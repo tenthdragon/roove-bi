@@ -99,7 +99,7 @@ export default function LoginPage() {
               style={{
                 width: '100%', padding: '10px 14px', borderRadius: 8,
                 border: '1px solid #1a2744', background: '#0b1121',
-                color: '#e2e8f0', fontSize: 14, outline: 'none',
+                color: '#e2e8f0', fontSize: 16, outline: 'none',
               }}
               onFocus={e => e.target.style.borderColor = '#3b82f6'}
               onBlur={e => e.target.style.borderColor = '#1a2744'}
@@ -118,7 +118,7 @@ export default function LoginPage() {
               style={{
                 width: '100%', padding: '10px 14px', borderRadius: 8,
                 border: '1px solid #1a2744', background: '#0b1121',
-                color: '#e2e8f0', fontSize: 14, outline: 'none',
+                color: '#e2e8f0', fontSize: 16, outline: 'none',
               }}
               onFocus={e => e.target.style.borderColor = '#3b82f6'}
               onBlur={e => e.target.style.borderColor = '#1a2744'}
