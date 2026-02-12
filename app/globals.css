@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
+
+:root {
+  --bg: #0b1121;
+  --card: #111a2e;
+  --border: #1a2744;
+  --text: #e2e8f0;
+  --dim: #64748b;
+  --accent: #3b82f6;
+  --green: #10b981;
+  --red: #ef4444;
+  --yellow: #f59e0b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+
+/* Mobile bottom nav */
+@media (max-width: 768px) {
+  .desktop-nav { display: none !important; }
+  .mobile-nav { display: flex !important; }
+  .dashboard-content { padding-bottom: 72px !important; }
+}
+@media (min-width: 769px) {
+  .mobile-nav { display: none !important; }
+}
+
+/* Table responsive */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Card hover effect */
+.card-hover:hover {
+  border-color: var(--accent);
+  transition: border-color 0.2s;
+}
+
+/* Badge styles */
+.badge-green { background: #064e3b; color: #10b981; }
+.badge-yellow { background: #78350f; color: #f59e0b; }
+.badge-red { background: #7f1d1d; color: #ef4444; }
+
+/* Loading spinner */
+.spinner {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Fade in animation */
+.fade-in {
+  animation: fadeIn 0.3s ease-in;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Upload drop zone */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 12px;
+  padding: 40px;
+  text-align: center;
+  transition: all 0.2s;
+  cursor: pointer;
+}
+.drop-zone:hover,
+.drop-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.05);
+}
