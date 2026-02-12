@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nocheck test
 // v3 - brand manager redirect fix
 'use client';
 
