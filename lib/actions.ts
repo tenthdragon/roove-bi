@@ -154,7 +154,8 @@ export async function uploadExcelData(formData: FormData) {
   try {
 // Delete existing data for this period (to allow re-imports)
     const periodStart = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-01`;
-    const periodEnd = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-31`;
+    const lastDay = new Date(parsed.period.year, parsed.period.month, 0).getDate();
+    const periodEnd = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
     const del1 = await svc.from('daily_product_summary').delete()
       .gte('date', periodStart).lte('date', periodEnd);
