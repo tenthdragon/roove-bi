@@ -17,7 +17,6 @@ export async function fetchSheetConnections() {
 export async function addSheetConnection(spreadsheetId: string, label: string) {
   const supabase = createServerSupabase();
 
-  // Verify user is owner
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
@@ -29,7 +28,6 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
 
   if (profile?.role !== 'owner') throw new Error('Only owners can manage sheet connections');
 
-  // Test connection first
   const test = await testSheetConnection(spreadsheetId);
   if (!test.success) {
     throw new Error(`Cannot access spreadsheet: ${test.error}. Make sure you shared it with the service account email.`);
@@ -54,7 +52,6 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
 export async function removeSheetConnection(connectionId: string) {
   const supabase = createServerSupabase();
 
-  // Verify user is owner
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
@@ -101,10 +98,8 @@ export async function toggleSheetConnection(connectionId: string, isActive: bool
 }
 
 export async function triggerSync() {
-  const { createServiceSupabase } = await import('./supabase-server');
-  const { parseGoogleSheet } = await import('./google-sheets');
-  
   const svc = createServiceSupabase();
+  const { parseGoogleSheet } = await import('./google-sheets');
 
   const { data: connections, error: connError } = await svc
     .from('sheet_connections')
@@ -180,20 +175,4 @@ export async function triggerSync() {
   }
 
   return { synced: results.filter(r => r.success).length, failed: results.filter(r => !r.success).length, results };
-}
-
-  const res = await fetch(`${baseUrl}/api/sync`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.CRON_SECRET}`,
-      'Content-Type': 'application/json',
-    },
-  });
-
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Sync failed');
-  }
-
-  return res.json();
 }
