@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
+import SheetManager from '@/components/SheetManager';
 
 export default function AdminPage() {
   const supabase = createClient();
@@ -54,7 +55,6 @@ export default function AdminPage() {
     try {
       const tabs = newRole === 'brand_manager' ? ['marketing'] : [];
       await updateUserRole(userId, newRole, tabs, []);
-      // Refresh users
       const { data: u } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
       setUsers(u || []);
     } catch (err: any) {
@@ -152,6 +152,11 @@ export default function AdminPage() {
             </table>
           </div>
         )}
+      </div>
+
+      {/* Google Sheets Integration */}
+      <div style={{ marginBottom:20 }}>
+        <SheetManager />
       </div>
 
       {/* User Management */}
