@@ -152,20 +152,26 @@ export async function uploadExcelData(formData: FormData) {
   const importId = importRecord.id;
 
   try {
-    // Delete existing data for this period (to allow re-imports)
+// Delete existing data for this period (to allow re-imports)
     const periodStart = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-01`;
     const periodEnd = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-31`;
 
-    await svc.from('daily_product_summary').delete()
+    const del1 = await svc.from('daily_product_summary').delete()
       .gte('date', periodStart).lte('date', periodEnd);
-    await svc.from('daily_channel_data').delete()
+    if (del1.error) throw new Error(`Delete daily_product_summary failed: ${del1.error.message}`);
+
+    const del2 = await svc.from('daily_channel_data').delete()
       .gte('date', periodStart).lte('date', periodEnd);
-    await svc.from('daily_ads_spend').delete()
+    if (del2.error) throw new Error(`Delete daily_channel_data failed: ${del2.error.message}`);
+
+    const del3 = await svc.from('daily_ads_spend').delete()
       .gte('date', periodStart).lte('date', periodEnd);
-    await svc.from('monthly_product_summary').delete()
+    if (del3.error) throw new Error(`Delete daily_ads_spend failed: ${del3.error.message}`);
+
+    const del4 = await svc.from('monthly_product_summary').delete()
       .eq('period_month', parsed.period.month)
       .eq('period_year', parsed.period.year);
-
+    if (del4.error) throw new Error(`Delete monthly_product_summary failed: ${del4.error.message}`);
     // Insert daily product data
     if (parsed.dailyProduct.length > 0) {
       const rows = parsed.dailyProduct.map(d => ({ ...d, import_id: importId }));
