@@ -1,4 +1,4 @@
-// @ts-nocheck
+// @ts-nochecks
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase-browser';
