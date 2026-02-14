@@ -8,14 +8,12 @@ export async function getScalevStatus() {
   try {
     const svc = createServiceSupabase();
 
-    // Get active config (without exposing API key)
     const { data: config } = await svc
       .from('scalev_config')
       .select('id, base_url, is_active, last_sync_id, updated_at')
       .eq('is_active', true)
       .single();
 
-    // Get order counts
     const { count: totalOrders } = await svc
       .from('scalev_orders')
       .select('*', { count: 'exact', head: true });
@@ -25,7 +23,6 @@ export async function getScalevStatus() {
       .select('*', { count: 'exact', head: true })
       .not('shipped_time', 'is', null);
 
-    // Get last sync
     const { data: lastSync } = await svc
       .from('scalev_sync_log')
       .select('*')
@@ -33,7 +30,6 @@ export async function getScalevStatus() {
       .limit(1)
       .single();
 
-    // Get recent syncs
     const { data: recentSyncs } = await svc
       .from('scalev_sync_log')
       .select('*')
@@ -63,49 +59,6 @@ export async function getScalevStatus() {
   }
 }
 
-  // Get active config (without exposing API key)
-  const { data: config } = await svc
-    .from('scalev_config')
-    .select('id, base_url, is_active, last_sync_id, updated_at')
-    .eq('is_active', true)
-    .single();
-
-  // Get order counts
-  const { count: totalOrders } = await svc
-    .from('scalev_orders')
-    .select('*', { count: 'exact', head: true });
-
-  const { count: shippedOrders } = await svc
-    .from('scalev_orders')
-    .select('*', { count: 'exact', head: true })
-    .not('shipped_time', 'is', null);
-
-  // Get last sync
-  const { data: lastSync } = await svc
-    .from('scalev_sync_log')
-    .select('*')
-    .order('started_at', { ascending: false })
-    .limit(1)
-    .single();
-
-  // Get recent syncs
-  const { data: recentSyncs } = await svc
-    .from('scalev_sync_log')
-    .select('*')
-    .order('started_at', { ascending: false })
-    .limit(5);
-
-  return {
-    configured: !!config,
-    configId: config?.id || null,
-    lastSyncId: config?.last_sync_id || 0,
-    totalOrders: totalOrders || 0,
-    shippedOrders: shippedOrders || 0,
-    lastSync: lastSync || null,
-    recentSyncs: recentSyncs || [],
-  };
-}
-
 // ── Save Scalev API key (owner only) ──
 export async function saveScalevApiKey(apiKey: string) {
   const supabase = createServerSupabase();
@@ -122,10 +75,8 @@ export async function saveScalevApiKey(apiKey: string) {
 
   const svc = createServiceSupabase();
 
-  // Deactivate existing configs
   await svc.from('scalev_config').update({ is_active: false }).eq('is_active', true);
 
-  // Insert new config
   const { error } = await svc.from('scalev_config').insert({
     api_key: apiKey,
     base_url: 'https://api.scalev.id/v2',
@@ -151,7 +102,6 @@ export async function triggerScalevSync(mode: 'incremental' | 'full' = 'incremen
 
   if (profile?.role !== 'owner') throw new Error('Only owners can trigger sync');
 
-  // Call the sync API route
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL
     || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
