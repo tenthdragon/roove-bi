@@ -4,7 +4,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS } from '@/lib/utils';
-import DateRangePicker from '@/components/DateRangePicker';
+import { useDateRange } from '@/lib/DateRangeContext';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, Bar, Line } from 'recharts';
 
 const TT = ({ active, payload, label }: any) => {
@@ -21,22 +21,9 @@ const TT = ({ active, payload, label }: any) => {
 
 export default function OverviewPage() {
   const supabase = createClient();
+  const { dateRange, loading: dateLoading } = useDateRange();
   const [dailyData, setDailyData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState({ from: '', to: '' });
-  const [dateExtent, setDateExtent] = useState({ earliest: '', latest: '' });
-
-  useEffect(() => {
-    async function init() {
-      const { data: first } = await supabase.from('daily_product_summary').select('date').order('date', { ascending: true }).limit(1);
-      const { data: last } = await supabase.from('daily_product_summary').select('date').order('date', { ascending: false }).limit(1);
-      const earliest = first?.[0]?.date || '2026-02-01';
-      const latest = last?.[0]?.date || '2026-02-28';
-      setDateExtent({ earliest, latest });
-      setDateRange({ from: earliest, to: latest });
-    }
-    init();
-  }, [supabase]);
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
@@ -68,7 +55,6 @@ export default function OverviewPage() {
     return { ts, tg, tn, tm, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
   }, [dailyData]);
 
-  // Aggregate by product
   const productTable = useMemo(() => {
     const byP: Record<string, { s:number; g:number; n:number; m:number }> = {};
     dailyData.forEach((d: any) => {
@@ -91,15 +77,36 @@ export default function OverviewPage() {
     </div>
   );
 
+  // Loading state
+  if (dateLoading || (loading && dailyData.length === 0)) {
+    return (
+      <div style={{ textAlign:'center', padding:60, color:'#64748b' }}>
+        <div className="spinner" style={{ width:32, height:32, border:'3px solid #1a2744', borderTop:'3px solid #3b82f6', borderRadius:'50%', margin:'0 auto 12px' }} />
+        <div>Memuat data...</div>
+      </div>
+    );
+  }
+
+  // Empty data - show friendly message instead of blank page
   if (dailyData.length === 0 && !loading) {
-    return <div style={{ textAlign:'center', padding:60, color:'#64748b' }}><div style={{ fontSize:48, marginBottom:16 }}>📊</div><div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data</div><div>Upload file Excel di halaman Admin untuk memulai.</div></div>;
+    return (
+      <div className="fade-in">
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:12 }}>
+          <h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2>
+        </div>
+        <div style={{ textAlign:'center', padding:60, color:'#64748b', background:'#111a2e', border:'1px solid #1a2744', borderRadius:12 }}>
+          <div style={{ fontSize:48, marginBottom:16 }}>📊</div>
+          <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
+          <div style={{ fontSize:13 }}>Coba pilih rentang tanggal lain menggunakan filter di atas, atau upload data di halaman Admin.</div>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="fade-in">
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:12 }}>
         <div><h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2><div style={{ fontSize:12, color:'#64748b' }}>{kpi.ad} active days</div></div>
-        <DateRangePicker from={dateRange.from} to={dateRange.to} onChange={(f,t) => setDateRange({from:f,to:t})} earliest={dateExtent.earliest} latest={dateExtent.latest} />
       </div>
 
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
@@ -127,7 +134,6 @@ export default function OverviewPage() {
         </div>
       )}
 
-      {/* Product Table */}
       <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16, overflowX:'auto' }}>
         <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Ringkasan Per Produk</div>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:700 }}>
