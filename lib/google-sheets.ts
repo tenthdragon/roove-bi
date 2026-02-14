@@ -23,9 +23,7 @@ function serialDateToISO(val: any): string | null {
     return d.toISOString().split('T')[0];
   }
   if (typeof val === 'string') {
-    // Try parsing various date formats
     if (val.match(/^\d{4}-\d{2}-\d{2}/)) return val.split('T')[0];
-    // Google Sheets sometimes returns "2/1/2026" format
     const parts = val.split('/');
     if (parts.length === 3) {
       const m = parts[0].padStart(2, '0');
@@ -61,10 +59,37 @@ const SKU_SHEETS: Record<string, string> = {
   'Other': 'Others',
 };
 
-// Channel rows in SKU sheets (0-indexed from row 5 = index 4 in sheet, but 0 in array after we fetch from row 3)
+// Sales channels in order (rows 31-41 net sales, rows 57-67 gross profit)
 const CHANNELS = [
   'Facebook Ads', 'Google Ads', 'Organik', 'Reseller', 'Shopee',
   'TikTok Ads', 'TikTok Shop', 'Tokopedia', 'BliBli', 'Lazada', 'SnackVideo Ads',
+];
+
+// Admin marketplace channels and their row indices (array index, fetched from row 3)
+// Sheet rows 84-87 → array index 81-84
+const MP_ADMIN_CHANNELS: Record<string, number> = {
+  'Shopee': 81,       // sheet row 84
+  'TikTok Shop': 82,  // sheet row 85
+  'BliBli': 83,       // sheet row 86
+  'Lazada': 84,       // sheet row 87
+};
+
+// Net after mkt+admin channels (rows 90-101 in sheet → index 87-98)
+// Order: Facebook Ads, WhatsApp, Google Ads, Organik, Reseller, Shopee,
+//        TikTok Ads, TikTok Shop, Tokopedia, BliBli, Lazada, SnackVideo Ads
+const NET_AFTER_MKT_CHANNELS: Array<{ channel: string; rowIdx: number }> = [
+  { channel: 'Facebook Ads', rowIdx: 87 },
+  { channel: 'WhatsApp', rowIdx: 88 },
+  { channel: 'Google Ads', rowIdx: 89 },
+  { channel: 'Organik', rowIdx: 90 },
+  { channel: 'Reseller', rowIdx: 91 },
+  { channel: 'Shopee', rowIdx: 92 },
+  { channel: 'TikTok Ads', rowIdx: 93 },
+  { channel: 'TikTok Shop', rowIdx: 94 },
+  { channel: 'Tokopedia', rowIdx: 95 },
+  { channel: 'BliBli', rowIdx: 96 },
+  { channel: 'Lazada', rowIdx: 97 },
+  { channel: 'SnackVideo Ads', rowIdx: 98 },
 ];
 
 export interface ParsedSheetData {
@@ -82,6 +107,8 @@ export interface ParsedSheetData {
     channel: string;
     net_sales: number;
     gross_profit: number;
+    mp_admin_cost: number;
+    net_after_mkt: number;
   }>;
   ads: Array<{
     date: string;
@@ -140,10 +167,9 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
   // ── Parse General sheet (monthly summary) ──
   if (sheetNames.includes('General')) {
     const rows = await fetchRange(spreadsheetId, 'General!B2:K15');
-    // Row 0 = headers, rows 1-12 = SKU data, row 13 = Total
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
-      if (!row || !row[0] || !row[1]) continue; // need No and SKU
+      if (!row || !row[0] || !row[1]) continue;
       if (row[1] === 'Total') break;
 
       monthlySummary.push({
@@ -164,10 +190,14 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
   for (const [sheetName, productName] of Object.entries(SKU_SHEETS)) {
     if (!sheetNames.includes(sheetName)) continue;
 
-    // Fetch rows 3 to ~85 (dates in row 3, data below)
-    // Row 3 = dates, Row 5-15 = Penjualan, Row 18-28 = Diskon, Row 31-41 = Penjualan Bersih
-    // Row 44-54 = HPP, Row 57-67 = Laba Kotor, Row 70-85 = Biaya Marketing
-    const rows = await fetchRange(spreadsheetId, `'${sheetName}'!A3:AI90`);
+    // Fetch rows 3 to 120 (expanded to include admin MP and net after mkt sections)
+    // Row 3 = dates
+    // Rows 31-41 = Penjualan Bersih (net sales per channel)
+    // Rows 57-67 = Laba Kotor (gross profit per channel)
+    // Rows 70-81 = Biaya Marketing
+    // Rows 83-87 = Biaya Adm Marketplace (Shopee, TikTok Shop, BliBli, Lazada)
+    // Rows 89-101 = Laba/(Rugi) Kotor Setelah Biaya Marketing & Admin Marketplace
+    const rows = await fetchRange(spreadsheetId, `'${sheetName}'!A3:AI120`);
     if (!rows || rows.length === 0) continue;
 
     // Row 0 (sheet row 3) has dates starting from col D (index 3) onwards
@@ -177,7 +207,6 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
       const d = serialDateToISO(dateRow[c]);
       if (d) {
         dates.push({ col: c, date: d });
-        // Detect period from first date
         if (periodMonth === 0) {
           const parts = d.split('-');
           periodYear = parseInt(parts[0]);
@@ -188,26 +217,34 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
 
     if (dates.length === 0) continue;
 
-    // Parse channel-level data for each date
-    // Net sales rows: row index 28-38 (sheet rows 31-41, 0-indexed from row 3 = 28-38)
-    // Gross profit rows: row index 54-64 (sheet rows 57-67)
-    // Marketing cost section starts at row index 67 (sheet row 70)
-
     for (const { col, date } of dates) {
       let totalNetSales = 0;
       let totalGP = 0;
       let totalMktCost = 0;
+      let totalMpAdmin = 0;
+      let totalNetAfterMkt = 0;
 
-      // Net sales by channel: rows 31-41 in sheet = index 28-38 in our array
+      // ── Net sales & Gross Profit by channel ──
+      // Net sales: sheet rows 31-41 → array index 28-38
+      // Gross profit: sheet rows 57-67 → array index 54-64
       for (let ch = 0; ch < CHANNELS.length; ch++) {
-        const rowIdx = 28 + ch; // net sales section
-        const gpRowIdx = 54 + ch; // gross profit section
+        const nsRowIdx = 28 + ch;
+        const gpRowIdx = 54 + ch;
 
-        const netSales = toNum(rows[rowIdx]?.[col]);
+        const netSales = toNum(rows[nsRowIdx]?.[col]);
         const gp = toNum(rows[gpRowIdx]?.[col]);
 
         totalNetSales += netSales;
         totalGP += gp;
+
+        // Get admin marketplace cost for this channel (if applicable)
+        const mpAdminIdx = MP_ADMIN_CHANNELS[CHANNELS[ch]];
+        const mpAdmin = mpAdminIdx !== undefined ? Math.abs(toNum(rows[mpAdminIdx]?.[col])) : 0;
+        totalMpAdmin += mpAdmin;
+
+        // Get net after mkt+admin for this channel from the sheet directly
+        const namEntry = NET_AFTER_MKT_CHANNELS.find(n => n.channel === CHANNELS[ch]);
+        const netAfterMktChannel = namEntry ? toNum(rows[namEntry.rowIdx]?.[col]) : 0;
 
         if (netSales !== 0 || gp !== 0) {
           dailyChannel.push({
@@ -216,26 +253,33 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
             channel: CHANNELS[ch],
             net_sales: netSales,
             gross_profit: gp,
+            mp_admin_cost: mpAdmin,
+            net_after_mkt: netAfterMktChannel,
           });
         }
       }
 
-      // Marketing cost: rows 70-85 in sheet = index 67-82 in array
-      // Sum all marketing rows for this product
-      for (let mktRow = 67; mktRow <= 82 && mktRow < rows.length; mktRow++) {
-        totalMktCost += toNum(rows[mktRow]?.[col]);
+      // ── Marketing cost: sheet rows 70-81 → array index 67-78 ──
+      for (let mktRow = 67; mktRow <= 78 && mktRow < rows.length; mktRow++) {
+        totalMktCost += Math.abs(toNum(rows[mktRow]?.[col]));
       }
 
-      const netAfterMkt = totalGP - totalMktCost;
+      // ── Net after mkt+admin: read total from sheet ──
+      // Sum all net_after_mkt channels (rows 87-98 in array)
+      for (const { rowIdx } of NET_AFTER_MKT_CHANNELS) {
+        if (rowIdx < rows.length) {
+          totalNetAfterMkt += toNum(rows[rowIdx]?.[col]);
+        }
+      }
 
-      if (totalNetSales !== 0 || totalGP !== 0) {
+      if (totalNetSales !== 0 || totalGP !== 0 || totalMktCost !== 0) {
         dailyProduct.push({
           date,
           product: productName,
-          net_sales: totalNetSales,
-          gross_profit: totalGP,
-          net_after_mkt: netAfterMkt,
-          mkt_cost: totalMktCost,
+          net_sales: Math.round(totalNetSales),
+          gross_profit: Math.round(totalGP),
+          net_after_mkt: Math.round(totalNetAfterMkt),
+          mkt_cost: Math.round(totalMktCost + totalMpAdmin), // mkt_cost now includes admin MP
         });
       }
     }
@@ -244,7 +288,6 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
   // ── Parse Ads sheet ──
   if (sheetNames.includes('Ads')) {
     const rows = await fetchRange(spreadsheetId, 'Ads!B3:I2000');
-    // Row 0 = headers, data from row 1 onwards
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       if (!row || !row[0]) continue;
