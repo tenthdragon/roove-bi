@@ -181,20 +181,28 @@ export default function ChannelsPage() {
         </select>
       </div>
 
+      {/* Pre-Feb disclaimer */}
+      {dateRange.from < '2026-02-01' && (
+        <div style={{ background: '#1e1b4b', border: '1px solid #3730a3', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 11, color: '#a5b4fc', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 16 }}>ℹ️</span>
+          <span>Data sebelum Feb 2026 tidak termasuk biaya admin marketplace (MP Fee).</span>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI label="Total Revenue" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.filter(c => c.revenue > 0).length} active channels`} color="#3b82f6" />
+        <KPI label="Net Sales" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.filter(c => c.revenue > 0).length} active channels`} color="#3b82f6" />
         <KPI
-          label="Total Biaya"
+          label="Mkt Cost + MP Fee"
           val={`Rp ${fmtCompact(totalCost)}`}
-          sub={`Ads: ${fmtCompact(totalAdsCost)} | Admin MP: ${fmtCompact(totalMpAdmin)}`}
+          sub={totalMpAdmin > 0 ? `MP Fee: Rp ${fmtCompact(totalMpAdmin)} (${(totalCost > 0 ? totalMpAdmin / totalCost * 100 : 0).toFixed(1)}%)` : 'MP Fee: tidak tersedia'}
           color="#f59e0b"
         />
-        <KPI label="Gross Profit" val={`Rp ${fmtCompact(totalGP)}`} sub={`Margin: ${totalRevenue > 0 ? (totalGP / totalRevenue * 100).toFixed(1) : 0}%`} color="#10b981" />
+        <KPI label="Gross Profit" val={`Rp ${fmtCompact(totalGP)}`} sub={`GP Margin: ${totalRevenue > 0 ? (totalGP / totalRevenue * 100).toFixed(1) : 0}%`} color="#10b981" />
         <KPI
-          label="Net After Mkt"
+          label="Profit After Mkt"
           val={`Rp ${fmtCompact(totalNetAfterMkt)}`}
-          sub={`Margin: ${totalRevenue > 0 ? (totalNetAfterMkt / totalRevenue * 100).toFixed(1) : 0}%`}
+          sub={`Margin After Mkt: ${totalRevenue > 0 ? (totalNetAfterMkt / totalRevenue * 100).toFixed(1) : 0}%`}
           color={totalNetAfterMkt >= 0 ? '#06b6d4' : '#ef4444'}
         />
       </div>
@@ -255,7 +263,7 @@ export default function ChannelsPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 760 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid #1a2744' }}>
-              {['Channel', 'Revenue', '% Share', 'Ads Cost', 'Admin MP', 'Total Biaya', 'Biaya/Rev', 'GP Margin'].map(h => (
+              {['Channel', 'Revenue', '% Share', 'Ads Cost', 'Admin MP', 'Mkt Cost + MP Fee', 'Mkt Ratio', 'GP Margin'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
