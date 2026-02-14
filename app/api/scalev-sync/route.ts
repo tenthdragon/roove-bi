@@ -19,14 +19,12 @@ function getServiceSupabase() {
 // POST: trigger sync (from cron or manual)
 export async function POST(req: NextRequest) {
   try {
-    // Auth: check for CRON_SECRET
-// const authHeader = req.headers.get('authorization');
-// const cronSecret = process.env.CRON_SECRET;
-// console.log('CRON_SECRET exists:', !!cronSecret);
-// console.log('Auth header exists:', !!authHeader);
-// if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-//  return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-// }
+    // TODO: re-enable auth after testing
+    // const authHeader = req.headers.get('authorization');
+    // const cronSecret = process.env.CRON_SECRET;
+    // if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+    //   return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // }
 
     // Parse mode
     let syncMode: 'incremental' | 'full' = 'incremental';
@@ -67,15 +65,22 @@ export async function POST(req: NextRequest) {
     let currentLastId = syncMode === 'full' ? 0 : config.last_sync_id;
     let maxScalevId = currentLastId;
     let hasMore = true;
+    let timedOut = false;
 
-    // Scalev API quirk: page_size=1 is most reliable
-    const PAGE_SIZE = 1;
-    // Safety limit to prevent infinite loops
-    const MAX_ITERATIONS = 50000;
+    const PAGE_SIZE = 25;
+    const MAX_ITERATIONS = 2000;
+    const START_TIME = Date.now();
+    const TIME_LIMIT_MS = 55000; // 55 seconds, buffer before Vercel 60s timeout
     let iterations = 0;
 
     try {
       while (hasMore && iterations < MAX_ITERATIONS) {
+        // Time limit check — save progress and stop gracefully
+        if (Date.now() - START_TIME > TIME_LIMIT_MS) {
+          timedOut = true;
+          break;
+        }
+
         iterations++;
 
         const page = await fetchOrderList(
@@ -153,7 +158,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // Update config with last sync ID
+      // Save progress — update config with last sync ID
       await svc
         .from('scalev_config')
         .update({
@@ -167,10 +172,11 @@ export async function POST(req: NextRequest) {
         .from('scalev_sync_log')
         .update({
           completed_at: new Date().toISOString(),
-          status: 'success',
+          status: timedOut ? 'partial' : 'success',
           orders_fetched: totalFetched,
           orders_inserted: totalInserted,
           orders_updated: totalUpdated,
+          error_message: timedOut ? `Time limit reached. Synced ${totalFetched} orders. Run again to continue.` : null,
         })
         .eq('id', syncLogId);
 
@@ -180,10 +186,24 @@ export async function POST(req: NextRequest) {
         orders_fetched: totalFetched,
         orders_inserted: totalInserted,
         last_id: maxScalevId,
+        timed_out: timedOut,
+        message: timedOut
+          ? `Synced ${totalFetched} orders before time limit. Click Sync again to continue.`
+          : `Sync complete. ${totalFetched} orders synced.`,
       });
 
     } catch (syncErr: any) {
-      // Update sync log with error
+      // Save progress even on error
+      if (maxScalevId > config.last_sync_id) {
+        await svc
+          .from('scalev_config')
+          .update({
+            last_sync_id: maxScalevId,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', config.id);
+      }
+
       await svc
         .from('scalev_sync_log')
         .update({
