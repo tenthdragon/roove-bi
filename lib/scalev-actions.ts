@@ -90,18 +90,6 @@ export async function saveScalevApiKey(apiKey: string) {
 
 // ── Trigger manual sync (owner only) ──
 export async function triggerScalevSync(mode: 'incremental' | 'full' = 'incremental') {
-  const supabase = createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profile?.role !== 'owner') throw new Error('Only owners can trigger sync');
-
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL
     || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
@@ -115,8 +103,8 @@ export async function triggerScalevSync(mode: 'incremental' | 'full' = 'incremen
   });
 
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || 'Sync failed');
+    const text = await res.text();
+    throw new Error(`Sync failed: ${text}`);
   }
 
   return await res.json();
