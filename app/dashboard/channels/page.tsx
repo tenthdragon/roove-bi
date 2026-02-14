@@ -6,28 +6,28 @@ import { fmtCompact, fmtRupiah, CHANNEL_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
-// Map ads source → channel, with CPAS → Shopee
-function mapSourceToChannel(source: string): string {
+// Map ads source to channel, with CPAS to Shopee
+function mapSourceToChannel(source) {
   if (!source) return 'Other';
   const s = source.toLowerCase();
   if (s.includes('cpas')) return 'Shopee';
   if (s.includes('shopee')) return 'Shopee';
   if (s.includes('tiktok shop')) return 'TikTok Shop';
-  if (s.includes('tiktok ads') || s.includes('tiktok') && !s.includes('shop')) return 'TikTok Ads';
+  if (s.includes('tiktok')) return 'TikTok Ads';
   if (s.includes('facebook')) return 'Facebook Ads';
   if (s.includes('google')) return 'Google Ads';
   return 'Other';
 }
 
-function isCpasSource(source: string): boolean {
+function isCpasSource(source) {
   return source?.toLowerCase().includes('cpas') || false;
 }
 
 export default function ChannelsPage() {
   const supabase = createClient();
   const { dateRange, loading: dateLoading } = useDateRange();
-  const [channelData, setChannelData] = useState<any[]>([]);
-  const [adsData, setAdsData] = useState<any[]>([]);
+  const [channelData, setChannelData] = useState([]);
+  const [adsData, setAdsData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState('all');
 
@@ -35,8 +35,12 @@ export default function ChannelsPage() {
     if (!dateRange.from || !dateRange.to) return;
     setLoading(true);
     Promise.all([
-      supabase.from('daily_channel_data').select('product, channel, net_sales, gross_profit').gte('date', dateRange.from).lte('date', dateRange.to),
-      supabase.from('daily_ads_spend').select('source, spent, store').gte('date', dateRange.from).lte('date', dateRange.to),
+      supabase.from('daily_channel_data')
+        .select('product, channel, net_sales, gross_profit, mp_admin_cost, net_after_mkt')
+        .gte('date', dateRange.from).lte('date', dateRange.to),
+      supabase.from('daily_ads_spend')
+        .select('source, spent, store')
+        .gte('date', dateRange.from).lte('date', dateRange.to),
     ]).then(([{ data: ch }, { data: ads }]) => {
       setChannelData(ch || []);
       setAdsData(ads || []);
@@ -44,39 +48,36 @@ export default function ChannelsPage() {
     });
   }, [dateRange, supabase]);
 
-  // Get unique products for filter
+  // Unique products for filter
   const products = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set();
     channelData.forEach(d => { if (d.product) set.add(d.product); });
     return Array.from(set).sort();
   }, [channelData]);
 
-  // Aggregate channel revenue + GP, filtered by product
+  // Aggregate channel data (revenue, GP, admin MP, net after mkt)
   const channelAgg = useMemo(() => {
-    const byC: Record<string, { revenue: number; gp: number }> = {};
-    channelData.forEach((d: any) => {
+    const byC = {};
+    channelData.forEach(d => {
       if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
-      if (!byC[d.channel]) byC[d.channel] = { revenue: 0, gp: 0 };
-      byC[d.channel].revenue += Number(d.net_sales);
-      byC[d.channel].gp += Number(d.gross_profit);
+      if (!byC[d.channel]) byC[d.channel] = { revenue: 0, gp: 0, mpAdmin: 0, netAfterMkt: 0 };
+      byC[d.channel].revenue += Number(d.net_sales) || 0;
+      byC[d.channel].gp += Number(d.gross_profit) || 0;
+      byC[d.channel].mpAdmin += Math.abs(Number(d.mp_admin_cost) || 0);
+      byC[d.channel].netAfterMkt += Number(d.net_after_mkt) || 0;
     });
     return byC;
   }, [channelData, selectedProduct]);
 
-  // Aggregate ads cost per channel (with CPAS → Shopee), filtered by store (≈product)
-  // Mapping store → product for ads filtering
+  // Aggregate ads cost per channel (CPAS to Shopee)
   const adsAgg = useMemo(() => {
-    const byChannel: Record<string, { total: number; cpas: number }> = {};
-
-    adsData.forEach((d: any) => {
-      // Filter by product: match store to selected product
+    const byChannel = {};
+    adsData.forEach(d => {
       if (selectedProduct !== 'all') {
         const store = (d.store || '').toLowerCase();
         const prod = selectedProduct.toLowerCase();
-        // Store names: "Roove", "Purvu Store", "Pluve", "Osgard", "DrHyun", "Calmara"
         if (!store.includes(prod) && !(prod === 'purvu' && store.includes('purvu'))) return;
       }
-
       const channel = mapSourceToChannel(d.source);
       const spent = Number(d.spent) || 0;
       if (!byChannel[channel]) byChannel[channel] = { total: 0, cpas: 0 };
@@ -97,32 +98,48 @@ export default function ChannelsPage() {
       .map(ch => {
         const rev = channelAgg[ch]?.revenue || 0;
         const gp = channelAgg[ch]?.gp || 0;
-        const mktCost = adsAgg[ch]?.total || 0;
+        const mpAdmin = channelAgg[ch]?.mpAdmin || 0;
+        const netAfterMkt = channelAgg[ch]?.netAfterMkt || 0;
+        const adsCost = adsAgg[ch]?.total || 0;
         const cpas = adsAgg[ch]?.cpas || 0;
+        const totalCost = adsCost + mpAdmin;
         return {
           name: ch,
           revenue: rev,
           gp,
-          mktCost,
+          mpAdmin,
+          netAfterMkt,
+          adsCost,
+          totalCost,
           cpas,
-          cpasPercent: mktCost > 0 ? (cpas / mktCost) * 100 : 0,
+          cpasPercent: adsCost > 0 ? (cpas / adsCost) * 100 : 0,
           pct: totalRevenue > 0 ? (rev / totalRevenue) * 100 : 0,
           gpMargin: rev > 0 ? (gp / rev) * 100 : 0,
-          mktRatio: rev > 0 ? (mktCost / rev) * 100 : 0,
+          mktRatio: rev > 0 ? (totalCost / rev) * 100 : 0,
         };
       })
-      .filter(c => c.revenue > 0 || c.mktCost > 0)
+      .filter(c => c.revenue > 0 || c.totalCost > 0)
       .sort((a, b) => b.revenue - a.revenue);
   }, [channelAgg, adsAgg]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
-  const totalMktCost = channels.reduce((a, c) => a + c.mktCost, 0);
+  const totalAdsCost = channels.reduce((a, c) => a + c.adsCost, 0);
+  const totalMpAdmin = channels.reduce((a, c) => a + c.mpAdmin, 0);
+  const totalCost = totalAdsCost + totalMpAdmin;
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);
+  const totalNetAfterMkt = channels.reduce((a, c) => a + c.netAfterMkt, 0);
 
-  // Pie chart data (revenue only)
   const pieData = channels.filter(c => c.revenue > 0).map(c => ({ name: c.name, value: c.revenue }));
 
-  // ── Loading ──
+  const KPI = ({ label, val, sub, color = '#3b82f6' }) => (
+    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: color }} />
+      <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>{val}</div>
+      {sub && <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
   if (dateLoading || (loading && channelData.length === 0)) {
     return (
       <div style={{ textAlign: 'center', padding: 60, color: '#64748b' }}>
@@ -132,7 +149,6 @@ export default function ChannelsPage() {
     );
   }
 
-  // ── Empty ──
   if (channelData.length === 0 && !loading) {
     return (
       <div className="fade-in">
@@ -165,26 +181,22 @@ export default function ChannelsPage() {
         </select>
       </div>
 
-      {/* KPI Summary */}
+      {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: '#3b82f6' }} />
-          <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>Total Revenue</div>
-          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>Rp {fmtCompact(totalRevenue)}</div>
-          <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>{channels.filter(c => c.revenue > 0).length} active channels</div>
-        </div>
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: '#f59e0b' }} />
-          <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>Total Mkt Cost</div>
-          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>Rp {fmtCompact(totalMktCost)}</div>
-          <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>Ratio: {totalRevenue > 0 ? (totalMktCost / totalRevenue * 100).toFixed(1) : 0}%</div>
-        </div>
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: '#10b981' }} />
-          <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>Gross Profit</div>
-          <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>Rp {fmtCompact(totalGP)}</div>
-          <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>Margin: {totalRevenue > 0 ? (totalGP / totalRevenue * 100).toFixed(1) : 0}%</div>
-        </div>
+        <KPI label="Total Revenue" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.filter(c => c.revenue > 0).length} active channels`} color="#3b82f6" />
+        <KPI
+          label="Total Biaya"
+          val={`Rp ${fmtCompact(totalCost)}`}
+          sub={`Ads: ${fmtCompact(totalAdsCost)} | Admin MP: ${fmtCompact(totalMpAdmin)}`}
+          color="#f59e0b"
+        />
+        <KPI label="Gross Profit" val={`Rp ${fmtCompact(totalGP)}`} sub={`Margin: ${totalRevenue > 0 ? (totalGP / totalRevenue * 100).toFixed(1) : 0}%`} color="#10b981" />
+        <KPI
+          label="Net After Mkt"
+          val={`Rp ${fmtCompact(totalNetAfterMkt)}`}
+          sub={`Margin: ${totalRevenue > 0 ? (totalNetAfterMkt / totalRevenue * 100).toFixed(1) : 0}%`}
+          color={totalNetAfterMkt >= 0 ? '#06b6d4' : '#ef4444'}
+        />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: 16, marginBottom: 20 }}>
@@ -197,13 +209,12 @@ export default function ChannelsPage() {
                 <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={105} dataKey="value" nameKey="name" stroke="#0b1121" strokeWidth={3}>
                   {pieData.map((c, i) => <Cell key={i} fill={CHANNEL_COLORS[c.name] || `hsl(${i * 40},60%,50%)`} />)}
                 </Pie>
-                <Tooltip formatter={(v: number) => fmtRupiah(v)} />
+                <Tooltip formatter={(v) => fmtRupiah(v)} />
               </PieChart>
             </ResponsiveContainer>
           ) : (
             <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>Tidak ada data revenue</div>
           )}
-          {/* Legend */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, justifyContent: 'center' }}>
             {pieData.map((c, i) => (
               <div key={c.name} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#64748b' }}>
@@ -238,13 +249,13 @@ export default function ChannelsPage() {
         </div>
       </div>
 
-      {/* ── Channel Breakdown Table ── */}
+      {/* Channel Breakdown Table */}
       <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto' }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Channel Breakdown</div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 640 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 760 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid #1a2744' }}>
-              {['Channel', 'Revenue', '% Share', 'Mkt Cost', 'Mkt Ratio', 'GP Margin'].map(h => (
+              {['Channel', 'Revenue', '% Share', 'Ads Cost', 'Admin MP', 'Total Biaya', 'Biaya/Rev', 'GP Margin'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
@@ -264,10 +275,16 @@ export default function ChannelsPage() {
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(c.revenue)}</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>{c.pct.toFixed(1)}%</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
-                  {c.mktCost > 0 ? fmtRupiah(c.mktCost) : <span style={{ color: '#334155' }}>—</span>}
+                  {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: '#334155' }}>—</span>}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
+                  {c.mpAdmin > 0 ? fmtRupiah(c.mpAdmin) : <span style={{ color: '#334155' }}>—</span>}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>
+                  {c.totalCost > 0 ? fmtRupiah(c.totalCost) : <span style={{ color: '#334155' }}>—</span>}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                  {c.mktCost > 0 ? (
+                  {c.totalCost > 0 && c.revenue > 0 ? (
                     <span style={{
                       padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
                       background: c.mktRatio > 40 ? '#7f1d1d' : c.mktRatio > 25 ? '#78350f' : '#064e3b',
@@ -276,11 +293,13 @@ export default function ChannelsPage() {
                   ) : <span style={{ color: '#334155' }}>—</span>}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                  <span style={{
-                    padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                    background: c.gpMargin >= 50 ? '#064e3b' : c.gpMargin >= 30 ? '#78350f' : '#7f1d1d',
-                    color: c.gpMargin >= 50 ? '#10b981' : c.gpMargin >= 30 ? '#f59e0b' : '#ef4444',
-                  }}>{c.gpMargin.toFixed(1)}%</span>
+                  {c.revenue > 0 ? (
+                    <span style={{
+                      padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                      background: c.gpMargin >= 50 ? '#064e3b' : c.gpMargin >= 30 ? '#78350f' : '#7f1d1d',
+                      color: c.gpMargin >= 50 ? '#10b981' : c.gpMargin >= 30 ? '#f59e0b' : '#ef4444',
+                    }}>{c.gpMargin.toFixed(1)}%</span>
+                  ) : <span style={{ color: '#334155' }}>—</span>}
                 </td>
               </tr>
             ))}
@@ -289,10 +308,12 @@ export default function ChannelsPage() {
               <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalRevenue)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalMktCost)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalAdsCost)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalMpAdmin)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalCost)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                 <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1a2744', color: '#e2e8f0' }}>
-                  {totalRevenue > 0 ? (totalMktCost / totalRevenue * 100).toFixed(1) : 0}%
+                  {totalRevenue > 0 ? (totalCost / totalRevenue * 100).toFixed(1) : 0}%
                 </span>
               </td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
