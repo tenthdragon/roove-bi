@@ -3,48 +3,58 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, PRODUCT_COLORS } from '@/lib/utils';
-import DateRangePicker from '@/components/DateRangePicker';
+import { useDateRange } from '@/lib/DateRangeContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 
 export default function ProductsPage() {
   const supabase = createClient();
+  const { dateRange, loading: dateLoading } = useDateRange();
   const [data, setData] = useState<any[]>([]);
-  const [dateRange, setDateRange] = useState({ from: '', to: '' });
-  const [dateExtent, setDateExtent] = useState({ earliest: '', latest: '' });
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function init() {
-      const { data: f } = await supabase.from('daily_product_summary').select('date').order('date',{ascending:true}).limit(1);
-      const { data: l } = await supabase.from('daily_product_summary').select('date').order('date',{ascending:false}).limit(1);
-      setDateExtent({ earliest: f?.[0]?.date||'', latest: l?.[0]?.date||'' });
-      setDateRange({ from: f?.[0]?.date||'', to: l?.[0]?.date||'' });
-    }
-    init();
-  }, [supabase]);
-
-  useEffect(() => {
-    if (!dateRange.from) return;
-    supabase.from('daily_product_summary').select('*').gte('date',dateRange.from).lte('date',dateRange.to)
-      .then(({ data:d }) => setData(d || []));
+    if (!dateRange.from || !dateRange.to) return;
+    setLoading(true);
+    supabase.from('daily_product_summary').select('*').gte('date', dateRange.from).lte('date', dateRange.to)
+      .then(({ data: d }) => { setData(d || []); setLoading(false); });
   }, [dateRange, supabase]);
 
   const products = useMemo(() => {
     const byP: Record<string, { s:number; g:number; n:number; m:number }> = {};
-    data.forEach((d:any) => {
+    data.forEach((d: any) => {
       if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0, m:0 };
       byP[d.product].s += Number(d.net_sales); byP[d.product].g += Number(d.gross_profit);
       byP[d.product].n += Number(d.net_after_mkt); byP[d.product].m += Math.abs(Number(d.mkt_cost));
     });
-    return Object.entries(byP).filter(([,v])=>v.s>0).sort((a,b)=>b[1].s-a[1].s)
-      .map(([p,v]) => ({ sku:p, sales:v.s, gp:v.g, nam:v.n, mkt:v.m, margin:v.s>0?v.n/v.s*100:0, mktR:v.s>0?v.m/v.s*100:0 }));
+    return Object.entries(byP).filter(([,v]) => v.s > 0).sort((a, b) => b[1].s - a[1].s)
+      .map(([p, v]) => ({ sku: p, sales: v.s, gp: v.g, nam: v.n, mkt: v.m, margin: v.s > 0 ? v.n / v.s * 100 : 0, mktR: v.s > 0 ? v.m / v.s * 100 : 0 }));
   }, [data]);
+
+  if (dateLoading || (loading && data.length === 0)) {
+    return (
+      <div style={{ textAlign:'center', padding:60, color:'#64748b' }}>
+        <div className="spinner" style={{ width:32, height:32, border:'3px solid #1a2744', borderTop:'3px solid #3b82f6', borderRadius:'50%', margin:'0 auto 12px' }} />
+        <div>Memuat data...</div>
+      </div>
+    );
+  }
+
+  if (data.length === 0 && !loading) {
+    return (
+      <div className="fade-in">
+        <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Produk</h2>
+        <div style={{ textAlign:'center', padding:60, color:'#64748b', background:'#111a2e', border:'1px solid #1a2744', borderRadius:12 }}>
+          <div style={{ fontSize:48, marginBottom:16 }}>📦</div>
+          <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
+          <div style={{ fontSize:13 }}>Coba pilih rentang tanggal lain menggunakan filter di atas.</div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fade-in">
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:12 }}>
-        <h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Produk</h2>
-        <DateRangePicker from={dateRange.from} to={dateRange.to} onChange={(f,t)=>setDateRange({from:f,to:t})} earliest={dateExtent.earliest} latest={dateExtent.latest} />
-      </div>
+      <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Produk</h2>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:14, marginBottom:20 }}>
         {products.map(p => (
           <div key={p.sku} style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:18, position:'relative', overflow:'hidden' }}>
