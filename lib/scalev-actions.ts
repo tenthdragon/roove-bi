@@ -3,10 +3,6 @@
 
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-server';
 
-function createServerSupabase() {
-  return createServerComponentClient({ cookies });
-}
-
 // ── Get Scalev integration status ──
 export async function getScalevStatus() {
   const svc = createServiceSupabase();
