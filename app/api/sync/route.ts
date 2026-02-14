@@ -11,6 +11,8 @@ function getServiceSupabase() {
   );
 }
 
+export const maxDuration = 250;
+
 export async function POST(req: NextRequest) {
   try {
     // Verify authorization - either cron secret or authenticated user
