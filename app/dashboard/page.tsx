@@ -59,7 +59,7 @@ export default function OverviewPage() {
     const tn = dates.reduce((a,d) => a + byDate[d].n, 0);
     const tm = dates.reduce((a,d) => a + byDate[d].m, 0);
     const ad = dates.filter(d => byDate[d].s > 0).length;
-    const chart = dates.map(d => ({ date: shortDate(d), 'Net Sales': byDate[d].s, 'Gross Profit': byDate[d].g, 'Net Profit': byDate[d].n, 'Mkt Cost + MP Fee': byDate[d].m }));
+    const chart = dates.map(d => ({ date: shortDate(d), 'Net Sales': byDate[d].s, 'Gross Profit': byDate[d].g, 'Profit After Mkt': byDate[d].n, 'Mkt Cost + MP Fee': byDate[d].m }));
     return { ts, tg, tn, tm, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
   }, [dailyData]);
 
@@ -119,14 +119,14 @@ export default function OverviewPage() {
 
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
         <KPI label="Net Sales" val={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg: ${fmtRupiah(kpi.avg)}/hari`} />
-        <KPI label="Gross Profit" val={`Rp ${fmtCompact(kpi.tg)}`} sub={`Margin: ${kpi.gpM.toFixed(1)}%`} color="#10b981" />
+        <KPI label="Gross Profit" val={`Rp ${fmtCompact(kpi.tg)}`} sub={`GP Margin: ${kpi.gpM.toFixed(1)}%`} color="#10b981" />
         <KPI
           label="Mkt Cost + MP Fee"
           val={`Rp ${fmtCompact(kpi.tm)}`}
           sub={totalMpFee > 0 ? `MP Fee: Rp ${fmtCompact(totalMpFee)} (${mpFeePercent.toFixed(1)}%)` : 'MP Fee: tidak tersedia'}
           color="#f59e0b"
         />
-        <KPI label="Net Profit" val={`Rp ${fmtCompact(kpi.tn)}`} sub={`Margin: ${kpi.nM.toFixed(1)}%`} color="#06b6d4" />
+        <KPI label="Profit After Mkt" val={`Rp ${fmtCompact(kpi.tn)}`} sub={`Margin After Mkt: ${kpi.nM.toFixed(1)}%`} color="#06b6d4" />
       </div>
 
       {/* Pre-Feb disclaimer */}
@@ -148,7 +148,7 @@ export default function OverviewPage() {
               <Tooltip content={<TT />} />
               <Area type="monotone" dataKey="Net Sales" fill="#3b82f6" fillOpacity={0.12} stroke="#3b82f6" strokeWidth={2.5} />
               <Line type="monotone" dataKey="Gross Profit" stroke="#10b981" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="Net Profit" stroke="#06b6d4" strokeWidth={2} dot={false} strokeDasharray="5 3" />
+              <Line type="monotone" dataKey="Profit After Mkt" stroke="#06b6d4" strokeWidth={2} dot={false} strokeDasharray="5 3" />
               <Bar dataKey="Mkt Cost + MP Fee" fill="#f59e0b" fillOpacity={0.35} radius={[3,3,0,0]} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -159,7 +159,7 @@ export default function OverviewPage() {
         <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Ringkasan Per Produk</div>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:700 }}>
           <thead><tr style={{ borderBottom:'2px solid #1a2744' }}>
-            {['SKU','Net Sales',"%",'Gross Profit','Net Profit','Net Margin','Mkt Ratio'].map(h => (
+            {['SKU','Net Sales',"%",'Gross Profit','Profit After Mkt','Margin After Mkt','Mkt Ratio'].map(h => (
               <th key={h} style={{ padding:'8px 10px', textAlign:h==='SKU'?'left':'right', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>{h}</th>
             ))}
           </tr></thead>
