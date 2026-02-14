@@ -1,11 +1,13 @@
-// @ts-nochecks
-// v3 - brand manager redirect fix
+// @ts-nocheck
+// v4 - shared date filter in header
 'use client';
 
 import { useState, useEffect } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import { ALL_TABS, canAccessTab } from '@/lib/utils';
+import { DateRangeProvider, useDateRange } from '@/lib/DateRangeContext';
+import DateRangePicker from '@/components/DateRangePicker';
 
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
@@ -17,7 +19,21 @@ function getAllowedTabs(prof) {
   if (prof.role === 'brand_manager') {
     return prof.allowed_tabs && prof.allowed_tabs.length > 0 ? prof.allowed_tabs : ['marketing'];
   }
-  return null; // null means all tabs allowed
+  return null;
+}
+
+function HeaderDatePicker() {
+  const { dateRange, dateExtent, setDateRange } = useDateRange();
+  if (!dateRange.from) return null;
+  return (
+    <DateRangePicker
+      from={dateRange.from}
+      to={dateRange.to}
+      onChange={(f, t) => setDateRange(f, t)}
+      earliest={dateExtent.earliest}
+      latest={dateExtent.latest}
+    />
+  );
 }
 
 export default function DashboardLayout({ children }) {
@@ -39,7 +55,6 @@ export default function DashboardLayout({ children }) {
     load();
   }, []);
 
-  // CRITICAL: Redirect brand_manager to marketing immediately
   useEffect(() => {
     if (!profile || loading) return;
     const allowed = getAllowedTabs(profile);
@@ -76,7 +91,9 @@ export default function DashboardLayout({ children }) {
     return canAccessTab(profile, t.id);
   }) : [];
 
-  // Loading state
+  // Don't show date picker on admin page
+  const showDatePicker = currentTab !== 'admin';
+
   if (loading) {
     return (
       <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#0b1121' }}>
@@ -85,7 +102,6 @@ export default function DashboardLayout({ children }) {
     );
   }
 
-  // Pending approval
   if (isPending) {
     return (
       <div style={{ minHeight:'100vh', background:'#0b1121', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
@@ -103,7 +119,6 @@ export default function DashboardLayout({ children }) {
     );
   }
 
-  // Brand manager on wrong page - show spinner while redirecting
   const bmAllowed = getAllowedTabs(profile);
   if (bmAllowed !== null && !bmAllowed.includes(currentTab)) {
     return (
@@ -114,35 +129,40 @@ export default function DashboardLayout({ children }) {
   }
 
   return (
-    <div style={{ minHeight:'100vh', background:'#0b1121' }}>
-      {/* HEADER */}
-      <header style={{ background:'linear-gradient(135deg,#0f172a,#1e1b4b)', borderBottom:'1px solid #1a2744', padding:'12px 16px', position:'sticky', top:0, zIndex:40 }}>
-        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', maxWidth:1400, margin:'0 auto' }}>
-          <div onClick={goHome} style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer', flexShrink:0 }}>
-            <div style={{ width:32, height:32, borderRadius:8, background:'linear-gradient(135deg,#3b82f6,#8b5cf6)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:800, color:'#fff', flexShrink:0 }}>R</div>
-            <h1 style={{ margin:0, fontSize:16, fontWeight:700, whiteSpace:'nowrap' }}>Roove BI</h1>
+    <DateRangeProvider>
+      <div style={{ minHeight:'100vh', background:'#0b1121' }}>
+        {/* HEADER */}
+        <header style={{ background:'linear-gradient(135deg,#0f172a,#1e1b4b)', borderBottom:'1px solid #1a2744', padding:'12px 16px', position:'sticky', top:0, zIndex:40 }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', maxWidth:1400, margin:'0 auto', gap:8 }}>
+            <div onClick={goHome} style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer', flexShrink:0 }}>
+              <div style={{ width:32, height:32, borderRadius:8, background:'linear-gradient(135deg,#3b82f6,#8b5cf6)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:800, color:'#fff', flexShrink:0 }}>R</div>
+              <h1 className="desktop-nav" style={{ margin:0, fontSize:16, fontWeight:700, whiteSpace:'nowrap' }}>Roove BI</h1>
+            </div>
+            <nav className="desktop-nav" style={{ display:'flex', gap:2, background:'#0f172a', borderRadius:10, padding:3, border:'1px solid #1a2744' }}>
+              {visibleTabs.map(t => (
+                <button key={t.id} onClick={() => navigateTo(t.id)} style={{ padding:'7px 16px', borderRadius:7, border:'none', cursor:'pointer', fontSize:13, fontWeight:600, background:currentTab===t.id?'#3b82f6':'transparent', color:currentTab===t.id?'#fff':'#64748b', whiteSpace:'nowrap' }}>{t.label}</button>
+              ))}
+            </nav>
+            <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+              {showDatePicker && <HeaderDatePicker />}
+              <button onClick={handleLogout} style={{ padding:'6px 14px', borderRadius:7, border:'1px solid #1a2744', background:'transparent', color:'#64748b', fontSize:12, cursor:'pointer', fontWeight:500, flexShrink:0, whiteSpace:'nowrap' }}>Keluar</button>
+            </div>
           </div>
-          <nav className="desktop-nav" style={{ display:'flex', gap:2, background:'#0f172a', borderRadius:10, padding:3, border:'1px solid #1a2744' }}>
-            {visibleTabs.map(t => (
-              <button key={t.id} onClick={() => navigateTo(t.id)} style={{ padding:'7px 16px', borderRadius:7, border:'none', cursor:'pointer', fontSize:13, fontWeight:600, background:currentTab===t.id?'#3b82f6':'transparent', color:currentTab===t.id?'#fff':'#64748b', whiteSpace:'nowrap' }}>{t.label}</button>
-            ))}
-          </nav>
-          <button onClick={handleLogout} style={{ padding:'6px 14px', borderRadius:7, border:'1px solid #1a2744', background:'transparent', color:'#64748b', fontSize:12, cursor:'pointer', fontWeight:500, flexShrink:0, whiteSpace:'nowrap' }}>Keluar</button>
-        </div>
-      </header>
+        </header>
 
-      {/* CONTENT */}
-      <main className="dashboard-content" style={{ padding:'16px', maxWidth:1400, margin:'0 auto' }}>{children}</main>
+        {/* CONTENT */}
+        <main className="dashboard-content" style={{ padding:'16px', maxWidth:1400, margin:'0 auto' }}>{children}</main>
 
-      {/* MOBILE BOTTOM NAV */}
-      <nav className="mobile-nav" style={{ display:'none', position:'fixed', bottom:0, left:0, right:0, background:'#111a2e', borderTop:'1px solid #1a2744', padding:'6px 8px', paddingBottom:'max(6px, env(safe-area-inset-bottom))', zIndex:50, justifyContent:'space-around' }}>
-        {visibleTabs.map(t => (
-          <button key={t.id} onClick={() => navigateTo(t.id)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:2, padding:'6px 8px', borderRadius:8, border:'none', cursor:'pointer', background:currentTab===t.id?'rgba(59,130,246,0.15)':'transparent', color:currentTab===t.id?'#3b82f6':'#64748b', fontSize:10, fontWeight:600, minWidth:48 }}>
-            <TabIcon id={t.id} />{t.label}
-          </button>
-        ))}
-      </nav>
-    </div>
+        {/* MOBILE BOTTOM NAV */}
+        <nav className="mobile-nav" style={{ display:'none', position:'fixed', bottom:0, left:0, right:0, background:'#111a2e', borderTop:'1px solid #1a2744', padding:'6px 8px', paddingBottom:'max(6px, env(safe-area-inset-bottom))', zIndex:50, justifyContent:'space-around' }}>
+          {visibleTabs.map(t => (
+            <button key={t.id} onClick={() => navigateTo(t.id)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:2, padding:'6px 8px', borderRadius:8, border:'none', cursor:'pointer', background:currentTab===t.id?'rgba(59,130,246,0.15)':'transparent', color:currentTab===t.id?'#3b82f6':'#64748b', fontSize:10, fontWeight:600, minWidth:48 }}>
+              <TabIcon id={t.id} />{t.label}
+            </button>
+          ))}
+        </nav>
+      </div>
+    </DateRangeProvider>
   );
 }
 
