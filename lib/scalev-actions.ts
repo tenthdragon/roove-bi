@@ -5,7 +5,63 @@ import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-serv
 
 // ── Get Scalev integration status ──
 export async function getScalevStatus() {
-  const svc = createServiceSupabase();
+  try {
+    const svc = createServiceSupabase();
+
+    // Get active config (without exposing API key)
+    const { data: config } = await svc
+      .from('scalev_config')
+      .select('id, base_url, is_active, last_sync_id, updated_at')
+      .eq('is_active', true)
+      .single();
+
+    // Get order counts
+    const { count: totalOrders } = await svc
+      .from('scalev_orders')
+      .select('*', { count: 'exact', head: true });
+
+    const { count: shippedOrders } = await svc
+      .from('scalev_orders')
+      .select('*', { count: 'exact', head: true })
+      .not('shipped_time', 'is', null);
+
+    // Get last sync
+    const { data: lastSync } = await svc
+      .from('scalev_sync_log')
+      .select('*')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .single();
+
+    // Get recent syncs
+    const { data: recentSyncs } = await svc
+      .from('scalev_sync_log')
+      .select('*')
+      .order('started_at', { ascending: false })
+      .limit(5);
+
+    return {
+      configured: !!config,
+      configId: config?.id || null,
+      lastSyncId: config?.last_sync_id || 0,
+      totalOrders: totalOrders || 0,
+      shippedOrders: shippedOrders || 0,
+      lastSync: lastSync || null,
+      recentSyncs: recentSyncs || [],
+    };
+  } catch (err: any) {
+    console.error('getScalevStatus error:', err.message);
+    return {
+      configured: false,
+      configId: null,
+      lastSyncId: 0,
+      totalOrders: 0,
+      shippedOrders: 0,
+      lastSync: null,
+      recentSyncs: [],
+    };
+  }
+}
 
   // Get active config (without exposing API key)
   const { data: config } = await svc
