@@ -1,17 +1,7 @@
 // lib/scalev-actions.ts
 'use server';
 
-import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
-import { createServerComponentClient } from '@supabase/auth-helpers-nextjs';
-
-function createServiceSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  );
-}
+import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-server';
 
 function createServerSupabase() {
   return createServerComponentClient({ cookies });
