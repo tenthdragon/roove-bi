@@ -96,7 +96,7 @@ export default function ProductsPage() {
             <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:PRODUCT_COLORS[p.sku]||'#64748b' }} />
             <div style={{ display:'flex', justifyContent:'space-between', marginBottom:10 }}>
               <div style={{ fontSize:15, fontWeight:700 }}>{p.sku}</div>
-              <span style={{ padding:'3px 8px', borderRadius:6, fontSize:11, fontWeight:700, background:p.margin>=20?'#064e3b':p.margin>=0?'#78350f':'#7f1d1d', color:p.margin>=20?'#10b981':p.margin>=0?'#f59e0b':'#ef4444' }}>NM {p.margin.toFixed(1)}%</span>
+              <span style={{ padding:'3px 8px', borderRadius:6, fontSize:10, fontWeight:700, background:p.margin>=20?'#064e3b':p.margin>=0?'#78350f':'#7f1d1d', color:p.margin>=20?'#10b981':p.margin>=0?'#f59e0b':'#ef4444' }}>Margin After Mkt {p.margin.toFixed(1)}%</span>
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, fontSize:12 }}>
               <div><div style={{ fontSize:10, color:'#64748b' }}>NET SALES</div><div style={{ fontWeight:700, fontFamily:'monospace' }}>Rp {fmtCompact(p.sales)}</div></div>
@@ -106,22 +106,22 @@ export default function ProductsPage() {
                 <div style={{ fontWeight:700, fontFamily:'monospace', color:'#f59e0b' }}>Rp {fmtCompact(p.mkt)}</div>
                 {p.mpFee > 0 && <div style={{ fontSize:9, color:'#8b5cf6' }}>MP Fee: {p.mpFeePct.toFixed(0)}%</div>}
               </div>
-              <div><div style={{ fontSize:10, color:'#64748b' }}>NET PROFIT</div><div style={{ fontWeight:700, fontFamily:'monospace', color:p.nam>=0?'#06b6d4':'#ef4444' }}>Rp {fmtCompact(p.nam)}</div></div>
+              <div><div style={{ fontSize:10, color:'#64748b' }}>PROFIT AFTER MKT</div><div style={{ fontWeight:700, fontFamily:'monospace', color:p.nam>=0?'#06b6d4':'#ef4444' }}>Rp {fmtCompact(p.nam)}</div></div>
             </div>
           </div>
         ))}
       </div>
       {products.length > 0 && (
         <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16 }}>
-          <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Net Sales vs Net Profit</div>
+          <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Net Sales vs Profit After Mkt</div>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={products.map(p=>({name:p.sku,'Net Sales':p.sales,'Net Profit':p.nam}))} layout="vertical">
+            <BarChart data={products.map(p=>({name:p.sku,'Net Sales':p.sales,'Profit After Mkt':p.nam}))} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
               <XAxis type="number" stroke="#64748b" fontSize={11} tickFormatter={v=>fmtCompact(v)} />
               <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={11} width={65} />
               <Tooltip formatter={v=>fmtRupiah(v)} />
               <Bar dataKey="Net Sales" fill="#3b82f6" fillOpacity={0.6} radius={[0,4,4,0]} />
-              <Bar dataKey="Net Profit" radius={[0,4,4,0]}>
+              <Bar dataKey="Profit After Mkt" radius={[0,4,4,0]}>
                 {products.map((p,i) => <Cell key={i} fill={p.nam>=0?'#10b981':'#ef4444'} fillOpacity={0.6} />)}
               </Bar>
             </BarChart>
