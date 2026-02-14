@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
 import SheetManager from '@/components/SheetManager';
+import ScalevManager from '@/components/ScalevManager';
 
 export default function AdminPage() {
   const supabase = createClient();
@@ -159,6 +160,11 @@ export default function AdminPage() {
         <SheetManager />
       </div>
 
+      {/* Scalev API Integration */}
+      <div style={{ marginBottom:20 }}>
+        <ScalevManager />
+      </div>
+      
       {/* User Management */}
       <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20 }}>
         <div style={{ fontSize:15, fontWeight:700, marginBottom:4 }}>Kelola User</div>
