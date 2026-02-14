@@ -16,6 +16,9 @@ function getServiceSupabase() {
   );
 }
 
+// Set max duration for Vercel Pro (300s limit)
+export const maxDuration = 250;
+
 // POST: trigger sync (from cron or manual)
 export async function POST(req: NextRequest) {
   try {
@@ -68,9 +71,9 @@ export async function POST(req: NextRequest) {
     let timedOut = false;
 
     const PAGE_SIZE = 25;
-    const MAX_ITERATIONS = 2000;
+    const MAX_ITERATIONS = 10000;
     const START_TIME = Date.now();
-    const TIME_LIMIT_MS = 55000; // 55 seconds, buffer before Vercel 60s timeout
+    const TIME_LIMIT_MS = 240000; // 240 seconds, buffer before Vercel Pro 300s timeout
     let iterations = 0;
 
     try {
@@ -146,8 +149,8 @@ export async function POST(req: NextRequest) {
         hasMore = page.hasNext;
         currentLastId = page.lastId;
 
-        // Update progress every 100 orders
-        if (totalFetched % 100 === 0) {
+        // Update progress every 250 orders
+        if (totalFetched % 250 === 0) {
           await svc
             .from('scalev_sync_log')
             .update({
@@ -155,10 +158,19 @@ export async function POST(req: NextRequest) {
               orders_inserted: totalInserted,
             })
             .eq('id', syncLogId);
+
+          // Also save last_sync_id periodically for crash safety
+          await svc
+            .from('scalev_config')
+            .update({
+              last_sync_id: maxScalevId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', config.id);
         }
       }
 
-      // Save progress — update config with last sync ID
+      // Save final progress
       await svc
         .from('scalev_config')
         .update({
@@ -166,6 +178,8 @@ export async function POST(req: NextRequest) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', config.id);
+
+      const elapsed = Math.round((Date.now() - START_TIME) / 1000);
 
       // Finalize sync log
       await svc
@@ -176,7 +190,9 @@ export async function POST(req: NextRequest) {
           orders_fetched: totalFetched,
           orders_inserted: totalInserted,
           orders_updated: totalUpdated,
-          error_message: timedOut ? `Time limit reached. Synced ${totalFetched} orders. Run again to continue.` : null,
+          error_message: timedOut
+            ? `Time limit reached after ${elapsed}s. Synced ${totalFetched} orders. Run again to continue.`
+            : null,
         })
         .eq('id', syncLogId);
 
@@ -186,10 +202,11 @@ export async function POST(req: NextRequest) {
         orders_fetched: totalFetched,
         orders_inserted: totalInserted,
         last_id: maxScalevId,
+        elapsed_seconds: elapsed,
         timed_out: timedOut,
         message: timedOut
-          ? `Synced ${totalFetched} orders before time limit. Click Sync again to continue.`
-          : `Sync complete. ${totalFetched} orders synced.`,
+          ? `Synced ${totalFetched} orders in ${elapsed}s. Click Sync again to continue.`
+          : `Sync complete! ${totalFetched} orders synced in ${elapsed}s.`,
       });
 
     } catch (syncErr: any) {
