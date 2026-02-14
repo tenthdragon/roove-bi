@@ -7,11 +7,11 @@ import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, Bar, Line } from 'recharts';
 
-const TT = ({ active, payload, label }: any) => {
+const TT = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   return (<div style={{ background:'#1e293b', border:'1px solid #1a2744', borderRadius:8, padding:'10px 14px', fontSize:12, maxWidth:320 }}>
     <div style={{ fontWeight:700, marginBottom:6 }}>{label}</div>
-    {payload.filter((p:any)=>p.value!==0).map((p:any,i:number) => (
+    {payload.filter(p => p.value !== 0).map((p, i) => (
       <div key={i} style={{ color:p.color||p.stroke, marginBottom:2, display:'flex', justifyContent:'space-between', gap:16 }}>
         <span>{p.name}</span><span style={{ fontFamily:'monospace', fontWeight:600 }}>{fmtRupiah(Math.abs(p.value))}</span>
       </div>
@@ -22,23 +22,31 @@ const TT = ({ active, payload, label }: any) => {
 export default function OverviewPage() {
   const supabase = createClient();
   const { dateRange, loading: dateLoading } = useDateRange();
-  const [dailyData, setDailyData] = useState<any[]>([]);
+  const [dailyData, setDailyData] = useState([]);
+  const [mpData, setMpData] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
-    async function load() {
-      setLoading(true);
-      const { data } = await supabase.from('daily_product_summary').select('*').gte('date', dateRange.from).lte('date', dateRange.to).order('date');
-      setDailyData(data || []);
+    setLoading(true);
+    Promise.all([
+      supabase.from('daily_product_summary').select('*').gte('date', dateRange.from).lte('date', dateRange.to).order('date'),
+      supabase.from('daily_channel_data').select('product, mp_admin_cost').gte('date', dateRange.from).lte('date', dateRange.to),
+    ]).then(([{ data: d }, { data: mp }]) => {
+      setDailyData(d || []);
+      setMpData(mp || []);
       setLoading(false);
-    }
-    load();
+    });
   }, [dateRange, supabase]);
 
+  // Total MP admin fee (for breakdown display)
+  const totalMpFee = useMemo(() => {
+    return mpData.reduce((a, d) => a + Math.abs(Number(d.mp_admin_cost) || 0), 0);
+  }, [mpData]);
+
   const kpi = useMemo(() => {
-    const byDate: Record<string, { s:number; g:number; n:number; m:number }> = {};
-    dailyData.forEach((d: any) => {
+    const byDate = {};
+    dailyData.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { s:0, g:0, n:0, m:0 };
       byDate[d.date].s += Number(d.net_sales);
       byDate[d.date].g += Number(d.gross_profit);
@@ -51,13 +59,13 @@ export default function OverviewPage() {
     const tn = dates.reduce((a,d) => a + byDate[d].n, 0);
     const tm = dates.reduce((a,d) => a + byDate[d].m, 0);
     const ad = dates.filter(d => byDate[d].s > 0).length;
-    const chart = dates.map(d => ({ date: shortDate(d), 'Net Sales': byDate[d].s, 'Gross Profit': byDate[d].g, 'Net After Mkt': byDate[d].n, 'Ad Spend': byDate[d].m }));
+    const chart = dates.map(d => ({ date: shortDate(d), 'Net Sales': byDate[d].s, 'Gross Profit': byDate[d].g, 'Net Profit': byDate[d].n, 'Mkt Cost + MP Fee': byDate[d].m }));
     return { ts, tg, tn, tm, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
   }, [dailyData]);
 
   const productTable = useMemo(() => {
-    const byP: Record<string, { s:number; g:number; n:number; m:number }> = {};
-    dailyData.forEach((d: any) => {
+    const byP = {};
+    dailyData.forEach(d => {
       if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0, m:0 };
       byP[d.product].s += Number(d.net_sales);
       byP[d.product].g += Number(d.gross_profit);
@@ -68,7 +76,11 @@ export default function OverviewPage() {
       .map(([p, v]) => ({ sku: p, sales: v.s, gp: v.g, nam: v.n, mkt: v.m, gmpR: v.s>0?v.n/v.s*100:0, mktR: v.s>0?v.m/v.s*100:0, sp: kpi.ts>0?v.s/kpi.ts*100:0 }));
   }, [dailyData, kpi.ts]);
 
-  const KPI = ({ label, val, sub, color='#3b82f6' }: any) => (
+  // Check if date range includes pre-Feb 2026 data
+  const hasPreFebData = dateRange.from < '2026-02-01';
+  const mpFeePercent = kpi.tm > 0 ? (totalMpFee / kpi.tm * 100) : 0;
+
+  const KPI = ({ label, val, sub, color='#3b82f6' }) => (
     <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:'16px 18px', flex:'1 1 160px', minWidth:150, position:'relative', overflow:'hidden' }}>
       <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:color }} />
       <div style={{ fontSize:11, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6, fontWeight:600 }}>{label}</div>
@@ -77,7 +89,6 @@ export default function OverviewPage() {
     </div>
   );
 
-  // Loading state
   if (dateLoading || (loading && dailyData.length === 0)) {
     return (
       <div style={{ textAlign:'center', padding:60, color:'#64748b' }}>
@@ -87,13 +98,10 @@ export default function OverviewPage() {
     );
   }
 
-  // Empty data - show friendly message instead of blank page
   if (dailyData.length === 0 && !loading) {
     return (
       <div className="fade-in">
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:12 }}>
-          <h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2>
-        </div>
+        <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
         <div style={{ textAlign:'center', padding:60, color:'#64748b', background:'#111a2e', border:'1px solid #1a2744', borderRadius:12 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>📊</div>
           <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
@@ -112,9 +120,22 @@ export default function OverviewPage() {
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
         <KPI label="Net Sales" val={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg: ${fmtRupiah(kpi.avg)}/hari`} />
         <KPI label="Gross Profit" val={`Rp ${fmtCompact(kpi.tg)}`} sub={`Margin: ${kpi.gpM.toFixed(1)}%`} color="#10b981" />
-        <KPI label="Net After Mkt" val={`Rp ${fmtCompact(kpi.tn)}`} sub={`Margin: ${kpi.nM.toFixed(1)}%`} color="#06b6d4" />
-        <KPI label="Ad Spend" val={`Rp ${fmtCompact(kpi.tm)}`} sub={`${kpi.mR.toFixed(1)}% of sales`} color="#f59e0b" />
+        <KPI
+          label="Mkt Cost + MP Fee"
+          val={`Rp ${fmtCompact(kpi.tm)}`}
+          sub={totalMpFee > 0 ? `MP Fee: Rp ${fmtCompact(totalMpFee)} (${mpFeePercent.toFixed(1)}%)` : 'MP Fee: tidak tersedia'}
+          color="#f59e0b"
+        />
+        <KPI label="Net Profit" val={`Rp ${fmtCompact(kpi.tn)}`} sub={`Margin: ${kpi.nM.toFixed(1)}%`} color="#06b6d4" />
       </div>
+
+      {/* Pre-Feb disclaimer */}
+      {hasPreFebData && (
+        <div style={{ background:'#1e1b4b', border:'1px solid #3730a3', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:11, color:'#a5b4fc', display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ fontSize:16 }}>ℹ️</span>
+          <span>Data sebelum Feb 2026 tidak termasuk biaya admin marketplace (MP Fee).</span>
+        </div>
+      )}
 
       {kpi.chart.length > 0 && (
         <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16, marginBottom:20 }}>
@@ -123,12 +144,12 @@ export default function OverviewPage() {
             <ComposedChart data={kpi.chart}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
               <XAxis dataKey="date" stroke="#64748b" fontSize={11} />
-              <YAxis stroke="#64748b" fontSize={11} tickFormatter={(v:number) => fmtCompact(v)} />
+              <YAxis stroke="#64748b" fontSize={11} tickFormatter={v => fmtCompact(v)} />
               <Tooltip content={<TT />} />
               <Area type="monotone" dataKey="Net Sales" fill="#3b82f6" fillOpacity={0.12} stroke="#3b82f6" strokeWidth={2.5} />
               <Line type="monotone" dataKey="Gross Profit" stroke="#10b981" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="Net After Mkt" stroke="#06b6d4" strokeWidth={2} dot={false} strokeDasharray="5 3" />
-              <Bar dataKey="Ad Spend" fill="#f59e0b" fillOpacity={0.35} radius={[3,3,0,0]} />
+              <Line type="monotone" dataKey="Net Profit" stroke="#06b6d4" strokeWidth={2} dot={false} strokeDasharray="5 3" />
+              <Bar dataKey="Mkt Cost + MP Fee" fill="#f59e0b" fillOpacity={0.35} radius={[3,3,0,0]} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -138,7 +159,7 @@ export default function OverviewPage() {
         <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Ringkasan Per Produk</div>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:700 }}>
           <thead><tr style={{ borderBottom:'2px solid #1a2744' }}>
-            {['SKU','Sales',"%",'Gross Profit','Net After Mkt','GMP Real','% Mkt'].map(h => (
+            {['SKU','Net Sales',"%",'Gross Profit','Net Profit','Net Margin','Mkt Ratio'].map(h => (
               <th key={h} style={{ padding:'8px 10px', textAlign:h==='SKU'?'left':'right', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>{h}</th>
             ))}
           </tr></thead>
