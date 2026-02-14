@@ -3,60 +3,55 @@
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, shortDate } from '@/lib/utils';
-import DateRangePicker from '@/components/DateRangePicker';
+import { useDateRange } from '@/lib/DateRangeContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 export default function MarketingPage() {
   const supabase = createClient();
+  const { dateRange, loading: dateLoading } = useDateRange();
   const [adsData, setAdsData] = useState<any[]>([]);
   const [prodData, setProdData] = useState<any[]>([]);
-  const [dateRange, setDateRange] = useState({ from: '', to: '' });
-  const [dateExtent, setDateExtent] = useState({ earliest: '', latest: '' });
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function init() {
-      const { data: f } = await supabase.from('daily_ads_spend').select('date').order('date',{ascending:true}).limit(1);
-      const { data: l } = await supabase.from('daily_ads_spend').select('date').order('date',{ascending:false}).limit(1);
-      setDateExtent({ earliest: f?.[0]?.date||'', latest: l?.[0]?.date||'' });
-      setDateRange({ from: f?.[0]?.date||'', to: l?.[0]?.date||'' });
-    }
-    init();
-  }, [supabase]);
-
-  useEffect(() => {
-    if (!dateRange.from) return;
+    if (!dateRange.from || !dateRange.to) return;
+    setLoading(true);
     Promise.all([
-      supabase.from('daily_ads_spend').select('date, spent, store').gte('date',dateRange.from).lte('date',dateRange.to).order('date'),
-      supabase.from('daily_product_summary').select('product, net_sales, mkt_cost').gte('date',dateRange.from).lte('date',dateRange.to),
-    ]).then(([{ data: a }, { data: p }]) => { setAdsData(a||[]); setProdData(p||[]); });
+      supabase.from('daily_ads_spend').select('date, spent, store').gte('date', dateRange.from).lte('date', dateRange.to).order('date'),
+      supabase.from('daily_product_summary').select('product, net_sales, mkt_cost').gte('date', dateRange.from).lte('date', dateRange.to),
+    ]).then(([{ data: a }, { data: p }]) => {
+      setAdsData(a || []);
+      setProdData(p || []);
+      setLoading(false);
+    });
   }, [dateRange, supabase]);
 
-  const totalSpend = useMemo(() => adsData.reduce((a,d) => a + Number(d.spent), 0), [adsData]);
-  const totalSales = useMemo(() => prodData.reduce((a,d) => a + Number(d.net_sales), 0), [prodData]);
+  const totalSpend = useMemo(() => adsData.reduce((a, d) => a + Number(d.spent), 0), [adsData]);
+  const totalSales = useMemo(() => prodData.reduce((a, d) => a + Number(d.net_sales), 0), [prodData]);
 
   const dailyAds = useMemo(() => {
     const byDate: Record<string, Record<string, number>> = {};
     const stores = new Set<string>();
-    adsData.forEach((d:any) => {
+    adsData.forEach((d: any) => {
       if (!byDate[d.date]) byDate[d.date] = {};
       const store = d.store || 'Other';
       stores.add(store);
-      byDate[d.date][store] = (byDate[d.date][store]||0) + Number(d.spent);
+      byDate[d.date][store] = (byDate[d.date][store] || 0) + Number(d.spent);
     });
     return { data: Object.keys(byDate).sort().map(d => ({ date: shortDate(d), ...byDate[d] })), stores: Array.from(stores) };
   }, [adsData]);
 
   const prodEfficiency = useMemo(() => {
     const byP: Record<string, { s:number; m:number }> = {};
-    prodData.forEach((d:any) => {
+    prodData.forEach((d: any) => {
       if (!byP[d.product]) byP[d.product] = { s:0, m:0 };
       byP[d.product].s += Number(d.net_sales); byP[d.product].m += Math.abs(Number(d.mkt_cost));
     });
-    return Object.entries(byP).filter(([,v])=>v.m>0).sort((a,b)=>(a[1].s>0?a[1].m/a[1].s:999)-(b[1].s>0?b[1].m/b[1].s:999))
-      .map(([p,v]) => ({ sku:p, spend:v.m, sales:v.s, ratio:v.s>0?v.m/v.s*100:0, roas:v.m>0?v.s/v.m:0 }));
+    return Object.entries(byP).filter(([, v]) => v.m > 0).sort((a, b) => (a[1].s > 0 ? a[1].m / a[1].s : 999) - (b[1].s > 0 ? b[1].m / b[1].s : 999))
+      .map(([p, v]) => ({ sku: p, spend: v.m, sales: v.s, ratio: v.s > 0 ? v.m / v.s * 100 : 0, roas: v.m > 0 ? v.s / v.m : 0 }));
   }, [prodData]);
 
-  const storeColors: Record<string,string> = { Roove:'#3b82f6', 'Purvu Store':'#8b5cf6', Pluve:'#06b6d4', Osgard:'#f97316', DrHyun:'#ec4899', Calmara:'#f59e0b' };
+  const storeColors: Record<string, string> = { Roove:'#3b82f6', 'Purvu Store':'#8b5cf6', Pluve:'#06b6d4', Osgard:'#f97316', DrHyun:'#ec4899', Calmara:'#f59e0b' };
 
   const KPI = ({ label, val, sub, color='#3b82f6' }: any) => (
     <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:'16px 18px', flex:'1 1 160px', minWidth:150, position:'relative', overflow:'hidden' }}>
@@ -67,17 +62,36 @@ export default function MarketingPage() {
     </div>
   );
 
+  if (dateLoading || (loading && adsData.length === 0 && prodData.length === 0)) {
+    return (
+      <div style={{ textAlign:'center', padding:60, color:'#64748b' }}>
+        <div className="spinner" style={{ width:32, height:32, border:'3px solid #1a2744', borderTop:'3px solid #3b82f6', borderRadius:'50%', margin:'0 auto 12px' }} />
+        <div>Memuat data...</div>
+      </div>
+    );
+  }
+
+  if (adsData.length === 0 && prodData.length === 0 && !loading) {
+    return (
+      <div className="fade-in">
+        <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Marketing</h2>
+        <div style={{ textAlign:'center', padding:60, color:'#64748b', background:'#111a2e', border:'1px solid #1a2744', borderRadius:12 }}>
+          <div style={{ fontSize:48, marginBottom:16 }}>📢</div>
+          <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
+          <div style={{ fontSize:13 }}>Coba pilih rentang tanggal lain menggunakan filter di atas.</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fade-in">
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:12 }}>
-        <h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Marketing</h2>
-        <DateRangePicker from={dateRange.from} to={dateRange.to} onChange={(f,t)=>setDateRange({from:f,to:t})} earliest={dateExtent.earliest} latest={dateExtent.latest} />
-      </div>
+      <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Marketing</h2>
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
         <KPI label="Total Ad Spend" val={`Rp ${fmtCompact(totalSpend)}`} color="#f59e0b" />
-        <KPI label="Avg Daily" val={`Rp ${fmtCompact(totalSpend/Math.max(dailyAds.data.length,1))}`} color="#f97316" />
-        <KPI label="Mkt Ratio" val={`${totalSales>0?(totalSpend/totalSales*100).toFixed(1):0}%`} color={totalSales>0&&totalSpend/totalSales>0.3?'#ef4444':'#10b981'} />
-        <KPI label="ROAS" val={`${totalSpend>0?(totalSales/totalSpend).toFixed(1):0}x`} color="#8b5cf6" />
+        <KPI label="Avg Daily" val={`Rp ${fmtCompact(totalSpend / Math.max(dailyAds.data.length, 1))}`} color="#f97316" />
+        <KPI label="Mkt Ratio" val={`${totalSales > 0 ? (totalSpend / totalSales * 100).toFixed(1) : 0}%`} color={totalSales > 0 && totalSpend / totalSales > 0.3 ? '#ef4444' : '#10b981'} />
+        <KPI label="ROAS" val={`${totalSpend > 0 ? (totalSales / totalSpend).toFixed(1) : 0}x`} color="#8b5cf6" />
       </div>
       {dailyAds.data.length > 0 && (
         <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16, marginBottom:20 }}>
@@ -86,9 +100,9 @@ export default function MarketingPage() {
             <BarChart data={dailyAds.data}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
               <XAxis dataKey="date" stroke="#64748b" fontSize={11} />
-              <YAxis stroke="#64748b" fontSize={11} tickFormatter={(v:number)=>fmtCompact(v)} />
-              <Tooltip formatter={(v:number)=>fmtRupiah(v)} />
-              {dailyAds.stores.map((s,i) => <Bar key={s} dataKey={s} stackId="a" fill={storeColors[s]||`hsl(${i*60},60%,50%)`} />)}
+              <YAxis stroke="#64748b" fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
+              <Tooltip formatter={(v: number) => fmtRupiah(v)} />
+              {dailyAds.stores.map((s, i) => <Bar key={s} dataKey={s} stackId="a" fill={storeColors[s] || `hsl(${i * 60},60%,50%)`} />)}
             </BarChart>
           </ResponsiveContainer>
           <div style={{ display:'flex', gap:14, flexWrap:'wrap', marginTop:8, justifyContent:'center' }}>
@@ -103,10 +117,10 @@ export default function MarketingPage() {
             <div key={p.sku} style={{ padding:12, background:'#0b1121', borderRadius:8, border:'1px solid #1a2744' }}>
               <div style={{ display:'flex', justifyContent:'space-between', marginBottom:6 }}>
                 <span style={{ fontWeight:600 }}>{p.sku}</span>
-                <span style={{ fontSize:16, fontWeight:800, fontFamily:'monospace', color:p.ratio>40?'#ef4444':p.ratio>25?'#f59e0b':'#10b981' }}>{p.ratio.toFixed(1)}%</span>
+                <span style={{ fontSize:16, fontWeight:800, fontFamily:'monospace', color:p.ratio > 40 ? '#ef4444' : p.ratio > 25 ? '#f59e0b' : '#10b981' }}>{p.ratio.toFixed(1)}%</span>
               </div>
               <div style={{ height:6, borderRadius:3, background:'#1a2744', overflow:'hidden', marginBottom:4 }}>
-                <div style={{ width:`${Math.min(p.ratio,100)}%`, height:'100%', borderRadius:3, background:p.ratio>40?'#ef4444':p.ratio>25?'#f59e0b':'#10b981' }} />
+                <div style={{ width:`${Math.min(p.ratio, 100)}%`, height:'100%', borderRadius:3, background:p.ratio > 40 ? '#ef4444' : p.ratio > 25 ? '#f59e0b' : '#10b981' }} />
               </div>
               <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:'#64748b' }}>
                 <span>Spend: Rp {fmtCompact(p.spend)}</span><span>ROAS: {p.roas.toFixed(1)}x</span>
