@@ -321,7 +321,7 @@ export default function MarketingPage() {
                 <div style={{ width: `${Math.min(p.ratio, 100)}%`, height: '100%', borderRadius: 3, background: p.ratio > 40 ? '#ef4444' : p.ratio > 25 ? '#f59e0b' : '#10b981' }} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b' }}>
-                <span>Cost: Rp {fmtCompact(p.cost)}</span><span>ROAS: {p.roas.toFixed(1)}x</span>
+                <span>Total: Rp {fmtCompact(p.cost)}</span><span>ROAS: {p.roas.toFixed(1)}x</span>
               </div>
               {p.mpFee > 0 && (
                 <div style={{ fontSize: 9, color: '#8b5cf6', marginTop: 2 }}>MP Fee: Rp {fmtCompact(p.mpFee)} ({p.mpPct.toFixed(0)}%)</div>
