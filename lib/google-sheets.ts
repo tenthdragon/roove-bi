@@ -65,32 +65,38 @@ const CHANNELS = [
   'TikTok Ads', 'TikTok Shop', 'Tokopedia', 'BliBli', 'Lazada', 'SnackVideo Ads',
 ];
 
-// Admin marketplace channels and their row indices (array index, fetched from row 3)
-// Sheet rows 84-87 → array index 81-84
-const MP_ADMIN_CHANNELS: Record<string, number> = {
-  'Shopee': 81,       // sheet row 84
-  'TikTok Shop': 82,  // sheet row 85
-  'BliBli': 83,       // sheet row 86
-  'Lazada': 84,       // sheet row 87
+// Admin marketplace channels (only present in newer format, Feb 2026+)
+// Mapping: channel name → offset from admin MP header row
+const MP_ADMIN_CHANNEL_OFFSETS: Record<string, number> = {
+  'Shopee': 1,
+  'TikTok Shop': 2,
+  'BliBli': 3,
+  'Lazada': 4,
 };
 
-// Net after mkt+admin channels (rows 90-101 in sheet → index 87-98)
-// Order: Facebook Ads, WhatsApp, Google Ads, Organik, Reseller, Shopee,
-//        TikTok Ads, TikTok Shop, Tokopedia, BliBli, Lazada, SnackVideo Ads
-const NET_AFTER_MKT_CHANNELS: Array<{ channel: string; rowIdx: number }> = [
-  { channel: 'Facebook Ads', rowIdx: 87 },
-  { channel: 'WhatsApp', rowIdx: 88 },
-  { channel: 'Google Ads', rowIdx: 89 },
-  { channel: 'Organik', rowIdx: 90 },
-  { channel: 'Reseller', rowIdx: 91 },
-  { channel: 'Shopee', rowIdx: 92 },
-  { channel: 'TikTok Ads', rowIdx: 93 },
-  { channel: 'TikTok Shop', rowIdx: 94 },
-  { channel: 'Tokopedia', rowIdx: 95 },
-  { channel: 'BliBli', rowIdx: 96 },
-  { channel: 'Lazada', rowIdx: 97 },
-  { channel: 'SnackVideo Ads', rowIdx: 98 },
+// Net after mkt channels - order in sheet (same for both formats)
+// WhatsApp is included in sheet but not in CHANNELS array
+const NET_AFTER_MKT_ORDER = [
+  'Facebook Ads', 'WhatsApp', 'Google Ads', 'Organik', 'Reseller', 'Shopee',
+  'TikTok Ads', 'TikTok Shop', 'Tokopedia', 'BliBli', 'Lazada', 'SnackVideo Ads',
 ];
+
+// Detect format: check if row 83 (array index 80) col B contains "Biaya Adm Marketplace"
+// Returns: { hasMpAdmin, mpAdminBaseIdx, netAfterMktBaseIdx }
+function detectSheetFormat(rows: any[][]) {
+  // Array index 80 = sheet row 83 (fetched from row 3, so 83 - 3 = 80)
+  const row80ColB = rows[80]?.[1]; // col B
+  const hasMpAdmin = typeof row80ColB === 'string' &&
+    row80ColB.toLowerCase().includes('adm marketplace');
+
+  if (hasMpAdmin) {
+    // Feb 2026+ format: admin MP at row 83 (idx 80), net_after_mkt header at row 89 (idx 86), data starts row 90 (idx 87)
+    return { hasMpAdmin: true, mpAdminBaseIdx: 80, netAfterMktDataIdx: 87 };
+  } else {
+    // Nov 2025 format: no admin MP, net_after_mkt header at row 83 (idx 80), data starts row 84 (idx 81)
+    return { hasMpAdmin: false, mpAdminBaseIdx: -1, netAfterMktDataIdx: 81 };
+  }
+}
 
 export interface ParsedSheetData {
   dailyProduct: Array<{
@@ -200,6 +206,9 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
     const rows = await fetchRange(spreadsheetId, `'${sheetName}'!A3:AI120`);
     if (!rows || rows.length === 0) continue;
 
+    // Detect format (with or without admin marketplace section)
+    const format = detectSheetFormat(rows);
+
     // Row 0 (sheet row 3) has dates starting from col D (index 3) onwards
     const dateRow = rows[0];
     const dates: Array<{ col: number; date: string }> = [];
@@ -216,6 +225,12 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
     }
 
     if (dates.length === 0) continue;
+
+    // Build net_after_mkt channel index map
+    const netAfterMktMap: Record<string, number> = {};
+    NET_AFTER_MKT_ORDER.forEach((ch, i) => {
+      netAfterMktMap[ch] = format.netAfterMktDataIdx + i;
+    });
 
     for (const { col, date } of dates) {
       let totalNetSales = 0;
@@ -237,14 +252,20 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         totalNetSales += netSales;
         totalGP += gp;
 
-        // Get admin marketplace cost for this channel (if applicable)
-        const mpAdminIdx = MP_ADMIN_CHANNELS[CHANNELS[ch]];
-        const mpAdmin = mpAdminIdx !== undefined ? Math.abs(toNum(rows[mpAdminIdx]?.[col])) : 0;
+        // Get admin marketplace cost for this channel (if format has it)
+        let mpAdmin = 0;
+        if (format.hasMpAdmin) {
+          const offset = MP_ADMIN_CHANNEL_OFFSETS[CHANNELS[ch]];
+          if (offset !== undefined) {
+            mpAdmin = Math.abs(toNum(rows[format.mpAdminBaseIdx + offset]?.[col]));
+          }
+        }
         totalMpAdmin += mpAdmin;
 
-        // Get net after mkt+admin for this channel from the sheet directly
-        const namEntry = NET_AFTER_MKT_CHANNELS.find(n => n.channel === CHANNELS[ch]);
-        const netAfterMktChannel = namEntry ? toNum(rows[namEntry.rowIdx]?.[col]) : 0;
+        // Get net after mkt for this channel from the sheet directly
+        const namRowIdx = netAfterMktMap[CHANNELS[ch]];
+        const netAfterMktChannel = namRowIdx !== undefined && namRowIdx < rows.length
+          ? toNum(rows[namRowIdx]?.[col]) : 0;
 
         if (netSales !== 0 || gp !== 0) {
           dailyChannel.push({
@@ -264,10 +285,10 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         totalMktCost += Math.abs(toNum(rows[mktRow]?.[col]));
       }
 
-      // ── Net after mkt+admin: read total from sheet ──
-      // Sum all net_after_mkt channels (rows 87-98 in array)
-      for (const { rowIdx } of NET_AFTER_MKT_CHANNELS) {
-        if (rowIdx < rows.length) {
+      // ── Net after mkt: sum all channels from sheet ──
+      for (const ch of NET_AFTER_MKT_ORDER) {
+        const rowIdx = netAfterMktMap[ch];
+        if (rowIdx !== undefined && rowIdx < rows.length) {
           totalNetAfterMkt += toNum(rows[rowIdx]?.[col]);
         }
       }
