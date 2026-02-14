@@ -9,26 +9,53 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 export default function ProductsPage() {
   const supabase = createClient();
   const { dateRange, loading: dateLoading } = useDateRange();
-  const [data, setData] = useState<any[]>([]);
+  const [data, setData] = useState([]);
+  const [mpData, setMpData] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     setLoading(true);
-    supabase.from('daily_product_summary').select('*').gte('date', dateRange.from).lte('date', dateRange.to)
-      .then(({ data: d }) => { setData(d || []); setLoading(false); });
+    Promise.all([
+      supabase.from('daily_product_summary').select('*').gte('date', dateRange.from).lte('date', dateRange.to),
+      supabase.from('daily_channel_data').select('product, mp_admin_cost').gte('date', dateRange.from).lte('date', dateRange.to),
+    ]).then(([{ data: d }, { data: mp }]) => {
+      setData(d || []);
+      setMpData(mp || []);
+      setLoading(false);
+    });
   }, [dateRange, supabase]);
 
+  // MP fee per product
+  const mpFeeByProduct = useMemo(() => {
+    const byP = {};
+    mpData.forEach(d => {
+      if (!byP[d.product]) byP[d.product] = 0;
+      byP[d.product] += Math.abs(Number(d.mp_admin_cost) || 0);
+    });
+    return byP;
+  }, [mpData]);
+
   const products = useMemo(() => {
-    const byP: Record<string, { s:number; g:number; n:number; m:number }> = {};
-    data.forEach((d: any) => {
+    const byP = {};
+    data.forEach(d => {
       if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0, m:0 };
       byP[d.product].s += Number(d.net_sales); byP[d.product].g += Number(d.gross_profit);
       byP[d.product].n += Number(d.net_after_mkt); byP[d.product].m += Math.abs(Number(d.mkt_cost));
     });
     return Object.entries(byP).filter(([,v]) => v.s > 0).sort((a, b) => b[1].s - a[1].s)
-      .map(([p, v]) => ({ sku: p, sales: v.s, gp: v.g, nam: v.n, mkt: v.m, margin: v.s > 0 ? v.n / v.s * 100 : 0, mktR: v.s > 0 ? v.m / v.s * 100 : 0 }));
-  }, [data]);
+      .map(([p, v]) => {
+        const mpFee = mpFeeByProduct[p] || 0;
+        const mpFeePct = v.m > 0 ? (mpFee / v.m * 100) : 0;
+        return {
+          sku: p, sales: v.s, gp: v.g, nam: v.n, mkt: v.m, mpFee, mpFeePct,
+          margin: v.s > 0 ? v.n / v.s * 100 : 0,
+          mktR: v.s > 0 ? v.m / v.s * 100 : 0,
+        };
+      });
+  }, [data, mpFeeByProduct]);
+
+  const hasPreFebData = dateRange.from < '2026-02-01';
 
   if (dateLoading || (loading && data.length === 0)) {
     return (
@@ -55,6 +82,14 @@ export default function ProductsPage() {
   return (
     <div className="fade-in">
       <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Produk</h2>
+
+      {hasPreFebData && (
+        <div style={{ background:'#1e1b4b', border:'1px solid #3730a3', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:11, color:'#a5b4fc', display:'flex', alignItems:'center', gap:8 }}>
+          <span style={{ fontSize:16 }}>ℹ️</span>
+          <span>Data sebelum Feb 2026 tidak termasuk biaya admin marketplace (MP Fee).</span>
+        </div>
+      )}
+
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(260px,1fr))', gap:14, marginBottom:20 }}>
         {products.map(p => (
           <div key={p.sku} style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:18, position:'relative', overflow:'hidden' }}>
@@ -64,25 +99,29 @@ export default function ProductsPage() {
               <span style={{ padding:'3px 8px', borderRadius:6, fontSize:11, fontWeight:700, background:p.margin>=20?'#064e3b':p.margin>=0?'#78350f':'#7f1d1d', color:p.margin>=20?'#10b981':p.margin>=0?'#f59e0b':'#ef4444' }}>NM {p.margin.toFixed(1)}%</span>
             </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:6, fontSize:12 }}>
-              <div><div style={{ fontSize:10, color:'#64748b' }}>SALES</div><div style={{ fontWeight:700, fontFamily:'monospace' }}>Rp {fmtCompact(p.sales)}</div></div>
+              <div><div style={{ fontSize:10, color:'#64748b' }}>NET SALES</div><div style={{ fontWeight:700, fontFamily:'monospace' }}>Rp {fmtCompact(p.sales)}</div></div>
               <div><div style={{ fontSize:10, color:'#64748b' }}>GROSS PROFIT</div><div style={{ fontWeight:700, fontFamily:'monospace', color:'#10b981' }}>Rp {fmtCompact(p.gp)}</div></div>
-              <div><div style={{ fontSize:10, color:'#64748b' }}>NET AFTER MKT</div><div style={{ fontWeight:700, fontFamily:'monospace', color:p.nam>=0?'#06b6d4':'#ef4444' }}>Rp {fmtCompact(p.nam)}</div></div>
-              <div><div style={{ fontSize:10, color:'#64748b' }}>MKT RATIO</div><div style={{ fontWeight:700, fontFamily:'monospace', color:p.mktR>40?'#ef4444':p.mktR>25?'#f59e0b':'#10b981' }}>{p.mktR.toFixed(1)}%</div></div>
+              <div>
+                <div style={{ fontSize:10, color:'#64748b' }}>MKT COST + MP FEE</div>
+                <div style={{ fontWeight:700, fontFamily:'monospace', color:'#f59e0b' }}>Rp {fmtCompact(p.mkt)}</div>
+                {p.mpFee > 0 && <div style={{ fontSize:9, color:'#8b5cf6' }}>MP Fee: {p.mpFeePct.toFixed(0)}%</div>}
+              </div>
+              <div><div style={{ fontSize:10, color:'#64748b' }}>NET PROFIT</div><div style={{ fontWeight:700, fontFamily:'monospace', color:p.nam>=0?'#06b6d4':'#ef4444' }}>Rp {fmtCompact(p.nam)}</div></div>
             </div>
           </div>
         ))}
       </div>
       {products.length > 0 && (
         <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16 }}>
-          <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Sales vs Net After Marketing</div>
+          <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Net Sales vs Net Profit</div>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={products.map(p=>({name:p.sku,Sales:p.sales,'Net After Mkt':p.nam}))} layout="vertical">
+            <BarChart data={products.map(p=>({name:p.sku,'Net Sales':p.sales,'Net Profit':p.nam}))} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
-              <XAxis type="number" stroke="#64748b" fontSize={11} tickFormatter={(v:number)=>fmtCompact(v)} />
+              <XAxis type="number" stroke="#64748b" fontSize={11} tickFormatter={v=>fmtCompact(v)} />
               <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={11} width={65} />
-              <Tooltip formatter={(v:number)=>fmtRupiah(v)} />
-              <Bar dataKey="Sales" fill="#3b82f6" fillOpacity={0.6} radius={[0,4,4,0]} />
-              <Bar dataKey="Net After Mkt" radius={[0,4,4,0]}>
+              <Tooltip formatter={v=>fmtRupiah(v)} />
+              <Bar dataKey="Net Sales" fill="#3b82f6" fillOpacity={0.6} radius={[0,4,4,0]} />
+              <Bar dataKey="Net Profit" radius={[0,4,4,0]}>
                 {products.map((p,i) => <Cell key={i} fill={p.nam>=0?'#10b981':'#ef4444'} fillOpacity={0.6} />)}
               </Bar>
             </BarChart>
