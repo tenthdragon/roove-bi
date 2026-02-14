@@ -38,7 +38,7 @@ export async function fetchOrderList(
   apiKey: string,
   baseUrl: string,
   lastId: number = 0,
-  pageSize: number = 1
+  pageSize: number = 25
 ): Promise<{ results: any[]; hasNext: boolean; lastId: number }> {
   let url = `${baseUrl}/order?page_size=${pageSize}`;
   if (lastId > 0) {
