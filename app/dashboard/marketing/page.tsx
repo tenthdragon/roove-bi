@@ -19,7 +19,7 @@ export default function MarketingPage() {
     setLoading(true);
     Promise.all([
       supabase.from('daily_ads_spend').select('date, spent, store').gte('date', dateRange.from).lte('date', dateRange.to).order('date'),
-      supabase.from('daily_product_summary').select('date, product, net_sales, mkt_cost').gte('date', dateRange.from).lte('date', dateRange.to),
+      supabase.from('daily_product_summary').select('date, product, net_sales, gross_profit, net_after_mkt').gte('date', dateRange.from).lte('date', dateRange.to),
       supabase.from('daily_channel_data').select('date, product, mp_admin_cost').gte('date', dateRange.from).lte('date', dateRange.to),
     ]).then(([{ data: a }, { data: p }, { data: mp }]) => {
       setAdsData(a || []);
@@ -43,23 +43,29 @@ export default function MarketingPage() {
     return byDate;
   }, [mpData]);
 
-  // Aggregations using mkt_cost from daily_product_summary (already includes admin MP)
+  // Aggregations — Mkt Cost = GP - Profit After Mkt (consistent with all pages)
   const { totalCost, totalRevenue, activeDays, dailyByDate, avgDailyRatio, avgDailyRoas } = useMemo(() => {
     const revByDate = {};
-    const costByDate = {};
+    const gpByDate = {};
+    const namByDate = {};
     prodData.forEach(d => {
       revByDate[d.date] = (revByDate[d.date] || 0) + Number(d.net_sales);
-      costByDate[d.date] = (costByDate[d.date] || 0) + Math.abs(Number(d.mkt_cost));
+      gpByDate[d.date] = (gpByDate[d.date] || 0) + Number(d.gross_profit);
+      namByDate[d.date] = (namByDate[d.date] || 0) + Number(d.net_after_mkt);
     });
 
-    const allDates = [...new Set([...Object.keys(revByDate), ...Object.keys(costByDate)])].sort();
-    const totalCost = Object.values(costByDate).reduce((a, v) => a + v, 0);
+    const allDates = [...new Set(Object.keys(revByDate))].sort();
     const totalRevenue = Object.values(revByDate).reduce((a, v) => a + v, 0);
+    const totalGP = Object.values(gpByDate).reduce((a, v) => a + v, 0);
+    const totalNAM = Object.values(namByDate).reduce((a, v) => a + v, 0);
+    const totalCost = totalGP - totalNAM; // Mkt Cost = GP - Profit After Mkt
 
     let ratioSum = 0, roasSum = 0, countDays = 0;
     const dailyByDate = allDates.map(date => {
       const rev = revByDate[date] || 0;
-      const cost = costByDate[date] || 0;
+      const gp = gpByDate[date] || 0;
+      const nam = namByDate[date] || 0;
+      const cost = gp - nam; // Mkt Cost = GP - Profit After Mkt
       const mpFee = mpFeeByDate[date] || 0;
       const ratio = rev > 0 ? (cost / rev) * 100 : 0;
       const roas = cost > 0 ? rev / cost : 0;
@@ -87,13 +93,14 @@ export default function MarketingPage() {
     return { data: Object.keys(byDate).sort().map(d => ({ date: shortDate(d), ...byDate[d] })), stores: Array.from(stores) };
   }, [adsData]);
 
-  // Marketing efficiency per product (using mkt_cost which includes admin MP)
+  // Marketing efficiency per product — Mkt Cost = GP - Profit After Mkt
   const prodEfficiency = useMemo(() => {
     const byP = {};
     prodData.forEach(d => {
-      if (!byP[d.product]) byP[d.product] = { s: 0, m: 0 };
+      if (!byP[d.product]) byP[d.product] = { s: 0, g: 0, n: 0 };
       byP[d.product].s += Number(d.net_sales);
-      byP[d.product].m += Math.abs(Number(d.mkt_cost));
+      byP[d.product].g += Number(d.gross_profit);
+      byP[d.product].n += Number(d.net_after_mkt);
     });
     // Add MP fee per product
     const mpByP = {};
@@ -101,11 +108,16 @@ export default function MarketingPage() {
       mpByP[d.product] = (mpByP[d.product] || 0) + Math.abs(Number(d.mp_admin_cost) || 0);
     });
 
-    return Object.entries(byP).filter(([, v]) => v.m > 0).sort((a, b) => (a[1].s > 0 ? a[1].m / a[1].s : 999) - (b[1].s > 0 ? b[1].m / b[1].s : 999))
+    return Object.entries(byP).filter(([, v]) => (v.g - v.n) > 0).sort((a, b) => {
+      const ratioA = a[1].s > 0 ? (a[1].g - a[1].n) / a[1].s : 999;
+      const ratioB = b[1].s > 0 ? (b[1].g - b[1].n) / b[1].s : 999;
+      return ratioA - ratioB;
+    })
       .map(([p, v]) => {
+        const cost = v.g - v.n; // Mkt Cost = GP - Profit After Mkt
         const mpFee = mpByP[p] || 0;
-        const mpPct = v.m > 0 ? (mpFee / v.m * 100) : 0;
-        return { sku: p, cost: v.m, sales: v.s, mpFee, mpPct, ratio: v.s > 0 ? v.m / v.s * 100 : 0, roas: v.m > 0 ? v.s / v.m : 0 };
+        const mpPct = cost > 0 ? (mpFee / cost * 100) : 0;
+        return { sku: p, cost, sales: v.s, mpFee, mpPct, ratio: v.s > 0 ? cost / v.s * 100 : 0, roas: cost > 0 ? v.s / cost : 0 };
       });
   }, [prodData, mpData]);
 
