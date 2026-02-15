@@ -47,33 +47,34 @@ export default function OverviewPage() {
   const kpi = useMemo(() => {
     const byDate = {};
     dailyData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { s:0, g:0, n:0, m:0 };
+      if (!byDate[d.date]) byDate[d.date] = { s:0, g:0, n:0 };
       byDate[d.date].s += Number(d.net_sales);
       byDate[d.date].g += Number(d.gross_profit);
       byDate[d.date].n += Number(d.net_after_mkt);
-      byDate[d.date].m += Math.abs(Number(d.mkt_cost));
     });
     const dates = Object.keys(byDate).sort();
     const ts = dates.reduce((a,d) => a + byDate[d].s, 0);
     const tg = dates.reduce((a,d) => a + byDate[d].g, 0);
     const tn = dates.reduce((a,d) => a + byDate[d].n, 0);
-    const tm = dates.reduce((a,d) => a + byDate[d].m, 0);
+    const tm = tg - tn; // Mkt Cost = GP - Profit After Mkt
     const ad = dates.filter(d => byDate[d].s > 0).length;
-    const chart = dates.map(d => ({ date: shortDate(d), 'Net Sales': byDate[d].s, 'Gross Profit': byDate[d].g, 'Profit After Mkt': byDate[d].n, 'Mkt Cost + MP Fee': byDate[d].m }));
+    const chart = dates.map(d => ({ date: shortDate(d), 'Net Sales': byDate[d].s, 'Gross Profit': byDate[d].g, 'Profit After Mkt': byDate[d].n, 'Mkt Cost + MP Fee': byDate[d].g - byDate[d].n }));
     return { ts, tg, tn, tm, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
   }, [dailyData]);
 
   const productTable = useMemo(() => {
     const byP = {};
     dailyData.forEach(d => {
-      if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0, m:0 };
+      if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0 };
       byP[d.product].s += Number(d.net_sales);
       byP[d.product].g += Number(d.gross_profit);
       byP[d.product].n += Number(d.net_after_mkt);
-      byP[d.product].m += Math.abs(Number(d.mkt_cost));
     });
     return Object.entries(byP).filter(([,v]) => v.s > 0).sort((a,b) => b[1].s - a[1].s)
-      .map(([p, v]) => ({ sku: p, sales: v.s, gp: v.g, nam: v.n, mkt: v.m, gmpR: v.s>0?v.n/v.s*100:0, mktR: v.s>0?v.m/v.s*100:0, sp: kpi.ts>0?v.s/kpi.ts*100:0 }));
+      .map(([p, v]) => {
+        const mkt = v.g - v.n; // Mkt Cost = GP - Profit After Mkt
+        return { sku: p, sales: v.s, gp: v.g, nam: v.n, mkt, gmpR: v.s>0?v.n/v.s*100:0, mktR: v.s>0?mkt/v.s*100:0, sp: kpi.ts>0?v.s/kpi.ts*100:0 };
+      });
   }, [dailyData, kpi.ts]);
 
   // Check if date range includes pre-Feb 2026 data
