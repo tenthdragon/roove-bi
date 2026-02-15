@@ -59,14 +59,25 @@ const SKU_SHEETS: Record<string, string> = {
   'Other': 'Others',
 };
 
-// Sales channels in order (rows 31-41 net sales, rows 57-67 gross profit)
-const CHANNELS = [
+// Sales channels in order as they appear in sheet (rows 31-41 net sales, rows 57-67 gross profit)
+const SHEET_CHANNELS = [
   'Facebook Ads', 'Google Ads', 'Organik', 'Reseller', 'Shopee',
   'TikTok Ads', 'TikTok Shop', 'Tokopedia', 'BliBli', 'Lazada', 'SnackVideo Ads',
 ];
 
+// Merge map: sheet channel name → database channel name
+// Channels not listed here keep their original name
+const CHANNEL_MERGE: Record<string, string> = {
+  'TikTok Ads': 'TikTok',
+  'TikTok Shop': 'TikTok',
+};
+
+function resolveChannel(sheetChannel: string): string {
+  return CHANNEL_MERGE[sheetChannel] || sheetChannel;
+}
+
 // Admin marketplace channels (only present in newer format, Feb 2026+)
-// Mapping: channel name → offset from admin MP header row
+// Mapping: sheet channel name → offset from admin MP header row
 const MP_ADMIN_CHANNEL_OFFSETS: Record<string, number> = {
   'Shopee': 1,
   'TikTok Shop': 2,
@@ -75,7 +86,7 @@ const MP_ADMIN_CHANNEL_OFFSETS: Record<string, number> = {
 };
 
 // Net after mkt channels - order in sheet (same for both formats)
-// WhatsApp is included in sheet but not in CHANNELS array
+// WhatsApp is included in sheet but not in SHEET_CHANNELS array
 const NET_AFTER_MKT_ORDER = [
   'Facebook Ads', 'WhatsApp', 'Google Ads', 'Organik', 'Reseller', 'Shopee',
   'TikTok Ads', 'TikTok Shop', 'Tokopedia', 'BliBli', 'Lazada', 'SnackVideo Ads',
@@ -239,10 +250,12 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
       let totalMpAdmin = 0;
       let totalNetAfterMkt = 0;
 
-      // ── Net sales & Gross Profit by channel ──
+      // ── Read all sheet channels, then merge before pushing ──
       // Net sales: sheet rows 31-41 → array index 28-38
       // Gross profit: sheet rows 57-67 → array index 54-64
-      for (let ch = 0; ch < CHANNELS.length; ch++) {
+      const channelBucket: Record<string, { ns: number; gp: number; mpAdmin: number; nam: number }> = {};
+
+      for (let ch = 0; ch < SHEET_CHANNELS.length; ch++) {
         const nsRowIdx = 28 + ch;
         const gpRowIdx = 54 + ch;
 
@@ -255,7 +268,7 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         // Get admin marketplace cost for this channel (if format has it)
         let mpAdmin = 0;
         if (format.hasMpAdmin) {
-          const offset = MP_ADMIN_CHANNEL_OFFSETS[CHANNELS[ch]];
+          const offset = MP_ADMIN_CHANNEL_OFFSETS[SHEET_CHANNELS[ch]];
           if (offset !== undefined) {
             mpAdmin = Math.abs(toNum(rows[format.mpAdminBaseIdx + offset]?.[col]));
           }
@@ -263,19 +276,30 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         totalMpAdmin += mpAdmin;
 
         // Get net after mkt for this channel from the sheet directly
-        const namRowIdx = netAfterMktMap[CHANNELS[ch]];
+        const namRowIdx = netAfterMktMap[SHEET_CHANNELS[ch]];
         const netAfterMktChannel = namRowIdx !== undefined && namRowIdx < rows.length
           ? toNum(rows[namRowIdx]?.[col]) : 0;
 
-        if (netSales !== 0 || gp !== 0) {
+        // Merge into resolved channel name (e.g. TikTok Ads + TikTok Shop → TikTok)
+        const resolved = resolveChannel(SHEET_CHANNELS[ch]);
+        if (!channelBucket[resolved]) channelBucket[resolved] = { ns: 0, gp: 0, mpAdmin: 0, nam: 0 };
+        channelBucket[resolved].ns += netSales;
+        channelBucket[resolved].gp += gp;
+        channelBucket[resolved].mpAdmin += mpAdmin;
+        channelBucket[resolved].nam += netAfterMktChannel;
+      }
+
+      // Push merged channels to dailyChannel
+      for (const [channel, v] of Object.entries(channelBucket)) {
+        if (v.ns !== 0 || v.gp !== 0) {
           dailyChannel.push({
             date,
             product: productName,
-            channel: CHANNELS[ch],
-            net_sales: netSales,
-            gross_profit: gp,
-            mp_admin_cost: mpAdmin,
-            net_after_mkt: netAfterMktChannel,
+            channel,
+            net_sales: v.ns,
+            gross_profit: v.gp,
+            mp_admin_cost: v.mpAdmin,
+            net_after_mkt: v.nam,
           });
         }
       }
