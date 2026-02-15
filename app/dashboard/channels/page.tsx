@@ -6,46 +6,23 @@ import { fmtCompact, fmtRupiah, CHANNEL_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 
-// Map ads source to channel, with CPAS to Shopee
-function mapSourceToChannel(source) {
-  if (!source) return 'Other';
-  const s = source.toLowerCase();
-  if (s.includes('cpas')) return 'Shopee';
-  if (s.includes('shopee')) return 'Shopee';
-  if (s.includes('tiktok shop')) return 'TikTok Shop';
-  if (s.includes('tiktok')) return 'TikTok Ads';
-  if (s.includes('facebook')) return 'Facebook Ads';
-  if (s.includes('google')) return 'Google Ads';
-  return 'Other';
-}
-
-function isCpasSource(source) {
-  return source?.toLowerCase().includes('cpas') || false;
-}
-
 export default function ChannelsPage() {
   const supabase = createClient();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [channelData, setChannelData] = useState([]);
-  const [adsData, setAdsData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState('all');
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     setLoading(true);
-    Promise.all([
-      supabase.from('daily_channel_data')
-        .select('product, channel, net_sales, gross_profit, mp_admin_cost, net_after_mkt')
-        .gte('date', dateRange.from).lte('date', dateRange.to),
-      supabase.from('daily_ads_spend')
-        .select('source, spent, store')
-        .gte('date', dateRange.from).lte('date', dateRange.to),
-    ]).then(([{ data: ch }, { data: ads }]) => {
-      setChannelData(ch || []);
-      setAdsData(ads || []);
-      setLoading(false);
-    });
+    supabase.from('daily_channel_data')
+      .select('product, channel, net_sales, gross_profit, mp_admin_cost, net_after_mkt')
+      .gte('date', dateRange.from).lte('date', dateRange.to)
+      .then(({ data }) => {
+        setChannelData(data || []);
+        setLoading(false);
+      });
   }, [dateRange, supabase]);
 
   // Unique products for filter
@@ -55,79 +32,48 @@ export default function ChannelsPage() {
     return Array.from(set).sort();
   }, [channelData]);
 
-  // Aggregate channel data (revenue, GP, admin MP, net after mkt)
-  const channelAgg = useMemo(() => {
+  // Aggregate channel data — all metrics from single source (daily_channel_data)
+  const channels = useMemo(() => {
     const byC = {};
     channelData.forEach(d => {
       if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
-      if (!byC[d.channel]) byC[d.channel] = { revenue: 0, gp: 0, mpAdmin: 0, netAfterMkt: 0 };
+      if (!byC[d.channel]) byC[d.channel] = { revenue: 0, gp: 0, mpAdmin: 0, profitAfterMkt: 0 };
       byC[d.channel].revenue += Number(d.net_sales) || 0;
       byC[d.channel].gp += Number(d.gross_profit) || 0;
       byC[d.channel].mpAdmin += Math.abs(Number(d.mp_admin_cost) || 0);
-      byC[d.channel].netAfterMkt += Number(d.net_after_mkt) || 0;
+      byC[d.channel].profitAfterMkt += Number(d.net_after_mkt) || 0;
     });
-    return byC;
-  }, [channelData, selectedProduct]);
 
-  // Aggregate ads cost per channel (CPAS to Shopee)
-  const adsAgg = useMemo(() => {
-    const byChannel = {};
-    adsData.forEach(d => {
-      if (selectedProduct !== 'all') {
-        const store = (d.store || '').toLowerCase();
-        const prod = selectedProduct.toLowerCase();
-        if (!store.includes(prod) && !(prod === 'purvu' && store.includes('purvu'))) return;
-      }
-      const channel = mapSourceToChannel(d.source);
-      const spent = Number(d.spent) || 0;
-      if (!byChannel[channel]) byChannel[channel] = { total: 0, cpas: 0 };
-      byChannel[channel].total += spent;
-      if (isCpasSource(d.source)) {
-        byChannel[channel].cpas += spent;
-      }
-    });
-    return byChannel;
-  }, [adsData, selectedProduct]);
+    const totalRevenue = Object.values(byC).reduce((a, v) => a + v.revenue, 0);
 
-  // Merge into final channel list
-  const channels = useMemo(() => {
-    const allChannels = new Set([...Object.keys(channelAgg), ...Object.keys(adsAgg)]);
-    const totalRevenue = Object.values(channelAgg).reduce((a, v) => a + v.revenue, 0);
-
-    return Array.from(allChannels)
-      .map(ch => {
-        const rev = channelAgg[ch]?.revenue || 0;
-        const gp = channelAgg[ch]?.gp || 0;
-        const mpAdmin = channelAgg[ch]?.mpAdmin || 0;
-        const netAfterMkt = channelAgg[ch]?.netAfterMkt || 0;
-        const adsCost = adsAgg[ch]?.total || 0;
-        const cpas = adsAgg[ch]?.cpas || 0;
-        const totalCost = adsCost + mpAdmin;
+    return Object.entries(byC)
+      .map(([ch, v]) => {
+        // Mkt Cost = GP - Profit After Mkt (derived, guaranteed consistent)
+        const mktCost = v.gp - v.profitAfterMkt;
+        const mpAdminPct = mktCost > 0 ? (v.mpAdmin / mktCost) * 100 : 0;
         return {
           name: ch,
-          revenue: rev,
-          gp,
-          mpAdmin,
-          netAfterMkt,
-          adsCost,
-          totalCost,
-          cpas,
-          cpasPercent: adsCost > 0 ? (cpas / adsCost) * 100 : 0,
-          pct: totalRevenue > 0 ? (rev / totalRevenue) * 100 : 0,
-          gpMargin: rev > 0 ? (gp / rev) * 100 : 0,
-          mktRatio: rev > 0 ? (totalCost / rev) * 100 : 0,
+          revenue: v.revenue,
+          gp: v.gp,
+          mpAdmin: v.mpAdmin,
+          profitAfterMkt: v.profitAfterMkt,
+          mktCost,
+          mpAdminPct,
+          pct: totalRevenue > 0 ? (v.revenue / totalRevenue) * 100 : 0,
+          gpMargin: v.revenue > 0 ? (v.gp / v.revenue) * 100 : 0,
+          mktRatio: v.revenue > 0 ? (mktCost / v.revenue) * 100 : 0,
+          marginAfterMkt: v.revenue > 0 ? (v.profitAfterMkt / v.revenue) * 100 : 0,
         };
       })
-      .filter(c => c.revenue > 0 || c.totalCost > 0)
+      .filter(c => c.revenue > 0)
       .sort((a, b) => b.revenue - a.revenue);
-  }, [channelAgg, adsAgg]);
+  }, [channelData, selectedProduct]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
-  const totalAdsCost = channels.reduce((a, c) => a + c.adsCost, 0);
-  const totalMpAdmin = channels.reduce((a, c) => a + c.mpAdmin, 0);
-  const totalCost = totalAdsCost + totalMpAdmin;
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);
-  const totalNetAfterMkt = channels.reduce((a, c) => a + c.netAfterMkt, 0);
+  const totalMktCost = channels.reduce((a, c) => a + c.mktCost, 0);
+  const totalMpAdmin = channels.reduce((a, c) => a + c.mpAdmin, 0);
+  const totalProfitAfterMkt = channels.reduce((a, c) => a + c.profitAfterMkt, 0);
 
   const pieData = channels.filter(c => c.revenue > 0).map(c => ({ name: c.name, value: c.revenue }));
 
@@ -191,19 +137,19 @@ export default function ChannelsPage() {
 
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI label="Net Sales" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.filter(c => c.revenue > 0).length} active channels`} color="#3b82f6" />
-        <KPI
-          label="Mkt Cost + MP Fee"
-          val={`Rp ${fmtCompact(totalCost)}`}
-          sub={totalMpAdmin > 0 ? `MP Fee: Rp ${fmtCompact(totalMpAdmin)} (${(totalCost > 0 ? totalMpAdmin / totalCost * 100 : 0).toFixed(1)}%)` : 'MP Fee: tidak tersedia'}
-          color="#f59e0b"
-        />
+        <KPI label="Net Sales" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.length} active channels`} color="#3b82f6" />
         <KPI label="Gross Profit" val={`Rp ${fmtCompact(totalGP)}`} sub={`GP Margin: ${totalRevenue > 0 ? (totalGP / totalRevenue * 100).toFixed(1) : 0}%`} color="#10b981" />
         <KPI
+          label="Mkt Cost + MP Fee"
+          val={`Rp ${fmtCompact(totalMktCost)}`}
+          sub={totalMpAdmin > 0 ? `MP Fee: Rp ${fmtCompact(totalMpAdmin)} (${(totalMktCost > 0 ? totalMpAdmin / totalMktCost * 100 : 0).toFixed(1)}%)` : 'MP Fee: tidak tersedia'}
+          color="#f59e0b"
+        />
+        <KPI
           label="Profit After Mkt"
-          val={`Rp ${fmtCompact(totalNetAfterMkt)}`}
-          sub={`Margin After Mkt: ${totalRevenue > 0 ? (totalNetAfterMkt / totalRevenue * 100).toFixed(1) : 0}%`}
-          color={totalNetAfterMkt >= 0 ? '#06b6d4' : '#ef4444'}
+          val={`Rp ${fmtCompact(totalProfitAfterMkt)}`}
+          sub={`Margin After Mkt: ${totalRevenue > 0 ? (totalProfitAfterMkt / totalRevenue * 100).toFixed(1) : 0}%`}
+          color={totalProfitAfterMkt >= 0 ? '#06b6d4' : '#ef4444'}
         />
       </div>
 
@@ -236,7 +182,7 @@ export default function ChannelsPage() {
         <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16 }}>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Revenue per Channel</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {channels.filter(c => c.revenue > 0).map((c, i) => (
+            {channels.map((c, i) => (
               <div key={c.name} style={{ padding: 10, background: '#0b1121', borderRadius: 8, border: '1px solid #1a2744' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -260,10 +206,10 @@ export default function ChannelsPage() {
       {/* Channel Breakdown Table */}
       <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto' }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Channel Breakdown</div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 760 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid #1a2744' }}>
-              {['Channel', 'Revenue', '% Share', 'Ads Cost', 'Admin MP', 'Mkt Cost + MP Fee', 'Mkt Ratio', 'GP Margin'].map(h => (
+              {['Channel', 'Net Sales', '% Share', 'Gross Profit', 'Mkt Cost + MP Fee', 'Mkt Ratio', 'Profit After Mkt', 'Margin After Mkt'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
@@ -273,26 +219,20 @@ export default function ChannelsPage() {
               <tr key={c.name} style={{ borderBottom: '1px solid #1a2744' }}>
                 <td style={{ padding: '8px 10px' }}>
                   <div style={{ fontWeight: 600 }}>{c.name}</div>
-                  {/* CPAS note for Shopee */}
-                  {c.name === 'Shopee' && c.cpas > 0 && (
+                  {c.mpAdmin > 0 && (
                     <div style={{ fontSize: 10, color: '#8b5cf6', marginTop: 2 }}>
-                      Termasuk CPAS: Rp {fmtCompact(c.cpas)} ({c.cpasPercent.toFixed(0)}%)
+                      MP Fee: Rp {fmtCompact(c.mpAdmin)} ({c.mpAdminPct.toFixed(0)}%)
                     </div>
                   )}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(c.revenue)}</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>{c.pct.toFixed(1)}%</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(c.gp)}</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
-                  {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: '#334155' }}>—</span>}
-                </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
-                  {c.mpAdmin > 0 ? fmtRupiah(c.mpAdmin) : <span style={{ color: '#334155' }}>—</span>}
-                </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>
-                  {c.totalCost > 0 ? fmtRupiah(c.totalCost) : <span style={{ color: '#334155' }}>—</span>}
+                  {c.mktCost > 0 ? fmtRupiah(c.mktCost) : <span style={{ color: '#334155' }}>—</span>}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                  {c.totalCost > 0 && c.revenue > 0 ? (
+                  {c.mktCost > 0 ? (
                     <span style={{
                       padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
                       background: c.mktRatio > 40 ? '#7f1d1d' : c.mktRatio > 25 ? '#78350f' : '#064e3b',
@@ -300,14 +240,15 @@ export default function ChannelsPage() {
                     }}>{c.mktRatio.toFixed(1)}%</span>
                   ) : <span style={{ color: '#334155' }}>—</span>}
                 </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: c.profitAfterMkt >= 0 ? '#10b981' : '#ef4444' }}>
+                  {fmtRupiah(c.profitAfterMkt)}
+                </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                  {c.revenue > 0 ? (
-                    <span style={{
-                      padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                      background: c.gpMargin >= 50 ? '#064e3b' : c.gpMargin >= 30 ? '#78350f' : '#7f1d1d',
-                      color: c.gpMargin >= 50 ? '#10b981' : c.gpMargin >= 30 ? '#f59e0b' : '#ef4444',
-                    }}>{c.gpMargin.toFixed(1)}%</span>
-                  ) : <span style={{ color: '#334155' }}>—</span>}
+                  <span style={{
+                    padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                    background: c.marginAfterMkt >= 30 ? '#064e3b' : c.marginAfterMkt >= 10 ? '#78350f' : '#7f1d1d',
+                    color: c.marginAfterMkt >= 30 ? '#10b981' : c.marginAfterMkt >= 10 ? '#f59e0b' : '#ef4444',
+                  }}>{c.marginAfterMkt.toFixed(1)}%</span>
                 </td>
               </tr>
             ))}
@@ -316,17 +257,19 @@ export default function ChannelsPage() {
               <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalRevenue)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalAdsCost)}</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalMpAdmin)}</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalCost)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalGP)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalMktCost)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                 <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1a2744', color: '#e2e8f0' }}>
-                  {totalRevenue > 0 ? (totalCost / totalRevenue * 100).toFixed(1) : 0}%
+                  {totalRevenue > 0 ? (totalMktCost / totalRevenue * 100).toFixed(1) : 0}%
                 </span>
+              </td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalProfitAfterMkt >= 0 ? '#10b981' : '#ef4444' }}>
+                {fmtRupiah(totalProfitAfterMkt)}
               </td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                 <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1a2744', color: '#e2e8f0' }}>
-                  {totalRevenue > 0 ? (totalGP / totalRevenue * 100).toFixed(1) : 0}%
+                  {totalRevenue > 0 ? (totalProfitAfterMkt / totalRevenue * 100).toFixed(1) : 0}%
                 </span>
               </td>
             </tr>
