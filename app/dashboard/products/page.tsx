@@ -39,18 +39,19 @@ export default function ProductsPage() {
   const products = useMemo(() => {
     const byP = {};
     data.forEach(d => {
-      if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0, m:0 };
+      if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0 };
       byP[d.product].s += Number(d.net_sales); byP[d.product].g += Number(d.gross_profit);
-      byP[d.product].n += Number(d.net_after_mkt); byP[d.product].m += Math.abs(Number(d.mkt_cost));
+      byP[d.product].n += Number(d.net_after_mkt);
     });
     return Object.entries(byP).filter(([,v]) => v.s > 0).sort((a, b) => b[1].s - a[1].s)
       .map(([p, v]) => {
+        const mkt = v.g - v.n; // Mkt Cost = GP - Profit After Mkt
         const mpFee = mpFeeByProduct[p] || 0;
-        const mpFeePct = v.m > 0 ? (mpFee / v.m * 100) : 0;
+        const mpFeePct = mkt > 0 ? (mpFee / mkt * 100) : 0;
         return {
-          sku: p, sales: v.s, gp: v.g, nam: v.n, mkt: v.m, mpFee, mpFeePct,
+          sku: p, sales: v.s, gp: v.g, nam: v.n, mkt, mpFee, mpFeePct,
           margin: v.s > 0 ? v.n / v.s * 100 : 0,
-          mktR: v.s > 0 ? v.m / v.s * 100 : 0,
+          mktR: v.s > 0 ? mkt / v.s * 100 : 0,
         };
       });
   }, [data, mpFeeByProduct]);
