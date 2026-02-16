@@ -255,10 +255,16 @@ export async function parseCF(spreadsheetId: string): Promise<CFRow[]> {
     if (rawLabel.startsWith('Biaya Operasional')) { currentParent = 'biaya_operasional'; continue; }
     if (rawLabel.startsWith('Pendapatan & Beban')) { currentParent = 'pendapatan_beban'; continue; }
 
-    // Skip other section headers
-    if (upperLabel.startsWith('LAPORAN ARUS KAS') || upperLabel.startsWith('ARUS KAS DARI') || rawLabel === 'Free Cash Flow') {
+    // Skip other section headers (but NOT "Free Cash Flow" data row — check if it has data)
+    if (upperLabel.startsWith('LAPORAN ARUS KAS') || upperLabel.startsWith('ARUS KAS DARI')) {
       if (upperLabel.startsWith('ARUS KAS DARI')) currentParent = '';
       continue;
+    }
+    // "Free Cash Flow" can be both a header (no data) and a data row — only skip if no data
+    if (rawLabel === 'Free Cash Flow') {
+      const fcfVal = row[months[0].col];
+      if (fcfVal === undefined || fcfVal === null || fcfVal === '') continue;
+      // Has data — fall through to processing below
     }
 
     // Must have data in first month column
