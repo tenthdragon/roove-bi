@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
 import SheetManager from '@/components/SheetManager';
 import ScalevManager from '@/components/ScalevManager';
+import FinancialSheetManager from '@/components/FinancialSheetManager';
 
 export default function AdminPage() {
   const supabase = createClient();
@@ -163,6 +164,11 @@ export default function AdminPage() {
       {/* Scalev API Integration */}
       <div style={{ marginBottom:20 }}>
         <ScalevManager />
+      </div>
+
+      {/* Financial Report Integration */}
+      <div style={{ marginBottom:20 }}>
+        <FinancialSheetManager />
       </div>
       
       {/* User Management */}
