@@ -79,6 +79,20 @@ function ratioStatus(value: number, min: number | null, max: number | null): str
   return 'warning';
 }
 
+function timeAgo(dateStr: string): string {
+  const now = new Date();
+  const d = new Date(dateStr);
+  const diffMs = now.getTime() - d.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return 'Baru saja';
+  if (mins < 60) return `${mins} menit lalu`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} jam lalu`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} hari lalu`;
+  return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
 // ============================================================
 // KPI CARD
 // ============================================================
@@ -304,13 +318,43 @@ function RatiosTable({ data }: { data: RatioData[] }) {
 }
 
 // ============================================================
-// AI ANALYSIS PANEL
+// AI ANALYSIS PANEL — with persistence
 // ============================================================
 
-function AIPanel({ pl, cf, ratios }: { pl: PLSummary[]; cf: CFSummary[]; ratios: RatioData[] }) {
+function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[]; ratios: RatioData[]; userId?: string }) {
   const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
+  const [analysisTime, setAnalysisTime] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingPrev, setLoadingPrev] = useState(true);
   const [error, setError] = useState('');
+
+  // Load latest saved analysis on mount
+  useEffect(() => {
+    loadSavedAnalysis();
+  }, []);
+
+  async function loadSavedAnalysis() {
+    setLoadingPrev(true);
+    try {
+      const { createClient } = await import('@/lib/supabase-browser');
+      const supabase = createClient();
+      const { data, error: err } = await supabase
+        .from('financial_analyses')
+        .select('analysis_data, created_at')
+        .eq('analysis_type', 'executive')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (data && !err) {
+        setAnalysis(data.analysis_data as AIAnalysis);
+        setAnalysisTime(data.created_at);
+      }
+    } catch (e: any) {
+      // No saved analysis — that's fine
+    }
+    setLoadingPrev(false);
+  }
 
   async function generate() {
     setLoading(true);
@@ -326,6 +370,21 @@ function AIPanel({ pl, cf, ratios }: { pl: PLSummary[]; cf: CFSummary[]; ratios:
 
       const parsed = JSON.parse(data.analysis);
       setAnalysis(parsed);
+      setAnalysisTime(new Date().toISOString());
+
+      // Save to Supabase
+      try {
+        const { createClient } = await import('@/lib/supabase-browser');
+        const supabase = createClient();
+        await supabase.from('financial_analyses').insert({
+          analysis_type: 'executive',
+          analysis_data: parsed,
+          health_score: parsed.health_score || null,
+          generated_by: userId || null,
+        });
+      } catch (saveErr: any) {
+        console.error('Failed to save analysis:', saveErr);
+      }
     } catch (e: any) {
       setError(e.message);
     }
@@ -335,23 +394,31 @@ function AIPanel({ pl, cf, ratios }: { pl: PLSummary[]; cf: CFSummary[]; ratios:
   return (
     <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-white font-bold">🔍 The Unspoken Truth — AI Analysis</h3>
+        <div>
+          <h3 className="text-white font-bold">🔍 The Unspoken Truth — AI Analysis</h3>
+          {analysisTime && (
+            <p className="text-gray-500 text-xs mt-1">Terakhir di-generate: {timeAgo(analysisTime)}</p>
+          )}
+        </div>
         <button
           onClick={generate}
           disabled={loading}
           className="bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-4 py-2 rounded text-sm font-medium"
         >
-          {loading ? '⏳ Analyzing...' : '⚡ Generate Analysis'}
+          {loading ? '⏳ Analyzing...' : analysis ? '🔄 Re-generate' : '⚡ Generate Analysis'}
         </button>
       </div>
 
       {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
 
-      {!analysis && !loading && (
+      {!analysis && !loading && !loadingPrev && (
         <p className="text-gray-500 text-sm">
           Klik &quot;Generate Analysis&quot; untuk mendapatkan insight AI dari data keuangan.
-          Memerlukan ANTHROPIC_API_KEY di environment variables.
         </p>
+      )}
+
+      {loadingPrev && !analysis && (
+        <p className="text-gray-500 text-sm">Memuat analisis terakhir...</p>
       )}
 
       {analysis && (
@@ -540,7 +607,6 @@ export default function FinancePage() {
     );
   }
 
-  // Top KPIs from latest month
   const latestPL = pl[0];
   const prevPL = pl[1];
   const latestCF = cf[0];
@@ -586,7 +652,7 @@ export default function FinancePage() {
       </div>
 
       {/* AI Analysis Panel - Owner only */}
-      {profile?.role === 'owner' && <AIPanel pl={pl} cf={cf} ratios={ratios} />}
+      {profile?.role === 'owner' && <AIPanel pl={pl} cf={cf} ratios={ratios} userId={profile?.id} />}
 
       {/* PL Table */}
       <PLTable data={pl} />
