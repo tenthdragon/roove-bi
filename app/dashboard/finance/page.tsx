@@ -40,17 +40,21 @@ interface AIAnalysis {
   health_score?: number;
   health_label?: string;
   unspoken_truth?: string;
-  top_priority?: any;
+  strategic_advice?: {
+    stop_immediately?: string[];
+    start_this_month?: string[];
+    big_decision_this_quarter?: string;
+    if_only_one_brand?: string;
+  };
   cash_analysis?: any;
   revenue_quality?: any;
   cost_alerts?: any[];
+  hidden_patterns?: any[];
   strategic_risks?: any[];
-  hidden_opportunities?: any[];
-  cash_proxy_analysis?: any;
+  competitive_survival?: any;
   key_ratios_alert?: any[];
-  three_month_outlook?: any;
+  // Legacy fields (backward compat with old saved analyses)
   cash_proxy_analysis?: any;
-  key_ratios_alert?: any[];
 }
 
 // ============================================================
@@ -98,26 +102,26 @@ function timeAgo(dateStr: string): string {
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-// Table styles
+// Shared table styles
 const S = {
   scrollArea: { overflowX: 'auto' as const, WebkitOverflowScrolling: 'touch' as const },
   table: { width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 900 },
   thSticky: {
-    position: 'sticky' as const, left: 0, zIndex: 2, background: '#1f2937',
-    padding: '8px 12px', textAlign: 'left' as const, color: '#9ca3af',
-    fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const,
+    position: 'sticky' as const, left: 0, zIndex: 2,
+    background: '#1f2937', padding: '8px 12px', textAlign: 'left' as const,
+    color: '#9ca3af', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const,
     borderBottom: '1px solid #374151', minWidth: 190,
   },
   th: {
-    padding: '8px 10px', textAlign: 'right' as const, color: '#9ca3af',
-    fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const,
+    padding: '8px 10px', textAlign: 'right' as const,
+    color: '#9ca3af', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const,
     borderBottom: '1px solid #374151', minWidth: 105,
   },
   tdSticky: (bold: boolean) => ({
-    position: 'sticky' as const, left: 0, zIndex: 1, background: '#1f2937',
-    padding: '6px 12px', color: bold ? '#f3f4f6' : '#d1d5db',
-    fontWeight: bold ? 600 : 400, whiteSpace: 'nowrap' as const,
-    borderBottom: '1px solid rgba(55,65,81,0.4)', minWidth: 190,
+    position: 'sticky' as const, left: 0, zIndex: 1,
+    background: '#1f2937', padding: '6px 12px',
+    color: bold ? '#f3f4f6' : '#d1d5db', fontWeight: bold ? 600 : 400,
+    whiteSpace: 'nowrap' as const, borderBottom: '1px solid rgba(55,65,81,0.4)', minWidth: 190,
   }),
   td: (negative: boolean) => ({
     padding: '6px 10px', textAlign: 'right' as const,
@@ -125,9 +129,10 @@ const S = {
     borderBottom: '1px solid rgba(55,65,81,0.4)', whiteSpace: 'nowrap' as const, minWidth: 105,
   }),
   tdItalicSticky: {
-    position: 'sticky' as const, left: 0, zIndex: 1, background: '#1f2937',
-    padding: '6px 12px', color: '#9ca3af', fontStyle: 'italic' as const,
-    whiteSpace: 'nowrap' as const, borderTop: '1px solid #4b5563', minWidth: 190,
+    position: 'sticky' as const, left: 0, zIndex: 1,
+    background: '#1f2937', padding: '6px 12px',
+    color: '#9ca3af', fontStyle: 'italic' as const, whiteSpace: 'nowrap' as const,
+    borderTop: '1px solid #4b5563', minWidth: 190,
   },
   tdItalic: (negative: boolean) => ({
     padding: '6px 10px', textAlign: 'right' as const,
@@ -140,7 +145,9 @@ const S = {
 // KPI CARD
 // ============================================================
 
-function KPICard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
+function KPICard({ label, value, sub, color }: {
+  label: string; value: string; sub?: string; color?: string;
+}) {
   return (
     <div style={{ background: '#1f2937', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
       <p style={{ color: '#9ca3af', fontSize: 11, marginBottom: 4 }}>{label}</p>
@@ -183,7 +190,10 @@ function PLTable({ data }: { data: PLSummary[] }) {
             {rows.map(item => (
               <tr key={item.key}>
                 <td style={S.tdSticky(item.bold)}>{item.label}</td>
-                {data.map(r => { const val = (r as any)[item.key] as number; return <td key={r.month} style={S.td(val < 0)}>{fmtB(val)}</td>; })}
+                {data.map(r => {
+                  const val = (r as any)[item.key] as number;
+                  return <td key={r.month} style={S.td(val < 0)}>{fmtB(val)}</td>;
+                })}
               </tr>
             ))}
             <tr>
@@ -230,7 +240,10 @@ function CFTable({ data }: { data: CFSummary[] }) {
             {rows.map(item => (
               <tr key={item.key}>
                 <td style={S.tdSticky(item.bold)}>{item.label}</td>
-                {data.map(r => { const val = (r as any)[item.key] as number; return <td key={r.month} style={S.td(val < 0)}>{fmtB(val)}</td>; })}
+                {data.map(r => {
+                  const val = (r as any)[item.key] as number;
+                  return <td key={r.month} style={S.td(val < 0)}>{fmtB(val)}</td>;
+                })}
               </tr>
             ))}
             <tr>
@@ -257,9 +270,12 @@ function RatiosTable({ data }: { data: RatioData[] }) {
   const months = [...new Set(data.map(d => d.month))].sort().reverse();
   const ratioNames = [...new Set(data.map(d => d.ratio_name))];
   const niceLabel: Record<string, string> = {
-    gpm: 'Gross Profit Margin', npm: 'Net Profit Margin', roa: 'Return on Assets', roe: 'Return on Equity',
-    cash_ratio: 'Cash Ratio', current_ratio: 'Current Ratio', quick_ratio: 'Quick Ratio', debt_ratio: 'Debt Ratio',
-    ccr: 'Cash Conversion Ratio', ocf_to_asset: 'OCF to Asset', asset_turnover: 'Asset Turnover', inventory_turnover: 'Inventory Turnover',
+    gpm: 'Gross Profit Margin', npm: 'Net Profit Margin',
+    roa: 'Return on Assets', roe: 'Return on Equity',
+    cash_ratio: 'Cash Ratio', current_ratio: 'Current Ratio',
+    quick_ratio: 'Quick Ratio', debt_ratio: 'Debt Ratio',
+    ccr: 'Cash Conversion Ratio', ocf_to_asset: 'OCF to Asset',
+    asset_turnover: 'Asset Turnover', inventory_turnover: 'Inventory Turnover',
   };
   const statusColor: Record<string, string> = { healthy: '#34d399', warning: '#fbbf24', critical: '#f87171' };
   return (
@@ -349,12 +365,21 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
     setLoading(false);
   }
 
-  const card = (bg: string, border: string) => ({ background: bg, border: `1px solid ${border}`, borderRadius: 8, padding: 14, marginBottom: 0 });
-  const sevCard = (sev: string) => card(
-    sev === 'high' || sev === 'critical' ? 'rgba(127,29,29,0.15)' : sev === 'medium' || sev === 'warning' ? 'rgba(120,53,15,0.15)' : '#111827',
-    sev === 'high' || sev === 'critical' ? 'rgba(153,27,27,0.5)' : sev === 'medium' || sev === 'warning' ? 'rgba(146,64,14,0.5)' : '#374151'
+  const sevCard = (sev: string) => ({
+    background: sev === 'high' || sev === 'critical' ? 'rgba(127,29,29,0.15)' : sev === 'medium' || sev === 'warning' ? 'rgba(120,53,15,0.15)' : '#111827',
+    border: `1px solid ${sev === 'high' || sev === 'critical' ? 'rgba(153,27,27,0.5)' : sev === 'medium' || sev === 'warning' ? 'rgba(146,64,14,0.5)' : '#374151'}`,
+    borderRadius: 8, padding: 14, fontSize: 13,
+  });
+  const secTitle = (text: string) => (
+    <p style={{ color: '#9ca3af', fontSize: 11, fontWeight: 600, marginBottom: 10, letterSpacing: 0.5, textTransform: 'uppercase' as const }}>{text}</p>
   );
-  const sectionTitle = (icon: string, title: string) => ({ color: '#9ca3af', fontSize: 11, fontWeight: 600 as const, marginBottom: 10, letterSpacing: 0.5 });
+  const infoGrid = (items: [string, string, string?][]) => (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 13 }}>
+      {items.map(([label, value, color], i) => (
+        <div key={i}><span style={{ color: '#6b7280' }}>{label}:</span> <span style={{ color: color || '#fff' }}>{value}</span></div>
+      ))}
+    </div>
+  );
 
   return (
     <div style={{ background: '#1f2937', borderRadius: 8, border: '1px solid #374151', padding: 20 }}>
@@ -368,20 +393,22 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
         <button onClick={generate} disabled={loading} style={{
           padding: '10px 20px', borderRadius: 8, border: 'none', cursor: 'pointer',
           background: loading ? '#374151' : 'linear-gradient(135deg, #d97706, #b45309)',
-          color: '#fff', fontSize: 13, fontWeight: 700, opacity: loading ? 0.7 : 1,
+          color: '#fff', fontSize: 13, fontWeight: 600, opacity: loading ? 0.6 : 1,
         }}>
-          {loading ? '⏳ Opus sedang menganalisis...' : analysis ? '🔄 Re-generate Analysis' : '⚡ Generate Strategic Analysis'}
+          {loading ? '⏳ Analyzing with Opus...' : analysis ? '🔄 Re-generate' : '⚡ Generate Analysis'}
         </button>
       </div>
 
       {error && <p style={{ color: '#f87171', fontSize: 13, marginBottom: 12 }}>{error}</p>}
-      {!analysis && !loading && !loadingPrev && <p style={{ color: '#6b7280', fontSize: 13 }}>Klik tombol untuk mendapatkan analisis strategis mendalam dari Claude Opus 4.6.</p>}
+      {!analysis && !loading && !loadingPrev && (
+        <p style={{ color: '#6b7280', fontSize: 13 }}>Klik &quot;Generate Analysis&quot; untuk insight strategis dari Claude Opus 4.6.</p>
+      )}
       {loadingPrev && !analysis && <p style={{ color: '#6b7280', fontSize: 13 }}>Memuat analisis terakhir...</p>}
 
       {analysis && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-          {/* Health Score + Label */}
+          {/* ── Health Score ── */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <div style={{
               fontSize: 48, fontWeight: 900, lineHeight: 1,
@@ -389,176 +416,183 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
             }}>{analysis.health_score}</div>
             <div>
               <p style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>{analysis.health_label}</p>
-              <p style={{ color: '#9ca3af', fontSize: 12 }}>Business Health Score</p>
+              <p style={{ color: '#9ca3af', fontSize: 13 }}>Business Health Score</p>
             </div>
           </div>
 
-          {/* Unspoken Truth */}
+          {/* ── Unspoken Truth ── */}
           {analysis.unspoken_truth && (
-            <div style={card('rgba(127,29,29,0.12)', 'rgba(153,27,27,0.4)')}>
-              <p style={{ color: '#fca5a5', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>💀 THE UNSPOKEN TRUTH</p>
-              <p style={{ color: '#fef2f2', fontSize: 14, lineHeight: 1.7 }}>{analysis.unspoken_truth}</p>
+            <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid rgba(153,27,27,0.5)', borderRadius: 8, padding: 16 }}>
+              <p style={{ color: '#fca5a5', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>💀 The Unspoken Truth</p>
+              <p style={{ color: '#f3f4f6', fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-line' }}>{analysis.unspoken_truth}</p>
             </div>
           )}
 
-          {/* Executive Brief */}
-          {analysis.executive_brief && (
-            <div style={card('#111827', '#374151')}>
-              <p style={{ color: '#93c5fd', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>📝 EXECUTIVE BRIEF</p>
-              <p style={{ color: '#e5e7eb', fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-line' }}>{analysis.executive_brief}</p>
-            </div>
-          )}
-
-          {/* Cash Analysis */}
-          {analysis.cash_analysis && (
-            <div style={card('#111827', '#374151')}>
-              <p style={sectionTitle('💰', 'CASH')}>💰 CASH ANALYSIS</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 13 }}>
-                <div><span style={{ color: '#6b7280' }}>Position:</span> <span style={{ color: '#fff' }}>{analysis.cash_analysis.current_position}</span></div>
-                <div><span style={{ color: '#6b7280' }}>Monthly Burn:</span> <span style={{ color: '#fff' }}>{analysis.cash_analysis.monthly_burn || analysis.cash_analysis.burn_rate}</span></div>
-                <div><span style={{ color: '#6b7280' }}>Runway (optimis):</span> <span style={{ color: '#fff' }}>{analysis.cash_analysis.runway_optimistic || analysis.cash_analysis.runway_assessment}</span></div>
-                <div><span style={{ color: '#6b7280' }}>Runway (pesimis):</span> <span style={{ color: '#fff' }}>{analysis.cash_analysis.runway_pessimistic || '-'}</span></div>
-                <div style={{ gridColumn: '1 / -1' }}>
-                  <span style={{ color: '#6b7280' }}>Risk:</span>{' '}
-                  <span style={{ color: analysis.cash_analysis.risk_level === 'high' || analysis.cash_analysis.risk_level === 'critical' ? '#f87171' : analysis.cash_analysis.risk_level === 'medium' ? '#fbbf24' : '#34d399', fontWeight: 700 }}>
-                    {analysis.cash_analysis.risk_level?.toUpperCase()}
-                  </span>
+          {/* ── Strategic Advice ── */}
+          {analysis.strategic_advice && (
+            <div style={{ background: '#111827', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
+              {secTitle('🎯 Strategic Advice')}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                {/* Stop */}
+                <div style={{ background: 'rgba(127,29,29,0.1)', borderRadius: 6, padding: 12, border: '1px solid rgba(153,27,27,0.3)' }}>
+                  <p style={{ color: '#f87171', fontSize: 12, fontWeight: 600, marginBottom: 8 }}>🛑 STOP Minggu Ini</p>
+                  {(analysis.strategic_advice.stop_immediately || []).map((s, i) => (
+                    <p key={i} style={{ color: '#e5e7eb', fontSize: 12, marginBottom: 6, paddingLeft: 8, borderLeft: '2px solid #991b1b', lineHeight: 1.5 }}>{s}</p>
+                  ))}
                 </div>
-                {analysis.cash_analysis.immediate_action && (
-                  <div style={{ gridColumn: '1 / -1', background: 'rgba(59,130,246,0.1)', borderRadius: 6, padding: 10, marginTop: 4 }}>
-                    <span style={{ color: '#93c5fd', fontSize: 11, fontWeight: 700 }}>⚡ TINDAKAN SEGERA:</span>
-                    <p style={{ color: '#e5e7eb', fontSize: 13, marginTop: 4 }}>{analysis.cash_analysis.immediate_action}</p>
-                  </div>
-                )}
+                {/* Start */}
+                <div style={{ background: 'rgba(6,78,59,0.1)', borderRadius: 6, padding: 12, border: '1px solid rgba(6,78,59,0.3)' }}>
+                  <p style={{ color: '#34d399', fontSize: 12, fontWeight: 600, marginBottom: 8 }}>🚀 START Bulan Ini</p>
+                  {(analysis.strategic_advice.start_this_month || []).map((s, i) => (
+                    <p key={i} style={{ color: '#e5e7eb', fontSize: 12, marginBottom: 6, paddingLeft: 8, borderLeft: '2px solid #065f46', lineHeight: 1.5 }}>{s}</p>
+                  ))}
+                </div>
               </div>
+              {analysis.strategic_advice.big_decision_this_quarter && (
+                <div style={{ marginTop: 12, background: 'rgba(120,53,15,0.1)', borderRadius: 6, padding: 12, border: '1px solid rgba(120,53,15,0.3)' }}>
+                  <p style={{ color: '#fbbf24', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>⚡ Keputusan Besar Kuartal Ini</p>
+                  <p style={{ color: '#f3f4f6', fontSize: 13, lineHeight: 1.6 }}>{analysis.strategic_advice.big_decision_this_quarter}</p>
+                </div>
+              )}
+              {analysis.strategic_advice.if_only_one_brand && (
+                <div style={{ marginTop: 12, background: 'rgba(88,28,135,0.1)', borderRadius: 6, padding: 12, border: '1px solid rgba(88,28,135,0.3)' }}>
+                  <p style={{ color: '#c084fc', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>🏆 Jika Harus All-In 1 Brand</p>
+                  <p style={{ color: '#f3f4f6', fontSize: 13, lineHeight: 1.6 }}>{analysis.strategic_advice.if_only_one_brand}</p>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Revenue Diagnosis */}
-          {analysis.revenue_diagnosis && (
-            <div style={card('#111827', '#374151')}>
-              <p style={sectionTitle('📈', 'REVENUE')}>📈 REVENUE DIAGNOSIS</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
-                {analysis.revenue_diagnosis.trend_summary && <div><span style={{ color: '#6b7280' }}>Trend:</span> <span style={{ color: '#e5e7eb' }}>{analysis.revenue_diagnosis.trend_summary}</span></div>}
-                {analysis.revenue_diagnosis.growth_quality && <div><span style={{ color: '#6b7280' }}>Kualitas Growth:</span> <span style={{ color: '#e5e7eb' }}>{analysis.revenue_diagnosis.growth_quality}</span></div>}
-                {analysis.revenue_diagnosis.channel_insight && <div><span style={{ color: '#6b7280' }}>Channel:</span> <span style={{ color: '#e5e7eb' }}>{analysis.revenue_diagnosis.channel_insight}</span></div>}
-                {analysis.revenue_diagnosis.biggest_concern && (
-                  <div style={{ background: 'rgba(234,179,8,0.08)', borderRadius: 6, padding: 10, marginTop: 4 }}>
-                    <span style={{ color: '#fbbf24', fontSize: 11, fontWeight: 700 }}>⚠️ CONCERN:</span>
-                    <p style={{ color: '#fef3c7', fontSize: 13, marginTop: 4 }}>{analysis.revenue_diagnosis.biggest_concern}</p>
-                  </div>
-                )}
-              </div>
+          {/* ── Cash Analysis ── */}
+          {analysis.cash_analysis && (
+            <div style={{ background: '#111827', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
+              {secTitle('💰 Cash Analysis')}
+              {infoGrid([
+                ['Position', analysis.cash_analysis.current_position],
+                ['Burn Rate', analysis.cash_analysis.burn_rate],
+                ['Runway', analysis.cash_analysis.runway_assessment],
+                ['Risk', (analysis.cash_analysis.risk_level || '').toUpperCase(),
+                  analysis.cash_analysis.risk_level === 'critical' || analysis.cash_analysis.risk_level === 'high' ? '#f87171' :
+                  analysis.cash_analysis.risk_level === 'medium' ? '#fbbf24' : '#34d399'],
+              ])}
+              {analysis.cash_analysis.cash_traps && (
+                <div style={{ marginTop: 10, padding: 10, background: 'rgba(120,53,15,0.1)', borderRadius: 6, border: '1px solid rgba(120,53,15,0.2)' }}>
+                  <p style={{ color: '#fbbf24', fontSize: 11, fontWeight: 600, marginBottom: 4 }}>🪤 Cash Traps</p>
+                  <p style={{ color: '#e5e7eb', fontSize: 12, lineHeight: 1.5 }}>{analysis.cash_analysis.cash_traps}</p>
+                </div>
+              )}
             </div>
           )}
 
-          {/* Cost Alerts */}
+          {/* ── Revenue Quality ── */}
+          {analysis.revenue_quality && (
+            <div style={{ background: '#111827', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
+              {secTitle('📈 Revenue Quality')}
+              <p style={{ color: '#e5e7eb', fontSize: 13, lineHeight: 1.6, marginBottom: 8 }}>{analysis.revenue_quality.assessment}</p>
+              {analysis.revenue_quality.paid_vs_organic_dependency && (
+                <p style={{ color: '#9ca3af', fontSize: 12, marginBottom: 4 }}><span style={{ color: '#fbbf24' }}>Ad Dependency:</span> {analysis.revenue_quality.paid_vs_organic_dependency}</p>
+              )}
+              {analysis.revenue_quality.if_ads_stopped && (
+                <p style={{ color: '#9ca3af', fontSize: 12, marginBottom: 4 }}><span style={{ color: '#f87171' }}>If Ads Stopped:</span> {analysis.revenue_quality.if_ads_stopped}</p>
+              )}
+              {analysis.revenue_quality.concern && (
+                <p style={{ color: '#9ca3af', fontSize: 12 }}><span style={{ color: '#fbbf24' }}>Concern:</span> {analysis.revenue_quality.concern}</p>
+              )}
+            </div>
+          )}
+
+          {/* ── Cost Alerts ── */}
           {analysis.cost_alerts && analysis.cost_alerts.length > 0 && (
             <div>
-              <p style={sectionTitle('⚠️', 'COST')}>⚠️ COST ALERTS</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {secTitle('⚠️ Cost Surgery')}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {analysis.cost_alerts.map((alert: any, i: number) => (
                   <div key={i} style={sevCard(alert.severity)}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                      <p style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>{alert.category}</p>
-                      {alert.current_amount && <span style={{ color: '#9ca3af', fontSize: 11 }}>{alert.current_amount} ({alert.pct_of_revenue})</span>}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+                      <p style={{ color: '#fff', fontWeight: 600 }}>{alert.category}</p>
+                      {alert.estimated_saving && <span style={{ color: '#34d399', fontSize: 11 }}>Saving: {alert.estimated_saving}</span>}
                     </div>
-                    {alert.diagnosis && <p style={{ color: '#d1d5db', fontSize: 13, marginTop: 6 }}>{alert.diagnosis}</p>}
-                    {!alert.diagnosis && alert.issue && <p style={{ color: '#d1d5db', fontSize: 13, marginTop: 6 }}>{alert.issue}</p>}
-                    {alert.trend && <p style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>Trend: {alert.trend}</p>}
-                    <p style={{ color: '#93c5fd', fontSize: 12, marginTop: 6 }}>→ {alert.recommendation}</p>
-                    {alert.second_order_effect && <p style={{ color: '#6b7280', fontSize: 11, fontStyle: 'italic', marginTop: 4 }}>⚙️ Side effect: {alert.second_order_effect}</p>}
+                    <p style={{ color: '#d1d5db', lineHeight: 1.5 }}>{alert.issue}</p>
+                    <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 6 }}>→ {alert.recommendation}</p>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Strategic Risks */}
+          {/* ── Hidden Patterns ── */}
+          {analysis.hidden_patterns && analysis.hidden_patterns.length > 0 && (
+            <div>
+              {secTitle('🔍 Hidden Patterns')}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {analysis.hidden_patterns.map((p: any, i: number) => (
+                  <div key={i} style={{ background: '#111827', borderRadius: 8, padding: 14, border: '1px solid #374151', fontSize: 13 }}>
+                    <p style={{ color: '#c084fc', fontWeight: 600, marginBottom: 4 }}>{p.pattern}</p>
+                    <p style={{ color: '#d1d5db', lineHeight: 1.5, marginBottom: 4 }}>{p.evidence}</p>
+                    <p style={{ color: '#fbbf24', fontSize: 12 }}>Implikasi: {p.implication}</p>
+                    <p style={{ color: '#34d399', fontSize: 12, marginTop: 2 }}>Action: {p.action}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── Strategic Risks ── */}
           {analysis.strategic_risks && analysis.strategic_risks.length > 0 && (
             <div>
-              <p style={sectionTitle('🎯', 'RISKS')}>🎯 STRATEGIC RISKS</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {secTitle('🎯 Strategic Risks')}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {analysis.strategic_risks.map((risk: any, i: number) => (
-                  <div key={i} style={sevCard(risk.probability)}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div key={i} style={{ background: '#111827', borderRadius: 8, padding: 14, border: '1px solid #374151', fontSize: 13 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span style={{
-                        fontSize: 10, padding: '3px 8px', borderRadius: 4, fontWeight: 700, textTransform: 'uppercase' as const,
+                        fontSize: 11, padding: '2px 8px', borderRadius: 4,
                         background: risk.probability === 'high' ? '#7f1d1d' : risk.probability === 'medium' ? '#78350f' : '#374151',
                         color: risk.probability === 'high' ? '#fecaca' : risk.probability === 'medium' ? '#fde68a' : '#d1d5db',
                       }}>{risk.probability}</span>
-                      <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{risk.risk}</span>
+                      <span style={{ color: '#fff', fontWeight: 600 }}>{risk.risk}</span>
                     </div>
-                    {risk.timeframe && <p style={{ color: '#9ca3af', fontSize: 11, marginTop: 6 }}>⏰ {risk.timeframe}</p>}
-                    <p style={{ color: '#d1d5db', fontSize: 12, marginTop: 4 }}>Impact: {risk.impact}</p>
-                    {risk.early_warning && <p style={{ color: '#fbbf24', fontSize: 11, marginTop: 4 }}>📡 Early warning: {risk.early_warning}</p>}
-                    <p style={{ color: '#93c5fd', fontSize: 12, marginTop: 4 }}>Mitigation: {risk.mitigation}</p>
+                    <p style={{ color: '#9ca3af', fontSize: 12 }}>Impact: {risk.impact}</p>
+                    {risk.timeline && <p style={{ color: '#9ca3af', fontSize: 12 }}>Timeline: {risk.timeline}</p>}
+                    <p style={{ color: '#9ca3af', fontSize: 12 }}>Mitigation: {risk.mitigation}</p>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Subtle Insights */}
-          {analysis.subtle_insights && analysis.subtle_insights.length > 0 && (
-            <div style={card('rgba(88,28,135,0.1)', 'rgba(126,34,206,0.3)')}>
-              <p style={{ color: '#c4b5fd', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>🔬 SUBTLE INSIGHTS</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {analysis.subtle_insights.map((insight: string, i: number) => (
-                  <p key={i} style={{ color: '#e5e7eb', fontSize: 13, lineHeight: 1.7, paddingLeft: 12, borderLeft: '2px solid rgba(126,34,206,0.4)' }}>{insight}</p>
-                ))}
-              </div>
+          {/* ── Competitive Survival ── */}
+          {analysis.competitive_survival && (
+            <div style={{ background: '#111827', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
+              {secTitle('⏱️ Competitive Survival')}
+              {infoGrid([
+                ['Runway (current rate)', analysis.competitive_survival.months_at_current_rate],
+                ['Break-even req.', analysis.competitive_survival.break_even_requirement],
+              ])}
+              {analysis.competitive_survival.unit_economics_verdict && (
+                <p style={{ color: '#e5e7eb', fontSize: 13, marginTop: 10, lineHeight: 1.6, padding: 10, background: 'rgba(55,65,81,0.3)', borderRadius: 6 }}>
+                  {analysis.competitive_survival.unit_economics_verdict}
+                </p>
+              )}
             </div>
           )}
 
-          {/* Decisions Needed */}
-          {analysis.decisions_needed && (
-            <div style={card('#111827', '#374151')}>
-              <p style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700, marginBottom: 10 }}>📋 KEPUTUSAN YANG HARUS DIAMBIL</p>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {analysis.decisions_needed.this_week && analysis.decisions_needed.this_week.length > 0 && (
-                  <div>
-                    <p style={{ color: '#f87171', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>🔴 MINGGU INI</p>
-                    {analysis.decisions_needed.this_week.map((d: string, i: number) => (
-                      <p key={i} style={{ color: '#e5e7eb', fontSize: 13, paddingLeft: 12, marginTop: 4 }}>• {d}</p>
-                    ))}
-                  </div>
-                )}
-                {analysis.decisions_needed.this_month && analysis.decisions_needed.this_month.length > 0 && (
-                  <div>
-                    <p style={{ color: '#fbbf24', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>🟡 BULAN INI</p>
-                    {analysis.decisions_needed.this_month.map((d: string, i: number) => (
-                      <p key={i} style={{ color: '#e5e7eb', fontSize: 13, paddingLeft: 12, marginTop: 4 }}>• {d}</p>
-                    ))}
-                  </div>
-                )}
-                {analysis.decisions_needed.this_quarter && analysis.decisions_needed.this_quarter.length > 0 && (
-                  <div>
-                    <p style={{ color: '#34d399', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>🟢 KUARTAL INI</p>
-                    {analysis.decisions_needed.this_quarter.map((d: string, i: number) => (
-                      <p key={i} style={{ color: '#e5e7eb', fontSize: 13, paddingLeft: 12, marginTop: 4 }}>• {d}</p>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Key Ratios */}
+          {/* ── Key Ratios Alert ── */}
           {analysis.key_ratios_alert && analysis.key_ratios_alert.length > 0 && (
             <div>
-              <p style={sectionTitle('📊', 'RATIOS')}>📊 KEY RATIOS ALERT</p>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+              {secTitle('📊 Key Ratios Alert')}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 {analysis.key_ratios_alert.map((ra: any, i: number) => (
-                  <div key={i} style={sevCard(ra.status)}>
-                    <p style={{ color: '#fff', fontWeight: 700, fontSize: 12 }}>{ra.ratio}</p>
-                    <p style={{ color: '#d1d5db', fontSize: 14, fontWeight: 600, marginTop: 2 }}>{ra.current} <span style={{ color: '#6b7280', fontSize: 11, fontWeight: 400 }}>({ra.benchmark})</span></p>
-                    <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 4 }}>{ra.interpretation}</p>
+                  <div key={i} style={sevCard(ra.status === 'critical' ? 'high' : ra.status === 'warning' ? 'medium' : 'low')}>
+                    <p style={{ color: '#fff', fontWeight: 600, fontSize: 12, marginBottom: 2 }}>{ra.ratio}</p>
+                    <p style={{ color: '#d1d5db', fontSize: 13 }}>{ra.current} <span style={{ color: '#6b7280', fontSize: 11 }}>({ra.benchmark})</span></p>
+                    <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 4, lineHeight: 1.4 }}>{ra.interpretation}</p>
                   </div>
                 ))}
               </div>
             </div>
           )}
+
         </div>
       )}
     </div>
@@ -585,51 +619,92 @@ export default function FinancePage() {
       const { createClient } = await import('@/lib/supabase-browser');
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) { const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single(); setProfile(p); }
-      const [plData, cfData, ratioData] = await Promise.all([getFinancialPLSummary(12), getFinancialCFSummary(12), getFinancialRatios(12)]);
-      setPL(plData); setCF(cfData); setRatios(ratioData);
+      if (user) {
+        const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        setProfile(p);
+      }
+      const [plData, cfData, ratioData] = await Promise.all([
+        getFinancialPLSummary(12),
+        getFinancialCFSummary(12),
+        getFinancialRatios(12),
+      ]);
+      setPL(plData);
+      setCF(cfData);
+      setRatios(ratioData);
     } catch (e: any) { setError(e.message); }
     setLoading(false);
   }
 
   if (loading) return <div style={{ padding: 24, color: '#9ca3af' }}><p>Loading financial data...</p></div>;
 
-  if (error) return (
-    <div style={{ padding: 24 }}>
-      <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 8, padding: 16, color: '#fca5a5' }}>
-        <p style={{ fontWeight: 700 }}>Error loading financial data</p>
-        <p style={{ fontSize: 13, marginTop: 4 }}>{error}</p>
-        <p style={{ fontSize: 11, marginTop: 8, color: '#9ca3af' }}>Pastikan tabel financial sudah dibuat dan data sudah di-sync dari admin page.</p>
+  if (error) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 8, padding: 16, color: '#fca5a5' }}>
+          <p style={{ fontWeight: 700 }}>Error loading financial data</p>
+          <p style={{ fontSize: 13, marginTop: 4 }}>{error}</p>
+          <p style={{ fontSize: 11, marginTop: 8, color: '#9ca3af' }}>Pastikan tabel financial sudah dibuat dan data sudah di-sync dari admin page.</p>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 
-  if (pl.length === 0 && cf.length === 0 && ratios.length === 0) return (
-    <div style={{ padding: 24 }}>
-      <div style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 12, padding: 24, textAlign: 'center' }}>
-        <p style={{ color: '#fff', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>📊 Finance Dashboard</p>
-        <p style={{ color: '#9ca3af' }}>Belum ada data keuangan. Hubungkan dan sync Google Sheets di Admin page.</p>
+  if (pl.length === 0 && cf.length === 0 && ratios.length === 0) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 12, padding: 24, textAlign: 'center' }}>
+          <p style={{ color: '#fff', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>📊 Finance Dashboard</p>
+          <p style={{ color: '#9ca3af' }}>Belum ada data keuangan. Hubungkan dan sync Google Sheets di Admin page.</p>
+        </div>
       </div>
-    </div>
-  );
+    );
+  }
 
-  const latestPL = pl[0]; const prevPL = pl[1]; const latestCF = cf[0];
+  const latestPL = pl[0];
+  const prevPL = pl[1];
+  const latestCF = cf[0];
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: 0 }}>📊 Finance</h1>
-          <p style={{ color: '#9ca3af', fontSize: 13, marginTop: 4 }}>Laporan Keuangan — Delivered Basis | Latest: {latestPL ? monthLabel(latestPL.month) : '-'}</p>
+          <p style={{ color: '#9ca3af', fontSize: 13, marginTop: 4 }}>
+            Laporan Keuangan — Delivered Basis &nbsp;|&nbsp; Latest: {latestPL ? monthLabel(latestPL.month) : '-'}
+          </p>
         </div>
-        <button onClick={loadData} style={{ background: 'transparent', border: '1px solid #374151', borderRadius: 6, padding: '6px 12px', color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}>🔄 Refresh</button>
+        <button onClick={loadData} style={{
+          background: 'transparent', border: '1px solid #374151', borderRadius: 6,
+          padding: '6px 12px', color: '#9ca3af', fontSize: 12, cursor: 'pointer',
+        }}>🔄 Refresh</button>
       </div>
 
+      {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
-        <KPICard label="Net Revenue" value={fmtB(latestPL?.penjualan_bersih)} sub={prevPL ? `Prev: ${fmtB(prevPL.penjualan_bersih)}` : undefined} color={latestPL?.penjualan_bersih > (prevPL?.penjualan_bersih || 0) ? '#34d399' : '#f87171'} />
-        <KPICard label="Laba Bersih" value={fmtB(latestPL?.laba_rugi)} sub={latestPL?.penjualan_bersih ? `NPM: ${fmtPct(latestPL.laba_rugi / latestPL.penjualan_bersih)}` : undefined} color={latestPL?.laba_rugi >= 0 ? '#34d399' : '#f87171'} />
-        <KPICard label="Free Cash Flow" value={fmtB(latestCF?.free_cash_flow)} sub={latestCF?.saldo_kas_akhir ? `Saldo: ${fmtB(latestCF.saldo_kas_akhir)}` : undefined} color={latestCF?.free_cash_flow >= 0 ? '#34d399' : '#f87171'} />
-        <KPICard label="GPM" value={latestPL?.penjualan_bersih ? fmtPct(latestPL.laba_bruto / latestPL.penjualan_bersih) : '-'} sub="Benchmark: 50-70%" color={latestPL?.penjualan_bersih && (latestPL.laba_bruto / latestPL.penjualan_bersih) >= 0.5 ? '#34d399' : '#fbbf24'} />
+        <KPICard
+          label="Net Revenue"
+          value={fmtB(latestPL?.penjualan_bersih)}
+          sub={prevPL ? `Prev: ${fmtB(prevPL.penjualan_bersih)}` : undefined}
+          color={latestPL?.penjualan_bersih > (prevPL?.penjualan_bersih || 0) ? '#34d399' : '#f87171'}
+        />
+        <KPICard
+          label="Laba Bersih"
+          value={fmtB(latestPL?.laba_rugi)}
+          sub={latestPL?.penjualan_bersih ? `NPM: ${fmtPct(latestPL.laba_rugi / latestPL.penjualan_bersih)}` : undefined}
+          color={latestPL?.laba_rugi >= 0 ? '#34d399' : '#f87171'}
+        />
+        <KPICard
+          label="Free Cash Flow"
+          value={fmtB(latestCF?.free_cash_flow)}
+          sub={latestCF?.saldo_kas_akhir ? `Saldo: ${fmtB(latestCF.saldo_kas_akhir)}` : undefined}
+          color={latestCF?.free_cash_flow >= 0 ? '#34d399' : '#f87171'}
+        />
+        <KPICard
+          label="GPM"
+          value={latestPL?.penjualan_bersih ? fmtPct(latestPL.laba_bruto / latestPL.penjualan_bersih) : '-'}
+          sub="Benchmark: 50-70%"
+          color={latestPL?.penjualan_bersih && (latestPL.laba_bruto / latestPL.penjualan_bersih) >= 0.5 ? '#34d399' : '#fbbf24'}
+        />
       </div>
 
       {profile?.role === 'owner' && <AIPanel pl={pl} cf={cf} ratios={ratios} userId={profile?.id} />}
