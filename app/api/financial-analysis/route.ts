@@ -30,11 +30,56 @@ export async function POST(request: NextRequest) {
       .map(block => block.text)
       .join('\n');
 
-    return NextResponse.json({ analysis: responseText, mode });
+    // Opus sometimes wraps JSON in markdown fences or adds preamble text.
+    // Extract the actual JSON from the response.
+    const cleanJson = extractJSON(responseText);
+
+    return NextResponse.json({ analysis: cleanJson, mode });
   } catch (err: any) {
     console.error('[Financial Analysis API] Error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
+}
+
+/**
+ * Extract valid JSON from model response.
+ * Handles: markdown fences, preamble text, trailing text after JSON.
+ */
+function extractJSON(raw: string): string {
+  // 1. Strip markdown fences: ```json ... ``` or ``` ... ```
+  let cleaned = raw.replace(/```(?:json)?\s*/gi, '').replace(/```\s*/g, '');
+
+  // 2. Find the outermost { ... } block
+  const firstBrace = cleaned.indexOf('{');
+  if (firstBrace === -1) {
+    throw new Error('No JSON object found in AI response');
+  }
+
+  // Walk through to find matching closing brace
+  let depth = 0;
+  let lastBrace = -1;
+  for (let i = firstBrace; i < cleaned.length; i++) {
+    if (cleaned[i] === '{') depth++;
+    else if (cleaned[i] === '}') {
+      depth--;
+      if (depth === 0) { lastBrace = i; break; }
+    }
+  }
+
+  if (lastBrace === -1) {
+    throw new Error('Incomplete JSON object in AI response');
+  }
+
+  const jsonStr = cleaned.slice(firstBrace, lastBrace + 1);
+
+  // 3. Validate it parses
+  try {
+    JSON.parse(jsonStr);
+  } catch (e) {
+    throw new Error('AI response contains invalid JSON: ' + (e as Error).message);
+  }
+
+  return jsonStr;
 }
 
 function buildSystemPrompt(mode: string): string {
