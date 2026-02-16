@@ -351,7 +351,20 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-      const parsed = JSON.parse(data.analysis);
+
+      // Server should return clean JSON string, but double-safe parse
+      let parsed: any;
+      try {
+        parsed = typeof data.analysis === 'object' ? data.analysis : JSON.parse(data.analysis);
+      } catch {
+        // Fallback: extract JSON from possible markdown/preamble
+        const raw = data.analysis || '';
+        const start = raw.indexOf('{');
+        const end = raw.lastIndexOf('}');
+        if (start === -1 || end === -1) throw new Error('AI tidak mengembalikan JSON yang valid. Coba generate ulang.');
+        parsed = JSON.parse(raw.slice(start, end + 1));
+      }
+
       setAnalysis(parsed); setAnalysisTime(new Date().toISOString());
       try {
         const { createClient } = await import('@/lib/supabase-browser');
