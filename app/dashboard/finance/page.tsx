@@ -40,10 +40,15 @@ interface AIAnalysis {
   health_score?: number;
   health_label?: string;
   unspoken_truth?: string;
+  top_priority?: any;
   cash_analysis?: any;
   revenue_quality?: any;
   cost_alerts?: any[];
   strategic_risks?: any[];
+  hidden_opportunities?: any[];
+  cash_proxy_analysis?: any;
+  key_ratios_alert?: any[];
+  three_month_outlook?: any;
   cash_proxy_analysis?: any;
   key_ratios_alert?: any[];
 }
@@ -57,7 +62,7 @@ function fmtB(n: number | null): string {
   const abs = Math.abs(n);
   const sign = n < 0 ? '-' : '';
   if (abs >= 1e9) return `${sign}Rp ${(abs / 1e9).toFixed(2)}B`;
-  if (abs >= 1e6) return `${sign}Rp ${(abs / 1e6).toFixed(1)}M`;
+  if (abs >= 1e6) return `${sign}Rp ${(abs / 1e6).toFixed(0)}M`;
   if (abs >= 1e3) return `${sign}Rp ${(abs / 1e3).toFixed(0)}K`;
   return `${sign}Rp ${abs.toFixed(0)}`;
 }
@@ -93,18 +98,54 @@ function timeAgo(dateStr: string): string {
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+// Table styles
+const S = {
+  scrollArea: { overflowX: 'auto' as const, WebkitOverflowScrolling: 'touch' as const },
+  table: { width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 900 },
+  thSticky: {
+    position: 'sticky' as const, left: 0, zIndex: 2, background: '#1f2937',
+    padding: '8px 12px', textAlign: 'left' as const, color: '#9ca3af',
+    fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const,
+    borderBottom: '1px solid #374151', minWidth: 190,
+  },
+  th: {
+    padding: '8px 10px', textAlign: 'right' as const, color: '#9ca3af',
+    fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const,
+    borderBottom: '1px solid #374151', minWidth: 105,
+  },
+  tdSticky: (bold: boolean) => ({
+    position: 'sticky' as const, left: 0, zIndex: 1, background: '#1f2937',
+    padding: '6px 12px', color: bold ? '#f3f4f6' : '#d1d5db',
+    fontWeight: bold ? 600 : 400, whiteSpace: 'nowrap' as const,
+    borderBottom: '1px solid rgba(55,65,81,0.4)', minWidth: 190,
+  }),
+  td: (negative: boolean) => ({
+    padding: '6px 10px', textAlign: 'right' as const,
+    color: negative ? '#f87171' : '#e5e7eb',
+    borderBottom: '1px solid rgba(55,65,81,0.4)', whiteSpace: 'nowrap' as const, minWidth: 105,
+  }),
+  tdItalicSticky: {
+    position: 'sticky' as const, left: 0, zIndex: 1, background: '#1f2937',
+    padding: '6px 12px', color: '#9ca3af', fontStyle: 'italic' as const,
+    whiteSpace: 'nowrap' as const, borderTop: '1px solid #4b5563', minWidth: 190,
+  },
+  tdItalic: (negative: boolean) => ({
+    padding: '6px 10px', textAlign: 'right' as const,
+    color: negative ? '#f87171' : '#9ca3af', fontStyle: 'italic' as const,
+    borderTop: '1px solid #4b5563', whiteSpace: 'nowrap' as const, minWidth: 105,
+  }),
+};
+
 // ============================================================
 // KPI CARD
 // ============================================================
 
-function KPICard({ label, value, sub, color }: {
-  label: string; value: string; sub?: string; color?: string;
-}) {
+function KPICard({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
   return (
-    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700">
-      <p className="text-gray-400 text-xs mb-1">{label}</p>
-      <p className={`text-xl font-bold ${color || 'text-white'}`}>{value}</p>
-      {sub && <p className="text-xs mt-1 text-gray-500">{sub}</p>}
+    <div style={{ background: '#1f2937', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
+      <p style={{ color: '#9ca3af', fontSize: 11, marginBottom: 4 }}>{label}</p>
+      <p style={{ fontSize: 20, fontWeight: 700, color: color || '#fff' }}>{value}</p>
+      {sub && <p style={{ fontSize: 11, marginTop: 4, color: '#6b7280' }}>{sub}</p>}
     </div>
   );
 }
@@ -115,8 +156,6 @@ function KPICard({ label, value, sub, color }: {
 
 function PLTable({ data }: { data: PLSummary[] }) {
   if (!data.length) return null;
-  const recent = data.slice(0, 6);
-
   const rows = [
     { key: 'penjualan', label: 'Penjualan (Gross)', bold: false },
     { key: 'diskon_penjualan', label: 'Diskon Penjualan', bold: false },
@@ -131,53 +170,33 @@ function PLTable({ data }: { data: PLSummary[] }) {
     { key: 'pendapatan_lainnya', label: 'Pendapatan Lain-lain', bold: false },
     { key: 'laba_rugi', label: 'Laba / (Rugi) Bersih', bold: true },
   ];
-
   return (
-    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 overflow-x-auto">
-      <h3 className="text-white font-bold mb-3">📋 Profit & Loss — Delivered Basis</h3>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-700">
-            <th className="text-left text-gray-400 py-2 pr-4 sticky left-0 bg-gray-800 min-w-[180px]">Item</th>
-            {recent.map(r => (
-              <th key={r.month} className="text-right text-gray-400 py-2 px-2 min-w-[110px]">{monthLabel(r.month)}</th>
+    <div style={{ background: '#1f2937', borderRadius: 8, border: '1px solid #374151', padding: '16px 0' }}>
+      <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 15, margin: '0 0 12px 16px' }}>📋 Profit & Loss — Delivered Basis</h3>
+      <div style={S.scrollArea}>
+        <table style={S.table}>
+          <thead><tr>
+            <th style={S.thSticky}>Item</th>
+            {data.map(r => <th key={r.month} style={S.th}>{monthLabel(r.month)}</th>)}
+          </tr></thead>
+          <tbody>
+            {rows.map(item => (
+              <tr key={item.key}>
+                <td style={S.tdSticky(item.bold)}>{item.label}</td>
+                {data.map(r => { const val = (r as any)[item.key] as number; return <td key={r.month} style={S.td(val < 0)}>{fmtB(val)}</td>; })}
+              </tr>
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(item => (
-            <tr key={item.key} className={`border-b border-gray-700/30 ${item.bold ? 'font-semibold' : ''}`}>
-              <td className={`py-1.5 pr-4 sticky left-0 bg-gray-800 ${item.bold ? 'text-white' : 'text-gray-300'} whitespace-nowrap`}>
-                {item.label}
-              </td>
-              {recent.map(r => {
-                const val = (r as any)[item.key] as number;
-                return (
-                  <td key={r.month} className={`text-right py-1.5 px-2 ${val < 0 ? 'text-red-400' : 'text-gray-200'}`}>
-                    {fmtB(val)}
-                  </td>
-                );
-              })}
+            <tr>
+              <td style={S.tdItalicSticky}>GPM</td>
+              {data.map(r => <td key={r.month} style={S.tdItalic(false)}>{r.penjualan_bersih ? fmtPct(r.laba_bruto / r.penjualan_bersih) : '-'}</td>)}
             </tr>
-          ))}
-          <tr className="border-t border-gray-600">
-            <td className="py-1.5 pr-4 sticky left-0 bg-gray-800 text-gray-400 italic">GPM</td>
-            {recent.map(r => (
-              <td key={r.month} className="text-right py-1.5 px-2 text-gray-400 italic">
-                {r.penjualan_bersih ? fmtPct(r.laba_bruto / r.penjualan_bersih) : '-'}
-              </td>
-            ))}
-          </tr>
-          <tr>
-            <td className="py-1.5 pr-4 sticky left-0 bg-gray-800 text-gray-400 italic">NPM</td>
-            {recent.map(r => (
-              <td key={r.month} className="text-right py-1.5 px-2 text-gray-400 italic">
-                {r.penjualan_bersih ? fmtPct(r.laba_rugi / r.penjualan_bersih) : '-'}
-              </td>
-            ))}
-          </tr>
-        </tbody>
-      </table>
+            <tr>
+              <td style={{ ...S.tdItalicSticky, borderTop: 'none' }}>NPM</td>
+              {data.map(r => <td key={r.month} style={{ ...S.tdItalic(r.laba_rugi < 0), borderTop: 'none' }}>{r.penjualan_bersih ? fmtPct(r.laba_rugi / r.penjualan_bersih) : '-'}</td>)}
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -188,8 +207,6 @@ function PLTable({ data }: { data: PLSummary[] }) {
 
 function CFTable({ data }: { data: CFSummary[] }) {
   if (!data.length) return null;
-  const recent = data.slice(0, 6);
-
   const rows = [
     { key: 'penerimaan_pelanggan', label: 'Penerimaan Pelanggan', bold: false },
     { key: 'penerimaan_reseller', label: 'Penerimaan Reseller', bold: false },
@@ -200,49 +217,33 @@ function CFTable({ data }: { data: CFSummary[] }) {
     { key: 'saldo_kas_akhir', label: 'Saldo Kas Akhir', bold: true },
     { key: 'free_cash_flow', label: 'Free Cash Flow', bold: true },
   ];
-
   return (
-    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 overflow-x-auto">
-      <h3 className="text-white font-bold mb-3">💰 Cash Flow</h3>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-700">
-            <th className="text-left text-gray-400 py-2 pr-4 sticky left-0 bg-gray-800 min-w-[180px]">Item</th>
-            {recent.map(r => (
-              <th key={r.month} className="text-right text-gray-400 py-2 px-2 min-w-[110px]">{monthLabel(r.month)}</th>
+    <div style={{ background: '#1f2937', borderRadius: 8, border: '1px solid #374151', padding: '16px 0' }}>
+      <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 15, margin: '0 0 12px 16px' }}>💰 Cash Flow</h3>
+      <div style={S.scrollArea}>
+        <table style={S.table}>
+          <thead><tr>
+            <th style={S.thSticky}>Item</th>
+            {data.map(r => <th key={r.month} style={S.th}>{monthLabel(r.month)}</th>)}
+          </tr></thead>
+          <tbody>
+            {rows.map(item => (
+              <tr key={item.key}>
+                <td style={S.tdSticky(item.bold)}>{item.label}</td>
+                {data.map(r => { const val = (r as any)[item.key] as number; return <td key={r.month} style={S.td(val < 0)}>{fmtB(val)}</td>; })}
+              </tr>
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map(item => (
-            <tr key={item.key} className={`border-b border-gray-700/30 ${item.bold ? 'font-semibold' : ''}`}>
-              <td className={`py-1.5 pr-4 sticky left-0 bg-gray-800 ${item.bold ? 'text-white' : 'text-gray-300'} whitespace-nowrap`}>
-                {item.label}
-              </td>
-              {recent.map(r => {
-                const val = (r as any)[item.key] as number;
-                return (
-                  <td key={r.month} className={`text-right py-1.5 px-2 ${val < 0 ? 'text-red-400' : 'text-gray-200'}`}>
-                    {fmtB(val)}
-                  </td>
-                );
+            <tr>
+              <td style={S.tdItalicSticky}>Cash Efficiency</td>
+              {data.map(r => {
+                const totalIn = (r.penerimaan_pelanggan || 0) + (r.penerimaan_reseller || 0);
+                const eff = totalIn > 0 ? (r.cf_operasi || 0) / totalIn : null;
+                return <td key={r.month} style={S.tdItalic(eff !== null && eff < 0)}>{eff !== null ? fmtPct(eff) : '-'}</td>;
               })}
             </tr>
-          ))}
-          <tr className="border-t border-gray-600">
-            <td className="py-1.5 pr-4 sticky left-0 bg-gray-800 text-gray-400 italic">Cash Efficiency</td>
-            {recent.map(r => {
-              const totalIn = (r.penerimaan_pelanggan || 0) + (r.penerimaan_reseller || 0);
-              const eff = totalIn > 0 ? (r.cf_operasi || 0) / totalIn : null;
-              return (
-                <td key={r.month} className={`text-right py-1.5 px-2 italic ${eff !== null && eff < 0 ? 'text-red-400' : 'text-gray-400'}`}>
-                  {eff !== null ? fmtPct(eff) : '-'}
-                </td>
-              );
-            })}
-          </tr>
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -253,72 +254,54 @@ function CFTable({ data }: { data: CFSummary[] }) {
 
 function RatiosTable({ data }: { data: RatioData[] }) {
   if (!data.length) return null;
-
-  const months = [...new Set(data.map(d => d.month))].sort().reverse().slice(0, 6);
+  const months = [...new Set(data.map(d => d.month))].sort().reverse();
   const ratioNames = [...new Set(data.map(d => d.ratio_name))];
-
   const niceLabel: Record<string, string> = {
-    gpm: 'Gross Profit Margin', npm: 'Net Profit Margin',
-    roa: 'Return on Assets', roe: 'Return on Equity',
-    cash_ratio: 'Cash Ratio', current_ratio: 'Current Ratio',
-    quick_ratio: 'Quick Ratio', debt_ratio: 'Debt Ratio',
-    ccr: 'Cash Conversion Ratio', ocf_to_asset: 'OCF to Asset',
-    asset_turnover: 'Asset Turnover', inventory_turnover: 'Inventory Turnover',
+    gpm: 'Gross Profit Margin', npm: 'Net Profit Margin', roa: 'Return on Assets', roe: 'Return on Equity',
+    cash_ratio: 'Cash Ratio', current_ratio: 'Current Ratio', quick_ratio: 'Quick Ratio', debt_ratio: 'Debt Ratio',
+    ccr: 'Cash Conversion Ratio', ocf_to_asset: 'OCF to Asset', asset_turnover: 'Asset Turnover', inventory_turnover: 'Inventory Turnover',
   };
-
+  const statusColor: Record<string, string> = { healthy: '#34d399', warning: '#fbbf24', critical: '#f87171' };
   return (
-    <div className="bg-gray-800 rounded-lg p-4 border border-gray-700 overflow-x-auto">
-      <h3 className="text-white font-bold mb-3">📊 Rasio Keuangan vs Benchmark</h3>
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-700">
-            <th className="text-left text-gray-400 py-2 pr-4 sticky left-0 bg-gray-800 min-w-[170px]">Rasio</th>
-            <th className="text-center text-gray-400 py-2 px-2 min-w-[90px]">Benchmark</th>
-            {months.map(m => (
-              <th key={m} className="text-right text-gray-400 py-2 px-2 min-w-[80px]">{monthLabel(m)}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {ratioNames.map(rn => {
-            const items = data.filter(d => d.ratio_name === rn);
-            const benchmark = items[0]?.benchmark_label || '-';
-            const bMin = items[0]?.benchmark_min;
-            const bMax = items[0]?.benchmark_max;
-            return (
-              <tr key={rn} className="border-b border-gray-700/30">
-                <td className="py-1.5 pr-4 sticky left-0 bg-gray-800 text-gray-300 whitespace-nowrap">
-                  {niceLabel[rn] || rn}
-                </td>
-                <td className="text-center py-1.5 px-2 text-gray-500 text-xs">{benchmark}</td>
-                {months.map(m => {
-                  const item = items.find(i => i.month === m);
-                  if (!item) return <td key={m} className="text-right py-1.5 px-2 text-gray-600">-</td>;
-                  const status = ratioStatus(item.value, bMin ?? null, bMax ?? null);
-                  const colorClass = status === 'healthy' ? 'text-emerald-400' : status === 'warning' ? 'text-amber-400' : 'text-red-400';
-                  const isPercent = ['gpm', 'npm', 'roa', 'roe', 'ocf_to_asset'].includes(rn);
-                  return (
-                    <td key={m} className={`text-right py-1.5 px-2 ${colorClass}`}>
-                      {isPercent ? fmtPct(item.value) : item.value.toFixed(2)}
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      <p className="text-xs text-gray-500 mt-2">
-        <span className="text-emerald-400">●</span> Dalam benchmark &nbsp;
-        <span className="text-amber-400">●</span> Di luar benchmark &nbsp;
-        <span className="text-red-400">●</span> Jauh di luar benchmark
+    <div style={{ background: '#1f2937', borderRadius: 8, border: '1px solid #374151', padding: '16px 0' }}>
+      <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 15, margin: '0 0 12px 16px' }}>📊 Rasio Keuangan vs Benchmark</h3>
+      <div style={S.scrollArea}>
+        <table style={S.table}>
+          <thead><tr>
+            <th style={{ ...S.thSticky, minWidth: 170 }}>Rasio</th>
+            <th style={{ ...S.th, textAlign: 'center', minWidth: 90 }}>Benchmark</th>
+            {months.map(m => <th key={m} style={{ ...S.th, minWidth: 80 }}>{monthLabel(m)}</th>)}
+          </tr></thead>
+          <tbody>
+            {ratioNames.map(rn => {
+              const items = data.filter(d => d.ratio_name === rn);
+              const bMin = items[0]?.benchmark_min; const bMax = items[0]?.benchmark_max;
+              return (
+                <tr key={rn}>
+                  <td style={{ ...S.tdSticky(false), minWidth: 170 }}>{niceLabel[rn] || rn}</td>
+                  <td style={{ ...S.td(false), textAlign: 'center', color: '#6b7280', fontSize: 11 }}>{items[0]?.benchmark_label || '-'}</td>
+                  {months.map(m => {
+                    const item = items.find(i => i.month === m);
+                    if (!item) return <td key={m} style={{ ...S.td(false), color: '#4b5563' }}>-</td>;
+                    const status = ratioStatus(item.value, bMin ?? null, bMax ?? null);
+                    const isPercent = ['gpm', 'npm', 'roa', 'roe', 'ocf_to_asset'].includes(rn);
+                    return <td key={m} style={{ ...S.td(false), color: statusColor[status] }}>{isPercent ? fmtPct(item.value) : item.value.toFixed(2)}</td>;
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p style={{ fontSize: 11, color: '#6b7280', margin: '8px 16px 0' }}>
+        <span style={{ color: '#34d399' }}>●</span> Dalam benchmark &nbsp;<span style={{ color: '#fbbf24' }}>●</span> Di luar &nbsp;<span style={{ color: '#f87171' }}>●</span> Jauh di luar
       </p>
     </div>
   );
 }
 
 // ============================================================
-// AI ANALYSIS PANEL — with persistence
+// AI ANALYSIS PANEL — Opus 4.6 Strategic Advisory
 // ============================================================
 
 function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[]; ratios: RatioData[]; userId?: string }) {
@@ -328,135 +311,143 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
   const [loadingPrev, setLoadingPrev] = useState(true);
   const [error, setError] = useState('');
 
-  // Load latest saved analysis on mount
-  useEffect(() => {
-    loadSavedAnalysis();
-  }, []);
+  useEffect(() => { loadSavedAnalysis(); }, []);
 
   async function loadSavedAnalysis() {
     setLoadingPrev(true);
     try {
       const { createClient } = await import('@/lib/supabase-browser');
       const supabase = createClient();
-      const { data, error: err } = await supabase
-        .from('financial_analyses')
-        .select('analysis_data, created_at')
-        .eq('analysis_type', 'executive')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (data && !err) {
-        setAnalysis(data.analysis_data as AIAnalysis);
-        setAnalysisTime(data.created_at);
-      }
-    } catch (e: any) {
-      // No saved analysis — that's fine
-    }
+      const { data } = await supabase.from('financial_analyses')
+        .select('analysis_data, created_at').eq('analysis_type', 'executive')
+        .order('created_at', { ascending: false }).limit(1).single();
+      if (data) { setAnalysis(data.analysis_data as AIAnalysis); setAnalysisTime(data.created_at); }
+    } catch (e: any) { /* No saved */ }
     setLoadingPrev(false);
   }
 
   async function generate() {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const res = await fetch('/api/financial-analysis', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'executive', numMonths: 6 }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'executive', numMonths: 12 }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
-
       const parsed = JSON.parse(data.analysis);
-      setAnalysis(parsed);
-      setAnalysisTime(new Date().toISOString());
-
-      // Save to Supabase
+      setAnalysis(parsed); setAnalysisTime(new Date().toISOString());
       try {
         const { createClient } = await import('@/lib/supabase-browser');
         const supabase = createClient();
         await supabase.from('financial_analyses').insert({
-          analysis_type: 'executive',
-          analysis_data: parsed,
-          health_score: parsed.health_score || null,
-          generated_by: userId || null,
+          analysis_type: 'executive', analysis_data: parsed,
+          health_score: parsed.health_score || null, generated_by: userId || null,
         });
-      } catch (saveErr: any) {
-        console.error('Failed to save analysis:', saveErr);
-      }
-    } catch (e: any) {
-      setError(e.message);
-    }
+      } catch (e) { console.error('Save failed:', e); }
+    } catch (e: any) { setError(e.message); }
     setLoading(false);
   }
 
+  const card = (bg: string, border: string) => ({ background: bg, border: `1px solid ${border}`, borderRadius: 8, padding: 14, marginBottom: 0 });
+  const sevCard = (sev: string) => card(
+    sev === 'high' || sev === 'critical' ? 'rgba(127,29,29,0.15)' : sev === 'medium' || sev === 'warning' ? 'rgba(120,53,15,0.15)' : '#111827',
+    sev === 'high' || sev === 'critical' ? 'rgba(153,27,27,0.5)' : sev === 'medium' || sev === 'warning' ? 'rgba(146,64,14,0.5)' : '#374151'
+  );
+  const sectionTitle = (icon: string, title: string) => ({ color: '#9ca3af', fontSize: 11, fontWeight: 600 as const, marginBottom: 10, letterSpacing: 0.5 });
+
   return (
-    <div className="bg-gray-800 rounded-lg border border-gray-700 p-4">
-      <div className="flex items-center justify-between mb-4">
+    <div style={{ background: '#1f2937', borderRadius: 8, border: '1px solid #374151', padding: 20 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <h3 className="text-white font-bold">🔍 The Unspoken Truth — AI Analysis</h3>
-          {analysisTime && (
-            <p className="text-gray-500 text-xs mt-1">Terakhir di-generate: {timeAgo(analysisTime)}</p>
-          )}
+          <h3 style={{ color: '#fff', fontWeight: 700, margin: 0, fontSize: 16 }}>🔮 The Unspoken Truth — Strategic Advisory</h3>
+          <p style={{ color: '#6b7280', fontSize: 11, marginTop: 4 }}>
+            Powered by Claude Opus 4.6 {analysisTime ? `• Terakhir: ${timeAgo(analysisTime)}` : ''}
+          </p>
         </div>
-        <button
-          onClick={generate}
-          disabled={loading}
-          className="bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white px-4 py-2 rounded text-sm font-medium"
-        >
-          {loading ? '⏳ Analyzing...' : analysis ? '🔄 Re-generate' : '⚡ Generate Analysis'}
+        <button onClick={generate} disabled={loading} style={{
+          padding: '10px 20px', borderRadius: 8, border: 'none', cursor: 'pointer',
+          background: loading ? '#374151' : 'linear-gradient(135deg, #d97706, #b45309)',
+          color: '#fff', fontSize: 13, fontWeight: 700, opacity: loading ? 0.7 : 1,
+        }}>
+          {loading ? '⏳ Opus sedang menganalisis...' : analysis ? '🔄 Re-generate Analysis' : '⚡ Generate Strategic Analysis'}
         </button>
       </div>
 
-      {error && <p className="text-red-400 text-sm mb-3">{error}</p>}
-
-      {!analysis && !loading && !loadingPrev && (
-        <p className="text-gray-500 text-sm">
-          Klik &quot;Generate Analysis&quot; untuk mendapatkan insight AI dari data keuangan.
-        </p>
-      )}
-
-      {loadingPrev && !analysis && (
-        <p className="text-gray-500 text-sm">Memuat analisis terakhir...</p>
-      )}
+      {error && <p style={{ color: '#f87171', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+      {!analysis && !loading && !loadingPrev && <p style={{ color: '#6b7280', fontSize: 13 }}>Klik tombol untuk mendapatkan analisis strategis mendalam dari Claude Opus 4.6.</p>}
+      {loadingPrev && !analysis && <p style={{ color: '#6b7280', fontSize: 13 }}>Memuat analisis terakhir...</p>}
 
       {analysis && (
-        <div className="space-y-4">
-          {/* Health Score */}
-          <div className="flex items-center gap-4">
-            <div className={`text-4xl font-black ${
-              (analysis.health_score || 0) >= 70 ? 'text-emerald-400' :
-              (analysis.health_score || 0) >= 40 ? 'text-amber-400' : 'text-red-400'
-            }`}>
-              {analysis.health_score}
-            </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {/* Health Score + Label */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{
+              fontSize: 48, fontWeight: 900, lineHeight: 1,
+              color: (analysis.health_score || 0) >= 70 ? '#34d399' : (analysis.health_score || 0) >= 40 ? '#fbbf24' : '#f87171',
+            }}>{analysis.health_score}</div>
             <div>
-              <p className="text-white font-bold">{analysis.health_label}</p>
-              <p className="text-gray-400 text-sm">Health Score</p>
+              <p style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>{analysis.health_label}</p>
+              <p style={{ color: '#9ca3af', fontSize: 12 }}>Business Health Score</p>
             </div>
           </div>
 
           {/* Unspoken Truth */}
           {analysis.unspoken_truth && (
-            <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4">
-              <p className="text-red-300 text-sm font-medium mb-1">💀 The Unspoken Truth</p>
-              <p className="text-white text-sm">{analysis.unspoken_truth}</p>
+            <div style={card('rgba(127,29,29,0.12)', 'rgba(153,27,27,0.4)')}>
+              <p style={{ color: '#fca5a5', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>💀 THE UNSPOKEN TRUTH</p>
+              <p style={{ color: '#fef2f2', fontSize: 14, lineHeight: 1.7 }}>{analysis.unspoken_truth}</p>
+            </div>
+          )}
+
+          {/* Executive Brief */}
+          {analysis.executive_brief && (
+            <div style={card('#111827', '#374151')}>
+              <p style={{ color: '#93c5fd', fontSize: 12, fontWeight: 700, marginBottom: 6 }}>📝 EXECUTIVE BRIEF</p>
+              <p style={{ color: '#e5e7eb', fontSize: 13, lineHeight: 1.8, whiteSpace: 'pre-line' }}>{analysis.executive_brief}</p>
             </div>
           )}
 
           {/* Cash Analysis */}
           {analysis.cash_analysis && (
-            <div className="bg-gray-900 rounded-lg p-3">
-              <p className="text-gray-400 text-xs font-medium mb-2">💰 CASH ANALYSIS</p>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div><span className="text-gray-500">Position:</span> <span className="text-white">{analysis.cash_analysis.current_position}</span></div>
-                <div><span className="text-gray-500">Burn Rate:</span> <span className="text-white">{analysis.cash_analysis.burn_rate}</span></div>
-                <div><span className="text-gray-500">Runway:</span> <span className="text-white">{analysis.cash_analysis.runway_assessment}</span></div>
-                <div><span className="text-gray-500">Risk:</span> <span className={
-                  analysis.cash_analysis.risk_level === 'high' || analysis.cash_analysis.risk_level === 'critical' ? 'text-red-400' :
-                  analysis.cash_analysis.risk_level === 'medium' ? 'text-amber-400' : 'text-emerald-400'
-                }>{analysis.cash_analysis.risk_level?.toUpperCase()}</span></div>
+            <div style={card('#111827', '#374151')}>
+              <p style={sectionTitle('💰', 'CASH')}>💰 CASH ANALYSIS</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: 13 }}>
+                <div><span style={{ color: '#6b7280' }}>Position:</span> <span style={{ color: '#fff' }}>{analysis.cash_analysis.current_position}</span></div>
+                <div><span style={{ color: '#6b7280' }}>Monthly Burn:</span> <span style={{ color: '#fff' }}>{analysis.cash_analysis.monthly_burn || analysis.cash_analysis.burn_rate}</span></div>
+                <div><span style={{ color: '#6b7280' }}>Runway (optimis):</span> <span style={{ color: '#fff' }}>{analysis.cash_analysis.runway_optimistic || analysis.cash_analysis.runway_assessment}</span></div>
+                <div><span style={{ color: '#6b7280' }}>Runway (pesimis):</span> <span style={{ color: '#fff' }}>{analysis.cash_analysis.runway_pessimistic || '-'}</span></div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <span style={{ color: '#6b7280' }}>Risk:</span>{' '}
+                  <span style={{ color: analysis.cash_analysis.risk_level === 'high' || analysis.cash_analysis.risk_level === 'critical' ? '#f87171' : analysis.cash_analysis.risk_level === 'medium' ? '#fbbf24' : '#34d399', fontWeight: 700 }}>
+                    {analysis.cash_analysis.risk_level?.toUpperCase()}
+                  </span>
+                </div>
+                {analysis.cash_analysis.immediate_action && (
+                  <div style={{ gridColumn: '1 / -1', background: 'rgba(59,130,246,0.1)', borderRadius: 6, padding: 10, marginTop: 4 }}>
+                    <span style={{ color: '#93c5fd', fontSize: 11, fontWeight: 700 }}>⚡ TINDAKAN SEGERA:</span>
+                    <p style={{ color: '#e5e7eb', fontSize: 13, marginTop: 4 }}>{analysis.cash_analysis.immediate_action}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Revenue Diagnosis */}
+          {analysis.revenue_diagnosis && (
+            <div style={card('#111827', '#374151')}>
+              <p style={sectionTitle('📈', 'REVENUE')}>📈 REVENUE DIAGNOSIS</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: 13 }}>
+                {analysis.revenue_diagnosis.trend_summary && <div><span style={{ color: '#6b7280' }}>Trend:</span> <span style={{ color: '#e5e7eb' }}>{analysis.revenue_diagnosis.trend_summary}</span></div>}
+                {analysis.revenue_diagnosis.growth_quality && <div><span style={{ color: '#6b7280' }}>Kualitas Growth:</span> <span style={{ color: '#e5e7eb' }}>{analysis.revenue_diagnosis.growth_quality}</span></div>}
+                {analysis.revenue_diagnosis.channel_insight && <div><span style={{ color: '#6b7280' }}>Channel:</span> <span style={{ color: '#e5e7eb' }}>{analysis.revenue_diagnosis.channel_insight}</span></div>}
+                {analysis.revenue_diagnosis.biggest_concern && (
+                  <div style={{ background: 'rgba(234,179,8,0.08)', borderRadius: 6, padding: 10, marginTop: 4 }}>
+                    <span style={{ color: '#fbbf24', fontSize: 11, fontWeight: 700 }}>⚠️ CONCERN:</span>
+                    <p style={{ color: '#fef3c7', fontSize: 13, marginTop: 4 }}>{analysis.revenue_diagnosis.biggest_concern}</p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -464,17 +455,19 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
           {/* Cost Alerts */}
           {analysis.cost_alerts && analysis.cost_alerts.length > 0 && (
             <div>
-              <p className="text-gray-400 text-xs font-medium mb-2">⚠️ COST ALERTS</p>
-              <div className="space-y-2">
+              <p style={sectionTitle('⚠️', 'COST')}>⚠️ COST ALERTS</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {analysis.cost_alerts.map((alert: any, i: number) => (
-                  <div key={i} className={`rounded p-2 border text-sm ${
-                    alert.severity === 'high' ? 'bg-red-900/20 border-red-800/50' :
-                    alert.severity === 'medium' ? 'bg-amber-900/20 border-amber-800/50' :
-                    'bg-gray-900 border-gray-700'
-                  }`}>
-                    <p className="text-white font-medium">{alert.category}</p>
-                    <p className="text-gray-300">{alert.issue}</p>
-                    <p className="text-gray-400 text-xs mt-1">→ {alert.recommendation}</p>
+                  <div key={i} style={sevCard(alert.severity)}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <p style={{ color: '#fff', fontWeight: 700, fontSize: 14 }}>{alert.category}</p>
+                      {alert.current_amount && <span style={{ color: '#9ca3af', fontSize: 11 }}>{alert.current_amount} ({alert.pct_of_revenue})</span>}
+                    </div>
+                    {alert.diagnosis && <p style={{ color: '#d1d5db', fontSize: 13, marginTop: 6 }}>{alert.diagnosis}</p>}
+                    {!alert.diagnosis && alert.issue && <p style={{ color: '#d1d5db', fontSize: 13, marginTop: 6 }}>{alert.issue}</p>}
+                    {alert.trend && <p style={{ color: '#9ca3af', fontSize: 11, marginTop: 4 }}>Trend: {alert.trend}</p>}
+                    <p style={{ color: '#93c5fd', fontSize: 12, marginTop: 6 }}>→ {alert.recommendation}</p>
+                    {alert.second_order_effect && <p style={{ color: '#6b7280', fontSize: 11, fontStyle: 'italic', marginTop: 4 }}>⚙️ Side effect: {alert.second_order_effect}</p>}
                   </div>
                 ))}
               </div>
@@ -484,40 +477,83 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
           {/* Strategic Risks */}
           {analysis.strategic_risks && analysis.strategic_risks.length > 0 && (
             <div>
-              <p className="text-gray-400 text-xs font-medium mb-2">🎯 STRATEGIC RISKS</p>
-              <div className="space-y-2">
+              <p style={sectionTitle('🎯', 'RISKS')}>🎯 STRATEGIC RISKS</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {analysis.strategic_risks.map((risk: any, i: number) => (
-                  <div key={i} className="bg-gray-900 rounded p-2 border border-gray-700 text-sm">
-                    <div className="flex items-center gap-2">
-                      <span className={`text-xs px-1.5 py-0.5 rounded ${
-                        risk.probability === 'high' ? 'bg-red-800 text-red-200' :
-                        risk.probability === 'medium' ? 'bg-amber-800 text-amber-200' :
-                        'bg-gray-700 text-gray-300'
-                      }`}>{risk.probability}</span>
-                      <span className="text-white">{risk.risk}</span>
+                  <div key={i} style={sevCard(risk.probability)}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{
+                        fontSize: 10, padding: '3px 8px', borderRadius: 4, fontWeight: 700, textTransform: 'uppercase' as const,
+                        background: risk.probability === 'high' ? '#7f1d1d' : risk.probability === 'medium' ? '#78350f' : '#374151',
+                        color: risk.probability === 'high' ? '#fecaca' : risk.probability === 'medium' ? '#fde68a' : '#d1d5db',
+                      }}>{risk.probability}</span>
+                      <span style={{ color: '#fff', fontWeight: 600, fontSize: 14 }}>{risk.risk}</span>
                     </div>
-                    <p className="text-gray-400 text-xs mt-1">Impact: {risk.impact}</p>
-                    <p className="text-gray-400 text-xs">Mitigation: {risk.mitigation}</p>
+                    {risk.timeframe && <p style={{ color: '#9ca3af', fontSize: 11, marginTop: 6 }}>⏰ {risk.timeframe}</p>}
+                    <p style={{ color: '#d1d5db', fontSize: 12, marginTop: 4 }}>Impact: {risk.impact}</p>
+                    {risk.early_warning && <p style={{ color: '#fbbf24', fontSize: 11, marginTop: 4 }}>📡 Early warning: {risk.early_warning}</p>}
+                    <p style={{ color: '#93c5fd', fontSize: 12, marginTop: 4 }}>Mitigation: {risk.mitigation}</p>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          {/* Key Ratios Alert */}
+          {/* Subtle Insights */}
+          {analysis.subtle_insights && analysis.subtle_insights.length > 0 && (
+            <div style={card('rgba(88,28,135,0.1)', 'rgba(126,34,206,0.3)')}>
+              <p style={{ color: '#c4b5fd', fontSize: 12, fontWeight: 700, marginBottom: 8 }}>🔬 SUBTLE INSIGHTS</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {analysis.subtle_insights.map((insight: string, i: number) => (
+                  <p key={i} style={{ color: '#e5e7eb', fontSize: 13, lineHeight: 1.7, paddingLeft: 12, borderLeft: '2px solid rgba(126,34,206,0.4)' }}>{insight}</p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Decisions Needed */}
+          {analysis.decisions_needed && (
+            <div style={card('#111827', '#374151')}>
+              <p style={{ color: '#fbbf24', fontSize: 12, fontWeight: 700, marginBottom: 10 }}>📋 KEPUTUSAN YANG HARUS DIAMBIL</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {analysis.decisions_needed.this_week && analysis.decisions_needed.this_week.length > 0 && (
+                  <div>
+                    <p style={{ color: '#f87171', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>🔴 MINGGU INI</p>
+                    {analysis.decisions_needed.this_week.map((d: string, i: number) => (
+                      <p key={i} style={{ color: '#e5e7eb', fontSize: 13, paddingLeft: 12, marginTop: 4 }}>• {d}</p>
+                    ))}
+                  </div>
+                )}
+                {analysis.decisions_needed.this_month && analysis.decisions_needed.this_month.length > 0 && (
+                  <div>
+                    <p style={{ color: '#fbbf24', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>🟡 BULAN INI</p>
+                    {analysis.decisions_needed.this_month.map((d: string, i: number) => (
+                      <p key={i} style={{ color: '#e5e7eb', fontSize: 13, paddingLeft: 12, marginTop: 4 }}>• {d}</p>
+                    ))}
+                  </div>
+                )}
+                {analysis.decisions_needed.this_quarter && analysis.decisions_needed.this_quarter.length > 0 && (
+                  <div>
+                    <p style={{ color: '#34d399', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>🟢 KUARTAL INI</p>
+                    {analysis.decisions_needed.this_quarter.map((d: string, i: number) => (
+                      <p key={i} style={{ color: '#e5e7eb', fontSize: 13, paddingLeft: 12, marginTop: 4 }}>• {d}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Key Ratios */}
           {analysis.key_ratios_alert && analysis.key_ratios_alert.length > 0 && (
             <div>
-              <p className="text-gray-400 text-xs font-medium mb-2">📊 KEY RATIOS</p>
-              <div className="grid grid-cols-2 gap-2">
+              <p style={sectionTitle('📊', 'RATIOS')}>📊 KEY RATIOS ALERT</p>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                 {analysis.key_ratios_alert.map((ra: any, i: number) => (
-                  <div key={i} className={`rounded p-2 border text-sm ${
-                    ra.status === 'critical' ? 'bg-red-900/20 border-red-800/50' :
-                    ra.status === 'warning' ? 'bg-amber-900/20 border-amber-800/50' :
-                    'bg-emerald-900/20 border-emerald-800/50'
-                  }`}>
-                    <p className="text-white font-medium text-xs">{ra.ratio}</p>
-                    <p className="text-gray-300">{ra.current} <span className="text-gray-500 text-xs">({ra.benchmark})</span></p>
-                    <p className="text-gray-400 text-xs">{ra.interpretation}</p>
+                  <div key={i} style={sevCard(ra.status)}>
+                    <p style={{ color: '#fff', fontWeight: 700, fontSize: 12 }}>{ra.ratio}</p>
+                    <p style={{ color: '#d1d5db', fontSize: 14, fontWeight: 600, marginTop: 2 }}>{ra.current} <span style={{ color: '#6b7280', fontSize: 11, fontWeight: 400 }}>({ra.benchmark})</span></p>
+                    <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 4 }}>{ra.interpretation}</p>
                   </div>
                 ))}
               </div>
@@ -541,9 +577,7 @@ export default function FinancePage() {
   const [error, setError] = useState('');
   const [profile, setProfile] = useState<any>(null);
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
   async function loadData() {
     setLoading(true);
@@ -551,120 +585,60 @@ export default function FinancePage() {
       const { createClient } = await import('@/lib/supabase-browser');
       const supabase = createClient();
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-        setProfile(p);
-      }
-
-      const [plData, cfData, ratioData] = await Promise.all([
-        getFinancialPLSummary(12),
-        getFinancialCFSummary(12),
-        getFinancialRatios(12),
-      ]);
-      setPL(plData);
-      setCF(cfData);
-      setRatios(ratioData);
-    } catch (e: any) {
-      setError(e.message);
-    }
+      if (user) { const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single(); setProfile(p); }
+      const [plData, cfData, ratioData] = await Promise.all([getFinancialPLSummary(12), getFinancialCFSummary(12), getFinancialRatios(12)]);
+      setPL(plData); setCF(cfData); setRatios(ratioData);
+    } catch (e: any) { setError(e.message); }
     setLoading(false);
   }
 
-  if (loading) {
-    return (
-      <div className="p-6 text-gray-400">
-        <p>Loading financial data...</p>
+  if (loading) return <div style={{ padding: 24, color: '#9ca3af' }}><p>Loading financial data...</p></div>;
+
+  if (error) return (
+    <div style={{ padding: 24 }}>
+      <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 8, padding: 16, color: '#fca5a5' }}>
+        <p style={{ fontWeight: 700 }}>Error loading financial data</p>
+        <p style={{ fontSize: 13, marginTop: 4 }}>{error}</p>
+        <p style={{ fontSize: 11, marginTop: 8, color: '#9ca3af' }}>Pastikan tabel financial sudah dibuat dan data sudah di-sync dari admin page.</p>
       </div>
-    );
-  }
+    </div>
+  );
 
-  if (error) {
-    return (
-      <div className="p-6">
-        <div className="bg-red-900/20 border border-red-800 rounded p-4 text-red-300">
-          <p className="font-bold">Error loading financial data</p>
-          <p className="text-sm mt-1">{error}</p>
-          <p className="text-xs mt-2 text-gray-400">
-            Pastikan tabel financial sudah dibuat dan data sudah di-sync dari admin page.
-          </p>
-        </div>
+  if (pl.length === 0 && cf.length === 0 && ratios.length === 0) return (
+    <div style={{ padding: 24 }}>
+      <div style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 12, padding: 24, textAlign: 'center' }}>
+        <p style={{ color: '#fff', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>📊 Finance Dashboard</p>
+        <p style={{ color: '#9ca3af' }}>Belum ada data keuangan. Hubungkan dan sync Google Sheets di Admin page.</p>
       </div>
-    );
-  }
+    </div>
+  );
 
-  const noData = pl.length === 0 && cf.length === 0 && ratios.length === 0;
-
-  if (noData) {
-    return (
-      <div className="p-6">
-        <div className="bg-gray-800 border border-gray-700 rounded-lg p-6 text-center">
-          <p className="text-white text-lg font-bold mb-2">📊 Finance Dashboard</p>
-          <p className="text-gray-400 mb-4">
-            Belum ada data keuangan. Hubungkan dan sync Google Sheets laporan keuangan di Admin page.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  const latestPL = pl[0];
-  const prevPL = pl[1];
-  const latestCF = cf[0];
+  const latestPL = pl[0]; const prevPL = pl[1]; const latestCF = cf[0];
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <h1 className="text-2xl font-bold text-white">📊 Finance</h1>
-          <p className="text-gray-400 text-sm mt-1">
-            Laporan Keuangan — Delivered Basis &nbsp;|&nbsp; Latest: {latestPL ? monthLabel(latestPL.month) : '-'}
-          </p>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: 0 }}>📊 Finance</h1>
+          <p style={{ color: '#9ca3af', fontSize: 13, marginTop: 4 }}>Laporan Keuangan — Delivered Basis | Latest: {latestPL ? monthLabel(latestPL.month) : '-'}</p>
         </div>
-        <button onClick={loadData} className="text-gray-400 hover:text-white text-sm">🔄 Refresh</button>
+        <button onClick={loadData} style={{ background: 'transparent', border: '1px solid #374151', borderRadius: 6, padding: '6px 12px', color: '#9ca3af', fontSize: 12, cursor: 'pointer' }}>🔄 Refresh</button>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KPICard
-          label="Net Revenue"
-          value={fmtB(latestPL?.penjualan_bersih)}
-          sub={prevPL ? `Prev: ${fmtB(prevPL.penjualan_bersih)}` : undefined}
-          color={latestPL?.penjualan_bersih > (prevPL?.penjualan_bersih || 0) ? 'text-emerald-400' : 'text-red-400'}
-        />
-        <KPICard
-          label="Laba Bersih"
-          value={fmtB(latestPL?.laba_rugi)}
-          sub={latestPL?.penjualan_bersih ? `NPM: ${fmtPct(latestPL.laba_rugi / latestPL.penjualan_bersih)}` : undefined}
-          color={latestPL?.laba_rugi >= 0 ? 'text-emerald-400' : 'text-red-400'}
-        />
-        <KPICard
-          label="Free Cash Flow"
-          value={fmtB(latestCF?.free_cash_flow)}
-          sub={latestCF?.saldo_kas_akhir ? `Saldo: ${fmtB(latestCF.saldo_kas_akhir)}` : undefined}
-          color={latestCF?.free_cash_flow >= 0 ? 'text-emerald-400' : 'text-red-400'}
-        />
-        <KPICard
-          label="GPM"
-          value={latestPL?.penjualan_bersih ? fmtPct(latestPL.laba_bruto / latestPL.penjualan_bersih) : '-'}
-          sub="Benchmark: 50-70%"
-          color={latestPL?.penjualan_bersih && (latestPL.laba_bruto / latestPL.penjualan_bersih) >= 0.5 ? 'text-emerald-400' : 'text-amber-400'}
-        />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+        <KPICard label="Net Revenue" value={fmtB(latestPL?.penjualan_bersih)} sub={prevPL ? `Prev: ${fmtB(prevPL.penjualan_bersih)}` : undefined} color={latestPL?.penjualan_bersih > (prevPL?.penjualan_bersih || 0) ? '#34d399' : '#f87171'} />
+        <KPICard label="Laba Bersih" value={fmtB(latestPL?.laba_rugi)} sub={latestPL?.penjualan_bersih ? `NPM: ${fmtPct(latestPL.laba_rugi / latestPL.penjualan_bersih)}` : undefined} color={latestPL?.laba_rugi >= 0 ? '#34d399' : '#f87171'} />
+        <KPICard label="Free Cash Flow" value={fmtB(latestCF?.free_cash_flow)} sub={latestCF?.saldo_kas_akhir ? `Saldo: ${fmtB(latestCF.saldo_kas_akhir)}` : undefined} color={latestCF?.free_cash_flow >= 0 ? '#34d399' : '#f87171'} />
+        <KPICard label="GPM" value={latestPL?.penjualan_bersih ? fmtPct(latestPL.laba_bruto / latestPL.penjualan_bersih) : '-'} sub="Benchmark: 50-70%" color={latestPL?.penjualan_bersih && (latestPL.laba_bruto / latestPL.penjualan_bersih) >= 0.5 ? '#34d399' : '#fbbf24'} />
       </div>
 
-      {/* AI Analysis Panel - Owner only */}
       {profile?.role === 'owner' && <AIPanel pl={pl} cf={cf} ratios={ratios} userId={profile?.id} />}
 
-      {/* PL Table */}
       <PLTable data={pl} />
-
-      {/* CF Table */}
       <CFTable data={cf} />
-
-      {/* Ratios Table */}
       <RatiosTable data={ratios} />
 
-      {/* Disclaimer */}
-      <div className="text-xs text-gray-600 text-center py-4">
+      <div style={{ fontSize: 11, color: '#4b5563', textAlign: 'center', padding: '16px 0' }}>
         ⚠️ PL & CF = Delivered basis | Daily Income = Confirmed basis | Balance Sheet analysis disabled
       </div>
     </div>
