@@ -240,11 +240,9 @@ function CFTable({ data }: { data: CFSummary[] }) {
 function RatiosTable({ data }: { data: RatioData[] }) {
   if (!data.length) return null;
 
-  // Group by ratio, get latest month
   const months = [...new Set(data.map(d => d.month))].sort().reverse().slice(0, 6);
   const ratioNames = [...new Set(data.map(d => d.ratio_name))];
 
-  // Nice labels
   const niceLabel: Record<string, string> = {
     gpm: 'Gross Profit Margin', npm: 'Net Profit Margin',
     roa: 'Return on Assets', roe: 'Return on Equity',
@@ -326,7 +324,6 @@ function AIPanel({ pl, cf, ratios }: { pl: PLSummary[]; cf: CFSummary[]; ratios:
       const data = await res.json();
       if (data.error) throw new Error(data.error);
 
-      // Parse JSON from response
       const parsed = JSON.parse(data.analysis);
       setAnalysis(parsed);
     } catch (e: any) {
@@ -475,6 +472,7 @@ export default function FinancePage() {
   const [ratios, setRatios] = useState<RatioData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [profile, setProfile] = useState<any>(null);
 
   useEffect(() => {
     loadData();
@@ -483,6 +481,14 @@ export default function FinancePage() {
   async function loadData() {
     setLoading(true);
     try {
+      const { createClient } = await import('@/lib/supabase-browser');
+      const supabase = createClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+        setProfile(p);
+      }
+
       const [plData, cfData, ratioData] = await Promise.all([
         getFinancialPLSummary(12),
         getFinancialCFSummary(12),
@@ -579,8 +585,8 @@ export default function FinancePage() {
         />
       </div>
 
-      {/* AI Analysis Panel */}
-      <AIPanel pl={pl} cf={cf} ratios={ratios} />
+      {/* AI Analysis Panel - Owner only */}
+      {profile?.role === 'owner' && <AIPanel pl={pl} cf={cf} ratios={ratios} />}
 
       {/* PL Table */}
       <PLTable data={pl} />
