@@ -3,6 +3,10 @@
     {
       "path": "/api/sync",
       "schedule": "0 3,7,13 * * *"
+    },
+    {
+      "path": "/api/financial-sync?secret=roove-sync-2026-xyz",
+      "schedule": "0 2 * * *"
     }
   ]
 }
