@@ -12,7 +12,7 @@ const client = new Anthropic({
 // ╔══════════════════════════════════════════════════════════╗
 // ║  SWITCH: flip to true when ready for production Opus    ║
 // ╚══════════════════════════════════════════════════════════╝
-const USE_OPUS = false;
+const USE_OPUS = true;
 
 const MODEL = USE_OPUS ? 'claude-opus-4-6' : 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = USE_OPUS ? 8000 : 2000;
