@@ -6,6 +6,7 @@ import {
   getFinancialPLSummary,
   getFinancialCFSummary,
   getFinancialRatios,
+  getFinancialBS,
 } from '@/lib/financial-actions';
 
 // ============================================================
@@ -34,6 +35,11 @@ interface RatioData {
   category: string; value: number;
   benchmark_min: number | null; benchmark_max: number | null;
   benchmark_label: string | null;
+}
+
+interface BSData {
+  month: string; line_item: string; line_item_label: string;
+  section: string; amount: number; pct_of_asset: number | null;
 }
 
 interface AIAnalysis {
@@ -613,6 +619,205 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
 }
 
 // ============================================================
+// DIAGNOSTIC METRIC CARDS (Cunningham Framework)
+// ============================================================
+
+function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs: BSData[] }) {
+  // ── Group BS by month ──
+  const bsByMonth: Record<string, Record<string, number>> = {};
+  bs.forEach(r => {
+    if (!bsByMonth[r.month]) bsByMonth[r.month] = {};
+    bsByMonth[r.month][r.line_item] = r.amount;
+  });
+
+  const sortedMonths = Object.keys(bsByMonth).sort().reverse();
+  const latestMonth = sortedMonths[0];
+  const latestBS = bsByMonth[latestMonth] || {};
+
+  // ── 1. Cash in Hand ──
+  const cashInHand = latestBS['kas_setara_kas'] || 0;
+  const prevMonth = sortedMonths[1];
+  const prevCash = prevMonth ? (bsByMonth[prevMonth]?.['kas_setara_kas'] || 0) : 0;
+  const cashDelta = prevCash ? ((cashInHand - prevCash) / prevCash) * 100 : 0;
+
+  // ── 2. RCY Rolling 3 Month ──
+  // RCY = CF Operasi / Revenue Bersih × 100
+  const plSorted = [...pl].sort((a, b) => b.month.localeCompare(a.month));
+  const cfSorted = [...cf].sort((a, b) => b.month.localeCompare(a.month));
+
+  function calcRCY(monthsSlice: number, offset: number = 0): { rcy: number; npm: number } | null {
+    const plSlice = plSorted.slice(offset, offset + monthsSlice);
+    const cfSlice = cfSorted.slice(offset, offset + monthsSlice);
+    if (plSlice.length < monthsSlice || cfSlice.length < monthsSlice) return null;
+    const totalRev = plSlice.reduce((s, r) => s + (r.penjualan_bersih || 0), 0);
+    const totalCFOps = cfSlice.reduce((s, r) => s + (r.cf_operasi || 0), 0);
+    const totalLaba = plSlice.reduce((s, r) => s + (r.laba_rugi || 0), 0);
+    if (totalRev === 0) return null;
+    return { rcy: (totalCFOps / totalRev) * 100, npm: (totalLaba / totalRev) * 100 };
+  }
+
+  const rcyCurrent = calcRCY(3, 0);
+  const rcyPrev = calcRCY(3, 3);
+
+  // ── 3. DPO-DIO Gap ──
+  function calcDPODIO(month: string, prevM: string): { dio: number; dpo: number; gap: number } | null {
+    const curr = bsByMonth[month];
+    const prev = bsByMonth[prevM];
+    if (!curr || !prev) return null;
+    const inv = curr['persediaan'] || 0;
+    const invPrev = prev['persediaan'] || 0;
+    const pay = curr['utang_usaha'] || 0;
+    const payPrev = prev['utang_usaha'] || 0;
+    // Find COGS for this month from PL
+    const plMonth = pl.find(r => r.month === month);
+    if (!plMonth || !plMonth.cogs || plMonth.cogs === 0) return null;
+    const cogs = Math.abs(plMonth.cogs);
+    const avgInv = (inv + invPrev) / 2;
+    const avgPay = (pay + payPrev) / 2;
+    const dio = (avgInv / cogs) * 30;
+    const dpo = (avgPay / cogs) * 30;
+    return { dio, dpo, gap: dpo - dio };
+  }
+
+  const dpoDioCurrent = sortedMonths.length >= 2 ? calcDPODIO(sortedMonths[0], sortedMonths[1]) : null;
+  const dpoDioPrev = sortedMonths.length >= 4 ? calcDPODIO(sortedMonths[2], sortedMonths[3]) : null;
+
+  // ── 4. NPM vs RCY Gap ──
+  const npmRcyGap = rcyCurrent ? (rcyCurrent.rcy - rcyCurrent.npm) : null;
+
+  // ── Helpers ──
+  const arrow = (delta: number) => delta > 0 ? '▲' : delta < 0 ? '▼' : '—';
+  const deltaColor = (delta: number, higherIsBetter: boolean) => {
+    if (delta === 0) return '#6b7280';
+    return (delta > 0) === higherIsBetter ? '#34d399' : '#f87171';
+  };
+
+  // ── Card style ──
+  const cardStyle = (borderColor: string) => ({
+    background: '#111827', borderRadius: 10, padding: 16,
+    border: `1px solid ${borderColor}`, position: 'relative' as const,
+    display: 'flex', flexDirection: 'column' as const, gap: 6,
+  });
+  const labelStyle = { color: '#9ca3af', fontSize: 11, fontWeight: 600 as const, letterSpacing: 0.3 };
+  const valueStyle = (color: string) => ({ fontSize: 22, fontWeight: 700 as const, color, lineHeight: 1.2 });
+  const subStyle = { fontSize: 11, color: '#6b7280', lineHeight: 1.4 };
+  const defStyle = {
+    fontSize: 10, color: '#4b5563', marginTop: 6, paddingTop: 6,
+    borderTop: '1px solid rgba(75,85,99,0.3)', lineHeight: 1.4,
+  };
+
+  const noBSData = sortedMonths.length === 0;
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
+      {/* ── Cash in Hand ── */}
+      <div style={cardStyle('#1e3a5f')}>
+        <p style={labelStyle}>💰 Cash in Hand</p>
+        {noBSData ? (
+          <p style={{ ...subStyle, color: '#fbbf24' }}>Sync BS data dulu</p>
+        ) : (
+          <>
+            <p style={valueStyle(cashInHand > 0 ? '#60a5fa' : '#f87171')}>{fmtB(cashInHand)}</p>
+            <p style={subStyle}>
+              {prevCash > 0 && (
+                <span style={{ color: deltaColor(cashDelta, true) }}>
+                  {arrow(cashDelta)} {cashDelta >= 0 ? '+' : ''}{cashDelta.toFixed(1)}% vs prev
+                </span>
+              )}
+              {latestMonth && ` • ${monthLabel(latestMonth)}`}
+            </p>
+            <p style={defStyle}>Saldo kas riil di rekening bank pada akhir periode.</p>
+          </>
+        )}
+      </div>
+
+      {/* ── RCY Rolling 3 Month ── */}
+      <div style={cardStyle(
+        rcyCurrent ? (rcyCurrent.rcy >= 5 ? '#065f46' : rcyCurrent.rcy >= 0 ? '#78350f' : '#7f1d1d') : '#374151'
+      )}>
+        <p style={labelStyle}>🏦 Real Cash Yield (3M)</p>
+        {rcyCurrent ? (
+          <>
+            <p style={valueStyle(rcyCurrent.rcy >= 5 ? '#34d399' : rcyCurrent.rcy >= 0 ? '#fbbf24' : '#f87171')}>
+              {rcyCurrent.rcy.toFixed(1)}%
+            </p>
+            <p style={subStyle}>
+              NPM: {rcyCurrent.npm.toFixed(1)}%
+              <span style={{ color: '#4b5563' }}> → </span>
+              Gap: <span style={{ color: npmRcyGap && npmRcyGap < -3 ? '#f87171' : '#6b7280' }}>
+                {npmRcyGap ? `${npmRcyGap.toFixed(1)}pp` : '-'}
+              </span>
+              {rcyPrev && (
+                <span style={{ marginLeft: 6, color: deltaColor(rcyCurrent.rcy - rcyPrev.rcy, true) }}>
+                  {arrow(rcyCurrent.rcy - rcyPrev.rcy)} vs prev 3M
+                </span>
+              )}
+            </p>
+            <p style={defStyle}>Dari setiap Rp 1 revenue, berapa sen jadi cash riil? Benchmark sehat: 5-15%.</p>
+          </>
+        ) : (
+          <p style={subStyle}>Butuh minimal 3 bulan data PL + CF</p>
+        )}
+      </div>
+
+      {/* ── DPO-DIO Gap ── */}
+      <div style={cardStyle(
+        dpoDioCurrent ? (dpoDioCurrent.gap >= 20 ? '#065f46' : dpoDioCurrent.gap >= 10 ? '#78350f' : '#7f1d1d') : '#374151'
+      )}>
+        <p style={labelStyle}>⏱️ DPO–DIO Gap</p>
+        {noBSData ? (
+          <p style={{ ...subStyle, color: '#fbbf24' }}>Sync BS data dulu</p>
+        ) : dpoDioCurrent ? (
+          <>
+            <p style={valueStyle(dpoDioCurrent.gap >= 20 ? '#34d399' : dpoDioCurrent.gap >= 10 ? '#fbbf24' : '#f87171')}>
+              {dpoDioCurrent.gap >= 0 ? '+' : ''}{dpoDioCurrent.gap.toFixed(1)} hari
+            </p>
+            <p style={subStyle}>
+              DIO: {dpoDioCurrent.dio.toFixed(0)}d • DPO: {dpoDioCurrent.dpo.toFixed(0)}d
+              {dpoDioPrev && (
+                <span style={{ marginLeft: 6, color: deltaColor(dpoDioCurrent.gap - dpoDioPrev.gap, true) }}>
+                  {arrow(dpoDioCurrent.gap - dpoDioPrev.gap)} vs 2bln lalu
+                </span>
+              )}
+            </p>
+            <p style={defStyle}>Selisih hari antara bayar supplier vs terima cash. Positif = supplier mendanai operasi. &lt;10 hari = kritis.</p>
+          </>
+        ) : (
+          <p style={subStyle}>Butuh minimal 2 bulan data BS + PL</p>
+        )}
+      </div>
+
+      {/* ── NPM vs RCY Gap ── */}
+      <div style={cardStyle(
+        npmRcyGap !== null ? (npmRcyGap >= -2 ? '#065f46' : npmRcyGap >= -5 ? '#78350f' : '#7f1d1d') : '#374151'
+      )}>
+        <p style={labelStyle}>📊 Profit vs Cash Gap</p>
+        {rcyCurrent ? (
+          <>
+            <p style={valueStyle(npmRcyGap !== null && npmRcyGap >= -2 ? '#34d399' : npmRcyGap !== null && npmRcyGap >= -5 ? '#fbbf24' : '#f87171')}>
+              {npmRcyGap !== null ? `${npmRcyGap.toFixed(1)}pp` : '-'}
+            </p>
+            <p style={subStyle}>
+              NPM {rcyCurrent.npm.toFixed(1)}% vs RCY {rcyCurrent.rcy.toFixed(1)}%
+              {rcyPrev && npmRcyGap !== null && (
+                <span style={{ marginLeft: 6, color: deltaColor(
+                  npmRcyGap - (rcyPrev.rcy - rcyPrev.npm), true
+                ) }}>
+                  {arrow(npmRcyGap - (rcyPrev.rcy - rcyPrev.npm))} vs prev 3M
+                </span>
+              )}
+            </p>
+            <p style={defStyle}>Selisih antara profit di pembukuan vs cash riil masuk. Negatif besar = profit yang tidak jadi uang.</p>
+          </>
+        ) : (
+          <p style={subStyle}>Butuh minimal 3 bulan data PL + CF</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
 // MAIN PAGE
 // ============================================================
 
@@ -620,6 +825,7 @@ export default function FinancePage() {
   const [pl, setPL] = useState<PLSummary[]>([]);
   const [cf, setCF] = useState<CFSummary[]>([]);
   const [ratios, setRatios] = useState<RatioData[]>([]);
+  const [bs, setBS] = useState<BSData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [profile, setProfile] = useState<any>(null);
@@ -636,14 +842,16 @@ export default function FinancePage() {
         const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single();
         setProfile(p);
       }
-      const [plData, cfData, ratioData] = await Promise.all([
+      const [plData, cfData, ratioData, bsData] = await Promise.all([
         getFinancialPLSummary(12),
         getFinancialCFSummary(12),
         getFinancialRatios(12),
+        getFinancialBS(12),
       ]);
       setPL(plData);
       setCF(cfData);
       setRatios(ratioData);
+      setBS(bsData);
     } catch (e: any) { setError(e.message); }
     setLoading(false);
   }
@@ -720,6 +928,9 @@ export default function FinancePage() {
         />
       </div>
 
+      {/* Diagnostic Metric Cards (Cunningham Framework) */}
+      <DiagnosticCards pl={pl} cf={cf} bs={bs} />
+
       {profile?.role === 'owner' && <AIPanel pl={pl} cf={cf} ratios={ratios} userId={profile?.id} />}
 
       <PLTable data={pl} />
@@ -727,7 +938,7 @@ export default function FinancePage() {
       <RatiosTable data={ratios} />
 
       <div style={{ fontSize: 11, color: '#4b5563', textAlign: 'center', padding: '16px 0' }}>
-        ⚠️ PL & CF = Delivered basis | Daily Income = Confirmed basis | Balance Sheet analysis disabled
+        ⚠️ PL & CF = Delivered basis | Daily Income = Confirmed basis | BS data aktif untuk metrik diagnostik
       </div>
     </div>
   );
