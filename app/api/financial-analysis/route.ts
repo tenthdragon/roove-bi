@@ -14,8 +14,8 @@ const client = new Anthropic({
 // ╚══════════════════════════════════════════════════════════╝
 const USE_OPUS = true;
 
-const MODEL = USE_OPUS ? 'claude-opus-4-6' : 'claude-haiku-4-5-20251001';
-const MAX_TOKENS = USE_OPUS ? 8000 : 2000;
+const MODEL = 'claude-opus-4-6';
+const MAX_TOKENS = USE_OPUS ? 4096 : 4096;
 
 export async function POST(request: NextRequest) {
   try {
@@ -23,13 +23,10 @@ export async function POST(request: NextRequest) {
 
     const financialData = await getFinancialDataForAI(numMonths);
 
-    const systemPrompt = USE_OPUS
-      ? buildFullSystemPrompt(mode)
-      : buildTestSystemPrompt();
-
-    const userPrompt = USE_OPUS
-      ? buildFullUserPrompt(financialData, mode)
-      : buildTestUserPrompt(financialData);
+    // TEST MODE: minimal output to validate pipeline works.
+    // Once confirmed, swap to buildFullSystemPrompt / buildFullUserPrompt.
+    const systemPrompt = buildTestSystemPrompt();
+    const userPrompt = buildTestUserPrompt(financialData);
 
     // Always use streaming to avoid Vercel timeout
     const stream = await client.messages.stream({
@@ -125,56 +122,17 @@ function extractJSON(raw: string): string {
 // ============================================================
 
 function buildTestSystemPrompt(): string {
-  return `Kamu analis keuangan. Respond HANYA dengan JSON valid. Langsung mulai dengan { tanpa backtick atau teks lain. Bahasa Indonesia.`;
+  return `Kamu analis keuangan singkat. Output HANYA JSON valid. Mulai langsung dengan { dan akhiri dengan }. Tidak ada teks lain. Bahasa Indonesia. Jawab SANGAT SINGKAT, maksimal 1 kalimat per field.`;
 }
 
 function buildTestUserPrompt(data: any): string {
-  const { pl, cf } = data;
+  const { pl } = data;
+  const latest = (pl || [])[0];
 
-  // Only send latest 3 months to minimize tokens
-  const recentPL = (pl || []).slice(0, 3);
-  const recentCF = (cf || []).slice(0, 3);
+  return `Data PL terbaru: revenue=${latest?.penjualan_bersih}, laba=${latest?.laba_rugi}, cogs=${latest?.cogs}, iklan=${latest?.beban_iklan}
 
-  return `Analisis ringkas data keuangan ini. HANYA JSON, mulai dengan {
-
-PL (3 bulan terakhir): ${JSON.stringify(recentPL)}
-CF (3 bulan terakhir): ${JSON.stringify(recentCF)}
-
-Respond dengan EXACT format ini:
-{
-  "health_score": number 1-100,
-  "health_label": "Critical" atau "Warning" atau "Healthy",
-  "unspoken_truth": "satu paragraf singkat insight utama",
-  "strategic_advice": {
-    "stop_immediately": ["satu hal yang harus stop"],
-    "start_this_month": ["satu hal yang harus mulai"],
-    "big_decision_this_quarter": "satu keputusan besar"
-  },
-  "cash_analysis": {
-    "current_position": "ringkasan posisi kas",
-    "burn_rate": "burn rate",
-    "runway_assessment": "estimasi runway",
-    "risk_level": "low" atau "medium" atau "high" atau "critical"
-  },
-  "cost_alerts": [
-    {
-      "category": "nama item",
-      "issue": "masalah singkat",
-      "severity": "high",
-      "recommendation": "saran singkat",
-      "estimated_saving": "estimasi"
-    }
-  ],
-  "key_ratios_alert": [
-    {
-      "ratio": "nama rasio",
-      "current": "nilai",
-      "benchmark": "benchmark",
-      "status": "warning",
-      "interpretation": "arti singkat"
-    }
-  ]
-}`;
+Respond JSON singkat:
+{"health_score":50,"health_label":"Warning","unspoken_truth":"satu kalimat saja","cash_analysis":{"current_position":"singkat","risk_level":"medium"},"cost_alerts":[{"category":"item","issue":"singkat","severity":"high","recommendation":"singkat","estimated_saving":"Rp X"}]}`;
 }
 
 // ============================================================
