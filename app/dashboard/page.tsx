@@ -12,8 +12,8 @@ const TT = ({ active, payload, label }) => {
   return (<div style={{ background:'#1e293b', border:'1px solid #1a2744', borderRadius:8, padding:'10px 14px', fontSize:12, maxWidth:320 }}>
     <div style={{ fontWeight:700, marginBottom:6 }}>{label}</div>
     {payload.filter(p => p.value !== 0).map((p, i) => (
-      <div key={i} style={{ color:p.color||p.stroke, marginBottom:2, display:'flex', justifyContent:'space-between', gap:16 }}>
-        <span>{p.name}</span><span style={{ fontFamily:'monospace', fontWeight:600 }}>{fmtRupiah(Math.abs(p.value))}</span>
+      <div key={i} style={{ color: p.value < 0 ? '#ef4444' : (p.color||p.stroke), marginBottom:2, display:'flex', justifyContent:'space-between', gap:16 }}>
+        <span>{p.name}</span><span style={{ fontFamily:'monospace', fontWeight:600 }}>{fmtRupiah(p.value)}</span>
       </div>
     ))}
   </div>);
