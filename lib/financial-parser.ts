@@ -397,20 +397,167 @@ export async function parseRasio(spreadsheetId: string): Promise<RatioRow[]> {
 }
 
 // ============================================================
+// BS (Balance Sheet) PARSER
+// ============================================================
+
+interface BSRow {
+  month: string;
+  line_item: string;
+  line_item_label: string;
+  section: string;
+  amount: number;
+  pct_of_asset: number | null;
+}
+
+const BS_LABEL_MAP: Record<string, { key: string; section: string }> = {
+  // Aset Lancar
+  'kas dan setara kas': { key: 'kas_setara_kas', section: 'aset_lancar' },
+  'piutang usaha': { key: 'piutang_usaha', section: 'aset_lancar' },
+  'persediaan': { key: 'persediaan', section: 'aset_lancar' },
+  'aset lancar - lainnya': { key: 'aset_lancar_lainnya', section: 'aset_lancar' },
+  // Aset Tidak Lancar
+  'aset tetap, neto': { key: 'aset_tetap_neto', section: 'aset_tidak_lancar' },
+  'investasi': { key: 'investasi', section: 'aset_tidak_lancar' },
+  // Liabilitas Jangka Pendek
+  'utang usaha': { key: 'utang_usaha', section: 'liabilitas_jp' },
+  'utang pajak': { key: 'utang_pajak', section: 'liabilitas_jp' },
+  'utang jangka pendek lainnya': { key: 'utang_jp_lainnya', section: 'liabilitas_jp' },
+  // Ekuitas
+  'modal saham': { key: 'modal_saham', section: 'ekuitas' },
+  'deviden': { key: 'deviden', section: 'ekuitas' },
+  'saldo laba tahun lalu': { key: 'saldo_laba_tahun_lalu', section: 'ekuitas' },
+  'laba tahun berjalan': { key: 'laba_tahun_berjalan', section: 'ekuitas' },
+};
+
+// Summary/total rows are in column B
+const BS_SUMMARY_MAP: Record<string, { key: string; section: string }> = {
+  'jumlah aset lancar': { key: 'jumlah_aset_lancar', section: 'summary' },
+  'jumlah aset tidak lancar': { key: 'jumlah_aset_tidak_lancar', section: 'summary' },
+  'jumlah aset': { key: 'jumlah_aset', section: 'summary' },
+  'jumlah liabilitas jangka pendek': { key: 'jumlah_liabilitas_jp', section: 'summary' },
+  'jumlah ekuitas': { key: 'jumlah_ekuitas', section: 'summary' },
+  'jumlah liabilitas dan ekuitas': { key: 'jumlah_liabilitas_ekuitas', section: 'summary' },
+};
+
+function parseBSMonth(val: string): { year: number; month: number } | null {
+  if (!val) return null;
+  const str = String(val).trim();
+
+  // "Dec 31th, 2025" / "Nov 30th, 2025" / "Aug 31st, 2025"
+  const enMatch = str.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\w*\s+\d{1,2}(?:st|nd|rd|th)?,?\s*(\d{4})/i);
+  if (enMatch) {
+    const mm: Record<string,number> = {jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,oct:10,nov:11,dec:12};
+    const m = mm[enMatch[1].toLowerCase().substring(0,3)];
+    if (m) return { year: parseInt(enMatch[2]), month: m };
+  }
+
+  // "28 Februari 2025" / "31 Januari 2025" / "April 30th, 2025"
+  const idMatch = str.match(/(?:(\d{1,2})\s+)?(Januari|Februari|Maret|April|Mei|Juni|Juli|Agustus|September|Oktober|November|Desember)\s+(\d{4})/i);
+  if (idMatch) {
+    const mm: Record<string,number> = {januari:1,februari:2,maret:3,april:4,mei:5,juni:6,juli:7,agustus:8,september:9,oktober:10,november:11,desember:12};
+    const m = mm[idMatch[2].toLowerCase()];
+    if (m) return { year: parseInt(idMatch[3]), month: m };
+  }
+
+  // "April 30th, 2025"
+  const mixedMatch = str.match(/(April|Maret)\s+\d{1,2}(?:st|nd|rd|th)?,?\s*(\d{4})/i);
+  if (mixedMatch) {
+    const mm: Record<string,number> = {april:4, maret:3};
+    const m = mm[mixedMatch[1].toLowerCase()];
+    if (m) return { year: parseInt(mixedMatch[2]), month: m };
+  }
+
+  // Fallback to generic parseMonth
+  return parseMonth(str);
+}
+
+export async function parseBS(spreadsheetId: string): Promise<BSRow[]> {
+  const data = await getSheetData(spreadsheetId, 'BS!A1:AA42');
+  if (!data || data.length < 9) throw new Error('BS sheet is empty or too short');
+
+  // Row 4 has month headers at even columns (4, 6, 8, 10...)
+  const headerRow = data[3] || [];
+  const months: { col: number; date: string }[] = [];
+
+  for (let i = 3; i < headerRow.length; i++) {
+    const parsed = parseBSMonth(String(headerRow[i] || ''));
+    if (parsed) months.push({ col: i, date: toDateStr(parsed.year, parsed.month) });
+  }
+
+  if (months.length === 0) throw new Error('No month headers found in BS sheet');
+
+  const results: BSRow[] = [];
+
+  for (let r = 5; r < data.length; r++) {
+    const row = data[r] || [];
+    const colB = String(row[1] || '').trim();
+    const colC = String(row[2] || '').trim();
+
+    // Try line item from column C first (detail items)
+    let label = colC;
+    let mapping: { key: string; section: string } | null = null;
+
+    if (label) {
+      const lower = label.toLowerCase();
+      mapping = BS_LABEL_MAP[lower] || null;
+    }
+
+    // If not found in C, try column B (summary/total rows)
+    if (!mapping && colB) {
+      const lower = colB.toLowerCase();
+      mapping = BS_SUMMARY_MAP[lower] || null;
+      if (mapping) label = colB;
+    }
+
+    if (!mapping) continue;
+
+    // Must have data in at least one month column
+    let hasData = false;
+    for (const m of months) {
+      if (row[m.col] !== undefined && row[m.col] !== null && row[m.col] !== '') {
+        hasData = true;
+        break;
+      }
+    }
+    if (!hasData) continue;
+
+    for (const m of months) {
+      const amount = safeNumber(row[m.col]);
+      // % column is next col (col+1)
+      const pctVal = row[m.col + 1];
+      const pct = (pctVal !== undefined && pctVal !== null && pctVal !== '') ? safeNumber(pctVal) : null;
+
+      results.push({
+        month: m.date,
+        line_item: mapping.key,
+        line_item_label: label,
+        section: mapping.section,
+        amount,
+        pct_of_asset: pct,
+      });
+    }
+  }
+
+  return results;
+}
+
+// ============================================================
 // MAIN
 // ============================================================
 
-export interface FinancialParseResult { pl: PLRow[]; cf: CFRow[]; ratios: RatioRow[]; monthsFound: string[]; errors: string[]; }
+export interface FinancialParseResult { pl: PLRow[]; cf: CFRow[]; ratios: RatioRow[]; bs: BSRow[]; monthsFound: string[]; errors: string[]; }
 
 export async function parseFinancialReport(spreadsheetId: string): Promise<FinancialParseResult> {
   const errors: string[] = [];
-  let pl: PLRow[] = [], cf: CFRow[] = [], ratios: RatioRow[] = [];
+  let pl: PLRow[] = [], cf: CFRow[] = [], ratios: RatioRow[] = [], bs: BSRow[] = [];
   try { pl = await parsePL(spreadsheetId); } catch (e: any) { errors.push(`PL: ${e.message}`); }
   try { cf = await parseCF(spreadsheetId); } catch (e: any) { errors.push(`CF: ${e.message}`); }
   try { ratios = await parseRasio(spreadsheetId); } catch (e: any) { errors.push(`Rasio: ${e.message}`); }
+  try { bs = await parseBS(spreadsheetId); } catch (e: any) { errors.push(`BS: ${e.message}`); }
   const allMonths = new Set<string>();
   pl.forEach(r => allMonths.add(r.month));
   cf.forEach(r => allMonths.add(r.month));
   ratios.forEach(r => allMonths.add(r.month));
-  return { pl, cf, ratios, monthsFound: Array.from(allMonths).sort(), errors };
+  bs.forEach(r => allMonths.add(r.month));
+  return { pl, cf, ratios, bs, monthsFound: Array.from(allMonths).sort(), errors };
 }
