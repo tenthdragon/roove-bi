@@ -71,6 +71,7 @@ export async function triggerFinancialSync() {
     plRows?: number;
     cfRows?: number;
     ratioRows?: number;
+    bsRows?: number;
     months?: string[];
   }> = [];
 
@@ -157,13 +158,36 @@ export async function triggerFinancialSync() {
         }
       }
 
+      // --- UPSERT BS ---
+      if (parsed.bs.length > 0) {
+        const bsMonths = [...new Set(parsed.bs.map(r => r.month))];
+        for (const month of bsMonths) {
+          await svc.from('financial_bs_monthly').delete().eq('month', month);
+        }
+        for (let i = 0; i < parsed.bs.length; i += 200) {
+          const batch = parsed.bs.slice(i, i + 200).map(r => ({
+            month: r.month,
+            line_item: r.line_item,
+            line_item_label: r.line_item_label,
+            section: r.section,
+            amount: r.amount,
+            pct_of_asset: r.pct_of_asset,
+          }));
+          const { error: insertErr } = await svc.from('financial_bs_monthly').insert(batch);
+          if (insertErr) {
+            console.error(`[Financial Sync] BS insert error:`, insertErr);
+            throw insertErr;
+          }
+        }
+      }
+
       // Update connection status
       await svc
         .from('financial_sheet_connections')
         .update({
           last_synced: new Date().toISOString(),
           last_sync_status: 'success',
-          last_sync_message: `PL: ${parsed.pl.length} rows, CF: ${parsed.cf.length} rows, Ratios: ${parsed.ratios.length} rows. Months: ${parsed.monthsFound.length}${parsed.errors.length ? `. Warnings: ${parsed.errors.join('; ')}` : ''}`,
+          last_sync_message: `PL: ${parsed.pl.length} rows, CF: ${parsed.cf.length} rows, Ratios: ${parsed.ratios.length} rows, BS: ${parsed.bs.length} rows. Months: ${parsed.monthsFound.length}${parsed.errors.length ? `. Warnings: ${parsed.errors.join('; ')}` : ''}`,
         })
         .eq('id', conn.id);
 
@@ -173,6 +197,7 @@ export async function triggerFinancialSync() {
         plRows: parsed.pl.length,
         cfRows: parsed.cf.length,
         ratioRows: parsed.ratios.length,
+        bsRows: parsed.bs.length,
         months: parsed.monthsFound,
       });
 
