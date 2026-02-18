@@ -284,10 +284,23 @@ export async function getFinancialCFDetail(month: string) {
 
 // For AI analysis — get comprehensive data
 export async function getFinancialDataForAI(numMonths: number = 3) {
-  const [pl, cf, ratios] = await Promise.all([
+  const [pl, cf, ratios, bs] = await Promise.all([
     getFinancialPLSummary(numMonths),
     getFinancialCFSummary(numMonths),
     getFinancialRatios(numMonths),
+    getFinancialBS(numMonths),
   ]);
-  return { pl, cf, ratios };
+  return { pl, cf, ratios, bs };
+}
+
+export async function getFinancialBS(months?: number) {
+  const svc = createServiceSupabase();
+  let query = svc
+    .from('financial_bs_monthly')
+    .select('*')
+    .order('month', { ascending: false });
+  if (months) query = query.limit(months * 18); // ~18 line items per month
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
 }
