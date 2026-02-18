@@ -753,7 +753,7 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
                 </span>
               )}
             </p>
-            <p style={defStyle}>Dari setiap Rp 1 revenue, berapa sen jadi cash riil? Benchmark sehat: 5-15%.</p>
+            <p style={defStyle}>CF Operasi ÷ Revenue Bersih × 100%. Dari setiap Rp 1 revenue, berapa sen jadi cash riil? Benchmark: 5–15%.</p>
           </>
         ) : (
           <p style={subStyle}>Butuh minimal 3 bulan data PL + CF</p>
@@ -780,7 +780,7 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
                 </span>
               )}
             </p>
-            <p style={defStyle}>Selisih hari antara bayar supplier vs terima cash. Positif = supplier mendanai operasi. &lt;10 hari = kritis.</p>
+            <p style={defStyle}>DPO − DIO. DIO = (Avg Persediaan ÷ COGS) × 30. DPO = (Avg Hutang Usaha ÷ COGS) × 30. Positif = supplier mendanai operasi. &lt;10 hari = kritis.</p>
           </>
         ) : (
           <p style={subStyle}>Butuh minimal 2 bulan data BS + PL</p>
@@ -807,7 +807,7 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
                 </span>
               )}
             </p>
-            <p style={defStyle}>Selisih antara profit di pembukuan vs cash riil masuk. Negatif besar = profit yang tidak jadi uang.</p>
+            <p style={defStyle}>RCY − NPM (percentage points). Mengukur berapa besar profit di pembukuan yang tidak jadi cash riil. Mendekati 0 = sehat.</p>
           </>
         ) : (
           <p style={subStyle}>Butuh minimal 3 bulan data PL + CF</p>
@@ -931,7 +931,9 @@ export default function FinancePage() {
       {/* Diagnostic Metric Cards (Cunningham Framework) */}
       <DiagnosticCards pl={pl} cf={cf} bs={bs} />
 
+      {/* AI Panel — temporarily hidden
       {profile?.role === 'owner' && <AIPanel pl={pl} cf={cf} ratios={ratios} userId={profile?.id} />}
+      */}
 
       <PLTable data={pl} />
       <CFTable data={cf} />
