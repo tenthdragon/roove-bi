@@ -46,10 +46,20 @@ function getSubSource(source: string): string | null {
 }
 
 // ── Platform → Revenue Channel mapping (exclusive, no double count) ──
-const PLATFORM_CHANNEL: Record<string, string> = {
+// Values here are arrays of actual channel names in daily_channel_data
+const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
+  'Facebook Ads': ['Facebook Ads', 'Google Ads', 'Organik'],  // Scalev = Facebook Ads + Google Ads + Organik in DB
+  'Shopee Ads': ['Shopee'],
+  'TikTok Ads': ['TikTok', 'TikTok Shop'],
+  'Other Marketplace': ['Tokopedia', 'BliBli', 'Lazada'],
+};
+
+// Display label for the revenue channel
+const PLATFORM_CHANNEL_LABEL: Record<string, string> = {
   'Facebook Ads': 'Scalev',
   'Shopee Ads': 'Shopee',
   'TikTok Ads': 'TikTok',
+  'Other Marketplace': 'Other MP',
 };
 
 // ── Platform colors ──
@@ -59,6 +69,8 @@ const PLATFORM_COLORS: Record<string, string> = {
   'Shopee Ads': '#ee4d2d',
   'Google Ads': '#4285f4',
   'SnackVideo Ads': '#fbbf24',
+  'Other Marketplace': '#64748b',
+  'Reseller': '#f59e0b',
   'Other': '#64748b',
 };
 
@@ -92,6 +104,7 @@ export default function MarketingPage() {
   const [prodData, setProdData] = useState<any[]>([]);
   const [adsData, setAdsData] = useState<any[]>([]);
   const [channelData, setChannelData] = useState<any[]>([]);
+  const [productMappings, setProductMappings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [brandFilter, setBrandFilter] = useState('all');
 
@@ -115,10 +128,17 @@ export default function MarketingPage() {
         .select('date, channel, product, net_sales')
         .gte('date', dateRange.from)
         .lte('date', dateRange.to),
-    ]).then(([{ data: prod }, { data: ads }, { data: ch }]) => {
+      supabase
+        .from('product_mapping')
+        .select('product_name, product_type'),
+    ]).then(([{ data: prod }, { data: ads }, { data: ch }, { data: pm }]) => {
       setProdData(prod || []);
       setAdsData(ads || []);
       setChannelData(ch || []);
+      // Build product → brand lookup
+      const map: Record<string, string> = {};
+      (pm || []).forEach((r: any) => { map[r.product_name] = r.product_type; });
+      setProductMappings(map);
       setLoading(false);
     });
   }, [dateRange, supabase]);
@@ -228,9 +248,14 @@ export default function MarketingPage() {
       }
     });
 
-    // Channel revenue from daily_channel_data
+    // Channel revenue from daily_channel_data — filtered by brand if applicable
     const channelRev: Record<string, number> = {};
     channelData.forEach(d => {
+      // If brand filter is active, only include products that belong to this brand
+      if (brandFilter !== 'all') {
+        const productBrand = productMappings[d.product] || '';
+        if (productBrand !== brandFilter) return;
+      }
       const ch = d.channel || 'Other';
       channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
     });
@@ -238,11 +263,14 @@ export default function MarketingPage() {
     const totalSpendAll = Object.values(byPlatform).reduce((a, b) => a + b.total, 0);
     const numDays = new Set(filteredAds.map(d => d.date)).size || 1;
 
-    return Object.entries(byPlatform)
+    const result = Object.entries(byPlatform)
       .sort(([, a], [, b]) => b.total - a.total)
       .map(([platform, data]) => {
-        const revenueChannel = PLATFORM_CHANNEL[platform];
-        const channelRevenue = revenueChannel ? (channelRev[revenueChannel] || 0) : 0;
+        const revenueChannels = PLATFORM_CHANNEL_MAP[platform];
+        const revenueLabel = PLATFORM_CHANNEL_LABEL[platform] || '—';
+        const channelRevenue = revenueChannels
+          ? revenueChannels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0)
+          : 0;
         const roas = data.total > 0 && channelRevenue > 0 ? channelRevenue / data.total : 0;
 
         const subDetails = Object.entries(data.subs)
@@ -259,13 +287,54 @@ export default function MarketingPage() {
           pct: totalSpendAll > 0 ? (data.total / totalSpendAll) * 100 : 0,
           dailyAvg: data.total / numDays,
           roas,
-          revenueChannel: revenueChannel || '—',
+          revenueChannel: revenueLabel,
           channelRevenue,
           subDetails,
           color: PLATFORM_COLORS[platform] || '#64748b',
         };
       });
-  }, [adsData, channelData, brandFilter]);
+
+    // Add "Other Marketplace" row (Tokopedia + BliBli + Lazada) — no ads spend
+    const otherMpChannels = PLATFORM_CHANNEL_MAP['Other Marketplace'] || [];
+    const otherMpRevenue = otherMpChannels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0);
+    if (otherMpRevenue > 0) {
+      // Build sub-detail showing individual marketplace revenue
+      const otherMpSubs = otherMpChannels
+        .map(ch => ({ name: ch, spent: channelRev[ch] || 0, pct: otherMpRevenue > 0 ? ((channelRev[ch] || 0) / otherMpRevenue) * 100 : 0 }))
+        .filter(s => s.spent > 0)
+        .sort((a, b) => b.spent - a.spent);
+
+      result.push({
+        platform: 'Other Marketplace',
+        spent: 0,
+        pct: 0,
+        dailyAvg: 0,
+        roas: 0,
+        revenueChannel: 'Other MP',
+        channelRevenue: otherMpRevenue,
+        subDetails: otherMpSubs,
+        color: '#64748b',
+      });
+    }
+
+    // Also add "Reseller" if it has revenue
+    const resellerRevenue = channelRev['Reseller'] || 0;
+    if (resellerRevenue > 0) {
+      result.push({
+        platform: 'Reseller',
+        spent: 0,
+        pct: 0,
+        dailyAvg: 0,
+        roas: 0,
+        revenueChannel: 'Reseller',
+        channelRevenue: resellerRevenue,
+        subDetails: [],
+        color: '#f59e0b',
+      });
+    }
+
+    return result;
+  }, [adsData, channelData, brandFilter, productMappings]);
 
   // ── Per-brand matrix ──
   const brandPlatformMatrix = useMemo(() => {
@@ -523,7 +592,10 @@ export default function MarketingPage() {
                             <span style={{ fontWeight: 600 }}>{p.platform}</span>
                             {p.subDetails.length > 0 && (
                               <div style={{ fontSize: 10, color: C.dim, marginTop: 2, lineHeight: 1.4 }}>
-                                Termasuk: {p.subDetails.map(s => `${s.name} ${s.pct.toFixed(0)}%`).join(', ')}
+                                {p.spent > 0
+                                  ? `Termasuk: ${p.subDetails.map(s => `${s.name} ${s.pct.toFixed(0)}%`).join(', ')}`
+                                  : p.subDetails.map(s => `${s.name}: Rp ${fmtCompact(s.spent)}`).join(', ')
+                                }
                               </div>
                             )}
                           </div>
