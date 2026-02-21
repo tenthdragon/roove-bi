@@ -33,6 +33,23 @@ function normPlatform(source: string): string {
   return source;
 }
 
+// ── Attribution map: which ads platforms contribute to which revenue channels ──
+// Facebook Ads intentionally appears in BOTH Scalev and Shopee (demand generator spillover)
+const ATTRIBUTION_MAP: Record<string, string[]> = {
+  'Facebook Ads': ['Scalev', 'Shopee'],
+  'Google Ads': ['Scalev'],
+  'WhatsApp': ['Scalev'],
+  'CPAS': ['Shopee'],
+  'Shopee Ads': ['Shopee'],
+  'Shopee Live': ['Shopee'],
+  'TikTok Ads': ['TikTok'],
+  'TikTok Shop': ['TikTok'],
+  'SnackVideo Ads': [],
+};
+
+// Revenue channels for the matrix
+const REVENUE_CHANNELS = ['Scalev', 'Shopee', 'TikTok'];
+
 // ── Platform colors ──
 const PLATFORM_COLORS: Record<string, string> = {
   'Facebook Ads': '#1877f2',
@@ -45,6 +62,17 @@ const PLATFORM_COLORS: Record<string, string> = {
   'WhatsApp': '#25d366',
   'SnackVideo Ads': '#fbbf24',
   'Other': '#64748b',
+};
+
+// ── Channel colors ──
+const CHANNEL_COLORS: Record<string, string> = {
+  'Scalev': '#3b82f6',
+  'Shopee': '#ee4d2d',
+  'TikTok': '#ff0050',
+  'Tokopedia': '#10b981',
+  'BliBli': '#06b6d4',
+  'Lazada': '#1a237e',
+  'Reseller': '#f59e0b',
 };
 
 // ── Brand colors ──
@@ -65,6 +93,7 @@ export default function MarketingPage() {
 
   const [prodData, setProdData] = useState<any[]>([]);
   const [adsData, setAdsData] = useState<any[]>([]);
+  const [channelData, setChannelData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [brandFilter, setBrandFilter] = useState('all');
 
@@ -83,9 +112,15 @@ export default function MarketingPage() {
         .select('date, source, spent, store')
         .gte('date', dateRange.from)
         .lte('date', dateRange.to),
-    ]).then(([{ data: prod }, { data: ads }]) => {
+      supabase
+        .from('daily_channel_data')
+        .select('date, channel, net_sales')
+        .gte('date', dateRange.from)
+        .lte('date', dateRange.to),
+    ]).then(([{ data: prod }, { data: ads }, { data: ch }]) => {
       setProdData(prod || []);
       setAdsData(ads || []);
+      setChannelData(ch || []);
       setLoading(false);
     });
   }, [dateRange, supabase]);
@@ -95,7 +130,6 @@ export default function MarketingPage() {
     const rev = prodData.reduce((s, d) => s + Number(d.net_sales || 0), 0);
     const spend = adsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
 
-    // Daily aggregation for averages
     const byDate: Record<string, { rev: number; spend: number }> = {};
     prodData.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
@@ -165,9 +199,7 @@ export default function MarketingPage() {
     };
   }, [adsData]);
 
-  // ══════════════════════════════════════════════════════════
-  // NEW: Ads spend per platform per brand
-  // ══════════════════════════════════════════════════════════
+  // ── Unique brands for filter ──
   const uniqueBrands = useMemo(() => {
     const set = new Set<string>();
     adsData.forEach(d => {
@@ -177,13 +209,14 @@ export default function MarketingPage() {
     return Array.from(set).sort();
   }, [adsData]);
 
+  // ── Platform breakdown (with blended ROAS) ──
   const platformBreakdown = useMemo(() => {
-    // Filter by brand if selected
     const filtered = brandFilter === 'all'
       ? adsData
       : adsData.filter(d => normStore(d.store) === brandFilter);
 
-    // Group by platform
+    const filteredRevenue = prodData.reduce((s, d) => s + Number(d.net_sales || 0), 0);
+
     const byPlatform: Record<string, number> = {};
     filtered.forEach(d => {
       const platform = normPlatform(d.source);
@@ -200,11 +233,12 @@ export default function MarketingPage() {
         spent,
         pct: total > 0 ? (spent / total) * 100 : 0,
         dailyAvg: spent / numDays,
+        blendedRoas: spent > 0 ? filteredRevenue / spent : 0,
         color: PLATFORM_COLORS[platform] || '#64748b',
       }));
-  }, [adsData, brandFilter]);
+  }, [adsData, prodData, brandFilter]);
 
-  // Per-brand breakdown table (when "All Brands" selected)
+  // ── Per-brand breakdown table ──
   const brandPlatformMatrix = useMemo(() => {
     if (brandFilter !== 'all') return [];
 
@@ -229,6 +263,70 @@ export default function MarketingPage() {
 
     return { rows, platforms };
   }, [adsData, brandFilter]);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ATTRIBUTION: Channel Revenue + Attributed Spend → Channel ROAS
+  // ══════════════════════════════════════════════════════════════════════
+
+  // Aggregate revenue per channel from daily_channel_data
+  const channelRevenue = useMemo(() => {
+    const byCh: Record<string, number> = {};
+    channelData.forEach(d => {
+      const ch = d.channel || 'Other';
+      byCh[ch] = (byCh[ch] || 0) + Number(d.net_sales || 0);
+    });
+    return byCh;
+  }, [channelData]);
+
+  // Aggregate spend per normalized platform
+  const platformSpend = useMemo(() => {
+    const byP: Record<string, number> = {};
+    adsData.forEach(d => {
+      const p = normPlatform(d.source);
+      byP[p] = (byP[p] || 0) + Math.abs(Number(d.spent || 0));
+    });
+    return byP;
+  }, [adsData]);
+
+  // Build channel ROAS data
+  const channelRoasData = useMemo(() => {
+    return REVENUE_CHANNELS.map(ch => {
+      const revenue = channelRevenue[ch] || 0;
+
+      // Find all platforms that attribute to this channel
+      const attributedPlatforms = Object.entries(ATTRIBUTION_MAP)
+        .filter(([, channels]) => channels.includes(ch))
+        .map(([platform]) => platform);
+
+      // Sum their spend
+      const attributedSpend = attributedPlatforms.reduce(
+        (sum, p) => sum + (platformSpend[p] || 0), 0
+      );
+
+      // Check for double-counted platforms (platforms attributed to multiple channels)
+      const doubleCountedPlatforms = attributedPlatforms.filter(p => {
+        const attrs = ATTRIBUTION_MAP[p] || [];
+        return attrs.length > 1;
+      });
+
+      return {
+        channel: ch,
+        revenue,
+        attributedSpend,
+        roas: attributedSpend > 0 ? revenue / attributedSpend : 0,
+        platforms: attributedPlatforms,
+        platformDetails: attributedPlatforms.map(p => ({
+          name: p,
+          spend: platformSpend[p] || 0,
+          isShared: (ATTRIBUTION_MAP[p] || []).length > 1,
+          sharedWith: (ATTRIBUTION_MAP[p] || []).filter(c => c !== ch),
+        })),
+        hasDoubleCount: doubleCountedPlatforms.length > 0,
+        doubleCountedPlatforms,
+        color: CHANNEL_COLORS[ch] || '#64748b',
+      };
+    }).filter(d => d.revenue > 0 || d.attributedSpend > 0);
+  }, [channelRevenue, platformSpend]);
 
   // ── Product efficiency ──
   const prodEfficiency = useMemo(() => {
@@ -434,7 +532,7 @@ export default function MarketingPage() {
       )}
 
       {/* ══════════════════════════════════════════════════════════════════ */}
-      {/* NEW SECTION: Ad Spend by Platform — Per Brand                    */}
+      {/* Ad Spend by Platform — Per Brand                                 */}
       {/* ══════════════════════════════════════════════════════════════════ */}
       <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
@@ -478,9 +576,13 @@ export default function MarketingPage() {
                           <span style={{ color: C.dim }}>% of Total</span>
                           <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{d.pct.toFixed(1)}%</span>
                         </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginBottom: 2 }}>
                           <span style={{ color: C.dim }}>Daily Avg</span>
                           <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{fmtRupiah(d.dailyAvg)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20 }}>
+                          <span style={{ color: C.dim }}>Blended ROAS</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{d.blendedRoas.toFixed(1)}x</span>
                         </div>
                       </div>
                     );
@@ -494,12 +596,12 @@ export default function MarketingPage() {
               </BarChart>
             </ResponsiveContainer>
 
-            {/* Detail table */}
+            {/* Detail table with Blended ROAS */}
             <div style={{ overflowX: 'auto', marginTop: 16 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                    {['Platform', 'Spent', '% of Total', 'Daily Avg'].map(h => (
+                    {['Platform', 'Spent', '% of Total', 'Daily Avg', 'Blended ROAS'].map(h => (
                       <th key={h} style={{
                         padding: '8px 10px', textAlign: h === 'Platform' ? 'left' : 'right',
                         color: C.dim, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap',
@@ -508,7 +610,7 @@ export default function MarketingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {platformBreakdown.map((p, i) => (
+                  {platformBreakdown.map((p) => (
                     <tr key={p.platform} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
                       <td style={{ padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ width: 10, height: 10, borderRadius: 3, background: p.color, flexShrink: 0 }} />
@@ -523,6 +625,12 @@ export default function MarketingPage() {
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: C.dim }}>
                         Rp {fmtCompact(p.dailyAvg)}
                       </td>
+                      <td style={{
+                        padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
+                        color: p.blendedRoas >= 3 ? '#10b981' : p.blendedRoas >= 1.5 ? '#f59e0b' : '#ef4444',
+                      }}>
+                        {p.blendedRoas.toFixed(1)}x
+                      </td>
                     </tr>
                   ))}
                   {/* Total row */}
@@ -534,6 +642,12 @@ export default function MarketingPage() {
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>100%</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
                       Rp {fmtCompact(platformBreakdown.reduce((s, p) => s + p.dailyAvg, 0))}
+                    </td>
+                    <td style={{
+                      padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700,
+                      color: totalRoas >= 3 ? '#10b981' : totalRoas >= 1.5 ? '#f59e0b' : '#ef4444',
+                    }}>
+                      {totalRoas.toFixed(1)}x
                     </td>
                   </tr>
                 </tbody>
@@ -547,7 +661,7 @@ export default function MarketingPage() {
         )}
       </div>
 
-      {/* ── Brand × Platform Matrix (when All Brands selected) ── */}
+      {/* ── Brand × Platform Matrix ── */}
       {brandFilter === 'all' && brandPlatformMatrix.rows?.length > 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Brand × Platform Matrix</div>
@@ -595,6 +709,214 @@ export default function MarketingPage() {
         </div>
       )}
 
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* ATTRIBUTION MATRIX + CHANNEL ROAS                                */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {channelRoasData.length > 0 && (
+        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Attribution Matrix & Channel ROAS</div>
+          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>
+            Mapping ads platform ke revenue channel — menunjukkan kemana spend mengalir menjadi revenue
+          </div>
+
+          {/* ── Attribution Matrix Table ── */}
+          <div style={{ overflowX: 'auto', marginBottom: 20 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 480 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                  <th style={{ padding: '8px 12px', textAlign: 'left', color: C.dim, fontWeight: 600, fontSize: 11 }}>
+                    Ads Platform
+                  </th>
+                  {REVENUE_CHANNELS.map(ch => (
+                    <th key={ch} style={{
+                      padding: '8px 12px', textAlign: 'center',
+                      color: CHANNEL_COLORS[ch] || C.dim, fontWeight: 700, fontSize: 12,
+                    }}>
+                      {ch}
+                    </th>
+                  ))}
+                  <th style={{ padding: '8px 12px', textAlign: 'right', color: C.dim, fontWeight: 600, fontSize: 11 }}>
+                    Spend
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(ATTRIBUTION_MAP)
+                  .filter(([platform]) => (platformSpend[platform] || 0) > 0)
+                  .sort(([a], [b]) => (platformSpend[b] || 0) - (platformSpend[a] || 0))
+                  .map(([platform, channels]) => (
+                    <tr key={platform} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
+                      <td style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{
+                          width: 10, height: 10, borderRadius: 3, flexShrink: 0,
+                          background: PLATFORM_COLORS[platform] || '#64748b',
+                        }} />
+                        <span style={{ fontWeight: 600 }}>{platform}</span>
+                        {channels.length > 1 && (
+                          <span style={{
+                            fontSize: 9, background: '#fbbf2422', color: '#fbbf24', padding: '1px 5px',
+                            borderRadius: 4, fontWeight: 600, whiteSpace: 'nowrap',
+                          }}>
+                            SHARED
+                          </span>
+                        )}
+                      </td>
+                      {REVENUE_CHANNELS.map(ch => (
+                        <td key={ch} style={{ padding: '8px 12px', textAlign: 'center' }}>
+                          {channels.includes(ch) ? (
+                            <div style={{
+                              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                              width: 24, height: 24, borderRadius: 6,
+                              background: `${CHANNEL_COLORS[ch]}22`,
+                            }}>
+                              <span style={{ color: CHANNEL_COLORS[ch], fontSize: 14, fontWeight: 700 }}>✓</span>
+                            </div>
+                          ) : (
+                            <span style={{ color: `${C.dim}44`, fontSize: 14 }}>—</span>
+                          )}
+                        </td>
+                      ))}
+                      <td style={{
+                        padding: '8px 12px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: C.dim,
+                      }}>
+                        Rp {fmtCompact(platformSpend[platform] || 0)}
+                      </td>
+                    </tr>
+                  ))
+                }
+                {/* Revenue row at bottom */}
+                <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
+                  <td style={{ padding: '10px 12px', fontWeight: 700, fontSize: 11, color: C.dim }}>
+                    CHANNEL REVENUE
+                  </td>
+                  {REVENUE_CHANNELS.map(ch => (
+                    <td key={ch} style={{
+                      padding: '10px 12px', textAlign: 'center', fontFamily: 'monospace',
+                      fontWeight: 700, fontSize: 12, color: CHANNEL_COLORS[ch],
+                    }}>
+                      Rp {fmtCompact(channelRevenue[ch] || 0)}
+                    </td>
+                  ))}
+                  <td style={{
+                    padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12,
+                  }}>
+                    Rp {fmtCompact(totalSpend)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          {/* ── Channel ROAS Cards ── */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 16 }}>
+            {channelRoasData.map(d => (
+              <div key={d.channel} style={{
+                background: `${C.bdr}33`, border: `1px solid ${C.bdr}`, borderRadius: 10,
+                padding: '14px 16px', position: 'relative', overflow: 'hidden',
+              }}>
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: d.color }} />
+
+                {/* Header: Channel name + ROAS */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: d.color }}>{d.channel}</span>
+                  </div>
+                  <div style={{
+                    fontSize: 18, fontWeight: 800, fontFamily: 'monospace',
+                    color: d.roas >= 3 ? '#10b981' : d.roas >= 1.5 ? '#f59e0b' : '#ef4444',
+                  }}>
+                    {d.roas.toFixed(1)}x
+                  </div>
+                </div>
+
+                {/* Revenue & Spend */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 8 }}>
+                  <div>
+                    <div style={{ color: C.dim, marginBottom: 2 }}>Revenue</div>
+                    <div style={{ fontFamily: 'monospace', fontWeight: 600 }}>Rp {fmtCompact(d.revenue)}</div>
+                  </div>
+                  <div style={{ textAlign: 'right' }}>
+                    <div style={{ color: C.dim, marginBottom: 2 }}>Attributed Spend</div>
+                    <div style={{ fontFamily: 'monospace', fontWeight: 600 }}>Rp {fmtCompact(d.attributedSpend)}</div>
+                  </div>
+                </div>
+
+                {/* Platform breakdown */}
+                <div style={{ borderTop: `1px solid ${C.bdr}`, paddingTop: 8 }}>
+                  <div style={{ fontSize: 10, color: C.dim, marginBottom: 4, fontWeight: 600 }}>SUMBER ADS SPEND:</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {d.platformDetails.map(p => (
+                      <div key={p.name} style={{
+                        display: 'flex', alignItems: 'center', gap: 4, fontSize: 10,
+                        padding: '2px 8px', borderRadius: 4,
+                        background: p.isShared ? '#fbbf2411' : `${C.bdr}66`,
+                        border: p.isShared ? '1px solid #fbbf2433' : `1px solid ${C.bdr}`,
+                      }}>
+                        <div style={{
+                          width: 6, height: 6, borderRadius: 2,
+                          background: PLATFORM_COLORS[p.name] || '#64748b',
+                        }} />
+                        <span style={{ color: C.txt, fontWeight: 500 }}>{p.name}</span>
+                        <span style={{ color: C.dim, fontFamily: 'monospace' }}>
+                          {fmtCompact(p.spend)}
+                        </span>
+                        {p.isShared && (
+                          <span style={{ color: '#fbbf24', fontSize: 8, fontWeight: 700 }}>★</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Double count warning */}
+                {d.hasDoubleCount && (
+                  <div style={{
+                    marginTop: 8, fontSize: 10, color: '#fbbf24', lineHeight: 1.4,
+                    display: 'flex', alignItems: 'flex-start', gap: 4,
+                  }}>
+                    <span style={{ flexShrink: 0 }}>★</span>
+                    <span>
+                      {d.doubleCountedPlatforms.join(', ')} juga diatribusikan ke{' '}
+                      {d.doubleCountedPlatforms
+                        .flatMap(p => (ATTRIBUTION_MAP[p] || []).filter(c => c !== d.channel))
+                        .filter((v, i, a) => a.indexOf(v) === i)
+                        .join(', ')
+                      }
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* ── Meta Demand Generator Callout ── */}
+          <div style={{
+            padding: '12px 16px', borderRadius: 10,
+            background: 'linear-gradient(135deg, #1877f211 0%, #8b5cf611 100%)',
+            border: '1px solid #1877f233',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <span style={{ fontSize: 16, lineHeight: 1.4, flexShrink: 0 }}>💡</span>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#93c5fd', marginBottom: 4 }}>
+                  Meta (Facebook Ads + CPAS) sebagai Demand Generator
+                </div>
+                <div style={{ fontSize: 11, color: C.dim, lineHeight: 1.6 }}>
+                  Facebook Ads ditandai <span style={{ color: '#fbbf24', fontWeight: 600 }}>★ SHARED</span> karena
+                  berfungsi sebagai <span style={{ color: '#93c5fd', fontWeight: 600 }}>demand generator</span> yang
+                  menciptakan awareness & purchase intent. Spillover terjadi ke:{' '}
+                  <span style={{ color: CHANNEL_COLORS['Scalev'] }}>Scalev</span> (direct purchase via website),{' '}
+                  <span style={{ color: CHANNEL_COLORS['Shopee'] }}>Shopee</span> (konsumen cari di marketplace setelah lihat iklan),
+                  dan repeat order organik.
+                  Karena itu, Channel ROAS di atas <span style={{ fontWeight: 600, color: C.txt }}>tidak bisa dijumlahkan</span> —
+                  spend Facebook Ads dihitung ganda di Scalev dan Shopee.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Daily Dynamics Table ── */}
       {dailyDynamics.length > 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
@@ -631,7 +953,6 @@ export default function MarketingPage() {
                     </td>
                   </tr>
                 ))}
-                {/* Average row */}
                 <tr style={{ borderTop: `2px solid ${C.bdr}`, background: `${C.bdr}33` }}>
                   <td style={{ padding: '8px 10px', fontWeight: 700 }}>AVERAGE</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>
