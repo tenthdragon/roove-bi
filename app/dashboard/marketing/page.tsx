@@ -125,7 +125,7 @@ export default function MarketingPage() {
         .lte('date', dateRange.to),
       supabase
         .from('daily_channel_data')
-        .select('date, channel, product, net_sales')
+        .select('date, channel, product, net_sales, mp_admin_cost')
         .gte('date', dateRange.from)
         .lte('date', dateRange.to),
       supabase
@@ -260,6 +260,17 @@ export default function MarketingPage() {
       channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
     });
 
+    // Aggregate admin fee per channel from daily_channel_data
+    const channelAdminFee: Record<string, number> = {};
+    channelData.forEach(d => {
+      if (brandFilter !== 'all') {
+        const productBrand = productMappings[d.product] || '';
+        if (productBrand !== brandFilter) return;
+      }
+      const ch = d.channel || 'Other';
+      channelAdminFee[ch] = (channelAdminFee[ch] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
+    });
+
     const totalSpendAll = Object.values(byPlatform).reduce((a, b) => a + b.total, 0);
     const numDays = new Set(filteredAds.map(d => d.date)).size || 1;
 
@@ -271,7 +282,12 @@ export default function MarketingPage() {
         const channelRevenue = revenueChannels
           ? revenueChannels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0)
           : 0;
+        const adminFee = revenueChannels
+          ? revenueChannels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0)
+          : 0;
         const roas = data.total > 0 && channelRevenue > 0 ? channelRevenue / data.total : 0;
+        const totalCost = data.total + adminFee;
+        const effectiveRoas = totalCost > 0 && channelRevenue > 0 ? channelRevenue / totalCost : 0;
 
         const subDetails = Object.entries(data.subs)
           .sort(([, a], [, b]) => b - a)
@@ -287,6 +303,8 @@ export default function MarketingPage() {
           pct: totalSpendAll > 0 ? (data.total / totalSpendAll) * 100 : 0,
           dailyAvg: data.total / numDays,
           roas,
+          adminFee,
+          effectiveRoas,
           revenueChannel: revenueLabel,
           channelRevenue,
           subDetails,
@@ -304,12 +322,12 @@ export default function MarketingPage() {
         .filter(s => s.spent > 0)
         .sort((a, b) => b.spent - a.spent);
 
+      const otherMpAdminFee = otherMpChannels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0);
       result.push({
         platform: 'Other Marketplace',
-        spent: 0,
-        pct: 0,
-        dailyAvg: 0,
-        roas: 0,
+        spent: 0, pct: 0, dailyAvg: 0, roas: 0,
+        adminFee: otherMpAdminFee,
+        effectiveRoas: otherMpAdminFee > 0 && otherMpRevenue > 0 ? otherMpRevenue / otherMpAdminFee : 0,
         revenueChannel: 'Other MP',
         channelRevenue: otherMpRevenue,
         subDetails: otherMpSubs,
@@ -317,15 +335,12 @@ export default function MarketingPage() {
       });
     }
 
-    // Also add "Reseller" if it has revenue
     const resellerRevenue = channelRev['Reseller'] || 0;
     if (resellerRevenue > 0) {
       result.push({
         platform: 'Reseller',
-        spent: 0,
-        pct: 0,
-        dailyAvg: 0,
-        roas: 0,
+        spent: 0, pct: 0, dailyAvg: 0, roas: 0,
+        adminFee: 0, effectiveRoas: 0,
         revenueChannel: 'Reseller',
         channelRevenue: resellerRevenue,
         subDetails: [],
@@ -354,24 +369,6 @@ export default function MarketingPage() {
       .sort((a, b) => b._total - a._total);
     return { rows, platforms };
   }, [adsData, brandFilter]);
-
-  // ── Product efficiency ──
-  const prodEfficiency = useMemo(() => {
-    const byP: Record<string, { s: number; m: number }> = {};
-    prodData.forEach((d: any) => {
-      if (!byP[d.product]) byP[d.product] = { s: 0, m: 0 };
-      byP[d.product].s += Number(d.net_sales);
-      byP[d.product].m += Math.abs(Number(d.mkt_cost));
-    });
-    return Object.entries(byP)
-      .filter(([, v]) => v.m > 0)
-      .sort((a, b) => (a[1].s > 0 ? a[1].m / a[1].s : 999) - (b[1].s > 0 ? b[1].m / b[1].s : 999))
-      .map(([p, v]) => ({
-        sku: p, spend: v.m, sales: v.s,
-        ratio: v.s > 0 ? (v.m / v.s) * 100 : 0,
-        roas: v.m > 0 ? v.s / v.m : 0,
-      }));
-  }, [prodData]);
 
   // ── Daily dynamics ──
   const dailyDynamics = useMemo(() => {
@@ -577,7 +574,7 @@ export default function MarketingPage() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                    {['Traffic Source', 'Spent', '% of Total', 'Daily Avg', 'Channel', 'Revenue', 'ROAS'].map(h => (
+                    {['Traffic Source', 'Spent', '% of Total', 'Daily Avg', 'Channel', 'Revenue', 'ROAS', 'Admin Fee', 'Eff. ROAS'].map(h => (
                       <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Traffic Source' ? 'left' : 'right', color: C.dim, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap' }}>{h}</th>
                     ))}
                   </tr>
@@ -609,6 +606,15 @@ export default function MarketingPage() {
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: p.roas >= 3 ? '#10b981' : p.roas >= 1.5 ? '#f59e0b' : '#ef4444' }}>
                         {p.roas > 0 ? `${p.roas.toFixed(1)}x` : '—'}
                       </td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: p.adminFee > 0 ? '#f59e0b' : `${C.dim}66` }}>
+                        {p.adminFee > 0 ? `Rp ${fmtCompact(p.adminFee)}` : '—'}
+                      </td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: p.effectiveRoas >= 3 ? '#10b981' : p.effectiveRoas >= 1.5 ? '#f59e0b' : p.effectiveRoas > 0 ? '#ef4444' : `${C.dim}44` }}>
+                        {p.effectiveRoas > 0
+                          ? `${p.effectiveRoas.toFixed(1)}x`
+                          : p.adminFee === 0 && p.roas > 0 ? `${p.roas.toFixed(1)}x` : '—'
+                        }
+                      </td>
                     </tr>
                   ))}
                   <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
@@ -616,8 +622,20 @@ export default function MarketingPage() {
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(platformBreakdown.reduce((s, p) => s + p.spent, 0))}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>100%</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(platformBreakdown.reduce((s, p) => s + p.dailyAvg, 0))}</td>
-                    <td colSpan={2} style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalRevenue)}</td>
+                    <td style={{ padding: '8px 10px' }}></td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalRevenue)}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totalRoas >= 3 ? '#10b981' : totalRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{totalRoas.toFixed(1)}x</td>
+                    {(() => {
+                      const totalAdmin = platformBreakdown.reduce((s, p) => s + p.adminFee, 0);
+                      const totalAllCost = totalSpend + totalAdmin;
+                      const effRoas = totalAllCost > 0 ? totalRevenue / totalAllCost : 0;
+                      return (
+                        <>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f59e0b' }}>Rp {fmtCompact(totalAdmin)}</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: effRoas >= 3 ? '#10b981' : effRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{effRoas.toFixed(1)}x</td>
+                        </>
+                      );
+                    })()}
                   </tr>
                 </tbody>
               </table>
@@ -718,29 +736,6 @@ export default function MarketingPage() {
         </div>
       )}
 
-      {/* ── Marketing Efficiency per Product ── */}
-      {prodEfficiency.length > 0 && (
-        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Marketing Efficiency — Per Produk</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 12 }}>
-            {prodEfficiency.map(p => (
-              <div key={p.sku} style={{ background: `${C.bdr}33`, border: `1px solid ${C.bdr}`, borderRadius: 10, padding: '12px 14px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                  <span style={{ fontWeight: 600, fontSize: 13 }}>{p.sku}</span>
-                  <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'monospace', color: p.ratio > 40 ? '#ef4444' : p.ratio > 25 ? '#f59e0b' : '#10b981' }}>{p.ratio.toFixed(1)}%</span>
-                </div>
-                <div style={{ height: 6, borderRadius: 3, background: C.bdr, overflow: 'hidden', marginBottom: 4 }}>
-                  <div style={{ width: `${Math.min(p.ratio, 100)}%`, height: '100%', borderRadius: 3, background: p.ratio > 40 ? '#ef4444' : p.ratio > 25 ? '#f59e0b' : '#10b981' }} />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: C.dim }}>
-                  <span>Spend: Rp {fmtCompact(p.spend)}</span>
-                  <span>ROAS: {p.roas.toFixed(1)}x</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
