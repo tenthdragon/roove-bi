@@ -24,7 +24,6 @@ function normPlatform(source: string): string {
   if (s.includes('cpas')) return 'CPAS';
   if (s.includes('shopee') && s.includes('live')) return 'Shopee Live';
   if (s.includes('shopee')) return 'Shopee Ads';
-  if (s.includes('tiktok shop')) return 'TikTok Shop';
   if (s.includes('tiktok')) return 'TikTok Ads';
   if (s.includes('facebook')) return 'Facebook Ads';
   if (s.includes('google')) return 'Google Ads';
@@ -43,7 +42,6 @@ const ATTRIBUTION_MAP: Record<string, string[]> = {
   'Shopee Ads': ['Shopee'],
   'Shopee Live': ['Shopee'],
   'TikTok Ads': ['TikTok'],
-  'TikTok Shop': ['TikTok'],
   'SnackVideo Ads': [],
 };
 
@@ -54,7 +52,6 @@ const REVENUE_CHANNELS = ['Scalev', 'Shopee', 'TikTok'];
 const PLATFORM_COLORS: Record<string, string> = {
   'Facebook Ads': '#1877f2',
   'TikTok Ads': '#ff0050',
-  'TikTok Shop': '#25f4ee',
   'Shopee Ads': '#ee4d2d',
   'Shopee Live': '#f97316',
   'CPAS': '#8b5cf6',
