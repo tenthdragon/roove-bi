@@ -371,26 +371,6 @@ export default function MarketingPage() {
   }, [adsData, brandFilter]);
 
   // ── Daily dynamics ──
-  const dailyDynamics = useMemo(() => {
-    const byDate: Record<string, { rev: number; spend: number }> = {};
-    prodData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
-      byDate[d.date].rev += Number(d.net_sales || 0);
-    });
-    adsData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
-      byDate[d.date].spend += Math.abs(Number(d.spent || 0));
-    });
-    return Object.entries(byDate)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .filter(([, v]) => v.rev > 0 || v.spend > 0)
-      .map(([date, v]) => ({
-        date: new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
-        dateRaw: date, revenue: v.rev, spend: v.spend,
-        ratio: v.rev > 0 ? (v.spend / v.rev) * 100 : 0,
-        roas: v.spend > 0 ? v.rev / v.spend : 0,
-      }));
-  }, [prodData, adsData]);
 
   // ── Styles ──
   const C = { bg: '#0a0f1a', card: '#111a2e', bdr: '#1a2744', dim: '#64748b', txt: '#e2e8f0' };
@@ -427,7 +407,7 @@ export default function MarketingPage() {
         <KPI label="Total Revenue" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalRevenue / activeDays : 0)}/hari`} color="#3b82f6" />
         <KPI label="Total Ad Spend" val={`Rp ${fmtCompact(totalSpend)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalSpend / activeDays : 0)}/hari`} color="#f59e0b" />
         <KPI label="Mkt Ratio" val={`${totalRatio.toFixed(1)}%`} sub={`Avg: ${avgDailyRatio.toFixed(1)}%/hari`} color={totalRatio > 30 ? '#ef4444' : totalRatio > 20 ? '#f59e0b' : '#10b981'} />
-        <KPI label="ROAS" val={`${totalRoas.toFixed(1)}x`} sub={`Avg: ${avgDailyRoas.toFixed(1)}x/hari`} color="#8b5cf6" />
+        <KPI label="Eff. ROAS" val={`${(() => { const totalAdmin = platformBreakdown.reduce((s, p) => s + (p.adminFee || 0), 0); const tc = totalSpend + totalAdmin; return tc > 0 ? (totalRevenue / tc).toFixed(1) : '0.0'; })()}x`} sub={`Ads only: ${totalRoas.toFixed(1)}x`} color="#8b5cf6" />
       </div>
 
       {/* ── Daily Ad Spend & Mkt Ratio Chart ── */}
@@ -700,41 +680,6 @@ export default function MarketingPage() {
         </div>
       )}
 
-      {/* ── Daily Dynamics Table ── */}
-      {dailyDynamics.length > 0 && (
-        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Dinamika Harian</div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                  {['Tanggal', 'Revenue', 'Ad Spend', 'Mkt Ratio', 'ROAS'].map(h => (
-                    <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Tanggal' ? 'left' : 'right', color: C.dim, fontWeight: 600, fontSize: 11 }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {dailyDynamics.map(d => (
-                  <tr key={d.dateRaw} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
-                    <td style={{ padding: '8px 10px', fontWeight: 500 }}>{d.date}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>Rp {fmtCompact(d.revenue)}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>Rp {fmtCompact(d.spend)}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: d.ratio > 40 ? '#ef4444' : d.ratio > 25 ? '#f59e0b' : '#10b981' }}>{d.ratio.toFixed(1)}%</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: d.roas >= 3 ? '#10b981' : d.roas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{d.roas.toFixed(1)}x</td>
-                  </tr>
-                ))}
-                <tr style={{ borderTop: `2px solid ${C.bdr}`, background: `${C.bdr}33` }}>
-                  <td style={{ padding: '8px 10px', fontWeight: 700 }}>AVERAGE</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>Rp {fmtCompact(dailyDynamics.reduce((s, d) => s + d.revenue, 0) / dailyDynamics.length)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>Rp {fmtCompact(dailyDynamics.reduce((s, d) => s + d.spend, 0) / dailyDynamics.length)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: avgDailyRatio > 40 ? '#ef4444' : avgDailyRatio > 25 ? '#f59e0b' : '#10b981' }}>{avgDailyRatio.toFixed(1)}%</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: avgDailyRoas >= 3 ? '#10b981' : avgDailyRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{avgDailyRoas.toFixed(1)}x</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
     </div>
   );
