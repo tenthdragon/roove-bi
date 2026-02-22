@@ -171,10 +171,15 @@ export function getPresetRanges() {
 
   const monthStart = `${yyyy}-${mm}-01`;
 
+  // Bulan Lalu: 1st of previous month → last day of previous month
+  const prevMonthEnd = new Date(yyyy, today.getMonth(), 0); // last day of prev month
+  const prevMonthStart = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth(), 1);
+
   return [
     { label: 'Hari Ini', from: todayStr, to: todayStr },
     { label: '7 Hari', from: fmtD(d7), to: todayStr },
     { label: 'Bulan Ini', from: monthStart, to: todayStr },
+    { label: 'Bulan Lalu', from: fmtD(prevMonthStart), to: fmtD(prevMonthEnd) },
     { label: '30 Hari', from: fmtD(d30), to: todayStr },
     { label: '90 Hari', from: fmtD(d90), to: todayStr },
   ];
