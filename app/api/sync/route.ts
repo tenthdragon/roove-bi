@@ -20,20 +20,23 @@ export async function POST(req: NextRequest) {
     const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
 
     if (!isCron) {
-      // Verify user is owner via cookie-based auth
+      // Verify user is owner or finance via cookie-based auth
       const { createServerSupabase } = await import('@/lib/supabase-server');
       const supabase = createServerSupabase();
       const { data: { user } } = await supabase.auth.getUser();
+
       if (!user) {
         return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
       }
+
       const { data: profile } = await supabase
         .from('profiles')
         .select('role')
         .eq('id', user.id)
         .single();
-      if (profile?.role !== 'owner') {
-        return NextResponse.json({ error: 'Only owners can sync' }, { status: 403 });
+
+      if (profile?.role !== 'owner' && profile?.role !== 'finance') {
+        return NextResponse.json({ error: 'Only owners and finance users can sync' }, { status: 403 });
       }
     }
 
@@ -46,6 +49,7 @@ export async function POST(req: NextRequest) {
       .eq('is_active', true);
 
     if (connError) throw connError;
+
     if (!connections || connections.length === 0) {
       return NextResponse.json({ message: 'No active sheet connections', synced: 0 });
     }
@@ -164,6 +168,7 @@ export async function POST(req: NextRequest) {
             monthlySummary: parsed.monthlySummary.length,
           },
         });
+
       } catch (err: any) {
         console.error(`Sync failed for ${conn.spreadsheet_id}:`, err);
 
@@ -188,6 +193,7 @@ export async function POST(req: NextRequest) {
       failed: results.filter(r => !r.success).length,
       results,
     });
+
   } catch (err: any) {
     console.error('Sync API error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
