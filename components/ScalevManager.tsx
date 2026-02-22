@@ -34,9 +34,7 @@ export default function ScalevManager() {
   const [showApiForm, setShowApiForm] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  useEffect(() => {
-    loadStatus();
-  }, []);
+  useEffect(() => { loadStatus(); }, []);
 
   async function loadStatus() {
     try {
@@ -72,10 +70,7 @@ export default function ScalevManager() {
     setMessage(null);
     try {
       const result = await triggerScalevSync(mode);
-      setMessage({
-        type: 'success',
-        text: `Sync selesai! ${result.orders_fetched} orders di-fetch, ${result.orders_inserted} di-insert.`
-      });
+      setMessage({ type: 'success', text: `Sync selesai! ${result.orders_fetched} orders di-fetch, ${result.orders_inserted} di-insert.` });
       await loadStatus();
     } catch (err: any) {
       setMessage({ type: 'error', text: `Sync gagal: ${err.message}` });
@@ -93,61 +88,66 @@ export default function ScalevManager() {
 
   if (loading && !status) {
     return (
-      <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-        <p className="text-gray-500">Memuat status Scalev...</p>
+      <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20 }}>
+        <div style={{ color:'#64748b', fontSize:13 }}>Memuat status Scalev...</div>
       </div>
     );
   }
 
   return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 space-y-6">
+    <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20 }}>
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-800">Scalev API Integration</h2>
-          <p className="text-sm text-gray-500">
-            Otomatis tarik data order dari Scalev — tidak perlu upload Excel manual
-          </p>
-        </div>
-        <div className={`px-3 py-1 rounded-full text-xs font-medium ${
-          status?.configured
-            ? 'bg-green-100 text-green-700'
-            : 'bg-yellow-100 text-yellow-700'
-        }`}>
-          {status?.configured ? 'Terhubung' : 'Belum dikonfigurasi'}
-        </div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+        <div style={{ fontSize:14, fontWeight:700 }}>Scalev API Integration</div>
+        <span style={{
+          padding:'3px 10px', borderRadius:20, fontSize:11, fontWeight:600,
+          background: status?.configured ? '#064e3b' : '#78350f',
+          color: status?.configured ? '#10b981' : '#f59e0b',
+        }}>
+          {status?.configured ? '● Terhubung' : '○ Belum dikonfigurasi'}
+        </span>
+      </div>
+      <div style={{ fontSize:12, color:'#64748b', marginBottom:16 }}>
+        Otomatis tarik data order dari Scalev — tidak perlu upload Excel manual
       </div>
 
       {/* Messages */}
       {message && (
-        <div className={`p-3 rounded-lg text-sm ${
-          message.type === 'success'
-            ? 'bg-green-50 text-green-700 border border-green-200'
-            : 'bg-red-50 text-red-700 border border-red-200'
-        }`}>
-          {message.text}
+        <div style={{
+          marginBottom:12, padding:12, borderRadius:8, fontSize:13,
+          background: message.type === 'success' ? '#064e3b' : '#7f1d1d',
+          color: message.type === 'success' ? '#10b981' : '#ef4444',
+        }}>
+          {message.type === 'success' ? '✅' : '❌'} {message.text}
         </div>
       )}
 
       {/* API Key Configuration */}
       {showApiForm && (
-        <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-          <h3 className="font-medium text-gray-700 mb-2">Konfigurasi API Key</h3>
-          <p className="text-xs text-gray-500 mb-3">
-            Ambil API key dari Scalev dashboard &rarr; Settings &rarr; API Keys
-          </p>
-          <div className="flex gap-2">
+        <div style={{ padding:14, background:'#0c1b3a', border:'1px solid #1e3a5f', borderRadius:8, marginBottom:16 }}>
+          <div style={{ fontWeight:600, fontSize:13, marginBottom:4 }}>Konfigurasi API Key</div>
+          <div style={{ fontSize:11, color:'#64748b', marginBottom:10 }}>
+            Ambil API key dari Scalev dashboard → Settings → API Keys
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
             <input
               type="password"
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="sk_xxxxxxxxxx..."
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              style={{
+                flex:1, padding:'8px 12px', background:'#0b1121', border:'1px solid #1a2744',
+                borderRadius:8, color:'#e2e8f0', fontSize:13, outline:'none',
+              }}
             />
             <button
               onClick={handleSaveApiKey}
               disabled={!apiKey.trim() || loading}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              style={{
+                padding:'8px 16px', borderRadius:8, border:'none', cursor:'pointer',
+                background:'#1e40af', color:'#93c5fd', fontSize:12, fontWeight:600,
+                opacity: (!apiKey.trim() || loading) ? 0.5 : 1,
+              }}
             >
               Simpan
             </button>
@@ -159,88 +159,87 @@ export default function ScalevManager() {
       {status?.configured && (
         <>
           {/* Stats Cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="p-3 bg-blue-50 rounded-lg">
-              <p className="text-xs text-blue-600 font-medium">Total Orders</p>
-              <p className="text-xl font-bold text-blue-800">
-                {(status.totalOrders || 0).toLocaleString('id-ID')}
-              </p>
-            </div>
-            <div className="p-3 bg-green-50 rounded-lg">
-              <p className="text-xs text-green-600 font-medium">Shipped Orders</p>
-              <p className="text-xl font-bold text-green-800">
-                {(status.shippedOrders || 0).toLocaleString('id-ID')}
-              </p>
-            </div>
-            <div className="p-3 bg-purple-50 rounded-lg">
-              <p className="text-xs text-purple-600 font-medium">Last Sync ID</p>
-              <p className="text-xl font-bold text-purple-800">
-                {(status.lastSyncId || 0).toLocaleString('id-ID')}
-              </p>
-            </div>
-            <div className="p-3 bg-orange-50 rounded-lg">
-              <p className="text-xs text-orange-600 font-medium">Last Sync</p>
-              <p className="text-sm font-bold text-orange-800">
-                {status.lastSync
-                  ? formatDate(status.lastSync.started_at)
-                  : 'Belum pernah'}
-              </p>
-            </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(120px, 1fr))', gap:8, marginBottom:14 }}>
+            {[
+              { label: 'Total Orders', value: (status.totalOrders || 0).toLocaleString('id-ID'), color: '#3b82f6', bg: '#0c1b3a' },
+              { label: 'Shipped', value: (status.shippedOrders || 0).toLocaleString('id-ID'), color: '#10b981', bg: '#0a1f1a' },
+              { label: 'Last Sync ID', value: (status.lastSyncId || 0).toLocaleString('id-ID'), color: '#8b5cf6', bg: '#1a0f30' },
+              { label: 'Last Sync', value: status.lastSync ? formatDate(status.lastSync.started_at) : 'Belum', color: '#f59e0b', bg: '#1a1500' },
+            ].map((stat, i) => (
+              <div key={i} style={{ padding:10, background:stat.bg, border:'1px solid #1a2744', borderRadius:8 }}>
+                <div style={{ fontSize:10, color: stat.color, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.04em', marginBottom:4 }}>{stat.label}</div>
+                <div style={{ fontSize: stat.label === 'Last Sync' ? 11 : 16, fontWeight:700, fontFamily:'monospace', color:'#e2e8f0' }}>{stat.value}</div>
+              </div>
+            ))}
           </div>
 
           {/* Sync Controls */}
-          <div className="flex gap-3">
+          <div style={{ display:'flex', gap:8, marginBottom:14 }}>
             <button
               onClick={() => handleSync('incremental')}
               disabled={syncing}
-              className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                flex:1, padding:'9px 16px', borderRadius:8, border:'none', cursor: syncing ? 'not-allowed' : 'pointer',
+                background: syncing ? '#1a2744' : '#1e40af', color: syncing ? '#64748b' : '#93c5fd',
+                fontSize:12, fontWeight:600,
+              }}
             >
-              {syncing ? 'Syncing...' : 'Sync Incremental'}
+              {syncing ? '⟳ Syncing...' : '⟳ Sync Incremental'}
             </button>
             <button
               onClick={() => handleSync('full')}
               disabled={syncing}
-              className="px-4 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                padding:'9px 16px', borderRadius:8, border:'1px solid #1a2744', cursor: syncing ? 'not-allowed' : 'pointer',
+                background:'transparent', color:'#94a3b8', fontSize:12, fontWeight:600,
+              }}
             >
               Full Sync
             </button>
             <button
               onClick={() => setShowApiForm(true)}
-              className="px-4 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200"
+              style={{
+                padding:'9px 16px', borderRadius:8, border:'1px solid #1a2744', cursor:'pointer',
+                background:'transparent', color:'#64748b', fontSize:12, fontWeight:600,
+              }}
             >
-              Ganti API Key
+              Ganti Key
             </button>
           </div>
 
           {/* Sync History */}
           {status.recentSyncs.length > 0 && (
             <div>
-              <h3 className="text-sm font-semibold text-gray-700 mb-2">Riwayat Sync</h3>
-              <div className="space-y-2">
+              <div style={{ fontSize:12, fontWeight:600, color:'#64748b', marginBottom:8, textTransform:'uppercase', letterSpacing:'0.04em' }}>Riwayat Sync</div>
+              <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
                 {status.recentSyncs.map((sync) => (
-                  <div key={sync.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg text-sm">
-                    <div className="flex items-center gap-3">
-                      <span className={`w-2 h-2 rounded-full ${
-                        sync.status === 'success' ? 'bg-green-500'
-                        : sync.status === 'error' ? 'bg-red-500'
-                        : 'bg-yellow-500 animate-pulse'
-                      }`} />
-                      <span className="text-gray-600">
-                        {formatDate(sync.started_at)}
-                      </span>
-                      <span className="text-gray-400 text-xs uppercase">
-                        {sync.sync_type}
-                      </span>
+                  <div key={sync.id} style={{
+                    display:'flex', justifyContent:'space-between', alignItems:'center',
+                    padding:'10px 12px', background:'#0b1121', border:'1px solid #1a2744', borderRadius:8, fontSize:12,
+                  }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <span style={{
+                        width:8, height:8, borderRadius:'50%', display:'inline-block',
+                        background: sync.status === 'success' ? '#10b981' : sync.status === 'error' ? '#ef4444' : '#f59e0b',
+                      }} />
+                      <span style={{ color:'#94a3b8' }}>{formatDate(sync.started_at)}</span>
+                      <span style={{
+                        padding:'1px 6px', borderRadius:4, fontSize:9, fontWeight:600, textTransform:'uppercase',
+                        background:'#1a2744', color:'#64748b',
+                      }}>{sync.sync_type}</span>
                     </div>
-                    <div className="text-gray-500">
+                    <div style={{ color:'#64748b', fontSize:11 }}>
                       {sync.status === 'success' && (
-                        <span>{sync.orders_fetched} fetched, {sync.orders_inserted} inserted</span>
+                        <span style={{ color:'#10b981' }}>{sync.orders_fetched} fetched, {sync.orders_inserted} inserted</span>
                       )}
                       {sync.status === 'error' && (
-                        <span className="text-red-500">{sync.error_message?.slice(0, 50)}</span>
+                        <span style={{ color:'#ef4444' }}>{sync.error_message?.slice(0, 50)}</span>
                       )}
                       {sync.status === 'running' && (
-                        <span className="text-yellow-600">Berjalan...</span>
+                        <span style={{ color:'#f59e0b' }}>Berjalan...</span>
+                      )}
+                      {sync.status === 'partial' && (
+                        <span style={{ color:'#f59e0b' }}>{sync.orders_fetched} fetched (partial)</span>
                       )}
                     </div>
                   </div>
