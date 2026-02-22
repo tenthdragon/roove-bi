@@ -17,9 +17,11 @@ function getCurrentTab(path) {
 function getAllowedTabs(prof) {
   if (!prof) return [];
   if (prof.role === 'brand_manager') {
-    return prof.allowed_tabs && prof.allowed_tabs.length > 0 ? prof.allowed_tabs : ['marketing'];
+    return prof.allowed_tabs && prof.allowed_tabs.length > 0
+      ? prof.allowed_tabs
+      : ['marketing'];
   }
-  return null;
+  return null; // owner, admin, finance → all tabs
 }
 
 function HeaderDatePicker() {
@@ -85,7 +87,7 @@ export default function DashboardLayout({ children }) {
 
   const visibleTabs = profile ? ALL_TABS.filter(t => {
     if (isPending) return false;
-    if (t.ownerOnly && profile.role !== 'owner') return false;
+    if (t.ownerOnly && profile.role !== 'owner' && profile.role !== 'finance') return false;
     const allowed = getAllowedTabs(profile);
     if (allowed !== null) return allowed.includes(t.id);
     return canAccessTab(profile, t.id);
@@ -138,11 +140,18 @@ export default function DashboardLayout({ children }) {
               <div style={{ width:32, height:32, borderRadius:8, background:'linear-gradient(135deg,#3b82f6,#8b5cf6)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:15, fontWeight:800, color:'#fff', flexShrink:0 }}>R</div>
               <h1 className="desktop-nav" style={{ margin:0, fontSize:16, fontWeight:700, whiteSpace:'nowrap' }}>Roove BI</h1>
             </div>
+
             <nav className="desktop-nav" style={{ display:'flex', gap:2, background:'#0f172a', borderRadius:10, padding:3, border:'1px solid #1a2744' }}>
               {visibleTabs.map(t => (
-                <button key={t.id} onClick={() => navigateTo(t.id)} style={{ padding:'7px 16px', borderRadius:7, border:'none', cursor:'pointer', fontSize:13, fontWeight:600, background:currentTab===t.id?'#3b82f6':'transparent', color:currentTab===t.id?'#fff':'#64748b', whiteSpace:'nowrap' }}>{t.label}</button>
+                <button key={t.id} onClick={() => navigateTo(t.id)} style={{
+                  padding:'7px 16px', borderRadius:7, border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
+                  background:currentTab===t.id?'#3b82f6':'transparent',
+                  color:currentTab===t.id?'#fff':'#64748b',
+                  whiteSpace:'nowrap'
+                }}>{t.label}</button>
               ))}
             </nav>
+
             <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
               {showDatePicker && <HeaderDatePicker />}
               <button onClick={handleLogout} style={{ padding:'6px 14px', borderRadius:7, border:'1px solid #1a2744', background:'transparent', color:'#64748b', fontSize:12, cursor:'pointer', fontWeight:500, flexShrink:0, whiteSpace:'nowrap' }}>Keluar</button>
@@ -156,7 +165,12 @@ export default function DashboardLayout({ children }) {
         {/* MOBILE BOTTOM NAV */}
         <nav className="mobile-nav" style={{ display:'none', position:'fixed', bottom:0, left:0, right:0, background:'#111a2e', borderTop:'1px solid #1a2744', padding:'6px 8px', paddingBottom:'max(6px, env(safe-area-inset-bottom))', zIndex:50, justifyContent:'space-around' }}>
           {visibleTabs.map(t => (
-            <button key={t.id} onClick={() => navigateTo(t.id)} style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:2, padding:'6px 8px', borderRadius:8, border:'none', cursor:'pointer', background:currentTab===t.id?'rgba(59,130,246,0.15)':'transparent', color:currentTab===t.id?'#3b82f6':'#64748b', fontSize:10, fontWeight:600, minWidth:48 }}>
+            <button key={t.id} onClick={() => navigateTo(t.id)} style={{
+              display:'flex', flexDirection:'column', alignItems:'center', gap:2, padding:'6px 8px', borderRadius:8, border:'none', cursor:'pointer',
+              background:currentTab===t.id?'rgba(59,130,246,0.15)':'transparent',
+              color:currentTab===t.id?'#3b82f6':'#64748b',
+              fontSize:10, fontWeight:600, minWidth:48
+            }}>
               <TabIcon id={t.id} />{t.label}
             </button>
           ))}
