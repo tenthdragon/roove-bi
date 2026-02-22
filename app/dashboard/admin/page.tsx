@@ -93,167 +93,201 @@ export default function AdminPage() {
     <div className="fade-in">
       <h2 style={{ margin:'0 0 20px', fontSize:18, fontWeight:700 }}>Admin</h2>
 
-      {/* Upload Section */}
-      <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20, marginBottom:20 }}>
-        <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Upload Data Excel</div>
-        <div style={{ fontSize:12, color:'#64748b', marginBottom:16 }}>
-          Upload file Google Sheet (.xlsx). Data otomatis di-parse dan disimpan.
-          Upload ulang bulan yang sama akan menimpa data sebelumnya.
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* SECTION 1: DAILY REPORT                                */}
+      {/* ════════════════════════════════════════════════════════ */}
+      <div style={{ marginBottom:24 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+          <div style={{ width:4, height:20, borderRadius:2, background:'#3b82f6' }} />
+          <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:'#e2e8f0' }}>Daily Report</h3>
+          <span style={{ fontSize:11, color:'#64748b', fontWeight:500 }}>Data penjualan harian per produk & channel</span>
         </div>
-        <div
-          className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
-          onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={e => {
-            e.preventDefault(); setDragOver(false);
-            const f = e.dataTransfer.files[0];
-            if (f) handleUpload(f);
-          }}
-          onClick={() => {
-            const input = document.createElement('input');
-            input.type = 'file';
-            input.accept = '.xlsx,.xls';
-            input.onchange = (e: any) => { const f = e.target.files[0]; if (f) handleUpload(f); };
-            input.click();
-          }}
-        >
-          {uploading ? (
-            <div><div className="spinner" style={{ width:32, height:32, border:'3px solid #1a2744', borderTop:'3px solid #3b82f6', borderRadius:'50%', margin:'0 auto 12px' }} /><div style={{ color:'#64748b' }}>Mengupload & memproses data...</div></div>
-          ) : (
-            <div>
-              <div style={{ fontSize:32, marginBottom:8 }}>📁</div>
-              <div style={{ fontWeight:600, marginBottom:4 }}>Drag & drop file Excel di sini</div>
-              <div style={{ fontSize:12, color:'#64748b' }}>atau klik untuk memilih file</div>
+
+        {/* 1.1 Google Sheets Integration */}
+        <div style={{ marginBottom:12 }}>
+          <SheetManager />
+        </div>
+
+        {/* 1.2 Upload Data Excel */}
+        <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20, marginBottom:12 }}>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Upload Data Excel</div>
+          <div style={{ fontSize:12, color:'#64748b', marginBottom:14 }}>
+            Upload file .xlsx sebagai alternatif Google Sheets. Upload ulang bulan yang sama akan menimpa data sebelumnya.
+          </div>
+          <div
+            className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
+            onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={e => {
+              e.preventDefault(); setDragOver(false);
+              const f = e.dataTransfer.files[0];
+              if (f) handleUpload(f);
+            }}
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.accept = '.xlsx,.xls';
+              input.onchange = (e: any) => { const f = e.target.files[0]; if (f) handleUpload(f); };
+              input.click();
+            }}
+          >
+            {uploading ? (
+              <div><div className="spinner" style={{ width:32, height:32, border:'3px solid #1a2744', borderTop:'3px solid #3b82f6', borderRadius:'50%', margin:'0 auto 12px' }} /><div style={{ color:'#64748b' }}>Mengupload & memproses data...</div></div>
+            ) : (
+              <div>
+                <div style={{ fontSize:32, marginBottom:8 }}>📁</div>
+                <div style={{ fontWeight:600, marginBottom:4 }}>Drag & drop file Excel di sini</div>
+                <div style={{ fontSize:12, color:'#64748b' }}>atau klik untuk memilih file</div>
+              </div>
+            )}
+          </div>
+
+          {uploadResult && (
+            <div style={{ marginTop:12, padding:12, background:'#064e3b', borderRadius:8, color:'#10b981', fontSize:13 }}>
+              ✅ Berhasil! Periode: {uploadResult.period.month}/{uploadResult.period.year}.
+              Data: {uploadResult.counts.dailyProduct} daily, {uploadResult.counts.dailyChannel} channel, {uploadResult.counts.ads} ads.
             </div>
+          )}
+          {uploadError && (
+            <div style={{ marginTop:12, padding:12, background:'#7f1d1d', borderRadius:8, color:'#ef4444', fontSize:13 }}>❌ {uploadError}</div>
           )}
         </div>
 
-        {uploadResult && (
-          <div style={{ marginTop:12, padding:12, background:'#064e3b', borderRadius:8, color:'#10b981', fontSize:13 }}>
-            ✅ Berhasil! Periode: {uploadResult.period.month}/{uploadResult.period.year}.
-            Data: {uploadResult.counts.dailyProduct} daily, {uploadResult.counts.dailyChannel} channel, {uploadResult.counts.ads} ads.
-          </div>
-        )}
-        {uploadError && (
-          <div style={{ marginTop:12, padding:12, background:'#7f1d1d', borderRadius:8, color:'#ef4444', fontSize:13 }}>❌ {uploadError}</div>
-        )}
-      </div>
-
-      {/* Import History */}
-      <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20, marginBottom:20 }}>
-        <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Riwayat Import</div>
-        {imports.length === 0 ? (
-          <div style={{ color:'#64748b', fontSize:13 }}>Belum ada data yang diimport.</div>
-        ) : (
-          <div className="table-scroll">
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:500 }}>
-              <thead><tr style={{ borderBottom:'2px solid #1a2744' }}>
-                {['Periode','File','Status','Rows','Waktu'].map(h => (
-                  <th key={h} style={{ padding:'8px 10px', textAlign:'left', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>{h}</th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {imports.map((imp: any) => (
-                  <tr key={imp.id} style={{ borderBottom:'1px solid #1a2744' }}>
-                    <td style={{ padding:'8px 10px', fontWeight:600 }}>{imp.period_month}/{imp.period_year}</td>
-                    <td style={{ padding:'8px 10px', color:'#64748b', maxWidth:150, overflow:'hidden', textOverflow:'ellipsis' }}>{imp.filename}</td>
-                    <td style={{ padding:'8px 10px' }}>
-                      <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700,
-                        background: imp.status==='completed'?'#064e3b':'#7f1d1d',
-                        color: imp.status==='completed'?'#10b981':'#ef4444',
-                      }}>{imp.status}</span>
-                    </td>
-                    <td style={{ padding:'8px 10px', fontFamily:'monospace' }}>{imp.row_count}</td>
-                    <td style={{ padding:'8px 10px', color:'#64748b' }}>{new Date(imp.imported_at).toLocaleString('id-ID')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* Import History */}
+        {imports.length > 0 && (
+          <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20 }}>
+            <div style={{ fontSize:14, fontWeight:700, marginBottom:12 }}>Riwayat Import</div>
+            <div className="table-scroll">
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:500 }}>
+                <thead><tr style={{ borderBottom:'2px solid #1a2744' }}>
+                  {['Periode','File','Status','Rows','Waktu'].map(h => (
+                    <th key={h} style={{ padding:'8px 10px', textAlign:'left', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>{h}</th>
+                  ))}
+                </tr></thead>
+                <tbody>
+                  {imports.map((imp: any) => (
+                    <tr key={imp.id} style={{ borderBottom:'1px solid #1a2744' }}>
+                      <td style={{ padding:'8px 10px', fontWeight:600 }}>{imp.period_month}/{imp.period_year}</td>
+                      <td style={{ padding:'8px 10px', color:'#64748b', maxWidth:150, overflow:'hidden', textOverflow:'ellipsis' }}>{imp.filename}</td>
+                      <td style={{ padding:'8px 10px' }}>
+                        <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700,
+                          background: imp.status==='completed'?'#064e3b':'#7f1d1d',
+                          color: imp.status==='completed'?'#10b981':'#ef4444',
+                        }}>{imp.status}</span>
+                      </td>
+                      <td style={{ padding:'8px 10px', fontFamily:'monospace' }}>{imp.row_count}</td>
+                      <td style={{ padding:'8px 10px', color:'#64748b' }}>{new Date(imp.imported_at).toLocaleString('id-ID')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Google Sheets Integration */}
-      <div style={{ marginBottom:20 }}>
-        <SheetManager />
-      </div>
-
-      {/* Scalev API Integration */}
-      <div style={{ marginBottom:20 }}>
-        <ScalevManager />
-      </div>
-
-      {/* Financial Report Integration */}
-      <div style={{ marginBottom:20 }}>
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* SECTION 2: FINANCIAL REPORT                            */}
+      {/* ════════════════════════════════════════════════════════ */}
+      <div style={{ marginBottom:24 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+          <div style={{ width:4, height:20, borderRadius:2, background:'#10b981' }} />
+          <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:'#e2e8f0' }}>Financial Report</h3>
+          <span style={{ fontSize:11, color:'#64748b', fontWeight:500 }}>Laporan keuangan PL, CF, BS, Rasio</span>
+        </div>
         <FinancialSheetManager />
       </div>
 
-      {/* User Management - Owner Only */}
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* SECTION 3: SCALEV API                                  */}
+      {/* ════════════════════════════════════════════════════════ */}
+      <div style={{ marginBottom:24 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+          <div style={{ width:4, height:20, borderRadius:2, background:'#8b5cf6' }} />
+          <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:'#e2e8f0' }}>Scalev API</h3>
+          <span style={{ fontSize:11, color:'#64748b', fontWeight:500 }}>Tarik data order otomatis dari Scalev</span>
+        </div>
+        <ScalevManager />
+      </div>
+
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* SECTION 4: USER MANAGEMENT (Owner Only)                */}
+      {/* ════════════════════════════════════════════════════════ */}
       {profile?.role === 'owner' && (
-        <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20 }}>
-          <div style={{ fontSize:15, fontWeight:700, marginBottom:4 }}>Kelola User</div>
-          <div style={{ fontSize:12, color:'#64748b', marginBottom:16 }}>
-            Bagikan URL login ke tim. Mereka signup, lalu Anda approve dan atur role di sini.
+        <div style={{ marginBottom:24 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+            <div style={{ width:4, height:20, borderRadius:2, background:'#f59e0b' }} />
+            <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:'#e2e8f0' }}>Kelola User</h3>
+            <span style={{ fontSize:11, color:'#64748b', fontWeight:500 }}>Approve dan atur role akses</span>
           </div>
 
-          {/* Role Legend */}
-          <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:16, fontSize:11, color:'#64748b' }}>
-            <span>Role:</span>
-            <span style={{ padding:'2px 8px', borderRadius:5, background: roleLabel('owner').bg, color: roleLabel('owner').color, fontWeight:600 }}>Owner — akses penuh + upload</span>
-            <span style={{ padding:'2px 8px', borderRadius:5, background: roleLabel('admin').bg, color: roleLabel('admin').color, fontWeight:600 }}>Admin — akses semua tab (read-only)</span>
-            <span style={{ padding:'2px 8px', borderRadius:5, background: roleLabel('finance').bg, color: roleLabel('finance').color, fontWeight:600 }}>Finance — akses semua + sync/upload</span>
-            <span style={{ padding:'2px 8px', borderRadius:5, background: roleLabel('brand_manager').bg, color: roleLabel('brand_manager').color, fontWeight:600 }}>Brand Manager — marketing only</span>
-            <span style={{ padding:'2px 8px', borderRadius:5, background: roleLabel('pending').bg, color: roleLabel('pending').color, fontWeight:600 }}>Pending — belum di-approve</span>
-          </div>
+          <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20 }}>
+            <div style={{ fontSize:12, color:'#64748b', marginBottom:16 }}>
+              Bagikan URL login ke tim. Mereka signup, lalu Anda approve dan atur role di sini.
+            </div>
 
-          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-            {users.map((u: any) => {
-              const rl = roleLabel(u.role);
-              return (
-                <div key={u.id} style={{
-                  padding:14, background:'#0b1121', borderRadius:8,
-                  border: u.role==='pending' ? '1px solid #7f1d1d' : '1px solid #1a2744',
-                  display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8
-                }}>
-                  <div>
-                    <div style={{ fontWeight:600, fontSize:13 }}>{u.email}</div>
-                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:rl.bg, color:rl.color }}>{rl.text}</span>
-                  </div>
-                  {u.id !== profile?.id && (
-                    <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                      {u.role === 'pending' && (
-                        <>
-                          <button onClick={() => handleRoleChange(u.id, 'admin')}
-                            style={{ padding:'6px 14px', borderRadius:6, border:'none', cursor:'pointer',
-                              background:'#064e3b', color:'#10b981', fontSize:12, fontWeight:600 }}>
-                            ✓ Approve sebagai Admin
-                          </button>
-                          <button onClick={() => handleRoleChange(u.id, 'finance')}
-                            style={{ padding:'6px 14px', borderRadius:6, border:'none', cursor:'pointer',
-                              background:'#1e3a5f', color:'#60a5fa', fontSize:12, fontWeight:600 }}>
-                            ✓ Finance
-                          </button>
-                          <button onClick={() => handleRoleChange(u.id, 'brand_manager')}
-                            style={{ padding:'6px 14px', borderRadius:6, border:'none', cursor:'pointer',
-                              background:'#78350f', color:'#f59e0b', fontSize:12, fontWeight:600 }}>
-                            ✓ Brand Manager
-                          </button>
-                        </>
-                      )}
-                      {u.role !== 'pending' && (
-                        <select value={u.role} onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                          style={{ padding:'5px 10px', borderRadius:6, border:'1px solid #1a2744', background:'#111a2e', color:'#e2e8f0', fontSize:12 }}>
-                          <option value="admin">Admin</option>
-                          <option value="finance">Finance</option>
-                          <option value="brand_manager">Brand Manager</option>
-                          <option value="pending">Revoke Access</option>
-                        </select>
-                      )}
+            {/* Role Legend */}
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:16, fontSize:11 }}>
+              {['owner','admin','finance','brand_manager','pending'].map(r => {
+                const rl = roleLabel(r);
+                const desc = r === 'owner' ? 'akses penuh + upload' : r === 'admin' ? 'semua tab (read-only)' : r === 'finance' ? 'semua tab + sync/upload' : r === 'brand_manager' ? 'marketing only' : 'belum di-approve';
+                return (
+                  <span key={r} style={{ padding:'3px 8px', borderRadius:5, background:rl.bg, color:rl.color, fontWeight:600 }}>
+                    {rl.text} — {desc}
+                  </span>
+                );
+              })}
+            </div>
+
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              {users.map((u: any) => {
+                const rl = roleLabel(u.role);
+                return (
+                  <div key={u.id} style={{
+                    padding:14, background:'#0b1121', borderRadius:8,
+                    border: u.role==='pending' ? '1px solid #7f1d1d' : '1px solid #1a2744',
+                    display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:8
+                  }}>
+                    <div>
+                      <div style={{ fontWeight:600, fontSize:13 }}>{u.email}</div>
+                      <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:rl.bg, color:rl.color }}>{rl.text}</span>
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                    {u.id !== profile?.id && (
+                      <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                        {u.role === 'pending' && (
+                          <>
+                            <button onClick={() => handleRoleChange(u.id, 'admin')}
+                              style={{ padding:'6px 14px', borderRadius:6, border:'none', cursor:'pointer',
+                                background:'#064e3b', color:'#10b981', fontSize:12, fontWeight:600 }}>
+                              ✓ Admin
+                            </button>
+                            <button onClick={() => handleRoleChange(u.id, 'finance')}
+                              style={{ padding:'6px 14px', borderRadius:6, border:'none', cursor:'pointer',
+                                background:'#1e3a5f', color:'#60a5fa', fontSize:12, fontWeight:600 }}>
+                              ✓ Finance
+                            </button>
+                            <button onClick={() => handleRoleChange(u.id, 'brand_manager')}
+                              style={{ padding:'6px 14px', borderRadius:6, border:'none', cursor:'pointer',
+                                background:'#78350f', color:'#f59e0b', fontSize:12, fontWeight:600 }}>
+                              ✓ Brand Manager
+                            </button>
+                          </>
+                        )}
+                        {u.role !== 'pending' && (
+                          <select value={u.role} onChange={(e) => handleRoleChange(u.id, e.target.value)}
+                            style={{ padding:'5px 10px', borderRadius:6, border:'1px solid #1a2744', background:'#111a2e', color:'#e2e8f0', fontSize:12 }}>
+                            <option value="admin">Admin</option>
+                            <option value="finance">Finance</option>
+                            <option value="brand_manager">Brand Manager</option>
+                            <option value="pending">Revoke Access</option>
+                          </select>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
       )}
