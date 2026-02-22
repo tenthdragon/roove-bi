@@ -1,7 +1,8 @@
 // ============================================================
 // Types
 // ============================================================
-export type UserRole = 'owner' | 'admin' | 'brand_manager' | 'pending';
+
+export type UserRole = 'owner' | 'admin' | 'finance' | 'brand_manager' | 'pending';
 
 export interface Profile {
   id: string;
@@ -59,6 +60,7 @@ export interface DateRange {
 // ============================================================
 // Formatting
 // ============================================================
+
 export function fmtCompact(n: number): string {
   const a = Math.abs(n);
   const sign = n < 0 ? '-' : '';
@@ -84,6 +86,7 @@ export function shortDate(d: string): string {
 // ============================================================
 // Constants
 // ============================================================
+
 export const CHANNEL_COLORS: Record<string, string> = {
   'Shopee': '#ee4d2d',
   'TikTok Shop': '#00f2ea',
@@ -134,7 +137,7 @@ export type TabId = string;
 // Check if user can access a tab
 export function canAccessTab(profile: Profile, tabId: string): boolean {
   if (profile.role === 'pending') return false;
-  if (profile.role === 'owner' || profile.role === 'admin') return true;
+  if (profile.role === 'owner' || profile.role === 'admin' || profile.role === 'finance') return true;
   if (tabId === 'admin') return false;
   if (profile.allowed_tabs.length === 0) return true; // no restriction = all tabs
   return profile.allowed_tabs.includes(tabId);
@@ -155,12 +158,9 @@ export function getPresetRanges() {
   const dd = String(today.getDate()).padStart(2, '0');
   const todayStr = `${yyyy}-${mm}-${dd}`;
 
-  const d7 = new Date(today);
-  d7.setDate(d7.getDate() - 7);
-  const d30 = new Date(today);
-  d30.setDate(d30.getDate() - 30);
-  const d90 = new Date(today);
-  d90.setDate(d90.getDate() - 90);
+  const d7 = new Date(today); d7.setDate(d7.getDate() - 7);
+  const d30 = new Date(today); d30.setDate(d30.getDate() - 30);
+  const d90 = new Date(today); d90.setDate(d90.getDate() - 90);
 
   const fmtD = (d: Date) => {
     const y = d.getFullYear();
