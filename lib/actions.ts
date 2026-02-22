@@ -5,6 +5,7 @@ import { parseRooveExcel } from './excel-parser';
 import type { Profile, DailyProductSummary, MonthlyProductSummary } from './utils';
 
 // ── Auth & Profile ──
+
 export async function getCurrentProfile(): Promise<Profile | null> {
   const supabase = createServerSupabase();
   const { data: { user } } = await supabase.auth.getUser();
@@ -20,6 +21,7 @@ export async function getCurrentProfile(): Promise<Profile | null> {
 }
 
 // ── Dashboard Data Queries ──
+
 export async function fetchDailyProductSummary(from: string, to: string) {
   const supabase = createServerSupabase();
   const { data, error } = await supabase
@@ -106,10 +108,11 @@ export async function fetchDateRange() {
 }
 
 // ── Upload & Import ──
+
 export async function uploadExcelData(formData: FormData) {
   const supabase = createServerSupabase();
 
-  // Verify user is owner
+  // Verify user is owner or finance
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
@@ -119,7 +122,7 @@ export async function uploadExcelData(formData: FormData) {
     .eq('id', user.id)
     .single();
 
-  if (profile?.role !== 'owner') throw new Error('Only owners can upload data');
+  if (profile?.role !== 'owner' && profile?.role !== 'finance') throw new Error('Only owners and finance users can upload data');
 
   const file = formData.get('file') as File;
   if (!file) throw new Error('No file provided');
@@ -152,7 +155,7 @@ export async function uploadExcelData(formData: FormData) {
   const importId = importRecord.id;
 
   try {
-// Delete existing data for this period (to allow re-imports)
+    // Delete existing data for this period (to allow re-imports)
     const periodStart = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-01`;
     const lastDay = new Date(parsed.period.year, parsed.period.month, 0).getDate();
     const periodEnd = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
@@ -173,6 +176,7 @@ export async function uploadExcelData(formData: FormData) {
       .eq('period_month', parsed.period.month)
       .eq('period_year', parsed.period.year);
     if (del4.error) throw new Error(`Delete monthly_product_summary failed: ${del4.error.message}`);
+
     // Insert daily product data
     if (parsed.dailyProduct.length > 0) {
       const rows = parsed.dailyProduct.map(d => ({ ...d, import_id: importId }));
@@ -236,6 +240,7 @@ export async function uploadExcelData(formData: FormData) {
 }
 
 // ── User Management ──
+
 export async function fetchAllUsers() {
   const supabase = createServerSupabase();
   const { data, error } = await supabase
