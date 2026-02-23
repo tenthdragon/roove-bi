@@ -1,0 +1,132 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+
+// Service role client — bypasses RLS
+function getServiceSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+}
+
+// Verify the caller is an owner
+async function verifyOwner(): Promise<boolean> {
+  const cookieStore = cookies();
+  const supabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        get(name: string) { return (cookieStore as any).get(name)?.value; },
+        set() {},
+        remove() {},
+      },
+    }
+  );
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return false;
+  
+  const svc = getServiceSupabase();
+  const { data: profile } = await svc.from('profiles').select('role').eq('id', user.id).single();
+  return profile?.role === 'owner';
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    // Only owner can invite
+    const isOwner = await verifyOwner();
+    if (!isOwner) {
+      return NextResponse.json({ error: 'Hanya Owner yang bisa invite user' }, { status: 403 });
+    }
+
+    const { email, role } = await req.json();
+
+    // Validate input
+    if (!email || !email.includes('@')) {
+      return NextResponse.json({ error: 'Email tidak valid' }, { status: 400 });
+    }
+    
+    const allowedRoles = ['admin', 'finance', 'brand_manager'];
+    if (!allowedRoles.includes(role)) {
+      return NextResponse.json({ error: 'Role tidak valid' }, { status: 400 });
+    }
+
+    const svc = getServiceSupabase();
+
+    // Check if user already exists in profiles
+    const { data: existing } = await svc.from('profiles').select('email').eq('email', email).single();
+    if (existing) {
+      return NextResponse.json({ error: 'User dengan email ini sudah terdaftar' }, { status: 409 });
+    }
+
+    // Create user via Supabase Admin API
+    // This generates a temporary password — user will reset via email
+    const tempPassword = crypto.randomUUID() + '!Aa1'; // meets password requirements
+    
+    const { data: newUser, error: createError } = await svc.auth.admin.createUser({
+      email,
+      password: tempPassword,
+      email_confirm: true, // auto-confirm since we're inviting
+    });
+
+    if (createError) {
+      console.error('[Invite] Create user error:', createError);
+      return NextResponse.json({ error: createError.message }, { status: 500 });
+    }
+
+    if (!newUser?.user) {
+      return NextResponse.json({ error: 'Gagal membuat user' }, { status: 500 });
+    }
+
+    // Update the profile role (trigger should have created it as 'pending')
+    // Wait a moment for trigger to fire
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    const { error: updateError } = await svc
+      .from('profiles')
+      .update({ role })
+      .eq('id', newUser.user.id);
+
+    if (updateError) {
+      console.error('[Invite] Update role error:', updateError);
+      // Profile might not exist yet if trigger was slow — insert directly
+      const { error: insertError } = await svc
+        .from('profiles')
+        .upsert({
+          id: newUser.user.id,
+          email,
+          role,
+        });
+      if (insertError) {
+        console.error('[Invite] Insert profile error:', insertError);
+      }
+    }
+
+    // Send password reset email so user can set their own password
+    const { error: resetError } = await svc.auth.admin.generateLink({
+      type: 'recovery',
+      email,
+      options: {
+        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://roove-bi.vercel.app'}/reset-password`,
+      },
+    });
+
+    if (resetError) {
+      console.error('[Invite] Reset link error:', resetError);
+      // Non-blocking — user was still created
+    }
+
+    return NextResponse.json({
+      success: true,
+      message: `User ${email} berhasil di-invite sebagai ${role}. Mereka perlu reset password untuk login.`,
+      userId: newUser.user.id,
+    });
+
+  } catch (err: any) {
+    console.error('[Invite] Error:', err);
+    return NextResponse.json({ error: err.message || 'Internal error' }, { status: 500 });
+  }
+}
