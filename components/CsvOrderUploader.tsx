@@ -106,7 +106,7 @@ export default function CsvOrderUploader() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 8 }}>
             <StatBox label="Total Rows" value={result.stats.totalRows} color="#94a3b8" />
             <StatBox label="Baru Ditambahkan" value={result.stats.newInserted} color="#10b981" />
-            <StatBox label="Duplikat Di-skip" value={result.stats.skippedDuplicate} color="#f59e0b" />
+            <StatBox label="Diperkaya" value={result.stats.updated || 0} color="#06b6d4" />
             {result.stats.errors > 0 && (
               <StatBox label="Error" value={result.stats.errors} color="#ef4444" />
             )}
