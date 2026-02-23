@@ -7,7 +7,7 @@ import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell
+  ResponsiveContainer, ComposedChart, Line, Cell
 } from 'recharts';
 
 // ── Normalize store name ──
@@ -17,17 +17,10 @@ function normStore(s: string): string {
   return s;
 }
 
-// ── Normalize brand name for cross-table matching ──
-const BRAND_NORM: Record<string, string> = {
-  'Dr Hyun': 'DrHyun',
-  'Others': 'Other',
-  'Purvu Store': 'Purvu',
-};
-function normBrand(s: string): string {
-  return BRAND_NORM[s] || s;
-}
-
 // ── 3 main traffic groups ──
+// Facebook Ads + WhatsApp → "Facebook Ads" → atribusi ke revenue Scalev
+// Shopee Ads + CPAS + Shopee Live → "Shopee Ads" → atribusi ke revenue Shopee
+// TikTok Ads + TikTok Shop → "TikTok Ads" → atribusi ke revenue TikTok
 function normPlatform(source: string): string {
   if (!source) return 'Other';
   const s = source.toLowerCase();
@@ -41,6 +34,7 @@ function normPlatform(source: string): string {
   return source;
 }
 
+// ── Sub-source label for breakdown keterangan ──
 function getSubSource(source: string): string | null {
   if (!source) return null;
   const s = source.toLowerCase();
@@ -51,30 +45,35 @@ function getSubSource(source: string): string | null {
   return null;
 }
 
+// ── Platform → Revenue Channel mapping (exclusive, no double count) ──
 const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
   'Facebook Ads': ['Facebook Ads', 'Google Ads', 'Organik'],
-  'Shopee Ads': ['Shopee'],
-  'TikTok Ads': ['TikTok', 'TikTok Shop'],
+  'Shopee Ads':   ['Shopee'],
+  'TikTok Ads':   ['TikTok', 'TikTok Shop'],
   'Other Marketplace': ['Tokopedia', 'BliBli', 'Lazada'],
 };
+
 const PLATFORM_CHANNEL_LABEL: Record<string, string> = {
   'Facebook Ads': 'Scalev',
-  'Shopee Ads': 'Shopee',
-  'TikTok Ads': 'TikTok',
+  'Shopee Ads':   'Shopee',
+  'TikTok Ads':   'TikTok',
   'Other Marketplace': 'Other MP',
 };
+
+// ── Platform colors ──
 const PLATFORM_COLORS: Record<string, string> = {
   'Facebook Ads': '#1877f2', 'TikTok Ads': '#ff0050', 'Shopee Ads': '#ee4d2d',
   'Google Ads': '#4285f4', 'SnackVideo Ads': '#fbbf24', 'Other Marketplace': '#64748b',
   'Reseller': '#f59e0b', 'Other': '#64748b',
 };
+
+// ── Channel colors ──
 const CHANNEL_COLORS: Record<string, string> = {
   'Scalev': '#3b82f6', 'Shopee': '#ee4d2d', 'TikTok': '#ff0050',
   'Tokopedia': '#10b981', 'BliBli': '#06b6d4', 'Lazada': '#1a237e', 'Reseller': '#f59e0b',
 };
 
-const DISCONTINUED_BRANDS = new Set(['Almona', 'Orelif', 'Veminine', 'Yuv']);
-
+// ── Brand colors ──
 const BRAND_COLORS: Record<string, string> = {
   'Roove': '#3b82f6', 'Purvu': '#8b5cf6', 'Pluve': '#06b6d4', 'Osgard': '#f97316',
   'DrHyun': '#ec4899', 'Calmara': '#f59e0b', 'Globite': '#10b981', 'Other': '#64748b',
@@ -113,10 +112,8 @@ export default function MarketingPage() {
     });
   }, [dateRange, supabase]);
 
-  // ═══════════════════════════════════════════════════════════════════
-  // SECTION 1: KPI Cards — GLOBAL (no brand filter)
-  // ═══════════════════════════════════════════════════════════════════
-  const { totalRevenue, totalSpend, totalRatio, totalRoas, activeDays } = useMemo(() => {
+  // ── KPI calculations ──
+  const { totalRevenue, totalSpend, totalRatio, totalRoas, avgDailyRatio, avgDailyRoas, activeDays } = useMemo(() => {
     const rev = prodData.reduce((s, d) => s + Number(d.net_sales || 0), 0);
     const spend = adsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
     const byDate: Record<string, { rev: number; spend: number }> = {};
@@ -129,29 +126,47 @@ export default function MarketingPage() {
       byDate[d.date].spend += Math.abs(Number(d.spent || 0));
     });
     const days = Object.values(byDate).filter(d => d.rev > 0 || d.spend > 0);
+    const dailyRatios = days.map(d => d.rev > 0 ? (d.spend / d.rev) * 100 : 0);
+    const dailyRoas = days.map(d => d.spend > 0 ? d.rev / d.spend : 0);
     return {
-      totalRevenue: rev,
-      totalSpend: spend,
+      totalRevenue: rev, totalSpend: spend,
       totalRatio: rev > 0 ? (spend / rev) * 100 : 0,
       totalRoas: spend > 0 ? rev / spend : 0,
+      avgDailyRatio: dailyRatios.length > 0 ? dailyRatios.reduce((a, b) => a + b, 0) / dailyRatios.length : 0,
+      avgDailyRoas: dailyRoas.length > 0 ? dailyRoas.reduce((a, b) => a + b, 0) / dailyRoas.length : 0,
       activeDays: days.length,
     };
   }, [prodData, adsData]);
 
-  const globalAdminFee = useMemo(() => {
-    return channelData.reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost || 0)), 0);
-  }, [channelData]);
+  // ── Daily chart data ──
+  const ratioChartData = useMemo(() => {
+    const byDate: Record<string, { rev: number; spend: number }> = {};
+    prodData.forEach(d => {
+      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
+      byDate[d.date].rev += Number(d.net_sales || 0);
+    });
+    adsData.forEach(d => {
+      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
+      byDate[d.date].spend += Math.abs(Number(d.spent || 0));
+    });
+    return Object.entries(byDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .filter(([, v]) => v.rev > 0 || v.spend > 0)
+      .map(([date, v]) => ({
+        date: new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
+        Revenue: v.rev,
+        'Ad Spend': v.spend,
+        'Mkt Ratio %': v.rev > 0 ? parseFloat(((v.spend / v.rev) * 100).toFixed(1)) : 0,
+      }));
+  }, [prodData, adsData]);
 
-  // ═══════════════════════════════════════════════════════════════════
-  // SECTION 2: Daily Ad Spend by Brand — GLOBAL
-  // ═══════════════════════════════════════════════════════════════════
+  // ── Daily Ad Spend by Brand ──
   const dailyBrandData = useMemo(() => {
     const byDate: Record<string, Record<string, number>> = {};
     const brands = new Set<string>();
     adsData.forEach(d => {
       const date = new Date(d.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
-      const brand = normBrand(normStore(d.store));
-      if (DISCONTINUED_BRANDS.has(brand)) return;
+      const brand = normStore(d.store);
       brands.add(brand);
       if (!byDate[date]) byDate[date] = {};
       byDate[date][brand] = (byDate[date][brand] || 0) + Math.abs(Number(d.spent || 0));
@@ -161,94 +176,72 @@ export default function MarketingPage() {
       const db = new Date(b.split(' ').reverse().join(' '));
       return da.getTime() - db.getTime();
     });
-    return {
-      data: sortedDates.map(([date, vals]) => ({ date, ...vals })),
-      brands: Array.from(brands).sort(),
-    };
+    return { data: sortedDates.map(([date, vals]) => ({ date, ...vals })), brands: Array.from(brands).sort() };
   }, [adsData]);
 
-  // ═══════════════════════════════════════════════════════════════════
-  // SECTION 3: Brand Performance — GLOBAL
-  // ═══════════════════════════════════════════════════════════════════
-  const brandPerformance = useMemo(() => {
-    const brandRev: Record<string, number> = {};
-    prodData.forEach(d => {
-      const brand = normBrand(d.product);
-      if (DISCONTINUED_BRANDS.has(brand)) return;
-      brandRev[brand] = (brandRev[brand] || 0) + Number(d.net_sales || 0);
-    });
-    const brandSpend: Record<string, number> = {};
-    adsData.forEach(d => {
-      const brand = normBrand(normStore(d.store));
-      if (DISCONTINUED_BRANDS.has(brand)) return;
-      brandSpend[brand] = (brandSpend[brand] || 0) + Math.abs(Number(d.spent || 0));
-    });
-    const brandAdmin: Record<string, number> = {};
-    channelData.forEach(d => {
-      const brand = normBrand(d.product);
-      if (DISCONTINUED_BRANDS.has(brand)) return;
-      brandAdmin[brand] = (brandAdmin[brand] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
-    });
-    const allBrands = new Set([...Object.keys(brandRev), ...Object.keys(brandSpend)]);
-    allBrands.delete('Other');
-    return Array.from(allBrands)
-      .map(brand => {
-        const rev = brandRev[brand] || 0;
-        const spend = brandSpend[brand] || 0;
-        const admin = brandAdmin[brand] || 0;
-        const totalCost = spend + admin;
-        const mktRatio = rev > 0 ? (spend / rev) * 100 : 0;
-        const effRoas = totalCost > 0 ? rev / totalCost : 0;
-        const roas = spend > 0 ? rev / spend : 0;
-        return { brand, revenue: rev, spend, admin, totalCost, mktRatio, roas, effRoas };
-      })
-      .sort((a, b) => b.revenue - a.revenue);
-  }, [prodData, adsData, channelData]);
-
-  // ═══════════════════════════════════════════════════════════════════
-  // SECTION 3b: Brand × Traffic Source Matrix — GLOBAL
-  // ═══════════════════════════════════════════════════════════════════
-  const brandPlatformMatrix = useMemo(() => {
-    const matrix: Record<string, Record<string, number>> = {};
-    const allPlatforms = new Set<string>();
-
-    adsData.forEach(d => {
-      const brand = normBrand(normStore(d.store));
-      if (DISCONTINUED_BRANDS.has(brand)) return;
-      const platform = normPlatform(d.source);
-      allPlatforms.add(platform);
-      if (!matrix[brand]) matrix[brand] = {};
-      matrix[brand][platform] = (matrix[brand][platform] || 0) + Math.abs(Number(d.spent || 0));
-    });
-
-    const platforms = Array.from(allPlatforms).sort();
-    const rows = Object.entries(matrix)
-      .map(([brand, pd]) => ({ brand, ...pd, _total: Object.values(pd).reduce((a, b) => a + b, 0) }))
-      .sort((a, b) => b._total - a._total);
-
-    return { rows, platforms };
-  }, [adsData]);
-
-  // ═══════════════════════════════════════════════════════════════════
-  // SECTION 4: Unique brands + Platform Breakdown — FILTERED
-  // ═══════════════════════════════════════════════════════════════════
+  // ── Unique brands for filter ──
   const uniqueBrands = useMemo(() => {
     const set = new Set<string>();
+    adsData.forEach(d => { const brand = normStore(d.store); if (brand && brand !== 'Other') set.add(brand); });
+    return Array.from(set).sort();
+  }, [adsData]);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // DAILY DYNAMICS TABLE — Revenue, Ad Spend, Mkt Ratio, ROAS, Eff. ROAS
+  // ══════════════════════════════════════════════════════════════════════
+  const dailyDynamics = useMemo(() => {
+    // Build per-date: revenue, ad spend
+    const byDate: Record<string, { rev: number; spend: number; adminFee: number }> = {};
+
+    prodData.forEach(d => {
+      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0, adminFee: 0 };
+      byDate[d.date].rev += Number(d.net_sales || 0);
+    });
     adsData.forEach(d => {
-      const brand = normBrand(normStore(d.store));
-      if (brand && brand !== 'Other' && !DISCONTINUED_BRANDS.has(brand)) set.add(brand);
+      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0, adminFee: 0 };
+      byDate[d.date].spend += Math.abs(Number(d.spent || 0));
     });
     channelData.forEach(d => {
-      const brand = normBrand(d.product);
-      if (brand && brand !== 'Other' && !DISCONTINUED_BRANDS.has(brand)) set.add(brand);
+      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0, adminFee: 0 };
+      byDate[d.date].adminFee += Math.abs(Number(d.mp_admin_cost || 0));
     });
-    return Array.from(set).sort();
-  }, [adsData, channelData]);
 
+    const rows = Object.entries(byDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .filter(([, v]) => v.rev > 0 || v.spend > 0)
+      .map(([date, v]) => {
+        const ratio = v.rev > 0 ? (v.spend / v.rev) * 100 : 0;
+        const roas = v.spend > 0 ? v.rev / v.spend : 0;
+        const totalCost = v.spend + v.adminFee;
+        const effRoas = totalCost > 0 ? v.rev / totalCost : 0;
+        return {
+          date,
+          dateLabel: new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
+          rev: v.rev,
+          spend: v.spend,
+          adminFee: v.adminFee,
+          ratio,
+          roas,
+          effRoas,
+        };
+      });
+
+    // Compute averages
+    const count = rows.length || 1;
+    const avgRev = rows.reduce((s, r) => s + r.rev, 0) / count;
+    const avgSpend = rows.reduce((s, r) => s + r.spend, 0) / count;
+    const avgRatio = rows.reduce((s, r) => s + r.ratio, 0) / count;
+    const avgRoas = rows.reduce((s, r) => s + r.roas, 0) / count;
+    const avgEffRoas = rows.reduce((s, r) => s + r.effRoas, 0) / count;
+
+    return { rows, avgRev, avgSpend, avgRatio, avgRoas, avgEffRoas };
+  }, [prodData, adsData, channelData]);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // PLATFORM BREAKDOWN — exclusive Channel ROAS + sub-source breakdown
+  // ══════════════════════════════════════════════════════════════════════
   const platformBreakdown = useMemo(() => {
-    const filteredAds = brandFilter === 'all'
-      ? adsData
-      : adsData.filter(d => normBrand(normStore(d.store)) === brandFilter);
+    const filteredAds = brandFilter === 'all' ? adsData : adsData.filter(d => normStore(d.store) === brandFilter);
 
     const byPlatform: Record<string, { total: number; subs: Record<string, number> }> = {};
     filteredAds.forEach(d => {
@@ -257,19 +250,25 @@ export default function MarketingPage() {
       const spent = Math.abs(Number(d.spent || 0));
       if (!byPlatform[platform]) byPlatform[platform] = { total: 0, subs: {} };
       byPlatform[platform].total += spent;
-      if (sub) byPlatform[platform].subs[sub] = (byPlatform[platform].subs[sub] || 0) + spent;
+      if (sub) { byPlatform[platform].subs[sub] = (byPlatform[platform].subs[sub] || 0) + spent; }
     });
 
     const channelRev: Record<string, number> = {};
     channelData.forEach(d => {
-      if (brandFilter !== 'all' && normBrand(d.product) !== brandFilter) return;
+      if (brandFilter !== 'all') {
+        const productBrand = productMappings[d.product] || '';
+        if (productBrand !== brandFilter) return;
+      }
       const ch = d.channel || 'Other';
       channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
     });
 
     const channelAdminFee: Record<string, number> = {};
     channelData.forEach(d => {
-      if (brandFilter !== 'all' && normBrand(d.product) !== brandFilter) return;
+      if (brandFilter !== 'all') {
+        const productBrand = productMappings[d.product] || '';
+        if (productBrand !== brandFilter) return;
+      }
       const ch = d.channel || 'Other';
       channelAdminFee[ch] = (channelAdminFee[ch] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
     });
@@ -287,31 +286,67 @@ export default function MarketingPage() {
         const roas = data.total > 0 && channelRevenue > 0 ? channelRevenue / data.total : 0;
         const totalCost = data.total + adminFee;
         const effectiveRoas = totalCost > 0 && channelRevenue > 0 ? channelRevenue / totalCost : 0;
-        const subDetails = Object.entries(data.subs).sort(([, a], [, b]) => b - a).map(([name, spent]) => ({ name, spent, pct: data.total > 0 ? (spent / data.total) * 100 : 0 }));
-        return { platform, spent: data.total, pct: totalSpendAll > 0 ? (data.total / totalSpendAll) * 100 : 0, dailyAvg: data.total / numDays, roas, adminFee, effectiveRoas, revenueChannel: revenueLabel, channelRevenue, subDetails, color: PLATFORM_COLORS[platform] || '#64748b' };
+
+        const subDetails = Object.entries(data.subs)
+          .sort(([, a], [, b]) => b - a)
+          .map(([name, spent]) => ({ name, spent, pct: data.total > 0 ? (spent / data.total) * 100 : 0 }));
+
+        return {
+          platform, spent: data.total,
+          pct: totalSpendAll > 0 ? (data.total / totalSpendAll) * 100 : 0,
+          dailyAvg: data.total / numDays, roas, adminFee, effectiveRoas,
+          revenueChannel: revenueLabel, channelRevenue, subDetails,
+          color: PLATFORM_COLORS[platform] || '#64748b',
+        };
       });
 
-    // Add platforms with revenue but no ad spend
-    const existingPlatforms = new Set(result.map(r => r.platform));
-    for (const [platform, channels] of Object.entries(PLATFORM_CHANNEL_MAP)) {
-      if (existingPlatforms.has(platform)) continue;
-      const channelRevenue = channels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0);
-      if (channelRevenue <= 0) continue;
-      const revenueLabel = PLATFORM_CHANNEL_LABEL[platform] || '—';
-      const adminFee = channels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0);
-      const subDetails = channels.length > 1
-        ? channels.map(ch => ({ name: ch, spent: channelRev[ch] || 0, pct: channelRevenue > 0 ? ((channelRev[ch] || 0) / channelRevenue) * 100 : 0 })).filter(s => s.spent > 0).sort((a, b) => b.spent - a.spent)
-        : [];
-      result.push({ platform, spent: 0, pct: 0, dailyAvg: 0, roas: 0, adminFee, effectiveRoas: adminFee > 0 && channelRevenue > 0 ? channelRevenue / adminFee : 0, revenueChannel: revenueLabel, channelRevenue, subDetails, color: PLATFORM_COLORS[platform] || '#64748b' });
+    // Other Marketplace row
+    const otherMpChannels = PLATFORM_CHANNEL_MAP['Other Marketplace'] || [];
+    const otherMpRevenue = otherMpChannels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0);
+    if (otherMpRevenue > 0) {
+      const otherMpSubs = otherMpChannels
+        .map(ch => ({ name: ch, spent: channelRev[ch] || 0, pct: otherMpRevenue > 0 ? ((channelRev[ch] || 0) / otherMpRevenue) * 100 : 0 }))
+        .filter(s => s.spent > 0).sort((a, b) => b.spent - a.spent);
+      const otherMpAdminFee = otherMpChannels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0);
+      result.push({
+        platform: 'Other Marketplace', spent: 0, pct: 0, dailyAvg: 0, roas: 0,
+        adminFee: otherMpAdminFee,
+        effectiveRoas: otherMpAdminFee > 0 && otherMpRevenue > 0 ? otherMpRevenue / otherMpAdminFee : 0,
+        revenueChannel: 'Other MP', channelRevenue: otherMpRevenue, subDetails: otherMpSubs, color: '#64748b',
+      });
     }
 
+    // Reseller row
     const resellerRevenue = channelRev['Reseller'] || 0;
     if (resellerRevenue > 0) {
-      result.push({ platform: 'Reseller', spent: 0, pct: 0, dailyAvg: 0, roas: 0, adminFee: 0, effectiveRoas: 0, revenueChannel: 'Reseller', channelRevenue: resellerRevenue, subDetails: [], color: '#f59e0b' });
+      result.push({
+        platform: 'Reseller', spent: 0, pct: 0, dailyAvg: 0, roas: 0,
+        adminFee: 0, effectiveRoas: 0, revenueChannel: 'Reseller',
+        channelRevenue: resellerRevenue, subDetails: [], color: '#f59e0b',
+      });
     }
 
     return result;
   }, [adsData, channelData, brandFilter, productMappings]);
+
+  // ── Per-brand matrix ──
+  const brandPlatformMatrix = useMemo(() => {
+    if (brandFilter !== 'all') return [];
+    const matrix: Record<string, Record<string, number>> = {};
+    const allPlatforms = new Set<string>();
+    adsData.forEach(d => {
+      const brand = normStore(d.store);
+      const platform = normPlatform(d.source);
+      allPlatforms.add(platform);
+      if (!matrix[brand]) matrix[brand] = {};
+      matrix[brand][platform] = (matrix[brand][platform] || 0) + Math.abs(Number(d.spent || 0));
+    });
+    const platforms = Array.from(allPlatforms).sort();
+    const rows = Object.entries(matrix)
+      .map(([brand, pd]) => ({ brand, ...pd, _total: Object.values(pd).reduce((a, b) => a + b, 0) }))
+      .sort((a, b) => b._total - a._total);
+    return { rows, platforms };
+  }, [adsData, brandFilter]);
 
   // ── Styles ──
   const C = { bg: '#0a0f1a', card: '#111a2e', bdr: '#1a2744', dim: '#64748b', txt: '#e2e8f0' };
@@ -339,52 +374,163 @@ export default function MarketingPage() {
     </div>
   );
 
-  const globalEffRoas = (totalSpend + globalAdminFee) > 0 ? totalRevenue / (totalSpend + globalAdminFee) : 0;
-
   return (
     <div className="fade-in">
       <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Marketing</h2>
 
-      {/* ═══════════════════════════════════════════════════════════════ */}
-      {/* SECTION 1: KPI Cards — Global                                 */}
-      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* ── KPI Cards ── */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
         <KPI label="Total Revenue" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalRevenue / activeDays : 0)}/hari`} color="#3b82f6" />
         <KPI label="Total Ad Spend" val={`Rp ${fmtCompact(totalSpend)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalSpend / activeDays : 0)}/hari`} color="#f59e0b" />
-        <KPI label="Mkt Ratio" val={`${totalRatio.toFixed(1)}%`} sub={`Ads only: ${totalRoas.toFixed(1)}x ROAS`} color={totalRatio > 30 ? '#ef4444' : totalRatio > 20 ? '#f59e0b' : '#10b981'} />
-        <KPI label="Eff. ROAS" val={`${globalEffRoas.toFixed(1)}x`} sub={`Ads + Admin MP`} color="#8b5cf6" />
+        <KPI label="Mkt Ratio" val={`${totalRatio.toFixed(1)}%`} sub={`Avg: ${avgDailyRatio.toFixed(1)}%/hari`} color={totalRatio > 30 ? '#ef4444' : totalRatio > 20 ? '#f59e0b' : '#10b981'} />
+        <KPI label="Eff. ROAS" val={`${(() => { const totalAdmin = platformBreakdown.reduce((s, p) => s + (p.adminFee || 0), 0); const tc = totalSpend + totalAdmin; return tc > 0 ? (totalRevenue / tc).toFixed(1) : '0.0'; })()}x`} sub={`Ads only: ${totalRoas.toFixed(1)}x`} color="#8b5cf6" />
       </div>
 
-      {/* ═══════════════════════════════════════════════════════════════ */}
-      {/* SECTION 2: Daily Ad Spend — Global                            */}
-      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* ── Daily Ad Spend & Mkt Ratio Chart ── */}
+      {ratioChartData.length > 0 && (
+        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Ad Spend & Marketing Ratio</div>
+          <ResponsiveContainer width="100%" height={300}>
+            <ComposedChart data={ratioChartData}>
+              <CartesianGrid strokeDasharray="3 3" stroke={C.bdr} />
+              <XAxis dataKey="date" stroke={C.dim} fontSize={11} />
+              <YAxis yAxisId="left" stroke={C.dim} fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
+              <YAxis yAxisId="right" orientation="right" stroke="#ef4444" fontSize={11} tickFormatter={(v: number) => `${v}%`} />
+              <Tooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  return (
+                    <div style={{ background: '#1e293b', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>{label}</div>
+                      {payload.map((p: any, i: number) => (
+                        <div key={i} style={{ color: p.color || p.stroke, marginBottom: 2, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+                          <span>{p.name}</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>
+                            {p.name === 'Mkt Ratio %' ? `${p.value}%` : `Rp ${fmtCompact(p.value)}`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                }}
+              />
+              <Bar yAxisId="left" dataKey="Revenue" fill="#3b82f6" fillOpacity={0.4} radius={[4, 4, 0, 0]} />
+              <Bar yAxisId="left" dataKey="Ad Spend" fill="#f59e0b" fillOpacity={0.7} radius={[4, 4, 0, 0]} />
+              <Line yAxisId="right" type="monotone" dataKey="Mkt Ratio %" stroke="#ef4444" strokeWidth={2} dot={{ fill: '#ef4444', r: 3 }} />
+            </ComposedChart>
+          </ResponsiveContainer>
+
+          {/* ── Dinamika Harian Table (inside same card) ── */}
+          {dailyDynamics.rows.length > 0 && (
+            <div style={{ marginTop: 20, borderTop: `1px solid ${C.bdr}`, paddingTop: 16 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: C.dim }}>Rincian Harian</div>
+              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                      {['Tanggal', 'Revenue', 'Ad Spend', 'Mkt Ratio', 'ROAS', 'Eff. ROAS'].map(h => (
+                        <th key={h} style={{
+                          padding: '8px 10px',
+                          textAlign: h === 'Tanggal' ? 'left' : 'right',
+                          color: C.dim, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap',
+                          position: h === 'Tanggal' ? 'sticky' : undefined,
+                          left: h === 'Tanggal' ? 0 : undefined,
+                          background: h === 'Tanggal' ? C.card : undefined,
+                          zIndex: h === 'Tanggal' ? 1 : undefined,
+                        }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dailyDynamics.rows.map((r) => (
+                      <tr key={r.date} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
+                        <td style={{
+                          padding: '8px 10px', fontWeight: 500, whiteSpace: 'nowrap', fontSize: 11,
+                          position: 'sticky', left: 0, background: C.card, zIndex: 1,
+                        }}>{r.dateLabel}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>
+                          Rp {fmtCompact(r.rev)}
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>
+                          Rp {fmtCompact(r.spend)}
+                        </td>
+                        <td style={{
+                          padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
+                          color: r.ratio > 40 ? '#ef4444' : r.ratio > 25 ? '#f59e0b' : '#10b981',
+                        }}>{r.ratio.toFixed(1)}%</td>
+                        <td style={{
+                          padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
+                          color: r.roas >= 3 ? '#10b981' : r.roas >= 1.5 ? '#f59e0b' : '#ef4444',
+                        }}>{r.roas > 0 ? `${r.roas.toFixed(1)}x` : '—'}</td>
+                        <td style={{
+                          padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
+                          color: r.effRoas >= 3 ? '#10b981' : r.effRoas >= 1.5 ? '#f59e0b' : '#ef4444',
+                        }}>{r.effRoas > 0 ? `${r.effRoas.toFixed(1)}x` : '—'}</td>
+                      </tr>
+                    ))}
+                    {/* Average row */}
+                    <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
+                      <td style={{
+                        padding: '8px 10px', fontWeight: 700, fontSize: 11,
+                        position: 'sticky', left: 0, background: C.card, zIndex: 1,
+                      }}>RATA-RATA</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                        Rp {fmtCompact(dailyDynamics.avgRev)}
+                      </td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                        Rp {fmtCompact(dailyDynamics.avgSpend)}
+                      </td>
+                      <td style={{
+                        padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700,
+                        color: dailyDynamics.avgRatio > 40 ? '#ef4444' : dailyDynamics.avgRatio > 25 ? '#f59e0b' : '#10b981',
+                      }}>{dailyDynamics.avgRatio.toFixed(1)}%</td>
+                      <td style={{
+                        padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700,
+                        color: dailyDynamics.avgRoas >= 3 ? '#10b981' : dailyDynamics.avgRoas >= 1.5 ? '#f59e0b' : '#ef4444',
+                      }}>{dailyDynamics.avgRoas.toFixed(1)}x</td>
+                      <td style={{
+                        padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700,
+                        color: dailyDynamics.avgEffRoas >= 3 ? '#10b981' : dailyDynamics.avgEffRoas >= 1.5 ? '#f59e0b' : '#ef4444',
+                      }}>{dailyDynamics.avgEffRoas.toFixed(1)}x</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Daily Ad Spend by Brand ── */}
       {dailyBrandData.data.length > 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Daily Ad Spend</div>
-          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Pengeluaran iklan harian per brand</div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Daily Ad Spend — By Brand</div>
+          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Breakdown pengeluaran iklan harian per brand</div>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={dailyBrandData.data}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.bdr} />
               <XAxis dataKey="date" stroke={C.dim} fontSize={11} />
               <YAxis stroke={C.dim} fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
-              <Tooltip content={({ active, payload, label }) => {
-                if (!active || !payload?.length) return null;
-                const total = payload.reduce((s: number, p: any) => s + (p.value || 0), 0);
-                return (
-                  <div style={{ background: '#1e293b', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
-                    <div style={{ fontWeight: 700, marginBottom: 6 }}>{label}</div>
-                    {payload.filter((p: any) => p.value > 0).map((p: any, i: number) => (
-                      <div key={i} style={{ color: p.fill, marginBottom: 2, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-                        <span>{p.dataKey}</span>
-                        <span style={{ fontFamily: 'monospace' }}>Rp {fmtCompact(p.value)}</span>
+              <Tooltip
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const total = payload.reduce((s: number, p: any) => s + (p.value || 0), 0);
+                  return (
+                    <div style={{ background: '#1e293b', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
+                      <div style={{ fontWeight: 700, marginBottom: 6 }}>{label}</div>
+                      {payload.filter((p: any) => p.value > 0).map((p: any, i: number) => (
+                        <div key={i} style={{ color: p.fill, marginBottom: 2, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+                          <span>{p.dataKey}</span>
+                          <span style={{ fontFamily: 'monospace' }}>Rp {fmtCompact(p.value)}</span>
+                        </div>
+                      ))}
+                      <div style={{ borderTop: '1px solid #334155', marginTop: 4, paddingTop: 4, fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
+                        <span>Total</span><span style={{ fontFamily: 'monospace' }}>Rp {fmtCompact(total)}</span>
                       </div>
-                    ))}
-                    <div style={{ borderTop: '1px solid #334155', marginTop: 4, paddingTop: 4, fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
-                      <span>Total</span><span style={{ fontFamily: 'monospace' }}>Rp {fmtCompact(total)}</span>
                     </div>
-                  </div>
-                );
-              }} />
+                  );
+                }}
+              />
               {dailyBrandData.brands.map((brand, idx) => (
                 <Bar key={brand} dataKey={brand} stackId="a" fill={BRAND_COLORS[brand] || '#64748b'}
                   radius={idx === dailyBrandData.brands.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]} />
@@ -401,122 +547,17 @@ export default function MarketingPage() {
         </div>
       )}
 
-      {/* ═══════════════════════════════════════════════════════════════ */}
-      {/* SECTION 3: Brand Performance — Global                         */}
-      {/* ═══════════════════════════════════════════════════════════════ */}
-      {brandPerformance.length > 0 && (
-        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Brand Performance</div>
-          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Revenue, biaya marketing, dan efisiensi per brand</div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                  {['Brand', 'Revenue', 'Ad Spend', 'Admin MP', 'Total Cost', 'Mkt Ratio', 'ROAS', 'Eff. ROAS'].map(h => (
-                    <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Brand' ? 'left' : 'right', color: C.dim, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {brandPerformance.map(b => (
-                  <tr key={b.brand} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
-                    <td style={{ padding: '8px 10px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 10, height: 10, borderRadius: 3, background: BRAND_COLORS[b.brand] || '#64748b', flexShrink: 0 }} />
-                        <span style={{ fontWeight: 600 }}>{b.brand}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>Rp {fmtCompact(b.revenue)}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: b.spend > 0 ? C.txt : `${C.dim}66` }}>{b.spend > 0 ? `Rp ${fmtCompact(b.spend)}` : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: b.admin > 0 ? '#f59e0b' : `${C.dim}66` }}>{b.admin > 0 ? `Rp ${fmtCompact(b.admin)}` : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: C.dim }}>{b.totalCost > 0 ? `Rp ${fmtCompact(b.totalCost)}` : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: b.mktRatio > 30 ? '#ef4444' : b.mktRatio > 20 ? '#f59e0b' : '#10b981' }}>{b.spend > 0 ? `${b.mktRatio.toFixed(1)}%` : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: b.roas >= 3 ? '#10b981' : b.roas >= 1.5 ? '#f59e0b' : b.roas > 0 ? '#ef4444' : `${C.dim}66` }}>{b.roas > 0 ? `${b.roas.toFixed(1)}x` : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: b.effRoas >= 3 ? '#10b981' : b.effRoas >= 1.5 ? '#f59e0b' : b.effRoas > 0 ? '#ef4444' : `${C.dim}66` }}>{b.effRoas > 0 ? `${b.effRoas.toFixed(1)}x` : '—'}</td>
-                  </tr>
-                ))}
-                {(() => {
-                  const tRev = brandPerformance.reduce((s, b) => s + b.revenue, 0);
-                  const tSpend = brandPerformance.reduce((s, b) => s + b.spend, 0);
-                  const tAdmin = brandPerformance.reduce((s, b) => s + b.admin, 0);
-                  const tCost = tSpend + tAdmin;
-                  const tRatio = tRev > 0 ? (tSpend / tRev) * 100 : 0;
-                  const tRoas = tSpend > 0 ? tRev / tSpend : 0;
-                  const tEffRoas = tCost > 0 ? tRev / tCost : 0;
-                  return (
-                    <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
-                      <td style={{ padding: '8px 10px', fontWeight: 700 }}>TOTAL</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(tRev)}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(tSpend)}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f59e0b' }}>Rp {fmtCompact(tAdmin)}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(tCost)}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: tRatio > 30 ? '#ef4444' : tRatio > 20 ? '#f59e0b' : '#10b981' }}>{tRatio.toFixed(1)}%</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: tRoas >= 3 ? '#10b981' : tRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{tRoas.toFixed(1)}x</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: tEffRoas >= 3 ? '#10b981' : tEffRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{tEffRoas.toFixed(1)}x</td>
-                    </tr>
-                  );
-                })()}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════ */}
-      {/* SECTION 3b: Brand × Traffic Source Matrix — Global             */}
-      {/* ═══════════════════════════════════════════════════════════════ */}
-      {brandPlatformMatrix.rows?.length > 0 && (
-        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Spend Allocation</div>
-          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Alokasi ads spend tiap brand ke tiap traffic source</div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 500 }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                  <th style={{ padding: '8px 10px', textAlign: 'left', color: C.dim, fontWeight: 600, fontSize: 11, position: 'sticky', left: 0, background: C.card }}>Brand</th>
-                  {brandPlatformMatrix.platforms?.map((p: string) => (
-                    <th key={p} style={{ padding: '8px 6px', textAlign: 'right', color: PLATFORM_COLORS[p] || C.dim, fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap' }}>{p}</th>
-                  ))}
-                  <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f1f5f9', fontWeight: 700, fontSize: 11 }}>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {brandPlatformMatrix.rows?.map((row: any) => (
-                  <tr key={row.brand} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
-                    <td style={{ padding: '8px 10px', fontWeight: 600, position: 'sticky', left: 0, background: C.card, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: 2, background: BRAND_COLORS[row.brand] || '#64748b', flexShrink: 0 }} />
-                      {row.brand}
-                    </td>
-                    {brandPlatformMatrix.platforms?.map((p: string) => (
-                      <td key={p} style={{ padding: '8px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: row[p] > 0 ? C.txt : `${C.dim}66` }}>
-                        {row[p] > 0 ? fmtCompact(row[p]) : '—'}
-                      </td>
-                    ))}
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 11 }}>{fmtCompact(row._total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ═══════════════════════════════════════════════════════════════ */}
-      {/* SECTION 4: Ad Spend by Traffic Source — Brand-filtered         */}
-      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* Ad Spend by Traffic Source — Exclusive Channel ROAS              */}
+      {/* ══════════════════════════════════════════════════════════════════ */}
       <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 700 }}>Ad Spend by Traffic Source</div>
             <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>ROAS per channel atribusi — exclusive, tanpa double count</div>
           </div>
-          <select
-            value={brandFilter}
-            onChange={(e) => setBrandFilter(e.target.value)}
-            style={{
-              background: '#1a2744', border: `1px solid ${C.bdr}`, borderRadius: 8,
-              padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none',
-            }}>
+          <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)}
+            style={{ background: '#1a2744', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none' }}>
             <option value="all">All Brands</option>
             {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
@@ -524,49 +565,55 @@ export default function MarketingPage() {
 
         {platformBreakdown.length > 0 ? (
           <>
+            {/* Bar chart */}
             <ResponsiveContainer width="100%" height={Math.max(platformBreakdown.length * 50, 120)}>
               <BarChart data={platformBreakdown} layout="vertical" margin={{ left: 10, right: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={C.bdr} horizontal={false} />
                 <XAxis type="number" stroke={C.dim} fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
                 <YAxis type="category" dataKey="platform" stroke={C.dim} fontSize={12} width={110} />
-                <Tooltip content={({ active, payload }) => {
-                  if (!active || !payload?.length) return null;
-                  const d = payload[0].payload;
-                  return (
-                    <div style={{ background: '#1e293b', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
-                      <div style={{ fontWeight: 700, marginBottom: 6, color: d.color }}>{d.platform}</div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginBottom: 2 }}>
-                        <span style={{ color: C.dim }}>Total Spent</span>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{fmtRupiah(d.spent)}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginBottom: 2 }}>
-                        <span style={{ color: C.dim }}>Revenue ({d.revenueChannel})</span>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{fmtRupiah(d.channelRevenue)}</span>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20 }}>
-                        <span style={{ color: C.dim }}>ROAS</span>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 700, color: d.roas >= 3 ? '#10b981' : d.roas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{d.roas > 0 ? `${d.roas.toFixed(1)}x` : '—'}</span>
-                      </div>
-                      {d.subDetails.length > 0 && (
-                        <div style={{ borderTop: '1px solid #334155', marginTop: 6, paddingTop: 6 }}>
-                          <div style={{ fontSize: 10, color: C.dim, marginBottom: 3 }}>Termasuk:</div>
-                          {d.subDetails.map((s: any) => (
-                            <div key={s.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: '#94a3b8' }}>
-                              <span>{s.name}</span>
-                              <span style={{ fontFamily: 'monospace' }}>{fmtRupiah(s.spent)} ({s.pct.toFixed(0)}%)</span>
-                            </div>
-                          ))}
+                <Tooltip
+                  content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0].payload;
+                    return (
+                      <div style={{ background: '#1e293b', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
+                        <div style={{ fontWeight: 700, marginBottom: 6, color: d.color }}>{d.platform}</div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginBottom: 2 }}>
+                          <span style={{ color: C.dim }}>Total Spent</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{fmtRupiah(d.spent)}</span>
                         </div>
-                      )}
-                    </div>
-                  );
-                }} />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginBottom: 2 }}>
+                          <span style={{ color: C.dim }}>Revenue ({d.revenueChannel})</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{fmtRupiah(d.channelRevenue)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20 }}>
+                          <span style={{ color: C.dim }}>ROAS</span>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: d.roas >= 3 ? '#10b981' : d.roas >= 1.5 ? '#f59e0b' : '#ef4444' }}>
+                            {d.roas > 0 ? `${d.roas.toFixed(1)}x` : '—'}
+                          </span>
+                        </div>
+                        {d.subDetails.length > 0 && (
+                          <div style={{ borderTop: '1px solid #334155', marginTop: 6, paddingTop: 6 }}>
+                            <div style={{ fontSize: 10, color: C.dim, marginBottom: 3 }}>Termasuk:</div>
+                            {d.subDetails.map((s: any) => (
+                              <div key={s.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: '#94a3b8' }}>
+                                <span>{s.name}</span>
+                                <span style={{ fontFamily: 'monospace' }}>{fmtRupiah(s.spent)} ({s.pct.toFixed(0)}%)</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }}
+                />
                 <Bar dataKey="spent" radius={[0, 6, 6, 0]}>
                   {platformBreakdown.map((entry, i) => <Cell key={i} fill={entry.color} fillOpacity={0.85} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
 
+            {/* Detail table */}
             <div style={{ overflowX: 'auto', marginTop: 16 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
@@ -611,28 +658,26 @@ export default function MarketingPage() {
                       </td>
                     </tr>
                   ))}
-                  {(() => {
-                    const totalSpentSum = platformBreakdown.reduce((s, p) => s + p.spent, 0);
-                    const totalDailyAvgSum = platformBreakdown.reduce((s, p) => s + p.dailyAvg, 0);
-                    const totalRevenueSum = platformBreakdown.reduce((s, p) => s + p.channelRevenue, 0);
-                    const totalAdminSum = platformBreakdown.reduce((s, p) => s + p.adminFee, 0);
-                    const totalRoasCalc = totalSpentSum > 0 ? totalRevenueSum / totalSpentSum : 0;
-                    const totalAllCost = totalSpentSum + totalAdminSum;
-                    const effRoasCalc = totalAllCost > 0 ? totalRevenueSum / totalAllCost : 0;
-                    return (
-                      <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
-                        <td style={{ padding: '8px 10px', fontWeight: 700 }}>TOTAL</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalSpentSum)}</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>100%</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalDailyAvgSum)}</td>
-                        <td style={{ padding: '8px 10px' }}></td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalRevenueSum)}</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totalRoasCalc >= 3 ? '#10b981' : totalRoasCalc >= 1.5 ? '#f59e0b' : '#ef4444' }}>{totalRoasCalc > 0 ? `${totalRoasCalc.toFixed(1)}x` : '—'}</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f59e0b' }}>Rp {fmtCompact(totalAdminSum)}</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: effRoasCalc >= 3 ? '#10b981' : effRoasCalc >= 1.5 ? '#f59e0b' : '#ef4444' }}>{effRoasCalc > 0 ? `${effRoasCalc.toFixed(1)}x` : '—'}</td>
-                      </tr>
-                    );
-                  })()}
+                  <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
+                    <td style={{ padding: '8px 10px', fontWeight: 700 }}>TOTAL</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(platformBreakdown.reduce((s, p) => s + p.spent, 0))}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>100%</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(platformBreakdown.reduce((s, p) => s + p.dailyAvg, 0))}</td>
+                    <td style={{ padding: '8px 10px' }}></td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalRevenue)}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totalRoas >= 3 ? '#10b981' : totalRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{totalRoas.toFixed(1)}x</td>
+                    {(() => {
+                      const totalAdmin = platformBreakdown.reduce((s, p) => s + p.adminFee, 0);
+                      const totalAllCost = totalSpend + totalAdmin;
+                      const effRoas = totalAllCost > 0 ? totalRevenue / totalAllCost : 0;
+                      return (
+                        <>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f59e0b' }}>Rp {fmtCompact(totalAdmin)}</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: effRoas >= 3 ? '#10b981' : effRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{effRoas.toFixed(1)}x</td>
+                        </>
+                      );
+                    })()}
+                  </tr>
                 </tbody>
               </table>
             </div>
@@ -645,7 +690,8 @@ export default function MarketingPage() {
                   <span style={{ fontWeight: 700, color: '#93c5fd' }}>Meta Ads sebagai Demand Generator — </span>
                   ROAS Facebook Ads dihitung exclusive terhadap revenue <span style={{ color: CHANNEL_COLORS['Scalev'], fontWeight: 600 }}>Scalev</span>.
                   Namun Meta Ads juga menciptakan demand yang spillover ke{' '}
-                  <span style={{ color: CHANNEL_COLORS['Shopee'], fontWeight: 600 }}>Shopee</span> (konsumen search di marketplace setelah lihat iklan) dan <span style={{ color: '#10b981', fontWeight: 600 }}>repeat order organik</span>.
+                  <span style={{ color: CHANNEL_COLORS['Shopee'], fontWeight: 600 }}>Shopee</span> (konsumen search di marketplace setelah lihat iklan)
+                  dan <span style={{ color: '#10b981', fontWeight: 600 }}>repeat order organik</span>.
                   Kontribusi sebenarnya Meta Ads kemungkinan lebih besar dari ROAS yang ditampilkan.
                 </div>
               </div>
@@ -657,6 +703,43 @@ export default function MarketingPage() {
           </div>
         )}
       </div>
+
+      {/* ── Brand × Traffic Source Matrix ── */}
+      {brandFilter === 'all' && brandPlatformMatrix.rows?.length > 0 && (
+        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Brand × Traffic Source Matrix</div>
+          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Alokasi ads spend tiap brand ke tiap traffic source</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 500 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                  <th style={{ padding: '8px 10px', textAlign: 'left', color: C.dim, fontWeight: 600, fontSize: 11, position: 'sticky', left: 0, background: C.card }}>Brand</th>
+                  {brandPlatformMatrix.platforms?.map((p: string) => (
+                    <th key={p} style={{ padding: '8px 6px', textAlign: 'right', color: PLATFORM_COLORS[p] || C.dim, fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap' }}>{p}</th>
+                  ))}
+                  <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f1f5f9', fontWeight: 700, fontSize: 11 }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {brandPlatformMatrix.rows?.map((row: any) => (
+                  <tr key={row.brand} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
+                    <td style={{ padding: '8px 10px', fontWeight: 600, position: 'sticky', left: 0, background: C.card, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: 2, background: BRAND_COLORS[row.brand] || '#64748b', flexShrink: 0 }} />
+                      {row.brand}
+                    </td>
+                    {brandPlatformMatrix.platforms?.map((p: string) => (
+                      <td key={p} style={{ padding: '8px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: row[p] > 0 ? C.txt : `${C.dim}66` }}>
+                        {row[p] > 0 ? fmtCompact(row[p]) : '—'}
+                      </td>
+                    ))}
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 11 }}>{fmtCompact(row._total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
