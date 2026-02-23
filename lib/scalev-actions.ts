@@ -128,14 +128,105 @@ export async function fetchScalevDailySummary(from: string, to: string) {
 // ── Get daily channel summary (for dashboard) ──
 export async function fetchScalevChannelSummary(from: string, to: string) {
   const svc = createServiceSupabase();
-
   const { data, error } = await svc
     .from('v_daily_channel_summary')
     .select('*')
     .gte('date', from)
     .lte('date', to)
     .order('date', { ascending: true });
-
   if (error) throw error;
   return data;
+}
+
+// ── Get daily new vs repeat customer data ──
+export async function fetchCustomerTypeDaily(from: string, to: string) {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('v_daily_customer_type')
+    .select('*')
+    .gte('date', from)
+    .lte('date', to)
+    .order('date', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Get customer cohort summary (top repeat customers, etc) ──
+export async function fetchCustomerCohort(limit: number = 100) {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('v_customer_cohort')
+    .select('*')
+    .order('total_revenue', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Get overall customer KPIs ──
+export async function fetchCustomerKPIs(from: string, to: string) {
+  const svc = createServiceSupabase();
+
+  const { data: dailyData } = await svc
+    .from('v_daily_customer_type')
+    .select('*')
+    .gte('date', from)
+    .lte('date', to);
+
+  if (!dailyData || dailyData.length === 0) {
+    return {
+      totalCustomers: 0,
+      newCustomers: 0,
+      repeatCustomers: 0,
+      repeatRate: 0,
+      newRevenue: 0,
+      repeatRevenue: 0,
+      avgOrderValue: 0,
+      newOrders: 0,
+      repeatOrders: 0,
+    };
+  }
+
+  let newCustomers = 0, repeatCustomers = 0;
+  let newRevenue = 0, repeatRevenue = 0;
+  let newOrders = 0, repeatOrders = 0;
+
+  for (const row of dailyData) {
+    if (row.customer_type === 'new') {
+      newCustomers += row.customer_count || 0;
+      newRevenue += Number(row.revenue) || 0;
+      newOrders += row.order_count || 0;
+    } else {
+      repeatCustomers += row.customer_count || 0;
+      repeatRevenue += Number(row.revenue) || 0;
+      repeatOrders += row.order_count || 0;
+    }
+  }
+
+  const totalCustomers = newCustomers + repeatCustomers;
+  const totalOrders = newOrders + repeatOrders;
+  const totalRevenue = newRevenue + repeatRevenue;
+
+  return {
+    totalCustomers,
+    newCustomers,
+    repeatCustomers,
+    repeatRate: totalCustomers > 0 ? (repeatCustomers / totalCustomers) * 100 : 0,
+    newRevenue,
+    repeatRevenue,
+    avgOrderValue: totalOrders > 0 ? totalRevenue / totalOrders : 0,
+    newOrders,
+    repeatOrders,
+  };
+}
+
+// ── Get monthly cohort data ──
+export async function fetchMonthlyCohort() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('v_monthly_cohort')
+    .select('*')
+    .order('cohort_month', { ascending: true });
+  if (error) throw error;
+  return data || [];
 }
