@@ -7,7 +7,7 @@ import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ComposedChart, Line, Cell
+  ResponsiveContainer, Cell
 } from 'recharts';
 
 // ── Normalize store name ──
@@ -18,23 +18,16 @@ function normStore(s: string): string {
 }
 
 // ── Normalize brand name for cross-table matching ──
-// Google Sheet parser stores some names differently from ads store names.
-// This mapping normalizes ALL variants to a single canonical form.
 const BRAND_NORM: Record<string, string> = {
-  'Dr Hyun': 'DrHyun',   // parser stores "Dr Hyun", ads store uses "DrHyun"
-  'Others': 'Other',      // parser stores "Others", product_mapping uses "Other"
-  'Purvu Store': 'Purvu', // ads store name variant
+  'Dr Hyun': 'DrHyun',
+  'Others': 'Other',
+  'Purvu Store': 'Purvu',
 };
-
-// Normalize a product/brand name to the canonical form
 function normBrand(s: string): string {
   return BRAND_NORM[s] || s;
 }
 
 // ── 3 main traffic groups ──
-// Facebook Ads + WhatsApp → "Facebook Ads" → atribusi ke revenue Scalev
-// Shopee Ads + CPAS + Shopee Live → "Shopee Ads" → atribusi ke revenue Shopee
-// TikTok Ads + TikTok Shop → "TikTok Ads" → atribusi ke revenue TikTok
 function normPlatform(source: string): string {
   if (!source) return 'Other';
   const s = source.toLowerCase();
@@ -48,7 +41,6 @@ function normPlatform(source: string): string {
   return source;
 }
 
-// ── Sub-source label for breakdown keterangan ──
 function getSubSource(source: string): string | null {
   if (!source) return null;
   const s = source.toLowerCase();
@@ -59,59 +51,33 @@ function getSubSource(source: string): string | null {
   return null;
 }
 
-// ── Platform → Revenue Channel mapping (exclusive, no double count) ──
-// Values here are arrays of actual channel names in daily_channel_data
 const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
-  'Facebook Ads': ['Facebook Ads', 'Google Ads', 'Organik'], // Scalev = Facebook Ads + Google Ads + Organik in DB
+  'Facebook Ads': ['Facebook Ads', 'Google Ads', 'Organik'],
   'Shopee Ads': ['Shopee'],
   'TikTok Ads': ['TikTok', 'TikTok Shop'],
   'Other Marketplace': ['Tokopedia', 'BliBli', 'Lazada'],
 };
-
-// Display label for the revenue channel
 const PLATFORM_CHANNEL_LABEL: Record<string, string> = {
   'Facebook Ads': 'Scalev',
   'Shopee Ads': 'Shopee',
   'TikTok Ads': 'TikTok',
   'Other Marketplace': 'Other MP',
 };
-
-// ── Platform colors ──
 const PLATFORM_COLORS: Record<string, string> = {
-  'Facebook Ads': '#1877f2',
-  'TikTok Ads': '#ff0050',
-  'Shopee Ads': '#ee4d2d',
-  'Google Ads': '#4285f4',
-  'SnackVideo Ads': '#fbbf24',
-  'Other Marketplace': '#64748b',
-  'Reseller': '#f59e0b',
-  'Other': '#64748b',
+  'Facebook Ads': '#1877f2', 'TikTok Ads': '#ff0050', 'Shopee Ads': '#ee4d2d',
+  'Google Ads': '#4285f4', 'SnackVideo Ads': '#fbbf24', 'Other Marketplace': '#64748b',
+  'Reseller': '#f59e0b', 'Other': '#64748b',
 };
-
-// ── Channel colors ──
 const CHANNEL_COLORS: Record<string, string> = {
-  'Scalev': '#3b82f6',
-  'Shopee': '#ee4d2d',
-  'TikTok': '#ff0050',
-  'Tokopedia': '#10b981',
-  'BliBli': '#06b6d4',
-  'Lazada': '#1a237e',
-  'Reseller': '#f59e0b',
+  'Scalev': '#3b82f6', 'Shopee': '#ee4d2d', 'TikTok': '#ff0050',
+  'Tokopedia': '#10b981', 'BliBli': '#06b6d4', 'Lazada': '#1a237e', 'Reseller': '#f59e0b',
 };
 
-// ── Discontinued brands — excluded from dropdown and charts ──
 const DISCONTINUED_BRANDS = new Set(['Almona', 'Orelif', 'Veminine', 'Yuv']);
 
-// ── Brand colors ──
 const BRAND_COLORS: Record<string, string> = {
-  'Roove': '#3b82f6',
-  'Purvu': '#8b5cf6',
-  'Pluve': '#06b6d4',
-  'Osgard': '#f97316',
-  'DrHyun': '#ec4899',
-  'Calmara': '#f59e0b',
-  'Globite': '#10b981',
-  'Other': '#64748b',
+  'Roove': '#3b82f6', 'Purvu': '#8b5cf6', 'Pluve': '#06b6d4', 'Osgard': '#f97316',
+  'DrHyun': '#ec4899', 'Calmara': '#f59e0b', 'Globite': '#10b981', 'Other': '#64748b',
 };
 
 export default function MarketingPage() {
@@ -129,115 +95,59 @@ export default function MarketingPage() {
     if (!dateRange.from || !dateRange.to) return;
     setLoading(true);
     Promise.all([
-      supabase
-        .from('daily_product_summary')
-        .select('date, product, net_sales, mkt_cost')
-        .gte('date', dateRange.from)
-        .lte('date', dateRange.to),
-      supabase
-        .from('daily_ads_spend')
-        .select('date, source, spent, store')
-        .gte('date', dateRange.from)
-        .lte('date', dateRange.to),
-      supabase
-        .from('daily_channel_data')
-        .select('date, channel, product, net_sales, mp_admin_cost')
-        .gte('date', dateRange.from)
-        .lte('date', dateRange.to),
-      supabase
-        .from('product_mapping')
-        .select('product_name, product_type'),
+      supabase.from('daily_product_summary').select('date, product, net_sales, mkt_cost')
+        .gte('date', dateRange.from).lte('date', dateRange.to),
+      supabase.from('daily_ads_spend').select('date, source, spent, store')
+        .gte('date', dateRange.from).lte('date', dateRange.to),
+      supabase.from('daily_channel_data').select('date, channel, product, net_sales, mp_admin_cost')
+        .gte('date', dateRange.from).lte('date', dateRange.to),
+      supabase.from('product_mapping').select('product_name, product_type'),
     ]).then(([{ data: prod }, { data: ads }, { data: ch }, { data: pm }]) => {
       setProdData(prod || []);
       setAdsData(ads || []);
       setChannelData(ch || []);
-      // Build product → brand lookup
       const map: Record<string, string> = {};
-      (pm || []).forEach((r: any) => {
-        map[r.product_name] = r.product_type;
-      });
+      (pm || []).forEach((r: any) => { map[r.product_name] = r.product_type; });
       setProductMappings(map);
       setLoading(false);
     });
   }, [dateRange, supabase]);
 
-  // ── FIX: KPI calculations now respect brandFilter ──
-  const { totalRevenue, totalSpend, totalRatio, totalRoas, avgDailyRatio, avgDailyRoas, activeDays } = useMemo(() => {
-    // Filter prodData by brand — daily_product_summary.product IS the brand name directly
-    // Use normBrand() because parser may store "Dr Hyun" while ads store uses "DrHyun"
-    const filteredProd = brandFilter === 'all'
-      ? prodData
-      : prodData.filter(d => normBrand(d.product) === brandFilter);
-
-    // Filter adsData by brand using store name
-    const filteredAds = brandFilter === 'all'
-      ? adsData
-      : adsData.filter(d => normBrand(normStore(d.store)) === brandFilter);
-
-    const rev = filteredProd.reduce((s, d) => s + Number(d.net_sales || 0), 0);
-    const spend = filteredAds.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
-
+  // ═══════════════════════════════════════════════════════════════════
+  // SECTION 1: KPI Cards — GLOBAL (no brand filter)
+  // ═══════════════════════════════════════════════════════════════════
+  const { totalRevenue, totalSpend, totalRatio, totalRoas, activeDays } = useMemo(() => {
+    const rev = prodData.reduce((s, d) => s + Number(d.net_sales || 0), 0);
+    const spend = adsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
     const byDate: Record<string, { rev: number; spend: number }> = {};
-    filteredProd.forEach(d => {
+    prodData.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].rev += Number(d.net_sales || 0);
     });
-    filteredAds.forEach(d => {
+    adsData.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].spend += Math.abs(Number(d.spent || 0));
     });
-
     const days = Object.values(byDate).filter(d => d.rev > 0 || d.spend > 0);
-    const dailyRatios = days.map(d => d.rev > 0 ? (d.spend / d.rev) * 100 : 0);
-    const dailyRoas = days.map(d => d.spend > 0 ? d.rev / d.spend : 0);
-
     return {
       totalRevenue: rev,
       totalSpend: spend,
       totalRatio: rev > 0 ? (spend / rev) * 100 : 0,
       totalRoas: spend > 0 ? rev / spend : 0,
-      avgDailyRatio: dailyRatios.length > 0 ? dailyRatios.reduce((a, b) => a + b, 0) / dailyRatios.length : 0,
-      avgDailyRoas: dailyRoas.length > 0 ? dailyRoas.reduce((a, b) => a + b, 0) / dailyRoas.length : 0,
       activeDays: days.length,
     };
-  }, [prodData, adsData, brandFilter, productMappings]);
+  }, [prodData, adsData]);
 
-  // ── FIX: Daily chart data now respects brandFilter ──
-  const ratioChartData = useMemo(() => {
-    const filteredProd = brandFilter === 'all'
-      ? prodData
-      : prodData.filter(d => normBrand(d.product) === brandFilter);
+  const globalAdminFee = useMemo(() => {
+    return channelData.reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost || 0)), 0);
+  }, [channelData]);
 
-    const filteredAds = brandFilter === 'all'
-      ? adsData
-      : adsData.filter(d => normBrand(normStore(d.store)) === brandFilter);
-
-    const byDate: Record<string, { rev: number; spend: number }> = {};
-    filteredProd.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
-      byDate[d.date].rev += Number(d.net_sales || 0);
-    });
-    filteredAds.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
-      byDate[d.date].spend += Math.abs(Number(d.spent || 0));
-    });
-
-    return Object.entries(byDate)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .filter(([, v]) => v.rev > 0 || v.spend > 0)
-      .map(([date, v]) => ({
-        date: new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
-        Revenue: v.rev,
-        'Ad Spend': v.spend,
-        'Mkt Ratio %': v.rev > 0 ? parseFloat(((v.spend / v.rev) * 100).toFixed(1)) : 0,
-      }));
-  }, [prodData, adsData, brandFilter, productMappings]);
-
-  // ── Daily Ad Spend by Brand ──
+  // ═══════════════════════════════════════════════════════════════════
+  // SECTION 2: Daily Ad Spend by Brand — GLOBAL
+  // ═══════════════════════════════════════════════════════════════════
   const dailyBrandData = useMemo(() => {
     const byDate: Record<string, Record<string, number>> = {};
     const brands = new Set<string>();
-
     adsData.forEach(d => {
       const date = new Date(d.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
       const brand = normBrand(normStore(d.store));
@@ -246,177 +156,59 @@ export default function MarketingPage() {
       if (!byDate[date]) byDate[date] = {};
       byDate[date][brand] = (byDate[date][brand] || 0) + Math.abs(Number(d.spent || 0));
     });
-
     const sortedDates = Object.entries(byDate).sort(([a], [b]) => {
       const da = new Date(a.split(' ').reverse().join(' '));
       const db = new Date(b.split(' ').reverse().join(' '));
       return da.getTime() - db.getTime();
     });
-
     return {
       data: sortedDates.map(([date, vals]) => ({ date, ...vals })),
       brands: Array.from(brands).sort(),
     };
   }, [adsData]);
 
-  // ── Unique brands for filter — from BOTH ads store names AND channel product names ──
-  const uniqueBrands = useMemo(() => {
-    const set = new Set<string>();
-    // From ads data (store names)
+  // ═══════════════════════════════════════════════════════════════════
+  // SECTION 3: Brand Performance — GLOBAL
+  // ═══════════════════════════════════════════════════════════════════
+  const brandPerformance = useMemo(() => {
+    const brandRev: Record<string, number> = {};
+    prodData.forEach(d => {
+      const brand = normBrand(d.product);
+      if (DISCONTINUED_BRANDS.has(brand)) return;
+      brandRev[brand] = (brandRev[brand] || 0) + Number(d.net_sales || 0);
+    });
+    const brandSpend: Record<string, number> = {};
     adsData.forEach(d => {
       const brand = normBrand(normStore(d.store));
-      if (brand && brand !== 'Other' && !DISCONTINUED_BRANDS.has(brand)) set.add(brand);
+      if (DISCONTINUED_BRANDS.has(brand)) return;
+      brandSpend[brand] = (brandSpend[brand] || 0) + Math.abs(Number(d.spent || 0));
     });
-    // From channel data (product names) — brands with revenue but no ads
+    const brandAdmin: Record<string, number> = {};
     channelData.forEach(d => {
       const brand = normBrand(d.product);
-      if (brand && brand !== 'Other' && !DISCONTINUED_BRANDS.has(brand)) set.add(brand);
+      if (DISCONTINUED_BRANDS.has(brand)) return;
+      brandAdmin[brand] = (brandAdmin[brand] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
     });
-    return Array.from(set).sort();
-  }, [adsData, channelData]);
+    const allBrands = new Set([...Object.keys(brandRev), ...Object.keys(brandSpend)]);
+    allBrands.delete('Other');
+    return Array.from(allBrands)
+      .map(brand => {
+        const rev = brandRev[brand] || 0;
+        const spend = brandSpend[brand] || 0;
+        const admin = brandAdmin[brand] || 0;
+        const totalCost = spend + admin;
+        const mktRatio = rev > 0 ? (spend / rev) * 100 : 0;
+        const effRoas = totalCost > 0 ? rev / totalCost : 0;
+        const roas = spend > 0 ? rev / spend : 0;
+        return { brand, revenue: rev, spend, admin, totalCost, mktRatio, roas, effRoas };
+      })
+      .sort((a, b) => b.revenue - a.revenue);
+  }, [prodData, adsData, channelData]);
 
-  // ══════════════════════════════════════════════════════════════════════
-  // PLATFORM BREAKDOWN — exclusive Channel ROAS + sub-source breakdown
-  // ══════════════════════════════════════════════════════════════════════
-  const platformBreakdown = useMemo(() => {
-    const filteredAds = brandFilter === 'all'
-      ? adsData
-      : adsData.filter(d => normBrand(normStore(d.store)) === brandFilter);
-
-    // Spend per platform + sub-source tracking
-    const byPlatform: Record<string, { total: number; subs: Record<string, number> }> = {};
-    filteredAds.forEach(d => {
-      const platform = normPlatform(d.source);
-      const sub = getSubSource(d.source);
-      const spent = Math.abs(Number(d.spent || 0));
-      if (!byPlatform[platform]) byPlatform[platform] = { total: 0, subs: {} };
-      byPlatform[platform].total += spent;
-      if (sub) {
-        byPlatform[platform].subs[sub] = (byPlatform[platform].subs[sub] || 0) + spent;
-      }
-    });
-
-    // Channel revenue from daily_channel_data — filtered by brand if applicable
-    const channelRev: Record<string, number> = {};
-    channelData.forEach(d => {
-      // daily_channel_data.product IS the brand name (e.g. "Roove", "Dr Hyun")
-      // Use normBrand() to match against brandFilter (e.g. "DrHyun")
-      if (brandFilter !== 'all') {
-        if (normBrand(d.product) !== brandFilter) return;
-      }
-      const ch = d.channel || 'Other';
-      channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
-    });
-
-    // Aggregate admin fee per channel from daily_channel_data
-    const channelAdminFee: Record<string, number> = {};
-    channelData.forEach(d => {
-      if (brandFilter !== 'all') {
-        if (normBrand(d.product) !== brandFilter) return;
-      }
-      const ch = d.channel || 'Other';
-      channelAdminFee[ch] = (channelAdminFee[ch] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
-    });
-
-    const totalSpendAll = Object.values(byPlatform).reduce((a, b) => a + b.total, 0);
-    const numDays = new Set(filteredAds.map(d => d.date)).size || 1;
-
-    const result = Object.entries(byPlatform)
-      .sort(([, a], [, b]) => b.total - a.total)
-      .map(([platform, data]) => {
-        const revenueChannels = PLATFORM_CHANNEL_MAP[platform];
-        const revenueLabel = PLATFORM_CHANNEL_LABEL[platform] || '—';
-        const channelRevenue = revenueChannels
-          ? revenueChannels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0)
-          : 0;
-        const adminFee = revenueChannels
-          ? revenueChannels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0)
-          : 0;
-
-        const roas = data.total > 0 && channelRevenue > 0 ? channelRevenue / data.total : 0;
-        const totalCost = data.total + adminFee;
-        const effectiveRoas = totalCost > 0 && channelRevenue > 0 ? channelRevenue / totalCost : 0;
-
-        const subDetails = Object.entries(data.subs)
-          .sort(([, a], [, b]) => b - a)
-          .map(([name, spent]) => ({
-            name,
-            spent,
-            pct: data.total > 0 ? (spent / data.total) * 100 : 0,
-          }));
-
-        return {
-          platform,
-          spent: data.total,
-          pct: totalSpendAll > 0 ? (data.total / totalSpendAll) * 100 : 0,
-          dailyAvg: data.total / numDays,
-          roas,
-          adminFee,
-          effectiveRoas,
-          revenueChannel: revenueLabel,
-          channelRevenue,
-          subDetails,
-          color: PLATFORM_COLORS[platform] || '#64748b',
-        };
-      });
-
-    // Add rows for platforms in PLATFORM_CHANNEL_MAP that have revenue but no ad spend
-    // This handles cases like Osgard having Shopee/TikTok revenue but only Facebook Ads spend
-    const existingPlatforms = new Set(result.map(r => r.platform));
-    for (const [platform, channels] of Object.entries(PLATFORM_CHANNEL_MAP)) {
-      if (existingPlatforms.has(platform)) continue; // already in result from ad spend
-      const channelRevenue = channels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0);
-      if (channelRevenue <= 0) continue; // no revenue either, skip
-
-      const revenueLabel = PLATFORM_CHANNEL_LABEL[platform] || '—';
-      const adminFee = channels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0);
-
-      // Build sub-details for multi-channel platforms (e.g. Other Marketplace)
-      const subDetails = channels.length > 1
-        ? channels
-            .map(ch => ({ name: ch, spent: channelRev[ch] || 0, pct: channelRevenue > 0 ? ((channelRev[ch] || 0) / channelRevenue) * 100 : 0 }))
-            .filter(s => s.spent > 0)
-            .sort((a, b) => b.spent - a.spent)
-        : [];
-
-      result.push({
-        platform,
-        spent: 0,
-        pct: 0,
-        dailyAvg: 0,
-        roas: 0,
-        adminFee,
-        effectiveRoas: adminFee > 0 && channelRevenue > 0 ? channelRevenue / adminFee : 0,
-        revenueChannel: revenueLabel,
-        channelRevenue,
-        subDetails,
-        color: PLATFORM_COLORS[platform] || '#64748b',
-      });
-    }
-
-    const resellerRevenue = channelRev['Reseller'] || 0;
-    if (resellerRevenue > 0) {
-      result.push({
-        platform: 'Reseller',
-        spent: 0,
-        pct: 0,
-        dailyAvg: 0,
-        roas: 0,
-        adminFee: 0,
-        effectiveRoas: 0,
-        revenueChannel: 'Reseller',
-        channelRevenue: resellerRevenue,
-        subDetails: [],
-        color: '#f59e0b',
-      });
-    }
-
-    return result;
-  }, [adsData, channelData, brandFilter, productMappings]);
-
-  // ── Per-brand matrix ──
+  // ═══════════════════════════════════════════════════════════════════
+  // SECTION 3b: Brand × Traffic Source Matrix — GLOBAL
+  // ═══════════════════════════════════════════════════════════════════
   const brandPlatformMatrix = useMemo(() => {
-    if (brandFilter !== 'all') return [];
     const matrix: Record<string, Record<string, number>> = {};
     const allPlatforms = new Set<string>();
 
@@ -435,9 +227,91 @@ export default function MarketingPage() {
       .sort((a, b) => b._total - a._total);
 
     return { rows, platforms };
-  }, [adsData, brandFilter]);
+  }, [adsData]);
 
-  // ── Daily dynamics ──
+  // ═══════════════════════════════════════════════════════════════════
+  // SECTION 4: Unique brands + Platform Breakdown — FILTERED
+  // ═══════════════════════════════════════════════════════════════════
+  const uniqueBrands = useMemo(() => {
+    const set = new Set<string>();
+    adsData.forEach(d => {
+      const brand = normBrand(normStore(d.store));
+      if (brand && brand !== 'Other' && !DISCONTINUED_BRANDS.has(brand)) set.add(brand);
+    });
+    channelData.forEach(d => {
+      const brand = normBrand(d.product);
+      if (brand && brand !== 'Other' && !DISCONTINUED_BRANDS.has(brand)) set.add(brand);
+    });
+    return Array.from(set).sort();
+  }, [adsData, channelData]);
+
+  const platformBreakdown = useMemo(() => {
+    const filteredAds = brandFilter === 'all'
+      ? adsData
+      : adsData.filter(d => normBrand(normStore(d.store)) === brandFilter);
+
+    const byPlatform: Record<string, { total: number; subs: Record<string, number> }> = {};
+    filteredAds.forEach(d => {
+      const platform = normPlatform(d.source);
+      const sub = getSubSource(d.source);
+      const spent = Math.abs(Number(d.spent || 0));
+      if (!byPlatform[platform]) byPlatform[platform] = { total: 0, subs: {} };
+      byPlatform[platform].total += spent;
+      if (sub) byPlatform[platform].subs[sub] = (byPlatform[platform].subs[sub] || 0) + spent;
+    });
+
+    const channelRev: Record<string, number> = {};
+    channelData.forEach(d => {
+      if (brandFilter !== 'all' && normBrand(d.product) !== brandFilter) return;
+      const ch = d.channel || 'Other';
+      channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
+    });
+
+    const channelAdminFee: Record<string, number> = {};
+    channelData.forEach(d => {
+      if (brandFilter !== 'all' && normBrand(d.product) !== brandFilter) return;
+      const ch = d.channel || 'Other';
+      channelAdminFee[ch] = (channelAdminFee[ch] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
+    });
+
+    const totalSpendAll = Object.values(byPlatform).reduce((a, b) => a + b.total, 0);
+    const numDays = new Set(filteredAds.map(d => d.date)).size || 1;
+
+    const result = Object.entries(byPlatform)
+      .sort(([, a], [, b]) => b.total - a.total)
+      .map(([platform, data]) => {
+        const revenueChannels = PLATFORM_CHANNEL_MAP[platform];
+        const revenueLabel = PLATFORM_CHANNEL_LABEL[platform] || '—';
+        const channelRevenue = revenueChannels ? revenueChannels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0) : 0;
+        const adminFee = revenueChannels ? revenueChannels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0) : 0;
+        const roas = data.total > 0 && channelRevenue > 0 ? channelRevenue / data.total : 0;
+        const totalCost = data.total + adminFee;
+        const effectiveRoas = totalCost > 0 && channelRevenue > 0 ? channelRevenue / totalCost : 0;
+        const subDetails = Object.entries(data.subs).sort(([, a], [, b]) => b - a).map(([name, spent]) => ({ name, spent, pct: data.total > 0 ? (spent / data.total) * 100 : 0 }));
+        return { platform, spent: data.total, pct: totalSpendAll > 0 ? (data.total / totalSpendAll) * 100 : 0, dailyAvg: data.total / numDays, roas, adminFee, effectiveRoas, revenueChannel: revenueLabel, channelRevenue, subDetails, color: PLATFORM_COLORS[platform] || '#64748b' };
+      });
+
+    // Add platforms with revenue but no ad spend
+    const existingPlatforms = new Set(result.map(r => r.platform));
+    for (const [platform, channels] of Object.entries(PLATFORM_CHANNEL_MAP)) {
+      if (existingPlatforms.has(platform)) continue;
+      const channelRevenue = channels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0);
+      if (channelRevenue <= 0) continue;
+      const revenueLabel = PLATFORM_CHANNEL_LABEL[platform] || '—';
+      const adminFee = channels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0);
+      const subDetails = channels.length > 1
+        ? channels.map(ch => ({ name: ch, spent: channelRev[ch] || 0, pct: channelRevenue > 0 ? ((channelRev[ch] || 0) / channelRevenue) * 100 : 0 })).filter(s => s.spent > 0).sort((a, b) => b.spent - a.spent)
+        : [];
+      result.push({ platform, spent: 0, pct: 0, dailyAvg: 0, roas: 0, adminFee, effectiveRoas: adminFee > 0 && channelRevenue > 0 ? channelRevenue / adminFee : 0, revenueChannel: revenueLabel, channelRevenue, subDetails, color: PLATFORM_COLORS[platform] || '#64748b' });
+    }
+
+    const resellerRevenue = channelRev['Reseller'] || 0;
+    if (resellerRevenue > 0) {
+      result.push({ platform: 'Reseller', spent: 0, pct: 0, dailyAvg: 0, roas: 0, adminFee: 0, effectiveRoas: 0, revenueChannel: 'Reseller', channelRevenue: resellerRevenue, subDetails: [], color: '#f59e0b' });
+    }
+
+    return result;
+  }, [adsData, channelData, brandFilter, productMappings]);
 
   // ── Styles ──
   const C = { bg: '#0a0f1a', card: '#111a2e', bdr: '#1a2744', dim: '#64748b', txt: '#e2e8f0' };
@@ -465,71 +339,29 @@ export default function MarketingPage() {
     </div>
   );
 
+  const globalEffRoas = (totalSpend + globalAdminFee) > 0 ? totalRevenue / (totalSpend + globalAdminFee) : 0;
+
   return (
     <div className="fade-in">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Marketing</h2>
-        <select
-          value={brandFilter}
-          onChange={(e) => setBrandFilter(e.target.value)}
-          style={{
-            background: '#1a2744', border: `1px solid ${C.bdr}`, borderRadius: 8,
-            padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none',
-          }}>
-          <option value="all">All Brands</option>
-          {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
-        </select>
-      </div>
+      <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Marketing</h2>
 
-      {/* ── KPI Cards ── */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* SECTION 1: KPI Cards — Global                                 */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
         <KPI label="Total Revenue" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalRevenue / activeDays : 0)}/hari`} color="#3b82f6" />
         <KPI label="Total Ad Spend" val={`Rp ${fmtCompact(totalSpend)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalSpend / activeDays : 0)}/hari`} color="#f59e0b" />
-        <KPI label="Mkt Ratio" val={`${totalRatio.toFixed(1)}%`} sub={`Avg: ${avgDailyRatio.toFixed(1)}%/hari`} color={totalRatio > 30 ? '#ef4444' : totalRatio > 20 ? '#f59e0b' : '#10b981'} />
-        <KPI label="Eff. ROAS" val={`${(() => {
-          const totalAdmin = platformBreakdown.reduce((s, p) => s + (p.adminFee || 0), 0);
-          const tc = totalSpend + totalAdmin;
-          return tc > 0 ? (totalRevenue / tc).toFixed(1) : '0.0';
-        })()}x`} sub={`Ads only: ${totalRoas.toFixed(1)}x`} color="#8b5cf6" />
+        <KPI label="Mkt Ratio" val={`${totalRatio.toFixed(1)}%`} sub={`Ads only: ${totalRoas.toFixed(1)}x ROAS`} color={totalRatio > 30 ? '#ef4444' : totalRatio > 20 ? '#f59e0b' : '#10b981'} />
+        <KPI label="Eff. ROAS" val={`${globalEffRoas.toFixed(1)}x`} sub={`Ads + Admin MP`} color="#8b5cf6" />
       </div>
 
-      {/* ── Daily Ad Spend & Mkt Ratio Chart ── */}
-      {ratioChartData.length > 0 && (
-        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Ad Spend & Marketing Ratio</div>
-          <ResponsiveContainer width="100%" height={300}>
-            <ComposedChart data={ratioChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.bdr} />
-              <XAxis dataKey="date" stroke={C.dim} fontSize={11} />
-              <YAxis yAxisId="left" stroke={C.dim} fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
-              <YAxis yAxisId="right" orientation="right" stroke="#ef4444" fontSize={11} tickFormatter={(v: number) => `${v}%`} />
-              <Tooltip content={({ active, payload, label }) => {
-                if (!active || !payload?.length) return null;
-                return (
-                  <div style={{ background: '#1e293b', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
-                    <div style={{ fontWeight: 700, marginBottom: 6 }}>{label}</div>
-                    {payload.map((p: any, i: number) => (
-                      <div key={i} style={{ color: p.color || p.stroke, marginBottom: 2, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-                        <span>{p.name}</span>
-                        <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{p.name === 'Mkt Ratio %' ? `${p.value}%` : `Rp ${fmtCompact(p.value)}`}</span>
-                      </div>
-                    ))}
-                  </div>
-                );
-              }} />
-              <Bar yAxisId="left" dataKey="Revenue" fill="#3b82f6" fillOpacity={0.4} radius={[4, 4, 0, 0]} />
-              <Bar yAxisId="left" dataKey="Ad Spend" fill="#f59e0b" fillOpacity={0.7} radius={[4, 4, 0, 0]} />
-              <Line yAxisId="right" type="monotone" dataKey="Mkt Ratio %" stroke="#ef4444" strokeWidth={2} dot={{ fill: '#ef4444', r: 3 }} />
-            </ComposedChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* ── Daily Ad Spend by Brand ── */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* SECTION 2: Daily Ad Spend — Global                            */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
       {dailyBrandData.data.length > 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Daily Ad Spend — By Brand</div>
-          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Breakdown pengeluaran iklan harian per brand</div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Daily Ad Spend</div>
+          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Pengeluaran iklan harian per brand</div>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={dailyBrandData.data}>
               <CartesianGrid strokeDasharray="3 3" stroke={C.bdr} />
@@ -569,18 +401,129 @@ export default function MarketingPage() {
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════════════ */}
-      {/* Ad Spend by Traffic Source — Exclusive Channel ROAS              */}
-      {/* ══════════════════════════════════════════════════════════════════ */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* SECTION 3: Brand Performance — Global                         */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {brandPerformance.length > 0 && (
+        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Brand Performance</div>
+          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Revenue, biaya marketing, dan efisiensi per brand</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                  {['Brand', 'Revenue', 'Ad Spend', 'Admin MP', 'Total Cost', 'Mkt Ratio', 'ROAS', 'Eff. ROAS'].map(h => (
+                    <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Brand' ? 'left' : 'right', color: C.dim, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {brandPerformance.map(b => (
+                  <tr key={b.brand} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
+                    <td style={{ padding: '8px 10px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ width: 10, height: 10, borderRadius: 3, background: BRAND_COLORS[b.brand] || '#64748b', flexShrink: 0 }} />
+                        <span style={{ fontWeight: 600 }}>{b.brand}</span>
+                      </div>
+                    </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>Rp {fmtCompact(b.revenue)}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: b.spend > 0 ? C.txt : `${C.dim}66` }}>{b.spend > 0 ? `Rp ${fmtCompact(b.spend)}` : '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: b.admin > 0 ? '#f59e0b' : `${C.dim}66` }}>{b.admin > 0 ? `Rp ${fmtCompact(b.admin)}` : '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: C.dim }}>{b.totalCost > 0 ? `Rp ${fmtCompact(b.totalCost)}` : '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: b.mktRatio > 30 ? '#ef4444' : b.mktRatio > 20 ? '#f59e0b' : '#10b981' }}>{b.spend > 0 ? `${b.mktRatio.toFixed(1)}%` : '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: b.roas >= 3 ? '#10b981' : b.roas >= 1.5 ? '#f59e0b' : b.roas > 0 ? '#ef4444' : `${C.dim}66` }}>{b.roas > 0 ? `${b.roas.toFixed(1)}x` : '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: b.effRoas >= 3 ? '#10b981' : b.effRoas >= 1.5 ? '#f59e0b' : b.effRoas > 0 ? '#ef4444' : `${C.dim}66` }}>{b.effRoas > 0 ? `${b.effRoas.toFixed(1)}x` : '—'}</td>
+                  </tr>
+                ))}
+                {(() => {
+                  const tRev = brandPerformance.reduce((s, b) => s + b.revenue, 0);
+                  const tSpend = brandPerformance.reduce((s, b) => s + b.spend, 0);
+                  const tAdmin = brandPerformance.reduce((s, b) => s + b.admin, 0);
+                  const tCost = tSpend + tAdmin;
+                  const tRatio = tRev > 0 ? (tSpend / tRev) * 100 : 0;
+                  const tRoas = tSpend > 0 ? tRev / tSpend : 0;
+                  const tEffRoas = tCost > 0 ? tRev / tCost : 0;
+                  return (
+                    <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
+                      <td style={{ padding: '8px 10px', fontWeight: 700 }}>TOTAL</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(tRev)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(tSpend)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f59e0b' }}>Rp {fmtCompact(tAdmin)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(tCost)}</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: tRatio > 30 ? '#ef4444' : tRatio > 20 ? '#f59e0b' : '#10b981' }}>{tRatio.toFixed(1)}%</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: tRoas >= 3 ? '#10b981' : tRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{tRoas.toFixed(1)}x</td>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: tEffRoas >= 3 ? '#10b981' : tEffRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{tEffRoas.toFixed(1)}x</td>
+                    </tr>
+                  );
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* SECTION 3b: Brand × Traffic Source Matrix — Global             */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {brandPlatformMatrix.rows?.length > 0 && (
+        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Spend Allocation</div>
+          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Alokasi ads spend tiap brand ke tiap traffic source</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 500 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                  <th style={{ padding: '8px 10px', textAlign: 'left', color: C.dim, fontWeight: 600, fontSize: 11, position: 'sticky', left: 0, background: C.card }}>Brand</th>
+                  {brandPlatformMatrix.platforms?.map((p: string) => (
+                    <th key={p} style={{ padding: '8px 6px', textAlign: 'right', color: PLATFORM_COLORS[p] || C.dim, fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap' }}>{p}</th>
+                  ))}
+                  <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f1f5f9', fontWeight: 700, fontSize: 11 }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {brandPlatformMatrix.rows?.map((row: any) => (
+                  <tr key={row.brand} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
+                    <td style={{ padding: '8px 10px', fontWeight: 600, position: 'sticky', left: 0, background: C.card, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: 2, background: BRAND_COLORS[row.brand] || '#64748b', flexShrink: 0 }} />
+                      {row.brand}
+                    </td>
+                    {brandPlatformMatrix.platforms?.map((p: string) => (
+                      <td key={p} style={{ padding: '8px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: row[p] > 0 ? C.txt : `${C.dim}66` }}>
+                        {row[p] > 0 ? fmtCompact(row[p]) : '—'}
+                      </td>
+                    ))}
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 11 }}>{fmtCompact(row._total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════ */}
+      {/* SECTION 4: Ad Spend by Traffic Source — Brand-filtered         */}
+      {/* ═══════════════════════════════════════════════════════════════ */}
       <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 700 }}>Ad Spend by Traffic Source</div>
-          <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>ROAS per channel atribusi — exclusive, tanpa double count</div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>Ad Spend by Traffic Source</div>
+            <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>ROAS per channel atribusi — exclusive, tanpa double count</div>
+          </div>
+          <select
+            value={brandFilter}
+            onChange={(e) => setBrandFilter(e.target.value)}
+            style={{
+              background: '#1a2744', border: `1px solid ${C.bdr}`, borderRadius: 8,
+              padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none',
+            }}>
+            <option value="all">All Brands</option>
+            {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
         </div>
 
         {platformBreakdown.length > 0 ? (
           <>
-            {/* Bar chart */}
             <ResponsiveContainer width="100%" height={Math.max(platformBreakdown.length * 50, 120)}>
               <BarChart data={platformBreakdown} layout="vertical" margin={{ left: 10, right: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke={C.bdr} horizontal={false} />
@@ -624,7 +567,6 @@ export default function MarketingPage() {
               </BarChart>
             </ResponsiveContainer>
 
-            {/* Detail table */}
             <div style={{ overflowX: 'auto', marginTop: 16 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
@@ -669,7 +611,6 @@ export default function MarketingPage() {
                       </td>
                     </tr>
                   ))}
-                  {/* ── FIX: TOTAL row now uses platformBreakdown aggregates instead of unfiltered globals ── */}
                   {(() => {
                     const totalSpentSum = platformBreakdown.reduce((s, p) => s + p.spent, 0);
                     const totalDailyAvgSum = platformBreakdown.reduce((s, p) => s + p.dailyAvg, 0);
@@ -678,7 +619,6 @@ export default function MarketingPage() {
                     const totalRoasCalc = totalSpentSum > 0 ? totalRevenueSum / totalSpentSum : 0;
                     const totalAllCost = totalSpentSum + totalAdminSum;
                     const effRoasCalc = totalAllCost > 0 ? totalRevenueSum / totalAllCost : 0;
-
                     return (
                       <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
                         <td style={{ padding: '8px 10px', fontWeight: 700 }}>TOTAL</td>
@@ -717,43 +657,6 @@ export default function MarketingPage() {
           </div>
         )}
       </div>
-
-      {/* ── Brand × Traffic Source Matrix ── */}
-      {brandFilter === 'all' && brandPlatformMatrix.rows?.length > 0 && (
-        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Brand × Traffic Source Matrix</div>
-          <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Alokasi ads spend tiap brand ke tiap traffic source</div>
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 500 }}>
-              <thead>
-                <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                  <th style={{ padding: '8px 10px', textAlign: 'left', color: C.dim, fontWeight: 600, fontSize: 11, position: 'sticky', left: 0, background: C.card }}>Brand</th>
-                  {brandPlatformMatrix.platforms?.map((p: string) => (
-                    <th key={p} style={{ padding: '8px 6px', textAlign: 'right', color: PLATFORM_COLORS[p] || C.dim, fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap' }}>{p}</th>
-                  ))}
-                  <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f1f5f9', fontWeight: 700, fontSize: 11 }}>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {brandPlatformMatrix.rows?.map((row: any) => (
-                  <tr key={row.brand} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
-                    <td style={{ padding: '8px 10px', fontWeight: 600, position: 'sticky', left: 0, background: C.card, display: 'flex', alignItems: 'center', gap: 6 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: 2, background: BRAND_COLORS[row.brand] || '#64748b', flexShrink: 0 }} />
-                      {row.brand}
-                    </td>
-                    {brandPlatformMatrix.platforms?.map((p: string) => (
-                      <td key={p} style={{ padding: '8px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: row[p] > 0 ? C.txt : `${C.dim}66` }}>
-                        {row[p] > 0 ? fmtCompact(row[p]) : '—'}
-                      </td>
-                    ))}
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 11 }}>{fmtCompact(row._total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
