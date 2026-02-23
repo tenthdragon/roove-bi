@@ -1,8 +1,8 @@
 // @ts-nocheck
-// v5 - sidebar navigation layout
+// v6 - sidebar nav desktop + hamburger slide-out mobile
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import { ALL_TABS, canAccessTab } from '@/lib/utils';
@@ -40,6 +40,8 @@ export default function DashboardLayout({ children }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const overlayRef = useRef(null);
   const router = useRouter();
   const pathname = usePathname();
   const supabase = createClient();
@@ -56,6 +58,21 @@ export default function DashboardLayout({ children }) {
     load();
   }, []);
 
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
+  // Lock body scroll when mobile menu open
+  useEffect(() => {
+    if (mobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [mobileMenuOpen]);
+
   useEffect(() => {
     if (!profile || loading) return;
     const allowed = getAllowedTabs(profile);
@@ -71,6 +88,7 @@ export default function DashboardLayout({ children }) {
 
   const navigateTo = (tabId) => {
     router.push(tabId === 'overview' ? '/dashboard' : '/dashboard/' + tabId);
+    setMobileMenuOpen(false);
   };
 
   const goHome = () => {
@@ -132,6 +150,67 @@ export default function DashboardLayout({ children }) {
 
   const sidebarW = sidebarCollapsed ? 64 : 220;
 
+  // ── Shared sidebar content (used by both desktop and mobile) ──
+  function SidebarNav({ isMobile = false }) {
+    return (
+      <>
+        {/* Nav Items */}
+        <nav style={{ flex:1, padding:'8px 8px', display:'flex', flexDirection:'column', gap:2 }}>
+          {visibleTabs.map(t => {
+            const active = currentTab === t.id;
+            const collapsed = !isMobile && sidebarCollapsed;
+            return (
+              <button
+                key={t.id}
+                onClick={() => navigateTo(t.id)}
+                title={collapsed ? t.label : undefined}
+                style={{
+                  display:'flex',
+                  alignItems:'center',
+                  gap:12,
+                  padding: collapsed ? '10px 0' : '10px 12px',
+                  justifyContent: collapsed ? 'center' : 'flex-start',
+                  borderRadius:8,
+                  border:'none',
+                  cursor:'pointer',
+                  fontSize:14,
+                  fontWeight: active ? 600 : 500,
+                  background: active ? 'rgba(59,130,246,0.12)' : 'transparent',
+                  color: active ? '#60a5fa' : '#94a3b8',
+                  transition:'all 0.15s ease',
+                  whiteSpace:'nowrap',
+                  width:'100%',
+                }}
+              >
+                <TabIcon id={t.id} size={20} />
+                {(isMobile || !sidebarCollapsed) && <span>{t.label}</span>}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Logout at bottom */}
+        <div style={{ padding:'12px 8px', borderTop:'1px solid #1a2744' }}>
+          <button
+            onClick={handleLogout}
+            style={{
+              display:'flex', alignItems:'center', gap:12, width:'100%',
+              padding: (!isMobile && sidebarCollapsed) ? '10px 0' : '10px 12px',
+              justifyContent: (!isMobile && sidebarCollapsed) ? 'center' : 'flex-start',
+              borderRadius:8, border:'none', cursor:'pointer',
+              background:'transparent', color:'#64748b', fontSize:14, fontWeight:500,
+            }}
+          >
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+            {(isMobile || !sidebarCollapsed) && <span>Keluar</span>}
+          </button>
+        </div>
+      </>
+    );
+  }
+
   return (
     <DateRangeProvider>
       <div style={{ minHeight:'100vh', background:'#0b1121', display:'flex' }}>
@@ -183,9 +262,9 @@ export default function DashboardLayout({ children }) {
             )}
             {sidebarCollapsed && (
               <button onClick={() => setSidebarCollapsed(false)} style={{
-                background:'none', border:'none', cursor:'pointer', color:'#475569',
+                border:'1px solid #1a2744', cursor:'pointer', color:'#475569',
                 padding:4, position:'absolute', right:-12, top:16,
-                background:'#111a2e', border:'1px solid #1a2744', borderRadius:'50%',
+                background:'#111a2e', borderRadius:'50%',
                 width:24, height:24, display:'flex', alignItems:'center', justifyContent:'center',
               }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -195,59 +274,62 @@ export default function DashboardLayout({ children }) {
             )}
           </div>
 
-          {/* Nav Items */}
-          <nav style={{ flex:1, padding:'8px 8px', display:'flex', flexDirection:'column', gap:2 }}>
-            {visibleTabs.map(t => {
-              const active = currentTab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => navigateTo(t.id)}
-                  title={sidebarCollapsed ? t.label : undefined}
-                  style={{
-                    display:'flex',
-                    alignItems:'center',
-                    gap:12,
-                    padding: sidebarCollapsed ? '10px 0' : '10px 12px',
-                    justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                    borderRadius:8,
-                    border:'none',
-                    cursor:'pointer',
-                    fontSize:13,
-                    fontWeight: active ? 600 : 500,
-                    background: active ? 'rgba(59,130,246,0.12)' : 'transparent',
-                    color: active ? '#60a5fa' : '#94a3b8',
-                    transition:'all 0.15s ease',
-                    whiteSpace:'nowrap',
-                    width:'100%',
-                  }}
-                >
-                  <TabIcon id={t.id} size={18} />
-                  {!sidebarCollapsed && <span>{t.label}</span>}
-                </button>
-              );
-            })}
-          </nav>
-
-          {/* Logout at bottom */}
-          <div style={{ padding:'12px 8px', borderTop:'1px solid #1a2744' }}>
-            <button
-              onClick={handleLogout}
-              style={{
-                display:'flex', alignItems:'center', gap:12, width:'100%',
-                padding: sidebarCollapsed ? '10px 0' : '10px 12px',
-                justifyContent: sidebarCollapsed ? 'center' : 'flex-start',
-                borderRadius:8, border:'none', cursor:'pointer',
-                background:'transparent', color:'#64748b', fontSize:13, fontWeight:500,
-              }}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
-              </svg>
-              {!sidebarCollapsed && <span>Keluar</span>}
-            </button>
-          </div>
+          <SidebarNav isMobile={false} />
         </aside>
+
+        {/* ═══ MOBILE OVERLAY + SLIDE-OUT SIDEBAR ═══ */}
+        {mobileMenuOpen && (
+          <div
+            ref={overlayRef}
+            onClick={(e) => { if (e.target === overlayRef.current) setMobileMenuOpen(false); }}
+            className="mobile-overlay"
+            style={{
+              position:'fixed', top:0, left:0, right:0, bottom:0,
+              background:'rgba(0,0,0,0.6)',
+              zIndex:100,
+              backdropFilter:'blur(2px)',
+            }}
+          >
+            <aside style={{
+              width:260,
+              height:'100%',
+              background:'linear-gradient(180deg, #0f172a 0%, #111a2e 100%)',
+              borderRight:'1px solid #1a2744',
+              display:'flex',
+              flexDirection:'column',
+              animation:'slideIn 0.2s ease-out',
+            }}>
+              {/* Mobile sidebar header */}
+              <div style={{
+                padding:'16px 16px',
+                borderBottom:'1px solid #1a2744',
+                display:'flex',
+                alignItems:'center',
+                justifyContent:'space-between',
+                minHeight:57,
+              }}>
+                <div onClick={goHome} style={{ display:'flex', alignItems:'center', gap:10, cursor:'pointer' }}>
+                  <div style={{
+                    width:32, height:32, borderRadius:8,
+                    background:'linear-gradient(135deg,#3b82f6,#8b5cf6)',
+                    display:'flex', alignItems:'center', justifyContent:'center',
+                    fontSize:15, fontWeight:800, color:'#fff',
+                  }}>R</div>
+                  <span style={{ fontSize:16, fontWeight:700, color:'#e2e8f0' }}>Roove BI</span>
+                </div>
+                <button onClick={() => setMobileMenuOpen(false)} style={{
+                  background:'none', border:'none', cursor:'pointer', color:'#64748b', padding:4,
+                }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                  </svg>
+                </button>
+              </div>
+
+              <SidebarNav isMobile={true} />
+            </aside>
+          </div>
+        )}
 
         {/* ═══ MAIN CONTENT ═══ */}
         <div className="main-content-area" style={{
@@ -258,9 +340,9 @@ export default function DashboardLayout({ children }) {
           flexDirection:'column',
           minHeight:'100vh',
         }}>
-          {/* Top Bar (date picker + user info) */}
+          {/* Top Bar */}
           <header style={{
-            padding:'10px 20px',
+            padding:'10px 16px',
             borderBottom:'1px solid #1a2744',
             display:'flex',
             alignItems:'center',
@@ -271,17 +353,29 @@ export default function DashboardLayout({ children }) {
             top:0,
             zIndex:40,
             minHeight:49,
+            gap:8,
           }}>
-            <div style={{ fontSize:14, fontWeight:600, color:'#94a3b8' }}>
-              {visibleTabs.find(t => t.id === currentTab)?.label || 'Dashboard'}
-            </div>
             <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+              {/* Hamburger - mobile only */}
+              <button className="mobile-hamburger" onClick={() => setMobileMenuOpen(true)} style={{
+                display:'none', /* shown via CSS on mobile */
+                background:'none', border:'none', cursor:'pointer', color:'#94a3b8', padding:4,
+              }}>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="3" y1="6" x2="21" y2="6"/>
+                  <line x1="3" y1="12" x2="21" y2="12"/>
+                  <line x1="3" y1="18" x2="21" y2="18"/>
+                </svg>
+              </button>
+              <div style={{ fontSize:14, fontWeight:600, color:'#94a3b8' }}>
+                {visibleTabs.find(t => t.id === currentTab)?.label || 'Dashboard'}
+              </div>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
               {showDatePicker && <HeaderDatePicker />}
-              {profile && (
-                <div style={{ fontSize:11, color:'#475569', fontWeight:500 }}>
-                  {profile.full_name || profile.email}
-                </div>
-              )}
+              <div className="desktop-sidebar" style={{ fontSize:11, color:'#475569', fontWeight:500 }}>
+                {profile?.full_name || profile?.email}
+              </div>
             </div>
           </header>
 
@@ -290,27 +384,6 @@ export default function DashboardLayout({ children }) {
             {children}
           </main>
         </div>
-
-        {/* ═══ MOBILE BOTTOM NAV ═══ */}
-        <nav className="mobile-nav" style={{
-          display:'none', position:'fixed', bottom:0, left:0, right:0,
-          background:'#111a2e', borderTop:'1px solid #1a2744',
-          padding:'6px 4px', paddingBottom:'max(6px, env(safe-area-inset-bottom))',
-          zIndex:50, justifyContent:'space-around',
-        }}>
-          {visibleTabs.map(t => (
-            <button key={t.id} onClick={() => navigateTo(t.id)} style={{
-              display:'flex', flexDirection:'column', alignItems:'center', gap:2,
-              padding:'6px 4px', borderRadius:8, border:'none', cursor:'pointer',
-              background: currentTab === t.id ? 'rgba(59,130,246,0.15)' : 'transparent',
-              color: currentTab === t.id ? '#3b82f6' : '#64748b',
-              fontSize:9, fontWeight:600, minWidth:44,
-            }}>
-              <TabIcon id={t.id} size={18} />
-              {t.label}
-            </button>
-          ))}
-        </nav>
       </div>
     </DateRangeProvider>
   );
