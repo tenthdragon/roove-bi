@@ -97,6 +97,7 @@ export async function POST(req: NextRequest) {
         const orderHeader: any = {
           scalev_id: null,
           order_id: row.order_id,
+          customer_type: row.customer_type || null,
           status: row.order_status || 'unknown',
           shipped_time: shippedTime,
           platform: row.platform || null,
