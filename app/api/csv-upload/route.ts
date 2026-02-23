@@ -228,13 +228,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Log
+    // Log with uploader info
+    const uploadedBy = formData.get('uploaded_by') as string || null;
+    const filename = formData.get('filename') as string || file.name;
+
     await svc.from('scalev_sync_log').insert({
       status: stats.errors.length > 0 ? 'partial' : 'success',
       sync_type: 'csv_upload',
       orders_fetched: stats.totalRows,
       orders_inserted: stats.newInserted,
       orders_updated: stats.updated,
+      uploaded_by: uploadedBy,
+      filename: filename,
       error_message: stats.errors.length > 0
         ? `${stats.errors.length} errors: ${stats.errors.slice(0, 5).join('; ')}`
         : null,
