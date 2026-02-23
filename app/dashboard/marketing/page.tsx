@@ -17,6 +17,20 @@ function normStore(s: string): string {
   return s;
 }
 
+// ── Normalize brand name for cross-table matching ──
+// Google Sheet parser stores some names differently from ads store names.
+// This mapping normalizes ALL variants to a single canonical form.
+const BRAND_NORM: Record<string, string> = {
+  'Dr Hyun': 'DrHyun',   // parser stores "Dr Hyun", ads store uses "DrHyun"
+  'Others': 'Other',      // parser stores "Others", product_mapping uses "Other"
+  'Purvu Store': 'Purvu', // ads store name variant
+};
+
+// Normalize a product/brand name to the canonical form
+function normBrand(s: string): string {
+  return BRAND_NORM[s] || s;
+}
+
 // ── 3 main traffic groups ──
 // Facebook Ads + WhatsApp → "Facebook Ads" → atribusi ke revenue Scalev
 // Shopee Ads + CPAS + Shopee Live → "Shopee Ads" → atribusi ke revenue Shopee
@@ -85,6 +99,9 @@ const CHANNEL_COLORS: Record<string, string> = {
   'Reseller': '#f59e0b',
 };
 
+// ── Discontinued brands — excluded from dropdown and charts ──
+const DISCONTINUED_BRANDS = new Set(['Almona', 'Orelif', 'Veminine', 'Yuv']);
+
 // ── Brand colors ──
 const BRAND_COLORS: Record<string, string> = {
   'Roove': '#3b82f6',
@@ -147,14 +164,15 @@ export default function MarketingPage() {
   // ── FIX: KPI calculations now respect brandFilter ──
   const { totalRevenue, totalSpend, totalRatio, totalRoas, avgDailyRatio, avgDailyRoas, activeDays } = useMemo(() => {
     // Filter prodData by brand — daily_product_summary.product IS the brand name directly
+    // Use normBrand() because parser may store "Dr Hyun" while ads store uses "DrHyun"
     const filteredProd = brandFilter === 'all'
       ? prodData
-      : prodData.filter(d => d.product === brandFilter);
+      : prodData.filter(d => normBrand(d.product) === brandFilter);
 
     // Filter adsData by brand using store name
     const filteredAds = brandFilter === 'all'
       ? adsData
-      : adsData.filter(d => normStore(d.store) === brandFilter);
+      : adsData.filter(d => normBrand(normStore(d.store)) === brandFilter);
 
     const rev = filteredProd.reduce((s, d) => s + Number(d.net_sales || 0), 0);
     const spend = filteredAds.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
@@ -188,11 +206,11 @@ export default function MarketingPage() {
   const ratioChartData = useMemo(() => {
     const filteredProd = brandFilter === 'all'
       ? prodData
-      : prodData.filter(d => d.product === brandFilter);
+      : prodData.filter(d => normBrand(d.product) === brandFilter);
 
     const filteredAds = brandFilter === 'all'
       ? adsData
-      : adsData.filter(d => normStore(d.store) === brandFilter);
+      : adsData.filter(d => normBrand(normStore(d.store)) === brandFilter);
 
     const byDate: Record<string, { rev: number; spend: number }> = {};
     filteredProd.forEach(d => {
@@ -222,7 +240,8 @@ export default function MarketingPage() {
 
     adsData.forEach(d => {
       const date = new Date(d.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
-      const brand = normStore(d.store);
+      const brand = normBrand(normStore(d.store));
+      if (DISCONTINUED_BRANDS.has(brand)) return;
       brands.add(brand);
       if (!byDate[date]) byDate[date] = {};
       byDate[date][brand] = (byDate[date][brand] || 0) + Math.abs(Number(d.spent || 0));
@@ -240,15 +259,21 @@ export default function MarketingPage() {
     };
   }, [adsData]);
 
-  // ── Unique brands for filter ──
+  // ── Unique brands for filter — from BOTH ads store names AND channel product names ──
   const uniqueBrands = useMemo(() => {
     const set = new Set<string>();
+    // From ads data (store names)
     adsData.forEach(d => {
-      const brand = normStore(d.store);
-      if (brand && brand !== 'Other') set.add(brand);
+      const brand = normBrand(normStore(d.store));
+      if (brand && brand !== 'Other' && !DISCONTINUED_BRANDS.has(brand)) set.add(brand);
+    });
+    // From channel data (product names) — brands with revenue but no ads
+    channelData.forEach(d => {
+      const brand = normBrand(d.product);
+      if (brand && brand !== 'Other' && !DISCONTINUED_BRANDS.has(brand)) set.add(brand);
     });
     return Array.from(set).sort();
-  }, [adsData]);
+  }, [adsData, channelData]);
 
   // ══════════════════════════════════════════════════════════════════════
   // PLATFORM BREAKDOWN — exclusive Channel ROAS + sub-source breakdown
@@ -256,7 +281,7 @@ export default function MarketingPage() {
   const platformBreakdown = useMemo(() => {
     const filteredAds = brandFilter === 'all'
       ? adsData
-      : adsData.filter(d => normStore(d.store) === brandFilter);
+      : adsData.filter(d => normBrand(normStore(d.store)) === brandFilter);
 
     // Spend per platform + sub-source tracking
     const byPlatform: Record<string, { total: number; subs: Record<string, number> }> = {};
@@ -274,9 +299,10 @@ export default function MarketingPage() {
     // Channel revenue from daily_channel_data — filtered by brand if applicable
     const channelRev: Record<string, number> = {};
     channelData.forEach(d => {
-      // daily_channel_data.product IS the brand name directly (e.g. "Roove", "Osgard")
+      // daily_channel_data.product IS the brand name (e.g. "Roove", "Dr Hyun")
+      // Use normBrand() to match against brandFilter (e.g. "DrHyun")
       if (brandFilter !== 'all') {
-        if (d.product !== brandFilter) return;
+        if (normBrand(d.product) !== brandFilter) return;
       }
       const ch = d.channel || 'Other';
       channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
@@ -286,7 +312,7 @@ export default function MarketingPage() {
     const channelAdminFee: Record<string, number> = {};
     channelData.forEach(d => {
       if (brandFilter !== 'all') {
-        if (d.product !== brandFilter) return;
+        if (normBrand(d.product) !== brandFilter) return;
       }
       const ch = d.channel || 'Other';
       channelAdminFee[ch] = (channelAdminFee[ch] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
@@ -388,7 +414,8 @@ export default function MarketingPage() {
     const allPlatforms = new Set<string>();
 
     adsData.forEach(d => {
-      const brand = normStore(d.store);
+      const brand = normBrand(normStore(d.store));
+      if (DISCONTINUED_BRANDS.has(brand)) return;
       const platform = normPlatform(d.source);
       allPlatforms.add(platform);
       if (!matrix[brand]) matrix[brand] = {};
