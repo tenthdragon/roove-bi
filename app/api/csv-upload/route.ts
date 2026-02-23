@@ -95,6 +95,7 @@ export async function POST(req: NextRequest) {
 
         // Build order header matching scalev_orders schema
         const orderHeader: any = {
+          scalev_id: null,
           order_id: row.order_id,
           status: row.order_status || 'unknown',
           shipped_time: shippedTime,
