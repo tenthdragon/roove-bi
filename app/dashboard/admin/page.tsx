@@ -1,4 +1,4 @@
-// @ts-nochecks
+// @ts-nocheck
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -7,22 +7,23 @@ import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
 import SheetManager from '@/components/SheetManager';
 import ScalevManager from '@/components/ScalevManager';
 import FinancialSheetManager from '@/components/FinancialSheetManager';
+import CsvOrderUploader from '@/components/CsvOrderUploader';
 
 export default function AdminPage() {
   const supabase = createClient();
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<any>(null);
+  const [uploadResult, setUploadResult] = useState(null);
   const [uploadError, setUploadError] = useState('');
-  const [imports, setImports] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
+  const [imports, setImports] = useState([]);
+  const [users, setUsers] = useState([]);
   const [dragOver, setDragOver] = useState(false);
 
   // Invite state
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('admin');
   const [inviting, setInviting] = useState(false);
-  const [inviteMsg, setInviteMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [inviteMsg, setInviteMsg] = useState(null);
 
   useEffect(() => {
     async function init() {
@@ -48,7 +49,7 @@ export default function AdminPage() {
     setUsers(u || []);
   }, [supabase]);
 
-  const handleUpload = useCallback(async (file: File) => {
+  const handleUpload = useCallback(async (file) => {
     if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
       setUploadError('File harus berformat .xlsx');
       return;
@@ -63,19 +64,19 @@ export default function AdminPage() {
       setUploadResult(result);
       const { data: i } = await supabase.from('data_imports').select('*').order('imported_at', { ascending: false });
       setImports(i || []);
-    } catch (err: any) {
+    } catch (err) {
       setUploadError(err.message || 'Upload gagal');
     } finally {
       setUploading(false);
     }
   }, [supabase]);
 
-  const handleRoleChange = async (userId: string, newRole: string) => {
+  const handleRoleChange = async (userId, newRole) => {
     try {
       const tabs = newRole === 'brand_manager' ? ['marketing'] : [];
       await updateUserRole(userId, newRole, tabs, []);
       await refreshUsers();
-    } catch (err: any) {
+    } catch (err) {
       alert('Error: ' + err.message);
     }
   };
@@ -101,7 +102,7 @@ export default function AdminPage() {
         setInviteEmail('');
         await refreshUsers();
       }
-    } catch (err: any) {
+    } catch (err) {
       setInviteMsg({ type: 'error', text: err.message || 'Invite gagal' });
     } finally {
       setInviting(false);
@@ -116,7 +117,7 @@ export default function AdminPage() {
     </div>;
   }
 
-  const roleLabel = (r: string) => {
+  const roleLabel = (r) => {
     switch(r) {
       case 'owner': return { text: 'Owner', bg: '#312e81', color: '#818cf8' };
       case 'admin': return { text: 'Admin', bg: '#064e3b', color: '#10b981' };
@@ -141,12 +142,10 @@ export default function AdminPage() {
           <span style={{ fontSize:11, color:'#64748b', fontWeight:500 }}>Data penjualan harian per produk & channel</span>
         </div>
 
-        {/* 1.1 Google Sheets Integration */}
         <div style={{ marginBottom:12 }}>
           <SheetManager />
         </div>
 
-        {/* 1.2 Upload Data Excel */}
         <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20, marginBottom:12 }}>
           <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Upload Data Excel</div>
           <div style={{ fontSize:12, color:'#64748b', marginBottom:14 }}>
@@ -165,7 +164,7 @@ export default function AdminPage() {
               const input = document.createElement('input');
               input.type = 'file';
               input.accept = '.xlsx,.xls';
-              input.onchange = (e: any) => { const f = e.target.files[0]; if (f) handleUpload(f); };
+              input.onchange = (e) => { const f = e.target.files[0]; if (f) handleUpload(f); };
               input.click();
             }}
           >
@@ -191,7 +190,6 @@ export default function AdminPage() {
           )}
         </div>
 
-        {/* Import History */}
         {imports.length > 0 && (
           <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20 }}>
             <div style={{ fontSize:14, fontWeight:700, marginBottom:12 }}>Riwayat Import</div>
@@ -203,7 +201,7 @@ export default function AdminPage() {
                   ))}
                 </tr></thead>
                 <tbody>
-                  {imports.map((imp: any) => (
+                  {imports.map((imp) => (
                     <tr key={imp.id} style={{ borderBottom:'1px solid #1a2744' }}>
                       <td style={{ padding:'8px 10px', fontWeight:600 }}>{imp.period_month}/{imp.period_year}</td>
                       <td style={{ padding:'8px 10px', color:'#64748b', maxWidth:150, overflow:'hidden', textOverflow:'ellipsis' }}>{imp.filename}</td>
@@ -249,7 +247,19 @@ export default function AdminPage() {
       </div>
 
       {/* ════════════════════════════════════════════════════════ */}
-      {/* SECTION 4: USER MANAGEMENT (Owner Only)                */}
+      {/* SECTION 4: CSV ORDER UPLOAD                            */}
+      {/* ════════════════════════════════════════════════════════ */}
+      <div style={{ marginBottom:24 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
+          <div style={{ width:4, height:20, borderRadius:2, background:'#06b6d4' }} />
+          <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:'#e2e8f0' }}>Customer Data (CSV)</h3>
+          <span style={{ fontSize:11, color:'#64748b', fontWeight:500 }}>Upload CSV export Scalev — melengkapi data, tidak duplikat</span>
+        </div>
+        <CsvOrderUploader />
+      </div>
+
+      {/* ════════════════════════════════════════════════════════ */}
+      {/* SECTION 5: USER MANAGEMENT (Owner Only)                */}
       {/* ════════════════════════════════════════════════════════ */}
       {profile?.role === 'owner' && (
         <div style={{ marginBottom:24 }}>
@@ -261,7 +271,6 @@ export default function AdminPage() {
 
           <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20 }}>
 
-            {/* ── Invite User Form ── */}
             <div style={{ marginBottom:20, padding:16, background:'#0b1121', borderRadius:8, border:'1px solid #1a2744' }}>
               <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>Invite User Baru</div>
               <div style={{ fontSize:11, color:'#64748b', marginBottom:12 }}>
@@ -325,7 +334,6 @@ export default function AdminPage() {
               )}
             </div>
 
-            {/* ── Role Legend ── */}
             <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:16, fontSize:11 }}>
               {['owner','admin','finance','brand_manager','pending'].map(r => {
                 const rl = roleLabel(r);
@@ -338,9 +346,8 @@ export default function AdminPage() {
               })}
             </div>
 
-            {/* ── User List ── */}
             <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-              {users.map((u: any) => {
+              {users.map((u) => {
                 const rl = roleLabel(u.role);
                 return (
                   <div key={u.id} style={{
