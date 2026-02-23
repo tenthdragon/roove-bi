@@ -238,6 +238,9 @@ export async function parseOrderForDb(order: any) {
     net_revenue: order.net_revenue || 0,
     shipping_cost: order.shipping_cost || 0,
     total_quantity: order.total_quantity || 0,
+    customer_name: order.customer_name || order.address?.name || null,
+    customer_phone: order.customer_phone || order.address?.phone || null,
+    customer_email: order.customer_email || null,
     raw_data: order,
     synced_at: new Date().toISOString(),
   };
