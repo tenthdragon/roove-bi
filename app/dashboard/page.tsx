@@ -23,26 +23,27 @@ export default function OverviewPage() {
   const supabase = createClient();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [dailyData, setDailyData] = useState([]);
-  const [mpData, setMpData] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     setLoading(true);
-    Promise.all([
-      supabase.from('daily_product_summary').select('*').gte('date', dateRange.from).lte('date', dateRange.to).order('date'),
-      supabase.from('daily_channel_data').select('product, mp_admin_cost').gte('date', dateRange.from).lte('date', dateRange.to),
-    ]).then(([{ data: d }, { data: mp }]) => {
-      setDailyData(d || []);
-      setMpData(mp || []);
-      setLoading(false);
-    });
+    // Now only need daily_product_summary — mp_admin_cost is in this table
+    supabase.from('daily_product_summary')
+      .select('*')
+      .gte('date', dateRange.from)
+      .lte('date', dateRange.to)
+      .order('date')
+      .then(({ data: d }) => {
+        setDailyData(d || []);
+        setLoading(false);
+      });
   }, [dateRange, supabase]);
 
-  // Total MP admin fee (for breakdown display)
+  // Total MP admin fee — now from same table as other metrics
   const totalMpFee = useMemo(() => {
-    return mpData.reduce((a, d) => a + Math.abs(Number(d.mp_admin_cost) || 0), 0);
-  }, [mpData]);
+    return dailyData.reduce((a, d) => a + Math.abs(Number(d.mp_admin_cost) || 0), 0);
+  }, [dailyData]);
 
   const kpi = useMemo(() => {
     const byDate = {};
@@ -56,28 +57,36 @@ export default function OverviewPage() {
     const ts = dates.reduce((a,d) => a + byDate[d].s, 0);
     const tg = dates.reduce((a,d) => a + byDate[d].g, 0);
     const tn = dates.reduce((a,d) => a + byDate[d].n, 0);
-    const tm = tg - tn; // Mkt Cost = GP - Profit After Mkt
+    const tm = tg - tn; // Mkt Cost + MP Fee combined
     const ad = dates.filter(d => byDate[d].s > 0).length;
-    const chart = dates.map(d => ({ date: shortDate(d), 'Net Sales': byDate[d].s, 'Gross Profit': byDate[d].g, 'Profit After Mkt': byDate[d].n, 'Mkt Cost + MP Fee': byDate[d].g - byDate[d].n }));
+
+    const chart = dates.map(d => ({
+      date: shortDate(d),
+      'Net Sales': byDate[d].s,
+      'Gross Profit': byDate[d].g,
+      'Profit After Mkt': byDate[d].n,
+      'Mkt Cost + MP Fee': byDate[d].g - byDate[d].n,
+    }));
+
     return { ts, tg, tn, tm, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
   }, [dailyData]);
 
   const productTable = useMemo(() => {
     const byP = {};
     dailyData.forEach(d => {
-      if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0 };
+      if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0, mp:0 };
       byP[d.product].s += Number(d.net_sales);
       byP[d.product].g += Number(d.gross_profit);
       byP[d.product].n += Number(d.net_after_mkt);
+      byP[d.product].mp += Math.abs(Number(d.mp_admin_cost) || 0);
     });
     return Object.entries(byP).filter(([,v]) => v.s > 0).sort((a,b) => b[1].s - a[1].s)
       .map(([p, v]) => {
-        const mkt = v.g - v.n; // Mkt Cost = GP - Profit After Mkt
-        return { sku: p, sales: v.s, gp: v.g, nam: v.n, mkt, gmpR: v.s>0?v.n/v.s*100:0, mktR: v.s>0?mkt/v.s*100:0, sp: kpi.ts>0?v.s/kpi.ts*100:0 };
+        const mkt = v.g - v.n; // Total = Mkt Cost + MP Fee
+        return { sku: p, sales: v.s, gp: v.g, nam: v.n, mkt, mpFee: v.mp, gmpR: v.s>0?v.n/v.s*100:0, mktR: v.s>0?mkt/v.s*100:0, sp: kpi.ts>0?v.s/kpi.ts*100:0 };
       });
   }, [dailyData, kpi.ts]);
 
-  // Check if date range includes pre-Feb 2026 data
   const hasPreFebData = dateRange.from < '2026-02-01';
   const mpFeePercent = kpi.tm > 0 ? (totalMpFee / kpi.tm * 100) : 0;
 
