@@ -128,6 +128,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'products', label: 'Produk', icon: 'Package' },
   { id: 'channels', label: 'Channel', icon: 'Share2' },
   { id: 'marketing', label: 'Marketing', icon: 'Megaphone' },
+  { id: 'customers', label: 'Customer', icon: 'Users' },
   { id: 'finance', label: 'Finance', icon: 'DollarSign' },
   { id: 'admin', label: 'Admin', icon: 'Settings', ownerOnly: true },
 ];
