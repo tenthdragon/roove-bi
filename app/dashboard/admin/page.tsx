@@ -18,6 +18,12 @@ export default function AdminPage() {
   const [users, setUsers] = useState<any[]>([]);
   const [dragOver, setDragOver] = useState(false);
 
+  // Invite state
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState('admin');
+  const [inviting, setInviting] = useState(false);
+  const [inviteMsg, setInviteMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
   useEffect(() => {
     async function init() {
       const { data: { user } } = await supabase.auth.getUser();
@@ -35,6 +41,11 @@ export default function AdminPage() {
       }
     }
     init();
+  }, [supabase]);
+
+  const refreshUsers = useCallback(async () => {
+    const { data: u } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
+    setUsers(u || []);
   }, [supabase]);
 
   const handleUpload = useCallback(async (file: File) => {
@@ -63,10 +74,37 @@ export default function AdminPage() {
     try {
       const tabs = newRole === 'brand_manager' ? ['marketing'] : [];
       await updateUserRole(userId, newRole, tabs, []);
-      const { data: u } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
-      setUsers(u || []);
+      await refreshUsers();
     } catch (err: any) {
       alert('Error: ' + err.message);
+    }
+  };
+
+  const handleInvite = async () => {
+    if (!inviteEmail || !inviteEmail.includes('@')) {
+      setInviteMsg({ type: 'error', text: 'Masukkan email yang valid' });
+      return;
+    }
+    setInviting(true);
+    setInviteMsg(null);
+    try {
+      const res = await fetch('/api/invite', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setInviteMsg({ type: 'error', text: data.error || 'Invite gagal' });
+      } else {
+        setInviteMsg({ type: 'success', text: data.message });
+        setInviteEmail('');
+        await refreshUsers();
+      }
+    } catch (err: any) {
+      setInviteMsg({ type: 'error', text: err.message || 'Invite gagal' });
+    } finally {
+      setInviting(false);
     }
   };
 
@@ -218,15 +256,76 @@ export default function AdminPage() {
           <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
             <div style={{ width:4, height:20, borderRadius:2, background:'#f59e0b' }} />
             <h3 style={{ margin:0, fontSize:15, fontWeight:700, color:'#e2e8f0' }}>Kelola User</h3>
-            <span style={{ fontSize:11, color:'#64748b', fontWeight:500 }}>Approve dan atur role akses</span>
+            <span style={{ fontSize:11, color:'#64748b', fontWeight:500 }}>Invite dan atur role akses</span>
           </div>
 
           <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:20 }}>
-            <div style={{ fontSize:12, color:'#64748b', marginBottom:16 }}>
-              Bagikan URL login ke tim. Mereka signup, lalu Anda approve dan atur role di sini.
+
+            {/* ── Invite User Form ── */}
+            <div style={{ marginBottom:20, padding:16, background:'#0b1121', borderRadius:8, border:'1px solid #1a2744' }}>
+              <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>Invite User Baru</div>
+              <div style={{ fontSize:11, color:'#64748b', marginBottom:12 }}>
+                Masukkan email dan pilih role. User akan menerima email untuk set password.
+              </div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-end' }}>
+                <div style={{ flex:'1 1 200px' }}>
+                  <label style={{ fontSize:11, color:'#64748b', display:'block', marginBottom:4 }}>Email</label>
+                  <input
+                    type="email"
+                    value={inviteEmail}
+                    onChange={e => setInviteEmail(e.target.value)}
+                    placeholder="nama@email.com"
+                    style={{
+                      width:'100%', padding:'8px 12px', borderRadius:6,
+                      border:'1px solid #1a2744', background:'#111a2e', color:'#e2e8f0',
+                      fontSize:13, outline:'none',
+                    }}
+                    onFocus={e => e.target.style.borderColor = '#3b82f6'}
+                    onBlur={e => e.target.style.borderColor = '#1a2744'}
+                  />
+                </div>
+                <div style={{ flex:'0 0 140px' }}>
+                  <label style={{ fontSize:11, color:'#64748b', display:'block', marginBottom:4 }}>Role</label>
+                  <select
+                    value={inviteRole}
+                    onChange={e => setInviteRole(e.target.value)}
+                    style={{
+                      width:'100%', padding:'8px 12px', borderRadius:6,
+                      border:'1px solid #1a2744', background:'#111a2e', color:'#e2e8f0',
+                      fontSize:13,
+                    }}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="finance">Finance</option>
+                    <option value="brand_manager">Brand Manager</option>
+                  </select>
+                </div>
+                <button
+                  onClick={handleInvite}
+                  disabled={inviting}
+                  style={{
+                    padding:'8px 20px', borderRadius:6, border:'none', cursor: inviting ? 'not-allowed' : 'pointer',
+                    background: inviting ? '#1a2744' : '#3b82f6', color:'#fff',
+                    fontSize:13, fontWeight:600, whiteSpace:'nowrap',
+                    opacity: inviting ? 0.6 : 1,
+                  }}
+                >
+                  {inviting ? 'Mengundang...' : '+ Invite'}
+                </button>
+              </div>
+
+              {inviteMsg && (
+                <div style={{
+                  marginTop:10, padding:10, borderRadius:6, fontSize:12,
+                  background: inviteMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
+                  color: inviteMsg.type === 'success' ? '#10b981' : '#ef4444',
+                }}>
+                  {inviteMsg.type === 'success' ? '✅' : '❌'} {inviteMsg.text}
+                </div>
+              )}
             </div>
 
-            {/* Role Legend */}
+            {/* ── Role Legend ── */}
             <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:16, fontSize:11 }}>
               {['owner','admin','finance','brand_manager','pending'].map(r => {
                 const rl = roleLabel(r);
@@ -239,6 +338,7 @@ export default function AdminPage() {
               })}
             </div>
 
+            {/* ── User List ── */}
             <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
               {users.map((u: any) => {
                 const rl = roleLabel(u.role);
