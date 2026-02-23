@@ -48,7 +48,7 @@ function getSubSource(source: string): string | null {
 // ── Platform → Revenue Channel mapping (exclusive, no double count) ──
 // Values here are arrays of actual channel names in daily_channel_data
 const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
-  'Facebook Ads': ['Facebook Ads', 'Google Ads', 'Organik'],  // Scalev = Facebook Ads + Google Ads + Organik in DB
+  'Facebook Ads': ['Facebook Ads', 'Google Ads', 'Organik'], // Scalev = Facebook Ads + Google Ads + Organik in DB
   'Shopee Ads': ['Shopee'],
   'TikTok Ads': ['TikTok', 'TikTok Shop'],
   'Other Marketplace': ['Tokopedia', 'BliBli', 'Lazada'],
@@ -100,7 +100,6 @@ const BRAND_COLORS: Record<string, string> = {
 export default function MarketingPage() {
   const supabase = createClient();
   const { dateRange, loading: dateLoading } = useDateRange();
-
   const [prodData, setProdData] = useState<any[]>([]);
   const [adsData, setAdsData] = useState<any[]>([]);
   const [channelData, setChannelData] = useState<any[]>([]);
@@ -137,23 +136,35 @@ export default function MarketingPage() {
       setChannelData(ch || []);
       // Build product → brand lookup
       const map: Record<string, string> = {};
-      (pm || []).forEach((r: any) => { map[r.product_name] = r.product_type; });
+      (pm || []).forEach((r: any) => {
+        map[r.product_name] = r.product_type;
+      });
       setProductMappings(map);
       setLoading(false);
     });
   }, [dateRange, supabase]);
 
-  // ── KPI calculations ──
+  // ── FIX: KPI calculations now respect brandFilter ──
   const { totalRevenue, totalSpend, totalRatio, totalRoas, avgDailyRatio, avgDailyRoas, activeDays } = useMemo(() => {
-    const rev = prodData.reduce((s, d) => s + Number(d.net_sales || 0), 0);
-    const spend = adsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
+    // Filter prodData by brand using productMappings
+    const filteredProd = brandFilter === 'all'
+      ? prodData
+      : prodData.filter(d => productMappings[d.product] === brandFilter);
+
+    // Filter adsData by brand using store name
+    const filteredAds = brandFilter === 'all'
+      ? adsData
+      : adsData.filter(d => normStore(d.store) === brandFilter);
+
+    const rev = filteredProd.reduce((s, d) => s + Number(d.net_sales || 0), 0);
+    const spend = filteredAds.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
 
     const byDate: Record<string, { rev: number; spend: number }> = {};
-    prodData.forEach(d => {
+    filteredProd.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].rev += Number(d.net_sales || 0);
     });
-    adsData.forEach(d => {
+    filteredAds.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].spend += Math.abs(Number(d.spent || 0));
     });
@@ -171,19 +182,28 @@ export default function MarketingPage() {
       avgDailyRoas: dailyRoas.length > 0 ? dailyRoas.reduce((a, b) => a + b, 0) / dailyRoas.length : 0,
       activeDays: days.length,
     };
-  }, [prodData, adsData]);
+  }, [prodData, adsData, brandFilter, productMappings]);
 
-  // ── Daily chart data ──
+  // ── FIX: Daily chart data now respects brandFilter ──
   const ratioChartData = useMemo(() => {
+    const filteredProd = brandFilter === 'all'
+      ? prodData
+      : prodData.filter(d => productMappings[d.product] === brandFilter);
+
+    const filteredAds = brandFilter === 'all'
+      ? adsData
+      : adsData.filter(d => normStore(d.store) === brandFilter);
+
     const byDate: Record<string, { rev: number; spend: number }> = {};
-    prodData.forEach(d => {
+    filteredProd.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].rev += Number(d.net_sales || 0);
     });
-    adsData.forEach(d => {
+    filteredAds.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].spend += Math.abs(Number(d.spent || 0));
     });
+
     return Object.entries(byDate)
       .sort(([a], [b]) => a.localeCompare(b))
       .filter(([, v]) => v.rev > 0 || v.spend > 0)
@@ -193,12 +213,13 @@ export default function MarketingPage() {
         'Ad Spend': v.spend,
         'Mkt Ratio %': v.rev > 0 ? parseFloat(((v.spend / v.rev) * 100).toFixed(1)) : 0,
       }));
-  }, [prodData, adsData]);
+  }, [prodData, adsData, brandFilter, productMappings]);
 
   // ── Daily Ad Spend by Brand ──
   const dailyBrandData = useMemo(() => {
     const byDate: Record<string, Record<string, number>> = {};
     const brands = new Set<string>();
+
     adsData.forEach(d => {
       const date = new Date(d.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
       const brand = normStore(d.store);
@@ -206,11 +227,13 @@ export default function MarketingPage() {
       if (!byDate[date]) byDate[date] = {};
       byDate[date][brand] = (byDate[date][brand] || 0) + Math.abs(Number(d.spent || 0));
     });
+
     const sortedDates = Object.entries(byDate).sort(([a], [b]) => {
       const da = new Date(a.split(' ').reverse().join(' '));
       const db = new Date(b.split(' ').reverse().join(' '));
       return da.getTime() - db.getTime();
     });
+
     return {
       data: sortedDates.map(([date, vals]) => ({ date, ...vals })),
       brands: Array.from(brands).sort(),
@@ -285,6 +308,7 @@ export default function MarketingPage() {
         const adminFee = revenueChannels
           ? revenueChannels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0)
           : 0;
+
         const roas = data.total > 0 && channelRevenue > 0 ? channelRevenue / data.total : 0;
         const totalCost = data.total + adminFee;
         const effectiveRoas = totalCost > 0 && channelRevenue > 0 ? channelRevenue / totalCost : 0;
@@ -323,9 +347,13 @@ export default function MarketingPage() {
         .sort((a, b) => b.spent - a.spent);
 
       const otherMpAdminFee = otherMpChannels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0);
+
       result.push({
         platform: 'Other Marketplace',
-        spent: 0, pct: 0, dailyAvg: 0, roas: 0,
+        spent: 0,
+        pct: 0,
+        dailyAvg: 0,
+        roas: 0,
         adminFee: otherMpAdminFee,
         effectiveRoas: otherMpAdminFee > 0 && otherMpRevenue > 0 ? otherMpRevenue / otherMpAdminFee : 0,
         revenueChannel: 'Other MP',
@@ -339,8 +367,12 @@ export default function MarketingPage() {
     if (resellerRevenue > 0) {
       result.push({
         platform: 'Reseller',
-        spent: 0, pct: 0, dailyAvg: 0, roas: 0,
-        adminFee: 0, effectiveRoas: 0,
+        spent: 0,
+        pct: 0,
+        dailyAvg: 0,
+        roas: 0,
+        adminFee: 0,
+        effectiveRoas: 0,
         revenueChannel: 'Reseller',
         channelRevenue: resellerRevenue,
         subDetails: [],
@@ -356,6 +388,7 @@ export default function MarketingPage() {
     if (brandFilter !== 'all') return [];
     const matrix: Record<string, Record<string, number>> = {};
     const allPlatforms = new Set<string>();
+
     adsData.forEach(d => {
       const brand = normStore(d.store);
       const platform = normPlatform(d.source);
@@ -363,10 +396,12 @@ export default function MarketingPage() {
       if (!matrix[brand]) matrix[brand] = {};
       matrix[brand][platform] = (matrix[brand][platform] || 0) + Math.abs(Number(d.spent || 0));
     });
+
     const platforms = Array.from(allPlatforms).sort();
     const rows = Object.entries(matrix)
       .map(([brand, pd]) => ({ brand, ...pd, _total: Object.values(pd).reduce((a, b) => a + b, 0) }))
       .sort((a, b) => b._total - a._total);
+
     return { rows, platforms };
   }, [adsData, brandFilter]);
 
@@ -407,7 +442,11 @@ export default function MarketingPage() {
         <KPI label="Total Revenue" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalRevenue / activeDays : 0)}/hari`} color="#3b82f6" />
         <KPI label="Total Ad Spend" val={`Rp ${fmtCompact(totalSpend)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalSpend / activeDays : 0)}/hari`} color="#f59e0b" />
         <KPI label="Mkt Ratio" val={`${totalRatio.toFixed(1)}%`} sub={`Avg: ${avgDailyRatio.toFixed(1)}%/hari`} color={totalRatio > 30 ? '#ef4444' : totalRatio > 20 ? '#f59e0b' : '#10b981'} />
-        <KPI label="Eff. ROAS" val={`${(() => { const totalAdmin = platformBreakdown.reduce((s, p) => s + (p.adminFee || 0), 0); const tc = totalSpend + totalAdmin; return tc > 0 ? (totalRevenue / tc).toFixed(1) : '0.0'; })()}x`} sub={`Ads only: ${totalRoas.toFixed(1)}x`} color="#8b5cf6" />
+        <KPI label="Eff. ROAS" val={`${(() => {
+          const totalAdmin = platformBreakdown.reduce((s, p) => s + (p.adminFee || 0), 0);
+          const tc = totalSpend + totalAdmin;
+          return tc > 0 ? (totalRevenue / tc).toFixed(1) : '0.0';
+        })()}x`} sub={`Ads only: ${totalRoas.toFixed(1)}x`} color="#8b5cf6" />
       </div>
 
       {/* ── Daily Ad Spend & Mkt Ratio Chart ── */}
@@ -471,7 +510,8 @@ export default function MarketingPage() {
                 );
               }} />
               {dailyBrandData.brands.map((brand, idx) => (
-                <Bar key={brand} dataKey={brand} stackId="a" fill={BRAND_COLORS[brand] || '#64748b'} radius={idx === dailyBrandData.brands.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]} />
+                <Bar key={brand} dataKey={brand} stackId="a" fill={BRAND_COLORS[brand] || '#64748b'}
+                  radius={idx === dailyBrandData.brands.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]} />
               ))}
             </BarChart>
           </ResponsiveContainer>
@@ -486,7 +526,7 @@ export default function MarketingPage() {
       )}
 
       {/* ══════════════════════════════════════════════════════════════════ */}
-      {/* Ad Spend by Traffic Source — Exclusive Channel ROAS               */}
+      {/* Ad Spend by Traffic Source — Exclusive Channel ROAS              */}
       {/* ══════════════════════════════════════════════════════════════════ */}
       <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
@@ -494,10 +534,13 @@ export default function MarketingPage() {
             <div style={{ fontSize: 15, fontWeight: 700 }}>Ad Spend by Traffic Source</div>
             <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>ROAS per channel atribusi — exclusive, tanpa double count</div>
           </div>
-          <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)} style={{
-            background: '#1a2744', border: `1px solid ${C.bdr}`, borderRadius: 8,
-            padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none',
-          }}>
+          <select
+            value={brandFilter}
+            onChange={(e) => setBrandFilter(e.target.value)}
+            style={{
+              background: '#1a2744', border: `1px solid ${C.bdr}`, borderRadius: 8,
+              padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none',
+            }}>
             <option value="all">All Brands</option>
             {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
@@ -590,33 +633,34 @@ export default function MarketingPage() {
                         {p.adminFee > 0 ? `Rp ${fmtCompact(p.adminFee)}` : '—'}
                       </td>
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: p.effectiveRoas >= 3 ? '#10b981' : p.effectiveRoas >= 1.5 ? '#f59e0b' : p.effectiveRoas > 0 ? '#ef4444' : `${C.dim}44` }}>
-                        {p.effectiveRoas > 0
-                          ? `${p.effectiveRoas.toFixed(1)}x`
-                          : p.adminFee === 0 && p.roas > 0 ? `${p.roas.toFixed(1)}x` : '—'
-                        }
+                        {p.effectiveRoas > 0 ? `${p.effectiveRoas.toFixed(1)}x` : p.adminFee === 0 && p.roas > 0 ? `${p.roas.toFixed(1)}x` : '—'}
                       </td>
                     </tr>
                   ))}
-                  <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
-                    <td style={{ padding: '8px 10px', fontWeight: 700 }}>TOTAL</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(platformBreakdown.reduce((s, p) => s + p.spent, 0))}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>100%</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(platformBreakdown.reduce((s, p) => s + p.dailyAvg, 0))}</td>
-                    <td style={{ padding: '8px 10px' }}></td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalRevenue)}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totalRoas >= 3 ? '#10b981' : totalRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{totalRoas.toFixed(1)}x</td>
-                    {(() => {
-                      const totalAdmin = platformBreakdown.reduce((s, p) => s + p.adminFee, 0);
-                      const totalAllCost = totalSpend + totalAdmin;
-                      const effRoas = totalAllCost > 0 ? totalRevenue / totalAllCost : 0;
-                      return (
-                        <>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f59e0b' }}>Rp {fmtCompact(totalAdmin)}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: effRoas >= 3 ? '#10b981' : effRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{effRoas.toFixed(1)}x</td>
-                        </>
-                      );
-                    })()}
-                  </tr>
+                  {/* ── FIX: TOTAL row now uses platformBreakdown aggregates instead of unfiltered globals ── */}
+                  {(() => {
+                    const totalSpentSum = platformBreakdown.reduce((s, p) => s + p.spent, 0);
+                    const totalDailyAvgSum = platformBreakdown.reduce((s, p) => s + p.dailyAvg, 0);
+                    const totalRevenueSum = platformBreakdown.reduce((s, p) => s + p.channelRevenue, 0);
+                    const totalAdminSum = platformBreakdown.reduce((s, p) => s + p.adminFee, 0);
+                    const totalRoasCalc = totalSpentSum > 0 ? totalRevenueSum / totalSpentSum : 0;
+                    const totalAllCost = totalSpentSum + totalAdminSum;
+                    const effRoasCalc = totalAllCost > 0 ? totalRevenueSum / totalAllCost : 0;
+
+                    return (
+                      <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
+                        <td style={{ padding: '8px 10px', fontWeight: 700 }}>TOTAL</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalSpentSum)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>100%</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalDailyAvgSum)}</td>
+                        <td style={{ padding: '8px 10px' }}></td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalRevenueSum)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totalRoasCalc >= 3 ? '#10b981' : totalRoasCalc >= 1.5 ? '#f59e0b' : '#ef4444' }}>{totalRoasCalc > 0 ? `${totalRoasCalc.toFixed(1)}x` : '—'}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f59e0b' }}>Rp {fmtCompact(totalAdminSum)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: effRoasCalc >= 3 ? '#10b981' : effRoasCalc >= 1.5 ? '#f59e0b' : '#ef4444' }}>{effRoasCalc > 0 ? `${effRoasCalc.toFixed(1)}x` : '—'}</td>
+                      </tr>
+                    );
+                  })()}
                 </tbody>
               </table>
             </div>
@@ -629,8 +673,7 @@ export default function MarketingPage() {
                   <span style={{ fontWeight: 700, color: '#93c5fd' }}>Meta Ads sebagai Demand Generator — </span>
                   ROAS Facebook Ads dihitung exclusive terhadap revenue <span style={{ color: CHANNEL_COLORS['Scalev'], fontWeight: 600 }}>Scalev</span>.
                   Namun Meta Ads juga menciptakan demand yang spillover ke{' '}
-                  <span style={{ color: CHANNEL_COLORS['Shopee'], fontWeight: 600 }}>Shopee</span> (konsumen search di marketplace setelah lihat iklan)
-                  dan <span style={{ color: '#10b981', fontWeight: 600 }}>repeat order organik</span>.
+                  <span style={{ color: CHANNEL_COLORS['Shopee'], fontWeight: 600 }}>Shopee</span> (konsumen search di marketplace setelah lihat iklan) dan <span style={{ color: '#10b981', fontWeight: 600 }}>repeat order organik</span>.
                   Kontribusi sebenarnya Meta Ads kemungkinan lebih besar dari ROAS yang ditampilkan.
                 </div>
               </div>
@@ -679,8 +722,6 @@ export default function MarketingPage() {
           </div>
         </div>
       )}
-
-
     </div>
   );
 }
