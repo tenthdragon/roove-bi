@@ -146,10 +146,10 @@ export default function MarketingPage() {
 
   // ── FIX: KPI calculations now respect brandFilter ──
   const { totalRevenue, totalSpend, totalRatio, totalRoas, avgDailyRatio, avgDailyRoas, activeDays } = useMemo(() => {
-    // Filter prodData by brand using productMappings
+    // Filter prodData by brand — daily_product_summary.product IS the brand name directly
     const filteredProd = brandFilter === 'all'
       ? prodData
-      : prodData.filter(d => productMappings[d.product] === brandFilter);
+      : prodData.filter(d => d.product === brandFilter);
 
     // Filter adsData by brand using store name
     const filteredAds = brandFilter === 'all'
@@ -188,7 +188,7 @@ export default function MarketingPage() {
   const ratioChartData = useMemo(() => {
     const filteredProd = brandFilter === 'all'
       ? prodData
-      : prodData.filter(d => productMappings[d.product] === brandFilter);
+      : prodData.filter(d => d.product === brandFilter);
 
     const filteredAds = brandFilter === 'all'
       ? adsData
@@ -274,10 +274,9 @@ export default function MarketingPage() {
     // Channel revenue from daily_channel_data — filtered by brand if applicable
     const channelRev: Record<string, number> = {};
     channelData.forEach(d => {
-      // If brand filter is active, only include products that belong to this brand
+      // daily_channel_data.product IS the brand name directly (e.g. "Roove", "Osgard")
       if (brandFilter !== 'all') {
-        const productBrand = productMappings[d.product] || '';
-        if (productBrand !== brandFilter) return;
+        if (d.product !== brandFilter) return;
       }
       const ch = d.channel || 'Other';
       channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
@@ -287,8 +286,7 @@ export default function MarketingPage() {
     const channelAdminFee: Record<string, number> = {};
     channelData.forEach(d => {
       if (brandFilter !== 'all') {
-        const productBrand = productMappings[d.product] || '';
-        if (productBrand !== brandFilter) return;
+        if (d.product !== brandFilter) return;
       }
       const ch = d.channel || 'Other';
       channelAdminFee[ch] = (channelAdminFee[ch] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
