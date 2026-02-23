@@ -44,6 +44,7 @@ function toNum(val: any): number {
 }
 
 // ── Sheet name to product name mapping ──
+// FIXED: Use consistent names that match ads store names and product_mapping types
 const SKU_SHEETS: Record<string, string> = {
   'Roove': 'Roove',
   'Almona': 'Almona',
@@ -51,12 +52,12 @@ const SKU_SHEETS: Record<string, string> = {
   'YUV': 'Yuv',
   'Osgard': 'Osgard',
   'Purvu': 'Purvu',
-  'DRHyun': 'Dr Hyun',
+  'DRHyun': 'DrHyun',     // FIXED: was 'Dr Hyun' — now matches ads store name
   'Globite': 'Globite',
   'Orelif': 'Orelif',
   'Veminine': 'Veminine',
   'Calmara': 'Calmara',
-  'Other': 'Others',
+  'Other': 'Other',         // FIXED: was 'Others' — now matches product_mapping
 };
 
 // Sales channels in order as they appear in sheet (rows 31-41 net sales, rows 57-67 gross profit)
@@ -76,8 +77,7 @@ function resolveChannel(sheetChannel: string): string {
   return CHANNEL_MERGE[sheetChannel] || sheetChannel;
 }
 
-// Admin marketplace channels (only present in newer format, Feb 2026+)
-// Mapping: sheet channel name → offset from admin MP header row
+// Admin marketplace channels — offset from admin MP header row
 const MP_ADMIN_CHANNEL_OFFSETS: Record<string, number> = {
   'Shopee': 1,
   'TikTok Shop': 2,
@@ -85,67 +85,93 @@ const MP_ADMIN_CHANNEL_OFFSETS: Record<string, number> = {
   'Lazada': 4,
 };
 
-// Net after mkt channels - order in sheet (same for both formats)
-// WhatsApp is included in sheet but not in SHEET_CHANNELS array
-const NET_AFTER_MKT_ORDER = [
-  'Facebook Ads', 'WhatsApp', 'Google Ads', 'Organik', 'Reseller', 'Shopee',
-  'TikTok Ads', 'TikTok Shop', 'Tokopedia', 'BliBli', 'Lazada', 'SnackVideo Ads',
-];
-
-// Detect format: check if row 83 (array index 80) col B contains "Biaya Adm Marketplace"
-// Returns: { hasMpAdmin, mpAdminBaseIdx, netAfterMktBaseIdx }
+// FIXED: Detect format DYNAMICALLY by scanning rows for section headers.
+// Different brand sheets have different numbers of marketing cost rows
+// (Roove has 12 rows including WhatsApp & Shopee Live; others have 10),
+// which shifts the position of "Biaya Adm Marketplace" and "Net After Mkt" sections.
+// Old code hardcoded row 83, which only worked for Roove.
 function detectSheetFormat(rows: any[][]) {
-  // Array index 80 = sheet row 83 (fetched from row 3, so 83 - 3 = 80)
-  const row80ColB = rows[80]?.[1]; // col B
-  const hasMpAdmin = typeof row80ColB === 'string' &&
-    row80ColB.toLowerCase().includes('adm marketplace');
-
-  if (hasMpAdmin) {
-    // Feb 2026+ format: admin MP at row 83 (idx 80), net_after_mkt header at row 89 (idx 86), data starts row 90 (idx 87)
-    return { hasMpAdmin: true, mpAdminBaseIdx: 80, netAfterMktDataIdx: 87 };
-  } else {
-    // Nov 2025 format: no admin MP, net_after_mkt header at row 83 (idx 80), data starts row 84 (idx 81)
-    return { hasMpAdmin: false, mpAdminBaseIdx: -1, netAfterMktDataIdx: 81 };
+  // Scan rows 75-95 (array indices 72-92) for "Biaya Adm Marketplace"
+  let mpAdminIdx = -1;
+  for (let idx = 72; idx <= 92 && idx < rows.length; idx++) {
+    const colB = rows[idx]?.[1];
+    if (typeof colB === 'string' && colB.toLowerCase().includes('adm marketplace')) {
+      mpAdminIdx = idx;
+      break;
+    }
   }
+
+  if (mpAdminIdx >= 0) {
+    // Found admin MP section — net_after_mkt header is typically 6 rows after admin header
+    // (4 admin channels + 1 blank row + header row), then data starts next row
+    // But let's also scan for the net_after_mkt header dynamically
+    let namHeaderIdx = -1;
+    for (let idx = mpAdminIdx + 4; idx <= mpAdminIdx + 10 && idx < rows.length; idx++) {
+      const colB = rows[idx]?.[1];
+      if (typeof colB === 'string' && colB.toLowerCase().includes('setelah biaya marketing')) {
+        namHeaderIdx = idx;
+        break;
+      }
+    }
+
+    // Data starts right after the header, at the first channel row
+    const netAfterMktDataIdx = namHeaderIdx >= 0 ? namHeaderIdx + 1 : mpAdminIdx + 6;
+
+    return { hasMpAdmin: true, mpAdminBaseIdx: mpAdminIdx, netAfterMktDataIdx };
+  } else {
+    // No admin MP section (older format)
+    // Scan for "Laba/(Rugi) Kotor Setelah" as fallback
+    let namHeaderIdx = -1;
+    for (let idx = 72; idx <= 92 && idx < rows.length; idx++) {
+      const colB = rows[idx]?.[1];
+      if (typeof colB === 'string' && colB.toLowerCase().includes('setelah biaya marketing')) {
+        namHeaderIdx = idx;
+        break;
+      }
+    }
+    const netAfterMktDataIdx = namHeaderIdx >= 0 ? namHeaderIdx + 1 : 81;
+
+    return { hasMpAdmin: false, mpAdminBaseIdx: -1, netAfterMktDataIdx };
+  }
+}
+
+// Detect the net_after_mkt channel order dynamically for each sheet.
+// Roove includes WhatsApp; other brands may not.
+function detectNetAfterMktOrder(rows: any[][], startIdx: number): string[] {
+  const channels: string[] = [];
+  for (let idx = startIdx; idx < startIdx + 14 && idx < rows.length; idx++) {
+    const colC = rows[idx]?.[2];
+    if (!colC) break; // Empty row = end of section
+    const ch = String(colC).trim();
+    if (ch.toLowerCase() === 'total') break;
+    channels.push(ch);
+  }
+  return channels.length > 0 ? channels : [
+    // Fallback to default order
+    'Facebook Ads', 'Google Ads', 'Organik', 'Reseller', 'Shopee',
+    'TikTok Ads', 'TikTok Shop', 'Tokopedia', 'BliBli', 'Lazada', 'SnackVideo Ads',
+  ];
 }
 
 export interface ParsedSheetData {
   dailyProduct: Array<{
-    date: string;
-    product: string;
-    net_sales: number;
-    gross_profit: number;
-    net_after_mkt: number;
-    mkt_cost: number;
+    date: string; product: string; net_sales: number;
+    gross_profit: number; net_after_mkt: number; mkt_cost: number;
   }>;
   dailyChannel: Array<{
-    date: string;
-    product: string;
-    channel: string;
-    net_sales: number;
-    gross_profit: number;
-    mp_admin_cost: number;
-    net_after_mkt: number;
+    date: string; product: string; channel: string;
+    net_sales: number; gross_profit: number;
+    mp_admin_cost: number; net_after_mkt: number;
   }>;
   ads: Array<{
-    date: string;
-    ad_account: string;
-    spent: number;
-    objective: string;
-    source: string;
-    store: string;
-    advertiser: string;
+    date: string; ad_account: string; spent: number;
+    objective: string; source: string; store: string; advertiser: string;
   }>;
   monthlySummary: Array<{
-    product: string;
-    sales_after_disc: number;
-    sales_pct: number;
-    gross_profit: number;
-    gross_profit_pct: number;
-    gross_after_mkt: number;
-    gmp_real: number;
-    mkt_pct: number;
-    mkt_share_pct: number;
+    product: string; sales_after_disc: number; sales_pct: number;
+    gross_profit: number; gross_profit_pct: number;
+    gross_after_mkt: number; gmp_real: number;
+    mkt_pct: number; mkt_share_pct: number;
   }>;
   period: { month: number; year: number };
 }
@@ -172,7 +198,6 @@ async function fetchRange(spreadsheetId: string, range: string): Promise<any[][]
 // ── Main: Parse entire Google Sheet into database-ready format ──
 export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedSheetData> {
   const sheetNames = await getSheetNames(spreadsheetId);
-
   let periodMonth = 0;
   let periodYear = 0;
 
@@ -188,7 +213,6 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
       const row = rows[i];
       if (!row || !row[0] || !row[1]) continue;
       if (row[1] === 'Total') break;
-
       monthlySummary.push({
         product: String(row[1]),
         sales_after_disc: toNum(row[2]),
@@ -207,17 +231,10 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
   for (const [sheetName, productName] of Object.entries(SKU_SHEETS)) {
     if (!sheetNames.includes(sheetName)) continue;
 
-    // Fetch rows 3 to 120 (expanded to include admin MP and net after mkt sections)
-    // Row 3 = dates
-    // Rows 31-41 = Penjualan Bersih (net sales per channel)
-    // Rows 57-67 = Laba Kotor (gross profit per channel)
-    // Rows 70-81 = Biaya Marketing
-    // Rows 83-87 = Biaya Adm Marketplace (Shopee, TikTok Shop, BliBli, Lazada)
-    // Rows 89-101 = Laba/(Rugi) Kotor Setelah Biaya Marketing & Admin Marketplace
     const rows = await fetchRange(spreadsheetId, `'${sheetName}'!A3:AI120`);
     if (!rows || rows.length === 0) continue;
 
-    // Detect format (with or without admin marketplace section)
+    // FIXED: Detect format dynamically per sheet (different brands have different layouts)
     const format = detectSheetFormat(rows);
 
     // Row 0 (sheet row 3) has dates starting from col D (index 3) onwards
@@ -237,9 +254,11 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
 
     if (dates.length === 0) continue;
 
-    // Build net_after_mkt channel index map
+    // FIXED: Detect net_after_mkt channel order dynamically per sheet
+    // (Roove has WhatsApp row; other brands don't — shifts all indices)
+    const netAfterMktChannels = detectNetAfterMktOrder(rows, format.netAfterMktDataIdx);
     const netAfterMktMap: Record<string, number> = {};
-    NET_AFTER_MKT_ORDER.forEach((ch, i) => {
+    netAfterMktChannels.forEach((ch, i) => {
       netAfterMktMap[ch] = format.netAfterMktDataIdx + i;
     });
 
@@ -250,7 +269,6 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
       let totalMpAdmin = 0;
       let totalNetAfterMkt = 0;
 
-      // ── Read all sheet channels, then merge before pushing ──
       // Net sales: sheet rows 31-41 → array index 28-38
       // Gross profit: sheet rows 57-67 → array index 54-64
       const channelBucket: Record<string, { ns: number; gp: number; mpAdmin: number; nam: number }> = {};
@@ -275,7 +293,7 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         }
         totalMpAdmin += mpAdmin;
 
-        // Get net after mkt for this channel from the sheet directly
+        // Get net after mkt for this channel
         const namRowIdx = netAfterMktMap[SHEET_CHANNELS[ch]];
         const netAfterMktChannel = namRowIdx !== undefined && namRowIdx < rows.length
           ? toNum(rows[namRowIdx]?.[col]) : 0;
@@ -304,13 +322,13 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         }
       }
 
-      // ── Marketing cost: sheet rows 70-81 → array index 67-78 ──
+      // Marketing cost: starts at row 70 (index 67), scan until empty or next section
       for (let mktRow = 67; mktRow <= 78 && mktRow < rows.length; mktRow++) {
         totalMktCost += Math.abs(toNum(rows[mktRow]?.[col]));
       }
 
-      // ── Net after mkt: sum all channels from sheet ──
-      for (const ch of NET_AFTER_MKT_ORDER) {
+      // Net after mkt: sum all channels from sheet
+      for (const ch of netAfterMktChannels) {
         const rowIdx = netAfterMktMap[ch];
         if (rowIdx !== undefined && rowIdx < rows.length) {
           totalNetAfterMkt += toNum(rows[rowIdx]?.[col]);
@@ -324,7 +342,7 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
           net_sales: Math.round(totalNetSales),
           gross_profit: Math.round(totalGP),
           net_after_mkt: Math.round(totalNetAfterMkt),
-          mkt_cost: Math.round(totalMktCost + totalMpAdmin), // mkt_cost now includes admin MP
+          mkt_cost: Math.round(totalMktCost + totalMpAdmin),
         });
       }
     }
@@ -336,7 +354,6 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       if (!row || !row[0]) continue;
-
       const dateStr = serialDateToISO(row[0]);
       if (!dateStr) continue;
 
