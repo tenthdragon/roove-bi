@@ -11,52 +11,43 @@ export default function ProductsPage() {
   const supabase = createClient();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [data, setData] = useState([]);
-  const [mpData, setMpData] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     setLoading(true);
-    Promise.all([
-      supabase.from('daily_product_summary').select('*').gte('date', dateRange.from).lte('date', dateRange.to),
-      supabase.from('daily_channel_data').select('product, mp_admin_cost').gte('date', dateRange.from).lte('date', dateRange.to),
-    ]).then(([{ data: d }, { data: mp }]) => {
-      setData(d || []);
-      setMpData(mp || []);
-      setLoading(false);
-    });
+    // Now only need daily_product_summary — mp_admin_cost is in this table
+    supabase.from('daily_product_summary')
+      .select('*')
+      .gte('date', dateRange.from)
+      .lte('date', dateRange.to)
+      .then(({ data: d }) => {
+        setData(d || []);
+        setLoading(false);
+      });
   }, [dateRange, supabase]);
-
-  // MP fee per product
-  const mpFeeByProduct = useMemo(() => {
-    const byP: Record<string, number> = {};
-    mpData.forEach(d => {
-      if (!byP[d.product]) byP[d.product] = 0;
-      byP[d.product] += Math.abs(Number(d.mp_admin_cost) || 0);
-    });
-    return byP;
-  }, [mpData]);
 
   const totalSales = useMemo(() => {
     return data.reduce((s, d) => s + Number(d.net_sales), 0);
   }, [data]);
 
   const products = useMemo(() => {
-    const byP: Record<string, { s: number; g: number; n: number }> = {};
+    const byP: Record<string, { s: number; g: number; n: number; mp: number }> = {};
     data.forEach(d => {
-      if (!byP[d.product]) byP[d.product] = { s: 0, g: 0, n: 0 };
+      if (!byP[d.product]) byP[d.product] = { s: 0, g: 0, n: 0, mp: 0 };
       byP[d.product].s += Number(d.net_sales);
       byP[d.product].g += Number(d.gross_profit);
       byP[d.product].n += Number(d.net_after_mkt);
+      byP[d.product].mp += Math.abs(Number(d.mp_admin_cost) || 0);
     });
 
     return Object.entries(byP)
       .filter(([, v]) => v.s > 0)
       .sort((a, b) => b[1].s - a[1].s)
       .map(([p, v]) => {
-        const totalMkt = v.g - v.n; // Total = Mkt Cost + MP Fee
-        const mpFee = mpFeeByProduct[p] || 0;
-        const adsCost = totalMkt - mpFee; // Pure ads cost (mkt cost without MP fee)
+        const totalMkt = v.g - v.n; // Total = Mkt Cost + MP Fee (guaranteed consistent)
+        const mpFee = v.mp;         // From same table — consistent source
+        const adsCost = totalMkt - mpFee; // Pure ads cost
 
         return {
           sku: p,
@@ -64,7 +55,7 @@ export default function ProductsPage() {
           gp: v.g,
           nam: v.n,
           totalMkt,
-          adsCost: adsCost > 0 ? adsCost : totalMkt, // fallback if no mp data
+          adsCost: adsCost > 0 ? adsCost : totalMkt,
           mpFee,
           // Percentages vs Net Sales
           salesPct: totalSales > 0 ? (v.s / totalSales * 100) : 0,
@@ -75,7 +66,7 @@ export default function ProductsPage() {
           mktR: v.s > 0 ? (totalMkt / v.s * 100) : 0,
         };
       });
-  }, [data, mpFeeByProduct, totalSales]);
+  }, [data, totalSales]);
 
   const hasPreFebData = dateRange.from < '2026-02-01';
   const hasPostFebData = dateRange.to >= '2026-02-01';
@@ -175,7 +166,7 @@ export default function ProductsPage() {
               <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #1a2744', paddingTop: 8, marginTop: 2 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <div style={{ fontSize: 10, color: '#64748b' }}>NET PROFIT</div>
+                    <div style={{ fontSize: 10, color: '#64748b' }}>PROFIT AFTER MKT</div>
                     <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 14, color: p.nam >= 0 ? '#06b6d4' : '#ef4444' }}>
                       Rp {fmtCompact(p.nam)}
                     </div>
@@ -196,15 +187,15 @@ export default function ProductsPage() {
 
       {products.length > 0 && (
         <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Net Sales vs Net Profit</div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Net Sales vs Profit After Mkt</div>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={products.map(p => ({ name: p.sku, 'Net Sales': p.sales, 'Net Profit': p.nam }))} layout="vertical">
+            <BarChart data={products.map(p => ({ name: p.sku, 'Net Sales': p.sales, 'Profit After Mkt': p.nam }))} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
               <XAxis type="number" stroke="#64748b" fontSize={11} tickFormatter={v => fmtCompact(v)} />
               <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={11} width={65} />
               <Tooltip formatter={v => fmtRupiah(v)} />
               <Bar dataKey="Net Sales" fill="#3b82f6" fillOpacity={0.6} radius={[0, 4, 4, 0]} />
-              <Bar dataKey="Net Profit" radius={[0, 4, 4, 0]}>
+              <Bar dataKey="Profit After Mkt" radius={[0, 4, 4, 0]}>
                 {products.map((p, i) => <Cell key={i} fill={p.nam >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.6} />)}
               </Bar>
             </BarChart>
