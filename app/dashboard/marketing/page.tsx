@@ -88,6 +88,7 @@ export default function MarketingPage() {
   const [productMappings, setProductMappings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [brandFilter, setBrandFilter] = useState('all');
+  const [showDailyDetail, setShowDailyDetail] = useState(false);
 
   // ── Fetch data ──
   useEffect(() => {
@@ -190,52 +191,35 @@ export default function MarketingPage() {
   // DAILY DYNAMICS TABLE — Revenue, Ad Spend, Mkt Ratio, ROAS, Eff. ROAS
   // ══════════════════════════════════════════════════════════════════════
   const dailyDynamics = useMemo(() => {
-    // Build per-date: revenue, ad spend
-    const byDate: Record<string, { rev: number; spend: number; adminFee: number }> = {};
-
+    const byDate: Record<string, { rev: number; spend: number }> = {};
     prodData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0, adminFee: 0 };
+      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].rev += Number(d.net_sales || 0);
     });
     adsData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0, adminFee: 0 };
+      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].spend += Math.abs(Number(d.spent || 0));
-    });
-    channelData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0, adminFee: 0 };
-      byDate[d.date].adminFee += Math.abs(Number(d.mp_admin_cost || 0));
     });
 
     const rows = Object.entries(byDate)
       .sort(([a], [b]) => a.localeCompare(b))
       .filter(([, v]) => v.rev > 0 || v.spend > 0)
-      .map(([date, v]) => {
-        const ratio = v.rev > 0 ? (v.spend / v.rev) * 100 : 0;
-        const roas = v.spend > 0 ? v.rev / v.spend : 0;
-        const totalCost = v.spend + v.adminFee;
-        const effRoas = totalCost > 0 ? v.rev / totalCost : 0;
-        return {
-          date,
-          dateLabel: new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
-          rev: v.rev,
-          spend: v.spend,
-          adminFee: v.adminFee,
-          ratio,
-          roas,
-          effRoas,
-        };
-      });
+      .map(([date, v]) => ({
+        date,
+        dateLabel: new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
+        rev: v.rev,
+        spend: v.spend,
+        ratio: v.rev > 0 ? (v.spend / v.rev) * 100 : 0,
+      }));
 
-    // Compute averages
     const count = rows.length || 1;
-    const avgRev = rows.reduce((s, r) => s + r.rev, 0) / count;
-    const avgSpend = rows.reduce((s, r) => s + r.spend, 0) / count;
-    const avgRatio = rows.reduce((s, r) => s + r.ratio, 0) / count;
-    const avgRoas = rows.reduce((s, r) => s + r.roas, 0) / count;
-    const avgEffRoas = rows.reduce((s, r) => s + r.effRoas, 0) / count;
-
-    return { rows, avgRev, avgSpend, avgRatio, avgRoas, avgEffRoas };
-  }, [prodData, adsData, channelData]);
+    return {
+      rows,
+      avgRev: rows.reduce((s, r) => s + r.rev, 0) / count,
+      avgSpend: rows.reduce((s, r) => s + r.spend, 0) / count,
+      avgRatio: rows.reduce((s, r) => s + r.ratio, 0) / count,
+    };
+  }, [prodData, adsData]);
 
   // ══════════════════════════════════════════════════════════════════════
   // PLATFORM BREAKDOWN — exclusive Channel ROAS + sub-source breakdown
@@ -423,79 +407,80 @@ export default function MarketingPage() {
           {/* ── Dinamika Harian Table (inside same card) ── */}
           {dailyDynamics.rows.length > 0 && (
             <div style={{ marginTop: 20, borderTop: `1px solid ${C.bdr}`, paddingTop: 16 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10, color: C.dim }}>Rincian Harian</div>
-              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
-                  <thead>
-                    <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                      {['Tanggal', 'Revenue', 'Ad Spend', 'Mkt Ratio', 'ROAS', 'Eff. ROAS'].map(h => (
-                        <th key={h} style={{
-                          padding: '8px 10px',
-                          textAlign: h === 'Tanggal' ? 'left' : 'right',
-                          color: C.dim, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap',
-                          position: h === 'Tanggal' ? 'sticky' : undefined,
-                          left: h === 'Tanggal' ? 0 : undefined,
-                          background: h === 'Tanggal' ? C.card : undefined,
-                          zIndex: h === 'Tanggal' ? 1 : undefined,
-                        }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dailyDynamics.rows.map((r) => (
-                      <tr key={r.date} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
-                        <td style={{
-                          padding: '8px 10px', fontWeight: 500, whiteSpace: 'nowrap', fontSize: 11,
-                          position: 'sticky', left: 0, background: C.card, zIndex: 1,
-                        }}>{r.dateLabel}</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>
-                          Rp {fmtCompact(r.rev)}
-                        </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>
-                          Rp {fmtCompact(r.spend)}
-                        </td>
-                        <td style={{
-                          padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
-                          color: r.ratio > 40 ? '#ef4444' : r.ratio > 25 ? '#f59e0b' : '#10b981',
-                        }}>{r.ratio.toFixed(1)}%</td>
-                        <td style={{
-                          padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
-                          color: r.roas >= 3 ? '#10b981' : r.roas >= 1.5 ? '#f59e0b' : '#ef4444',
-                        }}>{r.roas > 0 ? `${r.roas.toFixed(1)}x` : '—'}</td>
-                        <td style={{
-                          padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
-                          color: r.effRoas >= 3 ? '#10b981' : r.effRoas >= 1.5 ? '#f59e0b' : '#ef4444',
-                        }}>{r.effRoas > 0 ? `${r.effRoas.toFixed(1)}x` : '—'}</td>
-                      </tr>
-                    ))}
-                    {/* Average row */}
-                    <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
-                      <td style={{
-                        padding: '8px 10px', fontWeight: 700, fontSize: 11,
-                        position: 'sticky', left: 0, background: C.card, zIndex: 1,
-                      }}>RATA-RATA</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
-                        Rp {fmtCompact(dailyDynamics.avgRev)}
-                      </td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
-                        Rp {fmtCompact(dailyDynamics.avgSpend)}
-                      </td>
-                      <td style={{
-                        padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700,
-                        color: dailyDynamics.avgRatio > 40 ? '#ef4444' : dailyDynamics.avgRatio > 25 ? '#f59e0b' : '#10b981',
-                      }}>{dailyDynamics.avgRatio.toFixed(1)}%</td>
-                      <td style={{
-                        padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700,
-                        color: dailyDynamics.avgRoas >= 3 ? '#10b981' : dailyDynamics.avgRoas >= 1.5 ? '#f59e0b' : '#ef4444',
-                      }}>{dailyDynamics.avgRoas.toFixed(1)}x</td>
-                      <td style={{
-                        padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700,
-                        color: dailyDynamics.avgEffRoas >= 3 ? '#10b981' : dailyDynamics.avgEffRoas >= 1.5 ? '#f59e0b' : '#ef4444',
-                      }}>{dailyDynamics.avgEffRoas.toFixed(1)}x</td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div
+                onClick={() => setShowDailyDetail(!showDailyDetail)}
+                style={{
+                  cursor: 'pointer', userSelect: 'none',
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  fontSize: 12, color: C.dim, padding: '4px 0',
+                }}
+              >
+                <span style={{
+                  display: 'inline-block', transition: 'transform 0.2s',
+                  transform: showDailyDetail ? 'rotate(90deg)' : 'rotate(0deg)',
+                  fontSize: 10,
+                }}>▶</span>
+                <span style={{ fontWeight: 600 }}>Rincian Harian</span>
+                <span style={{ fontSize: 10, color: `${C.dim}88` }}>({dailyDynamics.rows.length} hari)</span>
               </div>
+
+              {showDailyDetail && (
+                <div style={{ marginTop: 10, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                        {['Tanggal', 'Revenue', 'Ad Spend', 'Mkt Ratio'].map(h => (
+                          <th key={h} style={{
+                            padding: '8px 10px',
+                            textAlign: h === 'Tanggal' ? 'left' : 'right',
+                            color: C.dim, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap',
+                            position: h === 'Tanggal' ? 'sticky' : undefined,
+                            left: h === 'Tanggal' ? 0 : undefined,
+                            background: h === 'Tanggal' ? C.card : undefined,
+                            zIndex: h === 'Tanggal' ? 1 : undefined,
+                          }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dailyDynamics.rows.map((r) => (
+                        <tr key={r.date} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
+                          <td style={{
+                            padding: '8px 10px', fontWeight: 500, whiteSpace: 'nowrap', fontSize: 11,
+                            position: 'sticky', left: 0, background: C.card, zIndex: 1,
+                          }}>{r.dateLabel}</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>
+                            Rp {fmtCompact(r.rev)}
+                          </td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>
+                            Rp {fmtCompact(r.spend)}
+                          </td>
+                          <td style={{
+                            padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
+                            color: r.ratio > 40 ? '#ef4444' : r.ratio > 25 ? '#f59e0b' : '#10b981',
+                          }}>{r.ratio.toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                      <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
+                        <td style={{
+                          padding: '8px 10px', fontWeight: 700, fontSize: 11,
+                          position: 'sticky', left: 0, background: C.card, zIndex: 1,
+                        }}>RATA-RATA</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                          Rp {fmtCompact(dailyDynamics.avgRev)}
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                          Rp {fmtCompact(dailyDynamics.avgSpend)}
+                        </td>
+                        <td style={{
+                          padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700,
+                          color: dailyDynamics.avgRatio > 40 ? '#ef4444' : dailyDynamics.avgRatio > 25 ? '#f59e0b' : '#10b981',
+                        }}>{dailyDynamics.avgRatio.toFixed(1)}%</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           )}
         </div>
