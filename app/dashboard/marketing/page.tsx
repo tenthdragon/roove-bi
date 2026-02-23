@@ -360,30 +360,37 @@ export default function MarketingPage() {
         };
       });
 
-    // Add "Other Marketplace" row (Tokopedia + BliBli + Lazada) — no ads spend
-    const otherMpChannels = PLATFORM_CHANNEL_MAP['Other Marketplace'] || [];
-    const otherMpRevenue = otherMpChannels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0);
-    if (otherMpRevenue > 0) {
-      // Build sub-detail showing individual marketplace revenue
-      const otherMpSubs = otherMpChannels
-        .map(ch => ({ name: ch, spent: channelRev[ch] || 0, pct: otherMpRevenue > 0 ? ((channelRev[ch] || 0) / otherMpRevenue) * 100 : 0 }))
-        .filter(s => s.spent > 0)
-        .sort((a, b) => b.spent - a.spent);
+    // Add rows for platforms in PLATFORM_CHANNEL_MAP that have revenue but no ad spend
+    // This handles cases like Osgard having Shopee/TikTok revenue but only Facebook Ads spend
+    const existingPlatforms = new Set(result.map(r => r.platform));
+    for (const [platform, channels] of Object.entries(PLATFORM_CHANNEL_MAP)) {
+      if (existingPlatforms.has(platform)) continue; // already in result from ad spend
+      const channelRevenue = channels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0);
+      if (channelRevenue <= 0) continue; // no revenue either, skip
 
-      const otherMpAdminFee = otherMpChannels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0);
+      const revenueLabel = PLATFORM_CHANNEL_LABEL[platform] || '—';
+      const adminFee = channels.reduce((sum, ch) => sum + (channelAdminFee[ch] || 0), 0);
+
+      // Build sub-details for multi-channel platforms (e.g. Other Marketplace)
+      const subDetails = channels.length > 1
+        ? channels
+            .map(ch => ({ name: ch, spent: channelRev[ch] || 0, pct: channelRevenue > 0 ? ((channelRev[ch] || 0) / channelRevenue) * 100 : 0 }))
+            .filter(s => s.spent > 0)
+            .sort((a, b) => b.spent - a.spent)
+        : [];
 
       result.push({
-        platform: 'Other Marketplace',
+        platform,
         spent: 0,
         pct: 0,
         dailyAvg: 0,
         roas: 0,
-        adminFee: otherMpAdminFee,
-        effectiveRoas: otherMpAdminFee > 0 && otherMpRevenue > 0 ? otherMpRevenue / otherMpAdminFee : 0,
-        revenueChannel: 'Other MP',
-        channelRevenue: otherMpRevenue,
-        subDetails: otherMpSubs,
-        color: '#64748b',
+        adminFee,
+        effectiveRoas: adminFee > 0 && channelRevenue > 0 ? channelRevenue / adminFee : 0,
+        revenueChannel: revenueLabel,
+        channelRevenue,
+        subDetails,
+        color: PLATFORM_COLORS[platform] || '#64748b',
       });
     }
 
