@@ -14,7 +14,6 @@
   --green: #10b981;
   --red: #ef4444;
   --yellow: #f59e0b;
-  --sidebar-width: 220px;
 }
 
 * { box-sizing: border-box; }
@@ -34,26 +33,35 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 
-/* ═══ SIDEBAR NAVIGATION ═══ */
+/* ═══ RESPONSIVE NAVIGATION ═══ */
 
-/* Desktop: show sidebar, hide mobile nav */
+/* Desktop: show sidebar, hide hamburger, hide mobile overlay */
 @media (min-width: 769px) {
   .desktop-sidebar { display: flex !important; }
+  .mobile-hamburger { display: none !important; }
+  .mobile-overlay { display: none !important; }
   .mobile-nav { display: none !important; }
-  .desktop-nav { display: none !important; }  /* legacy top nav - hide */
+  .desktop-nav { display: none !important; }
 }
 
-/* Mobile: hide sidebar, show bottom nav, full width content */
+/* Mobile: hide desktop sidebar, show hamburger */
 @media (max-width: 768px) {
   .desktop-sidebar { display: none !important; }
   .desktop-nav { display: none !important; }
-  .mobile-nav { display: flex !important; }
+  .mobile-nav { display: none !important; }
+  .mobile-hamburger { display: flex !important; }
   .main-content-area {
     margin-left: 0 !important;
   }
   .dashboard-content {
-    padding: 12px 12px 80px 12px !important;
+    padding: 12px 12px !important;
   }
+}
+
+/* Slide-in animation for mobile sidebar */
+@keyframes slideIn {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
 }
 
 /* Table responsive */
