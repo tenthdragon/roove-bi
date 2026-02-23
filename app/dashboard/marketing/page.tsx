@@ -460,7 +460,19 @@ export default function MarketingPage() {
 
   return (
     <div className="fade-in">
-      <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Marketing</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Marketing</h2>
+        <select
+          value={brandFilter}
+          onChange={(e) => setBrandFilter(e.target.value)}
+          style={{
+            background: '#1a2744', border: `1px solid ${C.bdr}`, borderRadius: 8,
+            padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none',
+          }}>
+          <option value="all">All Brands</option>
+          {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
+        </select>
+      </div>
 
       {/* ── KPI Cards ── */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
@@ -554,21 +566,9 @@ export default function MarketingPage() {
       {/* Ad Spend by Traffic Source — Exclusive Channel ROAS              */}
       {/* ══════════════════════════════════════════════════════════════════ */}
       <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>Ad Spend by Traffic Source</div>
-            <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>ROAS per channel atribusi — exclusive, tanpa double count</div>
-          </div>
-          <select
-            value={brandFilter}
-            onChange={(e) => setBrandFilter(e.target.value)}
-            style={{
-              background: '#1a2744', border: `1px solid ${C.bdr}`, borderRadius: 8,
-              padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none',
-            }}>
-            <option value="all">All Brands</option>
-            {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
-          </select>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>Ad Spend by Traffic Source</div>
+          <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>ROAS per channel atribusi — exclusive, tanpa double count</div>
         </div>
 
         {platformBreakdown.length > 0 ? (
