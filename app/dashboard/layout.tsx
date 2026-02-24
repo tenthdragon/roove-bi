@@ -17,6 +17,9 @@ function getCurrentTab(path) {
 
 function getAllowedTabs(prof) {
   if (!prof) return [];
+  if (prof.role === 'staff') {
+    return ['admin'];
+  }
   if (prof.role === 'brand_manager') {
     return prof.allowed_tabs && prof.allowed_tabs.length > 0 ? prof.allowed_tabs : ['marketing'];
   }
