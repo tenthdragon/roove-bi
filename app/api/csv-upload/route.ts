@@ -211,7 +211,7 @@ const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
     const UPDATE_BATCH = 200;
     for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
       const batch = toUpdate.slice(i, i + UPDATE_BATCH);
-      const upsertRows = batch.map(upd => ({ id: upd.id, ...upd.data }));
+      const upsertRows = batch.map(upd => ({ id: upd.id, order_id: upd.orderId, ...upd.data }));
       const { error } = await svc.from('scalev_orders').upsert(upsertRows, { onConflict: 'id' });
       if (error) {
         stats.errors.push(`Update batch ${Math.floor(i / UPDATE_BATCH) + 1}: ${error.message}`);
