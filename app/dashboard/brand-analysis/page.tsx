@@ -18,7 +18,7 @@ const BRAND_COLORS = {
 
 export default function BrandAnalysisPage() {
   const [matrix, setMatrix] = useState([]);
-  const [stats, setStats] = useState([]);
+  const [stats, setStats] = useState(null); // { segments, distribution, gateway }
   const [journey, setJourney] = useState([]);
   const [refreshTime, setRefreshTime] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -58,44 +58,25 @@ export default function BrandAnalysisPage() {
     }
   }
 
-  // ── Multi-brand distribution ──
-  const multiBrandDist = useMemo(() => {
-    const dist = {};
-    let totalCustomers = 0;
-    let singleCount = 0, singleRev = 0, singleOrders = 0;
-    let multiCount = 0, multiRev = 0, multiOrders = 0;
+  // ── Derived data from pre-aggregated stats ──
+  const singleStats = stats?.segments?.['single'] || { customerCount: 0, totalOrders: 0, totalRevenue: 0, avgOrderValue: 0 };
+  const dualStats = stats?.segments?.['dual'] || { customerCount: 0, totalOrders: 0, totalRevenue: 0, avgOrderValue: 0 };
+  const multiStats = stats?.segments?.['multi'] || { customerCount: 0, totalOrders: 0, totalRevenue: 0, avgOrderValue: 0 };
 
-    for (const row of stats) {
-      const bc = row.brand_count || 1;
-      dist[bc] = (dist[bc] || 0) + 1;
-      totalCustomers++;
-      if (bc === 1) {
-        singleCount++; singleRev += Number(row.total_revenue) || 0; singleOrders += row.total_orders || 0;
-      } else {
-        multiCount++; multiRev += Number(row.total_revenue) || 0; multiOrders += row.total_orders || 0;
-      }
-    }
+  const multiCount = dualStats.customerCount + multiStats.customerCount;
+  const multiRevenue = dualStats.totalRevenue + multiStats.totalRevenue;
+  const multiOrders = dualStats.totalOrders + multiStats.totalOrders;
+  const multiAov = multiOrders > 0 ? multiRevenue / multiOrders : 0;
 
-    return {
-      distribution: dist,
-      totalCustomers,
-      single: { count: singleCount, revenue: singleRev, orders: singleOrders, aov: singleOrders > 0 ? singleRev / singleOrders : 0 },
-      multi: { count: multiCount, revenue: multiRev, orders: multiOrders, aov: multiOrders > 0 ? multiRev / multiOrders : 0 },
-    };
-  }, [stats]);
+  const singleCount = singleStats.customerCount;
+  const singleRevenue = singleStats.totalRevenue;
+  const singleOrders = singleStats.totalOrders;
+  const singleAov = singleOrders > 0 ? singleRevenue / singleOrders : 0;
 
-  // ── Gateway brands ──
-  const gatewayBrands = useMemo(() => {
-    const firstBrandCount = {};
-    for (const row of stats) {
-      if (row.first_brand) {
-        firstBrandCount[row.first_brand] = (firstBrandCount[row.first_brand] || 0) + 1;
-      }
-    }
-    return Object.entries(firstBrandCount)
-      .map(([brand, count]) => ({ brand, count }))
-      .sort((a, b) => b.count - a.count);
-  }, [stats]);
+  const totalCustomers = singleCount + multiCount;
+
+  const distribution = stats?.distribution || {};
+  const gatewayBrands = (stats?.gateway || []).sort((a, b) => b.count - a.count);
 
   // ── Matrix brands & lookup ──
   const matrixBrands = useMemo(() => {
@@ -117,6 +98,8 @@ export default function BrandAnalysisPage() {
       </div>
     );
   }
+
+  const hasData = totalCustomers > 0;
 
   return (
     <div className="fade-in">
@@ -141,7 +124,7 @@ export default function BrandAnalysisPage() {
         </div>
       </div>
 
-      {stats.length === 0 ? (
+      {!hasData ? (
         <div style={{ color: '#64748b', textAlign: 'center', padding: 40, background: '#111a2e', borderRadius: 12, border: '1px solid #1a2744' }}>
           Belum ada data brand analysis. Pastikan materialized view sudah di-refresh setelah upload data.
           <div style={{ marginTop: 12 }}>
@@ -166,31 +149,31 @@ export default function BrandAnalysisPage() {
               <div style={{ padding: 16, background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8 }}>
                 <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Single-Brand</div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace" }}>
-                  {multiBrandDist.single.count.toLocaleString('id-ID')}
+                  {singleCount.toLocaleString('id-ID')}
                 </div>
                 <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
-                  {multiBrandDist.totalCustomers > 0 ? fmtPct((multiBrandDist.single.count / multiBrandDist.totalCustomers) * 100) : '0%'} dari total
+                  {totalCustomers > 0 ? fmtPct((singleCount / totalCustomers) * 100) : '0%'} dari total
                 </div>
                 <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 11 }}>
-                  <span style={{ color: '#64748b' }}>AOV: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{fmtCompact(multiBrandDist.single.aov)}</span></span>
-                  <span style={{ color: '#64748b' }}>Rev: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{fmtCompact(multiBrandDist.single.revenue)}</span></span>
+                  <span style={{ color: '#64748b' }}>AOV: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{fmtCompact(singleAov)}</span></span>
+                  <span style={{ color: '#64748b' }}>Rev: <span style={{ color: '#e2e8f0', fontFamily: 'monospace' }}>{fmtCompact(singleRevenue)}</span></span>
                 </div>
               </div>
               <div style={{ padding: 16, background: '#0b1121', border: '1px solid #10b981', borderRadius: 8 }}>
                 <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Multi-Brand</div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: '#10b981', fontFamily: "'JetBrains Mono', monospace" }}>
-                  {multiBrandDist.multi.count.toLocaleString('id-ID')}
+                  {multiCount.toLocaleString('id-ID')}
                 </div>
                 <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
-                  {multiBrandDist.totalCustomers > 0 ? fmtPct((multiBrandDist.multi.count / multiBrandDist.totalCustomers) * 100) : '0%'} dari total
+                  {totalCustomers > 0 ? fmtPct((multiCount / totalCustomers) * 100) : '0%'} dari total
                 </div>
                 <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 11 }}>
-                  <span style={{ color: '#64748b' }}>AOV: <span style={{ color: '#10b981', fontFamily: 'monospace' }}>{fmtCompact(multiBrandDist.multi.aov)}</span></span>
-                  <span style={{ color: '#64748b' }}>Rev: <span style={{ color: '#10b981', fontFamily: 'monospace' }}>{fmtCompact(multiBrandDist.multi.revenue)}</span></span>
+                  <span style={{ color: '#64748b' }}>AOV: <span style={{ color: '#10b981', fontFamily: 'monospace' }}>{fmtCompact(multiAov)}</span></span>
+                  <span style={{ color: '#64748b' }}>Rev: <span style={{ color: '#10b981', fontFamily: 'monospace' }}>{fmtCompact(multiRevenue)}</span></span>
                 </div>
-                {multiBrandDist.single.aov > 0 && multiBrandDist.multi.aov > 0 && (
+                {singleAov > 0 && multiAov > 0 && (
                   <div style={{ marginTop: 6, fontSize: 11, color: '#10b981', fontWeight: 600 }}>
-                    {(multiBrandDist.multi.aov / multiBrandDist.single.aov).toFixed(1)}x AOV vs single-brand
+                    {(multiAov / singleAov).toFixed(1)}x AOV vs single-brand
                   </div>
                 )}
               </div>
@@ -199,9 +182,9 @@ export default function BrandAnalysisPage() {
             {/* Distribution */}
             <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Distribusi Jumlah Brand per Customer</div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {Object.entries(multiBrandDist.distribution).sort((a, b) => Number(a[0]) - Number(b[0])).map(([count, customers]) => (
+              {Object.entries(distribution).sort((a, b) => Number(a[0]) - Number(b[0])).map(([count, customers]) => (
                 <div key={count} style={{ padding: '8px 14px', background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8, textAlign: 'center' }}>
-                  <div style={{ fontSize: 16, fontWeight: 800, color: Number(count) > 1 ? '#10b981' : '#94a3b8', fontFamily: 'monospace' }}>{customers}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: Number(count) > 1 ? '#10b981' : '#94a3b8', fontFamily: 'monospace' }}>{customers.toLocaleString('id-ID')}</div>
                   <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>{count} brand</div>
                 </div>
               ))}
@@ -211,35 +194,37 @@ export default function BrandAnalysisPage() {
           {/* ═══════════════════════════════════════════════════ */}
           {/* Section 2: Gateway Brands                          */}
           {/* ═══════════════════════════════════════════════════ */}
-          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, marginBottom: 20 }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Gateway Brand</h3>
-            <p style={{ margin: '0 0 16px', fontSize: 12, color: '#64748b' }}>
-              Brand pertama yang dibeli customer — "pintu masuk" ke ekosistem RTI
-            </p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {gatewayBrands.map((g) => {
-                const maxCount = gatewayBrands[0]?.count || 1;
-                const pct = multiBrandDist.totalCustomers > 0 ? (g.count / multiBrandDist.totalCustomers) * 100 : 0;
-                return (
-                  <div key={g.brand} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <div style={{ width: 80, fontSize: 12, fontWeight: 600, color: BRAND_COLORS[g.brand] || '#94a3b8' }}>{g.brand}</div>
-                    <div style={{ flex: 1, height: 24, background: '#0b1121', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
-                      <div style={{
-                        height: '100%', borderRadius: 4,
-                        background: BRAND_COLORS[g.brand] || '#64748b',
-                        width: `${(g.count / maxCount) * 100}%`,
-                        opacity: 0.7,
-                      }} />
-                      <span style={{ position: 'absolute', left: 8, top: 4, fontSize: 11, fontWeight: 700, color: '#fff' }}>
-                        {g.count.toLocaleString('id-ID')}
-                      </span>
+          {gatewayBrands.length > 0 && (
+            <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, marginBottom: 20 }}>
+              <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Gateway Brand</h3>
+              <p style={{ margin: '0 0 16px', fontSize: 12, color: '#64748b' }}>
+                Brand pertama yang dibeli customer — "pintu masuk" ke ekosistem RTI
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {gatewayBrands.map((g) => {
+                  const maxCount = gatewayBrands[0]?.count || 1;
+                  const pct = totalCustomers > 0 ? (g.count / totalCustomers) * 100 : 0;
+                  return (
+                    <div key={g.brand} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 80, fontSize: 12, fontWeight: 600, color: BRAND_COLORS[g.brand] || '#94a3b8' }}>{g.brand}</div>
+                      <div style={{ flex: 1, height: 24, background: '#0b1121', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
+                        <div style={{
+                          height: '100%', borderRadius: 4,
+                          background: BRAND_COLORS[g.brand] || '#64748b',
+                          width: `${(g.count / maxCount) * 100}%`,
+                          opacity: 0.7,
+                        }} />
+                        <span style={{ position: 'absolute', left: 8, top: 4, fontSize: 11, fontWeight: 700, color: '#fff' }}>
+                          {g.count.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+                      <div style={{ width: 50, fontSize: 11, color: '#64748b', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(pct, 0)}</div>
                     </div>
-                    <div style={{ width: 50, fontSize: 11, color: '#64748b', textAlign: 'right', fontFamily: 'monospace' }}>{fmtPct(pct, 0)}</div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* ═══════════════════════════════════════════════════ */}
           {/* Section 3: Cross-Brand Matrix                      */}
