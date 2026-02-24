@@ -1,8 +1,5 @@
 // lib/csv-actions.ts
 'use server';
-
-export const maxDuration = 250;
-
 import { createServiceSupabase } from '@/lib/supabase-server';
 
 // ── Brand detection from item_name or item_owner ──
