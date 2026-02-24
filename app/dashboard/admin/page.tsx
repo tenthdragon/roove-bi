@@ -293,6 +293,7 @@ export default function AdminPage() {
                         ) : (
                           <select value={u.role} onChange={(e) => handleRoleChange(u.id, e.target.value)}
                             style={{ padding:'5px 10px', borderRadius:6, border:'1px solid #1a2744', background:'#111a2e', color:'#e2e8f0', fontSize:12 }}>
+                            <option value="staff">Staff</option>
                             <option value="admin">Admin</option>
                             <option value="finance">Finance</option>
                             <option value="brand_manager">Brand Manager</option>
