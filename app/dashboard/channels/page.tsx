@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, CHANNEL_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 
 export default function ChannelsPage() {
   const supabase = createClient();
@@ -12,6 +13,7 @@ export default function ChannelsPage() {
   const [channelData, setChannelData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState('all');
+  const { isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
@@ -20,7 +22,7 @@ export default function ChannelsPage() {
       .select('product, channel, net_sales, gross_profit, mp_admin_cost, net_after_mkt')
       .gte('date', dateRange.from).lte('date', dateRange.to)
       .then(({ data }) => {
-        setChannelData(data || []);
+        setChannelData((data || []).filter(row => isActiveBrand(row.product)));
         setLoading(false);
       });
   }, [dateRange, supabase]);
