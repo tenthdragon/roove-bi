@@ -1,6 +1,5 @@
 import { google } from 'googleapis';
 
-// Initialize Google Sheets API with service account credentials
 function getAuth() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '{}');
   const auth = new google.auth.GoogleAuth({
@@ -15,7 +14,6 @@ async function getSheets() {
   return google.sheets({ version: 'v4', auth });
 }
 
-// ── Helper: Convert Google Sheets serial date to ISO string ──
 function serialDateToISO(val: any): string | null {
   if (!val) return null;
   if (typeof val === 'number') {
@@ -43,29 +41,13 @@ function toNum(val: any): number {
   return isNaN(n) ? 0 : n;
 }
 
-// ── Sheet name to product name mapping ──
-const SKU_SHEETS: Record<string, string> = {
-  'Roove': 'Roove',
-  'Almona': 'Almona',
-  'Pluve': 'Pluve',
-  'YUV': 'Yuv',
-  'Osgard': 'Osgard',
-  'Purvu': 'Purvu',
-  'DRHyun': 'DrHyun',
-  'Globite': 'Globite',
-  'Orelif': 'Orelif',
-  'Veminine': 'Veminine',
-  'Calmara': 'Calmara',
-  'Other': 'Other',
-};
-
-// Sales channels in order as they appear in sheet (rows 31-41 net sales, rows 57-67 gross profit)
+// Sales channels in order as they appear in sheet
 const SHEET_CHANNELS = [
-  'Facebook Ads', 'Google Ads', 'Organik', 'Reseller', 'Shopee',
-  'TikTok Ads', 'TikTok Shop', 'Tokopedia', 'BliBli', 'Lazada', 'SnackVideo Ads',
+  'Facebook Ads', 'Google Ads', 'Organik', 'Reseller',
+  'Shopee', 'TikTok Ads', 'TikTok Shop', 'Tokopedia',
+  'BliBli', 'Lazada', 'SnackVideo Ads',
 ];
 
-// Merge map: sheet channel name → database channel name
 const CHANNEL_MERGE: Record<string, string> = {
   'TikTok Ads': 'TikTok',
   'TikTok Shop': 'TikTok',
@@ -75,7 +57,6 @@ function resolveChannel(sheetChannel: string): string {
   return CHANNEL_MERGE[sheetChannel] || sheetChannel;
 }
 
-// Admin marketplace channels — offset from admin MP header row
 const MP_ADMIN_CHANNEL_OFFSETS: Record<string, number> = {
   'Shopee': 1,
   'TikTok Shop': 2,
@@ -83,7 +64,6 @@ const MP_ADMIN_CHANNEL_OFFSETS: Record<string, number> = {
   'Lazada': 4,
 };
 
-// Detect format dynamically by scanning rows for section headers.
 function detectSheetFormat(rows: any[][]) {
   let mpAdminIdx = -1;
   for (let idx = 72; idx <= 92 && idx < rows.length; idx++) {
@@ -119,7 +99,6 @@ function detectSheetFormat(rows: any[][]) {
   }
 }
 
-// Detect the net_after_mkt channel order dynamically for each sheet.
 function detectNetAfterMktOrder(rows: any[][], startIdx: number): string[] {
   const channels: string[] = [];
   for (let idx = startIdx; idx < startIdx + 14 && idx < rows.length; idx++) {
@@ -130,61 +109,39 @@ function detectNetAfterMktOrder(rows: any[][], startIdx: number): string[] {
     channels.push(ch);
   }
   return channels.length > 0 ? channels : [
-    'Facebook Ads', 'Google Ads', 'Organik', 'Reseller', 'Shopee',
-    'TikTok Ads', 'TikTok Shop', 'Tokopedia', 'BliBli', 'Lazada', 'SnackVideo Ads',
+    'Facebook Ads', 'Google Ads', 'Organik', 'Reseller',
+    'Shopee', 'TikTok Ads', 'TikTok Shop', 'Tokopedia',
+    'BliBli', 'Lazada', 'SnackVideo Ads',
   ];
 }
 
 export interface ParsedSheetData {
   dailyProduct: Array<{
-    date: string;
-    product: string;
-    net_sales: number;
-    gross_profit: number;
-    net_after_mkt: number;
-    mkt_cost: number;
-    mp_admin_cost: number;  // NEW: separated from mkt_cost
+    date: string; product: string; net_sales: number; gross_profit: number;
+    net_after_mkt: number; mkt_cost: number; mp_admin_cost: number;
   }>;
   dailyChannel: Array<{
-    date: string;
-    product: string;
-    channel: string;
-    net_sales: number;
-    gross_profit: number;
-    mp_admin_cost: number;
-    net_after_mkt: number;
+    date: string; product: string; channel: string; net_sales: number;
+    gross_profit: number; mp_admin_cost: number; net_after_mkt: number;
   }>;
   ads: Array<{
-    date: string;
-    ad_account: string;
-    spent: number;
-    objective: string;
-    source: string;
-    store: string;
-    advertiser: string;
+    date: string; ad_account: string; spent: number; objective: string;
+    source: string; store: string; advertiser: string;
   }>;
   monthlySummary: Array<{
-    product: string;
-    sales_after_disc: number;
-    sales_pct: number;
-    gross_profit: number;
-    gross_profit_pct: number;
-    gross_after_mkt: number;
-    gmp_real: number;
-    mkt_pct: number;
-    mkt_share_pct: number;
+    product: string; sales_after_disc: number; sales_pct: number;
+    gross_profit: number; gross_profit_pct: number; gross_after_mkt: number;
+    gmp_real: number; mkt_pct: number; mkt_share_pct: number;
   }>;
   period: { month: number; year: number };
 }
 
-// ── Fetch all sheet names from a spreadsheet ──
 async function getSheetNames(spreadsheetId: string): Promise<string[]> {
   const sheets = await getSheets();
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
   return meta.data.sheets?.map(s => s.properties?.title || '') || [];
 }
 
-// ── Fetch a range from a sheet ──
 async function fetchRange(spreadsheetId: string, range: string): Promise<any[][]> {
   const sheets = await getSheets();
   const res = await sheets.spreadsheets.values.get({
@@ -196,8 +153,28 @@ async function fetchRange(spreadsheetId: string, range: string): Promise<any[][]
   return res.data.values || [];
 }
 
-// ── Main: Parse entire Google Sheet into database-ready format ──
-export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedSheetData> {
+// ── Build brand sheet mapping from registered brands ──
+function buildBrandSheetMap(
+  brandList: Array<{ name: string; sheet_name: string }>,
+  sheetNames: string[],
+): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const brand of brandList) {
+    const match = sheetNames.find(
+      s => s.toLowerCase() === brand.sheet_name.toLowerCase()
+    );
+    if (match) {
+      result[match] = brand.name;
+    }
+  }
+  return result;
+}
+
+// ── Main parser — now takes brandList parameter ──
+export async function parseGoogleSheet(
+  spreadsheetId: string,
+  brandList: Array<{ name: string; sheet_name: string }>,
+): Promise<ParsedSheetData> {
   const sheetNames = await getSheetNames(spreadsheetId);
 
   let periodMonth = 0;
@@ -207,6 +184,9 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
   const dailyChannel: ParsedSheetData['dailyChannel'] = [];
   const ads: ParsedSheetData['ads'] = [];
   const monthlySummary: ParsedSheetData['monthlySummary'] = [];
+
+  // ── Build brand sheets from registered brands ──
+  const brandSheets = buildBrandSheetMap(brandList, sheetNames);
 
   // ── Parse General sheet (monthly summary) ──
   if (sheetNames.includes('General')) {
@@ -229,16 +209,13 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
     }
   }
 
-  // ── Parse SKU sheets ──
-  for (const [sheetName, productName] of Object.entries(SKU_SHEETS)) {
-    if (!sheetNames.includes(sheetName)) continue;
-
+  // ── Parse brand sheets ──
+  for (const [sheetName, productName] of Object.entries(brandSheets)) {
     const rows = await fetchRange(spreadsheetId, `'${sheetName}'!A3:AI120`);
     if (!rows || rows.length === 0) continue;
 
     const format = detectSheetFormat(rows);
 
-    // Row 0 (sheet row 3) has dates starting from col D (index 3) onwards
     const dateRow = rows[0];
     const dates: Array<{ col: number; date: string }> = [];
     for (let c = 3; c < (dateRow?.length || 0); c++) {
@@ -252,7 +229,6 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         }
       }
     }
-
     if (dates.length === 0) continue;
 
     const netAfterMktChannels = detectNetAfterMktOrder(rows, format.netAfterMktDataIdx);
@@ -279,7 +255,6 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         totalNetSales += netSales;
         totalGP += gp;
 
-        // Get admin marketplace cost for this channel (if format has it)
         let mpAdmin = 0;
         if (format.hasMpAdmin) {
           const offset = MP_ADMIN_CHANNEL_OFFSETS[SHEET_CHANNELS[ch]];
@@ -289,12 +264,10 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         }
         totalMpAdmin += mpAdmin;
 
-        // Get net after mkt for this channel
         const namRowIdx = netAfterMktMap[SHEET_CHANNELS[ch]];
         const netAfterMktChannel = namRowIdx !== undefined && namRowIdx < rows.length
           ? toNum(rows[namRowIdx]?.[col]) : 0;
 
-        // Merge into resolved channel name
         const resolved = resolveChannel(SHEET_CHANNELS[ch]);
         if (!channelBucket[resolved]) channelBucket[resolved] = { ns: 0, gp: 0, mpAdmin: 0, nam: 0 };
         channelBucket[resolved].ns += netSales;
@@ -303,7 +276,6 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         channelBucket[resolved].nam += netAfterMktChannel;
       }
 
-      // Push merged channels to dailyChannel
       for (const [channel, v] of Object.entries(channelBucket)) {
         if (v.ns !== 0 || v.gp !== 0) {
           dailyChannel.push({
@@ -314,12 +286,10 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
         }
       }
 
-      // Marketing cost: starts at row 70 (index 67), scan until empty or next section
       for (let mktRow = 67; mktRow <= 78 && mktRow < rows.length; mktRow++) {
         totalMktCost += Math.abs(toNum(rows[mktRow]?.[col]));
       }
 
-      // Net after mkt: sum all channels from sheet
       for (const ch of netAfterMktChannels) {
         const rowIdx = netAfterMktMap[ch];
         if (rowIdx !== undefined && rowIdx < rows.length) {
@@ -329,13 +299,12 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
 
       if (totalNetSales !== 0 || totalGP !== 0 || totalMktCost !== 0) {
         dailyProduct.push({
-          date,
-          product: productName,
+          date, product: productName,
           net_sales: Math.round(totalNetSales),
           gross_profit: Math.round(totalGP),
           net_after_mkt: Math.round(totalNetAfterMkt),
-          mkt_cost: Math.round(totalMktCost + totalMpAdmin),  // Combined total (unchanged)
-          mp_admin_cost: Math.round(totalMpAdmin),             // NEW: separated for split display
+          mkt_cost: Math.round(totalMktCost + totalMpAdmin),
+          mp_admin_cost: Math.round(totalMpAdmin),
         });
       }
     }
@@ -349,6 +318,7 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
       if (!row || !row[0]) continue;
       const dateStr = serialDateToISO(row[0]);
       if (!dateStr) continue;
+
       ads.push({
         date: dateStr,
         ad_account: String(row[1] || ''),
@@ -361,10 +331,12 @@ export async function parseGoogleSheet(spreadsheetId: string): Promise<ParsedShe
     }
   }
 
-  return { dailyProduct, dailyChannel, ads, monthlySummary, period: { month: periodMonth, year: periodYear } };
+  return {
+    dailyProduct, dailyChannel, ads, monthlySummary,
+    period: { month: periodMonth, year: periodYear },
+  };
 }
 
-// ── Test connection to a spreadsheet ──
 export async function testSheetConnection(spreadsheetId: string): Promise<{
   success: boolean; sheetNames?: string[]; error?: string;
 }> {
