@@ -12,25 +12,6 @@ function getServiceSupabase() {
 
 export const maxDuration = 120;
 
-// Fetch ALL existing orders with pagination (Supabase defaults to 1000 limit)
-async function fetchAllExistingOrders(svc: any) {
-  const allOrders: any[] = [];
-  const PAGE_SIZE = 5000;
-  let offset = 0;
-  while (true) {
-    const { data, error } = await svc
-      .from('scalev_orders')
-      .select('id, order_id, customer_name, customer_phone, customer_email')
-      .range(offset, offset + PAGE_SIZE - 1);
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-    allOrders.push(...data);
-    if (data.length < PAGE_SIZE) break;
-    offset += PAGE_SIZE;
-  }
-  return allOrders;
-}
-
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -56,9 +37,27 @@ export async function POST(req: NextRequest) {
 
     const svc = getServiceSupabase();
 
-    // Get ALL existing orders with pagination
-    const existingOrders = await fetchAllExistingOrders(svc);
-    const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
+    // Only fetch orders that exist in the CSV (much faster than fetching all 23K+)
+const csvOrderIds = [];
+for (let i = 1; i < lines.length; i++) {
+  const line = lines[i].trim();
+  if (!line) continue;
+  const orderId = line.split(';')[0]?.trim();
+  if (orderId) csvOrderIds.push(orderId);
+}
+
+const existingOrders: any[] = [];
+const CHUNK = 200;
+for (let i = 0; i < csvOrderIds.length; i += CHUNK) {
+  const chunk = csvOrderIds.slice(i, i + CHUNK);
+  const { data, error } = await svc
+    .from('scalev_orders')
+    .select('id, order_id, customer_name, customer_phone, customer_email')
+    .in('order_id', chunk);
+  if (error) throw error;
+  if (data) existingOrders.push(...data);
+}
+const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
 
     const stats = {
       totalRows: 0,
