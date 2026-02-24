@@ -123,8 +123,8 @@ export async function uploadExcelData(formData: FormData) {
     .eq('id', user.id)
     .single();
 
-  if (profile?.role !== 'owner' && profile?.role !== 'finance')
-    throw new Error('Only owners and finance users can upload data');
+  if (profile?.role !== 'owner' && profile?.role !== 'finance' && profile?.role !== 'staff')
+    throw new Error('Only owners, finance, and staff users can upload data');
 
   const file = formData.get('file') as File;
   if (!file) throw new Error('No file provided');
