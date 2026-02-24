@@ -37,10 +37,10 @@ export async function POST(req: NextRequest) {
 
     const svc = getServiceSupabase();
 
-    // Get existing orders to determine insert vs update
+    // Get existing orders — include fields needed for "only fill if empty" logic
     const { data: existingOrders } = await svc
       .from('scalev_orders')
-      .select('id, order_id, scalev_id, source');
+      .select('id, order_id, scalev_id, source, customer_name, customer_phone, customer_email');
     const existingMap = new Map((existingOrders || []).map(o => [o.order_id, o]));
 
     const stats = {
@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
     };
 
     const toInsert: any[] = [];
-    const toUpdate: { id: number; data: any }[] = [];
+    const toUpdate: { id: number; data: any; orderId: string }[] = [];
     const orderLinesMap: Record<string, any> = {};
     const seenOrderIds = new Set<string>();
 
@@ -84,19 +84,16 @@ export async function POST(req: NextRequest) {
           // ── UPDATE: only enrich fields that CSV has but API might not ──
           const enrichData: any = {};
 
-          // Always update these from CSV (CSV is authoritative for these)
           if (row.customer_type) enrichData.customer_type = row.customer_type;
           if (row.province) enrichData.province = row.province;
           if (row.city) enrichData.city = row.city;
           if (row.subdistrict) enrichData.subdistrict = row.subdistrict;
           if (row.handler) enrichData.handler = row.handler;
 
-          // Only fill if currently empty in DB (don't overwrite API data)
           if (row.name && !existing.customer_name) enrichData.customer_name = row.name;
           if (row.phone && !existing.customer_phone) enrichData.customer_phone = row.phone;
           if (row.email && !existing.customer_email) enrichData.customer_email = row.email;
 
-          // Update status if CSV has more advanced status
           if (row.order_status) enrichData.status = row.order_status;
           if (shippedTime) enrichData.shipped_time = shippedTime;
           if (ts(row.paid_time)) enrichData.paid_time = ts(row.paid_time);
@@ -105,17 +102,15 @@ export async function POST(req: NextRequest) {
           if (ts(row.draft_time)) enrichData.draft_time = ts(row.draft_time);
           if (ts(row.pending_time)) enrichData.pending_time = ts(row.pending_time);
 
-          // Financial data — update if CSV has non-zero values
           if (num(row.gross_revenue) > 0) enrichData.gross_revenue = num(row.gross_revenue);
           if (num(row.net_revenue) > 0) enrichData.net_revenue = num(row.net_revenue);
           if (num(row.shipping_cost) > 0) enrichData.shipping_cost = num(row.shipping_cost);
 
           if (Object.keys(enrichData).length > 0) {
             enrichData.synced_at = new Date().toISOString();
-            toUpdate.push({ id: existing.id, data: enrichData });
+            toUpdate.push({ id: existing.id, data: enrichData, orderId: row.order_id });
           }
 
-          // Also update order line with CSV data
           orderLinesMap[row.order_id] = {
             existingOrderDbId: existing.id,
             line: buildOrderLine(row, salesChannel, productType, shippedTime),
@@ -171,37 +166,85 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Execute batch inserts ──
-    const BATCH = 100;
+    // ── Execute inserts — individual fallback on batch conflict ──
+    const BATCH = 50;
     for (let i = 0; i < toInsert.length; i += BATCH) {
       const batch = toInsert.slice(i, i + BATCH);
-      const { data: inserted, error: err } = await svc
+
+      // Try batch insert first (fast path)
+      const { data: inserted, error: batchErr } = await svc
         .from('scalev_orders')
         .insert(batch)
         .select('id, order_id');
 
-      if (err) {
-        stats.errors.push(`Insert batch ${Math.floor(i / BATCH) + 1}: ${err.message}`);
-        continue;
-      }
-
-      // Insert order lines for new orders
-      if (inserted) {
+      if (!batchErr && inserted) {
+        // Batch succeeded — insert order lines
         const linesToInsert = inserted.map(o => {
           const entry = orderLinesMap[o.order_id];
-          if (!entry) return null;
+          if (!entry || entry.isUpdate) return null;
           return { ...entry.line, scalev_order_id: o.id };
         }).filter(Boolean);
 
         if (linesToInsert.length > 0) {
           const { error: lineErr } = await svc.from('scalev_order_lines').insert(linesToInsert);
-          if (lineErr) stats.errors.push(`Lines insert: ${lineErr.message}`);
+          if (lineErr) stats.errors.push(`Lines insert batch ${Math.floor(i / BATCH) + 1}: ${lineErr.message}`);
         }
         stats.newInserted += inserted.length;
+      } else {
+        // Batch failed (likely duplicates) — fall back to one-by-one
+        for (const order of batch) {
+          const { data: single, error: singleErr } = await svc
+            .from('scalev_orders')
+            .insert(order)
+            .select('id, order_id');
+
+          if (!singleErr && single && single.length > 0) {
+            // New order inserted successfully
+            const entry = orderLinesMap[single[0].order_id];
+            if (entry && !entry.isUpdate) {
+              await svc.from('scalev_order_lines').insert({
+                ...entry.line,
+                scalev_order_id: single[0].id,
+              });
+            }
+            stats.newInserted++;
+          } else if (singleErr?.message?.includes('duplicate key')) {
+            // Already exists — enrich instead
+            const { data: existing } = await svc
+              .from('scalev_orders')
+              .select('id')
+              .eq('order_id', order.order_id)
+              .single();
+
+            if (existing) {
+              const enrichData: any = { synced_at: new Date().toISOString() };
+              if (order.customer_type) enrichData.customer_type = order.customer_type;
+              if (order.province) enrichData.province = order.province;
+              if (order.city) enrichData.city = order.city;
+              if (order.subdistrict) enrichData.subdistrict = order.subdistrict;
+              if (order.handler) enrichData.handler = order.handler;
+
+              await svc.from('scalev_orders').update(enrichData).eq('id', existing.id);
+
+              // Replace order line
+              const entry = orderLinesMap[order.order_id];
+              if (entry) {
+                await svc.from('scalev_order_lines').delete().eq('scalev_order_id', existing.id);
+                await svc.from('scalev_order_lines').insert({
+                  ...entry.line,
+                  scalev_order_id: existing.id,
+                });
+              }
+              stats.updated++;
+            }
+          } else if (singleErr) {
+            stats.errors.push(`Order ${order.order_id}: ${singleErr.message}`);
+          }
+        }
       }
     }
 
-    // ── Execute batch updates ──
+    // ── Execute updates for orders that were already in existingMap ──
     for (const upd of toUpdate) {
       const { error: err } = await svc
         .from('scalev_orders')
@@ -213,10 +256,8 @@ export async function POST(req: NextRequest) {
       } else {
         stats.updated++;
 
-        // Update order line too (replace with CSV data which has customer_type info)
-        const entry = orderLinesMap[Object.keys(orderLinesMap).find(
-          k => orderLinesMap[k].existingOrderDbId === upd.id
-        ) || ''];
+        // Replace order line with CSV data
+        const entry = orderLinesMap[upd.orderId];
         if (entry) {
           await svc.from('scalev_order_lines').delete().eq('scalev_order_id', upd.id);
           const { error: lineErr } = await svc.from('scalev_order_lines').insert({
@@ -228,7 +269,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // Log with uploader info
+    // Log
     const uploadedBy = formData.get('uploaded_by') as string || null;
     const filename = formData.get('filename') as string || file.name;
 
