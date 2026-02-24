@@ -207,20 +207,16 @@ const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
       }
     }
 
-    // ── Phase 3: Batch UPDATE existing orders (parallel) ──
-    const UPDATE_BATCH = 50;
+   // ── Phase 3: Batch UPDATE existing orders via upsert ──
+    const UPDATE_BATCH = 200;
     for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
       const batch = toUpdate.slice(i, i + UPDATE_BATCH);
-      const results = await Promise.all(
-        batch.map(async (upd) => {
-          const { error } = await svc.from('scalev_orders').update(upd.data).eq('id', upd.id);
-          if (error) return { ok: false, msg: `Update ${upd.orderId}: ${error.message}` };
-          return { ok: true };
-        })
-      );
-      for (const r of results) {
-        if (r.ok) stats.updated++;
-        else stats.errors.push(r.msg!);
+      const upsertRows = batch.map(upd => ({ id: upd.id, ...upd.data }));
+      const { error } = await svc.from('scalev_orders').upsert(upsertRows, { onConflict: 'id' });
+      if (error) {
+        stats.errors.push(`Update batch ${Math.floor(i / UPDATE_BATCH) + 1}: ${error.message}`);
+      } else {
+        stats.updated += batch.length;
       }
     }
 
