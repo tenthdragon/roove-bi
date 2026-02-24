@@ -12,6 +12,63 @@ function getServiceSupabase() {
 
 export const maxDuration = 250;
 
+// ── Brand detection from item_name or store_name ──
+function deriveBrandFromItem(itemName: string, itemOwner: string): string {
+  const n = (itemName || '').toLowerCase();
+  const o = (itemOwner || '').toLowerCase();
+  if (n.includes('osgard') || o.includes('osgard')) return 'Osgard';
+  if (n.includes('purvu') || n.includes('secret') || o.includes('purvu') || o.includes('secret')) return 'Purvu';
+  if (n.includes('pluve') || o.includes('pluve')) return 'Pluve';
+  if (n.includes('globite') || o.includes('globite')) return 'Globite';
+  if (n.includes('drhyun') || n.includes('dr hyun') || o.includes('drhyun') || o.includes('dr hyun')) return 'DrHyun';
+  if (n.includes('calmara') || o.includes('calmara')) return 'Calmara';
+  if (n.includes('almona') || o.includes('almona')) return 'Almona';
+  if (n.includes('yuv') || o.includes('yuv')) return 'YUV';
+  if (n.includes('veminine') || o.includes('veminine')) return 'Veminine';
+  if (n.includes('orelif') || o.includes('orelif')) return 'Orelif';
+  if (n.includes('roove') || n.includes('shaker') || n.includes('jam tangan') || o.includes('roove')) return 'Roove';
+  return 'Other';
+}
+
+function deriveBrandFromStore(storeName: string): string {
+  const s = (storeName || '').toLowerCase();
+  if (s.includes('osgard')) return 'Osgard';
+  if (s.includes('purvu') || s.includes('secret')) return 'Purvu';
+  if (s.includes('pluve')) return 'Pluve';
+  if (s.includes('globite')) return 'Globite';
+  if (s.includes('drhyun') || s.includes('dr hyun')) return 'DrHyun';
+  if (s.includes('calmara')) return 'Calmara';
+  if (s.includes('almona')) return 'Almona';
+  if (s.includes('yuv')) return 'YUV';
+  if (s.includes('veminine')) return 'Veminine';
+  if (s.includes('orelif')) return 'Orelif';
+  if (s.includes('free store')) return 'Other';
+  if (s.includes('roove')) return 'Roove';
+  return 'Unknown';
+}
+
+function deriveSalesChannel(row: Record<string, string>): string {
+  const platform = (row.platform || '').toLowerCase();
+  const storeName = (row.store || '').toLowerCase();
+  const isPurchaseFb = row.is_purchase_fb === 'true';
+  const isPurchaseTiktok = row.is_purchase_tiktok === 'true';
+  const resellerPrice = parseFloat(row.reseller_product_price || '0');
+
+  if (platform === 'shopee' || storeName.includes('shopee')) return 'Shopee';
+  if (platform === 'tiktokshop' || platform === 'tiktok' || storeName.includes('tiktok')) return 'TikTok Shop';
+  if (platform === 'lazada' || storeName.includes('lazada')) return 'Lazada';
+  if (platform === 'tokopedia' || storeName.includes('tokopedia')) return 'Tokopedia';
+  if (platform === 'blibli' || storeName.includes('blibli')) return 'BliBli';
+  if (resellerPrice > 0 && storeName.includes('mitra')) return 'Reseller';
+
+  if (platform === 'scalev' || platform === '') {
+    if (isPurchaseFb) return 'Facebook Ads';
+    if (isPurchaseTiktok) return 'TikTok Ads';
+    return 'Organik';
+  }
+  return 'Organik';
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -35,49 +92,50 @@ export async function POST(req: NextRequest) {
       }, { status: 400 });
     }
 
+    // ── Auto-detect format ──
+    const isProductBased = headers.includes('item_name');
     const svc = getServiceSupabase();
 
-    // Only fetch orders that exist in the CSV (much faster than fetching all 23K+)
-const csvOrderIds = [];
-for (let i = 1; i < lines.length; i++) {
-  const line = lines[i].trim();
-  if (!line) continue;
-  const orderId = line.split(';')[0]?.trim();
-  if (orderId) csvOrderIds.push(orderId);
-}
+    // ── Collect all CSV order IDs for efficient lookup ──
+    const csvOrderIds: string[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      const orderId = line.split(';')[0]?.trim();
+      if (orderId && !csvOrderIds.includes(orderId)) csvOrderIds.push(orderId);
+    }
 
-const existingOrders: any[] = [];
-const CHUNK = 200;
-for (let i = 0; i < csvOrderIds.length; i += CHUNK) {
-  const chunk = csvOrderIds.slice(i, i + CHUNK);
-  const { data, error } = await svc
-    .from('scalev_orders')
-    .select('id, order_id, customer_name, customer_phone, customer_email')
-    .in('order_id', chunk);
-  if (error) throw error;
-  if (data) existingOrders.push(...data);
-}
-const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
+    // ── Fetch only relevant existing orders ──
+    const existingOrders: any[] = [];
+    const CHUNK = 200;
+    for (let i = 0; i < csvOrderIds.length; i += CHUNK) {
+      const chunk = csvOrderIds.slice(i, i + CHUNK);
+      const { data, error } = await svc
+        .from('scalev_orders')
+        .select('id, order_id, customer_name, customer_phone, customer_email')
+        .in('order_id', chunk);
+      if (error) throw error;
+      if (data) existingOrders.push(...data);
+    }
+    const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
 
     const stats = {
       totalRows: 0,
       newInserted: 0,
       updated: 0,
       errors: [] as string[],
-      // Debug info
+      format: isProductBased ? 'product-based' : 'order-based',
       existingMapSize: existingMap.size,
-      csvUniqueIds: 0,
+      csvUniqueIds: csvOrderIds.length,
       classifiedAsNew: 0,
       classifiedAsUpdate: 0,
+      totalLineItems: 0,
     };
 
-    // ── Phase 1: Parse all rows ──
-    const toInsert: any[] = [];
-    const toUpdate: { id: number; data: any; orderId: string }[] = [];
-    const orderLinesNew: Record<string, any> = {};
-    const orderLinesUpdate: Record<string, any> = {};
-    const seenOrderIds = new Set<string>();
-
+    // ── Parse rows ──
+    // For product-based: group rows by order_id first
+    const orderRows: Record<string, Record<string, string>[]> = {};
+    
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i].trim();
       if (!line) continue;
@@ -89,94 +147,155 @@ const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
         row[headers[j]] = (values[j] || '').trim();
       }
 
-      if (!row.order_id || seenOrderIds.has(row.order_id)) continue;
-      seenOrderIds.add(row.order_id);
+      if (!row.order_id) continue;
+      
+      if (!orderRows[row.order_id]) orderRows[row.order_id] = [];
+      orderRows[row.order_id].push(row);
+    }
 
-      try {
-        const num = (v: string) => parseFloat(v || '0') || 0;
-        const ts = (v: string) => (v && v.trim()) ? v.trim() : null;
-        const salesChannel = deriveSalesChannel(row);
-        const productType = deriveProductType(row.store || '');
-        const shippedTime = ts(row.shipped_time) || ts(row.completed_time) || null;
-        const orderLine = buildOrderLine(row, salesChannel, productType, shippedTime);
+    const num = (v: string) => parseFloat(v || '0') || 0;
+    const ts = (v: string) => (v && v.trim()) ? v.trim() : null;
 
-        const existing = existingMap.get(row.order_id);
+    const toInsert: any[] = [];
+    const toUpdate: { id: number; data: any; orderId: string }[] = [];
+    const orderLinesMap: Record<string, any[]> = {}; // order_id -> line items
+    const isNewOrder: Record<string, boolean> = {};
 
-        if (existing) {
-          const d: any = {};
-          if (row.customer_type) d.customer_type = row.customer_type;
-          if (row.province) d.province = row.province;
-          if (row.city) d.city = row.city;
-          if (row.subdistrict) d.subdistrict = row.subdistrict;
-          if (row.handler) d.handler = row.handler;
-          if (row.name && !existing.customer_name) d.customer_name = row.name;
-          if (row.phone && !existing.customer_phone) d.customer_phone = row.phone;
-          if (row.email && !existing.customer_email) d.customer_email = row.email;
-          if (row.order_status) d.status = row.order_status;
-          if (shippedTime) d.shipped_time = shippedTime;
-          if (ts(row.paid_time)) d.paid_time = ts(row.paid_time);
-          if (ts(row.canceled_time)) d.canceled_time = ts(row.canceled_time);
-          if (ts(row.confirmed_time)) d.confirmed_time = ts(row.confirmed_time);
-          if (ts(row.draft_time)) d.draft_time = ts(row.draft_time);
-          if (ts(row.pending_time)) d.pending_time = ts(row.pending_time);
-          if (num(row.gross_revenue) > 0) d.gross_revenue = num(row.gross_revenue);
-          if (num(row.net_revenue) > 0) d.net_revenue = num(row.net_revenue);
-          if (num(row.shipping_cost) > 0) d.shipping_cost = num(row.shipping_cost);
+    for (const [orderId, rows] of Object.entries(orderRows)) {
+      const firstRow = rows[0]; // Order-level data from first row
+      const salesChannel = deriveSalesChannel(firstRow);
+      const shippedTime = ts(firstRow.shipped_time) || ts(firstRow.completed_time) || null;
 
-          if (Object.keys(d).length > 0) {
-            d.synced_at = new Date().toISOString();
-            toUpdate.push({ id: existing.id, data: d, orderId: row.order_id });
-          }
-          orderLinesUpdate[row.order_id] = { dbId: existing.id, line: orderLine };
-          stats.classifiedAsUpdate++;
-        } else {
-          toInsert.push({
-            scalev_id: null,
-            order_id: row.order_id,
-            customer_type: row.customer_type || null,
-            status: row.order_status || 'unknown',
+      // ── Build line items ──
+      const lineItems: any[] = [];
+
+      if (isProductBased) {
+        // Product-based: each row is a line item
+        for (const row of rows) {
+          const itemName = row.item_name || '';
+          const itemOwner = row.item_owner || '';
+          if (!itemName) continue; // Skip rows without item
+
+          const brand = deriveBrandFromItem(itemName, itemOwner);
+          lineItems.push({
+            order_id: orderId,
+            product_name: itemName,
+            product_type: brand,
+            variant_sku: null,
+            quantity: parseInt(row.item_quantity || '0') || 0,
+            product_price_bt: num(row.item_product_price_bt),
+            discount_bt: num(row.item_product_discount_bt),
+            cogs_bt: num(row.item_cogs_bt),
+            tax_rate: num(firstRow.tax_rate) || 11.0,
             shipped_time: shippedTime,
-            platform: row.platform || null,
-            store_name: row.store || null,
-            utm_source: row.utm_source || null,
-            financial_entity: row.financial_entity || null,
-            payment_method: row.payment_method || null,
-            unique_code_discount: num(row.unique_code_discount),
-            is_purchase_fb: row.is_purchase_fb === 'true',
-            is_purchase_tiktok: row.is_purchase_tiktok === 'true',
-            is_purchase_kwai: row.is_purchase_kwai === 'true',
-            gross_revenue: num(row.gross_revenue),
-            net_revenue: num(row.net_revenue),
-            shipping_cost: num(row.shipping_cost),
-            total_quantity: parseInt(row.quantity || '0') || 0,
-            customer_name: row.name || null,
-            customer_phone: row.phone || null,
-            customer_email: row.email || null,
-            province: row.province || null,
-            city: row.city || null,
-            subdistrict: row.subdistrict || null,
-            handler: row.handler || null,
-            draft_time: ts(row.draft_time),
-            pending_time: ts(row.pending_time),
-            confirmed_time: ts(row.confirmed_time),
-            paid_time: ts(row.paid_time),
-            canceled_time: ts(row.canceled_time),
-            source: 'csv_upload',
-            raw_data: row,
+            sales_channel: salesChannel,
+            is_purchase_fb: firstRow.is_purchase_fb === 'true',
+            is_purchase_tiktok: firstRow.is_purchase_tiktok === 'true',
+            is_purchase_kwai: firstRow.is_purchase_kwai === 'true',
             synced_at: new Date().toISOString(),
           });
-          orderLinesNew[row.order_id] = orderLine;
-          stats.classifiedAsNew++;
         }
-      } catch (err: any) {
-        stats.errors.push(`Row ${i + 1} (${row.order_id}): ${err.message}`);
+      } else {
+        // Order-based: single line item derived from store
+        const brand = deriveBrandFromStore(firstRow.store || '');
+        lineItems.push({
+          order_id: orderId,
+          product_name: brand,
+          product_type: brand,
+          variant_sku: null,
+          quantity: parseInt(firstRow.quantity || '0') || 0,
+          product_price_bt: num(firstRow.product_price_bt),
+          discount_bt: num(firstRow.product_discount_bt),
+          cogs_bt: num(firstRow.cogs_bt),
+          tax_rate: num(firstRow.tax_rate) || 11.0,
+          shipped_time: shippedTime,
+          sales_channel: salesChannel,
+          is_purchase_fb: firstRow.is_purchase_fb === 'true',
+          is_purchase_tiktok: firstRow.is_purchase_tiktok === 'true',
+          is_purchase_kwai: firstRow.is_purchase_kwai === 'true',
+          synced_at: new Date().toISOString(),
+        });
+      }
+
+      stats.totalLineItems += lineItems.length;
+      orderLinesMap[orderId] = lineItems;
+
+      const existing = existingMap.get(orderId);
+
+      if (existing) {
+        // Update existing order
+        const d: any = {};
+        if (firstRow.customer_type) d.customer_type = firstRow.customer_type;
+        if (firstRow.province) d.province = firstRow.province;
+        if (firstRow.city) d.city = firstRow.city;
+        if (firstRow.subdistrict) d.subdistrict = firstRow.subdistrict;
+        if (firstRow.handler) d.handler = firstRow.handler;
+        if (firstRow.name && !existing.customer_name) d.customer_name = firstRow.name;
+        if (firstRow.phone && !existing.customer_phone) d.customer_phone = firstRow.phone;
+        if (firstRow.email && !existing.customer_email) d.customer_email = firstRow.email;
+        if (firstRow.order_status) d.status = firstRow.order_status;
+        if (shippedTime) d.shipped_time = shippedTime;
+        if (ts(firstRow.paid_time)) d.paid_time = ts(firstRow.paid_time);
+        if (ts(firstRow.canceled_time)) d.canceled_time = ts(firstRow.canceled_time);
+        if (ts(firstRow.confirmed_time)) d.confirmed_time = ts(firstRow.confirmed_time);
+        if (ts(firstRow.draft_time)) d.draft_time = ts(firstRow.draft_time);
+        if (ts(firstRow.pending_time)) d.pending_time = ts(firstRow.pending_time);
+        if (num(firstRow.gross_revenue) > 0) d.gross_revenue = num(firstRow.gross_revenue);
+        if (num(firstRow.net_revenue) > 0) d.net_revenue = num(firstRow.net_revenue);
+        if (num(firstRow.shipping_cost) > 0) d.shipping_cost = num(firstRow.shipping_cost);
+
+        if (Object.keys(d).length > 0) {
+          d.synced_at = new Date().toISOString();
+          toUpdate.push({ id: existing.id, data: d, orderId });
+        }
+        isNewOrder[orderId] = false;
+        stats.classifiedAsUpdate++;
+      } else {
+        // Insert new order
+        toInsert.push({
+          scalev_id: null,
+          order_id: orderId,
+          customer_type: firstRow.customer_type || null,
+          status: firstRow.order_status || 'unknown',
+          shipped_time: shippedTime,
+          platform: firstRow.platform || null,
+          store_name: firstRow.store || null,
+          utm_source: firstRow.utm_source || null,
+          financial_entity: firstRow.financial_entity || null,
+          payment_method: firstRow.payment_method || null,
+          unique_code_discount: num(firstRow.unique_code_discount),
+          is_purchase_fb: firstRow.is_purchase_fb === 'true',
+          is_purchase_tiktok: firstRow.is_purchase_tiktok === 'true',
+          is_purchase_kwai: firstRow.is_purchase_kwai === 'true',
+          gross_revenue: num(firstRow.gross_revenue),
+          net_revenue: num(firstRow.net_revenue),
+          shipping_cost: num(firstRow.shipping_cost),
+          total_quantity: parseInt(firstRow.quantity || '0') || 0,
+          customer_name: firstRow.name || null,
+          customer_phone: firstRow.phone || null,
+          customer_email: firstRow.email || null,
+          province: firstRow.province || null,
+          city: firstRow.city || null,
+          subdistrict: firstRow.subdistrict || null,
+          handler: firstRow.handler || null,
+          draft_time: ts(firstRow.draft_time),
+          pending_time: ts(firstRow.pending_time),
+          confirmed_time: ts(firstRow.confirmed_time),
+          paid_time: ts(firstRow.paid_time),
+          canceled_time: ts(firstRow.canceled_time),
+          source: 'csv_upload',
+          raw_data: firstRow,
+          synced_at: new Date().toISOString(),
+        });
+        isNewOrder[orderId] = true;
+        stats.classifiedAsNew++;
       }
     }
 
-    stats.csvUniqueIds = seenOrderIds.size;
-
-    // ── Phase 2: Batch INSERT new orders (use upsert as safety net) ──
+    // ── Phase 2: Batch INSERT new orders ──
     const BATCH = 200;
+    const insertedIdMap: Record<string, number> = {}; // order_id -> db id
+
     for (let i = 0; i < toInsert.length; i += BATCH) {
       const batch = toInsert.slice(i, i + BATCH);
       const { data: inserted, error: err } = await svc
@@ -189,25 +308,15 @@ const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
         continue;
       }
 
-      if (inserted && inserted.length > 0) {
-        const lineBatch = inserted.map(o => {
-          const line = orderLinesNew[o.order_id];
-          return line ? { ...line, scalev_order_id: o.id } : null;
-        }).filter(Boolean);
-
-        if (lineBatch.length > 0) {
-          // Also upsert lines to avoid conflicts
-          for (const ln of lineBatch) {
-            await svc.from('scalev_order_lines').delete().eq('scalev_order_id', ln.scalev_order_id);
-          }
-          const { error: lineErr } = await svc.from('scalev_order_lines').insert(lineBatch);
-          if (lineErr) stats.errors.push(`Lines batch ${Math.floor(i / BATCH) + 1}: ${lineErr.message}`);
+      if (inserted) {
+        for (const o of inserted) {
+          insertedIdMap[o.order_id] = o.id;
         }
         stats.newInserted += inserted.length;
       }
     }
 
-   // ── Phase 3: Batch UPDATE existing orders via upsert ──
+    // ── Phase 3: Batch UPDATE existing orders ──
     const UPDATE_BATCH = 200;
     for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
       const batch = toUpdate.slice(i, i + UPDATE_BATCH);
@@ -220,8 +329,60 @@ const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
       }
     }
 
-   // ── Phase 4: Replace order lines for NEW orders only (skip existing to avoid timeout) ──
-    // Order lines for existing orders are already in DB — only update if critical fields changed
+    // ── Phase 4: Replace line items for all orders (product-based) or new orders only ──
+    if (isProductBased) {
+      // For product-based: always replace line items (they have better data)
+      // First, get DB IDs for existing orders
+      const existingIdMap: Record<string, number> = {};
+      for (const o of existingOrders) {
+        existingIdMap[o.order_id] = o.id;
+      }
+
+      // Combine both maps
+      const allIdMap = { ...existingIdMap, ...insertedIdMap };
+
+      // Delete existing line items and insert new ones in batches
+      const allOrderIds = Object.keys(orderLinesMap);
+      for (let i = 0; i < allOrderIds.length; i += UPDATE_BATCH) {
+        const batchOrderIds = allOrderIds.slice(i, i + UPDATE_BATCH);
+        const dbIds = batchOrderIds.map(oid => allIdMap[oid]).filter(Boolean);
+        
+        if (dbIds.length > 0) {
+          // Delete old line items
+          await svc.from('scalev_order_lines').delete().in('scalev_order_id', dbIds);
+
+          // Prepare new line items
+          const lineBatch: any[] = [];
+          for (const oid of batchOrderIds) {
+            const dbId = allIdMap[oid];
+            if (!dbId) continue;
+            for (const line of orderLinesMap[oid]) {
+              lineBatch.push({ ...line, scalev_order_id: dbId });
+            }
+          }
+
+          if (lineBatch.length > 0) {
+            // Insert in sub-batches of 500
+            for (let j = 0; j < lineBatch.length; j += 500) {
+              const subBatch = lineBatch.slice(j, j + 500);
+              const { error: lineErr } = await svc.from('scalev_order_lines').insert(subBatch);
+              if (lineErr) stats.errors.push(`Lines batch: ${lineErr.message}`);
+            }
+          }
+        }
+      }
+    } else {
+      // For order-based: only insert line items for NEW orders
+      for (const [orderId, lines] of Object.entries(orderLinesMap)) {
+        if (!isNewOrder[orderId]) continue;
+        const dbId = insertedIdMap[orderId];
+        if (!dbId) continue;
+
+        const lineBatch = lines.map(line => ({ ...line, scalev_order_id: dbId }));
+        const { error: lineErr } = await svc.from('scalev_order_lines').insert(lineBatch);
+        if (lineErr) stats.errors.push(`Lines ${orderId}: ${lineErr.message}`);
+      }
+    }
 
     // ── Log ──
     const uploadedBy = formData.get('uploaded_by') as string || null;
@@ -250,6 +411,8 @@ const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
         updated: stats.updated,
         errors: stats.errors.length,
         errorDetails: stats.errors.slice(0, 10),
+        format: stats.format,
+        lineItems: stats.totalLineItems,
       },
       debug: {
         existingMapSize: stats.existingMapSize,
@@ -257,67 +420,11 @@ const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
         classifiedAsNew: stats.classifiedAsNew,
         classifiedAsUpdate: stats.classifiedAsUpdate,
       },
-      message: `Upload selesai! ${stats.newInserted} order baru, ${stats.updated} order diperkaya, ${stats.errors.length} error.`,
+      message: `Upload selesai (${stats.format})! ${stats.newInserted} order baru, ${stats.updated} order diperkaya, ${stats.totalLineItems} line items, ${stats.errors.length} error.`,
     });
 
   } catch (err: any) {
     console.error('CSV upload error:', err);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
-}
-
-function buildOrderLine(row: Record<string, string>, salesChannel: string, productType: string, shippedTime: string | null) {
-  const num = (v: string) => parseFloat(v || '0') || 0;
-  return {
-    order_id: row.order_id,
-    product_name: productType,
-    product_type: productType,
-    variant_sku: null,
-    quantity: parseInt(row.quantity || '0') || 0,
-    product_price_bt: num(row.product_price_bt),
-    discount_bt: num(row.product_discount_bt),
-    cogs_bt: num(row.cogs_bt),
-    tax_rate: num(row.tax_rate) || 11.0,
-    shipped_time: shippedTime,
-    sales_channel: salesChannel,
-    is_purchase_fb: row.is_purchase_fb === 'true',
-    is_purchase_tiktok: row.is_purchase_tiktok === 'true',
-    is_purchase_kwai: row.is_purchase_kwai === 'true',
-    synced_at: new Date().toISOString(),
-  };
-}
-
-function deriveSalesChannel(row: Record<string, string>): string {
-  const platform = (row.platform || '').toLowerCase();
-  const storeName = (row.store || '').toLowerCase();
-  const isPurchaseFb = row.is_purchase_fb === 'true';
-  const isPurchaseTiktok = row.is_purchase_tiktok === 'true';
-  const resellerPrice = parseFloat(row.reseller_product_price || '0');
-
-  if (platform === 'shopee' || storeName.includes('shopee')) return 'Shopee';
-  if (platform === 'tiktokshop' || platform === 'tiktok' || storeName.includes('tiktok')) return 'TikTok Shop';
-  if (platform === 'lazada' || storeName.includes('lazada')) return 'Lazada';
-  if (platform === 'tokopedia' || storeName.includes('tokopedia')) return 'Tokopedia';
-  if (platform === 'blibli' || storeName.includes('blibli')) return 'BliBli';
-  if (resellerPrice > 0 && storeName.includes('mitra')) return 'Reseller';
-
-  if (platform === 'scalev' || platform === '') {
-    if (isPurchaseFb) return 'Facebook Ads';
-    if (isPurchaseTiktok) return 'TikTok Ads';
-    return 'Organik';
-  }
-  return 'Organik';
-}
-
-function deriveProductType(storeName: string): string {
-  const s = storeName.toLowerCase();
-  if (s.includes('osgard')) return 'Osgard';
-  if (s.includes('purvu') || s.includes('secret')) return 'Purvu';
-  if (s.includes('pluve')) return 'Pluve';
-  if (s.includes('globite')) return 'Globite';
-  if (s.includes('drhyun') || s.includes('dr hyun')) return 'DrHyun';
-  if (s.includes('calmara')) return 'Calmara';
-  if (s.includes('free store')) return 'Other';
-  if (s.includes('roove')) return 'Roove';
-  return 'Unknown';
 }
