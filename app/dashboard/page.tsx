@@ -3,7 +3,6 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-browser';
-import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, Bar, Line } from 'recharts';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
