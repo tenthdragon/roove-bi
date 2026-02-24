@@ -3,15 +3,17 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase-browser';
-import { fmtCompact, fmtRupiah, PRODUCT_COLORS } from '@/lib/utils';
+import { fmtCompact, fmtRupiah, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
+import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 
 export default function ProductsPage() {
   const supabase = createClient();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { activeBrands, isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
@@ -22,7 +24,7 @@ export default function ProductsPage() {
       .gte('date', dateRange.from)
       .lte('date', dateRange.to)
       .then(({ data: d }) => {
-        setData(d || []);
+        setData((d || []).filter(row => isActiveBrand(row.product)));
         setLoading(false);
       });
   }, [dateRange, supabase]);
@@ -109,7 +111,7 @@ export default function ProductsPage() {
         {products.map(p => (
           <div key={p.sku} style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 18, position: 'relative', overflow: 'hidden' }}>
             {/* Top color bar */}
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: PRODUCT_COLORS[p.sku] || '#64748b' }} />
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: getBrandColor(p.sku, activeBrands) || '#64748b' }} />
 
             {/* Header: SKU name + share of total */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
