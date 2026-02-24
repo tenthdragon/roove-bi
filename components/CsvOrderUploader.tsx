@@ -3,6 +3,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { createClient } from '@/lib/supabase-browser';
+import { uploadCsvOrders } from '@/lib/csv-actions';
 
 export default function CsvOrderUploader() {
   const supabase = createClient();
@@ -38,9 +39,7 @@ export default function CsvOrderUploader() {
       if (user?.email) formData.append('uploaded_by', user.email);
       formData.append('filename', file.name);
 
-      const res = await fetch('/api/csv-upload', { method: 'POST', body: formData });
-      const data = await res.json();
-      if (!res.ok) { setError(data.error || 'Upload gagal'); return; }
+      const data = await uploadCsvOrders(formData);
       setResult(data);
       await loadHistory();
     } catch (err) { setError(err.message || 'Upload gagal'); }
