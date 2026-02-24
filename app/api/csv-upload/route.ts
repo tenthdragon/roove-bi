@@ -12,6 +12,25 @@ function getServiceSupabase() {
 
 export const maxDuration = 120;
 
+// Fetch ALL existing orders with pagination (Supabase defaults to 1000 limit)
+async function fetchAllExistingOrders(svc: any) {
+  const allOrders: any[] = [];
+  const PAGE_SIZE = 5000;
+  let offset = 0;
+  while (true) {
+    const { data, error } = await svc
+      .from('scalev_orders')
+      .select('id, order_id, customer_name, customer_phone, customer_email')
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    allOrders.push(...data);
+    if (data.length < PAGE_SIZE) break; // last page
+    offset += PAGE_SIZE;
+  }
+  return allOrders;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -37,19 +56,17 @@ export async function POST(req: NextRequest) {
 
     const svc = getServiceSupabase();
 
-    // Get ALL existing order_ids in one query — just the fields we need
-    const { data: existingOrders } = await svc
-      .from('scalev_orders')
-      .select('id, order_id, customer_name, customer_phone, customer_email');
-    const existingMap = new Map((existingOrders || []).map(o => [o.order_id, o]));
+    // Get ALL existing orders with pagination
+    const existingOrders = await fetchAllExistingOrders(svc);
+    const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
 
     const stats = { totalRows: 0, newInserted: 0, updated: 0, errors: [] as string[] };
 
     // ── Phase 1: Parse all rows, split into INSERT vs UPDATE ──
     const toInsert: any[] = [];
     const toUpdate: { id: number; data: any; orderId: string }[] = [];
-    const orderLinesNew: Record<string, any> = {};   // order_id → line data (for new)
-    const orderLinesUpdate: Record<string, any> = {}; // order_id → { dbId, line } (for existing)
+    const orderLinesNew: Record<string, any> = {};
+    const orderLinesUpdate: Record<string, any> = {};
     const seenOrderIds = new Set<string>();
 
     for (let i = 1; i < lines.length; i++) {
@@ -147,7 +164,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Phase 2: Batch INSERT new orders (guaranteed no duplicates) ──
+    // ── Phase 2: Batch INSERT new orders ──
     const BATCH = 200;
     for (let i = 0; i < toInsert.length; i += BATCH) {
       const batch = toInsert.slice(i, i + BATCH);
@@ -162,7 +179,6 @@ export async function POST(req: NextRequest) {
       }
 
       if (inserted && inserted.length > 0) {
-        // Batch insert order lines
         const lineBatch = inserted.map(o => {
           const line = orderLinesNew[o.order_id];
           return line ? { ...line, scalev_order_id: o.id } : null;
@@ -176,8 +192,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Phase 3: Batch UPDATE existing orders (parallel, fast) ──
-    // Group updates into batches and use Promise.all for speed
+    // ── Phase 3: Batch UPDATE existing orders (parallel) ──
     const UPDATE_BATCH = 50;
     for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
       const batch = toUpdate.slice(i, i + UPDATE_BATCH);
