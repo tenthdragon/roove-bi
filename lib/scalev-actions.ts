@@ -230,3 +230,76 @@ export async function fetchMonthlyCohort() {
   if (error) throw error;
   return data || [];
 }
+
+// ═══════════════════════════════════════════════════
+// BRAND ANALYSIS
+// ═══════════════════════════════════════════════════
+
+// ── Cross-brand matrix ──
+export async function fetchCrossBrandMatrix() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('mv_cross_brand_matrix')
+    .select('*')
+    .order('brand_from', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Multi-brand customer stats ──
+export async function fetchMultiBrandStats() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('mv_multi_brand_stats')
+    .select('*');
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Brand journey transitions ──
+export async function fetchBrandJourney() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('mv_brand_journey')
+    .select('*')
+    .order('customer_count', { ascending: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Customer-brand map (per brand summary) ──
+export async function fetchBrandSummary() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('mv_customer_brand_map')
+    .select('brand, customer_identifier, order_count, total_revenue');
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Last refresh time ──
+export async function fetchBrandAnalysisRefreshTime() {
+  const svc = createServiceSupabase();
+  const { data } = await svc
+    .from('mv_refresh_log')
+    .select('refreshed_at, triggered_by')
+    .eq('view_name', 'brand_analysis')
+    .order('refreshed_at', { ascending: false })
+    .limit(1)
+    .single();
+  return data;
+}
+
+// ── Trigger refresh ──
+export async function refreshBrandAnalysis() {
+  const svc = createServiceSupabase();
+  const { error } = await svc.rpc('refresh_brand_analysis');
+  if (error) throw error;
+  
+  await svc.from('mv_refresh_log').insert({
+    view_name: 'brand_analysis',
+    triggered_by: 'manual',
+  });
+  
+  return { success: true };
+}
