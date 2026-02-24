@@ -6,6 +6,8 @@ import { createClient } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, Bar, Line } from 'recharts';
+import { useActiveBrands } from '@/lib/ActiveBrandsContext';
+import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
 
 const TT = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -24,6 +26,7 @@ export default function OverviewPage() {
   const { dateRange, loading: dateLoading } = useDateRange();
   const [dailyData, setDailyData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const { activeBrands, isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
@@ -35,7 +38,7 @@ export default function OverviewPage() {
       .lte('date', dateRange.to)
       .order('date')
       .then(({ data: d }) => {
-        setDailyData(d || []);
+        setDailyData((d || []).filter(row => isActiveBrand(row.product)));
         setLoading(false);
       });
   }, [dateRange, supabase]);
@@ -177,7 +180,7 @@ export default function OverviewPage() {
             {productTable.map(p => (
               <tr key={p.sku} style={{ borderBottom:'1px solid #1a2744' }}>
                 <td style={{ padding:'8px 10px', fontWeight:600 }}>
-                  <span style={{ display:'inline-block', width:8, height:8, borderRadius:2, background: PRODUCT_COLORS[p.sku] || '#64748b', marginRight:8, verticalAlign:'middle' }} />{p.sku}
+                  <span style={{ display:'inline-block', width:8, height:8, borderRadius:2, background: getBrandColor(p.sku, activeBrands) || PRODUCT_COLORS[p.sku] || '#64748b', marginRight:8, verticalAlign:'middle' }} />{p.sku}
                 </td>
                 <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(p.sales)}</td>
                 <td style={{ padding:'8px 10px', textAlign:'right', color:'#64748b' }}>{p.sp.toFixed(1)}%</td>
