@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase-browser';
 import { ALL_TABS, canAccessTab } from '@/lib/utils';
 import { DateRangeProvider, useDateRange } from '@/lib/DateRangeContext';
 import DateRangePicker from '@/components/DateRangePicker';
+import { ActiveBrandsProvider } from '@/lib/ActiveBrandsContext';
 
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
