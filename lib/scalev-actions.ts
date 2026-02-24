@@ -246,14 +246,35 @@ export async function fetchCrossBrandMatrix() {
   return data || [];
 }
 
-// ── Multi-brand customer stats ──
+// ── Multi-brand customer stats (pre-aggregated) ──
 export async function fetchMultiBrandStats() {
   const svc = createServiceSupabase();
   const { data, error } = await svc
-    .from('mv_multi_brand_stats')
+    .from('v_brand_analysis_summary')
     .select('*');
   if (error) throw error;
-  return data || [];
+
+  // Parse into structured data
+  const segments: Record<string, any> = {};
+  const distribution: Record<number, number> = {};
+  const gateway: { brand: string; count: number }[] = [];
+
+  for (const row of (data || [])) {
+    if (row.stat_type === 'segment') {
+      segments[row.key] = {
+        customerCount: parseInt(row.value1) || 0,
+        totalOrders: parseInt(row.value2) || 0,
+        totalRevenue: parseFloat(row.value3) || 0,
+        avgOrderValue: parseFloat(row.value4) || 0,
+      };
+    } else if (row.stat_type === 'distribution') {
+      distribution[parseInt(row.key)] = parseInt(row.value1) || 0;
+    } else if (row.stat_type === 'gateway') {
+      gateway.push({ brand: row.key, count: parseInt(row.value1) || 0 });
+    }
+  }
+
+  return { segments, distribution, gateway };
 }
 
 // ── Brand journey transitions ──
