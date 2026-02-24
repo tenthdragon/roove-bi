@@ -53,7 +53,7 @@ export interface MonthlyProductSummary {
 }
 
 export interface DateRange {
-  from: string; // YYYY-MM-DD
+  from: string;  // YYYY-MM-DD
   to: string;
 }
 
@@ -84,12 +84,65 @@ export function shortDate(d: string): string {
 }
 
 // ============================================================
-// Constants
+// Dynamic Brand Colors
+// ============================================================
+
+// 20-color palette — visually distinct, accessible on dark backgrounds
+const BRAND_COLOR_PALETTE = [
+  '#3b82f6', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899',
+  '#10b981', '#f59e0b', '#a78bfa', '#94a3b8', '#fb923c',
+  '#f472b6', '#14b8a6', '#e879f9', '#84cc16', '#fbbf24',
+  '#22d3ee', '#a3e635', '#c084fc', '#fb7185', '#4ade80',
+];
+
+// Get a consistent color for a brand. Sorted alphabetically so
+// the same brand always gets the same color regardless of data order.
+export function getBrandColor(brand: string, allBrands: string[]): string {
+  if (!brand) return '#64748b';
+  const sorted = [...new Set(allBrands)].sort();
+  const idx = sorted.indexOf(brand);
+  if (idx < 0) return '#64748b';
+  return BRAND_COLOR_PALETTE[idx % BRAND_COLOR_PALETTE.length];
+}
+
+// Build a full color map from a list of brands (convenience helper)
+export function buildBrandColorMap(brands: string[]): Record<string, string> {
+  const map: Record<string, string> = {};
+  const sorted = [...new Set(brands)].sort();
+  sorted.forEach((b, i) => {
+    map[b] = BRAND_COLOR_PALETTE[i % BRAND_COLOR_PALETTE.length];
+  });
+  return map;
+}
+
+// ── Backward-compatible: static PRODUCT_COLORS for pages that haven't
+//    migrated yet. New code should use getBrandColor() instead. ──
+export const PRODUCT_COLORS: Record<string, string> = {
+  'Roove': '#3b82f6',
+  'Purvu': '#8b5cf6',
+  'Pluve': '#06b6d4',
+  'Osgard': '#f97316',
+  'Dr Hyun': '#ec4899',
+  'DrHyun': '#ec4899',
+  'Globite': '#10b981',
+  'Calmara': '#f59e0b',
+  'Others': '#64748b',
+  'Other': '#64748b',
+  'Yuv': '#a78bfa',
+  'YUV': '#a78bfa',
+  'Almona': '#94a3b8',
+  'Orelif': '#fb923c',
+  'Veminine': '#f472b6',
+};
+
+// ============================================================
+// Channel Colors (these are stable — marketplaces don't change often)
 // ============================================================
 
 export const CHANNEL_COLORS: Record<string, string> = {
   'Shopee': '#ee4d2d',
   'TikTok Shop': '#00f2ea',
+  'TikTok': '#ff0050',
   'Facebook Ads': '#1877f2',
   'Organik': '#10b981',
   'Reseller': '#f59e0b',
@@ -99,22 +152,12 @@ export const CHANNEL_COLORS: Record<string, string> = {
   'BliBli': '#0066cc',
   'SnackVideo Ads': '#ff6600',
   'WhatsApp': '#25d366',
+  'Scalev': '#3b82f6',
 };
 
-export const PRODUCT_COLORS: Record<string, string> = {
-  'Roove': '#3b82f6',
-  'Purvu': '#8b5cf6',
-  'Pluve': '#06b6d4',
-  'Osgard': '#f97316',
-  'Dr Hyun': '#ec4899',
-  'Globite': '#10b981',
-  'Calmara': '#f59e0b',
-  'Others': '#64748b',
-  'Yuv': '#a78bfa',
-  'Almona': '#94a3b8',
-  'Orelif': '#fb923c',
-  'Veminine': '#f472b6',
-};
+// ============================================================
+// Tabs & Access Control
+// ============================================================
 
 export interface TabDef {
   id: string;
@@ -124,14 +167,14 @@ export interface TabDef {
 }
 
 export const ALL_TABS: TabDef[] = [
-  { id: 'overview', label: 'Overview', icon: 'LayoutDashboard' },
-  { id: 'products', label: 'Produk', icon: 'Package' },
-  { id: 'channels', label: 'Channel', icon: 'Share2' },
-  { id: 'marketing', label: 'Marketing', icon: 'Megaphone' },
-  { id: 'customers', label: 'Customer', icon: 'Users' },
-  { id: 'brand-analysis', label: 'Brand Analysis', icon: 'Layers' },
-  { id: 'finance', label: 'Finance', icon: 'DollarSign' },
-  { id: 'admin', label: 'Admin', icon: 'Settings', ownerOnly: true },
+  { id: 'overview',       label: 'Overview',        icon: 'LayoutDashboard' },
+  { id: 'products',       label: 'Produk',          icon: 'Package' },
+  { id: 'channels',       label: 'Channel',         icon: 'Share2' },
+  { id: 'marketing',      label: 'Marketing',       icon: 'Megaphone' },
+  { id: 'customers',      label: 'Customer',        icon: 'Users' },
+  { id: 'brand-analysis', label: 'Brand Analysis',  icon: 'Layers' },
+  { id: 'finance',        label: 'Finance',         icon: 'DollarSign' },
+  { id: 'admin',          label: 'Admin',           icon: 'Settings', ownerOnly: true },
 ];
 
 export type TabId = string;
@@ -141,7 +184,7 @@ export function canAccessTab(profile: Profile, tabId: string): boolean {
   if (profile.role === 'pending') return false;
   if (profile.role === 'owner' || profile.role === 'admin' || profile.role === 'finance') return true;
   if (tabId === 'admin') return false;
-  if (profile.allowed_tabs.length === 0) return true; // no restriction = all tabs
+  if (profile.allowed_tabs.length === 0) return true;
   return profile.allowed_tabs.includes(tabId);
 }
 
@@ -173,16 +216,15 @@ export function getPresetRanges() {
 
   const monthStart = `${yyyy}-${mm}-01`;
 
-  // Bulan Lalu: 1st of previous month → last day of previous month
-  const prevMonthEnd = new Date(yyyy, today.getMonth(), 0); // last day of prev month
+  const prevMonthEnd = new Date(yyyy, today.getMonth(), 0);
   const prevMonthStart = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth(), 1);
 
   return [
-    { label: 'Hari Ini', from: todayStr, to: todayStr },
-    { label: '7 Hari', from: fmtD(d7), to: todayStr },
-    { label: 'Bulan Ini', from: monthStart, to: todayStr },
+    { label: 'Hari Ini',   from: todayStr, to: todayStr },
+    { label: '7 Hari',     from: fmtD(d7), to: todayStr },
+    { label: 'Bulan Ini',  from: monthStart, to: todayStr },
     { label: 'Bulan Lalu', from: fmtD(prevMonthStart), to: fmtD(prevMonthEnd) },
-    { label: '30 Hari', from: fmtD(d30), to: todayStr },
-    { label: '90 Hari', from: fmtD(d90), to: todayStr },
+    { label: '30 Hari',    from: fmtD(d30), to: todayStr },
+    { label: '90 Hari',    from: fmtD(d90), to: todayStr },
   ];
 }
