@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { parseGoogleSheet } from '@/lib/google-sheets';
 
-// Use direct Supabase client (not SSR) for API routes
 function getServiceSupabase() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,20 +14,16 @@ export const maxDuration = 250;
 
 export async function POST(req: NextRequest) {
   try {
-    // Verify authorization - either cron secret or authenticated user
     const authHeader = req.headers.get('authorization');
     const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
 
     if (!isCron) {
-      // Verify user is owner or finance via cookie-based auth
       const { createServerSupabase } = await import('@/lib/supabase-server');
       const supabase = createServerSupabase();
       const { data: { user } } = await supabase.auth.getUser();
-
       if (!user) {
         return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
       }
-
       const { data: profile } = await supabase
         .from('profiles')
         .select('role')
@@ -42,17 +37,25 @@ export async function POST(req: NextRequest) {
 
     const svc = getServiceSupabase();
 
-    // Get all active sheet connections
+    // Get active sheet connections
     const { data: connections, error: connError } = await svc
       .from('sheet_connections')
       .select('*')
       .eq('is_active', true);
 
     if (connError) throw connError;
-
     if (!connections || connections.length === 0) {
       return NextResponse.json({ message: 'No active sheet connections', synced: 0 });
     }
+
+    // ── Read active brands from database ──
+    const { data: brands, error: brandsError } = await svc
+      .from('brands')
+      .select('name, sheet_name')
+      .eq('is_active', true);
+
+    if (brandsError) throw brandsError;
+    const brandList = brands || [];
 
     const results = [];
 
@@ -60,8 +63,8 @@ export async function POST(req: NextRequest) {
       try {
         console.log(`Syncing spreadsheet: ${conn.spreadsheet_id} (${conn.label})`);
 
-        // Parse Google Sheet
-        const parsed = await parseGoogleSheet(conn.spreadsheet_id);
+        // Parse Google Sheet — pass brandList
+        const parsed = await parseGoogleSheet(conn.spreadsheet_id, brandList);
 
         if (!parsed.period.month || !parsed.period.year) {
           results.push({
@@ -172,7 +175,6 @@ export async function POST(req: NextRequest) {
       } catch (err: any) {
         console.error(`Sync failed for ${conn.spreadsheet_id}:`, err);
 
-        // Update connection with error
         await svc.from('sheet_connections').update({
           last_synced: new Date().toISOString(),
           last_sync_status: 'error',
