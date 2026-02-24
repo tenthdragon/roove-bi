@@ -119,7 +119,7 @@ export default function AdminPage() {
     finally { setInviting(false); }
   };
 
-  if (profile?.role !== 'owner' && profile?.role !== 'finance') {
+  if (profile?.role !== 'owner' && profile?.role !== 'finance' && profile?.role !== 'staff') {
     return <div style={{ textAlign:'center', padding:60, color:'#64748b' }}>
       <div style={{ fontSize:48, marginBottom:16 }}>🔒</div>
       <div style={{ fontSize:18, fontWeight:600 }}>Akses Ditolak</div>
@@ -134,6 +134,7 @@ export default function AdminPage() {
       case 'finance': return { text: 'Finance', bg: '#1e3a5f', color: '#60a5fa' };
       case 'brand_manager': return { text: 'Brand Manager', bg: '#78350f', color: '#f59e0b' };
       case 'pending': return { text: 'Menunggu Approval', bg: '#7f1d1d', color: '#ef4444' };
+      case 'staff': return { text: 'Staff', bg: '#1e3a5f', color: '#38bdf8' };
       default: return { text: r, bg: '#1a2744', color: '#64748b' };
     }
   };
@@ -197,9 +198,11 @@ export default function AdminPage() {
       </Section>
 
       {/* SECTION: BRAND MANAGEMENT */}
-<Section title="Brand Management" subtitle="Kelola daftar brand" color="#ec4899">
-  <BrandManager />
-</Section>
+{profile?.role === 'owner' && (
+  <Section title="Brand Management" subtitle="Kelola daftar brand" color="#ec4899">
+    <BrandManager />
+  </Section>
+)}
       
       {/* SECTION 2: FINANCIAL REPORT */}
       <Section title="Financial Report" subtitle="PL, CF, BS, Rasio" color="#10b981">
@@ -241,6 +244,7 @@ export default function AdminPage() {
                     <option value="admin">Admin</option>
                     <option value="finance">Finance</option>
                     <option value="brand_manager">Brand Manager</option>
+                    <option value="staff">Staff</option>
                   </select>
                 </div>
                 <button onClick={handleInvite} disabled={inviting}
@@ -257,7 +261,7 @@ export default function AdminPage() {
 
             {/* Role Legend */}
             <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:16, fontSize:11 }}>
-              {['owner','admin','finance','brand_manager','pending'].map(r => {
+              {['owner','admin','finance','staff','brand_manager','pending'].map(r => {
                 const rl = roleLabel(r);
                 const desc = r === 'owner' ? 'akses penuh' : r === 'admin' ? 'read-only' : r === 'finance' ? 'sync/upload' : r === 'brand_manager' ? 'marketing' : 'pending';
                 return <span key={r} style={{ padding:'3px 8px', borderRadius:5, background:rl.bg, color:rl.color, fontWeight:600 }}>{rl.text} — {desc}</span>;
