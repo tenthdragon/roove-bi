@@ -37,23 +37,19 @@ export async function POST(req: NextRequest) {
 
     const svc = getServiceSupabase();
 
-    // Get existing orders — include fields needed for "only fill if empty" logic
+    // Get ALL existing order_ids in one query — just the fields we need
     const { data: existingOrders } = await svc
       .from('scalev_orders')
-      .select('id, order_id, scalev_id, source, customer_name, customer_phone, customer_email');
+      .select('id, order_id, customer_name, customer_phone, customer_email');
     const existingMap = new Map((existingOrders || []).map(o => [o.order_id, o]));
 
-    const stats = {
-      totalRows: 0,
-      newInserted: 0,
-      updated: 0,
-      skippedNoOrderId: 0,
-      errors: [] as string[],
-    };
+    const stats = { totalRows: 0, newInserted: 0, updated: 0, errors: [] as string[] };
 
+    // ── Phase 1: Parse all rows, split into INSERT vs UPDATE ──
     const toInsert: any[] = [];
     const toUpdate: { id: number; data: any; orderId: string }[] = [];
-    const orderLinesMap: Record<string, any> = {};
+    const orderLinesNew: Record<string, any> = {};   // order_id → line data (for new)
+    const orderLinesUpdate: Record<string, any> = {}; // order_id → { dbId, line } (for existing)
     const seenOrderIds = new Set<string>();
 
     for (let i = 1; i < lines.length; i++) {
@@ -67,8 +63,7 @@ export async function POST(req: NextRequest) {
         row[headers[j]] = (values[j] || '').trim();
       }
 
-      if (!row.order_id) { stats.skippedNoOrderId++; continue; }
-      if (seenOrderIds.has(row.order_id)) continue;
+      if (!row.order_id || seenOrderIds.has(row.order_id)) continue;
       seenOrderIds.add(row.order_id);
 
       try {
@@ -77,49 +72,40 @@ export async function POST(req: NextRequest) {
         const salesChannel = deriveSalesChannel(row);
         const productType = deriveProductType(row.store || '');
         const shippedTime = ts(row.shipped_time) || ts(row.completed_time) || null;
+        const orderLine = buildOrderLine(row, salesChannel, productType, shippedTime);
 
         const existing = existingMap.get(row.order_id);
 
         if (existing) {
-          // ── UPDATE: only enrich fields that CSV has but API might not ──
-          const enrichData: any = {};
+          // ── Enrich existing order ──
+          const d: any = {};
+          if (row.customer_type) d.customer_type = row.customer_type;
+          if (row.province) d.province = row.province;
+          if (row.city) d.city = row.city;
+          if (row.subdistrict) d.subdistrict = row.subdistrict;
+          if (row.handler) d.handler = row.handler;
+          if (row.name && !existing.customer_name) d.customer_name = row.name;
+          if (row.phone && !existing.customer_phone) d.customer_phone = row.phone;
+          if (row.email && !existing.customer_email) d.customer_email = row.email;
+          if (row.order_status) d.status = row.order_status;
+          if (shippedTime) d.shipped_time = shippedTime;
+          if (ts(row.paid_time)) d.paid_time = ts(row.paid_time);
+          if (ts(row.canceled_time)) d.canceled_time = ts(row.canceled_time);
+          if (ts(row.confirmed_time)) d.confirmed_time = ts(row.confirmed_time);
+          if (ts(row.draft_time)) d.draft_time = ts(row.draft_time);
+          if (ts(row.pending_time)) d.pending_time = ts(row.pending_time);
+          if (num(row.gross_revenue) > 0) d.gross_revenue = num(row.gross_revenue);
+          if (num(row.net_revenue) > 0) d.net_revenue = num(row.net_revenue);
+          if (num(row.shipping_cost) > 0) d.shipping_cost = num(row.shipping_cost);
 
-          if (row.customer_type) enrichData.customer_type = row.customer_type;
-          if (row.province) enrichData.province = row.province;
-          if (row.city) enrichData.city = row.city;
-          if (row.subdistrict) enrichData.subdistrict = row.subdistrict;
-          if (row.handler) enrichData.handler = row.handler;
-
-          if (row.name && !existing.customer_name) enrichData.customer_name = row.name;
-          if (row.phone && !existing.customer_phone) enrichData.customer_phone = row.phone;
-          if (row.email && !existing.customer_email) enrichData.customer_email = row.email;
-
-          if (row.order_status) enrichData.status = row.order_status;
-          if (shippedTime) enrichData.shipped_time = shippedTime;
-          if (ts(row.paid_time)) enrichData.paid_time = ts(row.paid_time);
-          if (ts(row.canceled_time)) enrichData.canceled_time = ts(row.canceled_time);
-          if (ts(row.confirmed_time)) enrichData.confirmed_time = ts(row.confirmed_time);
-          if (ts(row.draft_time)) enrichData.draft_time = ts(row.draft_time);
-          if (ts(row.pending_time)) enrichData.pending_time = ts(row.pending_time);
-
-          if (num(row.gross_revenue) > 0) enrichData.gross_revenue = num(row.gross_revenue);
-          if (num(row.net_revenue) > 0) enrichData.net_revenue = num(row.net_revenue);
-          if (num(row.shipping_cost) > 0) enrichData.shipping_cost = num(row.shipping_cost);
-
-          if (Object.keys(enrichData).length > 0) {
-            enrichData.synced_at = new Date().toISOString();
-            toUpdate.push({ id: existing.id, data: enrichData, orderId: row.order_id });
+          if (Object.keys(d).length > 0) {
+            d.synced_at = new Date().toISOString();
+            toUpdate.push({ id: existing.id, data: d, orderId: row.order_id });
           }
-
-          orderLinesMap[row.order_id] = {
-            existingOrderDbId: existing.id,
-            line: buildOrderLine(row, salesChannel, productType, shippedTime),
-            isUpdate: true,
-          };
-
+          orderLinesUpdate[row.order_id] = { dbId: existing.id, line: orderLine };
         } else {
-          // ── INSERT: new order not in DB ──
-          const orderHeader: any = {
+          // ── New order ──
+          toInsert.push({
             scalev_id: null,
             order_id: row.order_id,
             customer_type: row.customer_type || null,
@@ -153,123 +139,74 @@ export async function POST(req: NextRequest) {
             source: 'csv_upload',
             raw_data: row,
             synced_at: new Date().toISOString(),
-          };
-
-          toInsert.push(orderHeader);
-          orderLinesMap[row.order_id] = {
-            line: buildOrderLine(row, salesChannel, productType, shippedTime),
-            isUpdate: false,
-          };
+          });
+          orderLinesNew[row.order_id] = orderLine;
         }
       } catch (err: any) {
         stats.errors.push(`Row ${i + 1} (${row.order_id}): ${err.message}`);
       }
     }
 
-    // ── Execute inserts — individual fallback on batch conflict ──
-    const BATCH = 50;
+    // ── Phase 2: Batch INSERT new orders (guaranteed no duplicates) ──
+    const BATCH = 200;
     for (let i = 0; i < toInsert.length; i += BATCH) {
       const batch = toInsert.slice(i, i + BATCH);
-
-      // Try batch insert first (fast path)
-      const { data: inserted, error: batchErr } = await svc
+      const { data: inserted, error: err } = await svc
         .from('scalev_orders')
         .insert(batch)
         .select('id, order_id');
 
-      if (!batchErr && inserted) {
-        // Batch succeeded — insert order lines
-        const linesToInsert = inserted.map(o => {
-          const entry = orderLinesMap[o.order_id];
-          if (!entry || entry.isUpdate) return null;
-          return { ...entry.line, scalev_order_id: o.id };
+      if (err) {
+        stats.errors.push(`Insert batch ${Math.floor(i / BATCH) + 1}: ${err.message}`);
+        continue;
+      }
+
+      if (inserted && inserted.length > 0) {
+        // Batch insert order lines
+        const lineBatch = inserted.map(o => {
+          const line = orderLinesNew[o.order_id];
+          return line ? { ...line, scalev_order_id: o.id } : null;
         }).filter(Boolean);
 
-        if (linesToInsert.length > 0) {
-          const { error: lineErr } = await svc.from('scalev_order_lines').insert(linesToInsert);
-          if (lineErr) stats.errors.push(`Lines insert batch ${Math.floor(i / BATCH) + 1}: ${lineErr.message}`);
+        if (lineBatch.length > 0) {
+          const { error: lineErr } = await svc.from('scalev_order_lines').insert(lineBatch);
+          if (lineErr) stats.errors.push(`Lines batch ${Math.floor(i / BATCH) + 1}: ${lineErr.message}`);
         }
         stats.newInserted += inserted.length;
-      } else {
-        // Batch failed (likely duplicates) — fall back to one-by-one
-        for (const order of batch) {
-          const { data: single, error: singleErr } = await svc
-            .from('scalev_orders')
-            .insert(order)
-            .select('id, order_id');
-
-          if (!singleErr && single && single.length > 0) {
-            // New order inserted successfully
-            const entry = orderLinesMap[single[0].order_id];
-            if (entry && !entry.isUpdate) {
-              await svc.from('scalev_order_lines').insert({
-                ...entry.line,
-                scalev_order_id: single[0].id,
-              });
-            }
-            stats.newInserted++;
-          } else if (singleErr?.message?.includes('duplicate key')) {
-            // Already exists — enrich instead
-            const { data: existing } = await svc
-              .from('scalev_orders')
-              .select('id')
-              .eq('order_id', order.order_id)
-              .single();
-
-            if (existing) {
-              const enrichData: any = { synced_at: new Date().toISOString() };
-              if (order.customer_type) enrichData.customer_type = order.customer_type;
-              if (order.province) enrichData.province = order.province;
-              if (order.city) enrichData.city = order.city;
-              if (order.subdistrict) enrichData.subdistrict = order.subdistrict;
-              if (order.handler) enrichData.handler = order.handler;
-
-              await svc.from('scalev_orders').update(enrichData).eq('id', existing.id);
-
-              // Replace order line
-              const entry = orderLinesMap[order.order_id];
-              if (entry) {
-                await svc.from('scalev_order_lines').delete().eq('scalev_order_id', existing.id);
-                await svc.from('scalev_order_lines').insert({
-                  ...entry.line,
-                  scalev_order_id: existing.id,
-                });
-              }
-              stats.updated++;
-            }
-          } else if (singleErr) {
-            stats.errors.push(`Order ${order.order_id}: ${singleErr.message}`);
-          }
-        }
       }
     }
 
-    // ── Execute updates for orders that were already in existingMap ──
-    for (const upd of toUpdate) {
-      const { error: err } = await svc
-        .from('scalev_orders')
-        .update(upd.data)
-        .eq('id', upd.id);
-
-      if (err) {
-        stats.errors.push(`Update order id ${upd.id}: ${err.message}`);
-      } else {
-        stats.updated++;
-
-        // Replace order line with CSV data
-        const entry = orderLinesMap[upd.orderId];
-        if (entry) {
-          await svc.from('scalev_order_lines').delete().eq('scalev_order_id', upd.id);
-          const { error: lineErr } = await svc.from('scalev_order_lines').insert({
-            ...entry.line,
-            scalev_order_id: upd.id,
-          });
-          if (lineErr) stats.errors.push(`Lines update for ${upd.id}: ${lineErr.message}`);
-        }
+    // ── Phase 3: Batch UPDATE existing orders (parallel, fast) ──
+    // Group updates into batches and use Promise.all for speed
+    const UPDATE_BATCH = 50;
+    for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
+      const batch = toUpdate.slice(i, i + UPDATE_BATCH);
+      const results = await Promise.all(
+        batch.map(async (upd) => {
+          const { error } = await svc.from('scalev_orders').update(upd.data).eq('id', upd.id);
+          if (error) return { ok: false, msg: `Update ${upd.orderId}: ${error.message}` };
+          return { ok: true };
+        })
+      );
+      for (const r of results) {
+        if (r.ok) stats.updated++;
+        else stats.errors.push(r.msg!);
       }
     }
 
-    // Log
+    // ── Phase 4: Replace order lines for updated orders (parallel) ──
+    const lineUpdateEntries = Object.values(orderLinesUpdate) as { dbId: number; line: any }[];
+    for (let i = 0; i < lineUpdateEntries.length; i += UPDATE_BATCH) {
+      const batch = lineUpdateEntries.slice(i, i + UPDATE_BATCH);
+      await Promise.all(
+        batch.map(async ({ dbId, line }) => {
+          await svc.from('scalev_order_lines').delete().eq('scalev_order_id', dbId);
+          await svc.from('scalev_order_lines').insert({ ...line, scalev_order_id: dbId });
+        })
+      );
+    }
+
+    // ── Log ──
     const uploadedBy = formData.get('uploaded_by') as string || null;
     const filename = formData.get('filename') as string || file.name;
 
@@ -306,7 +243,6 @@ export async function POST(req: NextRequest) {
   }
 }
 
-// ── Build order line object ──
 function buildOrderLine(row: Record<string, string>, salesChannel: string, productType: string, shippedTime: string | null) {
   const num = (v: string) => parseFloat(v || '0') || 0;
   return {
@@ -328,7 +264,6 @@ function buildOrderLine(row: Record<string, string>, salesChannel: string, produ
   };
 }
 
-// ── Derive sales channel ──
 function deriveSalesChannel(row: Record<string, string>): string {
   const platform = (row.platform || '').toLowerCase();
   const storeName = (row.store || '').toLowerCase();
@@ -351,7 +286,6 @@ function deriveSalesChannel(row: Record<string, string>): string {
   return 'Organik';
 }
 
-// ── Derive product type ──
 function deriveProductType(storeName: string): string {
   const s = storeName.toLowerCase();
   if (s.includes('osgard')) return 'Osgard';
