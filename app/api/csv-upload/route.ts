@@ -25,7 +25,7 @@ async function fetchAllExistingOrders(svc: any) {
     if (error) throw error;
     if (!data || data.length === 0) break;
     allOrders.push(...data);
-    if (data.length < PAGE_SIZE) break; // last page
+    if (data.length < PAGE_SIZE) break;
     offset += PAGE_SIZE;
   }
   return allOrders;
@@ -60,9 +60,19 @@ export async function POST(req: NextRequest) {
     const existingOrders = await fetchAllExistingOrders(svc);
     const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
 
-    const stats = { totalRows: 0, newInserted: 0, updated: 0, errors: [] as string[] };
+    const stats = {
+      totalRows: 0,
+      newInserted: 0,
+      updated: 0,
+      errors: [] as string[],
+      // Debug info
+      existingMapSize: existingMap.size,
+      csvUniqueIds: 0,
+      classifiedAsNew: 0,
+      classifiedAsUpdate: 0,
+    };
 
-    // ── Phase 1: Parse all rows, split into INSERT vs UPDATE ──
+    // ── Phase 1: Parse all rows ──
     const toInsert: any[] = [];
     const toUpdate: { id: number; data: any; orderId: string }[] = [];
     const orderLinesNew: Record<string, any> = {};
@@ -94,7 +104,6 @@ export async function POST(req: NextRequest) {
         const existing = existingMap.get(row.order_id);
 
         if (existing) {
-          // ── Enrich existing order ──
           const d: any = {};
           if (row.customer_type) d.customer_type = row.customer_type;
           if (row.province) d.province = row.province;
@@ -120,8 +129,8 @@ export async function POST(req: NextRequest) {
             toUpdate.push({ id: existing.id, data: d, orderId: row.order_id });
           }
           orderLinesUpdate[row.order_id] = { dbId: existing.id, line: orderLine };
+          stats.classifiedAsUpdate++;
         } else {
-          // ── New order ──
           toInsert.push({
             scalev_id: null,
             order_id: row.order_id,
@@ -158,19 +167,22 @@ export async function POST(req: NextRequest) {
             synced_at: new Date().toISOString(),
           });
           orderLinesNew[row.order_id] = orderLine;
+          stats.classifiedAsNew++;
         }
       } catch (err: any) {
         stats.errors.push(`Row ${i + 1} (${row.order_id}): ${err.message}`);
       }
     }
 
-    // ── Phase 2: Batch INSERT new orders ──
+    stats.csvUniqueIds = seenOrderIds.size;
+
+    // ── Phase 2: Batch INSERT new orders (use upsert as safety net) ──
     const BATCH = 200;
     for (let i = 0; i < toInsert.length; i += BATCH) {
       const batch = toInsert.slice(i, i + BATCH);
       const { data: inserted, error: err } = await svc
         .from('scalev_orders')
-        .insert(batch)
+        .upsert(batch, { onConflict: 'order_id', ignoreDuplicates: true })
         .select('id, order_id');
 
       if (err) {
@@ -185,6 +197,10 @@ export async function POST(req: NextRequest) {
         }).filter(Boolean);
 
         if (lineBatch.length > 0) {
+          // Also upsert lines to avoid conflicts
+          for (const ln of lineBatch) {
+            await svc.from('scalev_order_lines').delete().eq('scalev_order_id', ln.scalev_order_id);
+          }
           const { error: lineErr } = await svc.from('scalev_order_lines').insert(lineBatch);
           if (lineErr) stats.errors.push(`Lines batch ${Math.floor(i / BATCH) + 1}: ${lineErr.message}`);
         }
@@ -248,6 +264,12 @@ export async function POST(req: NextRequest) {
         updated: stats.updated,
         errors: stats.errors.length,
         errorDetails: stats.errors.slice(0, 10),
+      },
+      debug: {
+        existingMapSize: stats.existingMapSize,
+        csvUniqueIds: stats.csvUniqueIds,
+        classifiedAsNew: stats.classifiedAsNew,
+        classifiedAsUpdate: stats.classifiedAsUpdate,
       },
       message: `Upload selesai! ${stats.newInserted} order baru, ${stats.updated} order diperkaya, ${stats.errors.length} error.`,
     });
