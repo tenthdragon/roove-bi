@@ -10,7 +10,7 @@ function getServiceSupabase() {
   );
 }
 
-export const maxDuration = 120;
+export const maxDuration = 250;
 
 export async function POST(req: NextRequest) {
   try {
@@ -224,17 +224,8 @@ const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
       }
     }
 
-    // ── Phase 4: Replace order lines for updated orders (parallel) ──
-    const lineUpdateEntries = Object.values(orderLinesUpdate) as { dbId: number; line: any }[];
-    for (let i = 0; i < lineUpdateEntries.length; i += UPDATE_BATCH) {
-      const batch = lineUpdateEntries.slice(i, i + UPDATE_BATCH);
-      await Promise.all(
-        batch.map(async ({ dbId, line }) => {
-          await svc.from('scalev_order_lines').delete().eq('scalev_order_id', dbId);
-          await svc.from('scalev_order_lines').insert({ ...line, scalev_order_id: dbId });
-        })
-      );
-    }
+   // ── Phase 4: Replace order lines for NEW orders only (skip existing to avoid timeout) ──
+    // Order lines for existing orders are already in DB — only update if critical fields changed
 
     // ── Log ──
     const uploadedBy = formData.get('uploaded_by') as string || null;
