@@ -53,7 +53,6 @@ function excelDateToISO(val: any): string | null {
     return val.toISOString().split('T')[0];
   }
   if (typeof val === 'number') {
-    // Excel serial date
     const d = new Date((val - 25569) * 86400000);
     return d.toISOString().split('T')[0];
   }
@@ -63,35 +62,46 @@ function excelDateToISO(val: any): string | null {
   return null;
 }
 
-const SKU_SHEETS: Record<string, string> = {
-  'Roove': 'Roove',
-  'Almona': 'Almona',
-  'Pluve': 'Pluve',
-  'YUV': 'Yuv',
-  'Osgard': 'Osgard',
-  'Purvu': 'Purvu',
-  'DRHyun': 'Dr Hyun',
-  'Globite': 'Globite',
-  'Orelif': 'Orelif',
-  'Veminine': 'Veminine',
-  'Calmara': 'Calmara',
-  'Other': 'Others',
-};
+// ── Build brand sheet mapping from registered brands ──
+// brandList: array of { name, sheet_name } from the brands table
+// Returns: Record<sheetName, canonicalName> matched case-insensitively against workbook sheets
+function buildBrandSheetMap(
+  brandList: Array<{ name: string; sheet_name: string }>,
+  workbookSheetNames: string[],
+): Record<string, string> {
+  const result: Record<string, string> = {};
 
-export function parseRooveExcel(buffer: ArrayBuffer): ParsedData {
+  for (const brand of brandList) {
+    // Find matching sheet (case-insensitive)
+    const match = workbookSheetNames.find(
+      s => s.toLowerCase() === brand.sheet_name.toLowerCase()
+    );
+    if (match) {
+      result[match] = brand.name; // actual sheet name → canonical brand name
+    }
+  }
+
+  return result;
+}
+
+export function parseRooveExcel(
+  buffer: ArrayBuffer,
+  brandList: Array<{ name: string; sheet_name: string }>,
+): ParsedData {
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
 
-  // ── Detect period from SKU sheet dates ──
+  // ── Build brand sheets from registered brands ──
+  const brandSheets = buildBrandSheetMap(brandList, wb.SheetNames);
+
+  // ── Detect period from first brand sheet dates ──
   let periodMonth = 0;
   let periodYear = 0;
 
-  // Try to get dates from first SKU sheet that exists
-  for (const sheetName of Object.keys(SKU_SHEETS)) {
-    if (!wb.SheetNames.includes(sheetName)) continue;
+  for (const sheetName of Object.keys(brandSheets)) {
     const ws = wb.Sheets[sheetName];
-    // Row 3 has dates starting from column E (index 4)
+    if (!ws) continue;
     for (let c = 4; c < 35; c++) {
-      const addr = XLSX.utils.encode_cell({ r: 2, c }); // row 3 = index 2
+      const addr = XLSX.utils.encode_cell({ r: 2, c });
       const cell = ws[addr];
       if (cell) {
         const dateStr = excelDateToISO(cell.v);
@@ -110,11 +120,10 @@ export function parseRooveExcel(buffer: ArrayBuffer): ParsedData {
   const monthlySummary: ParsedData['monthlySummary'] = [];
   if (wb.SheetNames.includes('General')) {
     const ws = wb.Sheets['General'];
-    for (let r = 2; r <= 15; r++) { // rows 3-14 in 1-indexed = 2-13 in 0-indexed
-      const noCell = ws[XLSX.utils.encode_cell({ r, c: 1 })]; // col B
-      const skuCell = ws[XLSX.utils.encode_cell({ r, c: 2 })]; // col C
+    for (let r = 2; r <= 15; r++) {
+      const noCell = ws[XLSX.utils.encode_cell({ r, c: 1 })];
+      const skuCell = ws[XLSX.utils.encode_cell({ r, c: 2 })];
       if (!noCell?.v || !skuCell?.v) continue;
-
       monthlySummary.push({
         product: String(skuCell.v),
         sales_after_disc: toNum(ws[XLSX.utils.encode_cell({ r, c: 3 })]?.v),
@@ -129,11 +138,11 @@ export function parseRooveExcel(buffer: ArrayBuffer): ParsedData {
     }
   }
 
-  // ── Parse SKU sheets (daily product + channel data) ──
+  // ── Parse brand sheets (daily product + channel data) ──
   const dailyProduct: ParsedData['dailyProduct'] = [];
   const dailyChannel: ParsedData['dailyChannel'] = [];
 
-  for (const [sheetName, productName] of Object.entries(SKU_SHEETS)) {
+  for (const [sheetName, productName] of Object.entries(brandSheets)) {
     if (!wb.SheetNames.includes(sheetName)) continue;
     const ws = wb.Sheets[sheetName];
 
@@ -146,7 +155,6 @@ export function parseRooveExcel(buffer: ArrayBuffer): ParsedData {
         if (d) dates.push({ col: c, date: d });
       }
     }
-
     if (dates.length === 0) continue;
 
     // For each date, aggregate product-level totals
@@ -156,15 +164,15 @@ export function parseRooveExcel(buffer: ArrayBuffer): ParsedData {
       let totalMktCost = 0;
       let totalNetAfterMkt = 0;
 
-      // Net sales by channel: rows 31-41 (0-indexed: 30-40), col C has channel name
       const salesChannels: string[] = [
-        'Facebook Ads', 'Google Ads', 'Organik', 'Reseller', 'Shopee',
-        'TikTok Ads', 'TikTok Shop', 'Tokopedia', 'BliBli', 'Lazada', 'SnackVideo Ads'
+        'Facebook Ads', 'Google Ads', 'Organik', 'Reseller',
+        'Shopee', 'TikTok Ads', 'TikTok Shop', 'Tokopedia',
+        'BliBli', 'Lazada', 'SnackVideo Ads'
       ];
 
       for (let i = 0; i < salesChannels.length; i++) {
-        const nsRow = 30 + i; // net sales rows 31-41 (0-indexed 30-40)
-        const gpRow = 56 + i; // gross profit rows 57-67 (0-indexed 56-66)
+        const nsRow = 30 + i;
+        const gpRow = 56 + i;
 
         const nsVal = toNum(ws[XLSX.utils.encode_cell({ r: nsRow, c: col })]?.v);
         const gpVal = toNum(ws[XLSX.utils.encode_cell({ r: gpRow, c: col })]?.v);
@@ -211,9 +219,8 @@ export function parseRooveExcel(buffer: ArrayBuffer): ParsedData {
   if (wb.SheetNames.includes('Ads')) {
     const ws = wb.Sheets['Ads'];
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
-
-    for (let r = 3; r <= range.e.r; r++) { // data starts row 4 (0-indexed: 3)
-      const dateCell = ws[XLSX.utils.encode_cell({ r, c: 1 })]; // col B
+    for (let r = 3; r <= range.e.r; r++) {
+      const dateCell = ws[XLSX.utils.encode_cell({ r, c: 1 })];
       const dateStr = excelDateToISO(dateCell?.v);
       if (!dateStr) continue;
 
