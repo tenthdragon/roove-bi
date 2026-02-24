@@ -2,7 +2,7 @@
 // Types
 // ============================================================
 
-export type UserRole = 'owner' | 'admin' | 'finance' | 'brand_manager' | 'pending';
+export type UserRole = 'owner' | 'admin' | 'finance' | 'brand_manager' | 'staff' | 'pending';
 
 export interface Profile {
   id: string;
