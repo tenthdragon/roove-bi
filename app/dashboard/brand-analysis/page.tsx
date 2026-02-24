@@ -5,16 +5,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fmtCompact, fmtRupiah, fmtPct } from '@/lib/utils';
 import { fetchCrossBrandMatrix, fetchMultiBrandStats, fetchBrandJourney, fetchBrandAnalysisRefreshTime, refreshBrandAnalysis } from '@/lib/scalev-actions';
-
-const BRAND_COLORS = {
-  'Roove': '#3b82f6',
-  'Osgard': '#f59e0b',
-  'Purvu': '#ec4899',
-  'Pluve': '#8b5cf6',
-  'Globite': '#10b981',
-  'DrHyun': '#06b6d4',
-  'Calmara': '#f97316',
-};
+import { buildBrandColorMap } from '@/lib/utils';
 
 export default function BrandAnalysisPage() {
   const [matrix, setMatrix] = useState([]);
@@ -90,6 +81,14 @@ export default function BrandAnalysisPage() {
     for (const row of matrix) { lookup[`${row.brand_from}→${row.brand_to}`] = row; }
     return lookup;
   }, [matrix]);
+
+  const BRAND_COLORS = useMemo(() => {
+  const allBrands = [...matrixBrands];
+  (stats?.gateway || []).forEach((g: any) => {
+    if (!allBrands.includes(g.brand)) allBrands.push(g.brand);
+  });
+  return buildBrandColorMap(allBrands);
+}, [matrixBrands, stats]);
 
   if (loading) {
     return (
