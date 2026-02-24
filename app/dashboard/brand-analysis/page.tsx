@@ -9,11 +9,12 @@ import { buildBrandColorMap } from '@/lib/utils';
 
 export default function BrandAnalysisPage() {
   const [matrix, setMatrix] = useState([]);
-  const [stats, setStats] = useState(null); // { segments, distribution, gateway }
+  const [stats, setStats] = useState(null);
   const [journey, setJourney] = useState([]);
   const [refreshTime, setRefreshTime] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [crossFilter, setCrossFilter] = useState('all'); // 'all' | 'bundle_only' | 'separate_only' | 'mixed'
 
   useEffect(() => { loadData(); }, []);
 
@@ -68,6 +69,7 @@ export default function BrandAnalysisPage() {
 
   const distribution = stats?.distribution || {};
   const gatewayBrands = (stats?.gateway || []).sort((a, b) => b.count - a.count);
+  const crossType = stats?.crossType || {};
 
   // ── Matrix brands & lookup ──
   const matrixBrands = useMemo(() => {
@@ -83,12 +85,12 @@ export default function BrandAnalysisPage() {
   }, [matrix]);
 
   const BRAND_COLORS = useMemo(() => {
-  const allBrands = [...matrixBrands];
-  (stats?.gateway || []).forEach((g: any) => {
-    if (!allBrands.includes(g.brand)) allBrands.push(g.brand);
-  });
-  return buildBrandColorMap(allBrands);
-}, [matrixBrands, stats]);
+    const allBrands = [...matrixBrands];
+    (stats?.gateway || []).forEach((g: any) => {
+      if (!allBrands.includes(g.brand)) allBrands.push(g.brand);
+    });
+    return buildBrandColorMap(allBrands);
+  }, [matrixBrands, stats]);
 
   if (loading) {
     return (
@@ -99,6 +101,33 @@ export default function BrandAnalysisPage() {
   }
 
   const hasData = totalCustomers > 0;
+
+  // ── Toggle button style helper ──
+  const toggleStyle = (active: boolean) => ({
+    padding: '5px 12px',
+    borderRadius: 6,
+    border: active ? '1px solid #10b981' : '1px solid #1a2744',
+    background: active ? 'rgba(16,185,129,0.12)' : '#0b1121',
+    color: active ? '#10b981' : '#64748b',
+    fontSize: 11,
+    fontWeight: active ? 700 : 500,
+    cursor: 'pointer',
+    transition: 'all 0.15s',
+  });
+
+  // ── Filtered multi-brand count based on toggle ──
+  const filteredMultiCount = crossFilter === 'all'
+    ? multiCount
+    : crossFilter === 'mixed'
+      ? (crossType.mixed || 0)
+      : (crossType[crossFilter] || 0);
+
+  const filterLabel = {
+    all: 'Semua',
+    bundle_only: 'Bundle Only',
+    separate_only: 'Cross-Purchase',
+    mixed: 'Mixed',
+  };
 
   return (
     <div className="fade-in">
@@ -139,10 +168,25 @@ export default function BrandAnalysisPage() {
           {/* Section 1: Single vs Multi-Brand                   */}
           {/* ═══════════════════════════════════════════════════ */}
           <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, marginBottom: 20 }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Single vs Multi-Brand Customers</h3>
-            <p style={{ margin: '0 0 16px', fontSize: 12, color: '#64748b' }}>
-              Perbandingan customer yang beli 1 brand vs 2+ brand
-            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Single vs Multi-Brand Customers</h3>
+                <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>
+                  Perbandingan customer yang beli 1 brand vs 2+ brand
+                </p>
+              </div>
+              {/* Toggle */}
+              <div style={{ display: 'flex', gap: 4, background: '#0b1121', padding: 3, borderRadius: 8, border: '1px solid #1a2744' }}>
+                {['all', 'bundle_only', 'separate_only', 'mixed'].map(f => (
+                  <button key={f} onClick={() => setCrossFilter(f)} style={toggleStyle(crossFilter === f)}>
+                    {filterLabel[f]}
+                    {f !== 'all' && crossType[f] > 0 && (
+                      <span style={{ marginLeft: 4, opacity: 0.7 }}>({crossType[f]})</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
               <div style={{ padding: 16, background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8 }}>
@@ -159,24 +203,58 @@ export default function BrandAnalysisPage() {
                 </div>
               </div>
               <div style={{ padding: 16, background: '#0b1121', border: '1px solid #10b981', borderRadius: 8 }}>
-                <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>Multi-Brand</div>
+                <div style={{ fontSize: 11, color: '#10b981', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
+                  Multi-Brand
+                  {crossFilter !== 'all' && (
+                    <span style={{ fontWeight: 400, marginLeft: 4, fontSize: 10, color: '#0d9488' }}>
+                      ({filterLabel[crossFilter]})
+                    </span>
+                  )}
+                </div>
                 <div style={{ fontSize: 24, fontWeight: 800, color: '#10b981', fontFamily: "'JetBrains Mono', monospace" }}>
-                  {multiCount.toLocaleString('id-ID')}
+                  {filteredMultiCount.toLocaleString('id-ID')}
                 </div>
                 <div style={{ fontSize: 11, color: '#475569', marginTop: 4 }}>
-                  {totalCustomers > 0 ? fmtPct((multiCount / totalCustomers) * 100) : '0%'} dari total
+                  {totalCustomers > 0 ? fmtPct((filteredMultiCount / totalCustomers) * 100) : '0%'} dari total
                 </div>
-                <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 11 }}>
-                  <span style={{ color: '#64748b' }}>AOV: <span style={{ color: '#10b981', fontFamily: 'monospace' }}>{fmtCompact(multiAov)}</span></span>
-                  <span style={{ color: '#64748b' }}>Rev: <span style={{ color: '#10b981', fontFamily: 'monospace' }}>{fmtCompact(multiRevenue)}</span></span>
-                </div>
-                {singleAov > 0 && multiAov > 0 && (
+                {crossFilter === 'all' && (
+                  <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 11 }}>
+                    <span style={{ color: '#64748b' }}>AOV: <span style={{ color: '#10b981', fontFamily: 'monospace' }}>{fmtCompact(multiAov)}</span></span>
+                    <span style={{ color: '#64748b' }}>Rev: <span style={{ color: '#10b981', fontFamily: 'monospace' }}>{fmtCompact(multiRevenue)}</span></span>
+                  </div>
+                )}
+                {crossFilter === 'all' && singleAov > 0 && multiAov > 0 && (
                   <div style={{ marginTop: 6, fontSize: 11, color: '#10b981', fontWeight: 600 }}>
                     {(multiAov / singleAov).toFixed(1)}x AOV vs single-brand
                   </div>
                 )}
+                {crossFilter !== 'all' && (
+                  <div style={{ marginTop: 8, fontSize: 10, color: '#475569', lineHeight: 1.4 }}>
+                    {crossFilter === 'bundle_only' && 'Customer yang beli multi-brand hanya dari bundling (1 invoice)'}
+                    {crossFilter === 'separate_only' && 'Customer yang beli multi-brand di transaksi terpisah (repeat buyer lintas brand)'}
+                    {crossFilter === 'mixed' && 'Customer yang beli multi-brand dari bundling DAN transaksi terpisah'}
+                  </div>
+                )}
               </div>
             </div>
+
+            {/* Cross-type breakdown pills */}
+            {crossFilter === 'all' && (crossType.bundle_only > 0 || crossType.separate_only > 0) && (
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                <div style={{ padding: '6px 12px', background: '#0b1121', border: '1px solid #1a2744', borderRadius: 6, fontSize: 11 }}>
+                  <span style={{ color: '#f59e0b', fontWeight: 700 }}>{crossType.bundle_only || 0}</span>
+                  <span style={{ color: '#64748b', marginLeft: 4 }}>bundle only</span>
+                </div>
+                <div style={{ padding: '6px 12px', background: '#0b1121', border: '1px solid #1a2744', borderRadius: 6, fontSize: 11 }}>
+                  <span style={{ color: '#10b981', fontWeight: 700 }}>{crossType.separate_only || 0}</span>
+                  <span style={{ color: '#64748b', marginLeft: 4 }}>cross-purchase</span>
+                </div>
+                <div style={{ padding: '6px 12px', background: '#0b1121', border: '1px solid #1a2744', borderRadius: 6, fontSize: 11 }}>
+                  <span style={{ color: '#8b5cf6', fontWeight: 700 }}>{crossType.mixed || 0}</span>
+                  <span style={{ color: '#64748b', marginLeft: 4 }}>mixed</span>
+                </div>
+              </div>
+            )}
 
             {/* Distribution */}
             <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Distribusi Jumlah Brand per Customer</div>
