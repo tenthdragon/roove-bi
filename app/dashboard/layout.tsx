@@ -214,6 +214,7 @@ export default function DashboardLayout({ children }) {
 
   return (
     <DateRangeProvider>
+      <ActiveBrandsProvider>
       <div style={{ minHeight:'100vh', background:'#0b1121', display:'flex' }}>
 
         {/* ═══ DESKTOP SIDEBAR ═══ */}
@@ -386,6 +387,7 @@ export default function DashboardLayout({ children }) {
           </main>
         </div>
       </div>
+      </ActiveBrandsProvider>
     </DateRangeProvider>
   );
 }
