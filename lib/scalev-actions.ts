@@ -254,10 +254,10 @@ export async function fetchMultiBrandStats() {
     .select('*');
   if (error) throw error;
 
-  // Parse into structured data
   const segments: Record<string, any> = {};
   const distribution: Record<number, number> = {};
   const gateway: { brand: string; count: number }[] = [];
+  const crossType: Record<string, number> = {};
 
   for (const row of (data || [])) {
     if (row.stat_type === 'segment') {
@@ -271,10 +271,12 @@ export async function fetchMultiBrandStats() {
       distribution[parseInt(row.key)] = parseInt(row.value1) || 0;
     } else if (row.stat_type === 'gateway') {
       gateway.push({ brand: row.key, count: parseInt(row.value1) || 0 });
+    } else if (row.stat_type === 'cross_type') {
+      crossType[row.key] = parseInt(row.value1) || 0;
     }
   }
 
-  return { segments, distribution, gateway };
+  return { segments, distribution, gateway, crossType };
 }
 
 // ── Brand journey transitions ──
