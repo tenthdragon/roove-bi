@@ -9,6 +9,8 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ComposedChart, Line, Cell
 } from 'recharts';
+import { useActiveBrands } from '@/lib/ActiveBrandsContext';
+import { buildBrandColorMap } from '@/lib/utils';
 
 // ── Normalize store name ──
 function normStore(s: string): string {
@@ -73,12 +75,6 @@ const CHANNEL_COLORS: Record<string, string> = {
   'Tokopedia': '#10b981', 'BliBli': '#06b6d4', 'Lazada': '#1a237e', 'Reseller': '#f59e0b',
 };
 
-// ── Brand colors ──
-const BRAND_COLORS: Record<string, string> = {
-  'Roove': '#3b82f6', 'Purvu': '#8b5cf6', 'Pluve': '#06b6d4', 'Osgard': '#f97316',
-  'DrHyun': '#ec4899', 'Calmara': '#f59e0b', 'Globite': '#10b981', 'Other': '#64748b',
-};
-
 export default function MarketingPage() {
   const supabase = createClient();
   const { dateRange, loading: dateLoading } = useDateRange();
@@ -103,7 +99,7 @@ export default function MarketingPage() {
         .gte('date', dateRange.from).lte('date', dateRange.to),
       supabase.from('product_mapping').select('product_name, product_type'),
     ]).then(([{ data: prod }, { data: ads }, { data: ch }, { data: pm }]) => {
-      setProdData(prod || []);
+      setProdData((prod || []).filter(d => isActiveBrand(d.product)));
       setAdsData(ads || []);
       setChannelData(ch || []);
       const map: Record<string, string> = {};
@@ -186,6 +182,12 @@ export default function MarketingPage() {
     adsData.forEach(d => { const brand = normStore(d.store); if (brand && brand !== 'Other') set.add(brand); });
     return Array.from(set).sort();
   }, [adsData]);
+
+  const { activeBrands, isActiveBrand } = useActiveBrands();
+
+const BRAND_COLORS = useMemo(() => {
+  return buildBrandColorMap([...uniqueBrands, ...activeBrands]);
+}, [uniqueBrands, activeBrands]);
 
   // ══════════════════════════════════════════════════════════════════════
   // DAILY DYNAMICS TABLE — Revenue, Ad Spend, Mkt Ratio, ROAS, Eff. ROAS
