@@ -8,6 +8,7 @@ import SheetManager from '@/components/SheetManager';
 import ScalevManager from '@/components/ScalevManager';
 import FinancialSheetManager from '@/components/FinancialSheetManager';
 import CsvOrderUploader from '@/components/CsvOrderUploader';
+import BrandManager from '@/components/BrandManager';
 
 // ── Collapsible Section Component ──
 function Section({ title, subtitle, color, icon, defaultOpen = false, children }) {
@@ -195,6 +196,11 @@ export default function AdminPage() {
         </div>
       </Section>
 
+      {/* SECTION: BRAND MANAGEMENT */}
+<Section title="Brand Management" subtitle="Kelola daftar brand" color="#ec4899">
+  <BrandManager />
+</Section>
+      
       {/* SECTION 2: FINANCIAL REPORT */}
       <Section title="Financial Report" subtitle="PL, CF, BS, Rasio" color="#10b981">
         <FinancialSheetManager />
