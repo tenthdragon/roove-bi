@@ -3,7 +3,6 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { createClient } from '@/lib/supabase-browser';
-import { uploadCsvOrders } from '@/lib/csv-actions';
 
 export default function CsvOrderUploader() {
   const supabase = createClient();
