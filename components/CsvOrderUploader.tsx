@@ -33,13 +33,47 @@ export default function CsvOrderUploader() {
     setUploading(true); setError(''); setResult(null);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const formData = new FormData();
-      formData.append('file', file);
-      if (user?.email) formData.append('uploaded_by', user.email);
-      formData.append('filename', file.name);
+      
+      const text = await file.text();
+      const lines = text.split('\n');
+      const header = lines[0];
+      const dataLines = lines.slice(1).filter(l => l.trim());
+      
+      const CHUNK_SIZE = 3000;
+      const totalChunks = Math.ceil(dataLines.length / CHUNK_SIZE);
+      
+      let finalResult = null;
+      
+      for (let c = 0; c < totalChunks; c++) {
+        const chunkLines = dataLines.slice(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
+        const csvChunk = header + '\n' + chunkLines.join('\n');
+        const blob = new Blob([csvChunk], { type: 'text/csv' });
+        const chunkFile = new File([blob], file.name, { type: 'text/csv' });
+        
+        const formData = new FormData();
+        formData.append('file', chunkFile);
+        if (user?.email) formData.append('uploaded_by', user.email);
+        formData.append('filename', `${file.name} (part ${c + 1}/${totalChunks})`);
 
-      const data = await uploadCsvOrders(formData);
-      setResult(data);
+        const res = await fetch('/api/csv-upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (!res.ok) { setError(data.error || `Upload gagal di chunk ${c + 1}`); return; }
+        
+        if (!finalResult) {
+          finalResult = data;
+        } else {
+          finalResult.stats.totalRows += data.stats.totalRows;
+          finalResult.stats.newInserted += data.stats.newInserted;
+          finalResult.stats.updated += data.stats.updated;
+          finalResult.stats.errors += data.stats.errors;
+          finalResult.stats.lineItems = (finalResult.stats.lineItems || 0) + (data.stats.lineItems || 0);
+        }
+      }
+      
+      if (finalResult) {
+        finalResult.message = `Upload selesai (${totalChunks} parts)! ${finalResult.stats.newInserted} order baru, ${finalResult.stats.updated} order diperkaya, ${finalResult.stats.lineItems || 0} line items, ${finalResult.stats.errors} error.`;
+        setResult(finalResult);
+      }
       await loadHistory();
     } catch (err) { setError(err.message || 'Upload gagal'); }
     finally { setUploading(false); }
