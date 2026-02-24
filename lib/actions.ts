@@ -89,7 +89,8 @@ export async function fetchAvailablePeriods() {
 
 export async function fetchDateRange() {
   const supabase = createServerSupabase();
-  const { data, error } = await supabase
+
+  const { data } = await supabase
     .from('daily_product_summary')
     .select('date')
     .order('date', { ascending: true })
@@ -122,20 +123,28 @@ export async function uploadExcelData(formData: FormData) {
     .eq('id', user.id)
     .single();
 
-  if (profile?.role !== 'owner' && profile?.role !== 'finance') throw new Error('Only owners and finance users can upload data');
+  if (profile?.role !== 'owner' && profile?.role !== 'finance')
+    throw new Error('Only owners and finance users can upload data');
 
   const file = formData.get('file') as File;
   if (!file) throw new Error('No file provided');
 
   const buffer = await file.arrayBuffer();
-  const parsed = parseRooveExcel(buffer);
+
+  // ── Read active brands from database ──
+  const svc = createServiceSupabase();
+  const { data: brands, error: brandsError } = await svc
+    .from('brands')
+    .select('name, sheet_name')
+    .eq('is_active', true);
+
+  if (brandsError) throw brandsError;
+
+  const parsed = parseRooveExcel(buffer, brands || []);
 
   if (!parsed.period.month || !parsed.period.year) {
     throw new Error('Could not detect period from file. Make sure the file has date columns.');
   }
-
-  // Use service role for bulk insert (bypasses RLS for performance)
-  const svc = createServiceSupabase();
 
   // Create import record
   const { data: importRecord, error: importError } = await svc
@@ -155,7 +164,7 @@ export async function uploadExcelData(formData: FormData) {
   const importId = importRecord.id;
 
   try {
-    // Delete existing data for this period (to allow re-imports)
+    // Delete existing data for this period
     const periodStart = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-01`;
     const lastDay = new Date(parsed.period.year, parsed.period.month, 0).getDate();
     const periodEnd = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
@@ -187,7 +196,6 @@ export async function uploadExcelData(formData: FormData) {
     // Insert daily channel data
     if (parsed.dailyChannel.length > 0) {
       const rows = parsed.dailyChannel.map(d => ({ ...d, import_id: importId }));
-      // Insert in batches of 500
       for (let i = 0; i < rows.length; i += 500) {
         const batch = rows.slice(i, i + 500);
         const { error } = await svc.from('daily_channel_data').insert(batch);
@@ -234,7 +242,10 @@ export async function uploadExcelData(formData: FormData) {
       },
     };
   } catch (err) {
-    await svc.from('data_imports').update({ status: 'failed', notes: String(err) }).eq('id', importId);
+    await svc.from('data_imports').update({
+      status: 'failed',
+      notes: String(err)
+    }).eq('id', importId);
     throw err;
   }
 }
@@ -247,7 +258,6 @@ export async function fetchAllUsers() {
     .from('profiles')
     .select('*')
     .order('created_at', { ascending: true });
-
   if (error) throw error;
   return data as Profile[];
 }
@@ -255,7 +265,6 @@ export async function fetchAllUsers() {
 export async function updateUserRole(userId: string, role: string, allowedTabs: string[], allowedProducts: string[]) {
   const supabase = createServerSupabase();
 
-  // Verify caller is owner
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
 
