@@ -175,6 +175,10 @@ export async function parseGoogleSheet(
   spreadsheetId: string,
   brandList: Array<{ name: string; sheet_name: string }>,
 ): Promise<ParsedSheetData> {
+  // Defensive guard — prevents cryptic "e is not iterable" in production
+  if (!brandList || !Array.isArray(brandList)) {
+    throw new Error('brandList is required — pass the active brands array from the database');
+  }
   const sheetNames = await getSheetNames(spreadsheetId);
 
   let periodMonth = 0;
