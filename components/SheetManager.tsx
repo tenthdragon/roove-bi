@@ -1,7 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { fetchSheetConnections, addSheetConnection, removeSheetConnection, toggleSheetConnection, triggerSync } from '@/lib/sheet-actions';
+import {
+  fetchSheetConnections,
+  addSheetConnection,
+  removeSheetConnection,
+  toggleSheetConnection,
+} from '@/lib/sheet-actions';
 
 interface SheetConnection {
   id: string;
@@ -88,7 +93,17 @@ export default function SheetManager() {
       setSyncing(true);
       setError(null);
       setSuccess(null);
-      const result = await triggerSync();
+
+      // Call the unified API route instead of the server action.
+      // This ensures brandList is always fetched from the database,
+      // identical to how the Vercel cron job triggers sync.
+      const res = await fetch('/api/sync', { method: 'POST' });
+      const result = await res.json();
+
+      if (!res.ok) {
+        throw new Error(result.error || `Sync failed (${res.status})`);
+      }
+
       setSuccess(`Sync selesai: ${result.synced} berhasil, ${result.failed} gagal`);
       await loadConnections();
     } catch (err: any) {
@@ -114,9 +129,12 @@ export default function SheetManager() {
           onClick={handleSync}
           disabled={syncing || connections.filter(c => c.is_active).length === 0}
           style={{
-            padding:'7px 16px', borderRadius:8, border:'none', cursor: syncing ? 'not-allowed' : 'pointer',
-            background: syncing ? '#1a2744' : '#064e3b', color: syncing ? '#64748b' : '#10b981',
-            fontSize:12, fontWeight:600, opacity: connections.filter(c => c.is_active).length === 0 ? 0.5 : 1,
+            padding:'7px 16px', borderRadius:8, border:'none',
+            cursor: syncing ? 'not-allowed' : 'pointer',
+            background: syncing ? '#1a2744' : '#064e3b',
+            color: syncing ? '#64748b' : '#10b981',
+            fontSize:12, fontWeight:600,
+            opacity: connections.filter(c => c.is_active).length === 0 ? 0.5 : 1,
           }}
         >
           {syncing ? '⟳ Syncing...' : '⟳ Sync Now'}
@@ -157,21 +175,30 @@ export default function SheetManager() {
             placeholder="Label (misal: Feb 2026)"
             value={newLabel}
             onChange={e => setNewLabel(e.target.value)}
-            style={{ flex:'0 0 180px', padding:'8px 12px', background:'#0b1121', border:'1px solid #1a2744', borderRadius:8, color:'#e2e8f0', fontSize:13, outline:'none' }}
+            style={{
+              flex:'0 0 180px', padding:'8px 12px', background:'#0b1121',
+              border:'1px solid #1a2744', borderRadius:8, color:'#e2e8f0',
+              fontSize:13, outline:'none'
+            }}
           />
           <input
             type="text"
             placeholder="Spreadsheet ID atau URL lengkap"
             value={newSpreadsheetId}
             onChange={e => setNewSpreadsheetId(e.target.value)}
-            style={{ flex:1, minWidth:200, padding:'8px 12px', background:'#0b1121', border:'1px solid #1a2744', borderRadius:8, color:'#e2e8f0', fontSize:13, outline:'none' }}
+            style={{
+              flex:1, minWidth:200, padding:'8px 12px', background:'#0b1121',
+              border:'1px solid #1a2744', borderRadius:8, color:'#e2e8f0',
+              fontSize:13, outline:'none'
+            }}
           />
         </div>
         <button
           type="submit"
           disabled={adding || !newSpreadsheetId.trim() || !newLabel.trim()}
           style={{
-            padding:'8px 16px', borderRadius:8, border:'none', cursor: adding ? 'not-allowed' : 'pointer',
+            padding:'8px 16px', borderRadius:8, border:'none',
+            cursor: adding ? 'not-allowed' : 'pointer',
             background:'#1e40af', color:'#93c5fd', fontSize:12, fontWeight:600,
             opacity: (!newSpreadsheetId.trim() || !newLabel.trim()) ? 0.5 : 1,
           }}
@@ -194,7 +221,8 @@ export default function SheetManager() {
                 padding:14, background:'#0b1121', borderRadius:8,
                 border:'1px solid #1a2744',
                 opacity: conn.is_active ? 1 : 0.5,
-                display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:8,
+                display:'flex', justifyContent:'space-between', alignItems:'flex-start',
+                flexWrap:'wrap', gap:8,
               }}
             >
               <div style={{ flex:1 }}>
@@ -202,7 +230,7 @@ export default function SheetManager() {
                   <span style={{
                     width:8, height:8, borderRadius:'50%', display:'inline-block',
                     background: conn.last_sync_status === 'success' ? '#10b981' :
-                               conn.last_sync_status === 'error' ? '#ef4444' : '#64748b',
+                                conn.last_sync_status === 'error' ? '#ef4444' : '#64748b',
                   }} />
                   <span style={{ fontWeight:600, fontSize:13 }}>{conn.label}</span>
                   {!conn.is_active && (
