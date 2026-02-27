@@ -450,16 +450,21 @@ async function handleOpsUpload(
     }
   }
 
-  // ── Batch UPDATE existing orders ──
+  // ── Batch UPDATE existing orders (use update, not upsert, to avoid NOT NULL issues) ──
   const UPDATE_BATCH = 200;
   for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
     const batch = toUpdate.slice(i, i + UPDATE_BATCH);
-    const upsertRows = batch.map(upd => ({ id: upd.id, order_id: upd.orderId, ...upd.data }));
-    const { error } = await svc.from('scalev_orders').upsert(upsertRows, { onConflict: 'id' });
-    if (error) {
-      stats.errors.push(`Update batch ${Math.floor(i / UPDATE_BATCH) + 1}: ${error.message}`);
-    } else {
-      stats.updated += batch.length;
+    // Update each order individually since .update().in() doesn't support different data per row
+    for (const upd of batch) {
+      const { error } = await svc
+        .from('scalev_orders')
+        .update(upd.data)
+        .eq('id', upd.id);
+      if (error) {
+        stats.errors.push(`Update ${upd.orderId}: ${error.message}`);
+      } else {
+        stats.updated++;
+      }
     }
   }
 
