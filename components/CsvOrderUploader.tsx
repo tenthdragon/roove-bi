@@ -9,8 +9,7 @@ export default function CsvOrderUploader() {
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [results, setResults] = useState<any[]>([]);
-  const [currentFile, setCurrentFile] = useState('');
-  const [progress, setProgress] = useState({ current: 0, total: 0 });
+  const [fileQueue, setFileQueue] = useState<{ name: string; status: 'pending' | 'processing' | 'done'; chunk: number; totalChunks: number; pct: number }[]>([]);
   const [error, setError] = useState('');
   const [history, setHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -38,7 +37,10 @@ export default function CsvOrderUploader() {
     setUploading(true);
     setError('');
     setResults([]);
-    setProgress({ current: 0, total: csvFiles.length });
+
+    // Initialize queue
+    const initialQueue = csvFiles.map(f => ({ name: f.name, status: 'pending' as const, chunk: 0, totalChunks: 1, pct: 0 }));
+    setFileQueue(initialQueue);
 
     const allResults: any[] = [];
 
@@ -47,8 +49,9 @@ export default function CsvOrderUploader() {
 
       for (let fi = 0; fi < csvFiles.length; fi++) {
         const file = csvFiles[fi];
-        setCurrentFile(file.name);
-        setProgress({ current: fi + 1, total: csvFiles.length });
+
+        // Mark as processing
+        setFileQueue(q => q.map((item, i) => i === fi ? { ...item, status: 'processing' } : item));
 
         try {
           const text = await file.text();
@@ -58,6 +61,7 @@ export default function CsvOrderUploader() {
 
           if (dataLines.length === 0) {
             allResults.push({ filename: file.name, error: 'File kosong (tidak ada data rows)' });
+            setFileQueue(q => q.map((item, i) => i === fi ? { ...item, status: 'done', pct: 100 } : item));
             setResults([...allResults]);
             continue;
           }
@@ -67,7 +71,12 @@ export default function CsvOrderUploader() {
           let finalResult: any = null;
           let fileError = false;
 
+          setFileQueue(q => q.map((item, i) => i === fi ? { ...item, totalChunks } : item));
+
           for (let c = 0; c < totalChunks; c++) {
+            // Update chunk progress
+            setFileQueue(q => q.map((item, i) => i === fi ? { ...item, chunk: c, pct: Math.round((c / totalChunks) * 100) } : item));
+
             const chunkLines = dataLines.slice(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
             const csvChunk = header + '\n' + chunkLines.join('\n');
             const blob = new Blob([csvChunk], { type: 'text/csv' });
@@ -102,6 +111,9 @@ export default function CsvOrderUploader() {
                 finalResult.stats.cogsLookedUp = (finalResult.stats.cogsLookedUp || 0) + data.stats.cogsLookedUp;
               }
             }
+
+            // Update progress after chunk completes
+            setFileQueue(q => q.map((item, i) => i === fi ? { ...item, chunk: c + 1, pct: Math.round(((c + 1) / totalChunks) * 100) } : item));
           }
 
           if (!fileError && finalResult) allResults.push(finalResult);
@@ -109,7 +121,8 @@ export default function CsvOrderUploader() {
           allResults.push({ filename: file.name, error: fileErr.message || 'Error tidak diketahui' });
         }
 
-        // Update results progressively
+        // Mark done
+        setFileQueue(q => q.map((item, i) => i === fi ? { ...item, status: 'done', pct: 100 } : item));
         setResults([...allResults]);
       }
 
@@ -119,7 +132,6 @@ export default function CsvOrderUploader() {
       setError(err.message || 'Upload gagal');
     } finally {
       setUploading(false);
-      setCurrentFile('');
     }
   }, [supabase, loadHistory]);
 
@@ -175,15 +187,17 @@ export default function CsvOrderUploader() {
           {uploading ? (
             <div>
               <div className="spinner" style={{
-                width: 32, height: 32,
+                width: 24, height: 24,
                 border: '3px solid #1a2744', borderTop: '3px solid #06b6d4',
-                borderRadius: '50%', margin: '0 auto 12px'
+                borderRadius: '50%', margin: '0 auto 8px'
               }} />
-              <div style={{ color: '#06b6d4', fontWeight: 600, fontSize: 13 }}>
-                {progress.total > 1
-                  ? `Memproses file ${progress.current}/${progress.total}: ${currentFile}`
-                  : `Mengupload & memproses CSV...`
-                }
+              <div style={{ color: '#06b6d4', fontWeight: 600, fontSize: 12 }}>
+                {(() => {
+                  const processing = fileQueue.find(f => f.status === 'processing');
+                  const done = fileQueue.filter(f => f.status === 'done').length;
+                  if (processing) return `${done + 1}/${fileQueue.length}: ${processing.name}`;
+                  return 'Memproses...';
+                })()}
               </div>
             </div>
           ) : (
@@ -195,42 +209,107 @@ export default function CsvOrderUploader() {
           )}
         </div>
 
-        {/* Upload Results */}
-        {results.length > 0 && (
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {results.map((result, idx) => (
-              result.error ? (
-                <div key={idx} style={{ padding: 12, background: '#7f1d1d', borderRadius: 8, border: '1px solid #991b1b' }}>
-                  <div style={{ color: '#ef4444', fontWeight: 700, fontSize: 12 }}>❌ {result.filename}: {result.error}</div>
+        {/* Upload Results & Progress */}
+        {(results.length > 0 || fileQueue.length > 0) && (
+          <div style={{ marginTop: 14, background: '#0b1121', borderRadius: 8, border: '1px solid #1a2744', overflow: 'hidden' }}>
+            <div style={{ padding: '6px 12px', background: '#111a2e', borderBottom: '1px solid #1a2744', display: 'flex', gap: 12, fontSize: 9, color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>
+              <span style={{ flex: 1, minWidth: 0 }}>File</span>
+              <span style={{ width: 40, textAlign: 'right' }}>Rows</span>
+              <span style={{ width: 40, textAlign: 'right' }}>Baru</span>
+              <span style={{ width: 40, textAlign: 'right' }}>Fix</span>
+              <span style={{ width: 40, textAlign: 'right' }}>Items</span>
+            </div>
+            {fileQueue.map((fq, idx) => {
+              const result = results.find(r => r.filename === fq.name);
+              const isError = result?.error;
+              const isDone = fq.status === 'done' && result && !isError;
+              const isProcessing = fq.status === 'processing';
+              const isPending = fq.status === 'pending';
+
+              return (
+                <div key={idx} style={{
+                  borderBottom: idx < fileQueue.length - 1 ? '1px solid #1a2744' : 'none',
+                  position: 'relative', overflow: 'hidden',
+                }}>
+                  {/* Progress bar background for processing files */}
+                  {isProcessing && (
+                    <div style={{
+                      position: 'absolute', top: 0, left: 0, bottom: 0,
+                      width: `${fq.pct}%`,
+                      background: 'rgba(6,182,212,0.08)',
+                      transition: 'width 0.4s ease',
+                    }} />
+                  )}
+                  <div style={{
+                    display: 'flex', gap: 12, alignItems: 'center',
+                    padding: '5px 12px', fontSize: 11,
+                    position: 'relative',
+                    opacity: isPending ? 0.4 : 1,
+                  }}>
+                    {isError ? (
+                      <span style={{ flex: 1, color: '#ef4444', fontSize: 11 }}>❌ {fq.name}: {result.error}</span>
+                    ) : (
+                      <>
+                        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
+                          {isDone && <span style={{ color: '#10b981', fontSize: 10, flexShrink: 0 }}>✅</span>}
+                          {isProcessing && <span style={{ color: '#06b6d4', fontSize: 9, flexShrink: 0, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, width: 28 }}>{fq.pct}%</span>}
+                          {isPending && <span style={{ color: '#475569', fontSize: 10, flexShrink: 0 }}>⏳</span>}
+                          {isDone && (
+                            <span style={{
+                              fontSize: 8, padding: '1px 4px', borderRadius: 3, fontWeight: 700, flexShrink: 0,
+                              background: result.stats.format === 'ops-marketplace' ? '#052e16' : '#0e2a47',
+                              color: result.stats.format === 'ops-marketplace' ? '#10b981' : '#06b6d4',
+                            }}>
+                              {result.stats.format === 'ops-marketplace' ? 'OPS' : 'SCV'}
+                            </span>
+                          )}
+                          <span style={{
+                            color: isDone ? '#e2e8f0' : isProcessing ? '#06b6d4' : '#475569',
+                            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11,
+                          }}>
+                            {fq.name}
+                          </span>
+                        </div>
+                        {isDone ? (
+                          <>
+                            <span style={{ width: 40, textAlign: 'right', color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{result.stats.totalRows}</span>
+                            <span style={{ width: 40, textAlign: 'right', color: '#10b981', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{result.stats.newInserted}</span>
+                            <span style={{ width: 40, textAlign: 'right', color: '#06b6d4', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{result.stats.updated || 0}</span>
+                            <span style={{ width: 40, textAlign: 'right', color: '#8b5cf6', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{result.stats.lineItems || 0}</span>
+                          </>
+                        ) : isProcessing && fq.totalChunks > 1 ? (
+                          <span style={{ width: 172, textAlign: 'right', color: '#475569', fontSize: 10 }}>
+                            chunk {fq.chunk}/{fq.totalChunks}
+                          </span>
+                        ) : (
+                          <span style={{ width: 172 }} />
+                        )}
+                      </>
+                    )}
+                  </div>
                 </div>
-              ) : (
-                <div key={idx} style={{ padding: 14, background: '#064e3b', borderRadius: 8, border: '1px solid #065f46' }}>
-                  <div style={{ color: '#10b981', fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
-                    ✅ {result.filename}
-                  </div>
-                  <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-                    <span style={{
-                      fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 700,
-                      background: result.stats.format === 'ops-marketplace' ? '#052e16' : '#0e2a47',
-                      color: result.stats.format === 'ops-marketplace' ? '#10b981' : '#06b6d4',
-                    }}>
-                      {result.stats.format === 'ops-marketplace' ? '👥 TIM OPS' : `📋 SCALEV (${result.stats.format})`}
-                    </span>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: 6 }}>
-                    <StatBox label="Rows" value={result.stats.totalRows} color="#94a3b8" />
-                    <StatBox label="Baru" value={result.stats.newInserted} color="#10b981" />
-                    <StatBox
-                      label={result.stats.format === 'ops-marketplace' ? 'Fix' : 'Update'}
-                      value={result.stats.updated || 0}
-                      color="#06b6d4"
-                    />
-                    <StatBox label="Items" value={result.stats.lineItems || 0} color="#8b5cf6" />
-                    {(result.stats.errors || 0) > 0 && <StatBox label="Error" value={result.stats.errors} color="#ef4444" />}
-                  </div>
-                </div>
-              )
-            ))}
+              );
+            })}
+            {results.filter(r => !r.error).length > 1 && !uploading && (
+              <div style={{
+                display: 'flex', gap: 12, padding: '5px 12px', fontSize: 10, fontWeight: 700,
+                borderTop: '1px solid #1e3a5f', background: '#111a2e',
+              }}>
+                <span style={{ flex: 1, color: '#64748b' }}>Total ({results.filter(r => !r.error).length} files)</span>
+                <span style={{ width: 40, textAlign: 'right', color: '#94a3b8', fontFamily: "'JetBrains Mono', monospace" }}>
+                  {results.filter(r => !r.error).reduce((s, r) => s + r.stats.totalRows, 0)}
+                </span>
+                <span style={{ width: 40, textAlign: 'right', color: '#10b981', fontFamily: "'JetBrains Mono', monospace" }}>
+                  {results.filter(r => !r.error).reduce((s, r) => s + r.stats.newInserted, 0)}
+                </span>
+                <span style={{ width: 40, textAlign: 'right', color: '#06b6d4', fontFamily: "'JetBrains Mono', monospace" }}>
+                  {results.filter(r => !r.error).reduce((s, r) => s + (r.stats.updated || 0), 0)}
+                </span>
+                <span style={{ width: 40, textAlign: 'right', color: '#8b5cf6', fontFamily: "'JetBrains Mono', monospace" }}>
+                  {results.filter(r => !r.error).reduce((s, r) => s + (r.stats.lineItems || 0), 0)}
+                </span>
+              </div>
+            )}
           </div>
         )}
 
