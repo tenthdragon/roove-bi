@@ -239,25 +239,40 @@ export async function fetchMonthlyCohort() {
 // ── Get RTS and Canceled order stats with platform breakdown ──
 export async function fetchRtsCancelStats(from?: string, to?: string) {
   const svc = createServiceSupabase();
+
+  // Get total shipped+completed for percentage denominator
+  let baseQuery = svc
+    .from('scalev_orders')
+    .select('*', { count: 'exact', head: true })
+    .in('status', ['completed', 'shipped']);
+  if (from) baseQuery = baseQuery.gte('shipped_time', from);
+  if (to) baseQuery = baseQuery.lte('shipped_time', to + 'T23:59:59');
+  const { count: totalShipped } = await baseQuery;
+
+  // Get RTS + canceled orders
   let query = svc
     .from('scalev_orders')
     .select('status, platform')
     .in('status', ['rts', 'canceled']);
-
   if (from) query = query.gte('shipped_time', from);
   if (to) query = query.lte('shipped_time', to + 'T23:59:59');
-
   const { data, error } = await query;
   if (error) throw error;
 
-  const result = { rts: { total: 0, byPlatform: {} as Record<string, number> }, canceled: { total: 0, byPlatform: {} as Record<string, number> } };
+  const result = {
+    totalShipped: totalShipped || 0,
+    rts: { total: 0, byPlatform: {} as Record<string, number> },
+    canceled: { total: 0, byPlatform: {} as Record<string, number> },
+  };
 
   for (const row of (data || [])) {
     const bucket = row.status === 'rts' ? result.rts : result.canceled;
     bucket.total++;
     const p = row.platform || 'unknown';
-    // Group into Scalev vs marketplace
-    const group = (p === 'scalev' || p === '') ? 'Scalev' : p === 'shopee' ? 'Shopee' : p === 'tiktokshop' || p === 'tiktok' ? 'TikTok Shop' : 'Other';
+    const group = (p === 'scalev' || p === '') ? 'SCV'
+      : (p === 'tiktokshop' || p === 'tiktok') ? 'TTS'
+      : p === 'shopee' ? 'Shopee'
+      : 'Other';
     bucket.byPlatform[group] = (bucket.byPlatform[group] || 0) + 1;
   }
 
