@@ -151,14 +151,12 @@ export async function fetchCustomerTypeDaily(from: string, to: string) {
   return data || [];
 }
 
-// ── Get customer cohort summary (top customers by revenue, filtered by period) ──
 export async function fetchCustomerCohort(limit: number = 100, from?: string, to?: string) {
   const svc = createServiceSupabase();
   let query = svc
     .from('v_customer_cohort')
     .select('*');
 
-  // Filter by date range if provided (uses last_order_date for period relevance)
   if (from) query = query.gte('last_order_date', from);
   if (to) query = query.lte('last_order_date', to);
 
@@ -236,6 +234,34 @@ export async function fetchMonthlyCohort() {
     .order('cohort_month', { ascending: true });
   if (error) throw error;
   return data || [];
+}
+
+// ── Get RTS and Canceled order stats with platform breakdown ──
+export async function fetchRtsCancelStats(from?: string, to?: string) {
+  const svc = createServiceSupabase();
+  let query = svc
+    .from('scalev_orders')
+    .select('status, platform')
+    .in('status', ['rts', 'canceled']);
+
+  if (from) query = query.gte('shipped_time', from);
+  if (to) query = query.lte('shipped_time', to + 'T23:59:59');
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const result = { rts: { total: 0, byPlatform: {} as Record<string, number> }, canceled: { total: 0, byPlatform: {} as Record<string, number> } };
+
+  for (const row of (data || [])) {
+    const bucket = row.status === 'rts' ? result.rts : result.canceled;
+    bucket.total++;
+    const p = row.platform || 'unknown';
+    // Group into Scalev vs marketplace
+    const group = (p === 'scalev' || p === '') ? 'Scalev' : p === 'shopee' ? 'Shopee' : p === 'tiktokshop' || p === 'tiktok' ? 'TikTok Shop' : 'Other';
+    bucket.byPlatform[group] = (bucket.byPlatform[group] || 0) + 1;
+  }
+
+  return result;
 }
 
 // ═══════════════════════════════════════════════════
