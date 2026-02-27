@@ -215,7 +215,7 @@ export default function AdminPage() {
       </Section>
 
       {/* SECTION 4: CSV ORDER UPLOAD */}
-      <Section title="Customer Data (CSV)" subtitle="Upload CSV Scalev export" color="#06b6d4">
+      <Section title="Order & Customer Data" subtitle="Upload CSV Scalev export atau File MP yang Sudah Dirapikan" color="#06b6d4">
         <CsvOrderUploader />
       </Section>
 
