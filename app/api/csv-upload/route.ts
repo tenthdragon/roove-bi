@@ -728,10 +728,11 @@ async function handleScalevUpload(
         if (csvExtId) d.external_id = csvExtId;
       }
       
-      // Customer: only overwrite if NOT previously set by ops upload
-      if (existing.source !== 'ops_upload') {
-        if (firstRow.name && !existing.customer_name) d.customer_name = firstRow.name;
-      }
+    // Customer: Scalev is source of truth. Auto-null for FBS orders (Shopee Hemat).
+        const courierService = (firstRow.courier_service || '').toLowerCase();
+        const isFbs = (firstRow.platform || '').toLowerCase() === 'shopee' && courierService.includes('hemat');
+        d.customer_name = isFbs ? null : (firstRow.name || null);
+      
       if (firstRow.phone && !existing.customer_phone) d.customer_phone = firstRow.phone;
       if (firstRow.email && !existing.customer_email) d.customer_email = firstRow.email;
 
@@ -780,7 +781,11 @@ async function handleScalevUpload(
         net_revenue: num(firstRow.net_revenue),
         shipping_cost: num(firstRow.shipping_cost),
         total_quantity: parseInt(firstRow.quantity || '0') || 0,
-        customer_name: firstRow.name || null,
+        customer_name: (() => {
+                const cs = (firstRow.courier_service || '').toLowerCase();
+                const fbs = (firstRow.platform || '').toLowerCase() === 'shopee' && cs.includes('hemat');
+                return fbs ? null : (firstRow.name || null);
+              })(),
         customer_phone: firstRow.phone || null,
         customer_email: firstRow.email || null,
         province: firstRow.province || null,
