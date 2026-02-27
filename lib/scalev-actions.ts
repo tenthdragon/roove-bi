@@ -151,14 +151,21 @@ export async function fetchCustomerTypeDaily(from: string, to: string) {
   return data || [];
 }
 
-// ── Get customer cohort summary (top repeat customers, etc) ──
-export async function fetchCustomerCohort(limit: number = 100) {
+// ── Get customer cohort summary (top customers by revenue, filtered by period) ──
+export async function fetchCustomerCohort(limit: number = 100, from?: string, to?: string) {
   const svc = createServiceSupabase();
-  const { data, error } = await svc
+  let query = svc
     .from('v_customer_cohort')
-    .select('*')
+    .select('*');
+
+  // Filter by date range if provided (uses last_order_date for period relevance)
+  if (from) query = query.gte('last_order_date', from);
+  if (to) query = query.lte('last_order_date', to);
+
+  const { data, error } = await query
     .order('total_revenue', { ascending: false })
     .limit(limit);
+
   if (error) throw error;
   return data || [];
 }
