@@ -12,6 +12,9 @@ function getServiceSupabase() {
 
 export const maxDuration = 250;
 
+// ── Types ──
+type FileFormat = 'scalev' | 'ops';
+
 // ── Brand detection from item_name or store_name ──
 function deriveBrandFromItem(itemName: string, itemOwner: string): string {
   const n = (itemName || '').toLowerCase();
@@ -47,6 +50,22 @@ function deriveBrandFromStore(storeName: string): string {
   return 'Unknown';
 }
 
+function deriveBrandFromSku(sku: string): string {
+  const s = (sku || '').toUpperCase();
+  if (s.includes('OSG')) return 'Osgard';
+  if (s.includes('PRV') || s.includes('PUR') || s.includes('SEC')) return 'Purvu';
+  if (s.includes('PLV') || s.includes('PLU')) return 'Pluve';
+  if (s.includes('GLB') || s.includes('GLO')) return 'Globite';
+  if (s.includes('DRH') || s.includes('HYU')) return 'DrHyun';
+  if (s.includes('CLM') || s.includes('CAL')) return 'Calmara';
+  if (s.includes('ALM')) return 'Almona';
+  if (s.includes('YUV')) return 'YUV';
+  if (s.includes('VEM')) return 'Veminine';
+  if (s.includes('ORL') || s.includes('ORE')) return 'Orelif';
+  if (s.includes('ROV') || s.includes('ROO')) return 'Roove';
+  return 'Other';
+}
+
 function deriveSalesChannel(row: Record<string, string>): string {
   const platform = (row.platform || '').toLowerCase();
   const storeName = (row.store || '').toLowerCase();
@@ -69,6 +88,70 @@ function deriveSalesChannel(row: Record<string, string>): string {
   return 'Organik';
 }
 
+// ── Sales channel for ops file (simpler, uses platform field directly) ──
+function deriveSalesChannelFromOps(platform: string): string {
+  const p = (platform || '').toLowerCase();
+  if (p === 'shopee') return 'Shopee';
+  if (p === 'tiktokshop' || p === 'tiktok') return 'TikTok Shop';
+  if (p === 'lazada') return 'Lazada';
+  if (p === 'tokopedia') return 'Tokopedia';
+  if (p === 'blibli') return 'BliBli';
+  return 'Organik';
+}
+
+// ── Detect file format ──
+function detectFormat(firstLine: string): { format: FileFormat; delimiter: string; headers: string[] } {
+  // Ops file: comma-delimited, has 'username' column
+  // Scalev file: semicolon-delimited, has 'order_id' column
+  
+  if (firstLine.includes(';') && firstLine.includes('order_id')) {
+    const headers = firstLine.split(';').map(h => h.trim());
+    return { format: 'scalev', delimiter: ';', headers };
+  }
+  
+  if (firstLine.includes(',') && firstLine.includes('username')) {
+    const headers = firstLine.split(',').map(h => h.trim());
+    return { format: 'ops', delimiter: ',', headers };
+  }
+  
+  // Fallback: try semicolon first (Scalev)
+  if (firstLine.includes(';')) {
+    const headers = firstLine.split(';').map(h => h.trim());
+    return { format: 'scalev', delimiter: ';', headers };
+  }
+  
+  throw new Error('Format CSV tidak dikenali. File harus berupa export Scalev (semicolon) atau file tim ops (comma, dengan kolom username).');
+}
+
+// ── Parse CSV line respecting quotes ──
+function parseCsvLine(line: string, delimiter: string): string[] {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === delimiter && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
+
+const num = (v: string) => parseFloat(v || '0') || 0;
+const ts = (v: string) => (v && v.trim()) ? v.trim() : null;
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -83,130 +166,510 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'CSV is empty' }, { status: 400 });
     }
 
-    const headers = lines[0].split(';').map(h => h.trim());
-    const requiredCols = ['order_id', 'store', 'order_status', 'name'];
-    const missing = requiredCols.filter(c => !headers.includes(c));
-    if (missing.length > 0) {
-      return NextResponse.json({
-        error: `Missing columns: ${missing.join(', ')}. Pastikan CSV semicolon-delimited dari Scalev.`
-      }, { status: 400 });
+    // ── Detect format ──
+    const { format, delimiter, headers } = detectFormat(lines[0]);
+
+    if (format === 'ops') {
+      return handleOpsUpload(lines, headers, delimiter, formData, file);
+    } else {
+      return handleScalevUpload(lines, headers, delimiter, formData, file);
     }
+  } catch (err: any) {
+    console.error('CSV upload error:', err);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
 
-    // ── Auto-detect format ──
-    const isProductBased = headers.includes('item_name');
-    const svc = getServiceSupabase();
+// ══════════════════════════════════════════════════════════════
+// ── OPS FILE HANDLER ──
+// ══════════════════════════════════════════════════════════════
+async function handleOpsUpload(
+  lines: string[],
+  headers: string[],
+  delimiter: string,
+  formData: FormData,
+  file: File
+) {
+  const svc = getServiceSupabase();
 
-    // ── Collect all CSV order IDs for efficient lookup ──
-    const csvOrderIds: string[] = [];
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      const orderId = line.split(';')[0]?.trim();
-      if (orderId && !csvOrderIds.includes(orderId)) csvOrderIds.push(orderId);
+  const stats = {
+    totalRows: 0,
+    newInserted: 0,
+    updated: 0,
+    errors: [] as string[],
+    format: 'ops-marketplace' as string,
+    lineItems: 0,
+    cogsLookedUp: 0,
+  };
+
+  // ── Parse all rows ──
+  const parsedRows: Record<string, string>[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    stats.totalRows++;
+
+    const values = parseCsvLine(line, delimiter);
+    const row: Record<string, string> = {};
+    for (let j = 0; j < headers.length; j++) {
+      row[headers[j]] = (values[j] || '').trim();
     }
+    parsedRows.push(row);
+  }
 
-    // ── Fetch only relevant existing orders ──
-    const existingOrders: any[] = [];
-    const CHUNK = 200;
-    for (let i = 0; i < csvOrderIds.length; i += CHUNK) {
-      const chunk = csvOrderIds.slice(i, i + CHUNK);
-      const { data, error } = await svc
-        .from('scalev_orders')
-        .select('id, order_id, customer_name, customer_phone, customer_email')
-        .in('order_id', chunk);
-      if (error) throw error;
-      if (data) existingOrders.push(...data);
+  // ── Group by external_id (each external_id = one order, possibly multi-line for bundles) ──
+  const orderGroups: Record<string, Record<string, string>[]> = {};
+  for (const row of parsedRows) {
+    const extId = row.external_id?.trim();
+    if (!extId) continue; // skip rows without external_id (bundle continuation rows use empty)
+    if (!orderGroups[extId]) orderGroups[extId] = [];
+    orderGroups[extId].push(row);
+  }
+
+  // Also collect continuation rows (empty external_id) — attach to previous order
+  let lastExtId = '';
+  for (const row of parsedRows) {
+    const extId = row.external_id?.trim();
+    if (extId) {
+      lastExtId = extId;
+    } else if (lastExtId && row.sku?.trim()) {
+      // Continuation row with SKU but no external_id — belongs to last order
+      if (!orderGroups[lastExtId]) orderGroups[lastExtId] = [];
+      orderGroups[lastExtId].push(row);
     }
-    const existingMap = new Map(existingOrders.map(o => [o.order_id, o]));
+  }
 
-    const stats = {
-      totalRows: 0,
-      newInserted: 0,
-      updated: 0,
-      errors: [] as string[],
-      format: isProductBased ? 'product-based' : 'order-based',
-      existingMapSize: existingMap.size,
-      csvUniqueIds: csvOrderIds.length,
-      classifiedAsNew: 0,
-      classifiedAsUpdate: 0,
-      totalLineItems: 0,
-    };
+  const orderIds = Object.keys(orderGroups);
 
-    // ── Parse rows ──
-    // For product-based: group rows by order_id first
-    const orderRows: Record<string, Record<string, string>[]> = {};
-    
-    for (let i = 1; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (!line) continue;
-      stats.totalRows++;
+  // ── Lookup existing orders by external_id column ──
+  // Database has dedicated `external_id` column (populated from raw_data, # stripped)
+  // Ops file external_id matches this directly
+  const existingOrders: any[] = [];
+  const CHUNK = 200;
 
-      const values = line.split(';');
-      const row: Record<string, string> = {};
-      for (let j = 0; j < headers.length; j++) {
-        row[headers[j]] = (values[j] || '').trim();
+  for (let i = 0; i < orderIds.length; i += CHUNK) {
+    const chunk = orderIds.slice(i, i + CHUNK);
+    const { data, error } = await svc
+      .from('scalev_orders')
+      .select('id, order_id, external_id, customer_name, customer_phone, customer_email, source')
+      .in('external_id', chunk);
+    if (error) {
+      stats.errors.push(`Lookup batch: ${error.message}`);
+    } else if (data) {
+      existingOrders.push(...data);
+    }
+  }
+
+  // Build map: external_id -> existing record
+  const existingByExtId = new Map<string, any>();
+  for (const o of existingOrders) {
+    if (o.external_id) existingByExtId.set(o.external_id, o);
+  }
+
+  // ── Load product_mapping for COGS lookup ──
+  // Try with sku column first, fallback to product_name only
+  let productMappings: any[] = [];
+  const { data: pmData, error: pmError } = await svc
+    .from('product_mapping')
+    .select('*');
+  
+  if (!pmError && pmData) productMappings = pmData;
+
+  const cogsMap = new Map<string, { cogs: number; product_name: string; brand: string }>();
+  const nameMap = new Map<string, { cogs: number; brand: string }>();
+  
+  for (const pm of productMappings) {
+    const entry = { cogs: pm.cogs || 0, product_name: pm.product_name || '', brand: pm.brand || pm.product_type || '' };
+    // Index by SKU if available
+    if (pm.sku) cogsMap.set(pm.sku.toUpperCase(), entry);
+    // Also index by product_name for fallback
+    if (pm.product_name) nameMap.set(pm.product_name.toLowerCase(), { cogs: pm.cogs || 0, brand: pm.brand || pm.product_type || '' });
+  }
+
+  // ── Process each order ──
+  const toInsert: any[] = [];
+  const toUpdate: { id: number; data: any; orderId: string }[] = [];
+  const orderLinesMap: Record<string, any[]> = {};
+  const isNewOrder: Record<string, boolean> = {};
+
+  for (const [extId, rows] of Object.entries(orderGroups)) {
+    const firstRow = rows[0];
+    const platform = (firstRow.platform || '').toLowerCase();
+    const salesChannel = deriveSalesChannelFromOps(platform);
+    const shippedTime = ts(firstRow.timestamp) || null;
+
+    // ── Build line items from SKUs ──
+    const lineItems: any[] = [];
+    let totalPrice = 0;
+    let totalCogs = 0;
+    let totalQty = 0;
+
+    for (const row of rows) {
+      const sku = (row.sku || '').trim();
+      if (!sku) continue;
+
+      const qty = parseInt(row.quantity || '1') || 1;
+      const price = num(row.price);
+      
+      // COGS lookup from product_mapping
+      let cogs = 0;
+      let productName = sku;
+      let brand = deriveBrandFromSku(sku);
+      
+      // Try exact SKU match first, then partial
+      const skuUpper = sku.toUpperCase();
+      if (cogsMap.has(skuUpper)) {
+        const pm = cogsMap.get(skuUpper)!;
+        cogs = pm.cogs;
+        if (pm.product_name) productName = pm.product_name;
+        if (pm.brand) brand = pm.brand;
+        stats.cogsLookedUp++;
+      } else {
+        // Try matching individual SKUs in bundle (e.g., "ROV20+ROV01-590")
+        const skuParts = sku.split(/[+,]/);
+        for (const part of skuParts) {
+          const partUpper = part.trim().toUpperCase().replace(/-\d+$/, ''); // strip price suffix like -590
+          if (cogsMap.has(partUpper)) {
+            cogs += cogsMap.get(partUpper)!.cogs;
+            stats.cogsLookedUp++;
+          }
+        }
       }
 
-      if (!row.order_id) continue;
-      
-      if (!orderRows[row.order_id]) orderRows[row.order_id] = [];
-      orderRows[row.order_id].push(row);
+      // Tax rate: default 11% for marketplace
+      const taxRate = 11.0;
+      const priceBt = Math.round(price / (1 + taxRate / 100));
+      const cogsBt = Math.round(cogs / (1 + taxRate / 100));
+
+      lineItems.push({
+        order_id: extId,
+        product_name: productName,
+        product_type: brand,
+        variant_sku: sku,
+        quantity: qty,
+        product_price_bt: priceBt,
+        discount_bt: 0,
+        cogs_bt: cogsBt,
+        tax_rate: taxRate,
+        shipped_time: shippedTime,
+        sales_channel: salesChannel,
+        is_purchase_fb: false,
+        is_purchase_tiktok: false,
+        is_purchase_kwai: false,
+        synced_at: new Date().toISOString(),
+      });
+
+      totalPrice += price;
+      totalCogs += cogs;
+      totalQty += qty;
     }
 
-    const num = (v: string) => parseFloat(v || '0') || 0;
-    const ts = (v: string) => (v && v.trim()) ? v.trim() : null;
+    stats.lineItems += lineItems.length;
+    orderLinesMap[extId] = lineItems;
 
-    const toInsert: any[] = [];
-    const toUpdate: { id: number; data: any; orderId: string }[] = [];
-    const orderLinesMap: Record<string, any[]> = {}; // order_id -> line items
-    const isNewOrder: Record<string, boolean> = {};
+    // ── Check if order already exists (by external_id) ──
+    const existing = existingByExtId.get(extId);
 
-    for (const [orderId, rows] of Object.entries(orderRows)) {
-      const firstRow = rows[0]; // Order-level data from first row
-      const salesChannel = deriveSalesChannel(firstRow);
-      const shippedTime = ts(firstRow.shipped_time) || ts(firstRow.completed_time) || null;
+    if (existing) {
+      // UPDATE: ops file ALWAYS overwrites customer_name (source of truth)
+      const d: any = {
+        customer_name: firstRow.username || firstRow.name || null,
+        source: 'ops_upload', // mark as ops-uploaded so Scalev won't overwrite customer
+        synced_at: new Date().toISOString(),
+      };
+      
+      if (firstRow.phone) d.customer_phone = firstRow.phone;
+      if (firstRow.email) d.customer_email = firstRow.email;
+      if (firstRow.city) d.city = firstRow.city;
+      if (firstRow.subdistrict) d.subdistrict = firstRow.subdistrict;
+      if (shippedTime) d.shipped_time = shippedTime;
+      if (num(firstRow.shipping_cost) > 0) d.shipping_cost = num(firstRow.shipping_cost);
 
-      // ── Build line items ──
-      const lineItems: any[] = [];
+      toUpdate.push({ id: existing.id, data: d, orderId: existing.order_id });
+      isNewOrder[extId] = false;
+    } else {
+      // INSERT: new order from ops file
+      toInsert.push({
+        scalev_id: null,
+        order_id: extId, // use external_id as order_id for ops-only orders
+        external_id: extId, // dedicated external_id column
+        customer_type: null,
+        status: 'completed',
+        shipped_time: shippedTime,
+        platform: platform || null,
+        store_name: firstRow.store || null,
+        utm_source: null,
+        financial_entity: null,
+        payment_method: firstRow.payment_method || null,
+        unique_code_discount: 0,
+        is_purchase_fb: false,
+        is_purchase_tiktok: false,
+        is_purchase_kwai: false,
+        gross_revenue: totalPrice,
+        net_revenue: totalPrice,
+        shipping_cost: num(firstRow.shipping_cost),
+        total_quantity: totalQty,
+        customer_name: firstRow.username || firstRow.name || null,
+        customer_phone: firstRow.phone || null,
+        customer_email: firstRow.email || null,
+        province: null,
+        city: firstRow.city || null,
+        subdistrict: firstRow.subdistrict || null,
+        handler: null,
+        draft_time: null,
+        pending_time: null,
+        confirmed_time: null,
+        paid_time: shippedTime,
+        canceled_time: null,
+        source: 'ops_upload',
+        raw_data: firstRow,
+        synced_at: new Date().toISOString(),
+      });
+      isNewOrder[extId] = true;
+    }
+  }
 
-      if (isProductBased) {
-        // Product-based: each row is a line item
-        for (const row of rows) {
-          const itemName = row.item_name || '';
-          const itemOwner = row.item_owner || '';
-          if (!itemName) continue; // Skip rows without item
+  // ── Batch INSERT new orders ──
+  const BATCH = 200;
+  const insertedIdMap: Record<string, number> = {};
 
-          const brand = deriveBrandFromItem(itemName, itemOwner);
-          lineItems.push({
-            order_id: orderId,
-            product_name: itemName,
-            product_type: brand,
-            variant_sku: null,
-            quantity: parseInt(row.item_quantity || '0') || 0,
-            product_price_bt: num(row.item_product_price_bt),
-            discount_bt: num(row.item_product_discount_bt),
-            cogs_bt: num(row.item_cogs_bt),
-            tax_rate: num(firstRow.tax_rate) || 11.0,
-            shipped_time: shippedTime,
-            sales_channel: salesChannel,
-            is_purchase_fb: firstRow.is_purchase_fb === 'true',
-            is_purchase_tiktok: firstRow.is_purchase_tiktok === 'true',
-            is_purchase_kwai: firstRow.is_purchase_kwai === 'true',
-            synced_at: new Date().toISOString(),
-          });
+  for (let i = 0; i < toInsert.length; i += BATCH) {
+    const batch = toInsert.slice(i, i + BATCH);
+    const { data: inserted, error: err } = await svc
+      .from('scalev_orders')
+      .upsert(batch, { onConflict: 'order_id', ignoreDuplicates: false })
+      .select('id, order_id');
+
+    if (err) {
+      stats.errors.push(`Insert batch ${Math.floor(i / BATCH) + 1}: ${err.message}`);
+      continue;
+    }
+    if (inserted) {
+      for (const o of inserted) insertedIdMap[o.order_id] = o.id;
+      stats.newInserted += inserted.length;
+    }
+  }
+
+  // ── Batch UPDATE existing orders ──
+  const UPDATE_BATCH = 200;
+  for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
+    const batch = toUpdate.slice(i, i + UPDATE_BATCH);
+    const upsertRows = batch.map(upd => ({ id: upd.id, order_id: upd.orderId, ...upd.data }));
+    const { error } = await svc.from('scalev_orders').upsert(upsertRows, { onConflict: 'id' });
+    if (error) {
+      stats.errors.push(`Update batch ${Math.floor(i / UPDATE_BATCH) + 1}: ${error.message}`);
+    } else {
+      stats.updated += batch.length;
+    }
+  }
+
+  // ── Replace line items for all ops orders ──
+  // Bridge: for existing orders, map external_id -> db id
+  const existingIdMap: Record<string, number> = {};
+  for (const o of existingOrders) {
+    if (o.external_id) existingIdMap[o.external_id] = o.id;
+  }
+  // For newly inserted orders, insertedIdMap already maps order_id (= extId) -> db id
+  const allIdMap = { ...existingIdMap, ...insertedIdMap };
+
+  const allOrderIds = Object.keys(orderLinesMap);
+  for (let i = 0; i < allOrderIds.length; i += UPDATE_BATCH) {
+    const batchOrderIds = allOrderIds.slice(i, i + UPDATE_BATCH);
+    const dbIds = batchOrderIds.map(oid => allIdMap[oid]).filter(Boolean);
+
+    if (dbIds.length > 0) {
+      await svc.from('scalev_order_lines').delete().in('scalev_order_id', dbIds);
+
+      const lineBatch: any[] = [];
+      for (const oid of batchOrderIds) {
+        const dbId = allIdMap[oid];
+        if (!dbId) continue;
+        for (const line of orderLinesMap[oid]) {
+          lineBatch.push({ ...line, scalev_order_id: dbId });
         }
-      } else {
-        // Order-based: single line item derived from store
-        const brand = deriveBrandFromStore(firstRow.store || '');
+      }
+
+      if (lineBatch.length > 0) {
+        for (let j = 0; j < lineBatch.length; j += 500) {
+          const subBatch = lineBatch.slice(j, j + 500);
+          const { error: lineErr } = await svc.from('scalev_order_lines').insert(subBatch);
+          if (lineErr) stats.errors.push(`Lines batch: ${lineErr.message}`);
+        }
+      }
+    }
+  }
+
+  // ── Log ──
+  const uploadedBy = formData.get('uploaded_by') as string || null;
+  const filename = formData.get('filename') as string || file.name;
+  await svc.from('scalev_sync_log').insert({
+    status: stats.errors.length > 0 ? 'partial' : 'success',
+    sync_type: 'ops_upload',
+    orders_fetched: stats.totalRows,
+    orders_inserted: stats.newInserted,
+    orders_updated: stats.updated,
+    uploaded_by: uploadedBy,
+    filename: filename,
+    error_message: stats.errors.length > 0 ? `${stats.errors.length} errors: ${stats.errors.slice(0, 5).join('; ')}` : null,
+    completed_at: new Date().toISOString(),
+  });
+
+  return NextResponse.json({
+    success: true,
+    filename: file.name,
+    stats: {
+      totalRows: stats.totalRows,
+      newInserted: stats.newInserted,
+      updated: stats.updated,
+      errors: stats.errors.length,
+      errorDetails: stats.errors.slice(0, 10),
+      format: stats.format,
+      lineItems: stats.lineItems,
+      cogsLookedUp: stats.cogsLookedUp,
+    },
+    message: `Upload selesai (${stats.format})! ${stats.newInserted} order baru, ${stats.updated} customer diperbaiki, ${stats.lineItems} line items, ${stats.cogsLookedUp} COGS ditemukan.`,
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// ── SCALEV FILE HANDLER (existing logic, preserved) ──
+// ══════════════════════════════════════════════════════════════
+async function handleScalevUpload(
+  lines: string[],
+  headers: string[],
+  delimiter: string,
+  formData: FormData,
+  file: File
+) {
+  const svc = getServiceSupabase();
+
+  const requiredCols = ['order_id', 'store', 'order_status', 'name'];
+  const missing = requiredCols.filter(c => !headers.includes(c));
+  if (missing.length > 0) {
+    return NextResponse.json({
+      error: `Missing columns: ${missing.join(', ')}. Pastikan CSV semicolon-delimited dari Scalev.`
+    }, { status: 400 });
+  }
+
+  const isProductBased = headers.includes('item_name');
+
+  // ── Collect all CSV order IDs and external_ids ──
+  const csvOrderIds: string[] = [];
+  const csvExternalIds: string[] = [];
+  const extIdIdx = headers.indexOf('external_id');
+  
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const values = line.split(';');
+    const orderId = values[0]?.trim();
+    if (orderId && !csvOrderIds.includes(orderId)) csvOrderIds.push(orderId);
+    
+    // Also collect external_ids (strip #)
+    if (extIdIdx >= 0) {
+      const extId = (values[extIdIdx] || '').trim().replace('#', '');
+      if (extId && !csvExternalIds.includes(extId)) csvExternalIds.push(extId);
+    }
+  }
+
+  // ── Fetch existing orders by order_id AND by external_id ──
+  const existingOrders: any[] = [];
+  const seenIds = new Set<number>();
+  const CHUNK = 200;
+  
+  // Lookup by order_id (finds previously uploaded Scalev orders)
+  for (let i = 0; i < csvOrderIds.length; i += CHUNK) {
+    const chunk = csvOrderIds.slice(i, i + CHUNK);
+    const { data, error } = await svc
+      .from('scalev_orders')
+      .select('id, order_id, external_id, customer_name, customer_phone, customer_email, source')
+      .in('order_id', chunk);
+    if (error) throw error;
+    if (data) {
+      for (const o of data) {
+        if (!seenIds.has(o.id)) { seenIds.add(o.id); existingOrders.push(o); }
+      }
+    }
+  }
+  
+  // Lookup by external_id (finds ops-uploaded orders)
+  for (let i = 0; i < csvExternalIds.length; i += CHUNK) {
+    const chunk = csvExternalIds.slice(i, i + CHUNK);
+    const { data, error } = await svc
+      .from('scalev_orders')
+      .select('id, order_id, external_id, customer_name, customer_phone, customer_email, source')
+      .in('external_id', chunk);
+    if (error) throw error;
+    if (data) {
+      for (const o of data) {
+        if (!seenIds.has(o.id)) { seenIds.add(o.id); existingOrders.push(o); }
+      }
+    }
+  }
+
+  // Build maps: by order_id AND by external_id
+  const existingByOrderId = new Map(existingOrders.map(o => [o.order_id, o]));
+  const existingByExtId = new Map<string, any>();
+  for (const o of existingOrders) {
+    if (o.external_id) existingByExtId.set(o.external_id, o);
+  }
+
+  const stats = {
+    totalRows: 0,
+    newInserted: 0,
+    updated: 0,
+    errors: [] as string[],
+    format: isProductBased ? 'product-based' : 'order-based',
+    existingMapSize: existingByOrderId.size + existingByExtId.size,
+    csvUniqueIds: csvOrderIds.length,
+    classifiedAsNew: 0,
+    classifiedAsUpdate: 0,
+    totalLineItems: 0,
+  };
+
+  // ── Parse rows ──
+  const orderRows: Record<string, Record<string, string>[]> = {};
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    stats.totalRows++;
+    const values = line.split(';');
+    const row: Record<string, string> = {};
+    for (let j = 0; j < headers.length; j++) {
+      row[headers[j]] = (values[j] || '').trim();
+    }
+    if (!row.order_id) continue;
+    if (!orderRows[row.order_id]) orderRows[row.order_id] = [];
+    orderRows[row.order_id].push(row);
+  }
+
+  const toInsert: any[] = [];
+  const toUpdate: { id: number; data: any; orderId: string }[] = [];
+  const orderLinesMap: Record<string, any[]> = {};
+  const isNewOrder: Record<string, boolean> = {};
+
+  for (const [orderId, rows] of Object.entries(orderRows)) {
+    const firstRow = rows[0];
+    const salesChannel = deriveSalesChannel(firstRow);
+    const shippedTime = ts(firstRow.shipped_time) || ts(firstRow.completed_time) || null;
+
+    // ── Build line items ──
+    const lineItems: any[] = [];
+    if (isProductBased) {
+      for (const row of rows) {
+        const itemName = row.item_name || '';
+        const itemOwner = row.item_owner || '';
+        if (!itemName) continue;
+        const brand = deriveBrandFromItem(itemName, itemOwner);
         lineItems.push({
           order_id: orderId,
-          product_name: brand,
+          product_name: itemName,
           product_type: brand,
           variant_sku: null,
-          quantity: parseInt(firstRow.quantity || '0') || 0,
-          product_price_bt: num(firstRow.product_price_bt),
-          discount_bt: num(firstRow.product_discount_bt),
-          cogs_bt: num(firstRow.cogs_bt),
+          quantity: parseInt(row.item_quantity || '0') || 0,
+          product_price_bt: num(row.item_product_price_bt),
+          discount_bt: num(row.item_product_discount_bt),
+          cogs_bt: num(row.item_cogs_bt),
           tax_rate: num(firstRow.tax_rate) || 11.0,
           shipped_time: shippedTime,
           sales_channel: salesChannel,
@@ -216,215 +679,228 @@ export async function POST(req: NextRequest) {
           synced_at: new Date().toISOString(),
         });
       }
-
-      stats.totalLineItems += lineItems.length;
-      orderLinesMap[orderId] = lineItems;
-
-      const existing = existingMap.get(orderId);
-
-      if (existing) {
-        // Update existing order
-        const d: any = {};
-        if (firstRow.customer_type) d.customer_type = firstRow.customer_type;
-        if (firstRow.province) d.province = firstRow.province;
-        if (firstRow.city) d.city = firstRow.city;
-        if (firstRow.subdistrict) d.subdistrict = firstRow.subdistrict;
-        if (firstRow.handler) d.handler = firstRow.handler;
-        if (firstRow.name && !existing.customer_name) d.customer_name = firstRow.name;
-        if (firstRow.phone && !existing.customer_phone) d.customer_phone = firstRow.phone;
-        if (firstRow.email && !existing.customer_email) d.customer_email = firstRow.email;
-        if (firstRow.order_status) d.status = firstRow.order_status;
-        if (shippedTime) d.shipped_time = shippedTime;
-        if (ts(firstRow.paid_time)) d.paid_time = ts(firstRow.paid_time);
-        if (ts(firstRow.canceled_time)) d.canceled_time = ts(firstRow.canceled_time);
-        if (ts(firstRow.confirmed_time)) d.confirmed_time = ts(firstRow.confirmed_time);
-        if (ts(firstRow.draft_time)) d.draft_time = ts(firstRow.draft_time);
-        if (ts(firstRow.pending_time)) d.pending_time = ts(firstRow.pending_time);
-        if (num(firstRow.gross_revenue) > 0) d.gross_revenue = num(firstRow.gross_revenue);
-        if (num(firstRow.net_revenue) > 0) d.net_revenue = num(firstRow.net_revenue);
-        if (num(firstRow.shipping_cost) > 0) d.shipping_cost = num(firstRow.shipping_cost);
-
-        if (Object.keys(d).length > 0) {
-          d.synced_at = new Date().toISOString();
-          toUpdate.push({ id: existing.id, data: d, orderId });
-        }
-        isNewOrder[orderId] = false;
-        stats.classifiedAsUpdate++;
-      } else {
-        // Insert new order
-        toInsert.push({
-          scalev_id: null,
-          order_id: orderId,
-          customer_type: firstRow.customer_type || null,
-          status: firstRow.order_status || 'unknown',
-          shipped_time: shippedTime,
-          platform: firstRow.platform || null,
-          store_name: firstRow.store || null,
-          utm_source: firstRow.utm_source || null,
-          financial_entity: firstRow.financial_entity || null,
-          payment_method: firstRow.payment_method || null,
-          unique_code_discount: num(firstRow.unique_code_discount),
-          is_purchase_fb: firstRow.is_purchase_fb === 'true',
-          is_purchase_tiktok: firstRow.is_purchase_tiktok === 'true',
-          is_purchase_kwai: firstRow.is_purchase_kwai === 'true',
-          gross_revenue: num(firstRow.gross_revenue),
-          net_revenue: num(firstRow.net_revenue),
-          shipping_cost: num(firstRow.shipping_cost),
-          total_quantity: parseInt(firstRow.quantity || '0') || 0,
-          customer_name: firstRow.name || null,
-          customer_phone: firstRow.phone || null,
-          customer_email: firstRow.email || null,
-          province: firstRow.province || null,
-          city: firstRow.city || null,
-          subdistrict: firstRow.subdistrict || null,
-          handler: firstRow.handler || null,
-          draft_time: ts(firstRow.draft_time),
-          pending_time: ts(firstRow.pending_time),
-          confirmed_time: ts(firstRow.confirmed_time),
-          paid_time: ts(firstRow.paid_time),
-          canceled_time: ts(firstRow.canceled_time),
-          source: 'csv_upload',
-          raw_data: firstRow,
-          synced_at: new Date().toISOString(),
-        });
-        isNewOrder[orderId] = true;
-        stats.classifiedAsNew++;
-      }
-    }
-
-    // ── Phase 2: Batch INSERT new orders ──
-    const BATCH = 200;
-    const insertedIdMap: Record<string, number> = {}; // order_id -> db id
-
-    for (let i = 0; i < toInsert.length; i += BATCH) {
-      const batch = toInsert.slice(i, i + BATCH);
-      const { data: inserted, error: err } = await svc
-        .from('scalev_orders')
-        .upsert(batch, { onConflict: 'order_id', ignoreDuplicates: true })
-        .select('id, order_id');
-
-      if (err) {
-        stats.errors.push(`Insert batch ${Math.floor(i / BATCH) + 1}: ${err.message}`);
-        continue;
-      }
-
-      if (inserted) {
-        for (const o of inserted) {
-          insertedIdMap[o.order_id] = o.id;
-        }
-        stats.newInserted += inserted.length;
-      }
-    }
-
-    // ── Phase 3: Batch UPDATE existing orders ──
-    const UPDATE_BATCH = 200;
-    for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
-      const batch = toUpdate.slice(i, i + UPDATE_BATCH);
-      const upsertRows = batch.map(upd => ({ id: upd.id, order_id: upd.orderId, ...upd.data }));
-      const { error } = await svc.from('scalev_orders').upsert(upsertRows, { onConflict: 'id' });
-      if (error) {
-        stats.errors.push(`Update batch ${Math.floor(i / UPDATE_BATCH) + 1}: ${error.message}`);
-      } else {
-        stats.updated += batch.length;
-      }
-    }
-
-    // ── Phase 4: Replace line items for all orders (product-based) or new orders only ──
-    if (isProductBased) {
-      // For product-based: always replace line items (they have better data)
-      // First, get DB IDs for existing orders
-      const existingIdMap: Record<string, number> = {};
-      for (const o of existingOrders) {
-        existingIdMap[o.order_id] = o.id;
-      }
-
-      // Combine both maps
-      const allIdMap = { ...existingIdMap, ...insertedIdMap };
-
-      // Delete existing line items and insert new ones in batches
-      const allOrderIds = Object.keys(orderLinesMap);
-      for (let i = 0; i < allOrderIds.length; i += UPDATE_BATCH) {
-        const batchOrderIds = allOrderIds.slice(i, i + UPDATE_BATCH);
-        const dbIds = batchOrderIds.map(oid => allIdMap[oid]).filter(Boolean);
-        
-        if (dbIds.length > 0) {
-          // Delete old line items
-          await svc.from('scalev_order_lines').delete().in('scalev_order_id', dbIds);
-
-          // Prepare new line items
-          const lineBatch: any[] = [];
-          for (const oid of batchOrderIds) {
-            const dbId = allIdMap[oid];
-            if (!dbId) continue;
-            for (const line of orderLinesMap[oid]) {
-              lineBatch.push({ ...line, scalev_order_id: dbId });
-            }
-          }
-
-          if (lineBatch.length > 0) {
-            // Insert in sub-batches of 500
-            for (let j = 0; j < lineBatch.length; j += 500) {
-              const subBatch = lineBatch.slice(j, j + 500);
-              const { error: lineErr } = await svc.from('scalev_order_lines').insert(subBatch);
-              if (lineErr) stats.errors.push(`Lines batch: ${lineErr.message}`);
-            }
-          }
-        }
-      }
     } else {
-      // For order-based: only insert line items for NEW orders
-      for (const [orderId, lines] of Object.entries(orderLinesMap)) {
-        if (!isNewOrder[orderId]) continue;
-        const dbId = insertedIdMap[orderId];
-        if (!dbId) continue;
-
-        const lineBatch = lines.map(line => ({ ...line, scalev_order_id: dbId }));
-        const { error: lineErr } = await svc.from('scalev_order_lines').insert(lineBatch);
-        if (lineErr) stats.errors.push(`Lines ${orderId}: ${lineErr.message}`);
-      }
+      const brand = deriveBrandFromStore(firstRow.store || '');
+      lineItems.push({
+        order_id: orderId,
+        product_name: brand,
+        product_type: brand,
+        variant_sku: null,
+        quantity: parseInt(firstRow.quantity || '0') || 0,
+        product_price_bt: num(firstRow.product_price_bt),
+        discount_bt: num(firstRow.product_discount_bt),
+        cogs_bt: num(firstRow.cogs_bt),
+        tax_rate: num(firstRow.tax_rate) || 11.0,
+        shipped_time: shippedTime,
+        sales_channel: salesChannel,
+        is_purchase_fb: firstRow.is_purchase_fb === 'true',
+        is_purchase_tiktok: firstRow.is_purchase_tiktok === 'true',
+        is_purchase_kwai: firstRow.is_purchase_kwai === 'true',
+        synced_at: new Date().toISOString(),
+      });
     }
 
-    // ── Log ──
-    const uploadedBy = formData.get('uploaded_by') as string || null;
-    const filename = formData.get('filename') as string || file.name;
+    stats.totalLineItems += lineItems.length;
+    orderLinesMap[orderId] = lineItems;
 
-    await svc.from('scalev_sync_log').insert({
-      status: stats.errors.length > 0 ? 'partial' : 'success',
-      sync_type: 'csv_upload',
-      orders_fetched: stats.totalRows,
-      orders_inserted: stats.newInserted,
-      orders_updated: stats.updated,
-      uploaded_by: uploadedBy,
-      filename: filename,
-      error_message: stats.errors.length > 0
-        ? `${stats.errors.length} errors: ${stats.errors.slice(0, 5).join('; ')}`
-        : null,
-      completed_at: new Date().toISOString(),
-    });
+    // Check by order_id first, then by external_id (catches ops-uploaded orders)
+    const csvExtId = (firstRow.external_id || '').replace('#', '');
+    const existing = existingByOrderId.get(orderId) || (csvExtId ? existingByExtId.get(csvExtId) : null);
 
-    return NextResponse.json({
-      success: true,
-      filename: file.name,
-      stats: {
-        totalRows: stats.totalRows,
-        newInserted: stats.newInserted,
-        updated: stats.updated,
-        errors: stats.errors.length,
-        errorDetails: stats.errors.slice(0, 10),
-        format: stats.format,
-        lineItems: stats.totalLineItems,
-      },
-      debug: {
-        existingMapSize: stats.existingMapSize,
-        csvUniqueIds: stats.csvUniqueIds,
-        classifiedAsNew: stats.classifiedAsNew,
-        classifiedAsUpdate: stats.classifiedAsUpdate,
-      },
-      message: `Upload selesai (${stats.format})! ${stats.newInserted} order baru, ${stats.updated} order diperkaya, ${stats.totalLineItems} line items, ${stats.errors.length} error.`,
-    });
+    if (existing) {
+      const d: any = {};
+      if (firstRow.customer_type) d.customer_type = firstRow.customer_type;
+      if (firstRow.province) d.province = firstRow.province;
+      if (firstRow.city) d.city = firstRow.city;
+      if (firstRow.subdistrict) d.subdistrict = firstRow.subdistrict;
+      if (firstRow.handler) d.handler = firstRow.handler;
+      
+      // If found via external_id (ops-uploaded), update order_id to Scalev internal + set external_id
+      if (!existing.external_id && csvExtId) d.external_id = csvExtId;
+      if (existing.source === 'ops_upload' && existing.order_id !== orderId) {
+        // Ops created this with external_id as order_id. Now Scalev provides the real order_id.
+        // We can't change order_id (unique constraint), so just set external_id and enrich.
+        if (csvExtId) d.external_id = csvExtId;
+      }
+      
+      // Customer: only overwrite if NOT previously set by ops upload
+      if (existing.source !== 'ops_upload') {
+        if (firstRow.name && !existing.customer_name) d.customer_name = firstRow.name;
+      }
+      if (firstRow.phone && !existing.customer_phone) d.customer_phone = firstRow.phone;
+      if (firstRow.email && !existing.customer_email) d.customer_email = firstRow.email;
 
-  } catch (err: any) {
-    console.error('CSV upload error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+      if (firstRow.order_status) d.status = firstRow.order_status;
+      if (shippedTime) d.shipped_time = shippedTime;
+      if (ts(firstRow.paid_time)) d.paid_time = ts(firstRow.paid_time);
+      if (ts(firstRow.canceled_time)) d.canceled_time = ts(firstRow.canceled_time);
+      if (ts(firstRow.confirmed_time)) d.confirmed_time = ts(firstRow.confirmed_time);
+      if (ts(firstRow.draft_time)) d.draft_time = ts(firstRow.draft_time);
+      if (ts(firstRow.pending_time)) d.pending_time = ts(firstRow.pending_time);
+      
+      // Platform info (ops might not have this)
+      if (firstRow.platform) d.platform = firstRow.platform;
+      if (firstRow.store) d.store_name = firstRow.store;
+      if (firstRow.utm_source) d.utm_source = firstRow.utm_source;
+
+      // Financial data: Scalev is source of truth, always update
+      if (num(firstRow.gross_revenue) > 0) d.gross_revenue = num(firstRow.gross_revenue);
+      if (num(firstRow.net_revenue) > 0) d.net_revenue = num(firstRow.net_revenue);
+      if (num(firstRow.shipping_cost) > 0) d.shipping_cost = num(firstRow.shipping_cost);
+
+      if (Object.keys(d).length > 0) {
+        d.synced_at = new Date().toISOString();
+        toUpdate.push({ id: existing.id, data: d, orderId });
+      }
+      isNewOrder[orderId] = false;
+      stats.classifiedAsUpdate++;
+    } else {
+      toInsert.push({
+        scalev_id: null,
+        order_id: orderId,
+        external_id: (firstRow.external_id || '').replace('#', '') || null,
+        customer_type: firstRow.customer_type || null,
+        status: firstRow.order_status || 'unknown',
+        shipped_time: shippedTime,
+        platform: firstRow.platform || null,
+        store_name: firstRow.store || null,
+        utm_source: firstRow.utm_source || null,
+        financial_entity: firstRow.financial_entity || null,
+        payment_method: firstRow.payment_method || null,
+        unique_code_discount: num(firstRow.unique_code_discount),
+        is_purchase_fb: firstRow.is_purchase_fb === 'true',
+        is_purchase_tiktok: firstRow.is_purchase_tiktok === 'true',
+        is_purchase_kwai: firstRow.is_purchase_kwai === 'true',
+        gross_revenue: num(firstRow.gross_revenue),
+        net_revenue: num(firstRow.net_revenue),
+        shipping_cost: num(firstRow.shipping_cost),
+        total_quantity: parseInt(firstRow.quantity || '0') || 0,
+        customer_name: firstRow.name || null,
+        customer_phone: firstRow.phone || null,
+        customer_email: firstRow.email || null,
+        province: firstRow.province || null,
+        city: firstRow.city || null,
+        subdistrict: firstRow.subdistrict || null,
+        handler: firstRow.handler || null,
+        draft_time: ts(firstRow.draft_time),
+        pending_time: ts(firstRow.pending_time),
+        confirmed_time: ts(firstRow.confirmed_time),
+        paid_time: ts(firstRow.paid_time),
+        canceled_time: ts(firstRow.canceled_time),
+        source: 'csv_upload',
+        raw_data: firstRow,
+        synced_at: new Date().toISOString(),
+      });
+      isNewOrder[orderId] = true;
+      stats.classifiedAsNew++;
+    }
   }
+
+  // ── Batch INSERT ──
+  const BATCH = 200;
+  const insertedIdMap: Record<string, number> = {};
+  for (let i = 0; i < toInsert.length; i += BATCH) {
+    const batch = toInsert.slice(i, i + BATCH);
+    const { data: inserted, error: err } = await svc
+      .from('scalev_orders')
+      .upsert(batch, { onConflict: 'order_id', ignoreDuplicates: true })
+      .select('id, order_id');
+    if (err) {
+      stats.errors.push(`Insert batch ${Math.floor(i / BATCH) + 1}: ${err.message}`);
+      continue;
+    }
+    if (inserted) {
+      for (const o of inserted) insertedIdMap[o.order_id] = o.id;
+      stats.newInserted += inserted.length;
+    }
+  }
+
+  // ── Batch UPDATE ──
+  const UPDATE_BATCH = 200;
+  for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
+    const batch = toUpdate.slice(i, i + UPDATE_BATCH);
+    const upsertRows = batch.map(upd => ({ id: upd.id, order_id: upd.orderId, ...upd.data }));
+    const { error } = await svc.from('scalev_orders').upsert(upsertRows, { onConflict: 'id' });
+    if (error) {
+      stats.errors.push(`Update batch ${Math.floor(i / UPDATE_BATCH) + 1}: ${error.message}`);
+    } else {
+      stats.updated += batch.length;
+    }
+  }
+
+  // ── Replace line items ──
+  if (isProductBased) {
+    const existingIdMap: Record<string, number> = {};
+    for (const o of existingOrders) existingIdMap[o.order_id] = o.id;
+    const allIdMap = { ...existingIdMap, ...insertedIdMap };
+
+    const allOrderIds = Object.keys(orderLinesMap);
+    for (let i = 0; i < allOrderIds.length; i += UPDATE_BATCH) {
+      const batchOrderIds = allOrderIds.slice(i, i + UPDATE_BATCH);
+      const dbIds = batchOrderIds.map(oid => allIdMap[oid]).filter(Boolean);
+      if (dbIds.length > 0) {
+        await svc.from('scalev_order_lines').delete().in('scalev_order_id', dbIds);
+        const lineBatch: any[] = [];
+        for (const oid of batchOrderIds) {
+          const dbId = allIdMap[oid];
+          if (!dbId) continue;
+          for (const line of orderLinesMap[oid]) {
+            lineBatch.push({ ...line, scalev_order_id: dbId });
+          }
+        }
+        if (lineBatch.length > 0) {
+          for (let j = 0; j < lineBatch.length; j += 500) {
+            const subBatch = lineBatch.slice(j, j + 500);
+            const { error: lineErr } = await svc.from('scalev_order_lines').insert(subBatch);
+            if (lineErr) stats.errors.push(`Lines batch: ${lineErr.message}`);
+          }
+        }
+      }
+    }
+  } else {
+    for (const [orderId, lines] of Object.entries(orderLinesMap)) {
+      if (!isNewOrder[orderId]) continue;
+      const dbId = insertedIdMap[orderId];
+      if (!dbId) continue;
+      const lineBatch = lines.map(line => ({ ...line, scalev_order_id: dbId }));
+      const { error: lineErr } = await svc.from('scalev_order_lines').insert(lineBatch);
+      if (lineErr) stats.errors.push(`Lines ${orderId}: ${lineErr.message}`);
+    }
+  }
+
+  // ── Log ──
+  const uploadedBy = formData.get('uploaded_by') as string || null;
+  const filename = formData.get('filename') as string || file.name;
+  await svc.from('scalev_sync_log').insert({
+    status: stats.errors.length > 0 ? 'partial' : 'success',
+    sync_type: 'csv_upload',
+    orders_fetched: stats.totalRows,
+    orders_inserted: stats.newInserted,
+    orders_updated: stats.updated,
+    uploaded_by: uploadedBy,
+    filename: filename,
+    error_message: stats.errors.length > 0 ? `${stats.errors.length} errors: ${stats.errors.slice(0, 5).join('; ')}` : null,
+    completed_at: new Date().toISOString(),
+  });
+
+  return NextResponse.json({
+    success: true,
+    filename: file.name,
+    stats: {
+      totalRows: stats.totalRows,
+      newInserted: stats.newInserted,
+      updated: stats.updated,
+      errors: stats.errors.length,
+      errorDetails: stats.errors.slice(0, 10),
+      format: stats.format,
+      lineItems: stats.totalLineItems,
+    },
+    debug: {
+      existingMapSize: stats.existingMapSize,
+      csvUniqueIds: stats.csvUniqueIds,
+      classifiedAsNew: stats.classifiedAsNew,
+      classifiedAsUpdate: stats.classifiedAsUpdate,
+    },
+    message: `Upload selesai (${stats.format})! ${stats.newInserted} order baru, ${stats.updated} order diperkaya, ${stats.totalLineItems} line items, ${stats.errors.length} error.`,
+  });
 }
