@@ -137,6 +137,7 @@ export default function CsvOrderUploader() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
       {/* Upload Area */}
       <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Upload CSV Order</div>
@@ -235,8 +236,9 @@ export default function CsvOrderUploader() {
                   {isProcessing && (
                     <div style={{
                       position: 'absolute', top: 0, left: 0, bottom: 0,
-                      width: `${fq.pct}%`,
-                      background: 'rgba(6,182,212,0.08)',
+                      width: `${Math.max(fq.pct, 15)}%`,
+                      background: 'linear-gradient(90deg, rgba(6,182,212,0.15), rgba(6,182,212,0.05))',
+                      borderRight: fq.pct > 0 && fq.pct < 100 ? '2px solid rgba(6,182,212,0.4)' : 'none',
                       transition: 'width 0.4s ease',
                     }} />
                   )}
@@ -252,7 +254,7 @@ export default function CsvOrderUploader() {
                       <>
                         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
                           {isDone && <span style={{ color: '#10b981', fontSize: 10, flexShrink: 0 }}>✅</span>}
-                          {isProcessing && <span style={{ color: '#06b6d4', fontSize: 9, flexShrink: 0, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, width: 28 }}>{fq.pct}%</span>}
+                          {isProcessing && <span style={{ color: '#06b6d4', fontSize: 10, flexShrink: 0, display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>}
                           {isPending && <span style={{ color: '#475569', fontSize: 10, flexShrink: 0 }}>⏳</span>}
                           {isDone && (
                             <span style={{
