@@ -8,7 +8,9 @@ export default function CsvOrderUploader() {
   const supabase = createClient();
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [result, setResult] = useState<any>(null);
+  const [results, setResults] = useState<any[]>([]);
+  const [currentFile, setCurrentFile] = useState('');
+  const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState('');
   const [history, setHistory] = useState<any[]>([]);
   const [showHistory, setShowHistory] = useState(false);
@@ -25,73 +27,83 @@ export default function CsvOrderUploader() {
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
-  const handleUpload = useCallback(async (file: File) => {
-    if (!file.name.endsWith('.csv')) {
+  const handleUpload = useCallback(async (files: File[]) => {
+    const csvFiles = files.filter(f => f.name.endsWith('.csv'));
+    if (csvFiles.length === 0) {
       setError('File harus berformat .csv');
       return;
     }
 
     setUploading(true);
     setError('');
-    setResult(null);
+    setResults([]);
+    setProgress({ current: 0, total: csvFiles.length });
+
+    const allResults: any[] = [];
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const text = await file.text();
-      const lines = text.split('\n');
-      const header = lines[0];
-      const dataLines = lines.slice(1).filter(l => l.trim());
 
-      const CHUNK_SIZE = 3000;
-      const totalChunks = Math.ceil(dataLines.length / CHUNK_SIZE);
-      let finalResult: any = null;
+      for (let fi = 0; fi < csvFiles.length; fi++) {
+        const file = csvFiles[fi];
+        setCurrentFile(file.name);
+        setProgress({ current: fi + 1, total: csvFiles.length });
 
-      for (let c = 0; c < totalChunks; c++) {
-        const chunkLines = dataLines.slice(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
-        const csvChunk = header + '\n' + chunkLines.join('\n');
-        const blob = new Blob([csvChunk], { type: 'text/csv' });
-        const chunkFile = new File([blob], file.name, { type: 'text/csv' });
+        const text = await file.text();
+        const lines = text.split('\n');
+        const header = lines[0];
+        const dataLines = lines.slice(1).filter(l => l.trim());
 
-        const formData = new FormData();
-        formData.append('file', chunkFile);
-        if (user?.email) formData.append('uploaded_by', user.email);
-        formData.append('filename', `${file.name} (part ${c + 1}/${totalChunks})`);
+        const CHUNK_SIZE = 3000;
+        const totalChunks = Math.ceil(dataLines.length / CHUNK_SIZE);
+        let finalResult: any = null;
 
-        const res = await fetch('/api/csv-upload', { method: 'POST', body: formData });
-        const data = await res.json();
+        for (let c = 0; c < totalChunks; c++) {
+          const chunkLines = dataLines.slice(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
+          const csvChunk = header + '\n' + chunkLines.join('\n');
+          const blob = new Blob([csvChunk], { type: 'text/csv' });
+          const chunkFile = new File([blob], file.name, { type: 'text/csv' });
 
-        if (!res.ok) {
-          setError(data.error || `Upload gagal di chunk ${c + 1}`);
-          return;
-        }
+          const formData = new FormData();
+          formData.append('file', chunkFile);
+          if (user?.email) formData.append('uploaded_by', user.email);
+          formData.append('filename', csvFiles.length > 1
+            ? `${file.name} (file ${fi + 1}/${csvFiles.length}${totalChunks > 1 ? `, part ${c + 1}/${totalChunks}` : ''})`
+            : `${file.name}${totalChunks > 1 ? ` (part ${c + 1}/${totalChunks})` : ''}`
+          );
 
-        if (!finalResult) {
-          finalResult = data;
-        } else {
-          finalResult.stats.totalRows += data.stats.totalRows;
-          finalResult.stats.newInserted += data.stats.newInserted;
-          finalResult.stats.updated += data.stats.updated;
-          finalResult.stats.errors += data.stats.errors;
-          finalResult.stats.lineItems = (finalResult.stats.lineItems || 0) + (data.stats.lineItems || 0);
-          if (data.stats.cogsLookedUp) {
-            finalResult.stats.cogsLookedUp = (finalResult.stats.cogsLookedUp || 0) + data.stats.cogsLookedUp;
+          const res = await fetch('/api/csv-upload', { method: 'POST', body: formData });
+          const data = await res.json();
+
+          if (!res.ok) {
+            allResults.push({ filename: file.name, error: data.error || 'Upload gagal' });
+            break;
+          }
+
+          if (!finalResult) {
+            finalResult = { ...data, filename: file.name };
+          } else {
+            finalResult.stats.totalRows += data.stats.totalRows;
+            finalResult.stats.newInserted += data.stats.newInserted;
+            finalResult.stats.updated += data.stats.updated;
+            finalResult.stats.errors += data.stats.errors;
+            finalResult.stats.lineItems = (finalResult.stats.lineItems || 0) + (data.stats.lineItems || 0);
+            if (data.stats.cogsLookedUp) {
+              finalResult.stats.cogsLookedUp = (finalResult.stats.cogsLookedUp || 0) + data.stats.cogsLookedUp;
+            }
           }
         }
+
+        if (finalResult) allResults.push(finalResult);
       }
 
-      if (finalResult) {
-        const isOps = finalResult.stats.format === 'ops-marketplace';
-        finalResult.message = isOps
-          ? `Upload selesai (Marketplace Ops)! ${finalResult.stats.newInserted} order baru, ${finalResult.stats.updated} customer diperbaiki, ${finalResult.stats.lineItems || 0} line items, ${finalResult.stats.cogsLookedUp || 0} COGS ditemukan.`
-          : `Upload selesai (${totalChunks} parts)! ${finalResult.stats.newInserted} order baru, ${finalResult.stats.updated} order diperkaya, ${finalResult.stats.lineItems || 0} line items, ${finalResult.stats.errors} error.`;
-        setResult(finalResult);
-      }
-
+      setResults(allResults);
       await loadHistory();
     } catch (err: any) {
       setError(err.message || 'Upload gagal');
     } finally {
       setUploading(false);
+      setCurrentFile('');
     }
   }, [supabase, loadHistory]);
 
@@ -120,16 +132,17 @@ export default function CsvOrderUploader() {
           onDragLeave={() => setDragOver(false)}
           onDrop={e => {
             e.preventDefault(); setDragOver(false);
-            const f = e.dataTransfer.files[0];
-            if (f) handleUpload(f);
+            const files = Array.from(e.dataTransfer.files);
+            if (files.length > 0) handleUpload(files);
           }}
           onClick={() => {
             const input = document.createElement('input');
             input.type = 'file';
             input.accept = '.csv';
+            input.multiple = true;
             input.onchange = (e: any) => {
-              const f = e.target.files[0];
-              if (f) handleUpload(f);
+              const files = Array.from(e.target.files) as File[];
+              if (files.length > 0) handleUpload(files);
             };
             input.click();
           }}
@@ -150,53 +163,58 @@ export default function CsvOrderUploader() {
                 border: '3px solid #1a2744', borderTop: '3px solid #06b6d4',
                 borderRadius: '50%', margin: '0 auto 12px'
               }} />
-              <div style={{ color: '#06b6d4', fontWeight: 600, fontSize: 13 }}>Mengupload & memproses CSV...</div>
+              <div style={{ color: '#06b6d4', fontWeight: 600, fontSize: 13 }}>
+                {progress.total > 1
+                  ? `Memproses file ${progress.current}/${progress.total}: ${currentFile}`
+                  : `Mengupload & memproses CSV...`
+                }
+              </div>
             </div>
           ) : (
             <div>
               <div style={{ fontSize: 28, marginBottom: 6 }}>📋</div>
               <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 13 }}>Drag & drop file CSV di sini</div>
-              <div style={{ fontSize: 11, color: '#64748b' }}>Scalev export (.csv) atau file tim ops (.csv)</div>
+              <div style={{ fontSize: 11, color: '#64748b' }}>Bisa pilih banyak file sekaligus (Scalev + Tim Ops campur)</div>
             </div>
           )}
         </div>
 
-        {/* Upload Result */}
-        {result && (
-          <div style={{ marginTop: 14, padding: 14, background: '#064e3b', borderRadius: 8, border: '1px solid #065f46' }}>
-            <div style={{ color: '#10b981', fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
-              ✅ {result.message}
-            </div>
-            <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-              <span style={{
-                fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 700,
-                background: result.stats.format === 'ops-marketplace' ? '#052e16' : '#0e2a47',
-                color: result.stats.format === 'ops-marketplace' ? '#10b981' : '#06b6d4',
-              }}>
-                {result.stats.format === 'ops-marketplace' ? '👥 TIM OPS' : `📋 SCALEV (${result.stats.format})`}
-              </span>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 8 }}>
-              <StatBox label="Total Rows" value={result.stats.totalRows} color="#94a3b8" />
-              <StatBox label="Baru" value={result.stats.newInserted} color="#10b981" />
-              <StatBox
-                label={result.stats.format === 'ops-marketplace' ? 'Customer Fix' : 'Diperkaya'}
-                value={result.stats.updated || 0}
-                color="#06b6d4"
-              />
-              <StatBox label="Line Items" value={result.stats.lineItems || 0} color="#8b5cf6" />
-              {result.stats.cogsLookedUp > 0 && (
-                <StatBox label="COGS Found" value={result.stats.cogsLookedUp} color="#f59e0b" />
-              )}
-              {result.stats.errors > 0 && <StatBox label="Error" value={result.stats.errors} color="#ef4444" />}
-            </div>
-            {result.stats.errorDetails?.length > 0 && (
-              <div style={{ marginTop: 10, padding: 10, background: '#7f1d1d', borderRadius: 6, fontSize: 11 }}>
-                {result.stats.errorDetails.map((e: string, i: number) => (
-                  <div key={i} style={{ color: '#fca5a5', marginBottom: 2 }}>• {e}</div>
-                ))}
-              </div>
-            )}
+        {/* Upload Results */}
+        {results.length > 0 && (
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {results.map((result, idx) => (
+              result.error ? (
+                <div key={idx} style={{ padding: 12, background: '#7f1d1d', borderRadius: 8, border: '1px solid #991b1b' }}>
+                  <div style={{ color: '#ef4444', fontWeight: 700, fontSize: 12 }}>❌ {result.filename}: {result.error}</div>
+                </div>
+              ) : (
+                <div key={idx} style={{ padding: 14, background: '#064e3b', borderRadius: 8, border: '1px solid #065f46' }}>
+                  <div style={{ color: '#10b981', fontWeight: 700, fontSize: 13, marginBottom: 8 }}>
+                    ✅ {result.filename}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+                    <span style={{
+                      fontSize: 10, padding: '2px 6px', borderRadius: 4, fontWeight: 700,
+                      background: result.stats.format === 'ops-marketplace' ? '#052e16' : '#0e2a47',
+                      color: result.stats.format === 'ops-marketplace' ? '#10b981' : '#06b6d4',
+                    }}>
+                      {result.stats.format === 'ops-marketplace' ? '👥 TIM OPS' : `📋 SCALEV (${result.stats.format})`}
+                    </span>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px, 1fr))', gap: 6 }}>
+                    <StatBox label="Rows" value={result.stats.totalRows} color="#94a3b8" />
+                    <StatBox label="Baru" value={result.stats.newInserted} color="#10b981" />
+                    <StatBox
+                      label={result.stats.format === 'ops-marketplace' ? 'Fix' : 'Update'}
+                      value={result.stats.updated || 0}
+                      color="#06b6d4"
+                    />
+                    <StatBox label="Items" value={result.stats.lineItems || 0} color="#8b5cf6" />
+                    {(result.stats.errors || 0) > 0 && <StatBox label="Error" value={result.stats.errors} color="#ef4444" />}
+                  </div>
+                </div>
+              )
+            ))}
           </div>
         )}
 
