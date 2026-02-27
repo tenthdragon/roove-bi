@@ -29,8 +29,9 @@ export default function CsvOrderUploader() {
 
   const handleUpload = useCallback(async (files: File[]) => {
     const csvFiles = files.filter(f => f.name.endsWith('.csv'));
+    const skipped = files.length - csvFiles.length;
     if (csvFiles.length === 0) {
-      setError('File harus berformat .csv');
+      setError('Tidak ada file .csv yang ditemukan.' + (skipped > 0 ? ` ${skipped} file non-CSV di-skip.` : ''));
       return;
     }
 
@@ -49,52 +50,67 @@ export default function CsvOrderUploader() {
         setCurrentFile(file.name);
         setProgress({ current: fi + 1, total: csvFiles.length });
 
-        const text = await file.text();
-        const lines = text.split('\n');
-        const header = lines[0];
-        const dataLines = lines.slice(1).filter(l => l.trim());
+        try {
+          const text = await file.text();
+          const lines = text.split('\n');
+          const header = lines[0];
+          const dataLines = lines.slice(1).filter(l => l.trim());
 
-        const CHUNK_SIZE = 3000;
-        const totalChunks = Math.ceil(dataLines.length / CHUNK_SIZE);
-        let finalResult: any = null;
-
-        for (let c = 0; c < totalChunks; c++) {
-          const chunkLines = dataLines.slice(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
-          const csvChunk = header + '\n' + chunkLines.join('\n');
-          const blob = new Blob([csvChunk], { type: 'text/csv' });
-          const chunkFile = new File([blob], file.name, { type: 'text/csv' });
-
-          const formData = new FormData();
-          formData.append('file', chunkFile);
-          if (user?.email) formData.append('uploaded_by', user.email);
-          formData.append('filename', csvFiles.length > 1
-            ? `${file.name} (file ${fi + 1}/${csvFiles.length}${totalChunks > 1 ? `, part ${c + 1}/${totalChunks}` : ''})`
-            : `${file.name}${totalChunks > 1 ? ` (part ${c + 1}/${totalChunks})` : ''}`
-          );
-
-          const res = await fetch('/api/csv-upload', { method: 'POST', body: formData });
-          const data = await res.json();
-
-          if (!res.ok) {
-            allResults.push({ filename: file.name, error: data.error || 'Upload gagal' });
-            break;
+          if (dataLines.length === 0) {
+            allResults.push({ filename: file.name, error: 'File kosong (tidak ada data rows)' });
+            setResults([...allResults]);
+            continue;
           }
 
-          if (!finalResult) {
-            finalResult = { ...data, filename: file.name };
-          } else {
-            finalResult.stats.totalRows += data.stats.totalRows;
-            finalResult.stats.newInserted += data.stats.newInserted;
-            finalResult.stats.updated += data.stats.updated;
-            finalResult.stats.errors += data.stats.errors;
-            finalResult.stats.lineItems = (finalResult.stats.lineItems || 0) + (data.stats.lineItems || 0);
-            if (data.stats.cogsLookedUp) {
-              finalResult.stats.cogsLookedUp = (finalResult.stats.cogsLookedUp || 0) + data.stats.cogsLookedUp;
+          const CHUNK_SIZE = 3000;
+          const totalChunks = Math.ceil(dataLines.length / CHUNK_SIZE);
+          let finalResult: any = null;
+          let fileError = false;
+
+          for (let c = 0; c < totalChunks; c++) {
+            const chunkLines = dataLines.slice(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
+            const csvChunk = header + '\n' + chunkLines.join('\n');
+            const blob = new Blob([csvChunk], { type: 'text/csv' });
+            const chunkFile = new File([blob], file.name, { type: 'text/csv' });
+
+            const formData = new FormData();
+            formData.append('file', chunkFile);
+            if (user?.email) formData.append('uploaded_by', user.email);
+            formData.append('filename', csvFiles.length > 1
+              ? `${file.name} (file ${fi + 1}/${csvFiles.length}${totalChunks > 1 ? `, part ${c + 1}/${totalChunks}` : ''})`
+              : `${file.name}${totalChunks > 1 ? ` (part ${c + 1}/${totalChunks})` : ''}`
+            );
+
+            const res = await fetch('/api/csv-upload', { method: 'POST', body: formData });
+            const data = await res.json();
+
+            if (!res.ok) {
+              allResults.push({ filename: file.name, error: data.error || `Upload gagal di chunk ${c + 1}` });
+              fileError = true;
+              break;
+            }
+
+            if (!finalResult) {
+              finalResult = { ...data, filename: file.name };
+            } else {
+              finalResult.stats.totalRows += data.stats.totalRows;
+              finalResult.stats.newInserted += data.stats.newInserted;
+              finalResult.stats.updated += data.stats.updated;
+              finalResult.stats.errors += data.stats.errors;
+              finalResult.stats.lineItems = (finalResult.stats.lineItems || 0) + (data.stats.lineItems || 0);
+              if (data.stats.cogsLookedUp) {
+                finalResult.stats.cogsLookedUp = (finalResult.stats.cogsLookedUp || 0) + data.stats.cogsLookedUp;
+              }
             }
           }
+
+          if (!fileError && finalResult) allResults.push(finalResult);
+        } catch (fileErr: any) {
+          allResults.push({ filename: file.name, error: fileErr.message || 'Error tidak diketahui' });
         }
 
-        if (finalResult) allResults.push(finalResult);
+        // Update results progressively
+        setResults([...allResults]);
       }
 
       setResults(allResults);
