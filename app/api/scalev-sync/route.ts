@@ -66,88 +66,143 @@ async function fetchAllPages(
   return { results: orders };
 }
 
-// ── Batch upsert orders (50 at a time) ──
-async function batchUpsertOrders(
+// ── Load existing order statuses from DB for diff ──
+async function loadExistingStatuses(svc: any, orderIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  // Query in chunks of 500 to avoid URL length limits
+  for (let i = 0; i < orderIds.length; i += 500) {
+    const chunk = orderIds.slice(i, i + 500);
+    const { data } = await svc
+      .from('scalev_orders')
+      .select('order_id, status')
+      .in('order_id', chunk);
+    for (const row of data || []) {
+      map.set(row.order_id, row.status);
+    }
+  }
+  return map;
+}
+
+// ── Batch upsert ONLY changed orders ──
+async function batchUpsertChanged(
   svc: any,
   orders: any[],
-): Promise<{ upserted: number; errors: string[] }> {
-  const BATCH_SIZE = 50;
+  existingStatuses: Map<string, string>,
+): Promise<{ upserted: number; skipped: number; errors: string[] }> {
+  const BATCH_SIZE = 100;
   let totalUpserted = 0;
+  let totalSkipped = 0;
   const errors: string[] = [];
 
-  // Step 1: Parse all orders first (parallel)
+  // Step 1: Parse all orders (parallel) and filter changed
   const parsed = await Promise.all(
     orders.map(async (order) => {
       try {
+        const existingStatus = existingStatuses.get(order.order_id);
+        // Skip if status unchanged AND order exists in DB
+        if (existingStatus && existingStatus === order.status) {
+          return { skip: true };
+        }
         const { orderHeader, orderLines } = await parseOrderForDb(order);
-        return { orderHeader, orderLines, orderId: order.order_id };
+        return { orderHeader, orderLines, orderId: order.order_id, skip: false };
       } catch (err: any) {
         errors.push(`Parse ${order.order_id}: ${err.message}`);
-        return null;
+        return { skip: true };
       }
     })
   );
 
-  const validOrders = parsed.filter(Boolean) as {
+  const changed = parsed.filter((p) => !p.skip) as {
     orderHeader: any;
     orderLines: any[];
     orderId: string;
+    skip: false;
   }[];
+  totalSkipped = parsed.length - changed.length;
 
-  // Step 2: Batch upsert headers
-  for (let i = 0; i < validOrders.length; i += BATCH_SIZE) {
-    const batch = validOrders.slice(i, i + BATCH_SIZE);
-    const headers = batch.map((o) => o.orderHeader);
+  if (changed.length === 0) {
+    return { upserted: 0, skipped: totalSkipped, errors };
+  }
 
-    try {
-      const { data: upsertedRows, error: upsertErr } = await svc
-        .from('scalev_orders')
-        .upsert(headers, { onConflict: 'order_id', ignoreDuplicates: false })
-        .select('id, order_id');
+  // Step 2: Process batches in parallel (2 at a time to avoid overwhelming DB)
+  const batches: typeof changed[] = [];
+  for (let i = 0; i < changed.length; i += BATCH_SIZE) {
+    batches.push(changed.slice(i, i + BATCH_SIZE));
+  }
 
-      if (upsertErr) {
-        errors.push(`Batch upsert ${i}: ${upsertErr.message}`);
-        continue;
-      }
+  const PARALLEL_BATCHES = 2;
+  for (let i = 0; i < batches.length; i += PARALLEL_BATCHES) {
+    const parallelChunk = batches.slice(i, i + PARALLEL_BATCHES);
 
-      // Build id lookup: order_id → internal id
-      const idMap = new Map<string, string>();
-      for (const row of upsertedRows || []) {
-        idMap.set(row.order_id, row.id);
-      }
+    const results = await Promise.all(
+      parallelChunk.map(async (batch) => {
+        let batchUpserted = 0;
+        const batchErrors: string[] = [];
 
-      // Step 3: Batch delete old lines for this batch
-      const orderIds = batch.map((o) => o.orderId);
-      await svc.from('scalev_order_lines').delete().in('order_id', orderIds);
+        try {
+          const headers = batch.map((o) => o.orderHeader);
 
-      // Step 4: Batch insert new lines
-      const allLines: any[] = [];
-      for (const o of batch) {
-        const internalId = idMap.get(o.orderId);
-        if (!internalId || o.orderLines.length === 0) continue;
-        for (const line of o.orderLines) {
-          allLines.push({ ...line, scalev_order_id: internalId });
+          const { data: upsertedRows, error: upsertErr } = await svc
+            .from('scalev_orders')
+            .upsert(headers, { onConflict: 'order_id', ignoreDuplicates: false })
+            .select('id, order_id');
+
+          if (upsertErr) {
+            batchErrors.push(`Upsert: ${upsertErr.message}`);
+            return { upserted: 0, errors: batchErrors };
+          }
+
+          // Build id lookup
+          const idMap = new Map<string, string>();
+          for (const row of upsertedRows || []) {
+            idMap.set(row.order_id, row.id);
+          }
+
+          // Batch delete old lines
+          const orderIds = batch.map((o) => o.orderId);
+          await svc.from('scalev_order_lines').delete().in('order_id', orderIds);
+
+          // Batch insert new lines
+          const allLines: any[] = [];
+          for (const o of batch) {
+            const internalId = idMap.get(o.orderId);
+            if (!internalId || o.orderLines.length === 0) continue;
+            for (const line of o.orderLines) {
+              allLines.push({ ...line, scalev_order_id: internalId });
+            }
+          }
+
+          // Insert lines in sub-batches of 500
+          if (allLines.length > 0) {
+            const linePromises: Promise<any>[] = [];
+            for (let j = 0; j < allLines.length; j += 500) {
+              const lineBatch = allLines.slice(j, j + 500);
+              linePromises.push(
+                svc.from('scalev_order_lines').insert(lineBatch)
+                  .then(({ error }: any) => {
+                    if (error) batchErrors.push(`Lines: ${error.message}`);
+                  })
+              );
+            }
+            await Promise.all(linePromises);
+          }
+
+          batchUpserted = batch.length;
+        } catch (err: any) {
+          batchErrors.push(`Batch error: ${err.message}`);
         }
-      }
 
-      if (allLines.length > 0) {
-        // Insert lines in sub-batches of 200 (Supabase limit)
-        for (let j = 0; j < allLines.length; j += 200) {
-          const lineBatch = allLines.slice(j, j + 200);
-          const { error: lineErr } = await svc
-            .from('scalev_order_lines')
-            .insert(lineBatch);
-          if (lineErr) errors.push(`Lines batch ${j}: ${lineErr.message}`);
-        }
-      }
+        return { upserted: batchUpserted, errors: batchErrors };
+      })
+    );
 
-      totalUpserted += batch.length;
-    } catch (err: any) {
-      errors.push(`Batch ${i} error: ${err.message}`);
+    for (const r of results) {
+      totalUpserted += r.upserted;
+      errors.push(...r.errors);
     }
   }
 
-  return { upserted: totalUpserted, errors };
+  return { upserted: totalUpserted, skipped: totalSkipped, errors };
 }
 
 // ══ POST: trigger sync ══
@@ -175,7 +230,7 @@ export async function POST(req: NextRequest) {
     const START = Date.now();
 
     // ══════════════════════════════════════════
-    // STATUS MODE: parallel fetch + batch upsert
+    // STATUS MODE: parallel fetch, diff, batch upsert changed only
     // ══════════════════════════════════════════
     if (mode === 'status') {
       const now = new Date();
@@ -190,26 +245,25 @@ export async function POST(req: NextRequest) {
         { status: 'ready',       timeParam: 'confirmed_time_since' },
       ];
 
-      // Parallel fetch all statuses
+      // Step 1: Parallel fetch all statuses from Scalev
       const fetchResults = await Promise.all(
         statusQueries.map((q) =>
           fetchAllPages(config.api_key, config.base_url, q.status, q.timeParam, sinceISO)
-            .then((r) => ({ ...r, status: q.status }))
+            .then((r) => ({ ...r, queryStatus: q.status }))
         )
       );
 
-      // Collect all orders + errors
       const allOrders: any[] = [];
       const allErrors: string[] = [];
 
       for (const fr of fetchResults) {
-        if (fr.error) allErrors.push(`${fr.status}: ${fr.error}`);
+        if (fr.error) allErrors.push(`${fr.queryStatus}: ${fr.error}`);
         allOrders.push(...fr.results);
       }
 
       const totalFetched = allOrders.length;
 
-      // Deduplicate by order id (same order could appear in multiple status queries)
+      // Deduplicate
       const seen = new Set<number>();
       const uniqueOrders = allOrders.filter((o) => {
         if (seen.has(o.id)) return false;
@@ -217,8 +271,12 @@ export async function POST(req: NextRequest) {
         return true;
       });
 
-      // Batch upsert
-      const { upserted, errors: upsertErrors } = await batchUpsertOrders(svc, uniqueOrders);
+      // Step 2: Load existing statuses from DB (one fast query)
+      const orderIds = uniqueOrders.map((o) => o.order_id);
+      const existingStatuses = await loadExistingStatuses(svc, orderIds);
+
+      // Step 3: Only upsert changed orders
+      const { upserted, skipped, errors: upsertErrors } = await batchUpsertChanged(svc, uniqueOrders, existingStatuses);
       allErrors.push(...upsertErrors);
 
       const elapsed = Math.round((Date.now() - START) / 1000);
@@ -238,11 +296,12 @@ export async function POST(req: NextRequest) {
         sync_type: 'status',
         orders_fetched: totalFetched,
         orders_unique: uniqueOrders.length,
-        orders_inserted: upserted,
+        orders_changed: upserted,
+        orders_skipped: skipped,
         elapsed_seconds: elapsed,
         timed_out: false,
         warnings: allErrors.length,
-        message: `Sync complete! ${uniqueOrders.length} orders updated in ${elapsed}s.`,
+        message: `Sync done! ${totalFetched} fetched, ${upserted} changed, ${skipped} unchanged (${elapsed}s).`,
       });
     }
 
@@ -258,7 +317,7 @@ export async function POST(req: NextRequest) {
     let totalUpserted = 0;
     const allErrors: string[] = [];
     const buffer: any[] = [];
-    const FLUSH_SIZE = 50;
+    const FLUSH_SIZE = 100;
 
     while (hasMore) {
       if (Date.now() - START > TIME_LIMIT_MS) { timedOut = true; break; }
@@ -272,13 +331,13 @@ export async function POST(req: NextRequest) {
         buffer.push(order);
       }
 
-      // Flush buffer when full
       if (buffer.length >= FLUSH_SIZE) {
-        const { upserted, errors } = await batchUpsertOrders(svc, buffer.splice(0));
+        const ids = buffer.map((o) => o.order_id);
+        const existing = await loadExistingStatuses(svc, ids);
+        const { upserted, errors } = await batchUpsertChanged(svc, buffer.splice(0), existing);
         totalUpserted += upserted;
         allErrors.push(...errors);
 
-        // Save progress
         await svc.from('scalev_config').update({
           last_sync_id: maxScalevId,
           updated_at: new Date().toISOString(),
@@ -289,9 +348,10 @@ export async function POST(req: NextRequest) {
       currentLastId = page.lastId;
     }
 
-    // Flush remaining
     if (buffer.length > 0) {
-      const { upserted, errors } = await batchUpsertOrders(svc, buffer);
+      const ids = buffer.map((o) => o.order_id);
+      const existing = await loadExistingStatuses(svc, ids);
+      const { upserted, errors } = await batchUpsertChanged(svc, buffer, existing);
       totalUpserted += upserted;
       allErrors.push(...errors);
     }
