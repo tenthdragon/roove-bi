@@ -82,6 +82,29 @@ async function loadExistingStatuses(svc: any, orderIds: string[]): Promise<Map<s
   return map;
 }
 
+// ══════════════════════════════════════════════════════════════
+// ── Load existing customer data (phone/name/email) to preserve
+//    CSV-enriched data that API doesn't have ──
+// ══════════════════════════════════════════════════════════════
+async function loadExistingCustomerData(svc: any, orderIds: string[]): Promise<Map<string, { phone: string | null; name: string | null; email: string | null }>> {
+  const map = new Map();
+  for (let i = 0; i < orderIds.length; i += 500) {
+    const chunk = orderIds.slice(i, i + 500);
+    const { data } = await svc
+      .from('scalev_orders')
+      .select('order_id, customer_phone, customer_name, customer_email')
+      .in('order_id', chunk);
+    for (const row of data || []) {
+      map.set(row.order_id, {
+        phone: row.customer_phone,
+        name: row.customer_name,
+        email: row.customer_email,
+      });
+    }
+  }
+  return map;
+}
+
 // ── Batch upsert ONLY changed orders ──
 async function batchUpsertChanged(
   svc: any,
@@ -115,10 +138,37 @@ async function batchUpsertChanged(
     orderId: string;
     skip: false;
   }[];
+
   totalSkipped = parsed.length - changed.length;
 
   if (changed.length === 0) {
     return { upserted: 0, skipped: totalSkipped, errors };
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // FIX: Load existing customer data BEFORE upsert
+  //      Preserve phone/name/email from CSV when API returns null
+  //      Also preserve temp: phone IDs until real phone arrives
+  // ══════════════════════════════════════════════════════════
+  const changedOrderIds = changed.map((o) => o.orderId);
+  const existingCustomerData = await loadExistingCustomerData(svc, changedOrderIds);
+
+  for (const item of changed) {
+    const existing = existingCustomerData.get(item.orderId);
+    if (existing) {
+      // Preserve phone: keep existing (real or temp:) if API has nothing
+      if (!item.orderHeader.customer_phone && existing.phone) {
+        item.orderHeader.customer_phone = existing.phone;
+      }
+      // Preserve name if API has nothing
+      if (!item.orderHeader.customer_name && existing.name) {
+        item.orderHeader.customer_name = existing.name;
+      }
+      // Preserve email if API has nothing
+      if (!item.orderHeader.customer_email && existing.email) {
+        item.orderHeader.customer_email = existing.email;
+      }
+    }
   }
 
   const batches: typeof changed[] = [];
@@ -129,7 +179,6 @@ async function batchUpsertChanged(
   const PARALLEL_BATCHES = 2;
   for (let i = 0; i < batches.length; i += PARALLEL_BATCHES) {
     const parallelChunk = batches.slice(i, i + PARALLEL_BATCHES);
-
     const results = await Promise.all(
       parallelChunk.map(async (batch) => {
         let batchUpserted = 0;
@@ -207,11 +256,11 @@ async function syncByStatus(
   syncLabel: string,
 ): Promise<Response> {
   const statusQueries = [
-    { status: 'shipped',     timeParam: 'shipped_time_since' },
+    { status: 'shipped', timeParam: 'shipped_time_since' },
     { status: 'shipped_rts', timeParam: 'shipped_time_since' },
-    { status: 'confirmed',   timeParam: 'confirmed_time_since' },
-    { status: 'in_process',  timeParam: 'confirmed_time_since' },
-    { status: 'ready',       timeParam: 'confirmed_time_since' },
+    { status: 'confirmed', timeParam: 'confirmed_time_since' },
+    { status: 'in_process', timeParam: 'confirmed_time_since' },
+    { status: 'ready', timeParam: 'confirmed_time_since' },
   ];
 
   // Parallel fetch all statuses
@@ -224,7 +273,6 @@ async function syncByStatus(
 
   const allOrders: any[] = [];
   const allErrors: string[] = [];
-
   for (const fr of fetchResults) {
     if (fr.error) allErrors.push(`${fr.queryStatus}: ${fr.error}`);
     allOrders.push(...fr.results);
@@ -292,8 +340,8 @@ export async function POST(req: NextRequest) {
       .insert({ status: 'running', sync_type: mode })
       .select('id')
       .single();
-    const logId = syncLog?.id;
 
+    const logId = syncLog?.id;
     const START = Date.now();
     const now = new Date();
 
@@ -324,14 +372,21 @@ export async function POST(req: NextRequest) {
     let totalFetched = 0;
     let totalUpserted = 0;
     const allErrors: string[] = [];
+
     const buffer: any[] = [];
     const FLUSH_SIZE = 100;
 
     while (hasMore) {
-      if (Date.now() - START > TIME_LIMIT_MS) { timedOut = true; break; }
+      if (Date.now() - START > TIME_LIMIT_MS) {
+        timedOut = true;
+        break;
+      }
 
       const page = await fetchOrderList(config.api_key, config.base_url, currentLastId, 25);
-      if (!page.results || page.results.length === 0) { hasMore = false; break; }
+      if (!page.results || page.results.length === 0) {
+        hasMore = false;
+        break;
+      }
 
       for (const order of page.results) {
         totalFetched++;
@@ -345,7 +400,6 @@ export async function POST(req: NextRequest) {
         const { upserted, errors } = await batchUpsertChanged(svc, buffer.splice(0), existing);
         totalUpserted += upserted;
         allErrors.push(...errors);
-
         await svc.from('scalev_config').update({
           last_sync_id: maxScalevId,
           updated_at: new Date().toISOString(),
@@ -404,7 +458,6 @@ export async function POST(req: NextRequest) {
 // ══ GET: sync status ══
 export async function GET() {
   const svc = getServiceSupabase();
-
   try {
     const { data: logs } = await svc
       .from('scalev_sync_log')
