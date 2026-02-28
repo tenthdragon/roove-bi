@@ -7,17 +7,20 @@ import { useDateRange } from '@/lib/DateRangeContext';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, Bar, Line } from 'recharts';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
+import SyncOrdersWidget from '@/components/SyncOrdersWidget';
 
 const TT = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
-  return (<div style={{ background:'#1e293b', border:'1px solid #1a2744', borderRadius:8, padding:'10px 14px', fontSize:12, maxWidth:320 }}>
-    <div style={{ fontWeight:700, marginBottom:6 }}>{label}</div>
-    {payload.filter(p => p.value !== 0).map((p, i) => (
-      <div key={i} style={{ color: p.value < 0 ? '#ef4444' : (p.color||p.stroke), marginBottom:2, display:'flex', justifyContent:'space-between', gap:16 }}>
-        <span>{p.name}</span><span style={{ fontFamily:'monospace', fontWeight:600 }}>{fmtRupiah(p.value)}</span>
-      </div>
-    ))}
-  </div>);
+  return (
+    <div style={{ background:'#1e293b', border:'1px solid #1a2744', borderRadius:8, padding:'10px 14px', fontSize:12, maxWidth:320 }}>
+      <div style={{ fontWeight:700, marginBottom:6 }}>{label}</div>
+      {payload.filter(p => p.value !== 0).map((p, i) => (
+        <div key={i} style={{ color: p.value < 0 ? '#ef4444' : (p.color||p.stroke), marginBottom:2, display:'flex', justifyContent:'space-between', gap:16 }}>
+          <span>{p.name}</span><span style={{ fontFamily:'monospace', fontWeight:600 }}>{fmtRupiah(p.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
 };
 
 export default function OverviewPage() {
@@ -26,6 +29,17 @@ export default function OverviewPage() {
   const [dailyData, setDailyData] = useState([]);
   const [loading, setLoading] = useState(true);
   const { activeBrands, isActiveBrand } = useActiveBrands();
+  const [userRole, setUserRole] = useState(null);
+
+  // Fetch user role for conditional rendering
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        supabase.from('profiles').select('role').eq('id', user.id).single()
+          .then(({ data }) => setUserRole(data?.role || null));
+      }
+    });
+  }, [supabase]);
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
@@ -61,7 +75,6 @@ export default function OverviewPage() {
     const tn = dates.reduce((a,d) => a + byDate[d].n, 0);
     const tm = tg - tn; // Mkt Cost + MP Fee combined
     const ad = dates.filter(d => byDate[d].s > 0).length;
-
     const chart = dates.map(d => ({
       date: shortDate(d),
       'Net Sales': byDate[d].s,
@@ -69,7 +82,6 @@ export default function OverviewPage() {
       'Profit After Mkt': byDate[d].n,
       'Mkt Cost + MP Fee': byDate[d].g - byDate[d].n,
     }));
-
     return { ts, tg, tn, tm, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
   }, [dailyData]);
 
@@ -114,6 +126,7 @@ export default function OverviewPage() {
     return (
       <div className="fade-in">
         <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
+        {(userRole === 'owner' || userRole === 'admin') && <SyncOrdersWidget />}
         <div style={{ textAlign:'center', padding:60, color:'#64748b', background:'#111a2e', border:'1px solid #1a2744', borderRadius:12 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>📊</div>
           <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
@@ -129,15 +142,13 @@ export default function OverviewPage() {
         <div><h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2><div style={{ fontSize:12, color:'#64748b' }}>{kpi.ad} active days</div></div>
       </div>
 
+      {/* ── Scalev Order Sync Widget (owner/admin only) ── */}
+      {(userRole === 'owner' || userRole === 'admin') && <SyncOrdersWidget />}
+
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
         <KPI label="Net Sales" val={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg: ${fmtRupiah(kpi.avg)}/hari`} />
         <KPI label="Gross Profit" val={`Rp ${fmtCompact(kpi.tg)}`} sub={`GP Margin: ${kpi.gpM.toFixed(1)}%`} color="#10b981" />
-        <KPI
-          label="Mkt Cost + MP Fee"
-          val={`Rp ${fmtCompact(kpi.tm)}`}
-          sub={totalMpFee > 0 ? `MP Fee: Rp ${fmtCompact(totalMpFee)} (${mpFeePercent.toFixed(1)}%)` : 'MP Fee: tidak tersedia'}
-          color="#f59e0b"
-        />
+        <KPI label="Mkt Cost + MP Fee" val={`Rp ${fmtCompact(kpi.tm)}`} sub={totalMpFee > 0 ? `MP Fee: Rp ${fmtCompact(totalMpFee)} (${mpFeePercent.toFixed(1)}%)` : 'MP Fee: tidak tersedia'} color="#f59e0b" />
         <KPI label="Profit After Mkt" val={`Rp ${fmtCompact(kpi.tn)}`} sub={`Margin After Mkt: ${kpi.nM.toFixed(1)}%`} color="#06b6d4" />
       </div>
 
