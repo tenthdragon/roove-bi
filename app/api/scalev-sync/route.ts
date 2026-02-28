@@ -102,7 +102,7 @@ async function batchUpsertOrders(
     try {
       const { data: upsertedRows, error: upsertErr } = await svc
         .from('scalev_orders')
-        .upsert(headers, { onConflict: 'scalev_id' })
+        .upsert(headers, { onConflict: 'order_id', ignoreDuplicates: false })
         .select('id, order_id');
 
       if (upsertErr) {
