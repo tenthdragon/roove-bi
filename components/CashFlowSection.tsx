@@ -2,7 +2,7 @@
 // components/CashFlowSection.tsx
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { fetchLiveCashFlow } from '@/lib/cashflow-actions';
 import { fmtCompact } from '@/lib/utils';
 
@@ -18,11 +18,24 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
   const [syncResult, setSyncResult] = useState(null);
   const [snapshotting, setSnapshotting] = useState(false);
   const [snapshotResult, setSnapshotResult] = useState(null);
+  const [showSyncMenu, setShowSyncMenu] = useState(false);
+  const syncMenuRef = useRef(null);
 
   useEffect(() => {
     if (!periodStart) return;
     loadCashFlow();
   }, [periodStart]);
+
+  // Close menu on outside click
+  useEffect(() => {
+    function handleClick(e) {
+      if (syncMenuRef.current && !syncMenuRef.current.contains(e.target)) {
+        setShowSyncMenu(false);
+      }
+    }
+    if (showSyncMenu) document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [showSyncMenu]);
 
   function loadCashFlow() {
     setLoading(true);
@@ -32,19 +45,24 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
       .finally(() => setLoading(false));
   }
 
-  async function handleSync() {
+  async function handleSync(mode = 'quick') {
     setSyncing(true);
     setSyncResult(null);
+    setShowSyncMenu(false);
     try {
       const res = await fetch('/api/scalev-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'status' }),
+        body: JSON.stringify({ mode }),
       });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Sync failed');
-      setSyncResult({ success: true, msg: `${json.orders_fetched} orders · ${json.elapsed_seconds}s` });
-      // Reload cash flow after sync
+      const changed = json.orders_changed ?? json.orders_inserted ?? 0;
+      const skipped = json.orders_skipped ?? 0;
+      setSyncResult({
+        success: true,
+        msg: `${changed} updated, ${skipped} skipped · ${json.elapsed_seconds}s`
+      });
       loadCashFlow();
     } catch (err) {
       setSyncResult({ success: false, msg: err.message });
@@ -92,8 +110,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
   const totalCashIn = data.cashReceived + data.spillOver;
   const pct = (v) => netSales > 0 ? (v / netSales * 100) : 0;
 
-  // Toast component
-  const Toast = ({ result, onClear }) => {
+  const Toast = ({ result }) => {
     if (!result) return null;
     return (
       <span style={{
@@ -122,19 +139,74 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            title="Sync in-flight orders dari Scalev (2 bulan terakhir)"
-            style={{
-              background: syncing ? '#1e293b' : '#1e293b', color: syncing ? '#475569' : '#94a3b8',
-              border: '1px solid #334155', borderRadius: 6, padding: '5px 10px',
-              fontSize: 10, fontWeight: 600, cursor: syncing ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', gap: 4,
-            }}
-          >
-            {syncing ? '⏳ Syncing...' : '🔄 Sync Orders'}
-          </button>
+          {/* Sync button with dropdown */}
+          <div style={{ position: 'relative' }} ref={syncMenuRef}>
+            <div style={{ display: 'flex' }}>
+              {/* Main button: quick sync */}
+              <button
+                onClick={() => handleSync('quick')}
+                disabled={syncing}
+                title="Quick sync: 7 hari terakhir"
+                style={{
+                  background: '#1e293b', color: syncing ? '#475569' : '#94a3b8',
+                  border: '1px solid #334155', borderRadius: '6px 0 0 6px', padding: '5px 10px',
+                  fontSize: 10, fontWeight: 600, cursor: syncing ? 'not-allowed' : 'pointer',
+                  display: 'flex', alignItems: 'center', gap: 4,
+                  borderRight: 'none',
+                }}
+              >
+                {syncing ? '⏳ Syncing...' : '🔄 Sync'}
+              </button>
+              {/* Dropdown arrow */}
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowSyncMenu(!showSyncMenu); }}
+                disabled={syncing}
+                style={{
+                  background: '#1e293b', color: syncing ? '#475569' : '#94a3b8',
+                  border: '1px solid #334155', borderRadius: '0 6px 6px 0', padding: '5px 6px',
+                  fontSize: 10, cursor: syncing ? 'not-allowed' : 'pointer',
+                }}
+              >
+                ▾
+              </button>
+            </div>
+
+            {/* Dropdown menu */}
+            {showSyncMenu && (
+              <div style={{
+                position: 'absolute', top: '100%', right: 0, marginTop: 4,
+                background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
+                zIndex: 100, minWidth: 180, overflow: 'hidden',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+              }}>
+                <button
+                  onClick={() => handleSync('quick')}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
+                    background: 'transparent', color: '#e2e8f0', border: 'none', cursor: 'pointer',
+                    fontSize: 11, borderBottom: '1px solid #334155',
+                  }}
+                  onMouseEnter={e => e.target.style.background = '#334155'}
+                  onMouseLeave={e => e.target.style.background = 'transparent'}
+                >
+                  🔄 Quick Sync <span style={{ color: '#64748b' }}>· 7 hari (~15s)</span>
+                </button>
+                <button
+                  onClick={() => handleSync('status')}
+                  style={{
+                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
+                    background: 'transparent', color: '#e2e8f0', border: 'none', cursor: 'pointer',
+                    fontSize: 11,
+                  }}
+                  onMouseEnter={e => e.target.style.background = '#334155'}
+                  onMouseLeave={e => e.target.style.background = 'transparent'}
+                >
+                  🔁 Full Sync <span style={{ color: '#64748b' }}>· 2 bulan (~90s)</span>
+                </button>
+              </div>
+            )}
+          </div>
+
           <button
             onClick={handleSnapshot}
             disabled={snapshotting}
@@ -156,7 +228,6 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
         Cash Masuk
       </div>
       <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
-        {/* Cash Received */}
         <MiniCard
           label="Received (bulan ini)"
           value={data.cashReceived}
@@ -166,7 +237,6 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           bgAccent="#064e3b"
           sub="Shipped & completed bulan ini"
         />
-        {/* Spill Over */}
         <MiniCard
           label="Spill Over (bulan lalu)"
           value={data.spillOver}
@@ -209,7 +279,6 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
         Cash Belum Masuk
       </div>
       <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
-        {/* In Progress */}
         <MiniCard
           label="In Progress (bulan ini)"
           value={data.cashInProgress}
@@ -219,7 +288,6 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           bgAccent="#78350f"
           sub="Shipped bulan ini, menunggu completed"
         />
-        {/* Overdue */}
         <MiniCard
           label="Overdue (bulan lalu)"
           value={data.overdue}
