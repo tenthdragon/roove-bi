@@ -8,6 +8,7 @@ import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, Compos
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
 import SyncOrdersWidget from '@/components/SyncOrdersWidget';
+import CashFlowSection from '@/components/CashFlowSection';
 
 const TT = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
@@ -31,7 +32,6 @@ export default function OverviewPage() {
   const { activeBrands, isActiveBrand } = useActiveBrands();
   const [userRole, setUserRole] = useState(null);
 
-  // Fetch user role for conditional rendering
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (user) {
@@ -44,7 +44,6 @@ export default function OverviewPage() {
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     setLoading(true);
-    // Now only need daily_product_summary — mp_admin_cost is in this table
     supabase.from('daily_product_summary')
       .select('*')
       .gte('date', dateRange.from)
@@ -56,7 +55,6 @@ export default function OverviewPage() {
       });
   }, [dateRange, supabase]);
 
-  // Total MP admin fee — now from same table as other metrics
   const totalMpFee = useMemo(() => {
     return dailyData.reduce((a, d) => a + Math.abs(Number(d.mp_admin_cost) || 0), 0);
   }, [dailyData]);
@@ -73,7 +71,7 @@ export default function OverviewPage() {
     const ts = dates.reduce((a,d) => a + byDate[d].s, 0);
     const tg = dates.reduce((a,d) => a + byDate[d].g, 0);
     const tn = dates.reduce((a,d) => a + byDate[d].n, 0);
-    const tm = tg - tn; // Mkt Cost + MP Fee combined
+    const tm = tg - tn;
     const ad = dates.filter(d => byDate[d].s > 0).length;
     const chart = dates.map(d => ({
       date: shortDate(d),
@@ -96,13 +94,21 @@ export default function OverviewPage() {
     });
     return Object.entries(byP).filter(([,v]) => v.s > 0).sort((a,b) => b[1].s - a[1].s)
       .map(([p, v]) => {
-        const mkt = v.g - v.n; // Total = Mkt Cost + MP Fee
+        const mkt = v.g - v.n;
         return { sku: p, sales: v.s, gp: v.g, nam: v.n, mkt, mpFee: v.mp, gmpR: v.s>0?v.n/v.s*100:0, mktR: v.s>0?mkt/v.s*100:0, sp: kpi.ts>0?v.s/kpi.ts*100:0 };
       });
   }, [dailyData, kpi.ts]);
 
   const hasPreFebData = dateRange.from < '2026-02-01';
   const mpFeePercent = kpi.tm > 0 ? (totalMpFee / kpi.tm * 100) : 0;
+
+  const cashFlowPeriodStart = useMemo(() => {
+    if (!dateRange.from) return null;
+    const [y, m] = dateRange.from.split('-');
+    return `${y}-${m}-01`;
+  }, [dateRange.from]);
+
+  const isOwnerOrAdmin = userRole === 'owner' || userRole === 'admin';
 
   const KPI = ({ label, val, sub, color='#3b82f6' }) => (
     <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:'16px 18px', flex:'1 1 160px', minWidth:150, position:'relative', overflow:'hidden' }}>
@@ -126,7 +132,7 @@ export default function OverviewPage() {
     return (
       <div className="fade-in">
         <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
-        {(userRole === 'owner' || userRole === 'admin') && <SyncOrdersWidget />}
+        {isOwnerOrAdmin && <SyncOrdersWidget />}
         <div style={{ textAlign:'center', padding:60, color:'#64748b', background:'#111a2e', border:'1px solid #1a2744', borderRadius:12 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>📊</div>
           <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
@@ -142,9 +148,10 @@ export default function OverviewPage() {
         <div><h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2><div style={{ fontSize:12, color:'#64748b' }}>{kpi.ad} active days</div></div>
       </div>
 
-      {/* ── Scalev Order Sync Widget (owner/admin only) ── */}
-      {(userRole === 'owner' || userRole === 'admin') && <SyncOrdersWidget />}
+      {/* ── Scalev Order Sync (owner/admin) ── */}
+      {isOwnerOrAdmin && <SyncOrdersWidget />}
 
+      {/* ── KPI Cards ── */}
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
         <KPI label="Net Sales" val={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg: ${fmtRupiah(kpi.avg)}/hari`} />
         <KPI label="Gross Profit" val={`Rp ${fmtCompact(kpi.tg)}`} sub={`GP Margin: ${kpi.gpM.toFixed(1)}%`} color="#10b981" />
@@ -152,7 +159,11 @@ export default function OverviewPage() {
         <KPI label="Profit After Mkt" val={`Rp ${fmtCompact(kpi.tn)}`} sub={`Margin After Mkt: ${kpi.nM.toFixed(1)}%`} color="#06b6d4" />
       </div>
 
-      {/* Pre-Feb disclaimer */}
+      {/* ── Cash Flow Status (owner/admin) ── */}
+      {isOwnerOrAdmin && cashFlowPeriodStart && (
+        <CashFlowSection netSales={kpi.ts} periodStart={cashFlowPeriodStart} />
+      )}
+
       {hasPreFebData && (
         <div style={{ background:'#1e1b4b', border:'1px solid #3730a3', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:11, color:'#a5b4fc', display:'flex', alignItems:'center', gap:8 }}>
           <span style={{ fontSize:16 }}>ℹ️</span>
