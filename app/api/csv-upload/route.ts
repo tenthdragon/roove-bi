@@ -733,7 +733,7 @@ async function handleScalevUpload(
         const isFbs = (firstRow.platform || '').toLowerCase() === 'shopee' && courierService.includes('hemat');
         d.customer_name = isFbs ? null : (firstRow.name || null);
       
-      if (firstRow.phone && !existing.customer_phone) d.customer_phone = firstRow.phone;
+      if (firstRow.phone && (!existing.customer_phone || existing.customer_phone.startsWith('temp:'))) d.customer_phone = firstRow.phone;
       if (firstRow.email && !existing.customer_email) d.customer_email = firstRow.email;
 
       if (firstRow.order_status) d.status = firstRow.order_status;
