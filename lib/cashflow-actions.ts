@@ -10,6 +10,8 @@ export interface CashFlowLive {
   spillOverOrders: number;
   cashInProgress: number;
   cashInProgressOrders: number;
+  overdue: number;
+  overdueOrders: number;
 }
 
 export async function fetchLiveCashFlow(periodStart: string): Promise<CashFlowLive> {
@@ -27,6 +29,7 @@ export async function fetchLiveCashFlow(periodStart: string): Promise<CashFlowLi
       cashReceived: 0, cashReceivedOrders: 0,
       spillOver: 0, spillOverOrders: 0,
       cashInProgress: 0, cashInProgressOrders: 0,
+      overdue: 0, overdueOrders: 0,
     };
   }
 
@@ -34,6 +37,7 @@ export async function fetchLiveCashFlow(periodStart: string): Promise<CashFlowLi
     cashReceived: 0, cashReceivedOrders: 0,
     spillOver: 0, spillOverOrders: 0,
     cashInProgress: 0, cashInProgressOrders: 0,
+    overdue: 0, overdueOrders: 0,
   };
 
   for (const row of (data || [])) {
@@ -46,6 +50,9 @@ export async function fetchLiveCashFlow(periodStart: string): Promise<CashFlowLi
     } else if (row.category === 'in_progress') {
       result.cashInProgress = Number(row.total);
       result.cashInProgressOrders = Number(row.order_count);
+    } else if (row.category === 'overdue') {
+      result.overdue = Number(row.total);
+      result.overdueOrders = Number(row.order_count);
     }
   }
 
