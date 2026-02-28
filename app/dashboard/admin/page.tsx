@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase-browser';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
 import SheetManager from '@/components/SheetManager';
@@ -20,6 +21,9 @@ const TABS = [
 
 export default function AdminPage() {
   const supabase = createClient();
+  const searchParams = useSearchParams();
+  const showAdvanced = searchParams.get('advanced') === 'true';
+
   const [profile, setProfile] = useState(null);
   const [activeTab, setActiveTab] = useState('daily');
 
@@ -166,15 +170,11 @@ export default function AdminPage() {
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             style={{
-              padding: '8px 16px',
-              background: 'none',
-              border: 'none',
+              padding: '8px 16px', background: 'none', border: 'none',
               borderBottom: activeTab === tab.id ? '2px solid #3b82f6' : '2px solid transparent',
               color: activeTab === tab.id ? '#e2e8f0' : '#64748b',
-              fontSize: 13,
-              fontWeight: activeTab === tab.id ? 700 : 500,
-              cursor: 'pointer',
-              transition: 'all 0.15s',
+              fontSize: 13, fontWeight: activeTab === tab.id ? 700 : 500,
+              cursor: 'pointer', transition: 'all 0.15s',
             }}
           >
             {tab.label}
@@ -188,60 +188,54 @@ export default function AdminPage() {
           {/* Google Sheets Sync */}
           <SheetManager />
 
-          {/* Excel Upload */}
-          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Upload Data Excel</div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
-              Upload file .xlsx. Upload ulang bulan yang sama akan menimpa data sebelumnya.
-            </div>
-            <div
-              className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
-              onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-              onDragLeave={() => setDragOver(false)}
-              onDrop={e => {
-                e.preventDefault(); setDragOver(false);
-                const f = e.dataTransfer.files[0];
-                if (f) handleUpload(f);
-              }}
-              onClick={() => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.xlsx,.xls';
-                input.onchange = (e) => {
-                  const f = e.target.files[0];
+          {/* Excel Upload — only visible with ?advanced=true */}
+          {showAdvanced && (
+            <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Upload Data Excel</div>
+              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+                Upload file .xlsx. Upload ulang bulan yang sama akan menimpa data sebelumnya.
+              </div>
+              <div
+                className={`drop-zone ${dragOver ? 'drag-over' : ''}`}
+                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={e => {
+                  e.preventDefault(); setDragOver(false);
+                  const f = e.dataTransfer.files[0];
                   if (f) handleUpload(f);
-                };
-                input.click();
-              }}
-            >
-              {uploading ? (
-                <div>
-                  <div className="spinner" style={{
-                    width: 32, height: 32,
-                    border: '3px solid #1a2744', borderTop: '3px solid #3b82f6',
-                    borderRadius: '50%', margin: '0 auto 12px'
-                  }} />
-                  <div style={{ color: '#64748b' }}>Mengupload & memproses data...</div>
+                }}
+                onClick={() => {
+                  const input = document.createElement('input');
+                  input.type = 'file'; input.accept = '.xlsx,.xls';
+                  input.onchange = (e) => { const f = e.target.files[0]; if (f) handleUpload(f); };
+                  input.click();
+                }}
+              >
+                {uploading ? (
+                  <div>
+                    <div className="spinner" style={{ width: 32, height: 32, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%', margin: '0 auto 12px' }} />
+                    <div style={{ color: '#64748b' }}>Mengupload & memproses data...</div>
+                  </div>
+                ) : (
+                  <div>
+                    <div style={{ fontSize: 28, marginBottom: 6 }}>📁</div>
+                    <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 13 }}>Drag & drop file Excel di sini</div>
+                    <div style={{ fontSize: 11, color: '#64748b' }}>atau klik untuk memilih file</div>
+                  </div>
+                )}
+              </div>
+              {uploadResult && (
+                <div style={{ marginTop: 12, padding: 12, background: '#064e3b', borderRadius: 8, color: '#10b981', fontSize: 13 }}>
+                  ✅ Berhasil! Periode: {uploadResult.period.month}/{uploadResult.period.year}. Data: {uploadResult.counts.dailyProduct} daily, {uploadResult.counts.dailyChannel} channel, {uploadResult.counts.ads} ads.
                 </div>
-              ) : (
-                <div>
-                  <div style={{ fontSize: 28, marginBottom: 6 }}>📁</div>
-                  <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 13 }}>Drag & drop file Excel di sini</div>
-                  <div style={{ fontSize: 11, color: '#64748b' }}>atau klik untuk memilih file</div>
+              )}
+              {uploadError && (
+                <div style={{ marginTop: 12, padding: 12, background: '#7f1d1d', borderRadius: 8, color: '#ef4444', fontSize: 13 }}>
+                  ❌ {uploadError}
                 </div>
               )}
             </div>
-            {uploadResult && (
-              <div style={{ marginTop: 12, padding: 12, background: '#064e3b', borderRadius: 8, color: '#10b981', fontSize: 13 }}>
-                ✅ Berhasil! Periode: {uploadResult.period.month}/{uploadResult.period.year}. Data: {uploadResult.counts.dailyProduct} daily, {uploadResult.counts.dailyChannel} channel, {uploadResult.counts.ads} ads.
-              </div>
-            )}
-            {uploadError && (
-              <div style={{ marginTop: 12, padding: 12, background: '#7f1d1d', borderRadius: 8, color: '#ef4444', fontSize: 13 }}>
-                ❌ {uploadError}
-              </div>
-            )}
-          </div>
+          )}
 
           {/* CSV Order Upload */}
           <CsvOrderUploader />
@@ -276,27 +270,17 @@ export default function AdminPage() {
               <div style={{ flex: '1 1 200px' }}>
                 <label style={{ fontSize: 11, color: '#64748b', display: 'block', marginBottom: 4 }}>Email</label>
                 <input
-                  type="email"
-                  value={inviteEmail}
+                  type="email" value={inviteEmail}
                   onChange={e => setInviteEmail(e.target.value)}
                   placeholder="nama@email.com"
-                  style={{
-                    width: '100%', padding: '8px 12px', borderRadius: 6,
-                    border: '1px solid #1a2744', background: '#0b1121',
-                    color: '#e2e8f0', fontSize: 13, outline: 'none'
-                  }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #1a2744', background: '#0b1121', color: '#e2e8f0', fontSize: 13, outline: 'none' }}
                 />
               </div>
               <div style={{ flex: '0 0 140px' }}>
                 <label style={{ fontSize: 11, color: '#64748b', display: 'block', marginBottom: 4 }}>Role</label>
                 <select
-                  value={inviteRole}
-                  onChange={e => setInviteRole(e.target.value)}
-                  style={{
-                    width: '100%', padding: '8px 12px', borderRadius: 6,
-                    border: '1px solid #1a2744', background: '#0b1121',
-                    color: '#e2e8f0', fontSize: 13
-                  }}
+                  value={inviteRole} onChange={e => setInviteRole(e.target.value)}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #1a2744', background: '#0b1121', color: '#e2e8f0', fontSize: 13 }}
                 >
                   <option value="admin">Admin</option>
                   <option value="finance">Finance</option>
@@ -305,14 +289,13 @@ export default function AdminPage() {
                 </select>
               </div>
               <button
-                onClick={handleInvite}
-                disabled={inviting}
+                onClick={handleInvite} disabled={inviting}
                 style={{
                   padding: '8px 20px', borderRadius: 6, border: 'none',
                   cursor: inviting ? 'not-allowed' : 'pointer',
-                  background: inviting ? '#1a2744' : '#3b82f6',
-                  color: '#fff', fontSize: 13, fontWeight: 600,
-                  whiteSpace: 'nowrap', opacity: inviting ? 0.6 : 1
+                  background: inviting ? '#1a2744' : '#3b82f6', color: '#fff',
+                  fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+                  opacity: inviting ? 0.6 : 1
                 }}
               >
                 {inviting ? 'Mengundang...' : '+ Invite'}
@@ -335,9 +318,7 @@ export default function AdminPage() {
               const rl = roleLabel(r);
               const desc = r === 'owner' ? 'akses penuh' : r === 'admin' ? 'read-only' : r === 'finance' ? 'sync/upload' : r === 'brand_manager' ? 'marketing' : r === 'staff' ? 'staff' : 'pending';
               return (
-                <span key={r} style={{
-                  padding: '2px 8px', borderRadius: 5, background: rl.bg, color: rl.color, fontWeight: 600
-                }}>
+                <span key={r} style={{ padding: '2px 8px', borderRadius: 5, background: rl.bg, color: rl.color, fontWeight: 600 }}>
                   {rl.text} — {desc}
                 </span>
               );
@@ -357,10 +338,7 @@ export default function AdminPage() {
                 }}>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 13 }}>{u.email}</div>
-                    <span style={{
-                      padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                      background: rl.bg, color: rl.color
-                    }}>
+                    <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: rl.bg, color: rl.color }}>
                       {rl.text}
                     </span>
                   </div>
@@ -368,28 +346,15 @@ export default function AdminPage() {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {u.role === 'pending' ? (
                         <>
-                          <button onClick={() => handleRoleChange(u.id, 'admin')} style={{
-                            padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                            background: '#064e3b', color: '#10b981', fontSize: 12, fontWeight: 600
-                          }}>✓ Admin</button>
-                          <button onClick={() => handleRoleChange(u.id, 'finance')} style={{
-                            padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                            background: '#1e3a5f', color: '#60a5fa', fontSize: 12, fontWeight: 600
-                          }}>✓ Finance</button>
-                          <button onClick={() => handleRoleChange(u.id, 'brand_manager')} style={{
-                            padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                            background: '#78350f', color: '#f59e0b', fontSize: 12, fontWeight: 600
-                          }}>✓ Brand Manager</button>
+                          <button onClick={() => handleRoleChange(u.id, 'admin')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#064e3b', color: '#10b981', fontSize: 12, fontWeight: 600 }}>✓ Admin</button>
+                          <button onClick={() => handleRoleChange(u.id, 'finance')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#1e3a5f', color: '#60a5fa', fontSize: 12, fontWeight: 600 }}>✓ Finance</button>
+                          <button onClick={() => handleRoleChange(u.id, 'brand_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#78350f', color: '#f59e0b', fontSize: 12, fontWeight: 600 }}>✓ Brand Manager</button>
                         </>
                       ) : (
                         <select
                           value={u.role}
                           onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                          style={{
-                            padding: '5px 10px', borderRadius: 6,
-                            border: '1px solid #1a2744', background: '#0b1121',
-                            color: '#e2e8f0', fontSize: 12
-                          }}
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#0b1121', color: '#e2e8f0', fontSize: 12 }}
                         >
                           <option value="staff">Staff</option>
                           <option value="admin">Admin</option>
