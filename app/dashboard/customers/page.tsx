@@ -109,66 +109,86 @@ export default function CustomersPage() {
     return CHANNEL_ORDER.filter(ch => ch === 'Global' || groups.has(ch));
   }, [groupedDaily]);
 
+  // ── Chart data: now with 3 categories ──
   const chartData = useMemo(() => {
     const byDate = {};
     for (const row of filteredDaily) {
-      if (!byDate[row.date]) byDate[row.date] = { date: row.date, new: 0, repeat: 0 };
+      if (!byDate[row.date]) byDate[row.date] = { date: row.date, new: 0, repeat: 0, unidentified: 0 };
       if (row.customer_type === 'new') byDate[row.date].new += row.order_count || 0;
-      else byDate[row.date].repeat += row.order_count || 0;
+      else if (row.customer_type === 'ro') byDate[row.date].repeat += row.order_count || 0;
+      else if (row.customer_type === 'unidentified') byDate[row.date].unidentified += row.order_count || 0;
     }
     return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
   }, [filteredDaily]);
 
+  // ── KPIs: now with unidentified ──
   const filteredKpis = useMemo(() => {
     if (!kpis) return null;
-    let newC = 0, repC = 0, newR = 0, repR = 0, newO = 0, repO = 0;
+    let newC = 0, repC = 0, unidC = 0;
+    let newR = 0, repR = 0, unidR = 0;
+    let newO = 0, repO = 0, unidO = 0;
     for (const row of filteredDaily) {
       if (row.customer_type === 'new') {
         newC += row.customer_count || 0;
         newR += Number(row.revenue) || 0;
         newO += row.order_count || 0;
-      } else {
+      } else if (row.customer_type === 'ro') {
         repC += row.customer_count || 0;
         repR += Number(row.revenue) || 0;
         repO += row.order_count || 0;
+      } else if (row.customer_type === 'unidentified') {
+        unidC += row.customer_count || 0;
+        unidR += Number(row.revenue) || 0;
+        unidO += row.order_count || 0;
       }
     }
-    const tot = newC + repC;
+    // Repeat rate based on identified customers only
+    const identifiedTotal = newC + repC;
     return {
-      totalCustomers: tot, newCustomers: newC, repeatCustomers: repC,
-      repeatRate: tot > 0 ? (repC / tot) * 100 : 0,
+      totalCustomers: identifiedTotal,
+      newCustomers: newC, repeatCustomers: repC,
+      repeatRate: identifiedTotal > 0 ? (repC / identifiedTotal) * 100 : 0,
       newRevenue: newR, repeatRevenue: repR,
+      unidentifiedRevenue: unidR, unidentifiedOrders: unidO, unidentifiedCustomers: unidC,
       avgOrderValue: (newO + repO) > 0 ? (newR + repR) / (newO + repO) : 0,
-      newOrders: newO, repeatOrders: repO
+      newOrders: newO, repeatOrders: repO,
+      totalRevenue: newR + repR + unidR,
+      totalOrders: newO + repO + unidO,
     };
   }, [kpis, filteredDaily]);
 
+  // ── Channel performance: include unidentified ──
   const channelPerformance = useMemo(() => {
     const byGroup = {};
     for (const row of groupedDaily) {
       const g = row.channel_group;
-      if (!byGroup[g]) byGroup[g] = { newOrders: 0, repeatOrders: 0, newCustomers: 0, repeatCustomers: 0, newRevenue: 0, repeatRevenue: 0 };
+      if (!byGroup[g]) byGroup[g] = { newOrders: 0, repeatOrders: 0, unidOrders: 0, newCustomers: 0, repeatCustomers: 0, unidCustomers: 0, newRevenue: 0, repeatRevenue: 0, unidRevenue: 0 };
       if (row.customer_type === 'new') {
         byGroup[g].newOrders += row.order_count || 0;
         byGroup[g].newCustomers += row.customer_count || 0;
         byGroup[g].newRevenue += Number(row.revenue) || 0;
-      } else {
+      } else if (row.customer_type === 'ro') {
         byGroup[g].repeatOrders += row.order_count || 0;
         byGroup[g].repeatCustomers += row.customer_count || 0;
         byGroup[g].repeatRevenue += Number(row.revenue) || 0;
+      } else if (row.customer_type === 'unidentified') {
+        byGroup[g].unidOrders += row.order_count || 0;
+        byGroup[g].unidCustomers += row.customer_count || 0;
+        byGroup[g].unidRevenue += Number(row.revenue) || 0;
       }
     }
     const rows = CHANNEL_ORDER.filter(ch => ch !== 'Global' && byGroup[ch]).map(ch => {
       const d = byGroup[ch];
-      const tO = d.newOrders + d.repeatOrders;
+      const tO = d.newOrders + d.repeatOrders + d.unidOrders;
       const tC = d.newCustomers + d.repeatCustomers;
-      const tR = d.newRevenue + d.repeatRevenue;
+      const tR = d.newRevenue + d.repeatRevenue + d.unidRevenue;
       return {
         channel: ch, totalOrders: tO, totalCustomers: tC,
         newCustomers: d.newCustomers, repeatCustomers: d.repeatCustomers,
         repeatRate: tC > 0 ? (d.repeatCustomers / tC) * 100 : 0,
         totalRevenue: tR, repeatRevenue: d.repeatRevenue,
         repeatRevShare: tR > 0 ? (d.repeatRevenue / tR) * 100 : 0,
+        unidOrders: d.unidOrders, unidRevenue: d.unidRevenue,
         color: CHANNEL_TAB_COLORS[ch] || '#64748b'
       };
     });
@@ -200,7 +220,7 @@ export default function CustomersPage() {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700 }}>Customer Analytics</h2>
-          <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>New vs Repeat — excluding unidentified (FBS)</p>
+          <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>New vs Repeat vs Unidentified</p>
         </div>
         <DateRangePicker
           from={dateRange.from} to={dateRange.to}
@@ -240,10 +260,11 @@ export default function CustomersPage() {
 function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, setChannelFilter, availableChannels, topCustomers, rtsCancel }) {
   if (!k) return <div style={{ color: '#64748b', padding: 40, textAlign: 'center' }}>Belum ada data customer untuk periode ini.</div>;
 
-  const maxOrders = Math.max(...chartData.map(d => d.new + d.repeat), 1);
-  const totalRevenue = k.newRevenue + k.repeatRevenue;
-  const newRevPct = totalRevenue > 0 ? (k.newRevenue / totalRevenue) * 100 : 0;
-  const repRevPct = totalRevenue > 0 ? (k.repeatRevenue / totalRevenue) * 100 : 0;
+  const maxOrders = Math.max(...chartData.map(d => d.new + d.repeat + d.unidentified), 1);
+  const totalRevAll = k.totalRevenue;
+  const newRevPct = totalRevAll > 0 ? (k.newRevenue / totalRevAll) * 100 : 0;
+  const repRevPct = totalRevAll > 0 ? (k.repeatRevenue / totalRevAll) * 100 : 0;
+  const unidRevPct = totalRevAll > 0 ? (k.unidentifiedRevenue / totalRevAll) * 100 : 0;
 
   return (
     <>
@@ -286,63 +307,54 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
         ))}
       </div>
 
-      {/* ═══ 3. KPI CARDS (without RTS/Canceled) ═══ */}
+      {/* ═══ 3. KPI CARDS ═══ */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
         {[
           { label: 'Total Customer', value: k.totalCustomers?.toLocaleString('id-ID'), color: '#3b82f6', sub: `${k.newOrders + k.repeatOrders} orders` },
           { label: 'New Customer', value: k.newCustomers?.toLocaleString('id-ID'), color: '#10b981', sub: fmtCompact(k.newRevenue) },
           { label: 'Repeat Customer', value: k.repeatCustomers?.toLocaleString('id-ID'), color: '#f59e0b', sub: fmtCompact(k.repeatRevenue) },
-          { label: 'Repeat Rate', value: fmtPct(k.repeatRate), color: k.repeatRate > 20 ? '#10b981' : '#ef4444', sub: 'target > 20%' },
+          { label: 'Repeat Rate', value: fmtPct(k.repeatRate), color: k.repeatRate > 20 ? '#10b981' : '#ef4444', sub: 'identified only' },
           { label: 'AOV', value: fmtCompact(k.avgOrderValue), color: '#8b5cf6', sub: 'per order' },
         ].map((card, i) => (
           <KpiCard key={i} {...card} />
         ))}
       </div>
 
-      {/* ═══ 3b. NEW vs REPEAT REVENUE COMPARISON ═══ */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
+      {/* ═══ 3b. REVENUE COMPARISON: New vs Repeat vs Unidentified ═══ */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
         {/* New Customer Revenue */}
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 10, padding: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-            <div>
-              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>New Customer Revenue</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: '#10b981', fontFamily: "'JetBrains Mono', monospace" }}>{fmtCompact(k.newRevenue)}</div>
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#10b981', fontFamily: "'JetBrains Mono', monospace", background: '#064e3b', padding: '3px 10px', borderRadius: 8 }}>
-              {fmtPct(newRevPct, 1)}
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ flex: 1, height: 6, background: '#0f172a', borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{ width: `${newRevPct}%`, height: '100%', background: '#10b981', borderRadius: 3, transition: 'width 0.5s ease' }} />
-            </div>
-          </div>
-          <div style={{ fontSize: 10, color: '#475569', marginTop: 6 }}>{k.newOrders.toLocaleString('id-ID')} orders · AOV {fmtCompact(k.newOrders > 0 ? k.newRevenue / k.newOrders : 0)}</div>
-        </div>
-
+        <RevenueCard
+          label="New Customer Revenue"
+          value={k.newRevenue}
+          pct={newRevPct}
+          color="#10b981"
+          bgColor="#064e3b"
+          orders={k.newOrders}
+        />
         {/* Repeat Customer Revenue */}
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 10, padding: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
-            <div>
-              <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Repeat Order Revenue</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: '#f59e0b', fontFamily: "'JetBrains Mono', monospace" }}>{fmtCompact(k.repeatRevenue)}</div>
-            </div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', fontFamily: "'JetBrains Mono', monospace", background: '#78350f', padding: '3px 10px', borderRadius: 8 }}>
-              {fmtPct(repRevPct, 1)}
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ flex: 1, height: 6, background: '#0f172a', borderRadius: 3, overflow: 'hidden' }}>
-              <div style={{ width: `${repRevPct}%`, height: '100%', background: '#f59e0b', borderRadius: 3, transition: 'width 0.5s ease' }} />
-            </div>
-          </div>
-          <div style={{ fontSize: 10, color: '#475569', marginTop: 6 }}>{k.repeatOrders.toLocaleString('id-ID')} orders · AOV {fmtCompact(k.repeatOrders > 0 ? k.repeatRevenue / k.repeatOrders : 0)}</div>
-        </div>
+        <RevenueCard
+          label="Repeat Order Revenue"
+          value={k.repeatRevenue}
+          pct={repRevPct}
+          color="#f59e0b"
+          bgColor="#78350f"
+          orders={k.repeatOrders}
+        />
+        {/* Unidentified Revenue */}
+        <RevenueCard
+          label="Unidentified Revenue"
+          value={k.unidentifiedRevenue}
+          pct={unidRevPct}
+          color="#64748b"
+          bgColor="#1e293b"
+          orders={k.unidentifiedOrders}
+          tooltip="FBS & orders tanpa nama customer"
+        />
       </div>
 
       {/* ═══ 4. DAILY CHART ═══ */}
       <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, marginBottom: 20 }}>
-        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Daily New vs Repeat Orders</h3>
+        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Daily Orders by Customer Type</h3>
         <p style={{ margin: '0 0 14px', fontSize: 12, color: '#64748b' }}>{channelFilter === 'Global' ? 'Semua channel' : channelFilter}</p>
         {chartData.length === 0 ? (
           <div style={{ color: '#64748b', textAlign: 'center', padding: 40 }}>Tidak ada data untuk periode ini</div>
@@ -350,13 +362,19 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
           <div>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 180 }}>
               {chartData.map((d, i) => {
+                const total = d.new + d.repeat + d.unidentified;
                 const newH = (d.new / maxOrders) * 160;
                 const repH = (d.repeat / maxOrders) * 160;
+                const unidH = (d.unidentified / maxOrders) * 160;
                 return (
                   <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: 160, width: '100%', alignItems: 'center' }}>
-                      <div style={{ width: '70%', maxWidth: 20, height: repH, background: '#f59e0b', borderRadius: '3px 3px 0 0', minHeight: d.repeat > 0 ? 2 : 0 }} title={`Repeat: ${d.repeat}`} />
-                      <div style={{ width: '70%', maxWidth: 20, height: newH, background: '#10b981', borderRadius: d.repeat > 0 ? '0' : '3px 3px 0 0', minHeight: d.new > 0 ? 2 : 0 }} title={`New: ${d.new}`} />
+                      {/* Top: Unidentified (gray) */}
+                      <div style={{ width: '70%', maxWidth: 20, height: unidH, background: '#475569', borderRadius: (d.repeat > 0 || d.new > 0) ? '3px 3px 0 0' : '3px 3px 0 0', minHeight: d.unidentified > 0 ? 2 : 0 }} title={`Unidentified: ${d.unidentified}`} />
+                      {/* Middle: Repeat (amber) */}
+                      <div style={{ width: '70%', maxWidth: 20, height: repH, background: '#f59e0b', borderRadius: d.unidentified > 0 ? '0' : '3px 3px 0 0', minHeight: d.repeat > 0 ? 2 : 0 }} title={`Repeat: ${d.repeat}`} />
+                      {/* Bottom: New (green) */}
+                      <div style={{ width: '70%', maxWidth: 20, height: newH, background: '#10b981', borderRadius: (d.repeat > 0 || d.unidentified > 0) ? '0' : '3px 3px 0 0', minHeight: d.new > 0 ? 2 : 0 }} title={`New: ${d.new}`} />
                     </div>
                   </div>
                 );
@@ -377,6 +395,7 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
         <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: '#10b981' }} /><span style={{ fontSize: 10, color: '#94a3b8' }}>New</span></div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: '#f59e0b' }} /><span style={{ fontSize: 10, color: '#94a3b8' }}>Repeat</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: '#475569' }} /><span style={{ fontSize: 10, color: '#94a3b8' }}>Unidentified</span></div>
         </div>
       </div>
 
@@ -389,6 +408,32 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
 // ═══════════════════════════════════════════════════
 // SMALL COMPONENTS
 // ═══════════════════════════════════════════════════
+
+function RevenueCard({ label, value, pct, color, bgColor, orders, tooltip }) {
+  return (
+    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 10, padding: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+        <div>
+          <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace" }}>{fmtCompact(value)}</div>
+        </div>
+        <div style={{ fontSize: 13, fontWeight: 700, color, fontFamily: "'JetBrains Mono', monospace", background: bgColor, padding: '3px 10px', borderRadius: 8 }}>
+          {fmtPct(pct, 1)}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ flex: 1, height: 6, background: '#0f172a', borderRadius: 3, overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.5s ease' }} />
+        </div>
+      </div>
+      <div style={{ fontSize: 10, color: '#475569', marginTop: 6 }}>
+        {orders.toLocaleString('id-ID')} orders
+        {orders > 0 && ` · AOV ${fmtCompact(value / orders)}`}
+        {tooltip && <span style={{ marginLeft: 4, color: '#334155' }} title={tooltip}>ⓘ</span>}
+      </div>
+    </div>
+  );
+}
 
 function KpiCard({ label, value, color, sub }) {
   return (
