@@ -7,7 +7,6 @@ import { useDateRange } from '@/lib/DateRangeContext';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, Bar, Line } from 'recharts';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
-import SyncOrdersWidget from '@/components/SyncOrdersWidget';
 import CashFlowSection from '@/components/CashFlowSection';
 
 const TT = ({ active, payload, label }) => {
@@ -132,7 +131,6 @@ export default function OverviewPage() {
     return (
       <div className="fade-in">
         <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
-        {isOwnerOrAdmin && <SyncOrdersWidget />}
         <div style={{ textAlign:'center', padding:60, color:'#64748b', background:'#111a2e', border:'1px solid #1a2744', borderRadius:12 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>📊</div>
           <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
@@ -147,9 +145,6 @@ export default function OverviewPage() {
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:12 }}>
         <div><h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2><div style={{ fontSize:12, color:'#64748b' }}>{kpi.ad} active days</div></div>
       </div>
-
-      {/* ── Scalev Order Sync (owner/admin) ── */}
-      {isOwnerOrAdmin && <SyncOrdersWidget />}
 
       {/* ── KPI Cards ── */}
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
