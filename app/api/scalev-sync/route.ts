@@ -18,24 +18,22 @@ function getServiceSupabase() {
 
 export const maxDuration = 250;
 
-// ── Fetch orders by status + date range from Scalev API ──
-async function fetchByStatusAndDate(
+// ── Fetch ALL pages for a single status+date combo ──
+async function fetchAllPages(
   apiKey: string,
   baseUrl: string,
   status: string,
-  timeSinceParam: string,  // e.g. 'shipped_time_since'
-  sinceDate: string,       // ISO 8601: '2026-01-01T00:00:00'
-  pageSize: number = 25,
+  timeSinceParam: string,
+  sinceDate: string,
 ): Promise<{ results: any[]; error?: string }> {
   const orders: any[] = [];
   let lastId = 0;
   let hasNext = true;
-  const MAX_PAGES = 200;
   let page = 0;
 
-  while (hasNext && page < MAX_PAGES) {
+  while (hasNext && page < 200) {
     page++;
-    let url = `${baseUrl}/order?status=${status}&${timeSinceParam}=${encodeURIComponent(sinceDate)}&page_size=${pageSize}`;
+    let url = `${baseUrl}/order?status=${status}&${timeSinceParam}=${encodeURIComponent(sinceDate)}&page_size=25`;
     if (lastId > 0) url += `&last_id=${lastId}`;
 
     try {
@@ -45,17 +43,14 @@ async function fetchByStatusAndDate(
 
       if (!res.ok) {
         const text = await res.text();
-        // If filter combo not supported, return what we have
         if (res.status === 400 || res.status === 404) {
-          return { results: orders, error: `Filter not supported: ${res.status} - ${text}` };
+          return { results: orders, error: `Filter not supported: ${res.status}` };
         }
         throw new Error(`Scalev API ${res.status}: ${text}`);
       }
 
       const json = await res.json();
-      if (json.code !== 200) {
-        return { results: orders, error: `Scalev code ${json.code}` };
-      }
+      if (json.code !== 200) return { results: orders, error: `Code ${json.code}` };
 
       const batch = json.data?.results || [];
       if (batch.length === 0) break;
@@ -71,30 +66,88 @@ async function fetchByStatusAndDate(
   return { results: orders };
 }
 
-// ── Upsert a single order + lines ──
-async function upsertOrder(svc: any, order: any): Promise<{ ok: boolean; error?: string }> {
-  try {
-    const { orderHeader, orderLines } = await parseOrderForDb(order);
+// ── Batch upsert orders (50 at a time) ──
+async function batchUpsertOrders(
+  svc: any,
+  orders: any[],
+): Promise<{ upserted: number; errors: string[] }> {
+  const BATCH_SIZE = 50;
+  let totalUpserted = 0;
+  const errors: string[] = [];
 
-    const { data: upserted, error: orderErr } = await svc
-      .from('scalev_orders')
-      .upsert(orderHeader, { onConflict: 'scalev_id' })
-      .select('id')
-      .single();
+  // Step 1: Parse all orders first (parallel)
+  const parsed = await Promise.all(
+    orders.map(async (order) => {
+      try {
+        const { orderHeader, orderLines } = await parseOrderForDb(order);
+        return { orderHeader, orderLines, orderId: order.order_id };
+      } catch (err: any) {
+        errors.push(`Parse ${order.order_id}: ${err.message}`);
+        return null;
+      }
+    })
+  );
 
-    if (orderErr) return { ok: false, error: `Upsert ${order.order_id}: ${orderErr.message}` };
+  const validOrders = parsed.filter(Boolean) as {
+    orderHeader: any;
+    orderLines: any[];
+    orderId: string;
+  }[];
 
-    // Replace order lines
-    await svc.from('scalev_order_lines').delete().eq('order_id', order.order_id);
-    if (orderLines.length > 0) {
-      const linesWithFk = orderLines.map((l: any) => ({ ...l, scalev_order_id: upserted.id }));
-      await svc.from('scalev_order_lines').insert(linesWithFk);
+  // Step 2: Batch upsert headers
+  for (let i = 0; i < validOrders.length; i += BATCH_SIZE) {
+    const batch = validOrders.slice(i, i + BATCH_SIZE);
+    const headers = batch.map((o) => o.orderHeader);
+
+    try {
+      const { data: upsertedRows, error: upsertErr } = await svc
+        .from('scalev_orders')
+        .upsert(headers, { onConflict: 'scalev_id' })
+        .select('id, order_id');
+
+      if (upsertErr) {
+        errors.push(`Batch upsert ${i}: ${upsertErr.message}`);
+        continue;
+      }
+
+      // Build id lookup: order_id → internal id
+      const idMap = new Map<string, string>();
+      for (const row of upsertedRows || []) {
+        idMap.set(row.order_id, row.id);
+      }
+
+      // Step 3: Batch delete old lines for this batch
+      const orderIds = batch.map((o) => o.orderId);
+      await svc.from('scalev_order_lines').delete().in('order_id', orderIds);
+
+      // Step 4: Batch insert new lines
+      const allLines: any[] = [];
+      for (const o of batch) {
+        const internalId = idMap.get(o.orderId);
+        if (!internalId || o.orderLines.length === 0) continue;
+        for (const line of o.orderLines) {
+          allLines.push({ ...line, scalev_order_id: internalId });
+        }
+      }
+
+      if (allLines.length > 0) {
+        // Insert lines in sub-batches of 200 (Supabase limit)
+        for (let j = 0; j < allLines.length; j += 200) {
+          const lineBatch = allLines.slice(j, j + 200);
+          const { error: lineErr } = await svc
+            .from('scalev_order_lines')
+            .insert(lineBatch);
+          if (lineErr) errors.push(`Lines batch ${j}: ${lineErr.message}`);
+        }
+      }
+
+      totalUpserted += batch.length;
+    } catch (err: any) {
+      errors.push(`Batch ${i} error: ${err.message}`);
     }
-
-    return { ok: true };
-  } catch (err: any) {
-    return { ok: false, error: `Parse ${order.order_id}: ${err.message}` };
   }
+
+  return { upserted: totalUpserted, errors };
 }
 
 // ══ POST: trigger sync ══
@@ -112,7 +165,6 @@ export async function POST(req: NextRequest) {
     const svc = getServiceSupabase();
     clearProductMappingCache();
 
-    // Create sync log
     const { data: syncLog } = await svc
       .from('scalev_sync_log')
       .insert({ status: 'running', sync_type: mode })
@@ -121,20 +173,15 @@ export async function POST(req: NextRequest) {
     const logId = syncLog?.id;
 
     const START = Date.now();
-    let totalFetched = 0;
-    let totalUpserted = 0;
-    const errors: string[] = [];
 
     // ══════════════════════════════════════════
-    // STATUS MODE: only in-flight, last 2 months
+    // STATUS MODE: parallel fetch + batch upsert
     // ══════════════════════════════════════════
     if (mode === 'status') {
-      // Date: first day of previous month
       const now = new Date();
       const sinceDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const sinceISO = sinceDate.toISOString();
 
-      // Fetch in-flight orders with appropriate date filter
       const statusQueries = [
         { status: 'shipped',     timeParam: 'shipped_time_since' },
         { status: 'shipped_rts', timeParam: 'shipped_time_since' },
@@ -143,36 +190,46 @@ export async function POST(req: NextRequest) {
         { status: 'ready',       timeParam: 'confirmed_time_since' },
       ];
 
-      for (const q of statusQueries) {
-        const { results, error: fetchErr } = await fetchByStatusAndDate(
-          config.api_key, config.base_url,
-          q.status, q.timeParam, sinceISO,
-        );
+      // Parallel fetch all statuses
+      const fetchResults = await Promise.all(
+        statusQueries.map((q) =>
+          fetchAllPages(config.api_key, config.base_url, q.status, q.timeParam, sinceISO)
+            .then((r) => ({ ...r, status: q.status }))
+        )
+      );
 
-        if (fetchErr) {
-          errors.push(`${q.status}: ${fetchErr}`);
-          // If filter not supported, don't continue — will show error to user
-          if (fetchErr.includes('not supported')) break;
-        }
+      // Collect all orders + errors
+      const allOrders: any[] = [];
+      const allErrors: string[] = [];
 
-        totalFetched += results.length;
-
-        for (const order of results) {
-          const { ok, error: upsertErr } = await upsertOrder(svc, order);
-          if (ok) totalUpserted++;
-          else if (upsertErr) errors.push(upsertErr);
-        }
+      for (const fr of fetchResults) {
+        if (fr.error) allErrors.push(`${fr.status}: ${fr.error}`);
+        allOrders.push(...fr.results);
       }
+
+      const totalFetched = allOrders.length;
+
+      // Deduplicate by order id (same order could appear in multiple status queries)
+      const seen = new Set<number>();
+      const uniqueOrders = allOrders.filter((o) => {
+        if (seen.has(o.id)) return false;
+        seen.add(o.id);
+        return true;
+      });
+
+      // Batch upsert
+      const { upserted, errors: upsertErrors } = await batchUpsertOrders(svc, uniqueOrders);
+      allErrors.push(...upsertErrors);
 
       const elapsed = Math.round((Date.now() - START) / 1000);
 
       if (logId) {
         await svc.from('scalev_sync_log').update({
           completed_at: new Date().toISOString(),
-          status: errors.length > 0 ? 'completed_with_warnings' : 'success',
+          status: allErrors.length > 0 ? 'completed_with_warnings' : 'success',
           orders_fetched: totalFetched,
-          orders_inserted: totalUpserted,
-          error_message: errors.length > 0 ? errors.slice(0, 5).join('; ') : null,
+          orders_inserted: upserted,
+          error_message: allErrors.length > 0 ? allErrors.slice(0, 5).join('; ') : null,
         }).eq('id', logId);
       }
 
@@ -180,27 +237,31 @@ export async function POST(req: NextRequest) {
         success: true,
         sync_type: 'status',
         orders_fetched: totalFetched,
-        orders_inserted: totalUpserted,
+        orders_unique: uniqueOrders.length,
+        orders_inserted: upserted,
         elapsed_seconds: elapsed,
         timed_out: false,
-        warnings: errors.length,
-        message: `Sync complete! ${totalFetched} in-flight orders checked, ${totalUpserted} updated (${elapsed}s).`,
+        warnings: allErrors.length,
+        message: `Sync complete! ${uniqueOrders.length} orders updated in ${elapsed}s.`,
       });
     }
 
     // ══════════════════════════════════════════
-    // INCREMENTAL / FULL MODE (legacy fallback)
+    // INCREMENTAL / FULL MODE (batch version)
     // ══════════════════════════════════════════
     let currentLastId = mode === 'full' ? 0 : config.last_sync_id;
     let maxScalevId = currentLastId;
     let hasMore = true;
     let timedOut = false;
     const TIME_LIMIT_MS = 240000;
-    let iterations = 0;
+    let totalFetched = 0;
+    let totalUpserted = 0;
+    const allErrors: string[] = [];
+    const buffer: any[] = [];
+    const FLUSH_SIZE = 50;
 
-    while (hasMore && iterations < 10000) {
+    while (hasMore) {
       if (Date.now() - START > TIME_LIMIT_MS) { timedOut = true; break; }
-      iterations++;
 
       const page = await fetchOrderList(config.api_key, config.base_url, currentLastId, 25);
       if (!page.results || page.results.length === 0) { hasMore = false; break; }
@@ -208,23 +269,33 @@ export async function POST(req: NextRequest) {
       for (const order of page.results) {
         totalFetched++;
         if (order.id > maxScalevId) maxScalevId = order.id;
-        const { ok } = await upsertOrder(svc, order);
-        if (ok) totalUpserted++;
+        buffer.push(order);
       }
 
-      hasMore = page.hasNext;
-      currentLastId = page.lastId;
+      // Flush buffer when full
+      if (buffer.length >= FLUSH_SIZE) {
+        const { upserted, errors } = await batchUpsertOrders(svc, buffer.splice(0));
+        totalUpserted += upserted;
+        allErrors.push(...errors);
 
-      // Save progress every 250
-      if (totalFetched % 250 === 0) {
+        // Save progress
         await svc.from('scalev_config').update({
           last_sync_id: maxScalevId,
           updated_at: new Date().toISOString(),
         }).eq('id', config.id);
       }
+
+      hasMore = page.hasNext;
+      currentLastId = page.lastId;
     }
 
-    // Save final cursor
+    // Flush remaining
+    if (buffer.length > 0) {
+      const { upserted, errors } = await batchUpsertOrders(svc, buffer);
+      totalUpserted += upserted;
+      allErrors.push(...errors);
+    }
+
     await svc.from('scalev_config').update({
       last_sync_id: maxScalevId,
       updated_at: new Date().toISOString(),
@@ -235,10 +306,12 @@ export async function POST(req: NextRequest) {
     if (logId) {
       await svc.from('scalev_sync_log').update({
         completed_at: new Date().toISOString(),
-        status: timedOut ? 'partial' : 'success',
+        status: timedOut ? 'partial' : (allErrors.length > 0 ? 'completed_with_warnings' : 'success'),
         orders_fetched: totalFetched,
         orders_inserted: totalUpserted,
-        error_message: timedOut ? `Time limit after ${elapsed}s. Run again to continue.` : null,
+        error_message: timedOut
+          ? `Time limit after ${elapsed}s. Run again to continue.`
+          : (allErrors.length > 0 ? allErrors.slice(0, 5).join('; ') : null),
       }).eq('id', logId);
     }
 
