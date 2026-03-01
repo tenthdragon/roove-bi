@@ -1,4 +1,11 @@
 import { google } from 'googleapis';
+import {
+  type ParsedData,
+  toNum,
+  parseDateValue,
+  buildBrandSheetMap,
+  SALES_CHANNELS,
+} from './parser-shared';
 
 function getAuth() {
   const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '{}');
@@ -13,40 +20,6 @@ async function getSheets() {
   const auth = getAuth();
   return google.sheets({ version: 'v4', auth });
 }
-
-function serialDateToISO(val: any): string | null {
-  if (!val) return null;
-  if (typeof val === 'number') {
-    const d = new Date((val - 25569) * 86400000);
-    return d.toISOString().split('T')[0];
-  }
-  if (typeof val === 'string') {
-    if (val.match(/^\d{4}-\d{2}-\d{2}/)) return val.split('T')[0];
-    const parts = val.split('/');
-    if (parts.length === 3) {
-      const m = parts[0].padStart(2, '0');
-      const d = parts[1].padStart(2, '0');
-      const y = parts[2].length === 2 ? '20' + parts[2] : parts[2];
-      return `${y}-${m}-${d}`;
-    }
-  }
-  return null;
-}
-
-function toNum(val: any): number {
-  if (val === null || val === undefined || val === '') return 0;
-  if (typeof val === 'number') return val;
-  const s = String(val).trim().replace(/\./g, '').replace(',', '.');
-  const n = parseFloat(s);
-  return isNaN(n) ? 0 : n;
-}
-
-// Sales channels in order as they appear in sheet
-const SHEET_CHANNELS = [
-  'Facebook Ads', 'Google Ads', 'Organik', 'Reseller',
-  'Shopee', 'TikTok Ads', 'TikTok Shop', 'Tokopedia',
-  'BliBli', 'Lazada', 'SnackVideo Ads',
-];
 
 const CHANNEL_MERGE: Record<string, string> = {
   'TikTok Ads': 'TikTok',
@@ -115,27 +88,6 @@ function detectNetAfterMktOrder(rows: any[][], startIdx: number): string[] {
   ];
 }
 
-export interface ParsedSheetData {
-  dailyProduct: Array<{
-    date: string; product: string; net_sales: number; gross_profit: number;
-    net_after_mkt: number; mkt_cost: number; mp_admin_cost: number;
-  }>;
-  dailyChannel: Array<{
-    date: string; product: string; channel: string; net_sales: number;
-    gross_profit: number; mp_admin_cost: number; net_after_mkt: number;
-  }>;
-  ads: Array<{
-    date: string; ad_account: string; spent: number; objective: string;
-    source: string; store: string; advertiser: string;
-  }>;
-  monthlySummary: Array<{
-    product: string; sales_after_disc: number; sales_pct: number;
-    gross_profit: number; gross_profit_pct: number; gross_after_mkt: number;
-    gmp_real: number; mkt_pct: number; mkt_share_pct: number;
-  }>;
-  period: { month: number; year: number };
-}
-
 async function getSheetNames(spreadsheetId: string): Promise<string[]> {
   const sheets = await getSheets();
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
@@ -153,28 +105,11 @@ async function fetchRange(spreadsheetId: string, range: string): Promise<any[][]
   return res.data.values || [];
 }
 
-// ── Build brand sheet mapping from registered brands ──
-function buildBrandSheetMap(
-  brandList: Array<{ name: string; sheet_name: string }>,
-  sheetNames: string[],
-): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const brand of brandList) {
-    const match = sheetNames.find(
-      s => s.toLowerCase() === brand.sheet_name.toLowerCase()
-    );
-    if (match) {
-      result[match] = brand.name;
-    }
-  }
-  return result;
-}
-
 // ── Main parser — now takes brandList parameter ──
 export async function parseGoogleSheet(
   spreadsheetId: string,
   brandList: Array<{ name: string; sheet_name: string }>,
-): Promise<ParsedSheetData> {
+): Promise<ParsedData> {
   // Defensive guard — prevents cryptic "e is not iterable" in production
   if (!brandList || !Array.isArray(brandList)) {
     throw new Error('brandList is required — pass the active brands array from the database');
@@ -184,10 +119,10 @@ export async function parseGoogleSheet(
   let periodMonth = 0;
   let periodYear = 0;
 
-  const dailyProduct: ParsedSheetData['dailyProduct'] = [];
-  const dailyChannel: ParsedSheetData['dailyChannel'] = [];
-  const ads: ParsedSheetData['ads'] = [];
-  const monthlySummary: ParsedSheetData['monthlySummary'] = [];
+  const dailyProduct: ParsedData['dailyProduct'] = [];
+  const dailyChannel: ParsedData['dailyChannel'] = [];
+  const ads: ParsedData['ads'] = [];
+  const monthlySummary: ParsedData['monthlySummary'] = [];
 
   // ── Build brand sheets from registered brands ──
   const brandSheets = buildBrandSheetMap(brandList, sheetNames);
@@ -223,7 +158,7 @@ export async function parseGoogleSheet(
     const dateRow = rows[0];
     const dates: Array<{ col: number; date: string }> = [];
     for (let c = 3; c < (dateRow?.length || 0); c++) {
-      const d = serialDateToISO(dateRow[c]);
+      const d = parseDateValue(dateRow[c]);
       if (d) {
         dates.push({ col: c, date: d });
         if (periodMonth === 0) {
@@ -250,7 +185,7 @@ export async function parseGoogleSheet(
 
       const channelBucket: Record<string, { ns: number; gp: number; mpAdmin: number; nam: number }> = {};
 
-      for (let ch = 0; ch < SHEET_CHANNELS.length; ch++) {
+      for (let ch = 0; ch < SALES_CHANNELS.length; ch++) {
         const nsRowIdx = 28 + ch;
         const gpRowIdx = 54 + ch;
         const netSales = toNum(rows[nsRowIdx]?.[col]);
@@ -261,18 +196,18 @@ export async function parseGoogleSheet(
 
         let mpAdmin = 0;
         if (format.hasMpAdmin) {
-          const offset = MP_ADMIN_CHANNEL_OFFSETS[SHEET_CHANNELS[ch]];
+          const offset = MP_ADMIN_CHANNEL_OFFSETS[SALES_CHANNELS[ch]];
           if (offset !== undefined) {
             mpAdmin = Math.abs(toNum(rows[format.mpAdminBaseIdx + offset]?.[col]));
           }
         }
         totalMpAdmin += mpAdmin;
 
-        const namRowIdx = netAfterMktMap[SHEET_CHANNELS[ch]];
+        const namRowIdx = netAfterMktMap[SALES_CHANNELS[ch]];
         const netAfterMktChannel = namRowIdx !== undefined && namRowIdx < rows.length
           ? toNum(rows[namRowIdx]?.[col]) : 0;
 
-        const resolved = resolveChannel(SHEET_CHANNELS[ch]);
+        const resolved = resolveChannel(SALES_CHANNELS[ch]);
         if (!channelBucket[resolved]) channelBucket[resolved] = { ns: 0, gp: 0, mpAdmin: 0, nam: 0 };
         channelBucket[resolved].ns += netSales;
         channelBucket[resolved].gp += gp;
@@ -320,7 +255,7 @@ export async function parseGoogleSheet(
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       if (!row || !row[0]) continue;
-      const dateStr = serialDateToISO(row[0]);
+      const dateStr = parseDateValue(row[0]);
       if (!dateStr) continue;
 
       ads.push({

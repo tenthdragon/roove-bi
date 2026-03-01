@@ -1,88 +1,11 @@
 import * as XLSX from 'xlsx';
-
-interface ParsedData {
-  dailyProduct: Array<{
-    date: string;
-    product: string;
-    net_sales: number;
-    gross_profit: number;
-    net_after_mkt: number;
-    mkt_cost: number;
-  }>;
-  dailyChannel: Array<{
-    date: string;
-    product: string;
-    channel: string;
-    net_sales: number;
-    gross_profit: number;
-  }>;
-  ads: Array<{
-    date: string;
-    ad_account: string;
-    spent: number;
-    objective: string;
-    source: string;
-    store: string;
-    advertiser: string;
-  }>;
-  monthlySummary: Array<{
-    product: string;
-    sales_after_disc: number;
-    sales_pct: number;
-    gross_profit: number;
-    gross_profit_pct: number;
-    gross_after_mkt: number;
-    gmp_real: number;
-    mkt_pct: number;
-    mkt_share_pct: number;
-  }>;
-  period: { month: number; year: number };
-}
-
-function toNum(val: any): number {
-  if (val === null || val === undefined) return 0;
-  if (typeof val === 'number') return val;
-  const s = String(val).trim().replace(/\./g, '').replace(',', '.');
-  const n = parseFloat(s);
-  return isNaN(n) ? 0 : n;
-}
-
-function excelDateToISO(val: any): string | null {
-  if (!val) return null;
-  if (val instanceof Date) {
-    return val.toISOString().split('T')[0];
-  }
-  if (typeof val === 'number') {
-    const d = new Date((val - 25569) * 86400000);
-    return d.toISOString().split('T')[0];
-  }
-  if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) {
-    return val.split('T')[0];
-  }
-  return null;
-}
-
-// ── Build brand sheet mapping from registered brands ──
-// brandList: array of { name, sheet_name } from the brands table
-// Returns: Record<sheetName, canonicalName> matched case-insensitively against workbook sheets
-function buildBrandSheetMap(
-  brandList: Array<{ name: string; sheet_name: string }>,
-  workbookSheetNames: string[],
-): Record<string, string> {
-  const result: Record<string, string> = {};
-
-  for (const brand of brandList) {
-    // Find matching sheet (case-insensitive)
-    const match = workbookSheetNames.find(
-      s => s.toLowerCase() === brand.sheet_name.toLowerCase()
-    );
-    if (match) {
-      result[match] = brand.name; // actual sheet name → canonical brand name
-    }
-  }
-
-  return result;
-}
+import {
+  type ParsedData,
+  toNum,
+  parseDateValue,
+  buildBrandSheetMap,
+  SALES_CHANNELS,
+} from './parser-shared';
 
 export function parseRooveExcel(
   buffer: ArrayBuffer,
@@ -104,7 +27,7 @@ export function parseRooveExcel(
       const addr = XLSX.utils.encode_cell({ r: 2, c });
       const cell = ws[addr];
       if (cell) {
-        const dateStr = excelDateToISO(cell.v);
+        const dateStr = parseDateValue(cell.v);
         if (dateStr) {
           const parts = dateStr.split('-');
           periodYear = parseInt(parts[0]);
@@ -151,7 +74,7 @@ export function parseRooveExcel(
     for (let c = 4; c < 36; c++) {
       const cell = ws[XLSX.utils.encode_cell({ r: 2, c })];
       if (cell) {
-        const d = excelDateToISO(cell.v);
+        const d = parseDateValue(cell.v);
         if (d) dates.push({ col: c, date: d });
       }
     }
@@ -164,13 +87,7 @@ export function parseRooveExcel(
       let totalMktCost = 0;
       let totalNetAfterMkt = 0;
 
-      const salesChannels: string[] = [
-        'Facebook Ads', 'Google Ads', 'Organik', 'Reseller',
-        'Shopee', 'TikTok Ads', 'TikTok Shop', 'Tokopedia',
-        'BliBli', 'Lazada', 'SnackVideo Ads'
-      ];
-
-      for (let i = 0; i < salesChannels.length; i++) {
+      for (let i = 0; i < SALES_CHANNELS.length; i++) {
         const nsRow = 30 + i;
         const gpRow = 56 + i;
 
@@ -184,7 +101,7 @@ export function parseRooveExcel(
           dailyChannel.push({
             date,
             product: productName,
-            channel: salesChannels[i],
+            channel: SALES_CHANNELS[i],
             net_sales: Math.round(nsVal),
             gross_profit: Math.round(gpVal),
           });
@@ -221,7 +138,7 @@ export function parseRooveExcel(
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
     for (let r = 3; r <= range.e.r; r++) {
       const dateCell = ws[XLSX.utils.encode_cell({ r, c: 1 })];
-      const dateStr = excelDateToISO(dateCell?.v);
+      const dateStr = parseDateValue(dateCell?.v);
       if (!dateStr) continue;
 
       ads.push({
