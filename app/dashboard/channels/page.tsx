@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, CHANNEL_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
+import { getCached, setCache } from '@/lib/dashboard-cache';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 
@@ -17,12 +18,20 @@ export default function ChannelsPage() {
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
+    const cached = getCached<any[]>('daily_channel_data', dateRange.from, dateRange.to);
+    if (cached) {
+      setChannelData(cached.filter(row => isActiveBrand(row.product)));
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     supabase.from('daily_channel_data')
       .select('product, channel, net_sales, gross_profit, mp_admin_cost, net_after_mkt')
       .gte('date', dateRange.from).lte('date', dateRange.to)
       .then(({ data }) => {
-        setChannelData((data || []).filter(row => isActiveBrand(row.product)));
+        const rows = data || [];
+        setCache('daily_channel_data', dateRange.from, dateRange.to, rows);
+        setChannelData(rows.filter(row => isActiveBrand(row.product)));
         setLoading(false);
       });
   }, [dateRange, supabase]);

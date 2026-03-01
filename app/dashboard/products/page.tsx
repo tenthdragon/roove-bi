@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
+import { getCached, setCache } from '@/lib/dashboard-cache';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 
@@ -17,14 +18,21 @@ export default function ProductsPage() {
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
+    const cached = getCached<any[]>('daily_product_summary', dateRange.from, dateRange.to);
+    if (cached) {
+      setData(cached.filter(row => isActiveBrand(row.product)));
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    // Now only need daily_product_summary — mp_admin_cost is in this table
     supabase.from('daily_product_summary')
       .select('*')
       .gte('date', dateRange.from)
       .lte('date', dateRange.to)
       .then(({ data: d }) => {
-        setData((d || []).filter(row => isActiveBrand(row.product)));
+        const rows = d || [];
+        setCache('daily_product_summary', dateRange.from, dateRange.to, rows);
+        setData(rows.filter(row => isActiveBrand(row.product)));
         setLoading(false);
       });
   }, [dateRange, supabase]);

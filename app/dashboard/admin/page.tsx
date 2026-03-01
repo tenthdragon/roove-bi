@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSupabase } from '@/lib/supabase-browser';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
+import { invalidateAll } from '@/lib/dashboard-cache';
 import SheetManager from '@/components/SheetManager';
 import ScalevManager from '@/components/ScalevManager';
 import FinancialSheetManager from '@/components/FinancialSheetManager';
@@ -72,6 +73,7 @@ export default function AdminPage() {
       const formData = new FormData();
       formData.append('file', file);
       const result = await uploadExcelData(formData);
+      invalidateAll(); // Clear dashboard cache so fresh data shows up
       setUploadResult(result);
     } catch (err) {
       setUploadError(err.message || 'Upload gagal');

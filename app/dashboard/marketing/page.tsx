@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
+import { getCached, setCache } from '@/lib/dashboard-cache';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ComposedChart, Line, Cell
@@ -86,24 +87,51 @@ export default function MarketingPage() {
   const [brandFilter, setBrandFilter] = useState('all');
   const [showDailyDetail, setShowDailyDetail] = useState(false);
 
-  // ── Fetch data ──
+  // ── Fetch data (with cache) ──
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
+    const { from, to } = dateRange;
+
+    // Check cache for all 4 tables
+    const cachedProd = getCached<any[]>('daily_product_summary_mkt', from, to);
+    const cachedAds  = getCached<any[]>('daily_ads_spend', from, to);
+    const cachedCh   = getCached<any[]>('daily_channel_data_mkt', from, to);
+    const cachedPm   = getCached<any[]>('product_mapping', from, to);
+
+    if (cachedProd && cachedAds && cachedCh && cachedPm) {
+      setProdData(cachedProd.filter(d => isActiveBrand(d.product)));
+      setAdsData(cachedAds);
+      setChannelData(cachedCh);
+      const map: Record<string, string> = {};
+      cachedPm.forEach((r: any) => { map[r.product_name] = r.product_type; });
+      setProductMappings(map);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     Promise.all([
       supabase.from('daily_product_summary').select('date, product, net_sales, mkt_cost')
-        .gte('date', dateRange.from).lte('date', dateRange.to),
+        .gte('date', from).lte('date', to),
       supabase.from('daily_ads_spend').select('date, source, spent, store')
-        .gte('date', dateRange.from).lte('date', dateRange.to),
+        .gte('date', from).lte('date', to),
       supabase.from('daily_channel_data').select('date, channel, product, net_sales, mp_admin_cost')
-        .gte('date', dateRange.from).lte('date', dateRange.to),
+        .gte('date', from).lte('date', to),
       supabase.from('product_mapping').select('product_name, product_type'),
     ]).then(([{ data: prod }, { data: ads }, { data: ch }, { data: pm }]) => {
-      setProdData((prod || []).filter(d => isActiveBrand(d.product)));
-      setAdsData(ads || []);
-      setChannelData(ch || []);
+      const prodRows = prod || [];
+      const adsRows = ads || [];
+      const chRows = ch || [];
+      const pmRows = pm || [];
+      setCache('daily_product_summary_mkt', from, to, prodRows);
+      setCache('daily_ads_spend', from, to, adsRows);
+      setCache('daily_channel_data_mkt', from, to, chRows);
+      setCache('product_mapping', from, to, pmRows);
+      setProdData(prodRows.filter(d => isActiveBrand(d.product)));
+      setAdsData(adsRows);
+      setChannelData(chRows);
       const map: Record<string, string> = {};
-      (pm || []).forEach((r: any) => { map[r.product_name] = r.product_type; });
+      pmRows.forEach((r: any) => { map[r.product_name] = r.product_type; });
       setProductMappings(map);
       setLoading(false);
     });

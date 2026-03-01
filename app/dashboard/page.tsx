@@ -4,6 +4,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { useDateRange } from '@/lib/DateRangeContext';
+import { getCached, setCache } from '@/lib/dashboard-cache';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, Bar, Line } from 'recharts';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
@@ -42,6 +43,12 @@ export default function OverviewPage() {
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
+    const cached = getCached<any[]>('daily_product_summary', dateRange.from, dateRange.to);
+    if (cached) {
+      setDailyData(cached.filter(row => isActiveBrand(row.product)));
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     supabase.from('daily_product_summary')
       .select('*')
@@ -49,7 +56,9 @@ export default function OverviewPage() {
       .lte('date', dateRange.to)
       .order('date')
       .then(({ data: d }) => {
-        setDailyData((d || []).filter(row => isActiveBrand(row.product)));
+        const rows = d || [];
+        setCache('daily_product_summary', dateRange.from, dateRange.to, rows);
+        setDailyData(rows.filter(row => isActiveBrand(row.product)));
         setLoading(false);
       });
   }, [dateRange, supabase]);
