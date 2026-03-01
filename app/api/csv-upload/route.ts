@@ -152,6 +152,30 @@ function parseCsvLine(line: string, delimiter: string): string[] {
 const num = (v: string) => parseFloat(v || '0') || 0;
 const ts = (v: string) => (v && v.trim()) ? v.trim() : null;
 
+// ── Split CSV text into logical lines (respects quoted newlines) ──
+function splitCsvLines(text: string): string[] {
+  const lines: string[] = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+      current += char;
+    } else if ((char === '\n' || char === '\r') && !inQuotes) {
+      // End of logical line
+      if (char === '\r' && text[i + 1] === '\n') i++; // skip \r\n
+      if (current.trim()) lines.push(current);
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  if (current.trim()) lines.push(current);
+  return lines;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();
@@ -161,7 +185,7 @@ export async function POST(req: NextRequest) {
     }
 
     const csvText = await file.text();
-    const lines = csvText.split('\n').filter(l => l.trim());
+    const lines = splitCsvLines(csvText);
     if (lines.length < 2) {
       return NextResponse.json({ error: 'CSV is empty' }, { status: 400 });
     }
@@ -293,7 +317,12 @@ async function handleOpsUpload(
   const isNewOrder: Record<string, boolean> = {};
 
   for (const [extId, rows] of Object.entries(orderGroups)) {
-    const firstRow = rows[0];
+    // Pick the row with the most data as "main row" (defensive: handles split/corrupt rows)
+    const firstRow = rows.reduce((best, r) => {
+      const score = (r.username || r.name ? 1 : 0) + (r.phone ? 1 : 0) + (r.platform ? 1 : 0) + (r.store ? 1 : 0);
+      const bestScore = (best.username || best.name ? 1 : 0) + (best.phone ? 1 : 0) + (best.platform ? 1 : 0) + (best.store ? 1 : 0);
+      return score > bestScore ? r : best;
+    }, rows[0]);
     const platform = (firstRow.platform || '').toLowerCase();
     const salesChannel = deriveSalesChannelFromOps(platform);
     const shippedTime = ts(firstRow.timestamp) || null;
@@ -378,8 +407,9 @@ async function handleOpsUpload(
         synced_at: new Date().toISOString(),
       };
       
-      if (firstRow.phone) d.customer_phone = firstRow.phone;
-      if (firstRow.email) d.customer_email = firstRow.email;
+      // Always include phone & email to prevent batch upsert column normalization from nulling them
+      d.customer_phone = firstRow.phone || (existing.customer_phone || null);
+      d.customer_email = firstRow.email || (existing.customer_email || null);
       if (firstRow.city) d.city = firstRow.city;
       if (firstRow.subdistrict) d.subdistrict = firstRow.subdistrict;
       if (shippedTime) d.shipped_time = shippedTime;
@@ -450,21 +480,16 @@ async function handleOpsUpload(
     }
   }
 
-  // ── Batch UPDATE existing orders (use update, not upsert, to avoid NOT NULL issues) ──
+  // ── Batch UPDATE existing orders (upsert by id, same pattern as Scalev handler) ──
   const UPDATE_BATCH = 200;
   for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
     const batch = toUpdate.slice(i, i + UPDATE_BATCH);
-    // Update each order individually since .update().in() doesn't support different data per row
-    for (const upd of batch) {
-      const { error } = await svc
-        .from('scalev_orders')
-        .update(upd.data)
-        .eq('id', upd.id);
-      if (error) {
-        stats.errors.push(`Update ${upd.orderId}: ${error.message}`);
-      } else {
-        stats.updated++;
-      }
+    const upsertRows = batch.map(upd => ({ id: upd.id, order_id: upd.orderId, ...upd.data }));
+    const { error } = await svc.from('scalev_orders').upsert(upsertRows, { onConflict: 'id' });
+    if (error) {
+      stats.errors.push(`Update batch ${Math.floor(i / UPDATE_BATCH) + 1}: ${error.message}`);
+    } else {
+      stats.updated += batch.length;
     }
   }
 
@@ -566,10 +591,10 @@ async function handleScalevUpload(
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
-    const values = line.split(';');
+    const values = parseCsvLine(line, delimiter);
     const orderId = values[0]?.trim();
     if (orderId && !csvOrderIds.includes(orderId)) csvOrderIds.push(orderId);
-    
+
     // Also collect external_ids (strip #)
     if (extIdIdx >= 0) {
       const extId = (values[extIdIdx] || '').trim().replace('#', '');
@@ -638,7 +663,7 @@ async function handleScalevUpload(
     const line = lines[i].trim();
     if (!line) continue;
     stats.totalRows++;
-    const values = line.split(';');
+    const values = parseCsvLine(line, delimiter);
     const row: Record<string, string> = {};
     for (let j = 0; j < headers.length; j++) {
       row[headers[j]] = (values[j] || '').trim();
@@ -654,7 +679,12 @@ async function handleScalevUpload(
   const isNewOrder: Record<string, boolean> = {};
 
   for (const [orderId, rows] of Object.entries(orderRows)) {
-    const firstRow = rows[0];
+    // Pick the row with the most data as "main row" (defensive: handles split/corrupt rows)
+    const firstRow = rows.reduce((best, r) => {
+      const score = (r.name ? 1 : 0) + (r.phone ? 1 : 0) + (r.store ? 1 : 0) + (r.order_status ? 1 : 0);
+      const bestScore = (best.name ? 1 : 0) + (best.phone ? 1 : 0) + (best.store ? 1 : 0) + (best.order_status ? 1 : 0);
+      return score > bestScore ? r : best;
+    }, rows[0]);
     const salesChannel = deriveSalesChannel(firstRow);
     const shippedTime = ts(firstRow.shipped_time) || ts(firstRow.completed_time) || null;
 
@@ -733,8 +763,11 @@ async function handleScalevUpload(
         const isFbs = (firstRow.platform || '').toLowerCase() === 'shopee' && courierService.includes('hemat');
         d.customer_name = isFbs ? null : (firstRow.name || null);
       
-      if (firstRow.phone && (!existing.customer_phone || existing.customer_phone.startsWith('temp:'))) d.customer_phone = firstRow.phone;
-      if (firstRow.email && !existing.customer_email) d.customer_email = firstRow.email;
+      // Always include phone & email to prevent batch upsert column normalization from nulling them
+      d.customer_phone = (firstRow.phone && (!existing.customer_phone || existing.customer_phone.startsWith('temp:')))
+        ? firstRow.phone : (existing.customer_phone || null);
+      d.customer_email = (firstRow.email && !existing.customer_email)
+        ? firstRow.email : (existing.customer_email || null);
 
       if (firstRow.order_status) d.status = firstRow.order_status;
       if (shippedTime) d.shipped_time = shippedTime;
