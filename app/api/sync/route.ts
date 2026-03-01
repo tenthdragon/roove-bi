@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
         if (del4.error) throw new Error(`Delete monthly_product_summary: ${del4.error.message}`);
 
         // Create/update import record
-        await svc.from('data_imports').upsert({
+        const { error: upsertErr } = await svc.from('data_imports').upsert({
           filename: `gsheet:${conn.spreadsheet_id}`,
           period_month: parsed.period.month,
           period_year: parsed.period.year,
@@ -108,6 +108,7 @@ export async function POST(req: NextRequest) {
           status: 'processing',
           notes: `Auto-sync from Google Sheet: ${conn.label}`,
         }, { onConflict: 'period_month,period_year,filename' });
+        if (upsertErr) throw new Error(`Upsert data_imports: ${upsertErr.message}`);
 
         // Insert daily product data
         if (parsed.dailyProduct.length > 0) {

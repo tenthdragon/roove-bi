@@ -203,7 +203,8 @@ async function batchUpsertChanged(
           }
 
           const orderIds = batch.map((o) => o.orderId);
-          await svc.from('scalev_order_lines').delete().in('order_id', orderIds);
+          const { error: delErr } = await svc.from('scalev_order_lines').delete().in('order_id', orderIds);
+          if (delErr) batchErrors.push(`Delete lines: ${delErr.message}`);
 
           const allLines: any[] = [];
           for (const o of batch) {
@@ -469,7 +470,7 @@ export async function GET() {
       .from('scalev_config')
       .select('base_url, is_active, last_sync_id, updated_at')
       .eq('is_active', true)
-      .single();
+      .maybeSingle();
 
     const { count: totalOrders } = await svc
       .from('scalev_orders')

@@ -19,7 +19,8 @@ const MAX_TOKENS = USE_OPUS ? 4096 : 4096;
 
 export async function POST(request: NextRequest) {
   try {
-    const { mode = 'executive', numMonths = 12 } = await request.json();
+    const { mode = 'executive', numMonths: rawMonths = 12 } = await request.json();
+    const numMonths = Math.min(Math.max(Number(rawMonths) || 12, 1), 36);
 
     const financialData = await getFinancialDataForAI(numMonths);
 

@@ -41,6 +41,11 @@ export async function POST(req: NextRequest) {
         month = now.getMonth() + 1;
         year = now.getFullYear();
       }
+
+      // Validate range
+      if (month < 1 || month > 12 || year < 2000 || year > 2100) {
+        return NextResponse.json({ error: 'Month must be 1-12, year must be 2000-2100' }, { status: 400 });
+      }
     }
 
     const svc = getServiceSupabase();
@@ -62,7 +67,7 @@ export async function POST(req: NextRequest) {
       .eq('period_month', month)
       .eq('period_year', year)
       .eq('is_auto', isCron)
-      .single();
+      .maybeSingle();
 
     return NextResponse.json({
       success: true,

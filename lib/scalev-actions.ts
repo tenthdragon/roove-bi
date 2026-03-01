@@ -12,7 +12,7 @@ export async function getScalevStatus() {
       .from('scalev_config')
       .select('id, base_url, is_active, last_sync_id, updated_at')
       .eq('is_active', true)
-      .single();
+      .maybeSingle();
 
     const { count: totalOrders } = await svc
       .from('scalev_orders')
@@ -28,7 +28,7 @@ export async function getScalevStatus() {
       .select('*')
       .order('started_at', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     const { data: recentSyncs } = await svc
       .from('scalev_sync_log')
@@ -357,7 +357,7 @@ export async function fetchBrandAnalysisRefreshTime() {
     .eq('view_name', 'brand_analysis')
     .order('refreshed_at', { ascending: false })
     .limit(1)
-    .single();
+    .maybeSingle();
   return data;
 }
 

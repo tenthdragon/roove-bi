@@ -30,8 +30,9 @@ async function verifyOwner(): Promise<boolean> {
   if (!user) return false;
   
   const svc = getServiceSupabase();
-  const { data: profile } = await svc.from('profiles').select('role').eq('id', user.id).single();
-  return profile?.role === 'owner';
+  const { data: profile, error } = await svc.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  if (error || !profile) return false;
+  return profile.role === 'owner';
 }
 
 export async function POST(req: NextRequest) {
@@ -57,7 +58,7 @@ export async function POST(req: NextRequest) {
     const svc = getServiceSupabase();
 
     // Check if user already exists in profiles
-    const { data: existing } = await svc.from('profiles').select('email').eq('email', email).single();
+    const { data: existing } = await svc.from('profiles').select('email').eq('email', email).maybeSingle();
     if (existing) {
       return NextResponse.json({ error: 'User dengan email ini sudah terdaftar' }, { status: 409 });
     }
@@ -82,24 +83,28 @@ export async function POST(req: NextRequest) {
     }
 
     // Update the profile role (trigger should have created it as 'pending')
-    // Wait a moment for trigger to fire
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Poll for profile existence (trigger may take a moment)
+    let profileReady = false;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const { data: check } = await svc.from('profiles').select('id').eq('id', newUser.user.id).maybeSingle();
+      if (check) { profileReady = true; break; }
+    }
 
-    const { error: updateError } = await svc
-      .from('profiles')
-      .update({ role })
-      .eq('id', newUser.user.id);
-
-    if (updateError) {
-      console.error('[Invite] Update role error:', updateError);
-      // Profile might not exist yet if trigger was slow — insert directly
+    if (profileReady) {
+      const { error: updateError } = await svc
+        .from('profiles')
+        .update({ role })
+        .eq('id', newUser.user.id);
+      if (updateError) {
+        console.error('[Invite] Update role error:', updateError);
+      }
+    } else {
+      // Trigger didn't fire — insert profile directly
+      console.warn('[Invite] Profile trigger did not fire, inserting directly');
       const { error: insertError } = await svc
         .from('profiles')
-        .upsert({
-          id: newUser.user.id,
-          email,
-          role,
-        });
+        .upsert({ id: newUser.user.id, email, role });
       if (insertError) {
         console.error('[Invite] Insert profile error:', insertError);
       }
