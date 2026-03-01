@@ -26,3 +26,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# planning & rollback docs
+plan-langkah1.md
+supabase/migrations/006_dashboard_switch_ROLLBACK.sql
+supabase/migrations/007_validation_queries.sql
