@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { triggerViewRefresh } from '@/lib/refresh-views';
 
 function getServiceSupabase() {
   return createClient(
@@ -229,6 +230,11 @@ async function handleStatusChanged(data: any) {
   });
 
   console.log(`[scalev-webhook] status_changed: ${orderId} updated ${existing.status} → ${newStatus}`);
+
+  // Refresh materialized views if order became shipped/completed
+  if (newStatus === 'shipped' || newStatus === 'completed') {
+    triggerViewRefresh();
+  }
 
   return NextResponse.json({
     ok: true,

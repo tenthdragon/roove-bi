@@ -7,6 +7,7 @@ import {
   parseOrderForDb,
   clearProductMappingCache,
 } from '@/lib/scalev-api';
+import { triggerViewRefresh } from '@/lib/refresh-views';
 
 function getServiceSupabase() {
   return createClient(
@@ -307,6 +308,11 @@ async function syncByStatus(
     }).eq('id', logId);
   }
 
+  // Refresh materialized views after sync
+  if (upserted > 0) {
+    triggerViewRefresh();
+  }
+
   return NextResponse.json({
     success: true,
     sync_type: syncLabel,
@@ -436,6 +442,11 @@ export async function POST(req: NextRequest) {
           ? `Time limit after ${elapsed}s. Run again to continue.`
           : (allErrors.length > 0 ? allErrors.slice(0, 5).join('; ') : null),
       }).eq('id', logId);
+    }
+
+    // Refresh materialized views after sync
+    if (totalUpserted > 0) {
+      triggerViewRefresh();
     }
 
     return NextResponse.json({
