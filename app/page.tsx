@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 import { useRouter } from 'next/navigation';
 
 export default function LoginPage() {
@@ -9,8 +9,9 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [mode, setMode] = useState<'login' | 'signup'>('login');
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useSupabase();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,8 +19,13 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
+      if (mode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.auth.signUp({ email, password });
+        if (error) throw error;
+      }
       router.push('/dashboard');
       router.refresh();
     } catch (err: any) {
@@ -60,6 +66,24 @@ export default function LoginPage() {
           <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: 14 }}>
             Business Intelligence Dashboard
           </p>
+        </div>
+
+        {/* Toggle */}
+        <div style={{
+          display: 'flex', gap: 2, background: '#0b1121', borderRadius: 10, padding: 3,
+          marginBottom: 24, border: '1px solid #1a2744',
+        }}>
+          {(['login', 'signup'] as const).map(m => (
+            <button key={m} onClick={() => setMode(m)} style={{
+              flex: 1, padding: '8px 16px', borderRadius: 8, border: 'none',
+              cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              background: mode === m ? '#3b82f6' : 'transparent',
+              color: mode === m ? '#fff' : '#64748b',
+              transition: 'all 0.2s',
+            }}>
+              {m === 'login' ? 'Masuk' : 'Daftar'}
+            </button>
+          ))}
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -116,13 +140,15 @@ export default function LoginPage() {
             color: '#fff', transition: 'all 0.2s',
             opacity: loading ? 0.7 : 1,
           }}>
-            {loading ? '...' : 'Masuk'}
+            {loading ? '...' : mode === 'login' ? 'Masuk' : 'Daftar Akun Baru'}
           </button>
         </form>
 
-        <p style={{ marginTop: 16, fontSize: 12, color: '#64748b', textAlign: 'center' }}>
-          Hubungi admin untuk mendapatkan akses.
-        </p>
+        {mode === 'signup' && (
+          <p style={{ marginTop: 16, fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+            Akun pertama yang didaftarkan otomatis menjadi Owner.
+          </p>
+        )}
       </div>
     </div>
   );

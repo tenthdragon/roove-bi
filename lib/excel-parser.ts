@@ -1,114 +1,37 @@
 import * as XLSX from 'xlsx';
+import {
+  type ParsedData,
+  SKU_SHEETS,
+  CHANNELS,
+  SHEET_LAYOUT,
+  toNum,
+  excelDateToISO,
+  extractPeriod,
+  parseGeneralRow,
+} from './parser-shared';
 
-interface ParsedData {
-  dailyProduct: Array<{
-    date: string;
-    product: string;
-    net_sales: number;
-    gross_profit: number;
-    net_after_mkt: number;
-    mkt_cost: number;
-  }>;
-  dailyChannel: Array<{
-    date: string;
-    product: string;
-    channel: string;
-    net_sales: number;
-    gross_profit: number;
-  }>;
-  ads: Array<{
-    date: string;
-    ad_account: string;
-    spent: number;
-    objective: string;
-    source: string;
-    store: string;
-    advertiser: string;
-  }>;
-  monthlySummary: Array<{
-    product: string;
-    sales_after_disc: number;
-    sales_pct: number;
-    gross_profit: number;
-    gross_profit_pct: number;
-    gross_after_mkt: number;
-    gmp_real: number;
-    mkt_pct: number;
-    mkt_share_pct: number;
-  }>;
-  period: { month: number; year: number };
-}
+// Re-export ParsedData type for consumers
+export type { ParsedData };
 
-function toNum(val: any): number {
-  if (val === null || val === undefined) return 0;
-  if (typeof val === 'number') return val;
-  const s = String(val).trim().replace(/\./g, '').replace(',', '.');
-  const n = parseFloat(s);
-  return isNaN(n) ? 0 : n;
-}
-
-function excelDateToISO(val: any): string | null {
-  if (!val) return null;
-  if (val instanceof Date) {
-    return val.toISOString().split('T')[0];
-  }
-  if (typeof val === 'number') {
-    const d = new Date((val - 25569) * 86400000);
-    return d.toISOString().split('T')[0];
-  }
-  if (typeof val === 'string' && val.match(/^\d{4}-\d{2}-\d{2}/)) {
-    return val.split('T')[0];
-  }
-  return null;
-}
-
-// ── Build brand sheet mapping from registered brands ──
-// brandList: array of { name, sheet_name } from the brands table
-// Returns: Record<sheetName, canonicalName> matched case-insensitively against workbook sheets
-function buildBrandSheetMap(
-  brandList: Array<{ name: string; sheet_name: string }>,
-  workbookSheetNames: string[],
-): Record<string, string> {
-  const result: Record<string, string> = {};
-
-  for (const brand of brandList) {
-    // Find matching sheet (case-insensitive)
-    const match = workbookSheetNames.find(
-      s => s.toLowerCase() === brand.sheet_name.toLowerCase()
-    );
-    if (match) {
-      result[match] = brand.name; // actual sheet name → canonical brand name
-    }
-  }
-
-  return result;
-}
-
-export function parseRooveExcel(
-  buffer: ArrayBuffer,
-  brandList: Array<{ name: string; sheet_name: string }>,
-): ParsedData {
+export function parseRooveExcel(buffer: ArrayBuffer): ParsedData {
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
 
-  // ── Build brand sheets from registered brands ──
-  const brandSheets = buildBrandSheetMap(brandList, wb.SheetNames);
-
-  // ── Detect period from first brand sheet dates ──
+  // ── Detect period from SKU sheet dates ──
   let periodMonth = 0;
   let periodYear = 0;
 
-  for (const sheetName of Object.keys(brandSheets)) {
+  for (const sheetName of Object.keys(SKU_SHEETS)) {
+    if (!wb.SheetNames.includes(sheetName)) continue;
     const ws = wb.Sheets[sheetName];
-    if (!ws) continue;
-    for (let c = 4; c < 35; c++) {
-      const addr = XLSX.utils.encode_cell({ r: 2, c });
+    for (let c = SHEET_LAYOUT.DATE_COL_START; c < SHEET_LAYOUT.DATE_COL_END; c++) {
+      const addr = XLSX.utils.encode_cell({ r: SHEET_LAYOUT.DATE_ROW, c });
       const cell = ws[addr];
       if (cell) {
         const dateStr = excelDateToISO(cell.v);
         if (dateStr) {
-          const parts = dateStr.split('-');
-          periodYear = parseInt(parts[0]);
-          periodMonth = parseInt(parts[1]);
+          const period = extractPeriod(dateStr);
+          periodYear = period.year;
+          periodMonth = period.month;
           break;
         }
       }
@@ -124,55 +47,52 @@ export function parseRooveExcel(
       const noCell = ws[XLSX.utils.encode_cell({ r, c: 1 })];
       const skuCell = ws[XLSX.utils.encode_cell({ r, c: 2 })];
       if (!noCell?.v || !skuCell?.v) continue;
-      monthlySummary.push({
-        product: String(skuCell.v),
-        sales_after_disc: toNum(ws[XLSX.utils.encode_cell({ r, c: 3 })]?.v),
-        sales_pct: toNum(ws[XLSX.utils.encode_cell({ r, c: 4 })]?.v) * 100,
-        gross_profit: toNum(ws[XLSX.utils.encode_cell({ r, c: 5 })]?.v),
-        gross_profit_pct: toNum(ws[XLSX.utils.encode_cell({ r, c: 6 })]?.v) * 100,
-        gross_after_mkt: toNum(ws[XLSX.utils.encode_cell({ r, c: 7 })]?.v),
-        gmp_real: toNum(ws[XLSX.utils.encode_cell({ r, c: 8 })]?.v) * 100,
-        mkt_pct: toNum(ws[XLSX.utils.encode_cell({ r, c: 9 })]?.v) * 100,
-        mkt_share_pct: toNum(ws[XLSX.utils.encode_cell({ r, c: 10 })]?.v) * 100,
+
+      const row = parseGeneralRow({
+        sku: skuCell.v,
+        salesAfterDisc: ws[XLSX.utils.encode_cell({ r, c: 3 })]?.v,
+        salesPct: ws[XLSX.utils.encode_cell({ r, c: 4 })]?.v,
+        grossProfit: ws[XLSX.utils.encode_cell({ r, c: 5 })]?.v,
+        grossProfitPct: ws[XLSX.utils.encode_cell({ r, c: 6 })]?.v,
+        grossAfterMkt: ws[XLSX.utils.encode_cell({ r, c: 7 })]?.v,
+        gmpReal: ws[XLSX.utils.encode_cell({ r, c: 8 })]?.v,
+        mktPct: ws[XLSX.utils.encode_cell({ r, c: 9 })]?.v,
+        mktSharePct: ws[XLSX.utils.encode_cell({ r, c: 10 })]?.v,
       });
+      if (row) monthlySummary.push(row);
     }
   }
 
-  // ── Parse brand sheets (daily product + channel data) ──
+  // ── Parse SKU sheets (daily product + channel data) ──
   const dailyProduct: ParsedData['dailyProduct'] = [];
   const dailyChannel: ParsedData['dailyChannel'] = [];
 
-  for (const [sheetName, productName] of Object.entries(brandSheets)) {
+  for (const [sheetName, productName] of Object.entries(SKU_SHEETS)) {
     if (!wb.SheetNames.includes(sheetName)) continue;
     const ws = wb.Sheets[sheetName];
 
     // Get dates from row 3 (0-indexed: row 2), starting col E (index 4)
     const dates: Array<{ col: number; date: string }> = [];
-    for (let c = 4; c < 36; c++) {
-      const cell = ws[XLSX.utils.encode_cell({ r: 2, c })];
+    for (let c = SHEET_LAYOUT.DATE_COL_START; c < SHEET_LAYOUT.DATE_COL_END + 1; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: SHEET_LAYOUT.DATE_ROW, c })];
       if (cell) {
         const d = excelDateToISO(cell.v);
         if (d) dates.push({ col: c, date: d });
       }
     }
+
     if (dates.length === 0) continue;
 
-    // For each date, aggregate product-level totals
     for (const { col, date } of dates) {
       let totalNetSales = 0;
       let totalGP = 0;
       let totalMktCost = 0;
       let totalNetAfterMkt = 0;
 
-      const salesChannels: string[] = [
-        'Facebook Ads', 'Google Ads', 'Organik', 'Reseller',
-        'Shopee', 'TikTok Ads', 'TikTok Shop', 'Tokopedia',
-        'BliBli', 'Lazada', 'SnackVideo Ads'
-      ];
-
-      for (let i = 0; i < salesChannels.length; i++) {
-        const nsRow = 30 + i;
-        const gpRow = 56 + i;
+      // Net sales + gross profit by channel
+      for (let i = 0; i < CHANNELS.length; i++) {
+        const nsRow = SHEET_LAYOUT.NET_SALES_START + i;
+        const gpRow = SHEET_LAYOUT.GROSS_PROFIT_START + i;
 
         const nsVal = toNum(ws[XLSX.utils.encode_cell({ r: nsRow, c: col })]?.v);
         const gpVal = toNum(ws[XLSX.utils.encode_cell({ r: gpRow, c: col })]?.v);
@@ -184,20 +104,20 @@ export function parseRooveExcel(
           dailyChannel.push({
             date,
             product: productName,
-            channel: salesChannels[i],
+            channel: CHANNELS[i],
             net_sales: Math.round(nsVal),
             gross_profit: Math.round(gpVal),
           });
         }
       }
 
-      // Marketing costs: rows 70-81 (0-indexed 69-80)
-      for (let r = 69; r <= 80; r++) {
+      // Marketing costs
+      for (let r = SHEET_LAYOUT.MKT_COST_START; r <= SHEET_LAYOUT.MKT_COST_END; r++) {
         totalMktCost += toNum(ws[XLSX.utils.encode_cell({ r, c: col })]?.v);
       }
 
-      // Net after mkt: rows 90-101 (0-indexed 89-100)
-      for (let r = 89; r <= 100; r++) {
+      // Net after marketing
+      for (let r = SHEET_LAYOUT.NET_AFTER_MKT_START; r <= SHEET_LAYOUT.NET_AFTER_MKT_END; r++) {
         totalNetAfterMkt += toNum(ws[XLSX.utils.encode_cell({ r, c: col })]?.v);
       }
 
@@ -219,6 +139,7 @@ export function parseRooveExcel(
   if (wb.SheetNames.includes('Ads')) {
     const ws = wb.Sheets['Ads'];
     const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+
     for (let r = 3; r <= range.e.r; r++) {
       const dateCell = ws[XLSX.utils.encode_cell({ r, c: 1 })];
       const dateStr = excelDateToISO(dateCell?.v);
