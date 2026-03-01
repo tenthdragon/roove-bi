@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import {
@@ -76,7 +76,7 @@ const CHANNEL_COLORS: Record<string, string> = {
 };
 
 export default function MarketingPage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [prodData, setProdData] = useState<any[]>([]);
   const [adsData, setAdsData] = useState<any[]>([]);

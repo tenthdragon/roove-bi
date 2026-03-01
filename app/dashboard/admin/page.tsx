@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
 import SheetManager from '@/components/SheetManager';
 import ScalevManager from '@/components/ScalevManager';
@@ -20,7 +20,7 @@ const TABS = [
 ];
 
 export default function AdminPage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const searchParams = useSearchParams();
   const showAdvanced = searchParams.get('advanced') === 'true';
 

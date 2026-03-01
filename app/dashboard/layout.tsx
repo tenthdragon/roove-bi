@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 import { ALL_TABS, canAccessTab } from '@/lib/utils';
 import { DateRangeProvider, useDateRange } from '@/lib/DateRangeContext';
 import DateRangePicker from '@/components/DateRangePicker';
@@ -48,7 +48,7 @@ export default function DashboardLayout({ children }) {
   const overlayRef = useRef(null);
   const router = useRouter();
   const pathname = usePathname();
-  const supabase = createClient();
+  const supabase = useSupabase();
   const currentTab = getCurrentTab(pathname);
 
   useEffect(() => {

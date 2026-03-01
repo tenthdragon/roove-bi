@@ -1,14 +1,14 @@
 // @ts-nocheck
 'use client';
 import { useState, useEffect, useMemo } from 'react';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, CHANNEL_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 
 export default function ChannelsPage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [channelData, setChannelData] = useState([]);
   const [loading, setLoading] = useState(true);

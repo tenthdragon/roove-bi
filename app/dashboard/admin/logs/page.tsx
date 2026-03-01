@@ -3,10 +3,10 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 
 export default function LogsPage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const [logs, setLogs] = useState([]);
   const [excelImports, setExcelImports] = useState([]);
   const [loading, setLoading] = useState(true);

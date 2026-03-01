@@ -2,7 +2,7 @@
 'use client';
 
 import { createContext, useContext, useState, useEffect, useMemo } from 'react';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 
 interface ActiveBrandsContextType {
   activeBrands: string[];      // list of active brand names
@@ -17,7 +17,7 @@ const ActiveBrandsContext = createContext<ActiveBrandsContextType>({
 });
 
 export function ActiveBrandsProvider({ children }: { children: React.ReactNode }) {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const [activeBrands, setActiveBrands] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
 

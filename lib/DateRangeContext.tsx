@@ -1,7 +1,7 @@
 // @ts-nocheck
 'use client';
 import { createContext, useContext, useState, useEffect } from 'react';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 
 interface DateRangeContextType {
   dateRange: { from: string; to: string };
@@ -22,7 +22,7 @@ export function useDateRange() {
 }
 
 export function DateRangeProvider({ children }: { children: React.ReactNode }) {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const [dateRange, setDateRangeState] = useState({ from: '', to: '' });
   const [dateExtent, setDateExtent] = useState({ earliest: '', latest: '' });
   const [loading, setLoading] = useState(true);

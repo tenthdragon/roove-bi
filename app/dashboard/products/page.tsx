@@ -2,14 +2,14 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Cell } from 'recharts';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 
 export default function ProductsPage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);

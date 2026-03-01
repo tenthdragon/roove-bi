@@ -2,10 +2,10 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 
 export default function CsvOrderUploader() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [results, setResults] = useState<any[]>([]);

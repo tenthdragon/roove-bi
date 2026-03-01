@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { createClient } from '@/lib/supabase-browser';
+import { useSupabase } from '@/lib/supabase-browser';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, Bar, Line } from 'recharts';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
@@ -24,7 +24,7 @@ const TT = ({ active, payload, label }) => {
 };
 
 export default function OverviewPage() {
-  const supabase = createClient();
+  const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [dailyData, setDailyData] = useState([]);
   const [loading, setLoading] = useState(true);
