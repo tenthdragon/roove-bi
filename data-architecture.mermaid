@@ -1,0 +1,132 @@
+---
+title: Roove BI — Data Architecture (Setelah Langkah 1)
+---
+flowchart TB
+    subgraph Sources["🔵 Data Sources"]
+        SV["ScaleV API\n(Webhook)"]
+        CSV["CSV Upload\n(Historical)"]
+        GS_ADS["Google Sheet\n(Ads Tab)"]
+        GS_FIN["Google Sheet\n(Financial)"]
+    end
+
+    subgraph Ingestion["🟡 Ingestion Layer"]
+        WH["/api/scalev-webhook"]
+        UP["/api/csv-upload"]
+        SYNC_GS["/api/sync\n(Ads only)"]
+        SYNC_FIN["/api/financial-sync"]
+    end
+
+    subgraph Raw["🟠 Raw Tables (Supabase)"]
+        SO["scalev_orders"]
+        SOL["scalev_order_lines\n• product_price_bt\n• discount_bt\n• cogs_bt\n• sales_channel\n• product_type"]
+        ADS["daily_ads_spend\n• date, store, spent\n• source, advertiser"]
+        FIN_PL["financial_pl_monthly"]
+        FIN_CF["financial_cf_monthly"]
+        FIN_R["financial_ratios_monthly"]
+        FIN_BS["financial_bs_monthly"]
+    end
+
+    subgraph Config["⚙️ Config Tables"]
+        ABM["ads_store_brand_mapping\n(store → brand)"]
+        MCR["marketplace_commission_rates\n(channel → rate %)"]
+    end
+
+    subgraph MV["🟢 Materialized Views (NEW)"]
+        MV1["mv_daily_order_channel\n• date, product, channel\n• net_sales, cogs, gross_profit"]
+        MV2["mv_daily_ads_by_brand\n• date, product\n• total_ads_spend"]
+        MV3["mv_daily_channel_complete\n• + mp_admin_cost\n• + mkt_cost, net_after_mkt"]
+        MV4["mv_daily_product_complete\n• + ads_spend\n• total mkt_cost"]
+    end
+
+    subgraph Aliases["🔄 View Aliases (Zero UI Change)"]
+        VA_DCD["daily_channel_data\n(VIEW → MV3)"]
+        VA_DPS["daily_product_summary\n(VIEW → MV4)"]
+    end
+
+    subgraph Legacy["📦 Legacy Tables (Backup)"]
+        LEG_DCD["daily_channel_data_legacy"]
+        LEG_DPS["daily_product_summary_legacy"]
+    end
+
+    subgraph Pages["📊 Dashboard Pages"]
+        P_OV["Overview\n/dashboard"]
+        P_PR["Products\n/dashboard/products"]
+        P_CH["Channels\n/dashboard/channels"]
+        P_MK["Marketing\n/dashboard/marketing"]
+        P_FN["Finance\n/dashboard/finance"]
+    end
+
+    subgraph Refresh["🔃 Refresh Mechanism"]
+        RF["/api/refresh-views\nrefresh_order_views()"]
+    end
+
+    %% Source → Ingestion
+    SV -->|"real-time"| WH
+    CSV -->|"backfill"| UP
+    GS_ADS -->|"daily sync"| SYNC_GS
+    GS_FIN -->|"monthly sync"| SYNC_FIN
+
+    %% Ingestion → Raw
+    WH --> SO
+    WH --> SOL
+    UP --> SO
+    UP --> SOL
+    SYNC_GS --> ADS
+    SYNC_FIN --> FIN_PL
+    SYNC_FIN --> FIN_CF
+    SYNC_FIN --> FIN_R
+    SYNC_FIN --> FIN_BS
+
+    %% Raw → MV
+    SOL --> MV1
+    ADS --> MV2
+    ABM -.->|"store→brand"| MV2
+    MV1 --> MV3
+    MCR -.->|"commission %"| MV3
+    MV3 --> MV4
+    MV2 --> MV4
+
+    %% MV → Aliases
+    MV3 --> VA_DCD
+    MV4 --> VA_DPS
+
+    %% Aliases → Pages
+    VA_DPS --> P_OV
+    VA_DPS --> P_PR
+    VA_DPS --> P_MK
+    VA_DCD --> P_CH
+    VA_DCD --> P_MK
+    ADS --> P_MK
+    FIN_PL --> P_FN
+    FIN_CF --> P_FN
+    FIN_R --> P_FN
+    FIN_BS --> P_FN
+
+    %% Refresh triggers
+    WH -.->|"trigger"| RF
+    SYNC_GS -.->|"trigger"| RF
+    RF -.->|"REFRESH\nCONCURRENTLY"| MV1
+    RF -.->|"REFRESH\nCONCURRENTLY"| MV2
+    RF -.->|"REFRESH\nCONCURRENTLY"| MV3
+    RF -.->|"REFRESH\nCONCURRENTLY"| MV4
+
+    %% Styling
+    classDef source fill:#dbeafe,stroke:#3b82f6,color:#1e40af
+    classDef ingestion fill:#fef9c3,stroke:#eab308,color:#854d0e
+    classDef raw fill:#fed7aa,stroke:#f97316,color:#9a3412
+    classDef config fill:#e5e7eb,stroke:#6b7280,color:#374151
+    classDef mv fill:#bbf7d0,stroke:#22c55e,color:#166534
+    classDef alias fill:#e0e7ff,stroke:#6366f1,color:#4338ca
+    classDef legacy fill:#fecaca,stroke:#ef4444,color:#991b1b
+    classDef page fill:#f3e8ff,stroke:#a855f7,color:#6b21a8
+    classDef refresh fill:#cffafe,stroke:#06b6d4,color:#155e75
+
+    class SV,CSV,GS_ADS,GS_FIN source
+    class WH,UP,SYNC_GS,SYNC_FIN ingestion
+    class SO,SOL,ADS,FIN_PL,FIN_CF,FIN_R,FIN_BS raw
+    class ABM,MCR config
+    class MV1,MV2,MV3,MV4 mv
+    class VA_DCD,VA_DPS alias
+    class LEG_DCD,LEG_DPS legacy
+    class P_OV,P_PR,P_CH,P_MK,P_FN page
+    class RF refresh

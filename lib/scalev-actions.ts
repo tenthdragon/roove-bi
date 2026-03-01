@@ -88,27 +88,6 @@ export async function saveScalevApiKey(apiKey: string) {
   return { success: true };
 }
 
-// ── Trigger manual sync (owner only) ──
-export async function triggerScalevSync(mode: 'incremental' | 'full' = 'incremental') {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL
-    || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-
-  const res = await fetch(`${baseUrl}/api/scalev-sync`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${process.env.CRON_SECRET}`,
-    },
-    body: JSON.stringify({ mode }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Sync failed: ${text}`);
-  }
-
-  return await res.json();
-}
 
 // ── Get daily order summary (for dashboard) ──
 export async function fetchScalevDailySummary(from: string, to: string) {

@@ -2,7 +2,7 @@
 // components/CashFlowSection.tsx
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { fetchLiveCashFlow } from '@/lib/cashflow-actions';
 import { fmtCompact } from '@/lib/utils';
 
@@ -14,28 +14,11 @@ interface Props {
 export default function CashFlowSection({ netSales, periodStart }: Props) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState(null);
-  const [snapshotting, setSnapshotting] = useState(false);
-  const [snapshotResult, setSnapshotResult] = useState(null);
-  const [showSyncMenu, setShowSyncMenu] = useState(false);
-  const syncMenuRef = useRef(null);
 
   useEffect(() => {
     if (!periodStart) return;
     loadCashFlow();
   }, [periodStart]);
-
-  // Close menu on outside click
-  useEffect(() => {
-    function handleClick(e) {
-      if (syncMenuRef.current && !syncMenuRef.current.contains(e.target)) {
-        setShowSyncMenu(false);
-      }
-    }
-    if (showSyncMenu) document.addEventListener('click', handleClick);
-    return () => document.removeEventListener('click', handleClick);
-  }, [showSyncMenu]);
 
   function loadCashFlow() {
     setLoading(true);
@@ -43,52 +26,6 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
       .then(setData)
       .catch(err => console.error('CashFlow error:', err))
       .finally(() => setLoading(false));
-  }
-
-  async function handleSync(mode = 'quick') {
-    setSyncing(true);
-    setSyncResult(null);
-    setShowSyncMenu(false);
-    try {
-      const res = await fetch('/api/scalev-sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Sync failed');
-      const changed = json.orders_changed ?? json.orders_inserted ?? 0;
-      const skipped = json.orders_skipped ?? 0;
-      setSyncResult({
-        success: true,
-        msg: `${changed} updated, ${skipped} skipped · ${json.elapsed_seconds}s`
-      });
-      loadCashFlow();
-    } catch (err) {
-      setSyncResult({ success: false, msg: err.message });
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  async function handleSnapshot() {
-    setSnapshotting(true);
-    setSnapshotResult(null);
-    try {
-      const [y, m] = periodStart.split('-').map(Number);
-      const res = await fetch('/api/cashflow-snapshot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ month: m, year: y }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error);
-      setSnapshotResult({ success: true, msg: `Snapshot ${json.period} tersimpan` });
-    } catch (err) {
-      setSnapshotResult({ success: false, msg: err.message });
-    } finally {
-      setSnapshotting(false);
-    }
   }
 
   // Period label
@@ -110,116 +47,16 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
   const totalCashIn = data.cashReceived + data.spillOver;
   const pct = (v) => netSales > 0 ? (v / netSales * 100) : 0;
 
-  const Toast = ({ result }) => {
-    if (!result) return null;
-    return (
-      <span style={{
-        fontSize: 10, padding: '2px 8px', borderRadius: 4, marginLeft: 8,
-        background: result.success ? '#064e3b' : '#7f1d1d',
-        color: result.success ? '#10b981' : '#ef4444',
-      }}>
-        {result.success ? '✓' : '✗'} {result.msg}
-      </span>
-    );
-  };
-
   return (
     <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, marginBottom: 20 }}>
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 15, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-            Cash Flow Status
-            <Toast result={syncResult} />
-            <Toast result={snapshotResult} />
-          </div>
+          <div style={{ fontSize: 15, fontWeight: 700 }}>Cash Flow Status</div>
           <div style={{ fontSize: 11, color: '#64748b' }}>
             {periodLabel} · Sumber data: Scalev Orders
           </div>
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          {/* Sync button with dropdown */}
-          <div style={{ position: 'relative' }} ref={syncMenuRef}>
-            <div style={{ display: 'flex' }}>
-              {/* Main button: quick sync */}
-              <button
-                onClick={() => handleSync('quick')}
-                disabled={syncing}
-                title="Quick sync: 7 hari terakhir"
-                style={{
-                  background: '#1e293b', color: syncing ? '#475569' : '#94a3b8',
-                  border: '1px solid #334155', borderRadius: '6px 0 0 6px', padding: '5px 10px',
-                  fontSize: 10, fontWeight: 600, cursor: syncing ? 'not-allowed' : 'pointer',
-                  display: 'flex', alignItems: 'center', gap: 4,
-                  borderRight: 'none',
-                }}
-              >
-                {syncing ? '⏳ Syncing...' : '🔄 Sync'}
-              </button>
-              {/* Dropdown arrow */}
-              <button
-                onClick={(e) => { e.stopPropagation(); setShowSyncMenu(!showSyncMenu); }}
-                disabled={syncing}
-                style={{
-                  background: '#1e293b', color: syncing ? '#475569' : '#94a3b8',
-                  border: '1px solid #334155', borderRadius: '0 6px 6px 0', padding: '5px 6px',
-                  fontSize: 10, cursor: syncing ? 'not-allowed' : 'pointer',
-                }}
-              >
-                ▾
-              </button>
-            </div>
-
-            {/* Dropdown menu */}
-            {showSyncMenu && (
-              <div style={{
-                position: 'absolute', top: '100%', right: 0, marginTop: 4,
-                background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
-                zIndex: 100, minWidth: 180, overflow: 'hidden',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              }}>
-                <button
-                  onClick={() => handleSync('quick')}
-                  style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
-                    background: 'transparent', color: '#e2e8f0', border: 'none', cursor: 'pointer',
-                    fontSize: 11, borderBottom: '1px solid #334155',
-                  }}
-                  onMouseEnter={e => e.target.style.background = '#334155'}
-                  onMouseLeave={e => e.target.style.background = 'transparent'}
-                >
-                  🔄 Quick Sync <span style={{ color: '#64748b' }}>· 7 hari (~15s)</span>
-                </button>
-                <button
-                  onClick={() => handleSync('status')}
-                  style={{
-                    display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px',
-                    background: 'transparent', color: '#e2e8f0', border: 'none', cursor: 'pointer',
-                    fontSize: 11,
-                  }}
-                  onMouseEnter={e => e.target.style.background = '#334155'}
-                  onMouseLeave={e => e.target.style.background = 'transparent'}
-                >
-                  🔁 Full Sync <span style={{ color: '#64748b' }}>· 2 bulan (~90s)</span>
-                </button>
-              </div>
-            )}
-          </div>
-
-          <button
-            onClick={handleSnapshot}
-            disabled={snapshotting}
-            title="Simpan snapshot cash flow bulan ini"
-            style={{
-              background: '#1e293b', color: snapshotting ? '#475569' : '#94a3b8',
-              border: '1px solid #334155', borderRadius: 6, padding: '5px 10px',
-              fontSize: 10, fontWeight: 600, cursor: snapshotting ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', gap: 4,
-            }}
-          >
-            {snapshotting ? '⏳ Saving...' : '📸 Snapshot'}
-          </button>
         </div>
       </div>
 
@@ -318,12 +155,6 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
             <div style={{ width: `${Math.min(pct(data.overdue), 5)}%`, background: '#ef4444', opacity: 0.8, transition: 'width 0.5s' }} />
           )}
         </div>
-        <div style={{ display: 'flex', gap: 12, marginTop: 6, fontSize: 10, color: '#64748b', flexWrap: 'wrap' }}>
-          <Legend color="#10b981" label="Received" />
-          <Legend color="#8b5cf6" label="Spill Over" />
-          <Legend color="#f59e0b" label="In Progress" />
-          {data.overdueOrders > 0 && <Legend color="#ef4444" label="Overdue" />}
-        </div>
       </div>
     </div>
   );
@@ -360,11 +191,3 @@ function MiniCard({ label, value, orders, pctValue, color, bgAccent, sub, warn =
   );
 }
 
-function Legend({ color, label }) {
-  return (
-    <span>
-      <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: color, marginRight: 4, verticalAlign: 'middle' }} />
-      {label}
-    </span>
-  );
-}

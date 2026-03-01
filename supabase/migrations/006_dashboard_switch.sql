@@ -41,6 +41,7 @@ SELECT
   product,
   net_sales,
   gross_profit,
+  mp_admin_cost,
   net_after_mkt,
   mkt_cost,
   NULL::INT           AS import_id

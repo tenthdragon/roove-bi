@@ -1,0 +1,208 @@
+<svg viewBox="0 0 1100 880" xmlns="http://www.w3.org/2000/svg" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-dash" viewBox="0 0 10 7" refX="10" refY="3.5" markerWidth="8" markerHeight="6" orient="auto-start-reverse">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <!-- Title -->
+  <text x="550" y="30" text-anchor="middle" font-size="18" font-weight="700" fill="#1e293b">Roove BI — Data Architecture (Setelah Langkah 1)</text>
+
+  <!-- ===== DATA SOURCES ===== -->
+  <rect x="20" y="50" width="1060" height="80" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="40" y="72" font-size="11" font-weight="600" fill="#1e40af">DATA SOURCES</text>
+
+  <rect x="40" y="82" width="150" height="38" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="115" y="100" text-anchor="middle" font-size="10" font-weight="600" fill="#1e40af">ScaleV API</text>
+  <text x="115" y="113" text-anchor="middle" font-size="8" fill="#3b82f6">Webhook + Polling</text>
+
+  <rect x="210" y="82" width="150" height="38" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="285" y="100" text-anchor="middle" font-size="10" font-weight="600" fill="#1e40af">CSV Upload</text>
+  <text x="285" y="113" text-anchor="middle" font-size="8" fill="#3b82f6">Historical Backfill</text>
+
+  <rect x="380" y="82" width="150" height="38" rx="6" fill="#fef9c3" stroke="#eab308" stroke-width="1.2"/>
+  <text x="455" y="100" text-anchor="middle" font-size="10" font-weight="600" fill="#854d0e">Google Sheet</text>
+  <text x="455" y="113" text-anchor="middle" font-size="8" fill="#a16207">Ads Tab (daily sync)</text>
+
+  <rect x="550" y="82" width="150" height="38" rx="6" fill="#fef9c3" stroke="#eab308" stroke-width="1.2"/>
+  <text x="625" y="100" text-anchor="middle" font-size="10" font-weight="600" fill="#854d0e">Google Sheet</text>
+  <text x="625" y="113" text-anchor="middle" font-size="8" fill="#a16207">Financial (monthly)</text>
+
+  <!-- Removed label -->
+  <rect x="740" y="82" width="150" height="38" rx="6" fill="#fecaca" stroke="#ef4444" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="815" y="96" text-anchor="middle" font-size="10" font-weight="600" fill="#991b1b">Google Sheet</text>
+  <text x="815" y="108" text-anchor="middle" font-size="8" fill="#dc2626" text-decoration="line-through">Brand Tabs, Order, General</text>
+  <text x="815" y="118" text-anchor="middle" font-size="8" font-weight="600" fill="#dc2626">❌ DIHAPUS</text>
+
+  <!-- ===== RAW TABLES ===== -->
+  <rect x="20" y="155" width="1060" height="110" rx="12" fill="#fff7ed" stroke="#fdba74" stroke-width="1.5"/>
+  <text x="40" y="177" font-size="11" font-weight="600" fill="#9a3412">RAW TABLES (Supabase)</text>
+
+  <rect x="40" y="188" width="180" height="65" rx="6" fill="#fed7aa" stroke="#f97316" stroke-width="1.2"/>
+  <text x="130" y="205" text-anchor="middle" font-size="10" font-weight="600" fill="#9a3412">scalev_orders</text>
+  <text x="130" y="218" text-anchor="middle" font-size="8" fill="#c2410c">+ scalev_order_lines</text>
+  <text x="130" y="230" text-anchor="middle" font-size="7" fill="#ea580c">price_bt, discount_bt, cogs_bt</text>
+  <text x="130" y="241" text-anchor="middle" font-size="7" fill="#ea580c">sales_channel, product_type</text>
+
+  <rect x="250" y="188" width="160" height="65" rx="6" fill="#fed7aa" stroke="#f97316" stroke-width="1.2"/>
+  <text x="330" y="205" text-anchor="middle" font-size="10" font-weight="600" fill="#9a3412">daily_ads_spend</text>
+  <text x="330" y="220" text-anchor="middle" font-size="8" fill="#c2410c">date, store, spent</text>
+  <text x="330" y="233" text-anchor="middle" font-size="8" fill="#c2410c">source, advertiser</text>
+
+  <rect x="440" y="188" width="160" height="65" rx="6" fill="#fed7aa" stroke="#f97316" stroke-width="1.2"/>
+  <text x="520" y="205" text-anchor="middle" font-size="10" font-weight="600" fill="#9a3412">financial_*_monthly</text>
+  <text x="520" y="220" text-anchor="middle" font-size="8" fill="#c2410c">P&amp;L, Cash Flow</text>
+  <text x="520" y="233" text-anchor="middle" font-size="8" fill="#c2410c">Ratios, Balance Sheet</text>
+
+  <!-- Config tables -->
+  <rect x="660" y="188" width="170" height="65" rx="6" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.2"/>
+  <text x="745" y="205" text-anchor="middle" font-size="10" font-weight="600" fill="#374151">⚙️ Config Tables</text>
+  <text x="745" y="220" text-anchor="middle" font-size="8" fill="#6b7280">ads_store_brand_mapping</text>
+  <text x="745" y="233" text-anchor="middle" font-size="8" fill="#6b7280">marketplace_commission_rates</text>
+  <text x="745" y="246" text-anchor="middle" font-size="7" fill="#9ca3af">TikTok 19%, Shopee 21%, etc.</text>
+
+  <!-- Legacy -->
+  <rect x="870" y="188" width="190" height="65" rx="6" fill="#fef2f2" stroke="#fca5a5" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="965" y="205" text-anchor="middle" font-size="10" font-weight="600" fill="#991b1b">📦 Legacy (Backup)</text>
+  <text x="965" y="220" text-anchor="middle" font-size="8" fill="#dc2626">daily_channel_data_legacy</text>
+  <text x="965" y="233" text-anchor="middle" font-size="8" fill="#dc2626">daily_product_summary_legacy</text>
+  <text x="965" y="246" text-anchor="middle" font-size="7" fill="#ef4444">Untuk rollback jika diperlukan</text>
+
+  <!-- ===== MATERIALIZED VIEWS ===== -->
+  <rect x="20" y="290" width="720" height="180" rx="12" fill="#f0fdf4" stroke="#86efac" stroke-width="1.5"/>
+  <text x="40" y="312" font-size="11" font-weight="600" fill="#166534">🟢 MATERIALIZED VIEWS (NEW — auto-refresh)</text>
+
+  <!-- MV1 -->
+  <rect x="40" y="325" width="160" height="55" rx="6" fill="#bbf7d0" stroke="#22c55e" stroke-width="1.2"/>
+  <text x="120" y="342" text-anchor="middle" font-size="9" font-weight="600" fill="#166534">MV1: Order × Channel</text>
+  <text x="120" y="355" text-anchor="middle" font-size="7" fill="#15803d">date, product, channel</text>
+  <text x="120" y="366" text-anchor="middle" font-size="7" fill="#15803d">net_sales, cogs, gross_profit</text>
+
+  <!-- MV2 -->
+  <rect x="220" y="325" width="160" height="55" rx="6" fill="#bbf7d0" stroke="#22c55e" stroke-width="1.2"/>
+  <text x="300" y="342" text-anchor="middle" font-size="9" font-weight="600" fill="#166534">MV2: Ads × Brand</text>
+  <text x="300" y="355" text-anchor="middle" font-size="7" fill="#15803d">date, product (brand)</text>
+  <text x="300" y="366" text-anchor="middle" font-size="7" fill="#15803d">total_ads_spend</text>
+
+  <!-- MV3 -->
+  <rect x="40" y="400" width="250" height="55" rx="6" fill="#86efac" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="165" y="417" text-anchor="middle" font-size="9" font-weight="700" fill="#166534">MV3: Channel Complete</text>
+  <text x="165" y="430" text-anchor="middle" font-size="7" fill="#15803d">= MV1 + commission rates</text>
+  <text x="165" y="441" text-anchor="middle" font-size="7" fill="#15803d">+ mp_admin_cost, mkt_cost, net_after_mkt</text>
+
+  <!-- MV4 -->
+  <rect x="320" y="400" width="250" height="55" rx="6" fill="#86efac" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="445" y="417" text-anchor="middle" font-size="9" font-weight="700" fill="#166534">MV4: Product Complete</text>
+  <text x="445" y="430" text-anchor="middle" font-size="7" fill="#15803d">= MV3 aggregated + MV2 ads</text>
+  <text x="445" y="441" text-anchor="middle" font-size="7" fill="#15803d">total mkt_cost, net_after_mkt</text>
+
+  <!-- Refresh box -->
+  <rect x="610" y="330" width="115" height="120" rx="6" fill="#cffafe" stroke="#06b6d4" stroke-width="1.2"/>
+  <text x="668" y="352" text-anchor="middle" font-size="9" font-weight="600" fill="#155e75">🔃 Refresh</text>
+  <text x="668" y="368" text-anchor="middle" font-size="7" fill="#0e7490">Triggered by:</text>
+  <text x="668" y="382" text-anchor="middle" font-size="7" fill="#0e7490">• Webhook</text>
+  <text x="668" y="394" text-anchor="middle" font-size="7" fill="#0e7490">• ScaleV Sync</text>
+  <text x="668" y="406" text-anchor="middle" font-size="7" fill="#0e7490">• Ads Sync</text>
+  <text x="668" y="418" text-anchor="middle" font-size="7" fill="#0e7490">• Manual button</text>
+  <text x="668" y="435" text-anchor="middle" font-size="7" font-weight="600" fill="#155e75">REFRESH</text>
+  <text x="668" y="445" text-anchor="middle" font-size="7" font-weight="600" fill="#155e75">CONCURRENTLY</text>
+
+  <!-- ===== VIEW ALIASES ===== -->
+  <rect x="20" y="490" width="720" height="70" rx="12" fill="#eef2ff" stroke="#a5b4fc" stroke-width="1.5"/>
+  <text x="40" y="512" font-size="11" font-weight="600" fill="#4338ca">🔄 VIEW ALIASES (nama tabel sama — zero UI change)</text>
+
+  <rect x="40" y="522" width="300" height="28" rx="6" fill="#c7d2fe" stroke="#6366f1" stroke-width="1.2"/>
+  <text x="190" y="540" text-anchor="middle" font-size="9" font-weight="600" fill="#4338ca">daily_channel_data → MV3</text>
+
+  <rect x="370" y="522" width="300" height="28" rx="6" fill="#c7d2fe" stroke="#6366f1" stroke-width="1.2"/>
+  <text x="520" y="540" text-anchor="middle" font-size="9" font-weight="600" fill="#4338ca">daily_product_summary → MV4</text>
+
+  <!-- ===== DASHBOARD PAGES ===== -->
+  <rect x="20" y="580" width="1060" height="90" rx="12" fill="#faf5ff" stroke="#d8b4fe" stroke-width="1.5"/>
+  <text x="40" y="602" font-size="11" font-weight="600" fill="#6b21a8">📊 DASHBOARD PAGES</text>
+
+  <rect x="40" y="612" width="120" height="48" rx="6" fill="#f3e8ff" stroke="#a855f7" stroke-width="1.2"/>
+  <text x="100" y="632" text-anchor="middle" font-size="9" font-weight="600" fill="#6b21a8">Overview</text>
+  <text x="100" y="645" text-anchor="middle" font-size="7" fill="#7c3aed">product_summary</text>
+
+  <rect x="180" y="612" width="120" height="48" rx="6" fill="#f3e8ff" stroke="#a855f7" stroke-width="1.2"/>
+  <text x="240" y="632" text-anchor="middle" font-size="9" font-weight="600" fill="#6b21a8">Products</text>
+  <text x="240" y="645" text-anchor="middle" font-size="7" fill="#7c3aed">product_summary</text>
+
+  <rect x="320" y="612" width="120" height="48" rx="6" fill="#f3e8ff" stroke="#a855f7" stroke-width="1.2"/>
+  <text x="380" y="632" text-anchor="middle" font-size="9" font-weight="600" fill="#6b21a8">Channels</text>
+  <text x="380" y="645" text-anchor="middle" font-size="7" fill="#7c3aed">channel_data</text>
+
+  <rect x="460" y="612" width="140" height="48" rx="6" fill="#f3e8ff" stroke="#a855f7" stroke-width="1.2"/>
+  <text x="530" y="632" text-anchor="middle" font-size="9" font-weight="600" fill="#6b21a8">Marketing</text>
+  <text x="530" y="645" text-anchor="middle" font-size="7" fill="#7c3aed">both + ads_spend</text>
+
+  <rect x="620" y="612" width="140" height="48" rx="6" fill="#fef9c3" stroke="#eab308" stroke-width="1.2"/>
+  <text x="690" y="632" text-anchor="middle" font-size="9" font-weight="600" fill="#854d0e">Finance</text>
+  <text x="690" y="645" text-anchor="middle" font-size="7" fill="#a16207">financial_*_monthly</text>
+
+  <rect x="780" y="612" width="140" height="48" rx="6" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.2"/>
+  <text x="850" y="632" text-anchor="middle" font-size="9" font-weight="600" fill="#1e40af">Customers</text>
+  <text x="850" y="645" text-anchor="middle" font-size="7" fill="#3b82f6">scalev_orders (direct)</text>
+
+  <!-- ===== ARROWS ===== -->
+  <!-- Sources → Raw -->
+  <line x1="115" y1="120" x2="130" y2="188" stroke="#64748b" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="285" y1="120" x2="160" y2="188" stroke="#64748b" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="455" y1="120" x2="330" y2="188" stroke="#64748b" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="625" y1="120" x2="520" y2="188" stroke="#64748b" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- Raw → MV -->
+  <line x1="130" y1="253" x2="120" y2="325" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="330" y1="253" x2="300" y2="325" stroke="#22c55e" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Config → MV -->
+  <line x1="745" y1="253" x2="165" y2="400" stroke="#9ca3af" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-dash)"/>
+  <line x1="745" y1="253" x2="300" y2="325" stroke="#9ca3af" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-dash)"/>
+
+  <!-- MV chain -->
+  <line x1="120" y1="380" x2="130" y2="400" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="165" y1="455" x2="380" y2="400" stroke="#16a34a" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <line x1="300" y1="380" x2="400" y2="400" stroke="#16a34a" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- MV → Aliases -->
+  <line x1="165" y1="455" x2="190" y2="522" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <line x1="445" y1="455" x2="520" y2="522" stroke="#6366f1" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- Aliases → Pages -->
+  <line x1="520" y1="550" x2="100" y2="612" stroke="#a855f7" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="520" y1="550" x2="240" y2="612" stroke="#a855f7" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="190" y1="550" x2="380" y2="612" stroke="#a855f7" stroke-width="1" marker-end="url(#arrow)"/>
+  <line x1="400" y1="550" x2="530" y2="612" stroke="#a855f7" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- Financial direct -->
+  <line x1="520" y1="253" x2="690" y2="612" stroke="#eab308" stroke-width="1" marker-end="url(#arrow)"/>
+
+  <!-- ScaleV direct to Customers -->
+  <line x1="130" y1="253" x2="850" y2="612" stroke="#3b82f6" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow-dash)"/>
+
+  <!-- ===== LEGEND ===== -->
+  <rect x="20" y="690" width="1060" height="185" rx="12" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="40" y="712" font-size="12" font-weight="700" fill="#1e293b">Legend &amp; Ringkasan Perubahan</text>
+
+  <rect x="40" y="725" width="14" height="14" rx="3" fill="#bbf7d0" stroke="#22c55e"/>
+  <text x="62" y="736" font-size="9" fill="#374151">Materialized Views — data dari ScaleV order lines (NEW)</text>
+
+  <rect x="40" y="745" width="14" height="14" rx="3" fill="#c7d2fe" stroke="#6366f1"/>
+  <text x="62" y="756" font-size="9" fill="#374151">View Aliases — nama tabel tetap, sumber data berubah ke MV</text>
+
+  <rect x="40" y="765" width="14" height="14" rx="3" fill="#fef9c3" stroke="#eab308"/>
+  <text x="62" y="776" font-size="9" fill="#374151">Google Sheet — masih digunakan (Ads daily + Financial monthly)</text>
+
+  <rect x="40" y="785" width="14" height="14" rx="3" fill="#fecaca" stroke="#ef4444"/>
+  <text x="62" y="796" font-size="9" fill="#374151">Dihapus — Brand tabs, Order tab, General tab tidak lagi di-sync</text>
+
+  <rect x="40" y="805" width="14" height="14" rx="3" fill="#cffafe" stroke="#06b6d4"/>
+  <text x="62" y="816" font-size="9" fill="#374151">Refresh otomatis setelah webhook, sync, atau ads update</text>
+
+  <text x="550" y="845" text-anchor="middle" font-size="9" font-weight="600" fill="#374151">Profit Chain: gross_sales − discount = net_sales − cogs = gross_profit − mkt_cost (ads + mp_admin) = net_after_mkt</text>
+  <text x="550" y="862" text-anchor="middle" font-size="9" font-weight="600" fill="#374151">Channel Merge: TikTok Ads + TikTok Shop → TikTok  |  Commission: TikTok 19%, Shopee 21%, Lazada 13.2%, BliBli 10%</text>
+</svg>
