@@ -128,22 +128,18 @@ export async function POST(req: NextRequest) {
       allRows.push(...result.rows);
     }
 
-    // ── Delete existing Meta-sourced ads for the date range ──
-    // Only delete rows where source indicates Meta (Facebook, WABA, WhatsApp, Meta)
-    // This prevents duplicating data on re-sync while preserving manual entries
-    const metaSources = accounts.map((a: MetaAdAccount) => a.default_source);
-    const uniqueSources = Array.from(new Set(metaSources));
-
-    for (const source of uniqueSources) {
+    // ── Delete existing Meta API ads for the date range ──
+    // Only delete rows tagged as meta_api to preserve Google Sheets data
+    {
       const { error: delError } = await svc
         .from('daily_ads_spend')
         .delete()
         .gte('date', dateStart)
         .lte('date', dateEnd)
-        .eq('source', source);
+        .eq('data_source', 'meta_api');
 
       if (delError) {
-        console.error(`[meta-sync] Delete error for source "${source}":`, delError);
+        console.error(`[meta-sync] Delete error:`, delError);
       }
     }
 

@@ -86,9 +86,10 @@ export async function POST(req: NextRequest) {
         // daily_product_summary and daily_channel_data are now materialized views
         // populated from scalev_order_lines, NOT from Google Sheet.
 
-        // Delete existing ads for this period
+        // Delete existing Google Sheets ads for this period (preserve Meta API data)
         const del3 = await svc.from('daily_ads_spend').delete()
-          .gte('date', periodStart).lte('date', periodEnd);
+          .gte('date', periodStart).lte('date', periodEnd)
+          .eq('data_source', 'google_sheets');
         if (del3.error) throw new Error(`Delete daily_ads_spend: ${del3.error.message}`);
 
         // Create/update import record

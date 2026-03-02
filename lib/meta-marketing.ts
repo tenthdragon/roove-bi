@@ -38,6 +38,7 @@ export interface DailyAdSpendRow {
   source: string;
   store: string;
   advertiser: string;
+  data_source: string;
 }
 
 export interface MetaSyncResult {
@@ -120,6 +121,7 @@ function mapInsightsToRows(
       source: account.default_source,
       store: account.store,
       advertiser: account.default_advertiser,
+      data_source: 'meta_api',
     }));
 }
 
