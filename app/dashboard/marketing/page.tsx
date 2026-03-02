@@ -20,53 +20,65 @@ function normStore(s: string): string {
   return s;
 }
 
-// ── 3 main traffic groups ──
-// Facebook Ads + WhatsApp → "Facebook Ads" → atribusi ke revenue Scalev
-// Shopee Ads + CPAS + Shopee Live → "Shopee Ads" → atribusi ke revenue Shopee
-// TikTok Ads + TikTok Shop → "TikTok Ads" → atribusi ke revenue TikTok
+// ── Mapping: Ads Source → Marketing Platform ──
+// Marketing POV: ads spend attributed to all sales channels they impact (including organic spillover)
+//
+// Sales Channel (DB)  | Marketing Channels that serve it
+// ────────────────────|──────────────────────────────────
+// Scalev (="Facebook Ads" in DB) | Meta Ads (Non CPAS, WABA/CTWA), Google Ads
+// Organik             | WhatsApp BC / Marketing Message (future)
+// Shopee              | Shopee Ads, Meta Ads CPAS
+// TikTok Shop         | TikTok Ads, TikTokShop Ads
+// MP lain             | MP lain Ads (future)
+//
+// NOTE: On marketing page, Meta Ads also attributes to Organik (spillover effect).
+//       On channels/sales page, Organik has zero ads cost.
 function normPlatform(source: string): string {
   if (!source) return 'Other';
   const s = source.toLowerCase();
   if (s.includes('cpas')) return 'Shopee Ads';
   if (s.includes('shopee')) return 'Shopee Ads';
   if (s.includes('tiktok')) return 'TikTok Ads';
-  if (s.includes('facebook')) return 'Facebook Ads';
-  if (s.includes('whatsapp') || s.includes('waba')) return 'Facebook Ads';
+  if (s.includes('facebook')) return 'Meta Ads';
+  if (s.includes('whatsapp') || s.includes('waba')) return 'Meta Ads';
   if (s.includes('google')) return 'Google Ads';
   if (s.includes('snack')) return 'SnackVideo Ads';
   return source;
 }
 
-// ── Sub-source label for breakdown keterangan ──
+// ── Sub-source label for breakdown detail ──
 function getSubSource(source: string): string | null {
   if (!source) return null;
   const s = source.toLowerCase();
   if (s.includes('cpas')) return 'CPAS';
   if (s.includes('shopee') && s.includes('live')) return 'Shopee Live';
-  if (s.includes('whatsapp') || s.includes('waba')) return 'WhatsApp';
+  if (s.includes('whatsapp') || s.includes('waba')) return 'WABA/CTWA';
   if (s.includes('tiktok shop') || s.includes('tiktokshop')) return 'TikTok Shop';
   return null;
 }
 
-// ── Platform → Revenue Channel mapping (exclusive, no double count) ──
+// ── Marketing Platform → Sales Channels served (marketing POV, includes organic spillover) ──
+// "Facebook Ads" below is the DB value for Scalev website orders (displayed as "Scalev")
 const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
-  'Facebook Ads': ['Facebook Ads', 'Google Ads', 'Organik'],
-  'Shopee Ads':   ['Shopee'],
-  'TikTok Ads':   ['TikTok', 'TikTok Shop'],
+  'Meta Ads':          ['Facebook Ads', 'Organik'],
+  'Google Ads':        ['Facebook Ads', 'Organik'],
+  'Shopee Ads':        ['Shopee'],
+  'TikTok Ads':        ['TikTok', 'TikTok Shop'],
   'Other Marketplace': ['Tokopedia', 'BliBli', 'Lazada'],
 };
 
 const PLATFORM_CHANNEL_LABEL: Record<string, string> = {
-  'Facebook Ads': 'Scalev',
-  'Shopee Ads':   'Shopee',
-  'TikTok Ads':   'TikTok',
+  'Meta Ads':          'Scalev',
+  'Google Ads':        'Scalev',
+  'Shopee Ads':        'Shopee',
+  'TikTok Ads':        'TikTok',
   'Other Marketplace': 'Other MP',
 };
 
 // ── Platform colors ──
 const PLATFORM_COLORS: Record<string, string> = {
-  'Facebook Ads': '#1877f2', 'TikTok Ads': '#ff0050', 'Shopee Ads': '#ee4d2d',
-  'Google Ads': '#4285f4', 'SnackVideo Ads': '#fbbf24', 'Other Marketplace': '#64748b',
+  'Meta Ads': '#1877f2', 'Google Ads': '#4285f4', 'TikTok Ads': '#ff0050',
+  'Shopee Ads': '#ee4d2d', 'SnackVideo Ads': '#fbbf24', 'Other Marketplace': '#64748b',
   'Reseller': '#f59e0b', 'Other': '#64748b',
 };
 
@@ -654,6 +666,9 @@ const BRAND_COLORS = useMemo(() => {
                                 }
                               </div>
                             )}
+                            {p.platform === 'Meta Ads' && (
+                              <div style={{ fontSize: 10, color: C.dim, marginTop: 2 }}>Serve 2 sales channel: Scalev + Organik (spillover)</div>
+                            )}
                           </div>
                         </div>
                       </td>
@@ -703,7 +718,7 @@ const BRAND_COLORS = useMemo(() => {
                 <span style={{ fontSize: 16, lineHeight: 1.4, flexShrink: 0 }}>💡</span>
                 <div style={{ fontSize: 11, color: C.dim, lineHeight: 1.6 }}>
                   <span style={{ fontWeight: 700, color: '#93c5fd' }}>Meta Ads sebagai Demand Generator — </span>
-                  ROAS Facebook Ads dihitung exclusive terhadap revenue <span style={{ color: CHANNEL_COLORS['Scalev'], fontWeight: 600 }}>Scalev</span>.
+                  ROAS Meta Ads dihitung exclusive terhadap revenue <span style={{ color: CHANNEL_COLORS['Scalev'], fontWeight: 600 }}>Scalev</span>.
                   Namun Meta Ads juga menciptakan demand yang spillover ke{' '}
                   <span style={{ color: CHANNEL_COLORS['Shopee'], fontWeight: 600 }}>Shopee</span> (konsumen search di marketplace setelah lihat iklan)
                   dan <span style={{ color: '#10b981', fontWeight: 600 }}>repeat order organik</span>.

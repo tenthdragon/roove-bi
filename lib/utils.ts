@@ -144,6 +144,7 @@ export const CHANNEL_COLORS: Record<string, string> = {
   'TikTok Shop': '#00f2ea',
   'TikTok': '#ff0050',
   'Facebook Ads': '#1877f2',
+  'Scalev': '#1877f2',
   'Organik': '#10b981',
   'Reseller': '#f59e0b',
   'Lazada': '#0f1689',
