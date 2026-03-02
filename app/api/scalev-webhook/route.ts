@@ -195,9 +195,8 @@ async function handleStatusChanged(data: any) {
   };
 
   const timestampFields = [
-    'draft_time', 'pending_time', 'confirmed_time', 'in_process_time',
-    'ready_time', 'shipped_time', 'completed_time', 'rts_time',
-    'canceled_time', 'closed_time',
+    'draft_time', 'pending_time', 'confirmed_time',
+    'paid_time', 'shipped_time', 'canceled_time',
   ];
 
   for (const field of timestampFields) {
@@ -303,9 +302,8 @@ async function handleOrderUpdated(data: any) {
 
   // Timestamps
   const timestampFields = [
-    'draft_time', 'pending_time', 'confirmed_time', 'in_process_time',
-    'ready_time', 'shipped_time', 'completed_time', 'rts_time',
-    'canceled_time', 'closed_time', 'paid_time',
+    'draft_time', 'pending_time', 'confirmed_time',
+    'paid_time', 'shipped_time', 'canceled_time',
   ];
   for (const field of timestampFields) {
     if (field in data) updateData[field] = ts(data[field]);
@@ -448,7 +446,6 @@ async function handlePaymentStatusChanged(data: any) {
     synced_at: new Date().toISOString(),
   };
 
-  if (data.payment_status) updateData.payment_status = data.payment_status;
   if (data.payment_method) updateData.payment_method = data.payment_method;
   if (data.status) updateData.status = data.status;
   if (data.paid_time) updateData.paid_time = ts(data.paid_time);
