@@ -78,7 +78,7 @@ export default function MetaManager() {
   // Dropdown options loaded from DB
   const [storeOptions, setStoreOptions] = useState<string[]>([]);
   const [sourceOptions] = useState<string[]>([
-    'Facebook Ads', 'Google Ads', 'TikTok Ads', 'Shopee', 'Lazada',
+    'Facebook Ads', 'Facebook CPAS', 'Google Ads', 'TikTok Ads', 'Shopee', 'Lazada',
     'BliBli', 'Tokopedia', 'SnackVideo Ads', 'Organik', 'Reseller',
   ]);
 
