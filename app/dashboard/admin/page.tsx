@@ -152,15 +152,7 @@ export default function AdminPage() {
   return (
     <div className="fade-in">
       {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Admin</h2>
-        <a href="/dashboard/admin/logs" style={{
-          padding: '5px 12px', borderRadius: 6, border: '1px solid #1a2744',
-          color: '#64748b', fontSize: 11, fontWeight: 600, textDecoration: 'none', background: '#0b1121',
-        }}>
-          📋 Logs
-        </a>
-      </div>
+      <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Admin</h2>
 
       {/* Tab Navigation */}
       <div style={{
@@ -182,6 +174,15 @@ export default function AdminPage() {
             {tab.label}
           </button>
         ))}
+        <a href="/dashboard/admin/logs" style={{
+          padding: '8px 16px', background: 'none', border: 'none',
+          borderBottom: '2px solid transparent',
+          color: '#64748b', fontSize: 13, fontWeight: 500,
+          textDecoration: 'none', cursor: 'pointer', transition: 'all 0.15s',
+          display: 'flex', alignItems: 'center',
+        }}>
+          Logs
+        </a>
       </div>
 
       {/* ═══ TAB: DAILY DATA ═══ */}
