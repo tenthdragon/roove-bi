@@ -8,7 +8,8 @@ import {
 } from './parser-shared';
 
 function getAuth() {
-  const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '{}');
+  const raw = (process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '{}').replace(/\n/g, '\\n');
+  const credentials = JSON.parse(raw);
   const auth = new google.auth.GoogleAuth({
     credentials,
     scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
