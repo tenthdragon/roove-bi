@@ -127,7 +127,6 @@ async function handleOrderCreated(data: any) {
       variant_name: line.variant_unique_id || null,
       quantity: line.quantity || 0,
       weight: line.weight || 0,
-      is_inventory: line.is_inventory ?? true,
     }));
 
     const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
@@ -334,7 +333,6 @@ async function handleOrderUpdated(data: any) {
       variant_name: line.variant_unique_id || null,
       quantity: line.quantity || 0,
       weight: line.weight || 0,
-      is_inventory: line.is_inventory ?? true,
     }));
 
     const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
@@ -548,52 +546,70 @@ async function handleEPaymentCreated(data: any) {
 
 // ── POST handler ──
 export async function POST(req: NextRequest) {
-  const rawBody = await req.text();
-  const signature = req.headers.get('x-scalev-hmac-sha256');
-
-  // Verify signature
-  if (!verifySignature(rawBody, signature)) {
-    console.error('[scalev-webhook] invalid signature');
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
-  }
-
-  let body: any;
   try {
-    body = JSON.parse(rawBody);
-  } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-  }
+    // Validate required env vars early
+    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+      console.error('[scalev-webhook] Missing SUPABASE env vars');
+      return NextResponse.json({ error: 'Server misconfigured: missing Supabase env vars' }, { status: 500 });
+    }
+    if (!process.env.SCALEV_WEBHOOK_SECRET) {
+      console.error('[scalev-webhook] Missing SCALEV_WEBHOOK_SECRET');
+      return NextResponse.json({ error: 'Server misconfigured: missing webhook secret' }, { status: 500 });
+    }
 
-  const { event, data } = body;
+    const rawBody = await req.text();
+    const signature = req.headers.get('x-scalev-hmac-sha256');
 
-  // Handle test event
-  if (event === 'business.test_event') {
-    console.log('[scalev-webhook] test event received');
-    return NextResponse.json({ ok: true, message: 'Test event received' });
-  }
+    // Verify signature
+    if (!verifySignature(rawBody, signature)) {
+      console.error('[scalev-webhook] invalid signature');
+      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+    }
 
-  // Route to appropriate handler
-  switch (event) {
-    case 'order.created':
-      return handleOrderCreated(data);
+    let body: any;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+    }
 
-    case 'order.updated':
-      return handleOrderUpdated(data);
+    const { event, data } = body;
 
-    case 'order.deleted':
-      return handleOrderDeleted(data);
+    // Handle test event
+    if (event === 'business.test_event') {
+      console.log('[scalev-webhook] test event received');
+      return NextResponse.json({ ok: true, message: 'Test event received' });
+    }
 
-    case 'order.status_changed':
-      return handleStatusChanged(data);
+    // Route to appropriate handler
+    switch (event) {
+      case 'order.created':
+        return handleOrderCreated(data);
 
-    case 'order.payment_status_changed':
-      return handlePaymentStatusChanged(data);
+      case 'order.updated':
+        return handleOrderUpdated(data);
 
-    case 'order.e_payment_created':
-      return handleEPaymentCreated(data);
+      case 'order.deleted':
+        return handleOrderDeleted(data);
 
-    default:
-      console.log(`[scalev-webhook] unhandled event: ${event}`);
-      return NextResponse.json({ ok: true, skipped: true, event });
+      case 'order.status_changed':
+        return handleStatusChanged(data);
+
+      case 'order.payment_status_changed':
+        return handlePaymentStatusChanged(data);
+
+      case 'order.e_payment_created':
+        return handleEPaymentCreated(data);
+
+      default:
+        console.log(`[scalev-webhook] unhandled event: ${event}`);
+        return NextResponse.json({ ok: true, skipped: true, event });
+    }
+  } catch (err: any) {
+    console.error('[scalev-webhook] Unhandled error:', err);
+    return NextResponse.json(
+      { error: err.message || 'Internal server error' },
+      { status: 500 }
+    );
   }
 }
