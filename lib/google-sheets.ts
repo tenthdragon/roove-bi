@@ -8,13 +8,35 @@ import {
 } from './parser-shared';
 
 function getAuth() {
-  const raw = (process.env.GOOGLE_SERVICE_ACCOUNT_KEY || '{}').replace(/\n/g, '\\n');
-  const credentials = JSON.parse(raw);
-  const auth = new google.auth.GoogleAuth({
+  const envKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
+  if (!envKey || envKey.trim() === '') {
+    throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY is not set or empty');
+  }
+
+  // Strip wrapping quotes if accidentally added in env config
+  let raw = envKey.trim();
+  if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
+    raw = raw.slice(1, -1);
+  }
+
+  // Replace actual newlines with escaped newlines for JSON parsing
+  raw = raw.replace(/\n/g, '\\n');
+
+  let credentials;
+  try {
+    credentials = JSON.parse(raw);
+  } catch (e: any) {
+    const preview = raw.substring(0, 50);
+    throw new Error(
+      `Failed to parse GOOGLE_SERVICE_ACCOUNT_KEY: ${e.message}. ` +
+      `Value starts with: "${preview}..." — ensure the env var contains valid JSON without outer quotes.`
+    );
+  }
+
+  return new google.auth.GoogleAuth({
     credentials,
     scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
   });
-  return auth;
 }
 
 async function getSheets() {
