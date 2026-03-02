@@ -18,6 +18,7 @@ const TABS = [
   { id: 'brands', label: 'Brands' },
   { id: 'scalev', label: 'Scalev API' },
   { id: 'users', label: 'Users' },
+  { id: 'logs', label: 'Logs' },
 ];
 
 export default function AdminPage() {
@@ -33,6 +34,12 @@ export default function AdminPage() {
   const [uploadResult, setUploadResult] = useState(null);
   const [uploadError, setUploadError] = useState('');
   const [dragOver, setDragOver] = useState(false);
+
+  // Logs states
+  const [logsData, setLogsData] = useState([]);
+  const [excelImports, setExcelImports] = useState([]);
+  const [logsLoading, setLogsLoading] = useState(false);
+  const [logFilter, setLogFilter] = useState('all');
 
   // User management states
   const [users, setUsers] = useState([]);
@@ -55,6 +62,26 @@ export default function AdminPage() {
     }
     init();
   }, [supabase]);
+
+  // Load logs when tab becomes active
+  useEffect(() => {
+    if (activeTab !== 'logs' || logsData.length > 0) return;
+    (async () => {
+      setLogsLoading(true);
+      try {
+        const [{ data: syncLogs }, { data: imports }] = await Promise.all([
+          supabase.from('scalev_sync_log').select('*').order('started_at', { ascending: false }).limit(100),
+          supabase.from('data_imports').select('*').order('imported_at', { ascending: false }).limit(100),
+        ]);
+        setLogsData(syncLogs || []);
+        setExcelImports(imports || []);
+      } catch (err) {
+        console.error('Failed to load logs:', err);
+      } finally {
+        setLogsLoading(false);
+      }
+    })();
+  }, [activeTab, supabase]);
 
   const refreshUsers = useCallback(async () => {
     const { data: u } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
@@ -174,15 +201,6 @@ export default function AdminPage() {
             {tab.label}
           </button>
         ))}
-        <a href="/dashboard/admin/logs" style={{
-          padding: '8px 16px', background: 'none', border: 'none',
-          borderBottom: '2px solid transparent',
-          color: '#64748b', fontSize: 13, fontWeight: 500,
-          textDecoration: 'none', cursor: 'pointer', transition: 'all 0.15s',
-          display: 'flex', alignItems: 'center',
-        }}>
-          Logs
-        </a>
       </div>
 
       {/* ═══ TAB: DAILY DATA ═══ */}
@@ -259,6 +277,144 @@ export default function AdminPage() {
       {activeTab === 'scalev' && (
         <ScalevManager />
       )}
+
+      {/* ═══ TAB: LOGS ═══ */}
+      {activeTab === 'logs' && (() => {
+        const WEBHOOK_LABELS = {
+          webhook: 'Webhook', webhook_created: 'Order Created', webhook_updated: 'Order Updated',
+          webhook_deleted: 'Order Deleted', webhook_status_changed: 'Status Changed',
+          webhook_payment_changed: 'Payment Changed', webhook_epayment: 'E-Payment Created',
+        };
+        const isWebhook = (t) => t === 'webhook' || (t && t.startsWith('webhook_'));
+        const buildDetail = (log) => {
+          const parts = [];
+          if (log.orders_fetched) parts.push(`${log.orders_fetched} rows`);
+          if (log.orders_inserted) parts.push(`${log.orders_inserted} baru`);
+          if (log.orders_updated) parts.push(`${log.orders_updated} diperkaya`);
+          return parts.join(' · ') || '—';
+        };
+        const merged = [];
+        for (const log of logsData) {
+          merged.push({
+            id: `sync-${log.id}`, time: log.started_at,
+            type: log.sync_type === 'csv_upload' ? 'CSV Upload' :
+                  log.sync_type === 'ops_upload' ? 'OPS Upload' :
+                  isWebhook(log.sync_type) ? 'Webhook' :
+                  log.sync_type === 'full' ? 'Scalev Full Sync' :
+                  log.sync_type === 'incremental' ? 'Scalev Incremental' : log.sync_type || 'Sync',
+            webhookEvent: WEBHOOK_LABELS[log.sync_type] || null,
+            status: log.status, detail: buildDetail(log),
+            filename: log.filename || null, uploadedBy: log.uploaded_by || null,
+            error: log.error_message,
+            category: log.sync_type === 'csv_upload' || log.sync_type === 'ops_upload' ? 'csv' :
+                      isWebhook(log.sync_type) ? 'webhook' : 'scalev',
+          });
+        }
+        for (const imp of excelImports) {
+          merged.push({
+            id: `excel-${imp.id}`, time: imp.imported_at, type: 'Excel Upload',
+            status: imp.status === 'completed' ? 'success' : imp.status,
+            detail: `Periode: ${imp.period_month}/${imp.period_year} — ${imp.row_count || 0} rows`,
+            filename: imp.filename || null, uploadedBy: null, error: null, category: 'excel',
+          });
+        }
+        merged.sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+        const filtered = logFilter === 'all' ? merged : merged.filter(l => l.category === logFilter);
+
+        const LOG_FILTERS = [
+          { id: 'all', label: 'Semua', count: null },
+          { id: 'csv', label: 'CSV Upload', count: logsData.filter(l => l.sync_type === 'csv_upload' || l.sync_type === 'ops_upload').length },
+          { id: 'webhook', label: 'Webhook', count: logsData.filter(l => isWebhook(l.sync_type)).length },
+          { id: 'scalev', label: 'Scalev Sync', count: logsData.filter(l => !isWebhook(l.sync_type) && l.sync_type !== 'csv_upload' && l.sync_type !== 'ops_upload').length },
+          { id: 'excel', label: 'Excel Upload', count: excelImports.length },
+        ];
+        const statusStyle = (s) => {
+          switch (s) {
+            case 'success': return { bg: '#064e3b', color: '#10b981', label: 'Sukses' };
+            case 'partial': return { bg: '#78350f', color: '#f59e0b', label: 'Partial' };
+            case 'error': return { bg: '#7f1d1d', color: '#ef4444', label: 'Error' };
+            case 'running': return { bg: '#1e3a5f', color: '#60a5fa', label: 'Running' };
+            default: return { bg: '#1a2744', color: '#64748b', label: s };
+          }
+        };
+        const typeStyle = (t) => {
+          if (t.includes('CSV') || t.includes('OPS')) return { bg: '#164e63', color: '#06b6d4' };
+          if (t === 'Webhook' || t.includes('Webhook')) return { bg: '#14532d', color: '#22c55e' };
+          if (t.includes('Scalev')) return { bg: '#2e1065', color: '#8b5cf6' };
+          if (t.includes('Excel')) return { bg: '#1e3a5f', color: '#3b82f6' };
+          return { bg: '#1a2744', color: '#64748b' };
+        };
+
+        return (
+          <div>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#64748b' }}>Riwayat semua upload dan sync data</p>
+            <div style={{ display: 'flex', gap: 4, marginBottom: 16, flexWrap: 'wrap' }}>
+              {LOG_FILTERS.map(f => (
+                <button key={f.id} onClick={() => setLogFilter(f.id)} style={{
+                  padding: '6px 14px', borderRadius: 20, border: '1px solid',
+                  borderColor: logFilter === f.id ? '#3b82f6' : '#1a2744',
+                  background: logFilter === f.id ? 'rgba(59,130,246,0.12)' : 'transparent',
+                  color: logFilter === f.id ? '#60a5fa' : '#94a3b8',
+                  fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                }}>
+                  {f.label} {f.count !== null && <span style={{ opacity: 0.7 }}>({f.count})</span>}
+                </button>
+              ))}
+            </div>
+            {logsLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
+                <div className="spinner" style={{ width: 32, height: 32, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+              </div>
+            ) : filtered.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 60, color: '#64748b' }}>Belum ada log aktivitas</div>
+            ) : (
+              <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, overflow: 'hidden' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700 }}>
+                    <thead>
+                      <tr style={{ background: '#0b1121' }}>
+                        {['Waktu', 'Tipe', 'Status', 'Detail', 'File', 'Oleh'].map(h => (
+                          <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.map((log) => {
+                        const ss = statusStyle(log.status);
+                        const ts = typeStyle(log.type);
+                        return (
+                          <tr key={log.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                            <td style={{ padding: '10px 12px', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: 11 }}>
+                              {new Date(log.time).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600, background: ts.bg, color: ts.color }}>{log.type}</span>
+                            </td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: ss.bg, color: ss.color }}>{ss.label}</span>
+                            </td>
+                            <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>
+                              {log.webhookEvent && (
+                                <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 600, background: '#1a2744', color: '#94a3b8', marginRight: 6 }}>{log.webhookEvent}</span>
+                              )}
+                              {log.detail}
+                              {log.error && (
+                                <div style={{ fontSize: 10, color: '#ef4444', marginTop: 2, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.error}</div>
+                              )}
+                            </td>
+                            <td style={{ padding: '10px 12px', color: '#64748b', fontSize: 11, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.filename || '—'}</td>
+                            <td style={{ padding: '10px 12px', color: '#64748b', fontSize: 11 }}>{log.uploadedBy || '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ═══ TAB: USERS ═══ */}
       {activeTab === 'users' && profile?.role === 'owner' && (
