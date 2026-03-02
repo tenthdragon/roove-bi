@@ -44,19 +44,35 @@ export default function LogsPage() {
   const allLogs = (() => {
     const merged = [];
 
+    const WEBHOOK_LABELS = {
+      webhook: 'Webhook',
+      webhook_created: 'Order Created',
+      webhook_updated: 'Order Updated',
+      webhook_deleted: 'Order Deleted',
+      webhook_status_changed: 'Status Changed',
+      webhook_payment_changed: 'Payment Changed',
+      webhook_epayment: 'E-Payment Created',
+    };
+
+    const isWebhook = (t) => t === 'webhook' || (t && t.startsWith('webhook_'));
+
     for (const log of logs) {
       merged.push({
         id: `sync-${log.id}`,
         time: log.started_at,
         type: log.sync_type === 'csv_upload' ? 'CSV Upload' :
+              log.sync_type === 'ops_upload' ? 'OPS Upload' :
+              isWebhook(log.sync_type) ? 'Webhook' :
               log.sync_type === 'full' ? 'Scalev Full Sync' :
               log.sync_type === 'incremental' ? 'Scalev Incremental' : log.sync_type || 'Sync',
+        webhookEvent: WEBHOOK_LABELS[log.sync_type] || null,
         status: log.status,
         detail: buildSyncDetail(log),
         filename: log.filename || null,
         uploadedBy: log.uploaded_by || null,
         error: log.error_message,
-        category: log.sync_type === 'csv_upload' ? 'csv' : 'scalev',
+        category: log.sync_type === 'csv_upload' || log.sync_type === 'ops_upload' ? 'csv' :
+                  isWebhook(log.sync_type) ? 'webhook' : 'scalev',
       });
     }
 
@@ -88,10 +104,13 @@ export default function LogsPage() {
     return parts.join(' · ') || '—';
   }
 
+  const isWebhookType = (t) => t === 'webhook' || (t && t.startsWith('webhook_'));
+
   const FILTERS = [
     { id: 'all', label: 'Semua', count: null },
-    { id: 'csv', label: 'CSV Upload', count: logs.filter(l => l.sync_type === 'csv_upload').length },
-    { id: 'scalev', label: 'Scalev Sync', count: logs.filter(l => l.sync_type !== 'csv_upload').length },
+    { id: 'csv', label: 'CSV Upload', count: logs.filter(l => l.sync_type === 'csv_upload' || l.sync_type === 'ops_upload').length },
+    { id: 'webhook', label: 'Webhook', count: logs.filter(l => isWebhookType(l.sync_type)).length },
+    { id: 'scalev', label: 'Scalev Sync', count: logs.filter(l => !isWebhookType(l.sync_type) && l.sync_type !== 'csv_upload' && l.sync_type !== 'ops_upload').length },
     { id: 'excel', label: 'Excel Upload', count: excelImports.length },
   ];
 
@@ -106,7 +125,8 @@ export default function LogsPage() {
   };
 
   const typeStyle = (type) => {
-    if (type.includes('CSV')) return { bg: '#164e63', color: '#06b6d4' };
+    if (type.includes('CSV') || type.includes('OPS')) return { bg: '#164e63', color: '#06b6d4' };
+    if (type === 'Webhook' || type.includes('Webhook')) return { bg: '#14532d', color: '#22c55e' };
     if (type.includes('Scalev')) return { bg: '#2e1065', color: '#8b5cf6' };
     if (type.includes('Excel')) return { bg: '#1e3a5f', color: '#3b82f6' };
     return { bg: '#1a2744', color: '#64748b' };
@@ -189,6 +209,12 @@ export default function LogsPage() {
                         }}>{ss.label}</span>
                       </td>
                       <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>
+                        {log.webhookEvent && (
+                          <span style={{
+                            padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 600,
+                            background: '#1a2744', color: '#94a3b8', marginRight: 6,
+                          }}>{log.webhookEvent}</span>
+                        )}
                         {log.detail}
                         {log.error && (
                           <div style={{ fontSize: 10, color: '#ef4444', marginTop: 2, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
