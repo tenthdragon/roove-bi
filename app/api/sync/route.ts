@@ -92,22 +92,43 @@ export async function POST(req: NextRequest) {
           .eq('data_source', 'google_sheets');
         if (del3.error) throw new Error(`Delete daily_ads_spend: ${del3.error.message}`);
 
+        // ── Filter out ads whose ad_account is managed by Meta API ──
+        // This prevents duplicates when the same account exists in both
+        // Google Sheets and Meta API sync.
+        const { data: metaAccounts } = await svc
+          .from('meta_ad_accounts')
+          .select('account_name')
+          .eq('is_active', true);
+
+        const metaManagedNames = new Set(
+          (metaAccounts || []).map((a: { account_name: string }) => a.account_name)
+        );
+
+        const filteredAds = parsed.ads.filter(
+          (row: { ad_account: string }) => !metaManagedNames.has(row.ad_account)
+        );
+
+        const skippedCount = parsed.ads.length - filteredAds.length;
+        if (skippedCount > 0) {
+          console.log(`[sync] Skipped ${skippedCount} rows already managed by Meta API`);
+        }
+
         // Create/update import record
         const { error: upsertErr } = await svc.from('data_imports').upsert({
           filename: `gsheet:${conn.spreadsheet_id}`,
           period_month: parsed.period.month,
           period_year: parsed.period.year,
           imported_by: conn.created_by,
-          row_count: parsed.ads.length,
+          row_count: filteredAds.length,
           status: 'processing',
-          notes: `Ads sync from Google Sheet: ${conn.label}`,
+          notes: `Ads sync from Google Sheet: ${conn.label}${skippedCount > 0 ? ` (${skippedCount} rows skipped — managed by Meta API)` : ''}`,
         }, { onConflict: 'period_month,period_year,filename' });
         if (upsertErr) throw new Error(`Upsert data_imports: ${upsertErr.message}`);
 
         // Insert ads data (batched)
-        if (parsed.ads.length > 0) {
-          for (let i = 0; i < parsed.ads.length; i += 500) {
-            const batch = parsed.ads.slice(i, i + 500);
+        if (filteredAds.length > 0) {
+          for (let i = 0; i < filteredAds.length; i += 500) {
+            const batch = filteredAds.slice(i, i + 500);
             const { error } = await svc.from('daily_ads_spend').insert(batch);
             if (error) throw error;
           }
@@ -116,20 +137,23 @@ export async function POST(req: NextRequest) {
         // Mark import as completed
         await svc.from('data_imports').update({
           status: 'completed',
-          row_count: parsed.ads.length,
+          row_count: filteredAds.length,
         }).eq('filename', `gsheet:${conn.spreadsheet_id}`)
           .eq('period_month', parsed.period.month)
           .eq('period_year', parsed.period.year);
 
         // Update last_synced on connection
+        const syncMsg = skippedCount > 0
+          ? `Synced ${filteredAds.length} ad rows (${skippedCount} skipped — Meta API managed)`
+          : `Synced ${filteredAds.length} ad rows`;
         await svc.from('sheet_connections').update({
           last_synced: new Date().toISOString(),
           last_sync_status: 'success',
-          last_sync_message: `Synced ${parsed.ads.length} ad rows (ads-only mode)`,
+          last_sync_message: syncMsg,
         }).eq('id', conn.id);
 
         // Refresh materialized views (ads data affects mkt_cost in MVs)
-        if (parsed.ads.length > 0) {
+        if (filteredAds.length > 0) {
           triggerViewRefresh();
         }
 
@@ -138,7 +162,7 @@ export async function POST(req: NextRequest) {
           label: conn.label,
           success: true,
           period: parsed.period,
-          counts: { ads: parsed.ads.length },
+          counts: { ads: filteredAds.length, skipped_meta: skippedCount },
         });
 
       } catch (err: any) {
