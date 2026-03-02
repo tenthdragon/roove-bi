@@ -1,0 +1,703 @@
+// components/MetaManager.tsx
+'use client';
+
+import { useState, useEffect, useCallback } from 'react';
+import { useSupabase } from '@/lib/supabase-browser';
+
+interface MetaAccount {
+  id: number;
+  account_id: string;
+  account_name: string;
+  store: string;
+  default_source: string;
+  default_advertiser: string;
+  is_active: boolean;
+}
+
+interface SyncLog {
+  id: number;
+  sync_date: string;
+  date_range_start: string;
+  date_range_end: string;
+  accounts_synced: number;
+  rows_inserted: number;
+  status: string;
+  error_message: string | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+interface RemoteAccount {
+  account_id: string;
+  name: string;
+  account_status: number;
+  currency: string;
+  is_registered: boolean;
+  registration: any;
+}
+
+// Store mapping per selected account for bulk add
+interface SelectedAccountMapping {
+  account_id: string;
+  name: string;
+  store: string;
+  default_source: string;
+  default_advertiser: string;
+}
+
+const ACCOUNT_STATUS_LABELS: Record<number, string> = {
+  1: 'Active',
+  2: 'Disabled',
+  3: 'Unsettled',
+  7: 'Pending Review',
+  8: 'Pending Closure',
+  9: 'In Grace Period',
+  100: 'Pending Settlement',
+  101: 'Closed',
+  201: 'Any Closed',
+};
+
+export default function MetaManager() {
+  const supabase = useSupabase();
+
+  const [accounts, setAccounts] = useState<MetaAccount[]>([]);
+  const [recentLogs, setRecentLogs] = useState<SyncLog[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
+  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Date picker state for sync
+  const getYesterday = () => {
+    const d = new Date();
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split('T')[0];
+  };
+  const [syncDateStart, setSyncDateStart] = useState(getYesterday);
+  const [syncDateEnd, setSyncDateEnd] = useState(getYesterday);
+
+  // Dropdown options loaded from DB
+  const [storeOptions, setStoreOptions] = useState<string[]>([]);
+  const [sourceOptions] = useState<string[]>([
+    'Facebook Ads', 'Google Ads', 'TikTok Ads', 'Shopee', 'Lazada',
+    'BliBli', 'Tokopedia', 'SnackVideo Ads', 'Organik', 'Reseller',
+  ]);
+
+  // Account picker state
+  const [showPicker, setShowPicker] = useState(false);
+  const [remoteAccounts, setRemoteAccounts] = useState<RemoteAccount[]>([]);
+  const [loadingRemote, setLoadingRemote] = useState(false);
+  const [selectedMappings, setSelectedMappings] = useState<Map<string, SelectedAccountMapping>>(new Map());
+  const [savingBulk, setSavingBulk] = useState(false);
+  const [searchFilter, setSearchFilter] = useState('');
+
+  // Edit form state (for existing accounts)
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editForm, setEditForm] = useState({
+    account_id: '', account_name: '', store: '',
+    default_source: 'Facebook Ads', default_advertiser: 'Meta Team',
+  });
+
+  const loadData = useCallback(async () => {
+    try {
+      const [{ data: accs }, { data: logs }, { data: stores }] = await Promise.all([
+        supabase.from('meta_ad_accounts').select('*').order('account_name'),
+        supabase.from('meta_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
+        supabase.from('ads_store_brand_mapping').select('store_pattern').order('store_pattern'),
+      ]);
+      setAccounts(accs || []);
+      setRecentLogs(logs || []);
+      setStoreOptions((stores || []).map((s: any) => s.store_pattern));
+    } catch (err: any) {
+      console.error('Failed to load Meta data:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => { loadData(); }, [loadData]);
+
+  // ── Fetch remote accounts from Meta API ──
+  const handleLoadRemoteAccounts = async () => {
+    setLoadingRemote(true);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/meta-accounts');
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: 'error', text: data.error || 'Gagal mengambil data dari Meta' });
+        return;
+      }
+      setRemoteAccounts(data.accounts || []);
+      setShowPicker(true);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Gagal fetch akun' });
+    } finally {
+      setLoadingRemote(false);
+    }
+  };
+
+  // ── Toggle selection of a remote account ──
+  const toggleSelection = (acc: RemoteAccount) => {
+    setSelectedMappings(prev => {
+      const next = new Map(prev);
+      if (next.has(acc.account_id)) {
+        next.delete(acc.account_id);
+      } else {
+        next.set(acc.account_id, {
+          account_id: acc.account_id,
+          name: acc.name,
+          store: '',
+          default_source: 'Facebook Ads',
+          default_advertiser: 'Meta Team',
+        });
+      }
+      return next;
+    });
+  };
+
+  // ── Update store mapping for a selected account ──
+  const updateMapping = (accountId: string, field: string, value: string) => {
+    setSelectedMappings(prev => {
+      const next = new Map(prev);
+      const existing = next.get(accountId);
+      if (existing) {
+        next.set(accountId, { ...existing, [field]: value });
+      }
+      return next;
+    });
+  };
+
+  // ── Bulk save selected accounts ──
+  const handleBulkSave = async () => {
+    const toSave = Array.from(selectedMappings.values()).filter(m => m.store.trim());
+    if (toSave.length === 0) {
+      setMessage({ type: 'error', text: 'Pilih minimal 1 akun dan isi Store mapping-nya' });
+      return;
+    }
+
+    const missing = Array.from(selectedMappings.values()).filter(m => !m.store.trim());
+    if (missing.length > 0) {
+      setMessage({ type: 'error', text: `${missing.length} akun belum diisi Store mapping-nya` });
+      return;
+    }
+
+    setSavingBulk(true);
+    setMessage(null);
+    try {
+      const rows = toSave.map(m => ({
+        account_id: m.account_id,
+        account_name: m.name,
+        store: m.store.trim(),
+        default_source: m.default_source.trim() || 'Facebook',
+        default_advertiser: m.default_advertiser.trim() || 'Meta Team',
+      }));
+
+      const { error } = await supabase.from('meta_ad_accounts').upsert(rows, {
+        onConflict: 'account_id',
+      });
+      if (error) throw error;
+
+      setMessage({ type: 'success', text: `${rows.length} akun berhasil disimpan` });
+      setSelectedMappings(new Map());
+      setShowPicker(false);
+      setRemoteAccounts([]);
+      await loadData();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Gagal menyimpan' });
+    } finally {
+      setSavingBulk(false);
+    }
+  };
+
+  // ── Edit existing account ──
+  const handleEdit = (acc: MetaAccount) => {
+    setEditForm({
+      account_id: acc.account_id, account_name: acc.account_name,
+      store: acc.store, default_source: acc.default_source,
+      default_advertiser: acc.default_advertiser,
+    });
+    setEditingId(acc.id);
+  };
+
+  const handleEditSave = async () => {
+    if (!editForm.store.trim()) {
+      setMessage({ type: 'error', text: 'Store wajib diisi' });
+      return;
+    }
+    try {
+      const { error } = await supabase.from('meta_ad_accounts').update({
+        account_name: editForm.account_name.trim(),
+        store: editForm.store.trim(),
+        default_source: editForm.default_source.trim(),
+        default_advertiser: editForm.default_advertiser.trim(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', editingId);
+      if (error) throw error;
+      setMessage({ type: 'success', text: 'Akun diperbarui' });
+      setEditingId(null);
+      await loadData();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleToggleActive = async (acc: MetaAccount) => {
+    try {
+      const { error } = await supabase.from('meta_ad_accounts').update({
+        is_active: !acc.is_active, updated_at: new Date().toISOString(),
+      }).eq('id', acc.id);
+      if (error) throw error;
+      await loadData();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleSyncNow = async () => {
+    setSyncing(true);
+    setMessage(null);
+    try {
+      const params = new URLSearchParams({ date_start: syncDateStart, date_end: syncDateEnd });
+      const res = await fetch(`/api/meta-sync?${params}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ type: 'error', text: data.error || 'Sync gagal' });
+      } else {
+        const msg = `Sync ${data.status}: ${data.accounts_synced}/${data.accounts_total} akun, ${data.rows_inserted} baris data`;
+        setMessage({
+          type: data.status === 'failed' ? 'error' : 'success',
+          text: data.token_warning ? `${msg}. ⚠️ ${data.token_warning}` : msg,
+        });
+        await loadData();
+      }
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || 'Sync gagal' });
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  const statusStyle = (s: string) => {
+    switch (s) {
+      case 'success': return { bg: '#064e3b', color: '#10b981', label: 'Sukses' };
+      case 'partial': return { bg: '#78350f', color: '#f59e0b', label: 'Partial' };
+      case 'failed': return { bg: '#7f1d1d', color: '#ef4444', label: 'Gagal' };
+      case 'running': return { bg: '#1e3a5f', color: '#60a5fa', label: 'Running' };
+      default: return { bg: '#1a2744', color: '#64748b', label: s };
+    }
+  };
+
+  if (loading) {
+    return (
+      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+        <div style={{ color: '#64748b', fontSize: 13 }}>Memuat data Meta Ads...</div>
+      </div>
+    );
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '8px 12px', borderRadius: 6,
+    border: '1px solid #1a2744', background: '#0b1121',
+    color: '#e2e8f0', fontSize: 13, outline: 'none',
+  };
+  const labelStyle: React.CSSProperties = { fontSize: 11, color: '#64748b', display: 'block', marginBottom: 4 };
+
+  // Filtered remote accounts for the picker
+  const filteredRemote = remoteAccounts.filter(a =>
+    !searchFilter || a.name.toLowerCase().includes(searchFilter.toLowerCase()) ||
+    a.account_id.toLowerCase().includes(searchFilter.toLowerCase())
+  );
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* ─── Meta Ad Accounts ─── */}
+      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>Meta Ad Accounts</div>
+          <button
+            onClick={handleLoadRemoteAccounts}
+            disabled={loadingRemote}
+            style={{
+              padding: '6px 14px', borderRadius: 6, border: 'none', cursor: loadingRemote ? 'not-allowed' : 'pointer',
+              background: loadingRemote ? '#1a2744' : '#3b82f6', color: '#fff',
+              fontSize: 12, fontWeight: 600, opacity: loadingRemote ? 0.6 : 1,
+            }}
+          >
+            {loadingRemote ? 'Memuat...' : '+ Tambah Akun'}
+          </button>
+        </div>
+        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+          Daftar akun Meta Ads yang datanya ditarik otomatis via Marketing API.
+        </div>
+
+        {/* ─── Sync Controls with Date Picker ─── */}
+        {accounts.filter(a => a.is_active).length > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14,
+            padding: 12, background: '#0b1121', borderRadius: 8, border: '1px solid #1a2744',
+            flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>Sync tanggal:</span>
+            <input
+              type="date"
+              value={syncDateStart}
+              onChange={e => setSyncDateStart(e.target.value)}
+              style={{ ...inputStyle, width: 'auto', padding: '5px 8px', fontSize: 12 }}
+            />
+            <span style={{ fontSize: 12, color: '#64748b' }}>s/d</span>
+            <input
+              type="date"
+              value={syncDateEnd}
+              onChange={e => setSyncDateEnd(e.target.value)}
+              style={{ ...inputStyle, width: 'auto', padding: '5px 8px', fontSize: 12 }}
+            />
+            <button
+              onClick={handleSyncNow}
+              disabled={syncing}
+              style={{
+                padding: '6px 16px', borderRadius: 6, border: 'none',
+                cursor: syncing ? 'not-allowed' : 'pointer',
+                background: syncing ? '#1a2744' : '#7c3aed', color: '#fff',
+                fontSize: 12, fontWeight: 600, opacity: syncing ? 0.4 : 1,
+                marginLeft: 'auto',
+              }}
+            >
+              {syncing ? 'Syncing...' : 'Sync Now'}
+            </button>
+          </div>
+        )}
+
+        {/* Messages */}
+        {message && (
+          <div style={{
+            marginBottom: 12, padding: 12, borderRadius: 8, fontSize: 13,
+            background: message.type === 'success' ? '#064e3b' : '#7f1d1d',
+            color: message.type === 'success' ? '#10b981' : '#ef4444',
+          }}>
+            {message.type === 'success' ? '✅' : '❌'} {message.text}
+          </div>
+        )}
+
+        {/* ─── Account Picker (multi-select from Meta API) ─── */}
+        {showPicker && (
+          <div style={{
+            marginBottom: 16, padding: 16, background: '#0b1121',
+            borderRadius: 8, border: '1px solid #1a2744',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>
+                Pilih Akun dari Meta ({remoteAccounts.length} ditemukan)
+              </div>
+              <button
+                onClick={() => { setShowPicker(false); setSelectedMappings(new Map()); setSearchFilter(''); }}
+                style={{
+                  padding: '4px 12px', borderRadius: 4, border: '1px solid #1a2744',
+                  background: 'transparent', color: '#64748b', fontSize: 11, cursor: 'pointer',
+                }}
+              >
+                Tutup
+              </button>
+            </div>
+
+            {/* Search */}
+            <input
+              value={searchFilter}
+              onChange={e => setSearchFilter(e.target.value)}
+              placeholder="Cari nama akun atau ID..."
+              style={{ ...inputStyle, marginBottom: 12 }}
+            />
+
+            {/* Account checklist */}
+            <div style={{
+              maxHeight: 350, overflowY: 'auto', border: '1px solid #1a2744',
+              borderRadius: 6, background: '#111a2e',
+            }}>
+              {filteredRemote.map(acc => {
+                const isSelected = selectedMappings.has(acc.account_id);
+                const mapping = selectedMappings.get(acc.account_id);
+                const statusLabel = ACCOUNT_STATUS_LABELS[acc.account_status] || `Status ${acc.account_status}`;
+
+                return (
+                  <div key={acc.account_id} style={{
+                    borderBottom: '1px solid #0f172a',
+                    background: isSelected ? 'rgba(59,130,246,0.08)' : 'transparent',
+                  }}>
+                    {/* Row: checkbox + info */}
+                    <div
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '10px 12px', cursor: acc.is_registered ? 'default' : 'pointer',
+                      }}
+                      onClick={() => !acc.is_registered && toggleSelection(acc)}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected || acc.is_registered}
+                        disabled={acc.is_registered}
+                        onChange={() => !acc.is_registered && toggleSelection(acc)}
+                        onClick={e => e.stopPropagation()}
+                        style={{ accentColor: '#3b82f6', cursor: acc.is_registered ? 'default' : 'pointer' }}
+                      />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0' }}>
+                          {acc.name}
+                          {acc.is_registered && (
+                            <span style={{
+                              marginLeft: 8, padding: '1px 6px', borderRadius: 4,
+                              fontSize: 9, fontWeight: 600, background: '#064e3b', color: '#10b981',
+                            }}>Sudah terdaftar</span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 10, color: '#64748b' }}>
+                          {acc.account_id} · {statusLabel} · {acc.currency}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Mapping fields (shown when selected) */}
+                    {isSelected && mapping && (
+                      <div style={{
+                        padding: '0 12px 12px 36px',
+                        display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8,
+                      }}>
+                        <div>
+                          <label style={labelStyle}>Store (wajib)</label>
+                          <select
+                            value={mapping.store}
+                            onChange={e => updateMapping(acc.account_id, 'store', e.target.value)}
+                            style={{ ...inputStyle, padding: '6px 10px', fontSize: 12 }}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <option value="">— Pilih Store —</option>
+                            {storeOptions.map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Source</label>
+                          <select
+                            value={mapping.default_source}
+                            onChange={e => updateMapping(acc.account_id, 'default_source', e.target.value)}
+                            style={{ ...inputStyle, padding: '6px 10px', fontSize: 12 }}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            {sourceOptions.map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={labelStyle}>Advertiser</label>
+                          <input
+                            value={mapping.default_advertiser}
+                            onChange={e => updateMapping(acc.account_id, 'default_advertiser', e.target.value)}
+                            placeholder="Meta Team"
+                            style={{ ...inputStyle, padding: '6px 10px', fontSize: 12 }}
+                            onClick={e => e.stopPropagation()}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+              {filteredRemote.length === 0 && (
+                <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: 12 }}>
+                  {searchFilter ? 'Tidak ada akun yang cocok' : 'Tidak ada akun ditemukan'}
+                </div>
+              )}
+            </div>
+
+            {/* Save button */}
+            {selectedMappings.size > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                  {selectedMappings.size} akun dipilih
+                </div>
+                <button
+                  onClick={handleBulkSave}
+                  disabled={savingBulk}
+                  style={{
+                    padding: '8px 24px', borderRadius: 6, border: 'none', cursor: savingBulk ? 'not-allowed' : 'pointer',
+                    background: savingBulk ? '#1a2744' : '#3b82f6', color: '#fff',
+                    fontSize: 13, fontWeight: 600, opacity: savingBulk ? 0.6 : 1,
+                  }}
+                >
+                  {savingBulk ? 'Menyimpan...' : `Simpan ${selectedMappings.size} Akun`}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ─── Registered Account List ─── */}
+        {accounts.length === 0 && !showPicker ? (
+          <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>
+            Belum ada akun Meta Ads. Klik "+ Tambah Akun" untuk memuat daftar dari Meta API.
+          </div>
+        ) : accounts.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
+              <thead>
+                <tr style={{ background: '#0b1121' }}>
+                  {['Status', 'Account ID', 'Nama Akun', 'Store', 'Source', 'Advertiser', 'Aksi'].map(h => (
+                    <th key={h} style={{
+                      padding: '10px 12px', textAlign: 'left', color: '#64748b',
+                      fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
+                      borderBottom: '2px solid #1a2744',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {accounts.map(acc => (
+                  <tr key={acc.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                    {editingId === acc.id ? (
+                      /* ── Inline edit mode ── */
+                      <>
+                        <td style={{ padding: '8px 12px' }} colSpan={2}>
+                          <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#64748b' }}>{acc.account_id}</span>
+                        </td>
+                        <td style={{ padding: '8px 6px' }}>
+                          <input value={editForm.account_name} onChange={e => setEditForm(f => ({ ...f, account_name: e.target.value }))}
+                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }} />
+                        </td>
+                        <td style={{ padding: '8px 6px' }}>
+                          <select value={editForm.store} onChange={e => setEditForm(f => ({ ...f, store: e.target.value }))}
+                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}>
+                            <option value="">— Pilih —</option>
+                            {storeOptions.map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ padding: '8px 6px' }}>
+                          <select value={editForm.default_source} onChange={e => setEditForm(f => ({ ...f, default_source: e.target.value }))}
+                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}>
+                            {sourceOptions.map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ padding: '8px 6px' }}>
+                          <input value={editForm.default_advertiser} onChange={e => setEditForm(f => ({ ...f, default_advertiser: e.target.value }))}
+                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }} />
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button onClick={handleEditSave} style={{
+                              padding: '4px 8px', borderRadius: 4, border: 'none',
+                              background: '#3b82f6', color: '#fff', fontSize: 10, cursor: 'pointer',
+                            }}>Simpan</button>
+                            <button onClick={() => setEditingId(null)} style={{
+                              padding: '4px 8px', borderRadius: 4, border: '1px solid #1a2744',
+                              background: 'transparent', color: '#64748b', fontSize: 10, cursor: 'pointer',
+                            }}>Batal</button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      /* ── Normal display mode ── */
+                      <>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span style={{
+                            padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                            background: acc.is_active ? '#064e3b' : '#1a2744',
+                            color: acc.is_active ? '#10b981' : '#64748b',
+                          }}>
+                            {acc.is_active ? 'Aktif' : 'Nonaktif'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>
+                          {acc.account_id}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#e2e8f0', fontWeight: 600 }}>{acc.account_name}</td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.store}</td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.default_source}</td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.default_advertiser}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button onClick={() => handleEdit(acc)} style={{
+                              padding: '4px 10px', borderRadius: 4, border: '1px solid #1a2744',
+                              background: 'transparent', color: '#60a5fa', fontSize: 11, cursor: 'pointer',
+                            }}>Edit</button>
+                            <button onClick={() => handleToggleActive(acc)} style={{
+                              padding: '4px 10px', borderRadius: 4, border: '1px solid #1a2744',
+                              background: 'transparent', fontSize: 11, cursor: 'pointer',
+                              color: acc.is_active ? '#f59e0b' : '#10b981',
+                            }}>
+                              {acc.is_active ? 'Nonaktifkan' : 'Aktifkan'}
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ─── Recent Sync Logs ─── */}
+      {recentLogs.length > 0 && (
+        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Riwayat Sync Meta</div>
+          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>5 sync terakhir</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 500 }}>
+              <thead>
+                <tr style={{ background: '#0b1121' }}>
+                  {['Waktu', 'Range', 'Akun', 'Baris', 'Status', 'Durasi'].map(h => (
+                    <th key={h} style={{
+                      padding: '10px 12px', textAlign: 'left', color: '#64748b',
+                      fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
+                      borderBottom: '2px solid #1a2744',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {recentLogs.map(log => {
+                  const ss = statusStyle(log.status);
+                  return (
+                    <tr key={log.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                      <td style={{ padding: '10px 12px', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: 11 }}>
+                        {new Date(log.created_at).toLocaleString('id-ID', {
+                          day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                        })}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: 11 }}>
+                        {log.date_range_start === log.date_range_end
+                          ? log.date_range_start
+                          : `${log.date_range_start} ~ ${log.date_range_end}`}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{log.accounts_synced}</td>
+                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{log.rows_inserted}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span style={{
+                          padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                          background: ss.bg, color: ss.color,
+                        }}>{ss.label}</span>
+                        {log.error_message && (
+                          <div style={{ fontSize: 10, color: '#ef4444', marginTop: 2, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {log.error_message}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: 11 }}>
+                        {log.duration_ms ? `${(log.duration_ms / 1000).toFixed(1)}s` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

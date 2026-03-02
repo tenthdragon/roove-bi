@@ -11,9 +11,11 @@ import ScalevManager from '@/components/ScalevManager';
 import FinancialSheetManager from '@/components/FinancialSheetManager';
 import CsvOrderUploader from '@/components/CsvOrderUploader';
 import BrandManager from '@/components/BrandManager';
+import MetaManager from '@/components/MetaManager';
 
 const TABS = [
   { id: 'daily', label: 'Daily Data' },
+  { id: 'meta', label: 'Meta Ads' },
   { id: 'financial', label: 'Financial' },
   { id: 'brands', label: 'Brands' },
   { id: 'scalev', label: 'Scalev API' },
@@ -261,6 +263,11 @@ export default function AdminPage() {
           {/* CSV Order Upload */}
           <CsvOrderUploader />
         </div>
+      )}
+
+      {/* ═══ TAB: META ADS ═══ */}
+      {activeTab === 'meta' && (
+        <MetaManager />
       )}
 
       {/* ═══ TAB: FINANCIAL ═══ */}
