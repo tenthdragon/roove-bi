@@ -3,7 +3,6 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { fetchChannelSla, type SlaRow } from '@/lib/sla-actions';
-import { CHANNEL_COLORS } from '@/lib/utils';
 
 const CHANNEL_DISPLAY_NAME: Record<string, string> = {
   'Facebook Ads': 'Scalev',
@@ -27,6 +26,18 @@ function slaBg(days: number): string {
   return '#7f1d1d';
 }
 
+const PAYMENT_STYLE: Record<string, { bg: string; color: string; label: string }> = {
+  cod:           { bg: '#7c2d12', color: '#fb923c', label: 'COD' },
+  marketplace:   { bg: '#1e3a5f', color: '#60a5fa', label: 'Marketplace' },
+  bank_transfer: { bg: '#064e3b', color: '#34d399', label: 'Bank Transfer' },
+  no_payment:    { bg: '#1e293b', color: '#94a3b8', label: 'No Payment' },
+  unknown:       { bg: '#1e293b', color: '#64748b', label: 'Unknown' },
+};
+
+function paymentStyle(method: string) {
+  return PAYMENT_STYLE[method] || { bg: '#1e293b', color: '#94a3b8', label: method };
+}
+
 interface Props {
   from: string;
   to: string;
@@ -45,42 +56,76 @@ export default function ChannelSlaSection({ from, to }: Props) {
       .finally(() => setLoading(false));
   }, [from, to]);
 
-  // Group by channel, with sub-rows for payment type
-  const channels = useMemo(() => {
-    const map: Record<string, { total: SlaRow | null; cod: SlaRow | null; nonCod: SlaRow | null }> = {};
-
+  // Group by channel, build rows: channel total + sub-rows per payment type
+  const tableRows = useMemo(() => {
+    const byChannel: Record<string, SlaRow[]> = {};
     data.forEach(row => {
-      if (!map[row.sales_channel]) {
-        map[row.sales_channel] = { total: null, cod: null, nonCod: null };
-      }
-      if (row.payment_type === 'COD') {
-        map[row.sales_channel].cod = row;
-      } else {
-        map[row.sales_channel].nonCod = row;
-      }
+      if (!byChannel[row.sales_channel]) byChannel[row.sales_channel] = [];
+      byChannel[row.sales_channel].push(row);
     });
 
-    // Compute totals per channel
-    return Object.entries(map)
-      .map(([ch, { cod, nonCod }]) => {
-        const totalOrders = (cod?.orders || 0) + (nonCod?.orders || 0);
-        // Weighted average for median
-        const codWeight = cod ? cod.orders / totalOrders : 0;
-        const nonCodWeight = nonCod ? nonCod.orders / totalOrders : 0;
-        const avgMedian = (cod?.median_days || 0) * codWeight + (nonCod?.median_days || 0) * nonCodWeight;
-        const avgAvg = (cod?.avg_days || 0) * codWeight + (nonCod?.avg_days || 0) * nonCodWeight;
-
-        return {
-          channel: ch,
-          totalOrders,
-          avgDays: Math.round(avgAvg * 10) / 10,
-          medianDays: Math.round(avgMedian * 10) / 10,
-          cod,
-          nonCod,
-        };
-      })
-      .filter(c => c.totalOrders > 0)
+    // Sort channels by total orders desc
+    const sorted = Object.entries(byChannel)
+      .map(([ch, rows]) => ({
+        channel: ch,
+        rows: rows.sort((a, b) => b.orders - a.orders),
+        totalOrders: rows.reduce((s, r) => s + r.orders, 0),
+      }))
       .sort((a, b) => b.totalOrders - a.totalOrders);
+
+    // Build flat list with channel summary + payment sub-rows
+    const result: Array<{
+      type: 'channel' | 'payment';
+      channel: string;
+      paymentType?: string;
+      orders: number;
+      median: number;
+      avg: number;
+      p90: number;
+      min: number;
+      max: number;
+      hasMultiple: boolean;
+    }> = [];
+
+    for (const { channel, rows, totalOrders } of sorted) {
+      const hasMultiple = rows.length > 1;
+
+      if (hasMultiple) {
+        // Channel summary row (weighted)
+        const wMedian = rows.reduce((s, r) => s + r.median_days * r.orders, 0) / totalOrders;
+        const wAvg = rows.reduce((s, r) => s + r.avg_days * r.orders, 0) / totalOrders;
+        const wP90 = rows.reduce((s, r) => s + r.p90_days * r.orders, 0) / totalOrders;
+        const minAll = Math.min(...rows.map(r => r.min_days));
+        const maxAll = Math.max(...rows.map(r => r.max_days));
+
+        result.push({
+          type: 'channel', channel, orders: totalOrders,
+          median: Math.round(wMedian * 10) / 10,
+          avg: Math.round(wAvg * 10) / 10,
+          p90: Math.round(wP90 * 10) / 10,
+          min: minAll, max: maxAll, hasMultiple,
+        });
+
+        // Sub-rows per payment type
+        for (const r of rows) {
+          result.push({
+            type: 'payment', channel, paymentType: r.payment_type,
+            orders: r.orders, median: r.median_days, avg: r.avg_days,
+            p90: r.p90_days, min: r.min_days, max: r.max_days, hasMultiple,
+          });
+        }
+      } else {
+        // Single payment type — show as channel row directly with payment badge
+        const r = rows[0];
+        result.push({
+          type: 'channel', channel, paymentType: r.payment_type,
+          orders: r.orders, median: r.median_days, avg: r.avg_days,
+          p90: r.p90_days, min: r.min_days, max: r.max_days, hasMultiple,
+        });
+      }
+    }
+
+    return result;
   }, [data]);
 
   if (loading) {
@@ -92,7 +137,7 @@ export default function ChannelSlaSection({ from, to }: Props) {
     );
   }
 
-  if (channels.length === 0) {
+  if (tableRows.length === 0) {
     return (
       <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Order SLA · Shipped → Completed</div>
@@ -102,141 +147,112 @@ export default function ChannelSlaSection({ from, to }: Props) {
   }
 
   return (
-    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 700 }}>Order SLA · Shipped → Completed</div>
-          <div style={{ fontSize: 11, color: '#64748b' }}>
-            Waktu rata-rata dari pengiriman hingga selesai · Anomali data dikeluarkan
-          </div>
+    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto' }}>
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 15, fontWeight: 700 }}>Order SLA · Shipped → Completed</div>
+        <div style={{ fontSize: 11, color: '#64748b' }}>
+          Waktu dari pengiriman hingga selesai per channel · Anomali data dikeluarkan
         </div>
       </div>
 
-      {/* SLA Cards */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-        {channels.map(c => (
-          <div key={c.channel} style={{
-            flex: '1 1 180px', minWidth: 170, background: '#0c1524', borderRadius: 10,
-            padding: '14px 16px', border: '1px solid #1a2744', position: 'relative', overflow: 'hidden',
-          }}>
-            <div style={{
-              position: 'absolute', top: 0, left: 0, right: 0, height: 3,
-              background: CHANNEL_COLORS[displayName(c.channel)] || '#3b82f6',
-            }} />
-            <div style={{ fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 8 }}>
-              {displayName(c.channel)}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginBottom: 8 }}>
-              <span style={{
-                fontSize: 24, fontWeight: 800, fontFamily: 'monospace',
-                color: slaColor(c.medianDays), lineHeight: 1,
-              }}>
-                {c.medianDays}
-              </span>
-              <span style={{ fontSize: 11, color: '#64748b' }}>hari (median)</span>
-            </div>
-            <div style={{ fontSize: 10, color: '#475569', marginBottom: 10 }}>
-              avg {c.avgDays} hari · {c.totalOrders.toLocaleString('id-ID')} orders
-            </div>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700 }}>
+        <thead>
+          <tr style={{ borderBottom: '2px solid #1a2744' }}>
+            {['Channel', 'Payment', 'Orders', 'Median', 'Avg', 'P90', 'Min', 'Max'].map(h => (
+              <th key={h} style={{
+                padding: '8px 10px',
+                textAlign: h === 'Channel' || h === 'Payment' ? 'left' : 'right',
+                color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
+              }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {tableRows.map((row, i) => {
+            const isChannel = row.type === 'channel';
+            const isSubRow = row.type === 'payment';
 
-            {/* COD vs Non-COD breakdown */}
-            <div style={{ display: 'flex', gap: 6 }}>
-              {c.nonCod && (
-                <div style={{
-                  flex: 1, padding: '6px 8px', borderRadius: 6,
-                  background: '#0b1121', border: '1px solid #1a2744',
-                }}>
-                  <div style={{ fontSize: 9, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: 3 }}>
-                    Non-COD
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: slaColor(c.nonCod.median_days) }}>
-                    {c.nonCod.median_days}d
-                  </div>
-                  <div style={{ fontSize: 9, color: '#475569' }}>
-                    {c.nonCod.orders.toLocaleString('id-ID')} ord
-                  </div>
-                </div>
-              )}
-              {c.cod && (
-                <div style={{
-                  flex: 1, padding: '6px 8px', borderRadius: 6,
-                  background: '#0b1121', border: '1px solid #1a2744',
-                }}>
-                  <div style={{ fontSize: 9, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: 3 }}>
-                    COD
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: slaColor(c.cod.median_days) }}>
-                    {c.cod.median_days}d
-                  </div>
-                  <div style={{ fontSize: 9, color: '#475569' }}>
-                    {c.cod.orders.toLocaleString('id-ID')} ord
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Detail Table */}
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700 }}>
-          <thead>
-            <tr style={{ borderBottom: '2px solid #1a2744' }}>
-              {['Channel', 'Payment', 'Orders', 'Median', 'Avg', 'P90', 'Min', 'Max'].map(h => (
-                <th key={h} style={{
-                  padding: '8px 10px', textAlign: h === 'Channel' || h === 'Payment' ? 'left' : 'right',
-                  color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
-                }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {data
-              .sort((a, b) => b.orders - a.orders)
-              .map((row, i) => (
-              <tr key={`${row.sales_channel}-${row.payment_type}`} style={{ borderBottom: '1px solid #1a2744' }}>
-                <td style={{ padding: '8px 10px', fontWeight: 600 }}>
-                  {displayName(row.sales_channel)}
+            return (
+              <tr
+                key={`${row.channel}-${row.paymentType || 'all'}`}
+                style={{
+                  borderBottom: `1px solid ${isChannel ? '#1e293b' : '#141d2e'}`,
+                  background: isChannel && row.hasMultiple ? '#0c1524' : 'transparent',
+                }}
+              >
+                {/* Channel */}
+                <td style={{ padding: '8px 10px', fontWeight: isChannel ? 600 : 400 }}>
+                  {isChannel ? displayName(row.channel) : (
+                    <span style={{ paddingLeft: 16, color: '#64748b' }}>└</span>
+                  )}
                 </td>
+
+                {/* Payment Type */}
                 <td style={{ padding: '8px 10px' }}>
-                  <span style={{
-                    padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-                    background: row.payment_type === 'COD' ? '#7c2d12' : '#1e3a5f',
-                    color: row.payment_type === 'COD' ? '#fb923c' : '#60a5fa',
-                  }}>
-                    {row.payment_type}
-                  </span>
+                  {(isChannel && !row.hasMultiple && row.paymentType) || isSubRow ? (() => {
+                    const ps = paymentStyle(row.paymentType);
+                    return (
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                        background: ps.bg, color: ps.color,
+                      }}>
+                        {ps.label}
+                      </span>
+                    );
+                  })() : isChannel && row.hasMultiple ? (
+                    <span style={{ fontSize: 10, color: '#475569' }}>All</span>
+                  ) : null}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>
+
+                {/* Orders */}
+                <td style={{
+                  padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace',
+                  fontWeight: isChannel ? 600 : 400, color: isSubRow ? '#94a3b8' : '#e2e8f0',
+                }}>
                   {row.orders.toLocaleString('id-ID')}
                 </td>
+
+                {/* Median */}
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                   <span style={{
-                    padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 700,
-                    fontFamily: 'monospace', background: slaBg(row.median_days), color: slaColor(row.median_days),
+                    padding: '2px 8px', borderRadius: 4, fontSize: 11,
+                    fontWeight: isChannel ? 700 : 600, fontFamily: 'monospace',
+                    background: slaBg(row.median), color: slaColor(row.median),
                   }}>
-                    {row.median_days}d
+                    {row.median}d
                   </span>
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8' }}>
-                  {row.avg_days}d
+
+                {/* Avg */}
+                <td style={{
+                  padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace',
+                  color: isSubRow ? '#64748b' : '#94a3b8',
+                }}>
+                  {row.avg}d
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#64748b' }}>
-                  {row.p90_days}d
+
+                {/* P90 */}
+                <td style={{
+                  padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace',
+                  color: isSubRow ? '#475569' : '#64748b',
+                }}>
+                  {row.p90}d
                 </td>
+
+                {/* Min */}
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#475569' }}>
-                  {row.min_days}d
+                  {row.min}d
                 </td>
+
+                {/* Max */}
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#475569' }}>
-                  {row.max_days}d
+                  {row.max}d
                 </td>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            );
+          })}
+        </tbody>
+      </table>
 
       {/* Legend */}
       <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 10, color: '#475569' }}>
