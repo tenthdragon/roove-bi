@@ -50,7 +50,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email tidak valid' }, { status: 400 });
     }
     
-    const allowedRoles = ['admin', 'finance', 'brand_manager'];
+    const allowedRoles = ['admin', 'finance', 'brand_manager', 'sales_manager', 'staff'];
     if (!allowedRoles.includes(role)) {
       return NextResponse.json({ error: 'Role tidak valid' }, { status: 400 });
     }
