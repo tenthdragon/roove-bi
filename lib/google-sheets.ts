@@ -19,9 +19,6 @@ function getAuth() {
     raw = raw.slice(1, -1);
   }
 
-  // Replace actual newlines with escaped newlines for JSON parsing
-  raw = raw.replace(/\n/g, '\\n');
-
   let credentials;
   try {
     credentials = JSON.parse(raw);

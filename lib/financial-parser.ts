@@ -16,8 +16,6 @@ function getAuth() {
     raw = raw.slice(1, -1);
   }
 
-  raw = raw.replace(/\n/g, '\\n');
-
   let creds;
   try {
     creds = JSON.parse(raw);
