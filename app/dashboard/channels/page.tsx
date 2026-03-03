@@ -199,7 +199,16 @@ export default function ChannelsPage() {
         };
       })
       .filter(c => c.revenue > 0)
-      .sort((a, b) => b.revenue - a.revenue);
+      .sort((a, b) => {
+        // Pin Organik, Scalev, Reseller at top (in that order), rest sorted by revenue
+        const pinOrder = ['Organik', 'Scalev', 'Reseller'];
+        const aPin = pinOrder.indexOf(a.name);
+        const bPin = pinOrder.indexOf(b.name);
+        if (aPin !== -1 && bPin !== -1) return aPin - bPin;
+        if (aPin !== -1) return -1;
+        if (bPin !== -1) return 1;
+        return b.revenue - a.revenue;
+      });
   }, [channelData, selectedProduct, adsPerChannel]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
@@ -357,7 +366,7 @@ export default function ChannelsPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid #1a2744' }}>
-              {['Channel', 'Net Sales', '% Share', 'Gross Profit', 'Admin Fee', 'Mkt Cost', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
+              {['Channel', 'Net Sales', '% Share', 'Admin Fee', 'Mkt Cost', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
@@ -370,7 +379,6 @@ export default function ChannelsPage() {
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(c.revenue)}</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>{c.pct.toFixed(1)}%</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(c.gp)}</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#8b5cf6' }}>
                   {c.mpAdmin > 0 ? fmtRupiah(c.mpAdmin) : <span style={{ color: '#334155' }}>—</span>}
                 </td>
@@ -403,7 +411,6 @@ export default function ChannelsPage() {
               <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalRevenue)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalGP)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>{fmtRupiah(totalMpAdmin)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(totalAdsCost)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
