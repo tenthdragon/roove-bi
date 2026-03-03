@@ -7,6 +7,7 @@ import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
+import ChannelSlaSection from '@/components/ChannelSlaSection';
 
 // ── Normalize ad source → platform (same logic as marketing page) ──
 // ── Ads Source → Marketing Platform (sales POV: NO organic spillover) ──
@@ -413,6 +414,11 @@ export default function ChannelsPage() {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      {/* Order SLA Section */}
+      <div style={{ marginTop: 20 }}>
+        <ChannelSlaSection from={dateRange.from} to={dateRange.to} />
       </div>
     </div>
   );

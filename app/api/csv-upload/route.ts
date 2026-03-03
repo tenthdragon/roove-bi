@@ -1,6 +1,7 @@
 // app/api/csv-upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { triggerViewRefresh } from '@/lib/refresh-views';
 
 function getServiceSupabase() {
   return createClient(
@@ -544,6 +545,9 @@ async function handleOpsUpload(
     completed_at: new Date().toISOString(),
   });
 
+  // Refresh materialized views so dashboard reflects new data
+  triggerViewRefresh();
+
   return NextResponse.json({
     success: true,
     filename: file.name,
@@ -687,6 +691,7 @@ async function handleScalevUpload(
     }, rows[0]);
     const salesChannel = deriveSalesChannel(firstRow);
     const shippedTime = ts(firstRow.shipped_time) || ts(firstRow.completed_time) || null;
+    const completedTime = ts(firstRow.completed_time) || null;
 
     // ── Build line items ──
     const lineItems: any[] = [];
@@ -776,7 +781,8 @@ async function handleScalevUpload(
       if (ts(firstRow.confirmed_time)) d.confirmed_time = ts(firstRow.confirmed_time);
       if (ts(firstRow.draft_time)) d.draft_time = ts(firstRow.draft_time);
       if (ts(firstRow.pending_time)) d.pending_time = ts(firstRow.pending_time);
-      
+      if (completedTime) d.completed_time = completedTime;
+
       // Platform info (ops might not have this)
       if (firstRow.platform) d.platform = firstRow.platform;
       if (firstRow.store) d.store_name = firstRow.store;
@@ -829,6 +835,7 @@ async function handleScalevUpload(
         pending_time: ts(firstRow.pending_time),
         confirmed_time: ts(firstRow.confirmed_time),
         paid_time: ts(firstRow.paid_time),
+        completed_time: completedTime,
         canceled_time: ts(firstRow.canceled_time),
         source: 'csv_upload',
         raw_data: firstRow,
@@ -925,6 +932,9 @@ async function handleScalevUpload(
     error_message: stats.errors.length > 0 ? `${stats.errors.length} errors: ${stats.errors.slice(0, 5).join('; ')}` : null,
     completed_at: new Date().toISOString(),
   });
+
+  // Refresh materialized views so dashboard reflects new data
+  triggerViewRefresh();
 
   return NextResponse.json({
     success: true,

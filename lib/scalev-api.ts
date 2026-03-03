@@ -218,6 +218,7 @@ export async function lookupProductType(productName: string): Promise<string> {
 export async function parseOrderForDb(order: any) {
   const salesChannel = deriveSalesChannel(order);
   const shippedTime = order.shipped_time || order.completed_time || null;
+  const completedTime = order.completed_time || null;
 
   // Parse order header
   const orderHeader = {
@@ -225,6 +226,7 @@ export async function parseOrderForDb(order: any) {
     order_id: order.order_id,
     status: order.status || 'unknown',
     shipped_time: shippedTime,
+    completed_time: completedTime,
     platform: order.platform || null,
     store_name: order.store?.name || null,
     utm_source: order.utm_source || null,

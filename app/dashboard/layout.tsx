@@ -26,6 +26,75 @@ function getAllowedTabs(prof) {
   return null;
 }
 
+function RefreshViewsButton() {
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+
+  const handleRefresh = async () => {
+    setStatus('loading');
+    try {
+      const res = await fetch('/api/refresh-views', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setStatus('success');
+        // Reload page after short delay so dashboard picks up new data
+        setTimeout(() => window.location.reload(), 800);
+      } else {
+        console.error('[refresh]', data.error);
+        setStatus('error');
+        setTimeout(() => setStatus('idle'), 3000);
+      }
+    } catch (err) {
+      console.error('[refresh]', err);
+      setStatus('error');
+      setTimeout(() => setStatus('idle'), 3000);
+    }
+  };
+
+  const icon = {
+    idle: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
+        <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+      </svg>
+    ),
+    loading: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"
+        style={{ animation: 'spin 0.8s linear infinite' }}>
+        <polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" />
+        <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15" />
+      </svg>
+    ),
+    success: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5">
+        <polyline points="20 6 9 17 4 12" />
+      </svg>
+    ),
+    error: (
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5">
+        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+      </svg>
+    ),
+  };
+
+  return (
+    <button
+      onClick={handleRefresh}
+      disabled={status === 'loading'}
+      title="Refresh data dashboard"
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 34, height: 34, borderRadius: 8,
+        border: '1px solid #1a2744',
+        background: status === 'loading' ? '#1a2744' : '#111a2e',
+        color: '#94a3b8', cursor: status === 'loading' ? 'wait' : 'pointer',
+        transition: 'all 0.15s ease', flexShrink: 0,
+      }}
+    >
+      {icon[status]}
+    </button>
+  );
+}
+
 function HeaderDatePicker() {
   const { dateRange, dateExtent, setDateRange } = useDateRange();
   if (!dateRange.from) return null;
@@ -376,7 +445,8 @@ export default function DashboardLayout({ children }) {
                 {visibleTabs.find(t => t.id === currentTab)?.label || 'Dashboard'}
               </div>
             </div>
-            <div style={{ display:'flex', alignItems:'center', gap:12, flexShrink:0 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+              <RefreshViewsButton />
               {showDatePicker && <HeaderDatePicker />}
               <div className="desktop-sidebar" style={{ fontSize:11, color:'#475569', fontWeight:500 }}>
                 {profile?.full_name || profile?.email}

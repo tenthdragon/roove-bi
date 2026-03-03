@@ -135,6 +135,7 @@ export async function uploadCsvOrders(formData: FormData) {
     const firstRow = rows[0];
     const salesChannel = deriveSalesChannel(firstRow);
     const shippedTime = ts(firstRow.shipped_time) || ts(firstRow.completed_time) || null;
+    const completedTime = ts(firstRow.completed_time) || null;
 
     // ── Build line items ──
     const lineItems: any[] = [];
@@ -195,6 +196,7 @@ export async function uploadCsvOrders(formData: FormData) {
       if (ts(firstRow.confirmed_time)) d.confirmed_time = ts(firstRow.confirmed_time);
       if (ts(firstRow.draft_time)) d.draft_time = ts(firstRow.draft_time);
       if (ts(firstRow.pending_time)) d.pending_time = ts(firstRow.pending_time);
+      if (completedTime) d.completed_time = completedTime;
       if (num(firstRow.gross_revenue) > 0) d.gross_revenue = num(firstRow.gross_revenue);
       if (num(firstRow.net_revenue) > 0) d.net_revenue = num(firstRow.net_revenue);
       if (num(firstRow.shipping_cost) > 0) d.shipping_cost = num(firstRow.shipping_cost);
@@ -224,6 +226,7 @@ export async function uploadCsvOrders(formData: FormData) {
         handler: firstRow.handler || null,
         draft_time: ts(firstRow.draft_time), pending_time: ts(firstRow.pending_time),
         confirmed_time: ts(firstRow.confirmed_time), paid_time: ts(firstRow.paid_time),
+        completed_time: completedTime,
         canceled_time: ts(firstRow.canceled_time),
         source: 'csv_upload', raw_data: firstRow, synced_at: new Date().toISOString(),
       });

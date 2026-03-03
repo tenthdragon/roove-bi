@@ -100,6 +100,7 @@ async function handleOrderCreated(data: any) {
     confirmed_time: ts(data.confirmed_time),
     paid_time: ts(data.paid_time),
     shipped_time: ts(data.shipped_time),
+    completed_time: ts(data.completed_time),
     canceled_time: ts(data.canceled_time),
     source: 'webhook',
     raw_data: data,
@@ -196,7 +197,7 @@ async function handleStatusChanged(data: any) {
 
   const timestampFields = [
     'draft_time', 'pending_time', 'confirmed_time',
-    'paid_time', 'shipped_time', 'canceled_time',
+    'paid_time', 'shipped_time', 'completed_time', 'canceled_time',
   ];
 
   for (const field of timestampFields) {
@@ -303,7 +304,7 @@ async function handleOrderUpdated(data: any) {
   // Timestamps
   const timestampFields = [
     'draft_time', 'pending_time', 'confirmed_time',
-    'paid_time', 'shipped_time', 'canceled_time',
+    'paid_time', 'shipped_time', 'completed_time', 'canceled_time',
   ];
   for (const field of timestampFields) {
     if (field in data) updateData[field] = ts(data[field]);
