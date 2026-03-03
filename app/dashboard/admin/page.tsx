@@ -113,7 +113,7 @@ export default function AdminPage() {
 
   const handleRoleChange = async (userId, newRole) => {
     try {
-      const tabs = newRole === 'brand_manager' ? ['marketing'] : [];
+      const tabs = newRole === 'brand_manager' ? ['marketing'] : newRole === 'sales_manager' ? ['channels'] : [];
       await updateUserRole(userId, newRole, tabs, []);
       await refreshUsers();
     } catch (err) {
@@ -165,6 +165,7 @@ export default function AdminPage() {
       case 'admin': return { text: 'Admin', bg: '#064e3b', color: '#10b981' };
       case 'finance': return { text: 'Finance', bg: '#1e3a5f', color: '#60a5fa' };
       case 'brand_manager': return { text: 'Brand Manager', bg: '#78350f', color: '#f59e0b' };
+      case 'sales_manager': return { text: 'Sales Manager', bg: '#4a1d6e', color: '#c084fc' };
       case 'pending': return { text: 'Menunggu Approval', bg: '#7f1d1d', color: '#ef4444' };
       case 'staff': return { text: 'Staff', bg: '#1e3a5f', color: '#38bdf8' };
       default: return { text: r, bg: '#1a2744', color: '#64748b' };
@@ -451,6 +452,7 @@ export default function AdminPage() {
                   <option value="admin">Admin</option>
                   <option value="finance">Finance</option>
                   <option value="brand_manager">Brand Manager</option>
+                  <option value="sales_manager">Sales Manager</option>
                   <option value="staff">Staff</option>
                 </select>
               </div>
@@ -480,9 +482,9 @@ export default function AdminPage() {
 
           {/* Role Legend */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 10 }}>
-            {['owner', 'admin', 'finance', 'staff', 'brand_manager', 'pending'].map(r => {
+            {['owner', 'admin', 'finance', 'staff', 'brand_manager', 'sales_manager', 'pending'].map(r => {
               const rl = roleLabel(r);
-              const desc = r === 'owner' ? 'akses penuh' : r === 'admin' ? 'read-only' : r === 'finance' ? 'sync/upload' : r === 'brand_manager' ? 'marketing' : r === 'staff' ? 'staff' : 'pending';
+              const desc = r === 'owner' ? 'akses penuh' : r === 'admin' ? 'read-only' : r === 'finance' ? 'sync/upload' : r === 'brand_manager' ? 'marketing' : r === 'sales_manager' ? 'channel' : r === 'staff' ? 'staff' : 'pending';
               return (
                 <span key={r} style={{ padding: '2px 8px', borderRadius: 5, background: rl.bg, color: rl.color, fontWeight: 600 }}>
                   {rl.text} — {desc}
@@ -515,6 +517,7 @@ export default function AdminPage() {
                           <button onClick={() => handleRoleChange(u.id, 'admin')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#064e3b', color: '#10b981', fontSize: 12, fontWeight: 600 }}>✓ Admin</button>
                           <button onClick={() => handleRoleChange(u.id, 'finance')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#1e3a5f', color: '#60a5fa', fontSize: 12, fontWeight: 600 }}>✓ Finance</button>
                           <button onClick={() => handleRoleChange(u.id, 'brand_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#78350f', color: '#f59e0b', fontSize: 12, fontWeight: 600 }}>✓ Brand Manager</button>
+                          <button onClick={() => handleRoleChange(u.id, 'sales_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#4a1d6e', color: '#c084fc', fontSize: 12, fontWeight: 600 }}>✓ Sales Manager</button>
                         </>
                       ) : (
                         <select
@@ -526,6 +529,7 @@ export default function AdminPage() {
                           <option value="admin">Admin</option>
                           <option value="finance">Finance</option>
                           <option value="brand_manager">Brand Manager</option>
+                          <option value="sales_manager">Sales Manager</option>
                           <option value="pending">Revoke Access</option>
                         </select>
                       )}
