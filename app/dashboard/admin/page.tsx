@@ -19,6 +19,7 @@ const TABS = [
   { id: 'financial', label: 'Financial' },
   { id: 'brands', label: 'Brands' },
   { id: 'scalev', label: 'Scalev API' },
+  { id: 'data_ref', label: 'Data Reference' },
   { id: 'users', label: 'Users' },
   { id: 'logs', label: 'Logs' },
 ];
@@ -42,6 +43,13 @@ export default function AdminPage() {
   const [excelImports, setExcelImports] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logFilter, setLogFilter] = useState('all');
+
+  // Data Reference states
+  const [commRates, setCommRates] = useState([]);
+  const [commLoading, setCommLoading] = useState(false);
+  const [commSaving, setCommSaving] = useState(false);
+  const [commMsg, setCommMsg] = useState(null);
+  const [editingRate, setEditingRate] = useState(null); // { channel, rate, effective_from, isNew }
 
   // User management states
   const [users, setUsers] = useState([]);
@@ -89,6 +97,72 @@ export default function AdminPage() {
     const { data: u } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
     setUsers(u || []);
   }, [supabase]);
+
+  // Load commission rates when Data Reference tab is active
+  const loadCommRates = useCallback(async () => {
+    setCommLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('marketplace_commission_rates')
+        .select('*')
+        .order('channel')
+        .order('effective_from', { ascending: false });
+      if (error) throw error;
+      setCommRates(data || []);
+    } catch (err) {
+      console.error('Failed to load commission rates:', err);
+    } finally {
+      setCommLoading(false);
+    }
+  }, [supabase]);
+
+  useEffect(() => {
+    if (activeTab === 'data_ref' && commRates.length === 0) loadCommRates();
+  }, [activeTab]);
+
+  const handleSaveRate = async (row) => {
+    if (!row.channel || !row.rate || !row.effective_from) {
+      setCommMsg({ type: 'error', text: 'Semua field harus diisi' });
+      return;
+    }
+    setCommSaving(true);
+    setCommMsg(null);
+    try {
+      const rateNum = parseFloat(row.rate);
+      if (isNaN(rateNum) || rateNum < 0 || rateNum > 1) {
+        throw new Error('Rate harus berupa desimal antara 0 dan 1 (contoh: 0.19 = 19%)');
+      }
+      const { error } = await supabase
+        .from('marketplace_commission_rates')
+        .upsert({
+          channel: row.channel,
+          rate: rateNum,
+          effective_from: row.effective_from,
+        }, { onConflict: 'channel,effective_from' });
+      if (error) throw error;
+      setCommMsg({ type: 'success', text: `Rate ${row.channel} berhasil disimpan` });
+      setEditingRate(null);
+      await loadCommRates();
+      // Trigger MV refresh so mp_admin_cost recalculates
+      supabase.rpc('refresh_order_views', { use_concurrent: true }).then(() => {}).catch(() => {});
+    } catch (err) {
+      setCommMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
+    } finally {
+      setCommSaving(false);
+    }
+  };
+
+  const handleDeleteRate = async (id) => {
+    if (!confirm('Hapus rate ini? Data mp_admin_cost yang sudah dihitung tidak akan berubah sampai views di-refresh.')) return;
+    try {
+      const { error } = await supabase.from('marketplace_commission_rates').delete().eq('id', id);
+      if (error) throw error;
+      setCommMsg({ type: 'success', text: 'Rate dihapus' });
+      await loadCommRates();
+    } catch (err) {
+      setCommMsg({ type: 'error', text: err.message || 'Gagal menghapus' });
+    }
+  };
 
   const handleUpload = useCallback(async (file) => {
     if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
@@ -176,6 +250,7 @@ export default function AdminPage() {
   const visibleTabs = TABS.filter(t => {
     if (t.id === 'users' && profile?.role !== 'owner') return false;
     if (t.id === 'brands' && profile?.role !== 'owner') return false;
+    if (t.id === 'data_ref' && profile?.role !== 'owner') return false;
     return true;
   });
 
@@ -284,6 +359,154 @@ export default function AdminPage() {
       {/* ═══ TAB: SCALEV API ═══ */}
       {activeTab === 'scalev' && (
         <ScalevManager />
+      )}
+
+      {/* ═══ TAB: DATA REFERENCE ═══ */}
+      {activeTab === 'data_ref' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {/* Marketplace Commission Rates */}
+          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Marketplace Commission Rates</div>
+              <button
+                onClick={() => setEditingRate({ channel: '', rate: '', effective_from: new Date().toISOString().slice(0, 10), isNew: true })}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#3b82f6', color: '#fff', fontSize: 12, fontWeight: 600 }}
+              >
+                + Tambah Rate
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+              Rate komisi marketplace yang digunakan untuk menghitung biaya admin (mp_admin_cost = net_sales × rate).
+              Perubahan rate akan berlaku sesuai tanggal efektif.
+            </div>
+
+            {commMsg && (
+              <div style={{
+                marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
+                background: commMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
+                color: commMsg.type === 'success' ? '#10b981' : '#ef4444'
+              }}>
+                {commMsg.type === 'success' ? '✅' : '❌'} {commMsg.text}
+              </div>
+            )}
+
+            {/* Add/Edit Form */}
+            {editingRate && (
+              <div style={{ background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: '#e2e8f0' }}>
+                  {editingRate.isNew ? 'Tambah Rate Baru' : `Edit Rate — ${editingRate.channel}`}
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div style={{ flex: '1 1 140px' }}>
+                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Channel</label>
+                    {editingRate.isNew ? (
+                      <select
+                        value={editingRate.channel}
+                        onChange={e => setEditingRate({ ...editingRate, channel: e.target.value })}
+                        style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12 }}
+                      >
+                        <option value="">— Pilih Channel —</option>
+                        {['TikTok', 'Shopee', 'Lazada', 'BliBli', 'Tokopedia'].map(ch => (
+                          <option key={ch} value={ch}>{ch}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div style={{ padding: '7px 10px', fontSize: 12, color: '#94a3b8' }}>{editingRate.channel}</div>
+                    )}
+                  </div>
+                  <div style={{ flex: '0 0 120px' }}>
+                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Rate (desimal)</label>
+                    <input
+                      type="text"
+                      value={editingRate.rate}
+                      onChange={e => setEditingRate({ ...editingRate, rate: e.target.value })}
+                      placeholder="0.19"
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                    />
+                    {editingRate.rate && !isNaN(parseFloat(editingRate.rate)) && (
+                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>= {(parseFloat(editingRate.rate) * 100).toFixed(2)}%</div>
+                    )}
+                  </div>
+                  <div style={{ flex: '0 0 140px' }}>
+                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Berlaku Sejak</label>
+                    <input
+                      type="date"
+                      value={editingRate.effective_from}
+                      onChange={e => setEditingRate({ ...editingRate, effective_from: e.target.value })}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      onClick={() => handleSaveRate(editingRate)}
+                      disabled={commSaving}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: commSaving ? 'not-allowed' : 'pointer', background: '#10b981', color: '#fff', fontSize: 12, fontWeight: 600, opacity: commSaving ? 0.6 : 1 }}
+                    >
+                      {commSaving ? 'Saving...' : 'Simpan'}
+                    </button>
+                    <button
+                      onClick={() => { setEditingRate(null); setCommMsg(null); }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#94a3b8', fontSize: 12, fontWeight: 600 }}
+                    >
+                      Batal
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Rates Table */}
+            {commLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+              </div>
+            ) : commRates.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>Belum ada data commission rate</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#0b1121' }}>
+                      {['Channel', 'Rate', 'Berlaku Sejak', 'Aksi'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {commRates.map((r) => (
+                      <tr key={r.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: '#e2e8f0' }}>{r.channel}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span style={{ fontFamily: 'monospace', color: '#e2e8f0' }}>{(r.rate * 100).toFixed(2)}%</span>
+                          <span style={{ color: '#64748b', marginLeft: 6, fontSize: 10 }}>({r.rate})</span>
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>
+                          {new Date(r.effective_from).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              onClick={() => setEditingRate({ channel: r.channel, rate: String(r.rate), effective_from: r.effective_from, isNew: false })}
+                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteRate(r.id)}
+                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #7f1d1d', cursor: 'pointer', background: 'transparent', color: '#ef4444', fontSize: 11, fontWeight: 500 }}
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
       )}
 
       {/* ═══ TAB: LOGS ═══ */}

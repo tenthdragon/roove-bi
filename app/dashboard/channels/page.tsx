@@ -208,6 +208,7 @@ export default function ChannelsPage() {
   const totalAdsCost = channels.reduce((a, c) => a + c.adsCost, 0);
   const totalCost = channels.reduce((a, c) => a + c.totalCost, 0);
   const totalProfitAfterAll = channels.reduce((a, c) => a + c.profitAfterAll, 0);
+  const totalMpRevenue = channels.filter(c => c.mpAdmin > 0).reduce((a, c) => a + c.revenue, 0);
 
   const pieData = channels.filter(c => c.revenue > 0).map(c => ({ name: c.name, value: c.revenue }));
 
@@ -272,11 +273,18 @@ export default function ChannelsPage() {
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
         <KPI label="Net Sales" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.length} active channels`} color="#3b82f6" />
-        <KPI label="Gross Profit" val={`Rp ${fmtCompact(totalGP)}`} sub={`GP Margin: ${totalRevenue > 0 ? (totalGP / totalRevenue * 100).toFixed(1) : 0}%`} color="#10b981" />
         <KPI
           label="Admin Fee"
           val={`Rp ${fmtCompact(totalMpAdmin)}`}
-          sub={`${totalRevenue > 0 ? (totalMpAdmin / totalRevenue * 100).toFixed(1) : 0}% of revenue`}
+          sub={
+            <span>
+              <span style={{ color: '#c4b5fd' }}>{totalMpRevenue > 0 ? (totalMpAdmin / totalMpRevenue * 100).toFixed(1) : 0}%</span>
+              <span style={{ color: '#64748b' }}> of MP rev</span>
+              <span style={{ color: '#64748b', margin: '0 5px' }}>·</span>
+              <span style={{ color: '#94a3b8' }}>{totalRevenue > 0 ? (totalMpAdmin / totalRevenue * 100).toFixed(1) : 0}%</span>
+              <span style={{ color: '#64748b' }}> of total</span>
+            </span>
+          }
           color="#8b5cf6"
         />
         <KPI
@@ -286,7 +294,7 @@ export default function ChannelsPage() {
           color="#f59e0b"
         />
         <KPI
-          label="Profit After Mkt"
+          label="GP After Mkt + Adm"
           val={`Rp ${fmtCompact(totalProfitAfterAll)}`}
           sub={`Margin: ${totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%`}
           color={totalProfitAfterAll >= 0 ? '#06b6d4' : '#ef4444'}
@@ -349,7 +357,7 @@ export default function ChannelsPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid #1a2744' }}>
-              {['Channel', 'Net Sales', '% Share', 'Gross Profit', 'Admin Fee', 'Mkt Cost', 'Cost Ratio', 'Profit After Mkt', 'Margin'].map(h => (
+              {['Channel', 'Net Sales', '% Share', 'Gross Profit', 'Admin Fee', 'Mkt Cost', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>

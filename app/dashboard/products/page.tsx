@@ -197,15 +197,15 @@ export default function ProductsPage() {
 
       {products.length > 0 && (
         <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Net Sales vs Profit After Mkt</div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Net Sales vs GP After Mkt + Adm</div>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={products.map(p => ({ name: p.sku, 'Net Sales': p.sales, 'Profit After Mkt': p.nam }))} layout="vertical">
+            <BarChart data={products.map(p => ({ name: p.sku, 'Net Sales': p.sales, 'GP After Mkt + Adm': p.nam }))} layout="vertical">
               <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
               <XAxis type="number" stroke="#64748b" fontSize={11} tickFormatter={v => fmtCompact(v)} />
               <YAxis type="category" dataKey="name" stroke="#64748b" fontSize={11} width={65} />
               <Tooltip formatter={v => fmtRupiah(v)} />
               <Bar dataKey="Net Sales" fill="#3b82f6" fillOpacity={0.6} radius={[0, 4, 4, 0]} />
-              <Bar dataKey="Profit After Mkt" radius={[0, 4, 4, 0]}>
+              <Bar dataKey="GP After Mkt + Adm" radius={[0, 4, 4, 0]}>
                 {products.map((p, i) => <Cell key={i} fill={p.nam >= 0 ? '#10b981' : '#ef4444'} fillOpacity={0.6} />)}
               </Bar>
             </BarChart>
