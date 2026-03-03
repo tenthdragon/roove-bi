@@ -12,6 +12,7 @@ import FinancialSheetManager from '@/components/FinancialSheetManager';
 import CsvOrderUploader from '@/components/CsvOrderUploader';
 import BrandManager from '@/components/BrandManager';
 import MetaManager from '@/components/MetaManager';
+import WebhookManager from '@/components/WebhookManager';
 
 const TABS = [
   { id: 'daily', label: 'Daily Data' },
@@ -358,7 +359,10 @@ export default function AdminPage() {
 
       {/* ═══ TAB: SCALEV API ═══ */}
       {activeTab === 'scalev' && (
-        <ScalevManager />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <ScalevManager />
+          <WebhookManager />
+        </div>
       )}
 
       {/* ═══ TAB: DATA REFERENCE ═══ */}

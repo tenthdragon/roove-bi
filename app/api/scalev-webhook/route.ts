@@ -12,11 +12,81 @@ function getServiceSupabase() {
   );
 }
 
-// ── Verify HMAC-SHA256 signature from Scalev ──
-function verifySignature(rawBody: string, signature: string | null): boolean {
-  const secret = process.env.SCALEV_WEBHOOK_SECRET;
-  if (!secret || !signature) return false;
+// ── Multi-business secret configuration ──
+// Primary: read from DB table `scalev_webhook_businesses`
+// Fallback: env vars SCALEV_WEBHOOK_SECRET_<CODE> or legacy SCALEV_WEBHOOK_SECRET
+// DB secrets are cached in memory for 60 seconds to avoid DB hits on every webhook
 
+type BusinessSecret = { code: string; name: string; secret: string };
+
+let cachedSecrets: BusinessSecret[] | null = null;
+let cacheExpiry = 0;
+const CACHE_TTL_MS = 60_000; // 60 seconds
+
+async function getBusinessSecretsFromDB(): Promise<BusinessSecret[]> {
+  try {
+    const svc = getServiceSupabase();
+    const { data, error } = await svc
+      .from('scalev_webhook_businesses')
+      .select('business_code, business_name, webhook_secret')
+      .eq('is_active', true);
+
+    if (error || !data || data.length === 0) return [];
+
+    return data.map((row: any) => ({
+      code: row.business_code,
+      name: row.business_name,
+      secret: row.webhook_secret,
+    }));
+  } catch {
+    return [];
+  }
+}
+
+async function getBusinessSecrets(): Promise<BusinessSecret[]> {
+  // Return cached if still valid
+  if (cachedSecrets && Date.now() < cacheExpiry) {
+    return cachedSecrets;
+  }
+
+  // Try DB first
+  const dbSecrets = await getBusinessSecretsFromDB();
+  if (dbSecrets.length > 0) {
+    cachedSecrets = dbSecrets;
+    cacheExpiry = Date.now() + CACHE_TTL_MS;
+    return dbSecrets;
+  }
+
+  // Fallback: env vars (backward compatible)
+  const envSecrets: BusinessSecret[] = [];
+  for (const [code, name] of Object.entries({
+    RTI: 'Roove Tijara Internasional',
+    RLB: 'Roove Lautan Barat',
+    RLT: 'Roove Lautan Timur',
+  })) {
+    const secret = process.env[`SCALEV_WEBHOOK_SECRET_${code}`];
+    if (secret) envSecrets.push({ code, name, secret });
+  }
+
+  if (envSecrets.length > 0) {
+    cachedSecrets = envSecrets;
+    cacheExpiry = Date.now() + CACHE_TTL_MS;
+    return envSecrets;
+  }
+
+  // Legacy fallback: single secret
+  if (process.env.SCALEV_WEBHOOK_SECRET) {
+    const legacy = [{ code: 'RTI', name: 'Legacy', secret: process.env.SCALEV_WEBHOOK_SECRET }];
+    cachedSecrets = legacy;
+    cacheExpiry = Date.now() + CACHE_TTL_MS;
+    return legacy;
+  }
+
+  return [];
+}
+
+// ── Verify HMAC-SHA256 signature and resolve business ──
+function verifyHmac(rawBody: string, signature: string, secret: string): boolean {
   const calculated = crypto
     .createHmac('sha256', secret)
     .update(rawBody)
@@ -32,6 +102,32 @@ function verifySignature(rawBody: string, signature: string | null): boolean {
   }
 }
 
+/**
+ * Try each business secret to verify the signature.
+ * Returns the business code if a match is found, null otherwise.
+ */
+async function resolveBusinessFromSignature(rawBody: string, signature: string | null): Promise<string | null> {
+  if (!signature) return null;
+
+  const secrets = await getBusinessSecrets();
+  if (secrets.length === 0) return null;
+
+  for (const { code, secret } of secrets) {
+    if (verifyHmac(rawBody, signature, secret)) {
+      return code;
+    }
+  }
+
+  return null;
+}
+
+/** Get business display name from cached secrets */
+function getBusinessName(code: string): string {
+  if (!cachedSecrets) return code;
+  const found = cachedSecrets.find((s) => s.code === code);
+  return found?.name || code;
+}
+
 // ── Helpers ──
 const ts = (v: any): string | null =>
   v && typeof v === 'string' && v.trim() ? v.trim() : null;
@@ -43,7 +139,7 @@ const num = (v: any): number => {
 };
 
 // ── Handle order.created: insert new order into scalev_orders ──
-async function handleOrderCreated(data: any) {
+async function handleOrderCreated(data: any, businessCode: string) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -59,7 +155,7 @@ async function handleOrderCreated(data: any) {
     .maybeSingle();
 
   if (existing) {
-    console.log(`[scalev-webhook] order.created: ${orderId} already exists, skipping`);
+    console.log(`[scalev-webhook][${businessCode}] order.created: ${orderId} already exists, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'already_exists' });
   }
 
@@ -103,6 +199,7 @@ async function handleOrderCreated(data: any) {
     completed_time: ts(data.completed_time),
     canceled_time: ts(data.canceled_time),
     source: 'webhook',
+    business_code: businessCode,
     raw_data: data,
     synced_at: new Date().toISOString(),
   };
@@ -115,7 +212,7 @@ async function handleOrderCreated(data: any) {
     .single();
 
   if (insertErr) {
-    console.error(`[scalev-webhook] order.created insert error for ${orderId}:`, insertErr.message);
+    console.error(`[scalev-webhook][${businessCode}] order.created insert error for ${orderId}:`, insertErr.message);
     return NextResponse.json({ error: 'DB insert failed' }, { status: 500 });
   }
 
@@ -132,7 +229,7 @@ async function handleOrderCreated(data: any) {
 
     const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
     if (lineErr) {
-      console.warn(`[scalev-webhook] order.created lines insert error for ${orderId}:`, lineErr.message);
+      console.warn(`[scalev-webhook][${businessCode}] order.created lines insert error for ${orderId}:`, lineErr.message);
     }
   }
 
@@ -140,6 +237,7 @@ async function handleOrderCreated(data: any) {
   await svc.from('scalev_sync_log').insert({
     status: 'success',
     sync_type: 'webhook_created',
+    business_code: businessCode,
     orders_fetched: 1,
     orders_updated: 0,
     orders_inserted: 1,
@@ -147,17 +245,18 @@ async function handleOrderCreated(data: any) {
     completed_at: new Date().toISOString(),
   });
 
-  console.log(`[scalev-webhook] order.created: ${orderId} inserted successfully`);
+  console.log(`[scalev-webhook][${businessCode}] order.created: ${orderId} inserted successfully`);
 
   return NextResponse.json({
     ok: true,
     order_id: orderId,
+    business_code: businessCode,
     action: 'created',
   });
 }
 
 // ── Handle order.status_changed: update existing order ──
-async function handleStatusChanged(data: any) {
+async function handleStatusChanged(data: any, businessCode: string) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -175,12 +274,12 @@ async function handleStatusChanged(data: any) {
     .maybeSingle();
 
   if (lookupErr) {
-    console.error(`[scalev-webhook] status_changed lookup error for ${orderId}:`, lookupErr.message);
+    console.error(`[scalev-webhook][${businessCode}] status_changed lookup error for ${orderId}:`, lookupErr.message);
     return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (!existing) {
-    console.log(`[scalev-webhook] status_changed: ${orderId} not found in DB, skipping`);
+    console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} not found in DB, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
   }
 
@@ -192,6 +291,7 @@ async function handleStatusChanged(data: any) {
   // Build update
   const updateData: Record<string, any> = {
     status: newStatus,
+    business_code: businessCode,
     synced_at: new Date().toISOString(),
   };
 
@@ -213,7 +313,7 @@ async function handleStatusChanged(data: any) {
     .eq('id', existing.id);
 
   if (updateErr) {
-    console.error(`[scalev-webhook] status_changed update error for ${orderId}:`, updateErr.message);
+    console.error(`[scalev-webhook][${businessCode}] status_changed update error for ${orderId}:`, updateErr.message);
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
@@ -221,6 +321,7 @@ async function handleStatusChanged(data: any) {
   await svc.from('scalev_sync_log').insert({
     status: 'success',
     sync_type: 'webhook_status_changed',
+    business_code: businessCode,
     orders_fetched: 1,
     orders_updated: 1,
     orders_inserted: 0,
@@ -228,7 +329,7 @@ async function handleStatusChanged(data: any) {
     completed_at: new Date().toISOString(),
   });
 
-  console.log(`[scalev-webhook] status_changed: ${orderId} updated ${existing.status} → ${newStatus}`);
+  console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} updated ${existing.status} → ${newStatus}`);
 
   // Refresh materialized views if order became shipped/completed
   if (newStatus === 'shipped' || newStatus === 'completed') {
@@ -238,13 +339,14 @@ async function handleStatusChanged(data: any) {
   return NextResponse.json({
     ok: true,
     order_id: orderId,
+    business_code: businessCode,
     old_status: existing.status,
     new_status: newStatus,
   });
 }
 
 // ── Handle order.updated: full update of order data ──
-async function handleOrderUpdated(data: any) {
+async function handleOrderUpdated(data: any, businessCode: string) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -260,14 +362,14 @@ async function handleOrderUpdated(data: any) {
     .maybeSingle();
 
   if (lookupErr) {
-    console.error(`[scalev-webhook] order.updated lookup error for ${orderId}:`, lookupErr.message);
+    console.error(`[scalev-webhook][${businessCode}] order.updated lookup error for ${orderId}:`, lookupErr.message);
     return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (!existing) {
     // Order not in DB yet — treat as create
-    console.log(`[scalev-webhook] order.updated: ${orderId} not found, treating as create`);
-    return handleOrderCreated(data);
+    console.log(`[scalev-webhook][${businessCode}] order.updated: ${orderId} not found, treating as create`);
+    return handleOrderCreated(data, businessCode);
   }
 
   // Build update with all available fields
@@ -277,6 +379,7 @@ async function handleOrderUpdated(data: any) {
 
   const updateData: Record<string, any> = {
     synced_at: new Date().toISOString(),
+    business_code: businessCode,
     raw_data: data,
   };
 
@@ -316,7 +419,7 @@ async function handleOrderUpdated(data: any) {
     .eq('id', existing.id);
 
   if (updateErr) {
-    console.error(`[scalev-webhook] order.updated update error for ${orderId}:`, updateErr.message);
+    console.error(`[scalev-webhook][${businessCode}] order.updated update error for ${orderId}:`, updateErr.message);
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
@@ -336,7 +439,7 @@ async function handleOrderUpdated(data: any) {
 
     const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
     if (lineErr) {
-      console.warn(`[scalev-webhook] order.updated lines replace error for ${orderId}:`, lineErr.message);
+      console.warn(`[scalev-webhook][${businessCode}] order.updated lines replace error for ${orderId}:`, lineErr.message);
     }
   }
 
@@ -344,6 +447,7 @@ async function handleOrderUpdated(data: any) {
   await svc.from('scalev_sync_log').insert({
     status: 'success',
     sync_type: 'webhook_updated',
+    business_code: businessCode,
     orders_fetched: 1,
     orders_updated: 1,
     orders_inserted: 0,
@@ -351,18 +455,18 @@ async function handleOrderUpdated(data: any) {
     completed_at: new Date().toISOString(),
   });
 
-  console.log(`[scalev-webhook] order.updated: ${orderId} updated successfully`);
+  console.log(`[scalev-webhook][${businessCode}] order.updated: ${orderId} updated successfully`);
 
   // Refresh views if relevant status
   if (data.status === 'shipped' || data.status === 'completed') {
     triggerViewRefresh();
   }
 
-  return NextResponse.json({ ok: true, order_id: orderId, action: 'updated' });
+  return NextResponse.json({ ok: true, order_id: orderId, business_code: businessCode, action: 'updated' });
 }
 
 // ── Handle order.deleted: soft-delete by marking as canceled ──
-async function handleOrderDeleted(data: any) {
+async function handleOrderDeleted(data: any, businessCode: string) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -377,12 +481,12 @@ async function handleOrderDeleted(data: any) {
     .maybeSingle();
 
   if (lookupErr) {
-    console.error(`[scalev-webhook] order.deleted lookup error for ${orderId}:`, lookupErr.message);
+    console.error(`[scalev-webhook][${businessCode}] order.deleted lookup error for ${orderId}:`, lookupErr.message);
     return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (!existing) {
-    console.log(`[scalev-webhook] order.deleted: ${orderId} not found in DB, skipping`);
+    console.log(`[scalev-webhook][${businessCode}] order.deleted: ${orderId} not found in DB, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
   }
 
@@ -391,13 +495,14 @@ async function handleOrderDeleted(data: any) {
     .from('scalev_orders')
     .update({
       status: 'deleted',
+      business_code: businessCode,
       canceled_time: new Date().toISOString(),
       synced_at: new Date().toISOString(),
     })
     .eq('id', existing.id);
 
   if (updateErr) {
-    console.error(`[scalev-webhook] order.deleted update error for ${orderId}:`, updateErr.message);
+    console.error(`[scalev-webhook][${businessCode}] order.deleted update error for ${orderId}:`, updateErr.message);
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
@@ -405,6 +510,7 @@ async function handleOrderDeleted(data: any) {
   await svc.from('scalev_sync_log').insert({
     status: 'success',
     sync_type: 'webhook_deleted',
+    business_code: businessCode,
     orders_fetched: 1,
     orders_updated: 1,
     orders_inserted: 0,
@@ -412,14 +518,14 @@ async function handleOrderDeleted(data: any) {
     completed_at: new Date().toISOString(),
   });
 
-  console.log(`[scalev-webhook] order.deleted: ${orderId} marked as deleted (was ${existing.status})`);
+  console.log(`[scalev-webhook][${businessCode}] order.deleted: ${orderId} marked as deleted (was ${existing.status})`);
   triggerViewRefresh();
 
-  return NextResponse.json({ ok: true, order_id: orderId, action: 'deleted', old_status: existing.status });
+  return NextResponse.json({ ok: true, order_id: orderId, business_code: businessCode, action: 'deleted', old_status: existing.status });
 }
 
 // ── Handle order.payment_status_changed: update payment-related fields ──
-async function handlePaymentStatusChanged(data: any) {
+async function handlePaymentStatusChanged(data: any, businessCode: string) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -434,16 +540,17 @@ async function handlePaymentStatusChanged(data: any) {
     .maybeSingle();
 
   if (lookupErr) {
-    console.error(`[scalev-webhook] payment_status_changed lookup error for ${orderId}:`, lookupErr.message);
+    console.error(`[scalev-webhook][${businessCode}] payment_status_changed lookup error for ${orderId}:`, lookupErr.message);
     return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (!existing) {
-    console.log(`[scalev-webhook] payment_status_changed: ${orderId} not found, skipping`);
+    console.log(`[scalev-webhook][${businessCode}] payment_status_changed: ${orderId} not found, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
   }
 
   const updateData: Record<string, any> = {
+    business_code: businessCode,
     synced_at: new Date().toISOString(),
   };
 
@@ -459,7 +566,7 @@ async function handlePaymentStatusChanged(data: any) {
     .eq('id', existing.id);
 
   if (updateErr) {
-    console.error(`[scalev-webhook] payment_status_changed update error for ${orderId}:`, updateErr.message);
+    console.error(`[scalev-webhook][${businessCode}] payment_status_changed update error for ${orderId}:`, updateErr.message);
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
@@ -467,6 +574,7 @@ async function handlePaymentStatusChanged(data: any) {
   await svc.from('scalev_sync_log').insert({
     status: 'success',
     sync_type: 'webhook_payment_changed',
+    business_code: businessCode,
     orders_fetched: 1,
     orders_updated: 1,
     orders_inserted: 0,
@@ -474,13 +582,13 @@ async function handlePaymentStatusChanged(data: any) {
     completed_at: new Date().toISOString(),
   });
 
-  console.log(`[scalev-webhook] payment_status_changed: ${orderId} payment updated`);
+  console.log(`[scalev-webhook][${businessCode}] payment_status_changed: ${orderId} payment updated`);
 
-  return NextResponse.json({ ok: true, order_id: orderId, action: 'payment_status_changed' });
+  return NextResponse.json({ ok: true, order_id: orderId, business_code: businessCode, action: 'payment_status_changed' });
 }
 
 // ── Handle order.e_payment_created: record e-payment info on order ──
-async function handleEPaymentCreated(data: any) {
+async function handleEPaymentCreated(data: any, businessCode: string) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -495,16 +603,17 @@ async function handleEPaymentCreated(data: any) {
     .maybeSingle();
 
   if (lookupErr) {
-    console.error(`[scalev-webhook] e_payment_created lookup error for ${orderId}:`, lookupErr.message);
+    console.error(`[scalev-webhook][${businessCode}] e_payment_created lookup error for ${orderId}:`, lookupErr.message);
     return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (!existing) {
-    console.log(`[scalev-webhook] e_payment_created: ${orderId} not found, skipping`);
+    console.log(`[scalev-webhook][${businessCode}] e_payment_created: ${orderId} not found, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
   }
 
   const updateData: Record<string, any> = {
+    business_code: businessCode,
     synced_at: new Date().toISOString(),
   };
 
@@ -522,7 +631,7 @@ async function handleEPaymentCreated(data: any) {
     .eq('id', existing.id);
 
   if (updateErr) {
-    console.error(`[scalev-webhook] e_payment_created update error for ${orderId}:`, updateErr.message);
+    console.error(`[scalev-webhook][${businessCode}] e_payment_created update error for ${orderId}:`, updateErr.message);
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
@@ -530,6 +639,7 @@ async function handleEPaymentCreated(data: any) {
   await svc.from('scalev_sync_log').insert({
     status: 'success',
     sync_type: 'webhook_epayment',
+    business_code: businessCode,
     orders_fetched: 1,
     orders_updated: 1,
     orders_inserted: 0,
@@ -537,9 +647,9 @@ async function handleEPaymentCreated(data: any) {
     completed_at: new Date().toISOString(),
   });
 
-  console.log(`[scalev-webhook] e_payment_created: ${orderId} e-payment recorded`);
+  console.log(`[scalev-webhook][${businessCode}] e_payment_created: ${orderId} e-payment recorded`);
 
-  return NextResponse.json({ ok: true, order_id: orderId, action: 'e_payment_created' });
+  return NextResponse.json({ ok: true, order_id: orderId, business_code: businessCode, action: 'e_payment_created' });
 }
 
 // ── POST handler ──
@@ -550,19 +660,20 @@ export async function POST(req: NextRequest) {
       console.error('[scalev-webhook] Missing SUPABASE env vars');
       return NextResponse.json({ error: 'Server misconfigured: missing Supabase env vars' }, { status: 500 });
     }
-    if (!process.env.SCALEV_WEBHOOK_SECRET) {
-      console.error('[scalev-webhook] Missing SCALEV_WEBHOOK_SECRET');
-      return NextResponse.json({ error: 'Server misconfigured: missing webhook secret' }, { status: 500 });
-    }
 
     const rawBody = await req.text();
     const signature = req.headers.get('x-scalev-hmac-sha256');
 
-    // Verify signature
-    if (!verifySignature(rawBody, signature)) {
-      console.error('[scalev-webhook] invalid signature');
+    // Verify signature and resolve which business sent this webhook
+    // (reads from DB with in-memory cache, falls back to env vars)
+    const businessCode = await resolveBusinessFromSignature(rawBody, signature);
+    if (!businessCode) {
+      console.error('[scalev-webhook] invalid signature — no matching business secret');
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
     }
+
+    const businessName = getBusinessName(businessCode);
+    console.log(`[scalev-webhook] Verified request from ${businessName} (${businessCode})`);
 
     let body: any;
     try {
@@ -575,33 +686,33 @@ export async function POST(req: NextRequest) {
 
     // Handle test event
     if (event === 'business.test_event') {
-      console.log('[scalev-webhook] test event received');
-      return NextResponse.json({ ok: true, message: 'Test event received' });
+      console.log(`[scalev-webhook][${businessCode}] test event received`);
+      return NextResponse.json({ ok: true, business_code: businessCode, message: 'Test event received' });
     }
 
-    // Route to appropriate handler
+    // Route to appropriate handler — all handlers now receive businessCode
     switch (event) {
       case 'order.created':
-        return handleOrderCreated(data);
+        return handleOrderCreated(data, businessCode);
 
       case 'order.updated':
-        return handleOrderUpdated(data);
+        return handleOrderUpdated(data, businessCode);
 
       case 'order.deleted':
-        return handleOrderDeleted(data);
+        return handleOrderDeleted(data, businessCode);
 
       case 'order.status_changed':
-        return handleStatusChanged(data);
+        return handleStatusChanged(data, businessCode);
 
       case 'order.payment_status_changed':
-        return handlePaymentStatusChanged(data);
+        return handlePaymentStatusChanged(data, businessCode);
 
       case 'order.e_payment_created':
-        return handleEPaymentCreated(data);
+        return handleEPaymentCreated(data, businessCode);
 
       default:
-        console.log(`[scalev-webhook] unhandled event: ${event}`);
-        return NextResponse.json({ ok: true, skipped: true, event });
+        console.log(`[scalev-webhook][${businessCode}] unhandled event: ${event}`);
+        return NextResponse.json({ ok: true, skipped: true, business_code: businessCode, event });
     }
   } catch (err: any) {
     console.error('[scalev-webhook] Unhandled error:', err);
