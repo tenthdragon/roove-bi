@@ -168,14 +168,14 @@ export interface TabDef {
 }
 
 export const ALL_TABS: TabDef[] = [
-  { id: 'overview',       label: 'Overview',        icon: 'LayoutDashboard' },
-  { id: 'products',       label: 'Produk',          icon: 'Package' },
-  { id: 'channels',       label: 'Channel',         icon: 'Share2' },
-  { id: 'marketing',      label: 'Marketing',       icon: 'Megaphone' },
-  { id: 'customers',      label: 'Customer',        icon: 'Users' },
-  { id: 'brand-analysis', label: 'Brand Analysis',  icon: 'Layers' },
-  { id: 'finance',        label: 'Finance',         icon: 'DollarSign' },
-  { id: 'admin',          label: 'Admin',           icon: 'Settings', ownerOnly: true },
+  { id: 'overview',       label: 'Overview',           icon: 'LayoutDashboard' },
+  { id: 'products',       label: 'Products',           icon: 'Package' },
+  { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone' },
+  { id: 'channels',       label: 'Sales Channel',      icon: 'Share2' },
+  { id: 'customers',      label: 'Customer Analysis',  icon: 'Users' },
+  { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers' },
+  { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign' },
+  { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true },
 ];
 
 export type TabId = string;
