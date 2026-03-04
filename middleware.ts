@@ -38,9 +38,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 
+  // Allow access to forgot-password and reset-password without auth
+  // (no redirect needed — these pages handle their own state)
+
   return response;
 }
 
 export const config = {
-  matcher: ['/', '/dashboard/:path*'],
+  matcher: ['/', '/dashboard/:path*', '/forgot-password', '/reset-password'],
 };

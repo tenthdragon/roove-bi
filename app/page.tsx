@@ -120,7 +120,21 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <p style={{ marginTop: 16, fontSize: 12, color: '#64748b', textAlign: 'center' }}>
+        <div style={{ marginTop: 16, textAlign: 'center' }}>
+          <a
+            href="/forgot-password"
+            style={{
+              fontSize: 13, color: '#3b82f6', textDecoration: 'none',
+              transition: 'color 0.2s',
+            }}
+            onMouseEnter={e => (e.target as HTMLAnchorElement).style.color = '#60a5fa'}
+            onMouseLeave={e => (e.target as HTMLAnchorElement).style.color = '#3b82f6'}
+          >
+            Lupa password?
+          </a>
+        </div>
+
+        <p style={{ marginTop: 12, fontSize: 12, color: '#64748b', textAlign: 'center' }}>
           Hubungi admin untuk mendapatkan akses.
         </p>
       </div>
