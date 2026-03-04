@@ -2,10 +2,10 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
-import { fmtCompact, fmtRupiah, CHANNEL_COLORS } from '@/lib/utils';
+import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts';
+// PieChart removed – no longer used on this page
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import ChannelSlaSection from '@/components/ChannelSlaSection';
 
@@ -224,7 +224,50 @@ export default function ChannelsPage() {
   const totalProfitAfterAll = channels.reduce((a, c) => a + c.profitAfterAll, 0);
   const totalMpRevenue = channels.filter(c => c.mpAdmin > 0).reduce((a, c) => a + c.revenue, 0);
 
-  const pieData = channels.filter(c => c.revenue > 0).map(c => ({ name: c.name, value: c.revenue }));
+  // ── Product Breakdown: aggregate by product across all channels ──
+  const productBreakdown = useMemo(() => {
+    const byP = {};
+    channelData.forEach(d => {
+      if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
+      if (!byP[d.product]) byP[d.product] = { revenue: 0, gp: 0, mpAdmin: 0 };
+      byP[d.product].revenue += Number(d.net_sales) || 0;
+      byP[d.product].gp += Number(d.gross_profit) || 0;
+      byP[d.product].mpAdmin += Math.abs(Number(d.mp_admin_cost) || 0);
+    });
+
+    // Distribute ads cost per product using brand mapping
+    const adsByProduct = {};
+    adsData.forEach(d => {
+      if (selectedProduct !== 'all') {
+        const brand = getAdBrand(d.store);
+        if (brand !== selectedProduct) return;
+      }
+      const brand = getAdBrand(d.store) || 'Unknown';
+      adsByProduct[brand] = (adsByProduct[brand] || 0) + Math.abs(Number(d.spent || 0));
+    });
+
+    return Object.entries(byP)
+      .map(([product, v]) => {
+        const adsCost = adsByProduct[product] || 0;
+        const totalCostP = v.mpAdmin + adsCost;
+        const profitAfterAll = v.gp - totalCostP;
+        return {
+          name: product,
+          revenue: v.revenue,
+          gp: v.gp,
+          mpAdmin: v.mpAdmin,
+          adsCost,
+          totalCost: totalCostP,
+          profitAfterAll,
+          pct: totalRevenue > 0 ? (v.revenue / totalRevenue) * 100 : 0,
+          gpMargin: v.revenue > 0 ? (v.gp / v.revenue) * 100 : 0,
+          costRatio: v.revenue > 0 ? (totalCostP / v.revenue) * 100 : 0,
+          marginAfterAll: v.revenue > 0 ? (profitAfterAll / v.revenue) * 100 : 0,
+        };
+      })
+      .filter(p => p.revenue > 0)
+      .sort((a, b) => b.revenue - a.revenue);
+  }, [channelData, adsData, selectedProduct, storeBrandMap, totalRevenue]);
 
   const KPI = ({ label, val, sub, color = '#3b82f6' }) => (
     <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
@@ -315,56 +358,6 @@ export default function ChannelsPage() {
         />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))', gap: 16, marginBottom: 20 }}>
-        {/* Pie Chart */}
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Revenue Share</div>
-          {pieData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie data={pieData} cx="50%" cy="50%" innerRadius={60} outerRadius={105} dataKey="value" nameKey="name" stroke="#0b1121" strokeWidth={3}>
-                  {pieData.map((c, i) => <Cell key={i} fill={CHANNEL_COLORS[c.name] || `hsl(${i * 40},60%,50%)`} />)}
-                </Pie>
-                <Tooltip formatter={(v) => fmtRupiah(v)} />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div style={{ height: 280, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>Tidak ada data revenue</div>
-          )}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 8, justifyContent: 'center' }}>
-            {pieData.map((c, i) => (
-              <div key={c.name} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#64748b' }}>
-                <div style={{ width: 8, height: 8, borderRadius: 2, background: CHANNEL_COLORS[c.name] || `hsl(${i * 40},60%,50%)` }} />{c.name}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Channel Cards */}
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Revenue per Channel</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {channels.map((c, i) => (
-              <div key={c.name} style={{ padding: 10, background: '#0b1121', borderRadius: 8, border: '1px solid #1a2744' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: 2, background: CHANNEL_COLORS[c.name] || `hsl(${i * 40},60%,50%)` }} />
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>{c.name}</span>
-                  </div>
-                  <span style={{ fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>Rp {fmtCompact(c.revenue)}</span>
-                </div>
-                <div style={{ height: 4, borderRadius: 2, background: '#1a2744', overflow: 'hidden', marginBottom: 3 }}>
-                  <div style={{ width: `${c.pct}%`, height: '100%', borderRadius: 2, background: CHANNEL_COLORS[c.name] || `hsl(${i * 40},60%,50%)` }} />
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#64748b' }}>
-                  <span>{c.pct.toFixed(1)}% revenue</span><span>GP Margin: {c.gpMargin.toFixed(1)}%</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
       {/* Channel Breakdown Table */}
       <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto' }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Channel Breakdown</div>
@@ -408,6 +401,77 @@ export default function ChannelsPage() {
                     background: c.marginAfterAll >= 30 ? '#064e3b' : c.marginAfterAll >= 10 ? '#78350f' : '#7f1d1d',
                     color: c.marginAfterAll >= 30 ? '#10b981' : c.marginAfterAll >= 10 ? '#f59e0b' : '#ef4444',
                   }}>{c.marginAfterAll.toFixed(1)}%</span>
+                </td>
+              </tr>
+            ))}
+            {/* Total row */}
+            <tr style={{ borderTop: '2px solid #1a2744', background: '#0b1121' }}>
+              <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalRevenue)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>{fmtRupiah(totalMpAdmin)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(totalAdsCost)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1a2744', color: '#e2e8f0' }}>
+                  {totalRevenue > 0 ? (totalCost / totalRevenue * 100).toFixed(1) : 0}%
+                </span>
+              </td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalProfitAfterAll >= 0 ? '#10b981' : '#ef4444' }}>
+                {fmtRupiah(totalProfitAfterAll)}
+              </td>
+              <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1a2744', color: '#e2e8f0' }}>
+                  {totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Product Breakdown Table */}
+      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto', marginTop: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Product Breakdown</div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid #1a2744' }}>
+              {['Product', 'Net Sales', '% Share', 'Admin Fee', 'Mkt Cost', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Product' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {productBreakdown.map(p => (
+              <tr key={p.name} style={{ borderBottom: '1px solid #1a2744' }}>
+                <td style={{ padding: '8px 10px' }}>
+                  <div style={{ fontWeight: 600 }}>{p.name}</div>
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(p.revenue)}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>{p.pct.toFixed(1)}%</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#8b5cf6' }}>
+                  {p.mpAdmin > 0 ? fmtRupiah(p.mpAdmin) : <span style={{ color: '#334155' }}>—</span>}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>
+                  {p.adsCost > 0 ? fmtRupiah(p.adsCost) : <span style={{ color: '#334155' }}>—</span>}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                  {p.totalCost > 0 ? (
+                    <span style={{
+                      padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                      background: p.costRatio > 40 ? '#7f1d1d' : p.costRatio > 25 ? '#78350f' : '#064e3b',
+                      color: p.costRatio > 40 ? '#ef4444' : p.costRatio > 25 ? '#f59e0b' : '#10b981',
+                    }}>{p.costRatio.toFixed(1)}%</span>
+                  ) : <span style={{ color: '#334155' }}>—</span>}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: p.profitAfterAll >= 0 ? '#10b981' : '#ef4444' }}>
+                  {fmtRupiah(p.profitAfterAll)}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                  <span style={{
+                    padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                    background: p.marginAfterAll >= 30 ? '#064e3b' : p.marginAfterAll >= 10 ? '#78350f' : '#7f1d1d',
+                    color: p.marginAfterAll >= 30 ? '#10b981' : p.marginAfterAll >= 10 ? '#f59e0b' : '#ef4444',
+                  }}>{p.marginAfterAll.toFixed(1)}%</span>
                 </td>
               </tr>
             ))}
