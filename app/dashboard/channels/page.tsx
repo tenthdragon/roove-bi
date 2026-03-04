@@ -82,10 +82,15 @@ export default function ChannelsPage() {
         .gte('date', from).lte('date', to),
       supabase.from('ads_store_brand_mapping')
         .select('store_pattern, brand'),
-    ]).then(([{ data: ch }, { data: ads }, { data: bm }]) => {
-      const chRows = ch || [];
-      const adsRows = ads || [];
-      const bmRows = bm || [];
+    ]).then(([chRes, adsRes, bmRes]) => {
+      // Log errors so RLS / permission issues surface in console
+      if (chRes.error) console.error('[Channels] daily_channel_data error:', chRes.error);
+      if (adsRes.error) console.error('[Channels] daily_ads_spend error:', adsRes.error);
+      if (bmRes.error) console.error('[Channels] ads_store_brand_mapping error:', bmRes.error);
+
+      const chRows = chRes.data || [];
+      const adsRows = adsRes.data || [];
+      const bmRows = bmRes.data || [];
       setCache('daily_channel_data_ch', from, to, chRows);
       setCache('daily_ads_spend_ch', from, to, adsRows);
       setCache('ads_store_brand_mapping', from, to, bmRows);
