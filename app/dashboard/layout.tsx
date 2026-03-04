@@ -31,25 +31,135 @@ function getAllowedTabs(prof) {
 
 function RefreshViewsButton() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [showDetail, setShowDetail] = useState(false);
+  const [steps, setSteps] = useState({
+    sheets: 'pending' as 'pending' | 'running' | 'success' | 'error' | 'skipped',
+    meta: 'pending' as 'pending' | 'running' | 'success' | 'error' | 'skipped',
+    views: 'pending' as 'pending' | 'running' | 'success' | 'error',
+  });
+  const [stepMessages, setStepMessages] = useState({ sheets: '', meta: '', views: '' });
+  const detailRef = useRef<HTMLDivElement>(null);
+
+  // Close detail popup on outside click
+  useEffect(() => {
+    if (!showDetail) return;
+    const handler = (e: MouseEvent) => {
+      if (detailRef.current && !detailRef.current.contains(e.target as Node)) {
+        setShowDetail(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showDetail]);
 
   const handleRefresh = async () => {
     setStatus('loading');
+    setShowDetail(true);
+    setSteps({ sheets: 'running', meta: 'running', views: 'pending' });
+    setStepMessages({ sheets: '', meta: '', views: '' });
+
+    let sheetsOk = false;
+    let metaOk = false;
+
+    // Step 1: Run Google Sheets sync & Meta Ads sync in parallel
+    const [sheetsRes, metaRes] = await Promise.allSettled([
+      fetch('/api/sync', { method: 'POST' }).then(async r => {
+        const d = await r.json();
+        return { ok: r.ok, data: d };
+      }),
+      fetch('/api/meta-sync', { method: 'POST' }).then(async r => {
+        const d = await r.json();
+        return { ok: r.ok, data: d };
+      }),
+    ]);
+
+    // Process Google Sheets result
+    if (sheetsRes.status === 'fulfilled') {
+      const { ok, data } = sheetsRes.value;
+      if (ok && !data.error) {
+        const synced = data.synced ?? 0;
+        const failed = data.failed ?? 0;
+        if (synced === 0 && failed === 0) {
+          setSteps(s => ({ ...s, sheets: 'skipped' }));
+          setStepMessages(s => ({ ...s, sheets: 'Tidak ada sheet aktif' }));
+        } else {
+          sheetsOk = true;
+          setSteps(s => ({ ...s, sheets: 'success' }));
+          setStepMessages(s => ({ ...s, sheets: `${synced} synced${failed > 0 ? `, ${failed} gagal` : ''}` }));
+        }
+      } else {
+        setSteps(s => ({ ...s, sheets: 'error' }));
+        setStepMessages(s => ({ ...s, sheets: data.error || data.message || 'Gagal' }));
+      }
+    } else {
+      setSteps(s => ({ ...s, sheets: 'error' }));
+      setStepMessages(s => ({ ...s, sheets: 'Network error' }));
+    }
+
+    // Process Meta Ads result
+    if (metaRes.status === 'fulfilled') {
+      const { ok, data } = metaRes.value;
+      if (ok && !data.error) {
+        const rows = data.rows_inserted ?? 0;
+        const accts = data.accounts_synced ?? 0;
+        if (accts === 0 && rows === 0 && data.message) {
+          setSteps(s => ({ ...s, meta: 'skipped' }));
+          setStepMessages(s => ({ ...s, meta: 'Tidak ada akun aktif' }));
+        } else {
+          metaOk = true;
+          setSteps(s => ({ ...s, meta: data.status === 'failed' ? 'error' : 'success' }));
+          setStepMessages(s => ({ ...s, meta: `${accts} akun, ${rows} baris${data.token_warning ? ' ⚠️' : ''}` }));
+        }
+      } else {
+        setSteps(s => ({ ...s, meta: 'error' }));
+        setStepMessages(s => ({ ...s, meta: data.error || 'Gagal' }));
+      }
+    } else {
+      setSteps(s => ({ ...s, meta: 'error' }));
+      setStepMessages(s => ({ ...s, meta: 'Network error' }));
+    }
+
+    // Step 2: Refresh materialized views
+    setSteps(s => ({ ...s, views: 'running' }));
     try {
       const res = await fetch('/api/refresh-views', { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.success) {
+        setSteps(s => ({ ...s, views: 'success' }));
+        setStepMessages(s => ({ ...s, views: 'Selesai' }));
         setStatus('success');
-        // Reload page after short delay so dashboard picks up new data
-        setTimeout(() => window.location.reload(), 800);
+        setTimeout(() => window.location.reload(), 1200);
       } else {
-        console.error('[refresh]', data.error);
-        setStatus('error');
-        setTimeout(() => setStatus('idle'), 3000);
+        setSteps(s => ({ ...s, views: 'error' }));
+        setStepMessages(s => ({ ...s, views: data.error || 'Gagal' }));
+        setStatus(sheetsOk || metaOk ? 'success' : 'error');
+        setTimeout(() => setStatus('idle'), 4000);
       }
     } catch (err) {
       console.error('[refresh]', err);
+      setSteps(s => ({ ...s, views: 'error' }));
+      setStepMessages(s => ({ ...s, views: 'Network error' }));
       setStatus('error');
-      setTimeout(() => setStatus('idle'), 3000);
+      setTimeout(() => setStatus('idle'), 4000);
+    }
+  };
+
+  const stepIcon = (state: string) => {
+    switch (state) {
+      case 'running': return '⟳';
+      case 'success': return '✓';
+      case 'error': return '✗';
+      case 'skipped': return '—';
+      default: return '○';
+    }
+  };
+  const stepColor = (state: string) => {
+    switch (state) {
+      case 'running': return '#60a5fa';
+      case 'success': return '#22c55e';
+      case 'error': return '#ef4444';
+      case 'skipped': return '#64748b';
+      default: return '#475569';
     }
   };
 
@@ -80,21 +190,59 @@ function RefreshViewsButton() {
   };
 
   return (
-    <button
-      onClick={handleRefresh}
-      disabled={status === 'loading'}
-      title="Refresh data dashboard"
-      style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        width: 34, height: 34, borderRadius: 8,
-        border: '1px solid #1a2744',
-        background: status === 'loading' ? '#1a2744' : '#111a2e',
-        color: '#94a3b8', cursor: status === 'loading' ? 'wait' : 'pointer',
-        transition: 'all 0.15s ease', flexShrink: 0,
-      }}
-    >
-      {icon[status]}
-    </button>
+    <div style={{ position: 'relative' }} ref={detailRef}>
+      <button
+        onClick={handleRefresh}
+        disabled={status === 'loading'}
+        title="Sync semua data & refresh dashboard"
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          width: 34, height: 34, borderRadius: 8,
+          border: '1px solid #1a2744',
+          background: status === 'loading' ? '#1a2744' : '#111a2e',
+          color: '#94a3b8', cursor: status === 'loading' ? 'wait' : 'pointer',
+          transition: 'all 0.15s ease', flexShrink: 0,
+        }}
+      >
+        {icon[status]}
+      </button>
+
+      {/* Detail popup showing sync progress */}
+      {showDetail && status === 'loading' && (
+        <div style={{
+          position: 'absolute', top: '100%', right: 0, marginTop: 8,
+          background: '#111a2e', border: '1px solid #1a2744', borderRadius: 10,
+          padding: '12px 14px', minWidth: 250, zIndex: 999,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+        }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+            Sync Progress
+          </div>
+          {[
+            { key: 'sheets', label: 'Google Sheets' },
+            { key: 'meta', label: 'Meta Ads' },
+            { key: 'views', label: 'Refresh Views' },
+          ].map(({ key, label }) => (
+            <div key={key} style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0',
+              fontSize: 12, color: stepColor(steps[key]),
+            }}>
+              <span style={{
+                width: 18, textAlign: 'center', fontWeight: 700, fontSize: 13,
+                animation: steps[key] === 'running' ? 'spin 1s linear infinite' : 'none',
+                display: 'inline-block',
+              }}>
+                {stepIcon(steps[key])}
+              </span>
+              <span style={{ fontWeight: 600, color: '#e2e8f0', minWidth: 95 }}>{label}</span>
+              <span style={{ color: stepColor(steps[key]), fontSize: 11, flex: 1, textAlign: 'right' }}>
+                {stepMessages[key] || (steps[key] === 'running' ? 'Syncing...' : steps[key] === 'pending' ? 'Menunggu' : '')}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
