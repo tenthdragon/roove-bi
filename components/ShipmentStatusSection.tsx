@@ -118,7 +118,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
           bgAccent="#78350f"
         />
         <StatusCard
-          label="Returned / Cancel"
+          label="RTS / Cancel"
           orders={totals.returned}
           revenue={totals.returnedRev}
           pctValue={pct(totals.returned)}
@@ -327,7 +327,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
           <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 10, color: '#475569', flexWrap: 'wrap' }}>
             <span><span style={{ color: '#10b981' }}>●</span> Completed — sudah sampai & selesai</span>
             <span><span style={{ color: '#f59e0b' }}>●</span> In Transit — sudah dikirim, belum completed</span>
-            <span><span style={{ color: '#ef4444' }}>●</span> Returned — dibatalkan / dikembalikan</span>
+            <span><span style={{ color: '#ef4444' }}>●</span> RTS / Cancel — dikembalikan / dibatalkan</span>
             <span><span style={{ color: '#a855f7' }}>●</span> Overdue — ship bulan lalu, belum completed</span>
           </div>
         </>

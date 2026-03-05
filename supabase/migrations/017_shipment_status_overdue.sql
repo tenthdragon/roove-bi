@@ -1,7 +1,7 @@
 -- ============================================================
 -- Shipment Status RPC v2 — adds Overdue category
--- Revenue now from SUM(product_price_bt - discount_bt) line items
--- to be consistent with Net Sales in Overview/Channels pages
+-- Revenue from SUM(product_price_bt - discount_bt) line items
+-- Statuses: completed, in_transit (shipped), returned/rts/canceled
 -- ============================================================
 
 DROP FUNCTION IF EXISTS get_shipment_status(DATE, DATE);
@@ -24,7 +24,6 @@ BEGIN
   RETURN QUERY
   WITH
   -- Current period: shipped within p_from..p_to
-  -- Revenue = SUM of line-item (product_price_bt - discount_bt)
   current_period AS (
     SELECT
       COALESCE(l.sales_channel, 'Unknown') AS ch,
@@ -45,7 +44,7 @@ BEGIN
       AND o.shipped_time < (p_to + INTERVAL '1 day')
       AND o.status NOT IN ('deleted')
   ),
-  -- Overdue: shipped BEFORE p_from, still not completed, not canceled
+  -- Overdue: shipped BEFORE p_from, still not completed, not canceled/rts
   overdue AS (
     SELECT
       COALESCE(l.sales_channel, 'Unknown') AS ch,
@@ -62,7 +61,7 @@ BEGIN
     WHERE o.shipped_time IS NOT NULL
       AND o.shipped_time < p_from
       AND o.completed_time IS NULL
-      AND o.status NOT IN ('canceled', 'cancelled', 'failed', 'returned', 'deleted')
+      AND o.status NOT IN ('canceled', 'cancelled', 'failed', 'returned', 'rts', 'shipped_rts', 'deleted')
   ),
   -- Aggregate current period by channel
   current_agg AS (
@@ -70,25 +69,25 @@ BEGIN
       ch AS sales_channel,
       COUNT(*) FILTER (
         WHERE completed_time IS NOT NULL
-          AND status NOT IN ('canceled', 'cancelled', 'failed', 'returned')
+          AND status NOT IN ('canceled', 'cancelled', 'failed', 'returned', 'rts', 'shipped_rts')
       ) AS completed_orders,
       COALESCE(SUM(rev) FILTER (
         WHERE completed_time IS NOT NULL
-          AND status NOT IN ('canceled', 'cancelled', 'failed', 'returned')
+          AND status NOT IN ('canceled', 'cancelled', 'failed', 'returned', 'rts', 'shipped_rts')
       ), 0) AS completed_revenue,
       COUNT(*) FILTER (
         WHERE completed_time IS NULL
-          AND status NOT IN ('canceled', 'cancelled', 'failed', 'returned')
+          AND status NOT IN ('canceled', 'cancelled', 'failed', 'returned', 'rts', 'shipped_rts')
       ) AS in_transit_orders,
       COALESCE(SUM(rev) FILTER (
         WHERE completed_time IS NULL
-          AND status NOT IN ('canceled', 'cancelled', 'failed', 'returned')
+          AND status NOT IN ('canceled', 'cancelled', 'failed', 'returned', 'rts', 'shipped_rts')
       ), 0) AS in_transit_revenue,
       COUNT(*) FILTER (
-        WHERE status IN ('canceled', 'cancelled', 'failed', 'returned')
+        WHERE status IN ('canceled', 'cancelled', 'failed', 'returned', 'rts', 'shipped_rts')
       ) AS returned_orders,
       COALESCE(SUM(rev) FILTER (
-        WHERE status IN ('canceled', 'cancelled', 'failed', 'returned')
+        WHERE status IN ('canceled', 'cancelled', 'failed', 'returned', 'rts', 'shipped_rts')
       ), 0) AS returned_revenue
     FROM current_period
     GROUP BY ch
@@ -102,7 +101,6 @@ BEGIN
     FROM overdue
     GROUP BY ch
   )
-  -- FULL OUTER JOIN so channels appearing only in overdue still show
   SELECT
     COALESCE(c.sales_channel, ov.sales_channel) AS sales_channel,
     COALESCE(c.completed_orders, 0)::BIGINT AS completed_orders,

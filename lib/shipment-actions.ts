@@ -94,7 +94,7 @@ async function fetchShipmentStatusFallback(from: string, to: string): Promise<Sh
       .not('shipped_time', 'is', null)
       .lt('shipped_time', from)
       .is('completed_time', null)
-      .not('status', 'in', '(canceled,cancelled,failed,returned,deleted)')
+      .not('status', 'in', '(canceled,cancelled,failed,returned,rts,shipped_rts,deleted)')
       .range(offset, offset + PAGE_SIZE - 1);
 
     if (batchErr) {
@@ -165,7 +165,7 @@ async function fetchShipmentStatusFallback(from: string, to: string): Promise<Sh
     ensureChannel(ch);
 
     const rev = Math.abs(revenueMap[o.id] || 0);
-    const isCanceled = ['canceled', 'cancelled', 'failed', 'returned'].includes(o.status);
+    const isCanceled = ['canceled', 'cancelled', 'failed', 'returned', 'rts', 'shipped_rts'].includes(o.status);
 
     if (isCanceled) {
       byChannel[ch].returned_orders++;
