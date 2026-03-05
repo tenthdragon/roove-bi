@@ -5,24 +5,14 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
-import { XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Area, ComposedChart, Bar, Line } from 'recharts';
+// Recharts removed — daily trend is now a table
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
 import CashFlowSection from '@/components/CashFlowSection';
 
-const TT = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{ background:'#1e293b', border:'1px solid #1a2744', borderRadius:8, padding:'10px 14px', fontSize:12, maxWidth:320 }}>
-      <div style={{ fontWeight:700, marginBottom:6 }}>{label}</div>
-      {payload.filter(p => p.value !== 0).map((p, i) => (
-        <div key={i} style={{ color: p.value < 0 ? '#ef4444' : (p.color||p.stroke), marginBottom:2, display:'flex', justifyContent:'space-between', gap:16 }}>
-          <span>{p.name}</span><span style={{ fontFamily:'monospace', fontWeight:600 }}>{fmtRupiah(p.value)}</span>
-        </div>
-      ))}
-    </div>
-  );
-};
+// Daily trend color coding for margin
+const marginColor = (v: number) => v >= 30 ? '#10b981' : v >= 0 ? '#f59e0b' : '#ef4444';
+const marginBg = (v: number) => v >= 30 ? '#064e3b' : v >= 0 ? '#78350f' : '#7f1d1d';
 
 export default function OverviewPage() {
   const supabase = useSupabase();
@@ -81,13 +71,19 @@ export default function OverviewPage() {
     const tn = dates.reduce((a,d) => a + byDate[d].n, 0);
     const tm = tg - tn;
     const ad = dates.filter(d => byDate[d].s > 0).length;
-    const chart = dates.map(d => ({
-      date: shortDate(d),
-      'Net Sales': byDate[d].s,
-      'Gross Profit': byDate[d].g,
-      'GP After Mkt + Adm': byDate[d].n,
-      'Mkt Cost + MP Fee': byDate[d].g - byDate[d].n,
-    }));
+    const chart = dates.map(d => {
+      const mkt = byDate[d].g - byDate[d].n;
+      const gpM = byDate[d].s > 0 ? byDate[d].g / byDate[d].s * 100 : 0;
+      const nM = byDate[d].s > 0 ? byDate[d].n / byDate[d].s * 100 : 0;
+      return {
+        date: shortDate(d),
+        'Net Sales': byDate[d].s,
+        'Gross Profit': byDate[d].g,
+        'GP After Mkt + Adm': byDate[d].n,
+        'Mkt Cost + MP Fee': mkt,
+        gpM, nM,
+      };
+    });
     return { ts, tg, tn, tm, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
   }, [dailyData]);
 
@@ -176,20 +172,52 @@ export default function OverviewPage() {
       )}
 
       {kpi.chart.length > 0 && (
-        <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16, marginBottom:20 }}>
+        <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16, marginBottom:20, overflowX:'auto' }}>
           <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Tren Harian</div>
-          <ResponsiveContainer width="100%" height={280}>
-            <ComposedChart data={kpi.chart}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
-              <XAxis dataKey="date" stroke="#64748b" fontSize={11} />
-              <YAxis stroke="#64748b" fontSize={11} tickFormatter={v => fmtCompact(v)} />
-              <Tooltip content={<TT />} />
-              <Area type="monotone" dataKey="Net Sales" fill="#3b82f6" fillOpacity={0.12} stroke="#3b82f6" strokeWidth={2.5} />
-              <Line type="monotone" dataKey="Gross Profit" stroke="#10b981" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="GP After Mkt + Adm" stroke="#06b6d4" strokeWidth={2} dot={false} strokeDasharray="5 3" />
-              <Bar dataKey="Mkt Cost + MP Fee" fill="#f59e0b" fillOpacity={0.35} radius={[3,3,0,0]} />
-            </ComposedChart>
-          </ResponsiveContainer>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:700 }}>
+            <thead>
+              <tr style={{ borderBottom:'2px solid #1a2744' }}>
+                <th style={{ padding:'8px 10px', textAlign:'left', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'#111a2e', zIndex:1 }}>Tanggal</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'#3b82f6', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Net Sales</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'#10b981', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Gross Profit</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'#10b981', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>GP %</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'#f59e0b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Mkt + MP Fee</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'#06b6d4', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>GP After Mkt + Adm</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'#06b6d4', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Margin %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {kpi.chart.map((row, i) => (
+                <tr key={i} style={{ borderBottom:'1px solid #0f172a' }}>
+                  <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap', position:'sticky', left:0, background:'#111a2e', zIndex:1 }}>{row.date}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(row['Net Sales'])}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(row['Gross Profit'])}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right' }}>
+                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background: marginBg(row.gpM), color: marginColor(row.gpM) }}>{row.gpM.toFixed(1)}%</span>
+                  </td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(row['Mkt Cost + MP Fee'])}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['GP After Mkt + Adm'] >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(row['GP After Mkt + Adm'])}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right' }}>
+                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background: marginBg(row.nM), color: marginColor(row.nM) }}>{row.nM.toFixed(1)}%</span>
+                  </td>
+                </tr>
+              ))}
+              {/* TOTAL row */}
+              <tr style={{ borderTop:'2px solid #1a2744', fontWeight:700 }}>
+                <td style={{ padding:'10px 10px', position:'sticky', left:0, background:'#111a2e', zIndex:1, textTransform:'uppercase', fontSize:11, letterSpacing:'0.05em' }}>Total</td>
+                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(kpi.ts)}</td>
+                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(kpi.tg)}</td>
+                <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                  <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background: marginBg(kpi.gpM), color: marginColor(kpi.gpM) }}>{kpi.gpM.toFixed(1)}%</span>
+                </td>
+                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tm)}</td>
+                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: kpi.tn >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(kpi.tn)}</td>
+                <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                  <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background: marginBg(kpi.nM), color: marginColor(kpi.nM) }}>{kpi.nM.toFixed(1)}%</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       )}
 
