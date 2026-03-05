@@ -40,6 +40,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
       completed: 0, completedRev: 0,
       inTransit: 0, inTransitRev: 0,
       returned: 0, returnedRev: 0,
+      overdue: 0, overdueRev: 0,
     };
     data.forEach(row => {
       t.completed += row.completed_orders;
@@ -48,6 +49,8 @@ export default function ShipmentStatusSection({ from, to }: Props) {
       t.inTransitRev += row.in_transit_revenue;
       t.returned += row.returned_orders;
       t.returnedRev += row.returned_revenue;
+      t.overdue += row.overdue_orders;
+      t.overdueRev += row.overdue_revenue;
     });
     return t;
   }, [data]);
@@ -60,7 +63,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
   const channelRows = useMemo(() => {
     return data
       .map(row => {
-        const total = row.completed_orders + row.in_transit_orders + row.returned_orders;
+        const total = row.completed_orders + row.in_transit_orders + row.returned_orders + row.overdue_orders;
         return { ...row, displayName: displayName(row.sales_channel), total };
       })
       .filter(r => r.total > 0)
@@ -122,6 +125,16 @@ export default function ShipmentStatusSection({ from, to }: Props) {
           color={totals.returned > 0 ? '#ef4444' : '#64748b'}
           bgAccent={totals.returned > 0 ? '#7f1d1d' : '#1e293b'}
         />
+        <StatusCard
+          label="Overdue"
+          subtitle="Ship bulan lalu"
+          orders={totals.overdue}
+          revenue={totals.overdueRev}
+          pctValue={0}
+          color={totals.overdue > 0 ? '#a855f7' : '#64748b'}
+          bgAccent={totals.overdue > 0 ? '#581c87' : '#1e293b'}
+          hidePct
+        />
         {/* Total — highlighted */}
         <div style={{
           flex: '1 1 160px', background: '#0c1524', borderRadius: 10,
@@ -141,8 +154,9 @@ export default function ShipmentStatusSection({ from, to }: Props) {
         </div>
       </div>
 
-      {/* ── Progress Bar ── */}
-      <div style={{ marginBottom: 14 }}>
+      {/* ── Progress Bar (current period) ── */}
+      <div style={{ marginBottom: totals.overdue > 0 ? 6 : 14 }}>
+        <div style={{ fontSize: 9, color: '#475569', marginBottom: 3, fontWeight: 600 }}>Periode ini</div>
         <div style={{
           display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: '#1e293b',
         }}>
@@ -157,6 +171,23 @@ export default function ShipmentStatusSection({ from, to }: Props) {
           )}
         </div>
       </div>
+
+      {/* ── Overdue Bar (previous period, still pending) ── */}
+      {totals.overdue > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 9, color: '#475569', marginBottom: 3, fontWeight: 600 }}>
+            Overdue (ship sebelumnya, belum completed)
+          </div>
+          <div style={{
+            display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: '#1e293b',
+          }}>
+            <div style={{ width: '100%', background: '#a855f7', transition: 'width 0.5s' }} />
+          </div>
+          <div style={{ fontSize: 9, color: '#a855f7', marginTop: 2, fontFamily: 'monospace' }}>
+            {totals.overdue.toLocaleString('id-ID')} orders · Rp {fmtCompact(totals.overdueRev)}
+          </div>
+        </div>
+      )}
 
       {/* ── Collapsible Channel Breakdown ── */}
       <button
@@ -187,6 +218,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: '#10b981', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Completed</th>
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f59e0b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>In Transit</th>
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: '#ef4444', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Returned</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: '#a855f7', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Overdue</th>
               </tr>
             </thead>
             <tbody>
@@ -195,6 +227,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
                 const compPct = row.total > 0 ? (row.completed_orders / row.total * 100) : 0;
                 const transPct = row.total > 0 ? (row.in_transit_orders / row.total * 100) : 0;
                 const retPct = row.total > 0 ? (row.returned_orders / row.total * 100) : 0;
+                const wordsOverduePct = row.total > 0 ? (row.overdue_orders / row.total * 100) : 0;
 
                 return (
                   <tr key={row.sales_channel} style={{ borderBottom: '1px solid #1a2744' }}>
@@ -234,6 +267,17 @@ export default function ShipmentStatusSection({ from, to }: Props) {
                         </>
                       ) : <span style={{ color: '#334155' }}>—</span>}
                     </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                      {row.overdue_orders > 0 ? (
+                        <>
+                          <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{row.overdue_orders.toLocaleString('id-ID')}</span>
+                          <span style={{
+                            marginLeft: 6, padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+                            background: '#581c87', color: '#a855f7', fontFamily: 'monospace',
+                          }}>{wordsOverduePct.toFixed(0)}%</span>
+                        </>
+                      ) : <span style={{ color: '#334155' }}>—</span>}
+                    </td>
                   </tr>
                 );
               })}
@@ -268,6 +312,13 @@ export default function ShipmentStatusSection({ from, to }: Props) {
                     </>
                   ) : <span style={{ color: '#334155' }}>—</span>}
                 </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                  {totals.overdue > 0 ? (
+                    <>
+                      <span style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{totals.overdue.toLocaleString('id-ID')}</span>
+                    </>
+                  ) : <span style={{ color: '#334155' }}>—</span>}
+                </td>
               </tr>
             </tbody>
           </table>
@@ -277,6 +328,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
             <span><span style={{ color: '#10b981' }}>●</span> Completed — sudah sampai & selesai</span>
             <span><span style={{ color: '#f59e0b' }}>●</span> In Transit — sudah dikirim, belum completed</span>
             <span><span style={{ color: '#ef4444' }}>●</span> Returned — dibatalkan / dikembalikan</span>
+            <span><span style={{ color: '#a855f7' }}>●</span> Overdue — ship bulan lalu, belum completed</span>
           </div>
         </>
       )}
@@ -284,7 +336,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
   );
 }
 
-function StatusCard({ label, orders, revenue, pctValue, color, bgAccent }) {
+function StatusCard({ label, subtitle, orders, revenue, pctValue, color, bgAccent, hidePct }: any) {
   return (
     <div style={{
       flex: '1 1 160px', background: '#0c1524', borderRadius: 10,
@@ -292,20 +344,25 @@ function StatusCard({ label, orders, revenue, pctValue, color, bgAccent }) {
       position: 'relative', overflow: 'hidden',
     }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: color }} />
-      <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 4 }}>
+      <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.04em', marginBottom: subtitle ? 0 : 4 }}>
         {label}
       </div>
+      {subtitle && (
+        <div style={{ fontSize: 9, color: '#475569', marginBottom: 4, fontStyle: 'italic' }}>{subtitle}</div>
+      )}
       <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', color, lineHeight: 1.1 }}>
         {orders.toLocaleString('id-ID')}
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11, alignItems: 'center' }}>
         <span style={{ color: '#64748b', fontFamily: 'monospace', fontSize: 10 }}>Rp {fmtCompact(revenue)}</span>
-        <span style={{
-          padding: '1px 6px', borderRadius: 4, fontWeight: 700, fontSize: 10,
-          background: bgAccent, color, fontFamily: 'monospace',
-        }}>
-          {pctValue.toFixed(1)}%
-        </span>
+        {!hidePct && (
+          <span style={{
+            padding: '1px 6px', borderRadius: 4, fontWeight: 700, fontSize: 10,
+            background: bgAccent, color, fontFamily: 'monospace',
+          }}>
+            {pctValue.toFixed(1)}%
+          </span>
+        )}
       </div>
     </div>
   );
