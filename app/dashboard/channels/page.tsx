@@ -8,6 +8,7 @@ import { getCached, setCache } from '@/lib/dashboard-cache';
 // PieChart removed – no longer used on this page
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import ChannelSlaSection from '@/components/ChannelSlaSection';
+import ShipmentStatusSection from '@/components/ShipmentStatusSection';
 
 // ── Normalize ad source → platform (same logic as marketing page) ──
 // ── Ads Source → Marketing Platform (sales POV: NO organic spillover) ──
@@ -602,6 +603,11 @@ export default function ChannelsPage() {
             </tr>
           </tbody>
         </table>
+      </div>
+
+      {/* Shipment Status Section */}
+      <div style={{ marginTop: 20 }}>
+        <ShipmentStatusSection from={dateRange.from} to={dateRange.to} />
       </div>
 
       {/* Order SLA Section */}
