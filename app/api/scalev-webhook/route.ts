@@ -138,6 +138,120 @@ const num = (v: any): number => {
   return isNaN(n) ? 0 : n;
 };
 
+// ── PPN Tax Rate ──
+const TAX_RATE = 11;
+const TAX_DIVISOR = 1 + TAX_RATE / 100; // 1.11
+
+// ── Brand detection from product name (mirrors csv-actions.ts) ──
+function deriveBrandFromProduct(productName: string): string {
+  const n = (productName || '').toLowerCase();
+  if (n.includes('osgard')) return 'Osgard';
+  if (n.includes('purvu') || n.includes('secret')) return 'Purvu';
+  if (n.includes('pluve')) return 'Pluve';
+  if (n.includes('globite')) return 'Globite';
+  if (n.includes('drhyun') || n.includes('dr hyun')) return 'DrHyun';
+  if (n.includes('calmara')) return 'Calmara';
+  if (n.includes('almona')) return 'Almona';
+  if (n.includes('yuv')) return 'YUV';
+  if (n.includes('veminine')) return 'Veminine';
+  if (n.includes('orelif')) return 'Orelif';
+  if (n.includes('roove') || n.includes('shaker') || n.includes('jam tangan')) return 'Roove';
+  return 'Other';
+}
+
+// ── Platform detection from store name + external_id digit pattern ──
+// Marketplace external_id patterns (purely numeric):
+//   Shopee:     10-14 digits  (e.g. 12190861252)
+//   Lazada:     15-16 digits  (e.g. 2681417797192678)
+//   TikTok Shop: 17-19 digits (e.g. 582900390905349354)
+//   BliBli:     10-13 digits  — overlap with Shopee, but BliBli stores have explicit name
+function deriveMarketplaceFromExternalId(externalId: string): string | null {
+  const eid = (externalId || '').trim();
+  // Only apply to purely numeric external IDs (marketplace orders)
+  if (!/^\d+$/.test(eid)) return null;
+  const len = eid.length;
+  if (len >= 17) return 'tiktokshop';
+  if (len >= 15) return 'lazada';
+  if (len >= 10) return 'shopee';
+  return null;
+}
+
+function derivePlatformFromStore(storeName: string, externalId?: string): string | null {
+  const s = (storeName || '').toLowerCase();
+  // Explicit marketplace name in store
+  if (s.includes('shopee')) return 'shopee';
+  if (s.includes('tiktok')) return 'tiktokshop';
+  if (s.includes('lazada')) return 'lazada';
+  if (s.includes('blibli')) return 'blibli';
+  if (s.includes('tokopedia')) return 'tokopedia';
+  // Generic marketplace — detect from external_id digit length
+  if (s.includes('marketplace') || s.includes('markerplace')) {
+    const detected = deriveMarketplaceFromExternalId(externalId || '');
+    return detected || 'marketplace';
+  }
+  return 'scalev';
+}
+
+// ── Sales channel derivation from webhook data (mirrors csv-actions.ts) ──
+function deriveSalesChannelFromWebhook(data: any): string {
+  const storeName = (data.store?.name || '').toLowerCase();
+  const platform = derivePlatformFromStore(data.store?.name || '', data.external_id);
+  const resellerPrice = num(data.reseller_product_price);
+
+  if (platform === 'shopee') return 'Shopee';
+  if (platform === 'tiktokshop') return 'TikTok Shop';
+  if (platform === 'lazada') return 'Lazada';
+  if (platform === 'tokopedia') return 'Tokopedia';
+  if (platform === 'blibli') return 'BliBli';
+  if (platform === 'marketplace') return 'Marketplace';
+
+  if (resellerPrice > 0 && (storeName.includes('mitra') || storeName.includes('reseller'))) return 'Reseller';
+  if (storeName.includes('mitra') || storeName.includes('reseller')) return 'Reseller';
+
+  if (data.is_purchase_fb === true || data.is_purchase_fb === 'true') return 'Facebook Ads';
+  if (data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true') return 'TikTok Ads';
+
+  return 'Organik';
+}
+
+// ── Build enriched order lines from webhook orderlines payload ──
+function buildEnrichedLines(orderId: string, dbOrderId: number, data: any): any[] {
+  if (!data.orderlines || !Array.isArray(data.orderlines) || data.orderlines.length === 0) {
+    return [];
+  }
+
+  const salesChannel = deriveSalesChannelFromWebhook(data);
+  const shippedTime = ts(data.shipped_time) || ts(data.completed_time) || null;
+
+  return data.orderlines.map((line: any) => {
+    const qty = line.quantity || 1;
+    const productPrice = num(line.product_price);
+    const discount = num(line.discount);
+    const cogs = num(line.cogs || line.variant_cogs);
+
+    return {
+      order_id: dbOrderId,
+      scalev_order_id: orderId,
+      product_name: line.product_name || null,
+      product_type: deriveBrandFromProduct(line.product_name || ''),
+      variant_name: line.variant_unique_id || null,
+      quantity: qty,
+      weight: line.weight || 0,
+      // Financial fields: convert from per-unit incl. tax → before-tax line totals
+      product_price_bt: (productPrice * qty) / TAX_DIVISOR,
+      discount_bt: (discount * qty) / TAX_DIVISOR,
+      cogs_bt: (cogs * qty) / TAX_DIVISOR,
+      tax_rate: TAX_RATE,
+      sales_channel: salesChannel,
+      shipped_time: shippedTime,
+      is_purchase_fb: data.is_purchase_fb === true || data.is_purchase_fb === 'true',
+      is_purchase_tiktok: data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true',
+      is_purchase_kwai: data.is_purchase_kwai === true || data.is_purchase_kwai === 'true',
+      synced_at: new Date().toISOString(),
+    };
+  });
+}
+
 // ── Handle order.created: insert new order into scalev_orders ──
 async function handleOrderCreated(data: any, businessCode: string) {
   const svc = getServiceSupabase();
@@ -165,21 +279,22 @@ async function handleOrderCreated(data: any, businessCode: string) {
   const financialEntity = data.financial_entity?.name || data.financial_entity?.code || null;
 
   // Build order row
+  const derivedPlatform = derivePlatformFromStore(storeName || '', data.external_id);
   const orderRow: Record<string, any> = {
     scalev_id: null,
     order_id: orderId,
     external_id: data.external_id || null,
     customer_type: null,
     status: data.status || 'pending',
-    platform: null,
+    platform: derivedPlatform,
     store_name: storeName,
     utm_source: null,
     financial_entity: financialEntity,
     payment_method: data.payment_method || null,
     unique_code_discount: num(data.unique_code_discount),
-    is_purchase_fb: false,
-    is_purchase_tiktok: false,
-    is_purchase_kwai: false,
+    is_purchase_fb: data.is_purchase_fb === true || data.is_purchase_fb === 'true',
+    is_purchase_tiktok: data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true',
+    is_purchase_kwai: data.is_purchase_kwai === true || data.is_purchase_kwai === 'true',
     gross_revenue: num(data.gross_revenue),
     net_revenue: num(data.net_revenue),
     shipping_cost: num(data.shipping_cost),
@@ -216,20 +331,14 @@ async function handleOrderCreated(data: any, businessCode: string) {
     return NextResponse.json({ error: 'DB insert failed' }, { status: 500 });
   }
 
-  // Insert order lines if present
-  if (data.orderlines && Array.isArray(data.orderlines) && data.orderlines.length > 0 && inserted) {
-    const lines = data.orderlines.map((line: any) => ({
-      order_id: inserted.id,
-      scalev_order_id: orderId,
-      product_name: line.product_name || null,
-      variant_name: line.variant_unique_id || null,
-      quantity: line.quantity || 0,
-      weight: line.weight || 0,
-    }));
-
-    const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
-    if (lineErr) {
-      console.warn(`[scalev-webhook][${businessCode}] order.created lines insert error for ${orderId}:`, lineErr.message);
+  // Insert enriched order lines (with financial data) if present
+  if (inserted) {
+    const lines = buildEnrichedLines(orderId, inserted.id, data);
+    if (lines.length > 0) {
+      const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
+      if (lineErr) {
+        console.warn(`[scalev-webhook][${businessCode}] order.created lines insert error for ${orderId}:`, lineErr.message);
+      }
     }
   }
 
@@ -331,8 +440,85 @@ async function handleStatusChanged(data: any, businessCode: string) {
 
   console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} updated ${existing.status} → ${newStatus}`);
 
-  // Refresh materialized views if order became shipped/completed
+  // When order becomes shipped/completed, re-enrich lines that still have
+  // generic 'Marketplace' sales_channel — by now external_id should be available
   if (newStatus === 'shipped' || newStatus === 'completed') {
+    try {
+      // Fetch current order data (with external_id and store_name)
+      const { data: orderData } = await svc
+        .from('scalev_orders')
+        .select('id, external_id, store_name, is_purchase_fb, is_purchase_tiktok, is_purchase_kwai, raw_data')
+        .eq('id', existing.id)
+        .single();
+
+      if (orderData) {
+        // Check if any lines have generic 'Marketplace' channel
+        const { data: genericLines } = await svc
+          .from('scalev_order_lines')
+          .select('id')
+          .eq('scalev_order_id', orderId)
+          .eq('sales_channel', 'Marketplace');
+
+        if (genericLines && genericLines.length > 0 && orderData.external_id) {
+          const platform = derivePlatformFromStore(orderData.store_name || '', orderData.external_id);
+          let resolvedChannel = 'Marketplace';
+          if (platform === 'shopee') resolvedChannel = 'Shopee';
+          else if (platform === 'tiktokshop') resolvedChannel = 'TikTok Shop';
+          else if (platform === 'lazada') resolvedChannel = 'Lazada';
+          else if (platform === 'tokopedia') resolvedChannel = 'Tokopedia';
+          else if (platform === 'blibli') resolvedChannel = 'BliBli';
+
+          if (resolvedChannel !== 'Marketplace') {
+            await svc
+              .from('scalev_order_lines')
+              .update({ sales_channel: resolvedChannel })
+              .eq('scalev_order_id', orderId)
+              .eq('sales_channel', 'Marketplace');
+
+            // Also update the platform on the order itself
+            await svc
+              .from('scalev_orders')
+              .update({ platform })
+              .eq('id', existing.id);
+
+            console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} re-derived channel → ${resolvedChannel} (from external_id)`);
+          }
+        }
+
+        // Also check if lines are missing financial data (product_price_bt = 0 or null)
+        // and raw_data has orderlines — re-enrich them
+        const { data: emptyLines } = await svc
+          .from('scalev_order_lines')
+          .select('id')
+          .eq('scalev_order_id', orderId)
+          .or('product_price_bt.is.null,product_price_bt.eq.0');
+
+        if (emptyLines && emptyLines.length > 0 && orderData.raw_data?.orderlines) {
+          // Delete old lines and re-insert enriched ones
+          await svc.from('scalev_order_lines').delete().eq('scalev_order_id', orderId);
+          const enrichedLines = buildEnrichedLines(orderId, existing.id, {
+            ...orderData.raw_data,
+            external_id: orderData.external_id,
+            store: { name: orderData.store_name },
+            is_purchase_fb: orderData.is_purchase_fb,
+            is_purchase_tiktok: orderData.is_purchase_tiktok,
+            is_purchase_kwai: orderData.is_purchase_kwai,
+          });
+          if (enrichedLines.length > 0) {
+            const { error: reInsertErr } = await svc.from('scalev_order_lines').insert(enrichedLines);
+            if (reInsertErr) {
+              console.warn(`[scalev-webhook][${businessCode}] status_changed: re-enrich lines error for ${orderId}:`, reInsertErr.message);
+            } else {
+              console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} re-enriched ${enrichedLines.length} lines with financial data`);
+            }
+          }
+        }
+      }
+    } catch (enrichErr: any) {
+      // Non-fatal: log but don't fail the status change
+      console.warn(`[scalev-webhook][${businessCode}] status_changed: re-enrich failed for ${orderId}:`, enrichErr.message);
+    }
+
     triggerViewRefresh();
   }
 
@@ -393,6 +579,12 @@ async function handleOrderUpdated(data: any, businessCode: string) {
   if (data.shipping_cost != null) updateData.shipping_cost = num(data.shipping_cost);
   if (data.total_quantity != null) updateData.total_quantity = data.total_quantity;
   if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
+  // Derive platform from store name if not already set
+  if (storeName) updateData.platform = derivePlatformFromStore(storeName, data.external_id);
+  // Update purchase flags from webhook data
+  if (data.is_purchase_fb != null) updateData.is_purchase_fb = data.is_purchase_fb === true || data.is_purchase_fb === 'true';
+  if (data.is_purchase_tiktok != null) updateData.is_purchase_tiktok = data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true';
+  if (data.is_purchase_kwai != null) updateData.is_purchase_kwai = data.is_purchase_kwai === true || data.is_purchase_kwai === 'true';
 
   // Customer info (don't overwrite if source is ops_upload — ops is source of truth for customer)
   if (existing.source !== 'ops_upload') {
@@ -423,23 +615,17 @@ async function handleOrderUpdated(data: any, businessCode: string) {
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
-  // Replace order lines if present
+  // Replace order lines with enriched data (including financial fields)
   if (data.orderlines && Array.isArray(data.orderlines) && data.orderlines.length > 0) {
     // Delete old lines
     await svc.from('scalev_order_lines').delete().eq('scalev_order_id', orderId);
 
-    const lines = data.orderlines.map((line: any) => ({
-      order_id: existing.id,
-      scalev_order_id: orderId,
-      product_name: line.product_name || null,
-      variant_name: line.variant_unique_id || null,
-      quantity: line.quantity || 0,
-      weight: line.weight || 0,
-    }));
-
-    const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
-    if (lineErr) {
-      console.warn(`[scalev-webhook][${businessCode}] order.updated lines replace error for ${orderId}:`, lineErr.message);
+    const lines = buildEnrichedLines(orderId, existing.id, data);
+    if (lines.length > 0) {
+      const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
+      if (lineErr) {
+        console.warn(`[scalev-webhook][${businessCode}] order.updated lines replace error for ${orderId}:`, lineErr.message);
+      }
     }
   }
 
