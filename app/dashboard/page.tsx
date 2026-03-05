@@ -60,10 +60,11 @@ export default function OverviewPage() {
   const kpi = useMemo(() => {
     const byDate = {};
     dailyData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { s:0, g:0, n:0 };
+      if (!byDate[d.date]) byDate[d.date] = { s:0, g:0, n:0, mp:0 };
       byDate[d.date].s += Number(d.net_sales);
       byDate[d.date].g += Number(d.gross_profit);
       byDate[d.date].n += Number(d.net_after_mkt);
+      byDate[d.date].mp += Math.abs(Number(d.mp_admin_cost) || 0);
     });
     const dates = Object.keys(byDate).sort();
     const ts = dates.reduce((a,d) => a + byDate[d].s, 0);
@@ -72,7 +73,9 @@ export default function OverviewPage() {
     const tm = tg - tn;
     const ad = dates.filter(d => byDate[d].s > 0).length;
     const chart = dates.map(d => {
-      const mkt = byDate[d].g - byDate[d].n;
+      const totalMkt = byDate[d].g - byDate[d].n;
+      const mpFee = byDate[d].mp;
+      const adsFee = totalMkt - mpFee;
       const gpM = byDate[d].s > 0 ? byDate[d].g / byDate[d].s * 100 : 0;
       const nM = byDate[d].s > 0 ? byDate[d].n / byDate[d].s * 100 : 0;
       return {
@@ -80,11 +83,14 @@ export default function OverviewPage() {
         'Net Sales': byDate[d].s,
         'Gross Profit': byDate[d].g,
         'GP After Mkt + Adm': byDate[d].n,
-        'Mkt Cost + MP Fee': mkt,
+        'Mkt Fee': adsFee,
+        'MP Fee': mpFee,
         gpM, nM,
       };
     });
-    return { ts, tg, tn, tm, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
+    const tMp = dates.reduce((a,d) => a + byDate[d].mp, 0);
+    const tAds = tm - tMp;
+    return { ts, tg, tn, tm, tMp, tAds, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
   }, [dailyData]);
 
   const productTable = useMemo(() => {
@@ -174,14 +180,15 @@ export default function OverviewPage() {
       {kpi.chart.length > 0 && (
         <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16, marginBottom:20, overflowX:'auto' }}>
           <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Tren Harian</div>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:700 }}>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:820 }}>
             <thead>
               <tr style={{ borderBottom:'2px solid #1a2744' }}>
                 <th style={{ padding:'8px 10px', textAlign:'left', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'#111a2e', zIndex:1 }}>Tanggal</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#3b82f6', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Net Sales</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#10b981', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Gross Profit</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#10b981', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>GP %</th>
-                <th style={{ padding:'8px 10px', textAlign:'right', color:'#f59e0b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Mkt + MP Fee</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'#f59e0b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Mkt Fee</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'#f59e0b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>MP Fee</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#06b6d4', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>GP After Mkt + Adm</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#06b6d4', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Margin %</th>
               </tr>
@@ -195,7 +202,8 @@ export default function OverviewPage() {
                   <td style={{ padding:'8px 10px', textAlign:'right' }}>
                     <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background: marginBg(row.gpM), color: marginColor(row.gpM) }}>{row.gpM.toFixed(1)}%</span>
                   </td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(row['Mkt Cost + MP Fee'])}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(row['Mkt Fee'])}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(row['MP Fee'])}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['GP After Mkt + Adm'] >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(row['GP After Mkt + Adm'])}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right' }}>
                     <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background: marginBg(row.nM), color: marginColor(row.nM) }}>{row.nM.toFixed(1)}%</span>
@@ -210,7 +218,8 @@ export default function OverviewPage() {
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
                   <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background: marginBg(kpi.gpM), color: marginColor(kpi.gpM) }}>{kpi.gpM.toFixed(1)}%</span>
                 </td>
-                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tm)}</td>
+                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tAds)}</td>
+                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tMp)}</td>
                 <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: kpi.tn >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(kpi.tn)}</td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
                   <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background: marginBg(kpi.nM), color: marginColor(kpi.nM) }}>{kpi.nM.toFixed(1)}%</span>

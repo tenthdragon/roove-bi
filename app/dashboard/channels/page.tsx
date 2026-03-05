@@ -216,25 +216,38 @@ export default function ChannelsPage() {
       });
   }, [channelData, selectedProduct, adsPerChannel]);
 
-  // ── Daily Sales pivot: date × channel → net_sales ──
+  // ── Daily Sales pivot: date × channel → net_sales + Mkt Fee + MP Fee ──
   const dailySales = useMemo(() => {
-    const byDate: Record<string, Record<string, number>> = {};
+    const byDate: Record<string, { channels: Record<string, number>; mpFee: number; adsFee: number }> = {};
     const channelSet = new Set<string>();
 
+    // 1. Aggregate channel sales + mp_admin_cost per date
     channelData.forEach(d => {
       if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
       if (!d.date) return;
       const displayName = CHANNEL_DISPLAY_NAME[d.channel] || d.channel;
       channelSet.add(displayName);
-      if (!byDate[d.date]) byDate[d.date] = {};
-      byDate[d.date][displayName] = (byDate[d.date][displayName] || 0) + (Number(d.net_sales) || 0);
+      if (!byDate[d.date]) byDate[d.date] = { channels: {}, mpFee: 0, adsFee: 0 };
+      byDate[d.date].channels[displayName] = (byDate[d.date].channels[displayName] || 0) + (Number(d.net_sales) || 0);
+      byDate[d.date].mpFee += Math.abs(Number(d.mp_admin_cost) || 0);
+    });
+
+    // 2. Aggregate ads spend per date (ensures non-shipping days are included)
+    adsData.forEach(d => {
+      if (!d.date) return;
+      if (selectedProduct !== 'all') {
+        const brand = getAdBrand(d.store);
+        if (brand !== selectedProduct) return;
+      }
+      if (!byDate[d.date]) byDate[d.date] = { channels: {}, mpFee: 0, adsFee: 0 };
+      byDate[d.date].adsFee += Math.abs(Number(d.spent) || 0);
     });
 
     // Sort channels: pin Organik, Scalev, Reseller first, rest by total revenue desc
     const pinOrder = ['Organik', 'Scalev', 'Reseller'];
     const chTotals: Record<string, number> = {};
     Object.values(byDate).forEach(row => {
-      Object.entries(row).forEach(([ch, val]) => { chTotals[ch] = (chTotals[ch] || 0) + val; });
+      Object.entries(row.channels).forEach(([ch, val]) => { chTotals[ch] = (chTotals[ch] || 0) + val; });
     });
     const sortedChannels = Array.from(channelSet).sort((a, b) => {
       const aPin = pinOrder.indexOf(a);
@@ -247,13 +260,13 @@ export default function ChannelsPage() {
 
     const rows = Object.entries(byDate)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, chMap]) => {
-        const total = Object.values(chMap).reduce((sum, v) => sum + v, 0);
-        return { date, channels: chMap, total };
+      .map(([date, data]) => {
+        const total = Object.values(data.channels).reduce((sum, v) => sum + v, 0);
+        return { date, channels: data.channels, total, mpFee: data.mpFee, adsFee: data.adsFee };
       });
 
     return { rows, channelNames: sortedChannels };
-  }, [channelData, selectedProduct]);
+  }, [channelData, adsData, selectedProduct, storeBrandMap]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);
@@ -409,6 +422,8 @@ export default function ChannelsPage() {
                   <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: CHANNEL_COLORS[ch] || '#64748b' }}>{ch}</th>
                 ))}
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: '#e2e8f0', fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>Total</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f59e0b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Mkt Fee</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f59e0b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>MP Fee</th>
               </tr>
             </thead>
             <tbody>
@@ -421,6 +436,8 @@ export default function ChannelsPage() {
                     </td>
                   ))}
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(row.total)}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>{row.adsFee > 0 ? fmtRupiah(row.adsFee) : <span style={{ color: '#334155' }}>—</span>}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>{row.mpFee > 0 ? fmtRupiah(row.mpFee) : <span style={{ color: '#334155' }}>—</span>}</td>
                 </tr>
               ))}
               {/* Grand Total row */}
@@ -435,6 +452,8 @@ export default function ChannelsPage() {
                   );
                 })}
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(dailySales.rows.reduce((sum, r) => sum + r.total, 0))}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(dailySales.rows.reduce((sum, r) => sum + r.adsFee, 0))}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(dailySales.rows.reduce((sum, r) => sum + r.mpFee, 0))}</td>
               </tr>
             </tbody>
           </table>
