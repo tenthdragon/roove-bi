@@ -72,7 +72,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           pctValue={pct(data.cashReceived)}
           color="#10b981"
           bgAccent="#064e3b"
-          sub="Shipped & completed bulan ini"
+          sub="Completed shipment + Bank Transfer shipped bulan ini"
         />
         <MiniCard
           label="Spill Over (bulan lalu)"
@@ -81,7 +81,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           pctValue={pct(data.spillOver)}
           color="#8b5cf6"
           bgAccent="#2e1065"
-          sub="Shipped bulan lalu, cair bulan ini"
+          sub="COD & MP shipped bulan lalu, completed bulan ini"
         />
         {/* Total Cash In — highlighted */}
         <div style={{
@@ -123,7 +123,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           pctValue={pct(data.cashInProgress)}
           color="#f59e0b"
           bgAccent="#78350f"
-          sub="Shipped bulan ini, menunggu completed"
+          sub="COD & MP shipped bulan ini, menunggu completed"
         />
         <MiniCard
           label="Overdue (bulan lalu)"
@@ -132,7 +132,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           pctValue={pct(data.overdue)}
           color={data.overdueOrders > 0 ? '#ef4444' : '#64748b'}
           bgAccent={data.overdueOrders > 0 ? '#7f1d1d' : '#1e293b'}
-          sub="Shipped bulan lalu, belum juga completed"
+          sub="COD & MP shipped bulan lalu, bulan ini masih belum completed"
           warn={data.overdueOrders > 100}
         />
       </div>
