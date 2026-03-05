@@ -16,13 +16,13 @@ export interface ShipmentChannelRow {
 export async function fetchShipmentStatus(from: string, to: string): Promise<ShipmentChannelRow[]> {
   const svc = createServiceSupabase();
 
-  // Direct SQL query via Supabase — avoids PostgREST schema cache issues with new RPC functions
+  // Try RPC first
   const { data, error } = await svc.rpc('get_shipment_status', {
     p_from: from,
     p_to: to,
   });
 
-  // If RPC fails (schema cache), fallback to raw SQL via .from() approach
+  // If RPC fails (schema cache), fallback to direct query
   if (error) {
     console.error('[ShipmentStatus] RPC failed, trying fallback:', error.message);
     return fetchShipmentStatusFallback(from, to);
@@ -45,51 +45,70 @@ export async function fetchShipmentStatus(from: string, to: string): Promise<Shi
 }
 
 // Fallback: query scalev_orders + scalev_order_lines directly
+// Uses pagination to bypass Supabase default 1000-row limit
 async function fetchShipmentStatusFallback(from: string, to: string): Promise<ShipmentChannelRow[]> {
   const svc = createServiceSupabase();
 
-  // Fetch shipped orders in date range
-  const { data: orders, error: ordersErr } = await svc
-    .from('scalev_orders')
-    .select('id, net_revenue, completed_time, status')
-    .not('shipped_time', 'is', null)
-    .gte('shipped_time', from)
-    .lte('shipped_time', to + 'T23:59:59')
-    .not('status', 'in', '(deleted)');
+  // Fetch ALL shipped orders in date range (paginated to avoid 1000-row limit)
+  const allOrders: any[] = [];
+  const PAGE_SIZE = 1000;
+  let offset = 0;
+  let hasMore = true;
 
-  if (ordersErr) {
-    console.error('[ShipmentStatus] Fallback orders query error:', ordersErr.message);
-    return [];
-  }
+  while (hasMore) {
+    const { data: batch, error: batchErr } = await svc
+      .from('scalev_orders')
+      .select('id, net_revenue, completed_time, status')
+      .not('shipped_time', 'is', null)
+      .gte('shipped_time', from)
+      .lte('shipped_time', to + 'T23:59:59')
+      .not('status', 'in', '(deleted)')
+      .range(offset, offset + PAGE_SIZE - 1);
 
-  if (!orders || orders.length === 0) return [];
-
-  // Fetch sales_channel for each order (first line per order)
-  const orderIds = orders.map(o => o.id);
-
-  // Batch fetch order lines — get sales_channel per scalev_order_id
-  const { data: lines, error: linesErr } = await svc
-    .from('scalev_order_lines')
-    .select('scalev_order_id, sales_channel')
-    .in('scalev_order_id', orderIds);
-
-  if (linesErr) {
-    console.error('[ShipmentStatus] Fallback lines query error:', linesErr.message);
-    return [];
-  }
-
-  // Build map: order id → sales_channel (first line wins)
-  const channelMap: Record<number, string> = {};
-  (lines || []).forEach((l: any) => {
-    if (!channelMap[l.scalev_order_id]) {
-      channelMap[l.scalev_order_id] = l.sales_channel || 'Unknown';
+    if (batchErr) {
+      console.error('[ShipmentStatus] Fallback orders query error:', batchErr.message);
+      return [];
     }
-  });
+
+    const rows = batch || [];
+    allOrders.push(...rows);
+    hasMore = rows.length === PAGE_SIZE;
+    offset += PAGE_SIZE;
+  }
+
+  if (allOrders.length === 0) return [];
+
+  console.log(`[ShipmentStatus] Fallback fetched ${allOrders.length} orders`);
+
+  // Fetch sales_channel in batches (avoid URL length limits with .in())
+  const channelMap: Record<number, string> = {};
+  const BATCH_SIZE = 500;
+
+  for (let i = 0; i < allOrders.length; i += BATCH_SIZE) {
+    const batchIds = allOrders.slice(i, i + BATCH_SIZE).map(o => o.id);
+
+    const { data: lines, error: linesErr } = await svc
+      .from('scalev_order_lines')
+      .select('scalev_order_id, sales_channel')
+      .in('scalev_order_id', batchIds)
+      .limit(5000);
+
+    if (linesErr) {
+      console.error('[ShipmentStatus] Fallback lines query error:', linesErr.message);
+      continue;
+    }
+
+    (lines || []).forEach((l: any) => {
+      if (!channelMap[l.scalev_order_id]) {
+        channelMap[l.scalev_order_id] = l.sales_channel || 'Unknown';
+      }
+    });
+  }
 
   // Aggregate by channel
   const byChannel: Record<string, ShipmentChannelRow> = {};
 
-  for (const o of orders) {
+  for (const o of allOrders) {
     const ch = channelMap[o.id] || 'Unknown';
     if (!byChannel[ch]) {
       byChannel[ch] = {
