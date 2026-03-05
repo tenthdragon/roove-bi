@@ -138,24 +138,77 @@ const num = (v: any): number => {
   return isNaN(n) ? 0 : n;
 };
 
-// ── PPN Tax Rate ──
-const TAX_RATE = 11;
-const TAX_DIVISOR = 1 + TAX_RATE / 100; // 1.11
+// ── PPN Tax Rate (dynamic from DB, cached) ──
+const DEFAULT_TAX_RATE = 11;
+const DEFAULT_TAX_DIVISOR = 1 + DEFAULT_TAX_RATE / 100; // 1.11
 
-// ── Brand detection from product name (mirrors csv-actions.ts) ──
-function deriveBrandFromProduct(productName: string): string {
+type TaxRateEntry = { name: string; rate: number; effective_from: string };
+let cachedTaxRates: TaxRateEntry[] | null = null;
+let taxRateCacheExpiry = 0;
+
+async function getTaxRate(taxName = 'PPN'): Promise<{ rate: number; divisor: number }> {
+  // Return cached if still valid
+  if (!cachedTaxRates || Date.now() >= taxRateCacheExpiry) {
+    try {
+      const svc = getServiceSupabase();
+      const { data } = await svc
+        .from('tax_rates')
+        .select('name, rate, effective_from')
+        .order('effective_from', { ascending: false });
+      cachedTaxRates = (data || []) as TaxRateEntry[];
+      taxRateCacheExpiry = Date.now() + CACHE_TTL_MS;
+    } catch {
+      cachedTaxRates = [];
+      taxRateCacheExpiry = Date.now() + CACHE_TTL_MS;
+    }
+  }
+
+  // Find the most recent rate for the given tax name (already sorted desc by effective_from)
+  const entry = cachedTaxRates.find(r => r.name === taxName);
+  if (entry) {
+    const rate = Number(entry.rate);
+    return { rate, divisor: 1 + rate / 100 };
+  }
+  return { rate: DEFAULT_TAX_RATE, divisor: DEFAULT_TAX_DIVISOR };
+}
+
+// ── Brand detection from product name (dynamic from DB, cached) ──
+type BrandKeyword = { name: string; keywords: string[] };
+let cachedBrandKeywords: BrandKeyword[] | null = null;
+let brandCacheExpiry = 0;
+
+async function getBrandKeywords(): Promise<BrandKeyword[]> {
+  if (cachedBrandKeywords && Date.now() < brandCacheExpiry) {
+    return cachedBrandKeywords;
+  }
+  try {
+    const svc = getServiceSupabase();
+    const { data } = await svc
+      .from('brands')
+      .select('name, keywords')
+      .eq('is_active', true);
+    cachedBrandKeywords = (data || []).map((b: any) => ({
+      name: b.name,
+      keywords: b.keywords
+        ? b.keywords.split(',').map((k: string) => k.trim().toLowerCase()).filter(Boolean)
+        : [b.name.toLowerCase()],
+    }));
+    brandCacheExpiry = Date.now() + CACHE_TTL_MS;
+  } catch {
+    cachedBrandKeywords = [];
+    brandCacheExpiry = Date.now() + CACHE_TTL_MS;
+  }
+  return cachedBrandKeywords;
+}
+
+async function deriveBrandFromProduct(productName: string): Promise<string> {
   const n = (productName || '').toLowerCase();
-  if (n.includes('osgard')) return 'Osgard';
-  if (n.includes('purvu') || n.includes('secret')) return 'Purvu';
-  if (n.includes('pluve')) return 'Pluve';
-  if (n.includes('globite')) return 'Globite';
-  if (n.includes('drhyun') || n.includes('dr hyun')) return 'DrHyun';
-  if (n.includes('calmara')) return 'Calmara';
-  if (n.includes('almona')) return 'Almona';
-  if (n.includes('yuv')) return 'YUV';
-  if (n.includes('veminine')) return 'Veminine';
-  if (n.includes('orelif')) return 'Orelif';
-  if (n.includes('roove') || n.includes('shaker') || n.includes('jam tangan')) return 'Roove';
+  const brands = await getBrandKeywords();
+  for (const brand of brands) {
+    if (brand.keywords.some(kw => n.includes(kw))) {
+      return brand.name;
+    }
+  }
   return 'Other';
 }
 
@@ -215,41 +268,45 @@ function deriveSalesChannelFromWebhook(data: any): string {
 }
 
 // ── Build enriched order lines from webhook orderlines payload ──
-function buildEnrichedLines(orderId: string, dbOrderId: number, data: any): any[] {
+async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any): Promise<any[]> {
   if (!data.orderlines || !Array.isArray(data.orderlines) || data.orderlines.length === 0) {
     return [];
   }
 
   const salesChannel = deriveSalesChannelFromWebhook(data);
   const shippedTime = ts(data.shipped_time) || ts(data.completed_time) || null;
+  const tax = await getTaxRate('PPN');
 
-  return data.orderlines.map((line: any) => {
+  const lines: any[] = [];
+  for (const line of data.orderlines) {
     const qty = line.quantity || 1;
     const productPrice = num(line.product_price);
     const discount = num(line.discount);
     const cogs = num(line.cogs || line.variant_cogs);
+    const brand = await deriveBrandFromProduct(line.product_name || '');
 
-    return {
+    lines.push({
       order_id: dbOrderId,
       scalev_order_id: orderId,
       product_name: line.product_name || null,
-      product_type: deriveBrandFromProduct(line.product_name || ''),
+      product_type: brand,
       variant_name: line.variant_unique_id || null,
       quantity: qty,
       weight: line.weight || 0,
       // Financial fields: convert from per-unit incl. tax → before-tax line totals
-      product_price_bt: (productPrice * qty) / TAX_DIVISOR,
-      discount_bt: (discount * qty) / TAX_DIVISOR,
-      cogs_bt: (cogs * qty) / TAX_DIVISOR,
-      tax_rate: TAX_RATE,
+      product_price_bt: (productPrice * qty) / tax.divisor,
+      discount_bt: (discount * qty) / tax.divisor,
+      cogs_bt: (cogs * qty) / tax.divisor,
+      tax_rate: tax.rate,
       sales_channel: salesChannel,
       shipped_time: shippedTime,
       is_purchase_fb: data.is_purchase_fb === true || data.is_purchase_fb === 'true',
       is_purchase_tiktok: data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true',
       is_purchase_kwai: data.is_purchase_kwai === true || data.is_purchase_kwai === 'true',
       synced_at: new Date().toISOString(),
-    };
-  });
+    });
+  }
+  return lines;
 }
 
 // ── Handle order.created: insert new order into scalev_orders ──
@@ -333,7 +390,7 @@ async function handleOrderCreated(data: any, businessCode: string) {
 
   // Insert enriched order lines (with financial data) if present
   if (inserted) {
-    const lines = buildEnrichedLines(orderId, inserted.id, data);
+    const lines = await buildEnrichedLines(orderId, inserted.id, data);
     if (lines.length > 0) {
       const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
       if (lineErr) {
@@ -496,7 +553,7 @@ async function handleStatusChanged(data: any, businessCode: string) {
         if (emptyLines && emptyLines.length > 0 && orderData.raw_data?.orderlines) {
           // Delete old lines and re-insert enriched ones
           await svc.from('scalev_order_lines').delete().eq('scalev_order_id', orderId);
-          const enrichedLines = buildEnrichedLines(orderId, existing.id, {
+          const enrichedLines = await buildEnrichedLines(orderId, existing.id, {
             ...orderData.raw_data,
             external_id: orderData.external_id,
             store: { name: orderData.store_name },
@@ -620,7 +677,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
     // Delete old lines
     await svc.from('scalev_order_lines').delete().eq('scalev_order_id', orderId);
 
-    const lines = buildEnrichedLines(orderId, existing.id, data);
+    const lines = await buildEnrichedLines(orderId, existing.id, data);
     if (lines.length > 0) {
       const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
       if (lineErr) {

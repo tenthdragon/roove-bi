@@ -52,6 +52,13 @@ export default function AdminPage() {
   const [commMsg, setCommMsg] = useState(null);
   const [editingRate, setEditingRate] = useState(null); // { channel, rate, effective_from, isNew }
 
+  // Tax Rate states
+  const [taxRates, setTaxRates] = useState([]);
+  const [taxLoading, setTaxLoading] = useState(false);
+  const [taxSaving, setTaxSaving] = useState(false);
+  const [taxMsg, setTaxMsg] = useState(null);
+  const [editingTax, setEditingTax] = useState(null); // { name, rate, effective_from, isNew }
+
   // User management states
   const [users, setUsers] = useState([]);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -117,8 +124,29 @@ export default function AdminPage() {
     }
   }, [supabase]);
 
+  // Load tax rates
+  const loadTaxRates = useCallback(async () => {
+    setTaxLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('tax_rates')
+        .select('*')
+        .order('name')
+        .order('effective_from', { ascending: false });
+      if (error) throw error;
+      setTaxRates(data || []);
+    } catch (err) {
+      console.error('Failed to load tax rates:', err);
+    } finally {
+      setTaxLoading(false);
+    }
+  }, [supabase]);
+
   useEffect(() => {
-    if (activeTab === 'data_ref' && commRates.length === 0) loadCommRates();
+    if (activeTab === 'data_ref') {
+      if (commRates.length === 0) loadCommRates();
+      if (taxRates.length === 0) loadTaxRates();
+    }
   }, [activeTab]);
 
   const handleSaveRate = async (row) => {
@@ -162,6 +190,48 @@ export default function AdminPage() {
       await loadCommRates();
     } catch (err) {
       setCommMsg({ type: 'error', text: err.message || 'Gagal menghapus' });
+    }
+  };
+
+  const handleSaveTax = async (row) => {
+    if (!row.name || !row.rate || !row.effective_from) {
+      setTaxMsg({ type: 'error', text: 'Semua field harus diisi' });
+      return;
+    }
+    setTaxSaving(true);
+    setTaxMsg(null);
+    try {
+      const rateNum = parseFloat(row.rate);
+      if (isNaN(rateNum) || rateNum < 0 || rateNum > 100) {
+        throw new Error('Rate harus berupa angka persentase antara 0 dan 100 (contoh: 11 = 11%)');
+      }
+      const { error } = await supabase
+        .from('tax_rates')
+        .upsert({
+          name: row.name.trim(),
+          rate: rateNum,
+          effective_from: row.effective_from,
+        }, { onConflict: 'name,effective_from' });
+      if (error) throw error;
+      setTaxMsg({ type: 'success', text: `Tax rate ${row.name} berhasil disimpan` });
+      setEditingTax(null);
+      await loadTaxRates();
+    } catch (err) {
+      setTaxMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
+    } finally {
+      setTaxSaving(false);
+    }
+  };
+
+  const handleDeleteTax = async (id) => {
+    if (!confirm('Hapus tax rate ini?')) return;
+    try {
+      const { error } = await supabase.from('tax_rates').delete().eq('id', id);
+      if (error) throw error;
+      setTaxMsg({ type: 'success', text: 'Tax rate dihapus' });
+      await loadTaxRates();
+    } catch (err) {
+      setTaxMsg({ type: 'error', text: err.message || 'Gagal menghapus' });
     }
   };
 
@@ -497,6 +567,144 @@ export default function AdminPage() {
                             </button>
                             <button
                               onClick={() => handleDeleteRate(r.id)}
+                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #7f1d1d', cursor: 'pointer', background: 'transparent', color: '#ef4444', fontSize: 11, fontWeight: 500 }}
+                            >
+                              Hapus
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Tax Rates (PPN) */}
+          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Tax Rates</div>
+              <button
+                onClick={() => setEditingTax({ name: 'PPN', rate: '', effective_from: new Date().toISOString().slice(0, 10), isNew: true })}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#3b82f6', color: '#fff', fontSize: 12, fontWeight: 600 }}
+              >
+                + Tambah Rate
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+              Tax rate (PPN) yang digunakan untuk konversi harga inklusif pajak ke harga sebelum pajak (before tax).
+              Rate disimpan dalam persen (contoh: 11 = 11%). Perubahan rate berlaku sesuai tanggal efektif.
+            </div>
+
+            {taxMsg && (
+              <div style={{
+                marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
+                background: taxMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
+                color: taxMsg.type === 'success' ? '#10b981' : '#ef4444'
+              }}>
+                {taxMsg.type === 'success' ? '✅' : '❌'} {taxMsg.text}
+              </div>
+            )}
+
+            {/* Add/Edit Tax Form */}
+            {editingTax && (
+              <div style={{ background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: '#e2e8f0' }}>
+                  {editingTax.isNew ? 'Tambah Tax Rate Baru' : `Edit Tax Rate — ${editingTax.name}`}
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div style={{ flex: '1 1 140px' }}>
+                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Nama</label>
+                    <input
+                      type="text"
+                      value={editingTax.name}
+                      onChange={e => setEditingTax({ ...editingTax, name: e.target.value })}
+                      placeholder="PPN"
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                    />
+                  </div>
+                  <div style={{ flex: '0 0 120px' }}>
+                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Rate (%)</label>
+                    <input
+                      type="text"
+                      value={editingTax.rate}
+                      onChange={e => setEditingTax({ ...editingTax, rate: e.target.value })}
+                      placeholder="11"
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                    />
+                    {editingTax.rate && !isNaN(parseFloat(editingTax.rate)) && (
+                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>Divisor: {(1 + parseFloat(editingTax.rate) / 100).toFixed(4)}</div>
+                    )}
+                  </div>
+                  <div style={{ flex: '0 0 140px' }}>
+                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Berlaku Sejak</label>
+                    <input
+                      type="date"
+                      value={editingTax.effective_from}
+                      onChange={e => setEditingTax({ ...editingTax, effective_from: e.target.value })}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      onClick={() => handleSaveTax(editingTax)}
+                      disabled={taxSaving}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: taxSaving ? 'not-allowed' : 'pointer', background: '#10b981', color: '#fff', fontSize: 12, fontWeight: 600, opacity: taxSaving ? 0.6 : 1 }}
+                    >
+                      {taxSaving ? 'Saving...' : 'Simpan'}
+                    </button>
+                    <button
+                      onClick={() => { setEditingTax(null); setTaxMsg(null); }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#94a3b8', fontSize: 12, fontWeight: 600 }}
+                    >
+                      Batal
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tax Rates Table */}
+            {taxLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+              </div>
+            ) : taxRates.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>Belum ada data tax rate</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#0b1121' }}>
+                      {['Nama', 'Rate', 'Divisor', 'Berlaku Sejak', 'Aksi'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {taxRates.map((r) => (
+                      <tr key={r.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: '#e2e8f0' }}>{r.name}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span style={{ fontFamily: 'monospace', color: '#e2e8f0' }}>{Number(r.rate).toFixed(1)}%</span>
+                        </td>
+                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#94a3b8' }}>
+                          {(1 + Number(r.rate) / 100).toFixed(4)}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>
+                          {new Date(r.effective_from).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button
+                              onClick={() => setEditingTax({ name: r.name, rate: String(r.rate), effective_from: r.effective_from, isNew: false })}
+                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteTax(r.id)}
                               style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #7f1d1d', cursor: 'pointer', background: 'transparent', color: '#ef4444', fontSize: 11, fontWeight: 500 }}
                             >
                               Hapus

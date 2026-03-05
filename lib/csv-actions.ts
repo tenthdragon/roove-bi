@@ -1,39 +1,49 @@
-// lib/csv-actions.ts 
+// lib/csv-actions.ts
 'use server';
 import { createServiceSupabase } from '@/lib/supabase-server';
 
-// ── Brand detection from item_name or item_owner ──
-function deriveBrandFromItem(itemName: string, itemOwner: string): string {
+// ── Brand keyword type ──
+type BrandKeyword = { name: string; keywords: string[] };
+
+// ── Fetch brand keywords from DB (called once per upload) ──
+async function fetchBrandKeywords(): Promise<BrandKeyword[]> {
+  try {
+    const svc = createServiceSupabase();
+    const { data } = await svc
+      .from('brands')
+      .select('name, keywords')
+      .eq('is_active', true);
+    return (data || []).map((b: any) => ({
+      name: b.name,
+      keywords: b.keywords
+        ? b.keywords.split(',').map((k: string) => k.trim().toLowerCase()).filter(Boolean)
+        : [b.name.toLowerCase()],
+    }));
+  } catch {
+    return [];
+  }
+}
+
+// ── Brand detection from item_name or item_owner (dynamic) ──
+function deriveBrandFromItem(itemName: string, itemOwner: string, brands: BrandKeyword[]): string {
   const n = (itemName || '').toLowerCase();
   const o = (itemOwner || '').toLowerCase();
-  if (n.includes('osgard') || o.includes('osgard')) return 'Osgard';
-  if (n.includes('purvu') || n.includes('secret') || o.includes('purvu') || o.includes('secret')) return 'Purvu';
-  if (n.includes('pluve') || o.includes('pluve')) return 'Pluve';
-  if (n.includes('globite') || o.includes('globite')) return 'Globite';
-  if (n.includes('drhyun') || n.includes('dr hyun') || o.includes('drhyun') || o.includes('dr hyun')) return 'DrHyun';
-  if (n.includes('calmara') || o.includes('calmara')) return 'Calmara';
-  if (n.includes('almona') || o.includes('almona')) return 'Almona';
-  if (n.includes('yuv') || o.includes('yuv')) return 'YUV';
-  if (n.includes('veminine') || o.includes('veminine')) return 'Veminine';
-  if (n.includes('orelif') || o.includes('orelif')) return 'Orelif';
-  if (n.includes('roove') || n.includes('shaker') || n.includes('jam tangan') || o.includes('roove')) return 'Roove';
+  for (const brand of brands) {
+    if (brand.keywords.some(kw => n.includes(kw) || o.includes(kw))) {
+      return brand.name;
+    }
+  }
   return 'Other';
 }
 
-function deriveBrandFromStore(storeName: string): string {
+function deriveBrandFromStore(storeName: string, brands: BrandKeyword[]): string {
   const s = (storeName || '').toLowerCase();
-  if (s.includes('osgard')) return 'Osgard';
-  if (s.includes('purvu') || s.includes('secret')) return 'Purvu';
-  if (s.includes('pluve')) return 'Pluve';
-  if (s.includes('globite')) return 'Globite';
-  if (s.includes('drhyun') || s.includes('dr hyun')) return 'DrHyun';
-  if (s.includes('calmara')) return 'Calmara';
-  if (s.includes('almona')) return 'Almona';
-  if (s.includes('yuv')) return 'YUV';
-  if (s.includes('veminine')) return 'Veminine';
-  if (s.includes('orelif')) return 'Orelif';
   if (s.includes('free store')) return 'Other';
-  if (s.includes('roove')) return 'Roove';
+  for (const brand of brands) {
+    if (brand.keywords.some(kw => s.includes(kw))) {
+      return brand.name;
+    }
+  }
   return 'Unknown';
 }
 
@@ -76,6 +86,9 @@ export async function uploadCsvOrders(formData: FormData) {
 
   const isProductBased = headers.includes('item_name');
   const svc = createServiceSupabase();
+
+  // Fetch brand keywords from DB for dynamic detection
+  const brandKeywords = await fetchBrandKeywords();
 
   // ── Collect CSV order IDs ──
   const csvOrderIdSet = new Set<string>();
@@ -143,7 +156,7 @@ export async function uploadCsvOrders(formData: FormData) {
       for (const row of rows) {
         const itemName = row.item_name || '';
         if (!itemName) continue;
-        const brand = deriveBrandFromItem(itemName, row.item_owner || '');
+        const brand = deriveBrandFromItem(itemName, row.item_owner || '', brandKeywords);
         lineItems.push({
           order_id: orderId, product_name: itemName, product_type: brand,
           variant_sku: null, quantity: parseInt(row.item_quantity || '0') || 0,
@@ -159,7 +172,7 @@ export async function uploadCsvOrders(formData: FormData) {
         });
       }
     } else {
-      const brand = deriveBrandFromStore(firstRow.store || '');
+      const brand = deriveBrandFromStore(firstRow.store || '', brandKeywords);
       lineItems.push({
         order_id: orderId, product_name: brand, product_type: brand,
         variant_sku: null, quantity: parseInt(firstRow.quantity || '0') || 0,

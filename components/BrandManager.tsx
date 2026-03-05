@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { fetchAllBrands, addBrand, toggleBrand, deleteBrandPermanently } from '@/lib/brand-actions';
+import { fetchAllBrands, addBrand, toggleBrand, deleteBrandPermanently, updateBrandKeywords } from '@/lib/brand-actions';
 
 export default function BrandManager() {
   const [brands, setBrands] = useState([]);
@@ -13,6 +13,8 @@ export default function BrandManager() {
   const [msg, setMsg] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null); // brand id being confirmed
   const [deleteTyped, setDeleteTyped] = useState('');
+  const [editingKeywords, setEditingKeywords] = useState(null); // { id, keywords }
+  const [savingKeywords, setSavingKeywords] = useState(false);
 
   const C = { card: '#111a2e', bdr: '#1a2744', dim: '#64748b', txt: '#e2e8f0', bg: '#0b1121' };
 
@@ -70,6 +72,21 @@ export default function BrandManager() {
       await loadBrands();
     } catch (err) {
       alert('Error: ' + err.message);
+    }
+  };
+
+  const handleSaveKeywords = async () => {
+    if (!editingKeywords) return;
+    setSavingKeywords(true);
+    try {
+      await updateBrandKeywords(editingKeywords.id, editingKeywords.keywords);
+      setMsg({ type: 'success', text: 'Keywords berhasil disimpan' });
+      setEditingKeywords(null);
+      await loadBrands();
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message });
+    } finally {
+      setSavingKeywords(false);
     }
   };
 
@@ -134,19 +151,51 @@ export default function BrandManager() {
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {activeBrands.map(b => (
-            <div key={b.id} style={{ padding: '10px 14px', background: C.bg, borderRadius: 8, border: `1px solid ${C.bdr}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-              <div>
-                <span style={{ fontWeight: 600, fontSize: 13 }}>{b.name}</span>
-                {b.sheet_name !== b.name && (
-                  <span style={{ fontSize: 11, color: C.dim, marginLeft: 8 }}>sheet: {b.sheet_name}</span>
+            <div key={b.id} style={{ padding: '10px 14px', background: C.bg, borderRadius: 8, border: `1px solid ${C.bdr}`, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div>
+                  <span style={{ fontWeight: 600, fontSize: 13 }}>{b.name}</span>
+                  {b.sheet_name !== b.name && (
+                    <span style={{ fontSize: 11, color: C.dim, marginLeft: 8 }}>sheet: {b.sheet_name}</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => handleToggle(b)}
+                  style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${C.bdr}`, cursor: 'pointer', background: 'none', color: '#f59e0b', fontSize: 11, fontWeight: 600 }}
+                >
+                  Nonaktifkan
+                </button>
+              </div>
+              {/* Keywords row */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 10, color: C.dim, minWidth: 60 }}>Keywords:</span>
+                {editingKeywords?.id === b.id ? (
+                  <>
+                    <input
+                      value={editingKeywords.keywords}
+                      onChange={e => setEditingKeywords({ ...editingKeywords, keywords: e.target.value })}
+                      placeholder={b.name.toLowerCase()}
+                      style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: `1px solid ${C.bdr}`, background: C.card, color: C.txt, fontSize: 11, outline: 'none', minWidth: 150 }}
+                    />
+                    <button onClick={handleSaveKeywords} disabled={savingKeywords} style={{ padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', background: '#10b981', color: '#fff', fontSize: 10, fontWeight: 600 }}>
+                      {savingKeywords ? '...' : 'Simpan'}
+                    </button>
+                    <button onClick={() => setEditingKeywords(null)} style={{ padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer', background: 'none', color: C.dim, fontSize: 10 }}>Batal</button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>
+                      {b.keywords || b.name.toLowerCase()}
+                    </span>
+                    <button
+                      onClick={() => setEditingKeywords({ id: b.id, keywords: b.keywords || '' })}
+                      style={{ padding: '2px 8px', borderRadius: 4, border: `1px solid ${C.bdr}`, cursor: 'pointer', background: 'none', color: '#60a5fa', fontSize: 10, fontWeight: 500 }}
+                    >
+                      Edit
+                    </button>
+                  </>
                 )}
               </div>
-              <button
-                onClick={() => handleToggle(b)}
-                style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${C.bdr}`, cursor: 'pointer', background: 'none', color: '#f59e0b', fontSize: 11, fontWeight: 600 }}
-              >
-                Nonaktifkan
-              </button>
             </div>
           ))}
           {activeBrands.length === 0 && (

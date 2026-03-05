@@ -6,6 +6,7 @@ export interface Brand {
   id: number;
   name: string;
   sheet_name: string;
+  keywords: string | null;
   is_active: boolean;
   created_at: string;
 }
@@ -83,6 +84,24 @@ export async function addBrand(name: string, sheetName: string): Promise<{ succe
   }
 
   return { success: true };
+}
+
+// ── Update brand keywords ──
+export async function updateBrandKeywords(brandId: number, keywords: string): Promise<void> {
+  const supabase = createServerSupabase();
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error('Not authenticated');
+  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
+  if (profile?.role !== 'owner') throw new Error('Only owners can manage brands');
+
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('brands')
+    .update({ keywords: keywords.trim() || null })
+    .eq('id', brandId);
+
+  if (error) throw error;
 }
 
 // ── Toggle brand active/inactive ──
