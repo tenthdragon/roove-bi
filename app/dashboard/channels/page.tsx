@@ -2,7 +2,7 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
-import { fmtCompact, fmtRupiah } from '@/lib/utils';
+import { fmtCompact, fmtRupiah, shortDate, CHANNEL_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
 // PieChart removed – no longer used on this page
@@ -75,7 +75,7 @@ export default function ChannelsPage() {
     setLoading(true);
     Promise.all([
       supabase.from('daily_channel_data')
-        .select('product, channel, net_sales, gross_profit, mp_admin_cost')
+        .select('date, product, channel, net_sales, gross_profit, mp_admin_cost')
         .gte('date', from).lte('date', to),
       supabase.from('daily_ads_spend')
         .select('date, source, spent, store')
@@ -215,6 +215,45 @@ export default function ChannelsPage() {
         return b.revenue - a.revenue;
       });
   }, [channelData, selectedProduct, adsPerChannel]);
+
+  // ── Daily Sales pivot: date × channel → net_sales ──
+  const dailySales = useMemo(() => {
+    const byDate: Record<string, Record<string, number>> = {};
+    const channelSet = new Set<string>();
+
+    channelData.forEach(d => {
+      if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
+      if (!d.date) return;
+      const displayName = CHANNEL_DISPLAY_NAME[d.channel] || d.channel;
+      channelSet.add(displayName);
+      if (!byDate[d.date]) byDate[d.date] = {};
+      byDate[d.date][displayName] = (byDate[d.date][displayName] || 0) + (Number(d.net_sales) || 0);
+    });
+
+    // Sort channels: pin Organik, Scalev, Reseller first, rest by total revenue desc
+    const pinOrder = ['Organik', 'Scalev', 'Reseller'];
+    const chTotals: Record<string, number> = {};
+    Object.values(byDate).forEach(row => {
+      Object.entries(row).forEach(([ch, val]) => { chTotals[ch] = (chTotals[ch] || 0) + val; });
+    });
+    const sortedChannels = Array.from(channelSet).sort((a, b) => {
+      const aPin = pinOrder.indexOf(a);
+      const bPin = pinOrder.indexOf(b);
+      if (aPin !== -1 && bPin !== -1) return aPin - bPin;
+      if (aPin !== -1) return -1;
+      if (bPin !== -1) return 1;
+      return (chTotals[b] || 0) - (chTotals[a] || 0);
+    });
+
+    const rows = Object.entries(byDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, chMap]) => {
+        const total = Object.values(chMap).reduce((sum, v) => sum + v, 0);
+        return { date, channels: chMap, total };
+      });
+
+    return { rows, channelNames: sortedChannels };
+  }, [channelData, selectedProduct]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);
@@ -356,6 +395,52 @@ export default function ChannelsPage() {
           sub={`Margin: ${totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%`}
           color={totalProfitAfterAll >= 0 ? '#06b6d4' : '#ef4444'}
         />
+      </div>
+
+      {/* Daily Sales Table */}
+      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto', marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Sales</div>
+        {dailySales.rows.length > 0 ? (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + dailySales.channelNames.length * 130) }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid #1a2744' }}>
+                <th style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>Date</th>
+                {dailySales.channelNames.map(ch => (
+                  <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: CHANNEL_COLORS[ch] || '#64748b' }}>{ch}</th>
+                ))}
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: '#e2e8f0', fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dailySales.rows.map(row => (
+                <tr key={row.date} style={{ borderBottom: '1px solid #1a2744' }}>
+                  <td style={{ padding: '8px 10px', fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>{shortDate(row.date)}</td>
+                  {dailySales.channelNames.map(ch => (
+                    <td key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
+                      {row.channels[ch] ? fmtRupiah(row.channels[ch]) : <span style={{ color: '#334155' }}>—</span>}
+                    </td>
+                  ))}
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(row.total)}</td>
+                </tr>
+              ))}
+              {/* Grand Total row */}
+              <tr style={{ borderTop: '2px solid #1a2744', background: '#0b1121' }}>
+                <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11, position: 'sticky', left: 0, background: '#0b1121', zIndex: 1 }}>TOTAL</td>
+                {dailySales.channelNames.map(ch => {
+                  const chTotal = dailySales.rows.reduce((sum, r) => sum + (r.channels[ch] || 0), 0);
+                  return (
+                    <td key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: CHANNEL_COLORS[ch] || '#e2e8f0' }}>
+                      {chTotal > 0 ? fmtRupiah(chTotal) : <span style={{ color: '#334155' }}>—</span>}
+                    </td>
+                  );
+                })}
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(dailySales.rows.reduce((sum, r) => sum + r.total, 0))}</td>
+              </tr>
+            </tbody>
+          </table>
+        ) : (
+          <div style={{ textAlign: 'center', padding: 24, color: '#64748b', fontSize: 12 }}>Tidak ada data harian untuk periode ini.</div>
+        )}
       </div>
 
       {/* Channel Breakdown Table */}
