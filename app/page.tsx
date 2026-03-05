@@ -134,9 +134,16 @@ export default function LoginPage() {
           </a>
         </div>
 
-        <p style={{ marginTop: 12, fontSize: 12, color: '#64748b', textAlign: 'center' }}>
-          Hubungi admin untuk mendapatkan akses.
-        </p>
+        <div style={{ marginTop: 12, textAlign: 'center' }}>
+          <a
+            href="/register"
+            style={{ fontSize: 13, color: '#64748b', textDecoration: 'none' }}
+            onMouseEnter={e => (e.target as HTMLAnchorElement).style.color = '#94a3b8'}
+            onMouseLeave={e => (e.target as HTMLAnchorElement).style.color = '#64748b'}
+          >
+            Belum punya akun? Daftar
+          </a>
+        </div>
       </div>
     </div>
   );

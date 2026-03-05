@@ -71,6 +71,12 @@ export async function POST(req: NextRequest) {
       email,
       password: tempPassword,
       email_confirm: true, // auto-confirm since we're inviting
+      user_metadata: {
+        full_name: '',
+        email,
+        email_verified: true,
+        phone_verified: false,
+      },
     });
 
     if (createError) {
