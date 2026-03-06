@@ -53,6 +53,7 @@ export default function ChannelsPage() {
   const [channelData, setChannelData] = useState([]);
   const [adsData, setAdsData] = useState([]);
   const [brandMapping, setBrandMapping] = useState([]);
+  const [shipmentCounts, setShipmentCounts] = useState<{ date: string; product: string; channel: string; order_count: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState('all');
   const { isActiveBrand } = useActiveBrands();
@@ -64,11 +65,13 @@ export default function ChannelsPage() {
     const cachedCh = getCached('daily_channel_data_ch', from, to);
     const cachedAds = getCached('daily_ads_spend_ch', from, to);
     const cachedBm = getCached('ads_store_brand_mapping', from, to);
+    const cachedSc = getCached('daily_shipment_counts_ch', from, to);
 
-    if (cachedCh && cachedAds && cachedBm) {
+    if (cachedCh && cachedAds && cachedBm && cachedSc) {
       setChannelData(cachedCh.filter(row => isActiveBrand(row.product)));
       setAdsData(cachedAds);
       setBrandMapping(cachedBm);
+      setShipmentCounts(cachedSc.filter(row => isActiveBrand(row.product)));
       setLoading(false);
       return;
     }
@@ -83,21 +86,26 @@ export default function ChannelsPage() {
         .gte('date', from).lte('date', to),
       supabase.from('ads_store_brand_mapping')
         .select('store_pattern, brand'),
-    ]).then(([chRes, adsRes, bmRes]) => {
+      supabase.rpc('get_daily_shipment_counts', { p_from: from, p_to: to }),
+    ]).then(([chRes, adsRes, bmRes, scRes]) => {
       // Log errors so RLS / permission issues surface in console
       if (chRes.error) console.error('[Channels] daily_channel_data error:', chRes.error);
       if (adsRes.error) console.error('[Channels] daily_ads_spend error:', adsRes.error);
       if (bmRes.error) console.error('[Channels] ads_store_brand_mapping error:', bmRes.error);
+      if (scRes.error) console.error('[Channels] get_daily_shipment_counts error:', scRes.error);
 
       const chRows = chRes.data || [];
       const adsRows = adsRes.data || [];
       const bmRows = bmRes.data || [];
+      const scRows = scRes.data || [];
       setCache('daily_channel_data_ch', from, to, chRows);
       setCache('daily_ads_spend_ch', from, to, adsRows);
       setCache('ads_store_brand_mapping', from, to, bmRows);
+      setCache('daily_shipment_counts_ch', from, to, scRows);
       setChannelData(chRows.filter(row => isActiveBrand(row.product)));
       setAdsData(adsRows);
       setBrandMapping(bmRows);
+      setShipmentCounts(scRows.filter(row => isActiveBrand(row.product)));
       setLoading(false);
     });
   }, [dateRange, supabase]);
@@ -269,6 +277,45 @@ export default function ChannelsPage() {
     return { rows, channelNames: sortedChannels };
   }, [channelData, adsData, selectedProduct, storeBrandMap]);
 
+  // ── Daily Shipments pivot: date × channel → order_count ──
+  const dailyShipments = useMemo(() => {
+    const byDate: Record<string, { channels: Record<string, number> }> = {};
+    const channelSet = new Set<string>();
+
+    shipmentCounts.forEach(d => {
+      if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
+      if (!d.date) return;
+      const displayName = CHANNEL_DISPLAY_NAME[d.channel] || d.channel;
+      channelSet.add(displayName);
+      if (!byDate[d.date]) byDate[d.date] = { channels: {} };
+      byDate[d.date].channels[displayName] = (byDate[d.date].channels[displayName] || 0) + Number(d.order_count || 0);
+    });
+
+    // Sort channels: pin Organik, Scalev, Reseller first, rest by total count desc
+    const pinOrder = ['Organik', 'Scalev', 'Reseller'];
+    const chTotals: Record<string, number> = {};
+    Object.values(byDate).forEach(row => {
+      Object.entries(row.channels).forEach(([ch, val]) => { chTotals[ch] = (chTotals[ch] || 0) + val; });
+    });
+    const sortedChannels = Array.from(channelSet).sort((a, b) => {
+      const aPin = pinOrder.indexOf(a);
+      const bPin = pinOrder.indexOf(b);
+      if (aPin !== -1 && bPin !== -1) return aPin - bPin;
+      if (aPin !== -1) return -1;
+      if (bPin !== -1) return 1;
+      return (chTotals[b] || 0) - (chTotals[a] || 0);
+    });
+
+    const rows = Object.entries(byDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, data]) => {
+        const total = Object.values(data.channels).reduce((sum, v) => sum + v, 0);
+        return { date, channels: data.channels, total };
+      });
+
+    return { rows, channelNames: sortedChannels };
+  }, [shipmentCounts, selectedProduct]);
+
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);
   const totalMpAdmin = channels.reduce((a, c) => a + c.mpAdmin, 0);
@@ -409,6 +456,52 @@ export default function ChannelsPage() {
           sub={`Margin: ${totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%`}
           color={totalProfitAfterAll >= 0 ? '#06b6d4' : '#ef4444'}
         />
+      </div>
+
+      {/* Daily Shipments Table */}
+      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto', marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Shipments</div>
+        {dailyShipments.rows.length > 0 ? (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + dailyShipments.channelNames.length * 110) }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid #1a2744' }}>
+                <th style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>Date</th>
+                {dailyShipments.channelNames.map(ch => (
+                  <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: CHANNEL_COLORS[ch] || '#64748b' }}>{ch}</th>
+                ))}
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: '#e2e8f0', fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dailyShipments.rows.map(row => (
+                <tr key={row.date} style={{ borderBottom: '1px solid #1a2744' }}>
+                  <td style={{ padding: '8px 10px', fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>{shortDate(row.date)}</td>
+                  {dailyShipments.channelNames.map(ch => (
+                    <td key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
+                      {row.channels[ch] ? row.channels[ch].toLocaleString('id-ID') : <span style={{ color: '#334155' }}>—</span>}
+                    </td>
+                  ))}
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{row.total.toLocaleString('id-ID')}</td>
+                </tr>
+              ))}
+              {/* Grand Total row */}
+              <tr style={{ borderTop: '2px solid #1a2744', background: '#0b1121' }}>
+                <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11, position: 'sticky', left: 0, background: '#0b1121', zIndex: 1 }}>TOTAL</td>
+                {dailyShipments.channelNames.map(ch => {
+                  const chTotal = dailyShipments.rows.reduce((sum, r) => sum + (r.channels[ch] || 0), 0);
+                  return (
+                    <td key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: CHANNEL_COLORS[ch] || '#e2e8f0' }}>
+                      {chTotal > 0 ? chTotal.toLocaleString('id-ID') : <span style={{ color: '#334155' }}>—</span>}
+                    </td>
+                  );
+                })}
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{dailyShipments.rows.reduce((sum, r) => sum + r.total, 0).toLocaleString('id-ID')}</td>
+              </tr>
+            </tbody>
+          </table>
+        ) : (
+          <div style={{ textAlign: 'center', padding: 24, color: '#64748b', fontSize: 12 }}>Tidak ada data shipment untuk periode ini.</div>
+        )}
       </div>
 
       {/* Daily Sales Table */}
