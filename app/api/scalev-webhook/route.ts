@@ -254,10 +254,23 @@ function derivePlatformFromStore(storeName: string, externalId?: string, webhook
   if (s.includes('lazada')) return 'lazada';
   if (s.includes('blibli')) return 'blibli';
   if (s.includes('tokopedia')) return 'tokopedia';
-  // Generic marketplace — detect from external_id digit length, then courier fallback
+  // Generic marketplace — detect from financial_entity (most reliable), then external_id, then courier
   if (s.includes('marketplace') || s.includes('markerplace')) {
+    // 1. financial_entity from webhook raw_data — definitive source
+    const feCode = (
+      webhookData?.financial_entity?.code ||
+      webhookData?.raw_data?.financial_entity?.code ||
+      ''
+    ).toLowerCase();
+    if (feCode === 'shopee') return 'shopee';
+    if (feCode === 'tiktokshop') return 'tiktokshop';
+    if (feCode === 'lazada') return 'lazada';
+    if (feCode === 'blibli') return 'blibli';
+    if (feCode === 'tokopedia') return 'tokopedia';
+    // 2. external_id digit length
     const detected = deriveMarketplaceFromExternalId(externalId || '');
     if (detected) return detected;
+    // 3. courier code fallback
     const fromCourier = derivePlatformFromCourier(webhookData);
     if (fromCourier) return fromCourier;
     return 'marketplace';
