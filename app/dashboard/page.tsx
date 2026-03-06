@@ -96,16 +96,18 @@ export default function OverviewPage() {
   const productTable = useMemo(() => {
     const byP = {};
     dailyData.forEach(d => {
-      if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0, mp:0 };
+      if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0, mp:0, mc:0 };
       byP[d.product].s += Number(d.net_sales);
       byP[d.product].g += Number(d.gross_profit);
       byP[d.product].n += Number(d.net_after_mkt);
       byP[d.product].mp += Math.abs(Number(d.mp_admin_cost) || 0);
+      byP[d.product].mc += Math.abs(Number(d.mkt_cost) || 0);
     });
     return Object.entries(byP).filter(([,v]) => v.s > 0).sort((a,b) => b[1].s - a[1].s)
       .map(([p, v]) => {
-        const mkt = v.g - v.n;
-        return { sku: p, sales: v.s, gp: v.g, nam: v.n, mkt, mpFee: v.mp, gmpR: v.s>0?v.n/v.s*100:0, mktR: v.s>0?mkt/v.s*100:0, sp: kpi.ts>0?v.s/kpi.ts*100:0 };
+        const cogs = v.s - v.g;
+        const adsFee = v.mc - v.mp;
+        return { sku: p, sales: v.s, cogs, gp: v.g, adsFee, mpFee: v.mp, nam: v.n, gmpR: v.s>0?v.n/v.s*100:0, mktR: v.s>0?v.mc/v.s*100:0, sp: kpi.ts>0?v.s/kpi.ts*100:0 };
       });
   }, [dailyData, kpi.ts]);
 
@@ -232,21 +234,24 @@ export default function OverviewPage() {
 
       <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16, overflowX:'auto' }}>
         <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Ringkasan Per Produk</div>
-        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:700 }}>
+        <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:900 }}>
           <thead><tr style={{ borderBottom:'2px solid #1a2744' }}>
-            {['SKU','Net Sales',"%",'Gross Profit','GP After Mkt + Adm','Margin After Mkt','Mkt Ratio'].map(h => (
-              <th key={h} style={{ padding:'8px 10px', textAlign:h==='SKU'?'left':'right', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>{h}</th>
+            {['SKU','Net Sales','%','COGS','Mkt Fee','Admin Fee','GP After Mkt + Adm','Margin After Mkt','Mkt Ratio'].map(h => (
+              <th key={h} style={{ padding:'8px 10px', textAlign:h==='SKU'?'left':'right', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>
             ))}
           </tr></thead>
           <tbody>
             {productTable.map(p => (
               <tr key={p.sku} style={{ borderBottom:'1px solid #1a2744' }}>
-                <td style={{ padding:'8px 10px', fontWeight:600 }}>
+                <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap' }}>
                   <span style={{ display:'inline-block', width:8, height:8, borderRadius:2, background: getBrandColor(p.sku, activeBrands) || PRODUCT_COLORS[p.sku] || '#64748b', marginRight:8, verticalAlign:'middle' }} />{p.sku}
                 </td>
                 <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(p.sales)}</td>
                 <td style={{ padding:'8px 10px', textAlign:'right', color:'#64748b' }}>{p.sp.toFixed(1)}%</td>
-                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(p.gp)}</td>
+                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#64748b' }}>{fmtRupiah(p.cogs)}</td>
+                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(p.adsFee)}</td>
+                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#64748b' }}>{fmtRupiah(p.mpFee)}</td>
                 <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:p.nam>=0?'#10b981':'#ef4444' }}>{fmtRupiah(p.nam)}</td>
                 <td style={{ padding:'8px 10px', textAlign:'right' }}>
                   <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:p.gmpR>=30?'#064e3b':p.gmpR>=0?'#78350f':'#7f1d1d', color:p.gmpR>=30?'#10b981':p.gmpR>=0?'#f59e0b':'#ef4444' }}>{p.gmpR.toFixed(1)}%</span>
@@ -258,6 +263,7 @@ export default function OverviewPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
