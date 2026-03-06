@@ -286,8 +286,8 @@ async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any)
     const brand = await deriveBrandFromProduct(line.product_name || '');
 
     lines.push({
-      order_id: dbOrderId,
-      scalev_order_id: orderId,
+      scalev_order_id: dbOrderId,
+      order_id: orderId,
       product_name: line.product_name || null,
       product_type: brand,
       variant_name: line.variant_unique_id || null,
@@ -513,7 +513,7 @@ async function handleStatusChanged(data: any, businessCode: string) {
         const { data: genericLines } = await svc
           .from('scalev_order_lines')
           .select('id')
-          .eq('scalev_order_id', orderId)
+          .eq('scalev_order_id', existing.id)
           .eq('sales_channel', 'Marketplace');
 
         if (genericLines && genericLines.length > 0 && orderData.external_id) {
@@ -529,7 +529,7 @@ async function handleStatusChanged(data: any, businessCode: string) {
             await svc
               .from('scalev_order_lines')
               .update({ sales_channel: resolvedChannel })
-              .eq('scalev_order_id', orderId)
+              .eq('scalev_order_id', existing.id)
               .eq('sales_channel', 'Marketplace');
 
             // Also update the platform on the order itself
@@ -547,12 +547,12 @@ async function handleStatusChanged(data: any, businessCode: string) {
         const { data: emptyLines } = await svc
           .from('scalev_order_lines')
           .select('id')
-          .eq('scalev_order_id', orderId)
+          .eq('scalev_order_id', existing.id)
           .or('product_price_bt.is.null,product_price_bt.eq.0');
 
         if (emptyLines && emptyLines.length > 0 && orderData.raw_data?.orderlines) {
           // Delete old lines and re-insert enriched ones
-          await svc.from('scalev_order_lines').delete().eq('scalev_order_id', orderId);
+          await svc.from('scalev_order_lines').delete().eq('scalev_order_id', existing.id);
           const enrichedLines = await buildEnrichedLines(orderId, existing.id, {
             ...orderData.raw_data,
             external_id: orderData.external_id,
@@ -567,6 +567,31 @@ async function handleStatusChanged(data: any, businessCode: string) {
               console.warn(`[scalev-webhook][${businessCode}] status_changed: re-enrich lines error for ${orderId}:`, reInsertErr.message);
             } else {
               console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} re-enriched ${enrichedLines.length} lines with financial data`);
+            }
+          }
+        }
+
+        // Safety net: if NO lines exist at all but raw_data has orderlines, insert them
+        const { count: lineCount } = await svc
+          .from('scalev_order_lines')
+          .select('id', { count: 'exact', head: true })
+          .eq('scalev_order_id', existing.id);
+
+        if ((lineCount === 0 || lineCount === null) && orderData.raw_data?.orderlines?.length > 0) {
+          const newLines = await buildEnrichedLines(orderId, existing.id, {
+            ...orderData.raw_data,
+            external_id: orderData.external_id,
+            store: { name: orderData.store_name },
+            is_purchase_fb: orderData.is_purchase_fb,
+            is_purchase_tiktok: orderData.is_purchase_tiktok,
+            is_purchase_kwai: orderData.is_purchase_kwai,
+          });
+          if (newLines.length > 0) {
+            const { error: insertErr } = await svc.from('scalev_order_lines').insert(newLines);
+            if (insertErr) {
+              console.warn(`[scalev-webhook][${businessCode}] status_changed: insert missing lines error for ${orderId}:`, insertErr.message);
+            } else {
+              console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} inserted ${newLines.length} missing lines from raw_data`);
             }
           }
         }
@@ -675,7 +700,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
   // Replace order lines with enriched data (including financial fields)
   if (data.orderlines && Array.isArray(data.orderlines) && data.orderlines.length > 0) {
     // Delete old lines
-    await svc.from('scalev_order_lines').delete().eq('scalev_order_id', orderId);
+    await svc.from('scalev_order_lines').delete().eq('scalev_order_id', existing.id);
 
     const lines = await buildEnrichedLines(orderId, existing.id, data);
     if (lines.length > 0) {
