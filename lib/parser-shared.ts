@@ -85,10 +85,10 @@ export interface ParsedAd {
   date: string;
   ad_account: string;
   spent: number;
-  objective: string;
+  objective?: string;
   source: string;
   store: string;
-  advertiser: string;
+  advertiser?: string;
 }
 
 export interface ParsedMonthlySummary {

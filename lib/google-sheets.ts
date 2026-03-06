@@ -270,8 +270,9 @@ export async function parseGoogleSheet(
   }
 
   // ── Parse Ads sheet ──
+  // New format (5 cols): Date, Ad Account, Spent, Source, Store
   if (sheetNames.includes('Ads')) {
-    const rows = await fetchRange(spreadsheetId, 'Ads!B3:I2000');
+    const rows = await fetchRange(spreadsheetId, 'Ads!B3:F2000');
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       if (!row || !row[0]) continue;
@@ -282,12 +283,17 @@ export async function parseGoogleSheet(
         date: dateStr,
         ad_account: String(row[1] || ''),
         spent: toNum(row[2]),
-        objective: String(row[3] || ''),
-        source: String(row[4] || ''),
-        store: String(row[6] || ''),
-        advertiser: String(row[7] || ''),
+        source: String(row[3] || ''),
+        store: String(row[4] || ''),
       });
     }
+  }
+
+  // Fallback period detection from Ads data if brand sheets not available
+  if (periodMonth === 0 && ads.length > 0) {
+    const parts = ads[0].date.split('-');
+    periodYear = parseInt(parts[0]);
+    periodMonth = parseInt(parts[1]);
   }
 
   return {

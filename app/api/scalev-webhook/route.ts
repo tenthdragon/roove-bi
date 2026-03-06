@@ -229,7 +229,24 @@ function deriveMarketplaceFromExternalId(externalId: string): string | null {
   return null;
 }
 
-function derivePlatformFromStore(storeName: string, externalId?: string): string | null {
+function derivePlatformFromCourier(data?: any): string | null {
+  if (!data) return null;
+  // courier_service may be an object with nested courier info
+  const courierCode = (
+    data.courier_service?.courier?.code ||
+    data.courier_service?.courier?.name ||
+    data.courier ||
+    ''
+  ).toLowerCase();
+  if (courierCode.includes('shopee')) return 'shopee';
+  if (courierCode.includes('tiktok')) return 'tiktokshop';
+  if (courierCode.includes('lazada')) return 'lazada';
+  if (courierCode.includes('blibli')) return 'blibli';
+  if (courierCode.includes('tokopedia')) return 'tokopedia';
+  return null;
+}
+
+function derivePlatformFromStore(storeName: string, externalId?: string, webhookData?: any): string | null {
   const s = (storeName || '').toLowerCase();
   // Explicit marketplace name in store
   if (s.includes('shopee')) return 'shopee';
@@ -237,10 +254,13 @@ function derivePlatformFromStore(storeName: string, externalId?: string): string
   if (s.includes('lazada')) return 'lazada';
   if (s.includes('blibli')) return 'blibli';
   if (s.includes('tokopedia')) return 'tokopedia';
-  // Generic marketplace — detect from external_id digit length
+  // Generic marketplace — detect from external_id digit length, then courier fallback
   if (s.includes('marketplace') || s.includes('markerplace')) {
     const detected = deriveMarketplaceFromExternalId(externalId || '');
-    return detected || 'marketplace';
+    if (detected) return detected;
+    const fromCourier = derivePlatformFromCourier(webhookData);
+    if (fromCourier) return fromCourier;
+    return 'marketplace';
   }
   return 'scalev';
 }
@@ -248,7 +268,7 @@ function derivePlatformFromStore(storeName: string, externalId?: string): string
 // ── Sales channel derivation from webhook data (mirrors csv-actions.ts) ──
 function deriveSalesChannelFromWebhook(data: any): string {
   const storeName = (data.store?.name || '').toLowerCase();
-  const platform = derivePlatformFromStore(data.store?.name || '', data.external_id);
+  const platform = derivePlatformFromStore(data.store?.name || '', data.external_id, data);
   const resellerPrice = num(data.reseller_product_price);
 
   if (platform === 'shopee') return 'Shopee';
@@ -292,10 +312,10 @@ async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any)
       product_type: brand,
       variant_sku: line.variant_unique_id || null,
       quantity: qty,
-      // Financial fields: convert from per-unit incl. tax → before-tax line totals
-      product_price_bt: (productPrice * qty) / tax.divisor,
-      discount_bt: (discount * qty) / tax.divisor,
-      cogs_bt: (cogs * qty) / tax.divisor,
+      // Financial fields: all values from webhook are line totals incl. tax
+      product_price_bt: productPrice / tax.divisor,
+      discount_bt: discount / tax.divisor,
+      cogs_bt: cogs / tax.divisor,
       tax_rate: tax.rate,
       sales_channel: salesChannel,
       shipped_time: shippedTime,
@@ -335,7 +355,7 @@ async function handleOrderCreated(data: any, businessCode: string) {
   const financialEntity = data.financial_entity?.name || data.financial_entity?.code || null;
 
   // Build order row
-  const derivedPlatform = derivePlatformFromStore(storeName || '', data.external_id);
+  const derivedPlatform = derivePlatformFromStore(storeName || '', data.external_id, data);
   const orderRow: Record<string, any> = {
     scalev_id: null,
     order_id: orderId,
@@ -515,8 +535,8 @@ async function handleStatusChanged(data: any, businessCode: string) {
           .eq('scalev_order_id', existing.id)
           .eq('sales_channel', 'Marketplace');
 
-        if (genericLines && genericLines.length > 0 && orderData.external_id) {
-          const platform = derivePlatformFromStore(orderData.store_name || '', orderData.external_id);
+        if (genericLines && genericLines.length > 0) {
+          const platform = derivePlatformFromStore(orderData.store_name || '', orderData.external_id, orderData.raw_data);
           let resolvedChannel = 'Marketplace';
           if (platform === 'shopee') resolvedChannel = 'Shopee';
           else if (platform === 'tiktokshop') resolvedChannel = 'TikTok Shop';
@@ -661,7 +681,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
   if (data.total_quantity != null) updateData.total_quantity = data.total_quantity;
   if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
   // Derive platform from store name if not already set
-  if (storeName) updateData.platform = derivePlatformFromStore(storeName, data.external_id);
+  if (storeName) updateData.platform = derivePlatformFromStore(storeName, data.external_id, data);
   // Update purchase flags from webhook data
   if (data.is_purchase_fb != null) updateData.is_purchase_fb = data.is_purchase_fb === true || data.is_purchase_fb === 'true';
   if (data.is_purchase_tiktok != null) updateData.is_purchase_tiktok = data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true';
