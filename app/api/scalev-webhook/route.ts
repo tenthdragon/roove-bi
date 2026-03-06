@@ -290,9 +290,8 @@ async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any)
       order_id: orderId,
       product_name: line.product_name || null,
       product_type: brand,
-      variant_name: line.variant_unique_id || null,
+      variant_sku: line.variant_unique_id || null,
       quantity: qty,
-      weight: line.weight || 0,
       // Financial fields: convert from per-unit incl. tax → before-tax line totals
       product_price_bt: (productPrice * qty) / tax.divisor,
       discount_bt: (discount * qty) / tax.divisor,
