@@ -261,6 +261,33 @@ export default function OverviewPage() {
                 </td>
               </tr>
             ))}
+            {(() => {
+              const tSales = productTable.reduce((a, p) => a + p.sales, 0);
+              const tCogs = productTable.reduce((a, p) => a + p.cogs, 0);
+              const tAds = productTable.reduce((a, p) => a + p.adsFee, 0);
+              const tMp = productTable.reduce((a, p) => a + p.mpFee, 0);
+              const tNam = productTable.reduce((a, p) => a + p.nam, 0);
+              const tMc = tAds + tMp;
+              const marginR = tSales > 0 ? tNam / tSales * 100 : 0;
+              const mktR = tSales > 0 ? tMc / tSales * 100 : 0;
+              return (
+                <tr style={{ borderTop:'2px solid #1a2744' }}>
+                  <td style={{ padding:'8px 10px', fontWeight:700, fontSize:12 }}>TOTAL</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700 }}>{fmtRupiah(tSales)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', color:'#64748b', fontWeight:700 }}>100%</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'#64748b' }}>{fmtRupiah(tCogs)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'#f59e0b' }}>{fmtRupiah(tAds)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'#64748b' }}>{fmtRupiah(tMp)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:tNam>=0?'#10b981':'#ef4444' }}>{fmtRupiah(tNam)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right' }}>
+                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:marginR>=30?'#064e3b':marginR>=0?'#78350f':'#7f1d1d', color:marginR>=30?'#10b981':marginR>=0?'#f59e0b':'#ef4444' }}>{marginR.toFixed(1)}%</span>
+                  </td>
+                  <td style={{ padding:'8px 10px', textAlign:'right' }}>
+                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:mktR>40?'#7f1d1d':mktR>25?'#78350f':'#064e3b', color:mktR>40?'#ef4444':mktR>25?'#f59e0b':'#10b981' }}>{mktR.toFixed(1)}%</span>
+                  </td>
+                </tr>
+              );
+            })()}
           </tbody>
         </table>
         </div>
