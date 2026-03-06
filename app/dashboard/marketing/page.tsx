@@ -97,7 +97,7 @@ export default function MarketingPage() {
   const [productMappings, setProductMappings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [brandFilter, setBrandFilter] = useState('all');
-  const [showDailyDetail, setShowDailyDetail] = useState(false);
+
 
   // ── Fetch data (with cache) ──
   useEffect(() => {
@@ -229,39 +229,55 @@ const BRAND_COLORS = useMemo(() => {
   return buildBrandColorMap([...uniqueBrands, ...activeBrands]);
 }, [uniqueBrands, activeBrands]);
 
+
+
   // ══════════════════════════════════════════════════════════════════════
-  // DAILY DYNAMICS TABLE — Revenue, Ad Spend, Mkt Ratio, ROAS, Eff. ROAS
+  // DAILY AD SPEND BY TRAFFIC SOURCE — standalone table (like Daily Shipments)
   // ══════════════════════════════════════════════════════════════════════
-  const dailyDynamics = useMemo(() => {
-    const byDate: Record<string, { rev: number; spend: number }> = {};
+  const dailyTrafficSource = useMemo(() => {
+    const byDate: Record<string, Record<string, number>> = {};
+    const sources = new Set<string>();
+    const revenueByDate: Record<string, number> = {};
+
     prodData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
-      byDate[d.date].rev += Number(d.net_sales || 0);
+      revenueByDate[d.date] = (revenueByDate[d.date] || 0) + Number(d.net_sales || 0);
     });
+
     adsData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
-      byDate[d.date].spend += Math.abs(Number(d.spent || 0));
+      const platform = normPlatform(d.source);
+      sources.add(platform);
+      if (!byDate[d.date]) byDate[d.date] = {};
+      byDate[d.date][platform] = (byDate[d.date][platform] || 0) + Math.abs(Number(d.spent || 0));
     });
+
+    const sourceOrder = ['Meta Ads', 'Google Ads', 'Shopee Ads', 'TikTok Ads', 'SnackVideo Ads', 'Other'];
+    const sortedSources = sourceOrder.filter(s => sources.has(s));
+    sources.forEach(s => { if (!sortedSources.includes(s)) sortedSources.push(s); });
 
     const rows = Object.entries(byDate)
       .sort(([a], [b]) => a.localeCompare(b))
-      .filter(([, v]) => v.rev > 0 || v.spend > 0)
-      .map(([date, v]) => ({
-        date,
-        dateLabel: new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
-        rev: v.rev,
-        spend: v.spend,
-        ratio: v.rev > 0 ? (v.spend / v.rev) * 100 : 0,
-      }));
+      .map(([date, vals]) => {
+        const total = Object.values(vals).reduce((a, b) => a + b, 0);
+        const rev = revenueByDate[date] || 0;
+        const ratio = rev > 0 ? (total / rev) * 100 : 0;
+        return {
+          date,
+          dateLabel: `${new Date(date).getDate()}/${new Date(date).getMonth() + 1}`,
+          values: vals,
+          total,
+          rev,
+          ratio,
+        };
+      });
 
-    const count = rows.length || 1;
-    return {
-      rows,
-      avgRev: rows.reduce((s, r) => s + r.rev, 0) / count,
-      avgSpend: rows.reduce((s, r) => s + r.spend, 0) / count,
-      avgRatio: rows.reduce((s, r) => s + r.ratio, 0) / count,
-    };
-  }, [prodData, adsData]);
+    const totals: Record<string, number> = {};
+    sortedSources.forEach(s => { totals[s] = rows.reduce((sum, r) => sum + (r.values[s] || 0), 0); });
+    const grandTotal = rows.reduce((s, r) => s + r.total, 0);
+    const grandRev = rows.reduce((s, r) => s + r.rev, 0);
+    const grandRatio = grandRev > 0 ? (grandTotal / grandRev) * 100 : 0;
+
+    return { rows, sources: sortedSources, totals, grandTotal, grandRatio };
+  }, [adsData, prodData]);
 
   // ══════════════════════════════════════════════════════════════════════
   // PLATFORM BREAKDOWN — exclusive Channel ROAS + sub-source breakdown
@@ -446,85 +462,55 @@ const BRAND_COLORS = useMemo(() => {
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* ── Dinamika Harian Table (inside same card) ── */}
-          {dailyDynamics.rows.length > 0 && (
-            <div style={{ marginTop: 20, borderTop: `1px solid ${C.bdr}`, paddingTop: 16 }}>
-              <div
-                onClick={() => setShowDailyDetail(!showDailyDetail)}
-                style={{
-                  cursor: 'pointer', userSelect: 'none',
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  fontSize: 12, color: C.dim, padding: '4px 0',
-                }}
-              >
-                <span style={{
-                  display: 'inline-block', transition: 'transform 0.2s',
-                  transform: showDailyDetail ? 'rotate(90deg)' : 'rotate(0deg)',
-                  fontSize: 10,
-                }}>▶</span>
-                <span style={{ fontWeight: 600 }}>Rincian Harian</span>
-                <span style={{ fontSize: 10, color: `${C.dim}88` }}>({dailyDynamics.rows.length} hari)</span>
-              </div>
+        </div>
+      )}
 
-              {showDailyDetail && (
-                <div style={{ marginTop: 10, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                    <thead>
-                      <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                        {['Tanggal', 'Revenue', 'Ad Spend', 'Mkt Ratio'].map(h => (
-                          <th key={h} style={{
-                            padding: '8px 10px',
-                            textAlign: h === 'Tanggal' ? 'left' : 'right',
-                            color: C.dim, fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap',
-                            position: h === 'Tanggal' ? 'sticky' : undefined,
-                            left: h === 'Tanggal' ? 0 : undefined,
-                            background: h === 'Tanggal' ? C.card : undefined,
-                            zIndex: h === 'Tanggal' ? 1 : undefined,
-                          }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dailyDynamics.rows.map((r) => (
-                        <tr key={r.date} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
-                          <td style={{
-                            padding: '8px 10px', fontWeight: 500, whiteSpace: 'nowrap', fontSize: 11,
-                            position: 'sticky', left: 0, background: C.card, zIndex: 1,
-                          }}>{r.dateLabel}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>
-                            Rp {fmtCompact(r.rev)}
-                          </td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>
-                            Rp {fmtCompact(r.spend)}
-                          </td>
-                          <td style={{
-                            padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
-                            color: r.ratio > 40 ? '#ef4444' : r.ratio > 25 ? '#f59e0b' : '#10b981',
-                          }}>{r.ratio.toFixed(1)}%</td>
-                        </tr>
-                      ))}
-                      <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
-                        <td style={{
-                          padding: '8px 10px', fontWeight: 700, fontSize: 11,
-                          position: 'sticky', left: 0, background: C.card, zIndex: 1,
-                        }}>RATA-RATA</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
-                          Rp {fmtCompact(dailyDynamics.avgRev)}
-                        </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
-                          Rp {fmtCompact(dailyDynamics.avgSpend)}
-                        </td>
-                        <td style={{
-                          padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700,
-                          color: dailyDynamics.avgRatio > 40 ? '#ef4444' : dailyDynamics.avgRatio > 25 ? '#f59e0b' : '#10b981',
-                        }}>{dailyDynamics.avgRatio.toFixed(1)}%</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
+      {/* ── Daily Ad Spend by Traffic Source — Standalone Table ── */}
+      {dailyTrafficSource.rows.length > 0 && (
+        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Daily Ad Spend</div>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                  <th style={{ padding: '8px 10px', textAlign: 'left', color: C.dim, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', position: 'sticky', left: 0, background: C.card, zIndex: 1 }}>Date</th>
+                  {dailyTrafficSource.sources.map(s => (
+                    <th key={s} style={{ padding: '8px 8px', textAlign: 'right', color: PLATFORM_COLORS[s] || C.dim, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{s.replace(' Ads', '')}</th>
+                  ))}
+                  <th style={{ padding: '8px 10px', textAlign: 'right', color: C.dim, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right', color: C.dim, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Mkt Ratio</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dailyTrafficSource.rows.map((r) => (
+                  <tr key={r.date} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
+                    <td style={{ padding: '8px 10px', fontWeight: 500, whiteSpace: 'nowrap', fontSize: 12, position: 'sticky', left: 0, background: C.card, zIndex: 1 }}>{r.dateLabel}</td>
+                    {dailyTrafficSource.sources.map(s => (
+                      <td key={s} style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: (r.values[s] || 0) > 0 ? C.txt : `${C.dim}44` }}>
+                        {(r.values[s] || 0) > 0 ? fmtCompact(r.values[s]) : '—'}
+                      </td>
+                    ))}
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{fmtCompact(r.total)}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, fontSize: 12, color: r.ratio > 40 ? '#ef4444' : r.ratio > 25 ? '#f59e0b' : '#10b981' }}>
+                      {r.ratio > 0 ? `${r.ratio.toFixed(1)}%` : '—'}
+                    </td>
+                  </tr>
+                ))}
+                <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
+                  <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 12, position: 'sticky', left: 0, background: C.card, zIndex: 1 }}>TOTAL</td>
+                  {dailyTrafficSource.sources.map(s => (
+                    <td key={s} style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: PLATFORM_COLORS[s] || C.txt }}>
+                      {dailyTrafficSource.totals[s] > 0 ? fmtCompact(dailyTrafficSource.totals[s]) : '—'}
+                    </td>
+                  ))}
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{fmtCompact(dailyTrafficSource.grandTotal)}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: dailyTrafficSource.grandRatio > 40 ? '#ef4444' : dailyTrafficSource.grandRatio > 25 ? '#f59e0b' : '#10b981' }}>
+                    {dailyTrafficSource.grandRatio.toFixed(1)}%
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
