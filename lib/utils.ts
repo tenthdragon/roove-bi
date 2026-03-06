@@ -169,7 +169,7 @@ export interface TabDef {
 
 export const ALL_TABS: TabDef[] = [
   { id: 'overview',       label: 'Overview',           icon: 'LayoutDashboard' },
-  { id: 'products',       label: 'Products',           icon: 'Package' },
+  // { id: 'products',    label: 'Products',           icon: 'Package' },  // Hidden — merged into Overview
   { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone' },
   { id: 'channels',       label: 'Sales Channel',      icon: 'Share2' },
   { id: 'customers',      label: 'Customer Analysis',  icon: 'Users' },
