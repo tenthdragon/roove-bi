@@ -195,6 +195,13 @@ export async function uploadCsvOrders(formData: FormData) {
     const existing = existingMap.get(orderId);
     if (existing) {
       const d: any = {};
+      // Purchase flags & platform — CSV is source of truth, always update
+      d.is_purchase_fb = firstRow.is_purchase_fb === 'true';
+      d.is_purchase_tiktok = firstRow.is_purchase_tiktok === 'true';
+      d.is_purchase_kwai = firstRow.is_purchase_kwai === 'true';
+      if (firstRow.platform) d.platform = firstRow.platform;
+      if (firstRow.store) d.store_name = firstRow.store;
+      if (firstRow.utm_source) d.utm_source = firstRow.utm_source;
       if (firstRow.customer_type) d.customer_type = firstRow.customer_type;
       if (firstRow.province) d.province = firstRow.province;
       if (firstRow.city) d.city = firstRow.city;

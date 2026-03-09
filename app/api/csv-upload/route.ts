@@ -789,6 +789,11 @@ async function handleScalevUpload(
       if (firstRow.store) d.store_name = firstRow.store;
       if (firstRow.utm_source) d.utm_source = firstRow.utm_source;
 
+      // Purchase flags — CSV is source of truth, always update
+      d.is_purchase_fb = firstRow.is_purchase_fb === 'true';
+      d.is_purchase_tiktok = firstRow.is_purchase_tiktok === 'true';
+      d.is_purchase_kwai = firstRow.is_purchase_kwai === 'true';
+
       // Financial data: Scalev is source of truth, always update
       if (num(firstRow.gross_revenue) > 0) d.gross_revenue = num(firstRow.gross_revenue);
       if (num(firstRow.net_revenue) > 0) d.net_revenue = num(firstRow.net_revenue);
