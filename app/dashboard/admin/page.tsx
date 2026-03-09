@@ -13,11 +13,13 @@ import CsvOrderUploader from '@/components/CsvOrderUploader';
 import BrandManager from '@/components/BrandManager';
 import MetaManager from '@/components/MetaManager';
 import WebhookManager from '@/components/WebhookManager';
+import WarehouseSheetManager from '@/components/WarehouseSheetManager';
 
 const TABS = [
   { id: 'daily', label: 'Daily Data' },
   { id: 'meta', label: 'Meta Ads' },
   { id: 'financial', label: 'Financial' },
+  { id: 'warehouse', label: 'Warehouse' },
   { id: 'brands', label: 'Brands' },
   { id: 'scalev', label: 'Scalev API' },
   { id: 'data_ref', label: 'Data Reference' },
@@ -420,6 +422,11 @@ export default function AdminPage() {
       {/* ═══ TAB: FINANCIAL ═══ */}
       {activeTab === 'financial' && (
         <FinancialSheetManager />
+      )}
+
+      {/* ═══ TAB: WAREHOUSE ═══ */}
+      {activeTab === 'warehouse' && (
+        <WarehouseSheetManager />
       )}
 
       {/* ═══ TAB: BRANDS ═══ */}
