@@ -14,6 +14,7 @@ interface Props {
 export default function CashFlowSection({ netSales, periodStart }: Props) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!periodStart) return;
@@ -22,9 +23,16 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
 
   function loadCashFlow() {
     setLoading(true);
+    setError(null);
     fetchLiveCashFlow(periodStart)
-      .then(setData)
-      .catch(err => console.error('CashFlow error:', err))
+      .then(d => {
+        setData(d);
+        setError(null);
+      })
+      .catch(err => {
+        console.error('CashFlow error:', err);
+        setError(err?.message || String(err) || 'Gagal memuat data cash flow');
+      })
       .finally(() => setLoading(false));
   }
 
@@ -42,7 +50,27 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
     );
   }
 
-  if (!data) return null;
+  if (error || !data) {
+    return (
+      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, marginBottom: 20 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Cash Flow Status</div>
+        <div style={{ textAlign: 'center', padding: 20 }}>
+          <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 8 }}>
+            {error || 'Data tidak tersedia'}
+          </div>
+          <button
+            onClick={loadCashFlow}
+            style={{
+              background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
+              color: '#94a3b8', padding: '6px 16px', fontSize: 12, cursor: 'pointer',
+            }}
+          >
+            Coba Lagi
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const totalCashIn = data.cashReceived + data.spillOver;
   const pct = (v) => netSales > 0 ? (v / netSales * 100) : 0;
