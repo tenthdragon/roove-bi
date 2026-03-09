@@ -297,9 +297,13 @@ function deriveSalesChannelFromWebhook(data: any): string {
   if (data.is_purchase_fb === true || data.is_purchase_fb === 'true') return 'Facebook Ads';
   if (data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true') return 'TikTok Ads';
 
-  // Webhook doesn't send is_purchase_fb — use message_variables.advertiser instead
-  const advertiser = (data.message_variables?.advertiser || '').trim();
-  if (advertiser) return 'Facebook Ads';
+  // Webhook doesn't send is_purchase_fb — use message_variables.advertiser as fallback.
+  // BUT only if is_purchase_fb is not explicitly set (undefined/null).
+  // If CSV already set is_purchase_fb=false, respect that (CSV is source of truth).
+  if (data.is_purchase_fb == null) {
+    const advertiser = (data.message_variables?.advertiser || '').trim();
+    if (advertiser) return 'Facebook Ads';
+  }
 
   return 'Organik';
 }
@@ -732,12 +736,11 @@ async function handleOrderUpdated(data: any, businessCode: string) {
   if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
   // Derive platform from store name if not already set
   if (storeName) updateData.platform = derivePlatformFromStore(storeName, data.external_id, data);
-  // Update purchase flags from webhook data
+  // Update purchase flags from webhook data (only if explicitly sent).
+  // Don't use advertiser fallback here — CSV may have already set is_purchase_fb.
+  // Advertiser-based derivation only happens in handleOrderCreated (new orders).
   if (data.is_purchase_fb != null) {
     updateData.is_purchase_fb = data.is_purchase_fb === true || data.is_purchase_fb === 'true';
-  } else if ((data.message_variables?.advertiser || '').trim()) {
-    // Webhook doesn't send is_purchase_fb — derive from advertiser
-    updateData.is_purchase_fb = true;
   }
   if (data.is_purchase_tiktok != null) updateData.is_purchase_tiktok = data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true';
   if (data.is_purchase_kwai != null) updateData.is_purchase_kwai = data.is_purchase_kwai === true || data.is_purchase_kwai === 'true';
@@ -783,7 +786,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
         console.warn(`[scalev-webhook][${businessCode}] order.updated lines replace error for ${orderId}:`, lineErr.message);
       }
     }
-  } else if (data.is_purchase_fb != null || data.is_purchase_tiktok != null || (data.message_variables?.advertiser || '').trim()) {
+  } else if (data.is_purchase_fb != null || data.is_purchase_tiktok != null) {
     // Orderlines weren't replaced but purchase flags may have changed.
     // Re-derive sales_channel on existing lines to prevent misclassification
     // (e.g. is_purchase_fb changed from true→false but lines still say 'Facebook Ads').
