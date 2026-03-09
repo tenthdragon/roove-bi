@@ -144,7 +144,8 @@ export const CHANNEL_COLORS: Record<string, string> = {
   'TikTok Shop': '#00f2ea',
   'TikTok': '#ff0050',
   'Facebook Ads': '#1877f2',
-  'Scalev': '#1877f2',
+  'Scalev Ads': '#1877f2',
+  'Scalev RO': '#10b981',
   'Organik': '#10b981',
   'Reseller': '#f59e0b',
   'Lazada': '#0f1689',
@@ -153,7 +154,6 @@ export const CHANNEL_COLORS: Record<string, string> = {
   'BliBli': '#0066cc',
   'SnackVideo Ads': '#ff6600',
   'WhatsApp': '#25d366',
-  'Scalev': '#3b82f6',
 };
 
 // ============================================================

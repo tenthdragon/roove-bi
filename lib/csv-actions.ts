@@ -59,7 +59,8 @@ function deriveSalesChannel(row: Record<string, string>): string {
   if (platform === 'lazada' || storeName.includes('lazada')) return 'Lazada';
   if (platform === 'tokopedia' || storeName.includes('tokopedia')) return 'Tokopedia';
   if (platform === 'blibli' || storeName.includes('blibli')) return 'BliBli';
-  if (resellerPrice > 0 && storeName.includes('mitra')) return 'Reseller';
+  if (resellerPrice > 0 && storeName.includes('reseller')) return 'Reseller';
+  if (storeName.includes('reseller')) return 'Reseller';
 
   if (platform === 'scalev' || platform === '') {
     if (isPurchaseFb) return 'Facebook Ads';

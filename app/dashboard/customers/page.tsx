@@ -15,9 +15,9 @@ import {
 
 // ── Channel grouping ──
 const CHANNEL_GROUP_MAP = {
-  'Facebook Ads': 'Scalev',
-  'Organik': 'Scalev',
-  'Google Ads': 'Scalev',
+  'Facebook Ads': 'Scalev Ads',
+  'Organik': 'Scalev RO',
+  'Google Ads': 'Scalev Ads',
   'TikTok Ads': 'TikTok Shop',
   'TikTok Shop': 'TikTok Shop',
   'Reseller': 'Reseller',
@@ -32,11 +32,12 @@ function getChannelGroup(sc) {
   return CHANNEL_GROUP_MAP[sc] || 'Other Marketplaces';
 }
 
-const CHANNEL_ORDER = ['Global', 'Scalev', 'Reseller', 'TikTok Shop', 'Shopee', 'Other Marketplaces'];
+const CHANNEL_ORDER = ['Global', 'Scalev Ads', 'Scalev RO', 'Reseller', 'TikTok Shop', 'Shopee', 'Other Marketplaces'];
 
 const CHANNEL_TAB_COLORS = {
   'Global': '#3b82f6',
-  'Scalev': '#8b5cf6',
+  'Scalev Ads': '#1877f2',
+  'Scalev RO': '#10b981',
   'Reseller': '#f59e0b',
   'TikTok Shop': '#00f2ea',
   'Shopee': '#ee4d2d',

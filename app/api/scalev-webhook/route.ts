@@ -291,8 +291,8 @@ function deriveSalesChannelFromWebhook(data: any): string {
   if (platform === 'blibli') return 'BliBli';
   if (platform === 'marketplace') return 'Marketplace';
 
-  if (resellerPrice > 0 && (storeName.includes('mitra') || storeName.includes('reseller'))) return 'Reseller';
-  if (storeName.includes('mitra') || storeName.includes('reseller')) return 'Reseller';
+  if (resellerPrice > 0 && storeName.includes('reseller')) return 'Reseller';
+  if (storeName.includes('reseller')) return 'Reseller';
 
   if (data.is_purchase_fb === true || data.is_purchase_fb === 'true') return 'Facebook Ads';
   if (data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true') return 'TikTok Ads';
@@ -574,6 +574,38 @@ async function handleStatusChanged(data: any, businessCode: string) {
           }
         }
 
+        // Re-derive sales_channel for lines that don't match current purchase flags
+        // (handles misclassification from prior order.updated that changed flags without updating lines)
+        const correctChannel = deriveSalesChannelFromWebhook({
+          store: { name: orderData.store_name },
+          external_id: orderData.external_id,
+          is_purchase_fb: orderData.is_purchase_fb,
+          is_purchase_tiktok: orderData.is_purchase_tiktok,
+          is_purchase_kwai: orderData.is_purchase_kwai,
+          financial_entity: orderData.raw_data?.financial_entity,
+          reseller_product_price: orderData.raw_data?.reseller_product_price,
+        });
+
+        const { data: mismatchedLines } = await svc
+          .from('scalev_order_lines')
+          .select('id')
+          .eq('scalev_order_id', existing.id)
+          .neq('sales_channel', correctChannel);
+
+        if (mismatchedLines && mismatchedLines.length > 0) {
+          await svc
+            .from('scalev_order_lines')
+            .update({
+              sales_channel: correctChannel,
+              is_purchase_fb: orderData.is_purchase_fb,
+              is_purchase_tiktok: orderData.is_purchase_tiktok,
+              is_purchase_kwai: orderData.is_purchase_kwai,
+            })
+            .eq('scalev_order_id', existing.id);
+
+          console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} re-classified ${mismatchedLines.length} lines → ${correctChannel}`);
+        }
+
         // Also check if lines are missing financial data (product_price_bt = 0 or null)
         // and raw_data has orderlines — re-enrich them
         const { data: emptyLines } = await svc
@@ -739,6 +771,43 @@ async function handleOrderUpdated(data: any, businessCode: string) {
       const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
       if (lineErr) {
         console.warn(`[scalev-webhook][${businessCode}] order.updated lines replace error for ${orderId}:`, lineErr.message);
+      }
+    }
+  } else if (data.is_purchase_fb != null || data.is_purchase_tiktok != null) {
+    // Orderlines weren't replaced but purchase flags may have changed.
+    // Re-derive sales_channel on existing lines to prevent misclassification
+    // (e.g. is_purchase_fb changed from true→false but lines still say 'Facebook Ads').
+    const { data: updatedOrder } = await svc
+      .from('scalev_orders')
+      .select('id, store_name, external_id, is_purchase_fb, is_purchase_tiktok, is_purchase_kwai, raw_data')
+      .eq('id', existing.id)
+      .single();
+
+    if (updatedOrder) {
+      const correctChannel = deriveSalesChannelFromWebhook({
+        store: { name: updatedOrder.store_name },
+        external_id: updatedOrder.external_id,
+        is_purchase_fb: updatedOrder.is_purchase_fb,
+        is_purchase_tiktok: updatedOrder.is_purchase_tiktok,
+        is_purchase_kwai: updatedOrder.is_purchase_kwai,
+        financial_entity: updatedOrder.raw_data?.financial_entity,
+        reseller_product_price: updatedOrder.raw_data?.reseller_product_price,
+      });
+
+      const { error: channelErr } = await svc
+        .from('scalev_order_lines')
+        .update({
+          sales_channel: correctChannel,
+          is_purchase_fb: updatedOrder.is_purchase_fb,
+          is_purchase_tiktok: updatedOrder.is_purchase_tiktok,
+          is_purchase_kwai: updatedOrder.is_purchase_kwai,
+        })
+        .eq('scalev_order_id', existing.id);
+
+      if (channelErr) {
+        console.warn(`[scalev-webhook][${businessCode}] order.updated: channel re-derive failed for ${orderId}:`, channelErr.message);
+      } else {
+        console.log(`[scalev-webhook][${businessCode}] order.updated: ${orderId} lines sales_channel re-derived → ${correctChannel}`);
       }
     }
   }

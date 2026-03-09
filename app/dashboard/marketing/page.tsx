@@ -25,14 +25,14 @@ function normStore(s: string): string {
 //
 // Sales Channel (DB)  | Marketing Channels that serve it
 // ────────────────────|──────────────────────────────────
-// Scalev (="Facebook Ads" in DB) | Meta Ads (Non CPAS, WABA/CTWA), Google Ads
-// Organik             | WhatsApp BC / Marketing Message (future)
+// Scalev Ads (="Facebook Ads" in DB) | Meta Ads (Non CPAS, WABA/CTWA), Google Ads
+// Scalev RO (="Organik" in DB)      | WhatsApp BC / Marketing Message (future)
 // Shopee              | Shopee Ads, Meta Ads CPAS
 // TikTok Shop         | TikTok Ads, TikTokShop Ads
 // MP lain             | MP lain Ads (future)
 //
-// NOTE: On marketing page, Meta Ads also attributes to Organik (spillover effect).
-//       On channels/sales page, Organik has zero ads cost.
+// NOTE: On marketing page, Meta Ads also attributes to Scalev RO (spillover effect).
+//       On channels/sales page, Scalev RO has zero ads cost.
 function normPlatform(source: string): string {
   if (!source) return 'Other';
   const s = source.toLowerCase();
@@ -58,7 +58,7 @@ function getSubSource(source: string): string | null {
 }
 
 // ── Marketing Platform → Sales Channels served (marketing POV, includes organic spillover) ──
-// "Facebook Ads" below is the DB value for Scalev website orders (displayed as "Scalev")
+// "Facebook Ads" below is the DB value for Scalev Ads orders; "Organik" is the DB value for Scalev RO orders
 const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
   'Meta Ads':          ['Facebook Ads', 'Organik'],
   'Google Ads':        ['Facebook Ads', 'Organik'],
@@ -68,8 +68,8 @@ const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
 };
 
 const PLATFORM_CHANNEL_LABEL: Record<string, string> = {
-  'Meta Ads':          'Scalev',
-  'Google Ads':        'Scalev',
+  'Meta Ads':          'Scalev Ads',
+  'Google Ads':        'Scalev Ads',
   'Shopee Ads':        'Shopee',
   'TikTok Ads':        'TikTok',
   'Other Marketplace': 'Other MP',
@@ -84,8 +84,8 @@ const PLATFORM_COLORS: Record<string, string> = {
 
 // ── Channel colors ──
 const CHANNEL_COLORS: Record<string, string> = {
-  'Scalev': '#3b82f6', 'Shopee': '#ee4d2d', 'TikTok': '#ff0050',
-  'Tokopedia': '#10b981', 'BliBli': '#06b6d4', 'Lazada': '#1a237e', 'Reseller': '#f59e0b',
+  'Scalev Ads': '#1877f2', 'Scalev RO': '#10b981', 'Shopee': '#ee4d2d', 'TikTok': '#ff0050',
+  'Tokopedia': '#42b549', 'BliBli': '#06b6d4', 'Lazada': '#1a237e', 'Reseller': '#f59e0b',
 };
 
 export default function MarketingPage() {
@@ -643,7 +643,7 @@ const BRAND_COLORS = useMemo(() => {
                               </div>
                             )}
                             {p.platform === 'Meta Ads' && (
-                              <div style={{ fontSize: 10, color: C.dim, marginTop: 2 }}>Serve 2 sales channel: Scalev + Organik (spillover)</div>
+                              <div style={{ fontSize: 10, color: C.dim, marginTop: 2 }}>Serve 2 sales channel: Scalev Ads + Scalev RO (spillover)</div>
                             )}
                           </div>
                         </div>
