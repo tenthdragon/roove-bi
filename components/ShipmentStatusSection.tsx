@@ -9,7 +9,7 @@ import { fmtCompact, fmtRupiah, CHANNEL_COLORS } from '@/lib/utils';
 // ── Sales channel display names (same as channels page) ──
 const CHANNEL_DISPLAY_NAME: Record<string, string> = {
   'Facebook Ads': 'Scalev Ads',
-  'Organik': 'Scalev RO',
+  'Organik': 'CS Manual',
 };
 
 function displayName(ch: string) {

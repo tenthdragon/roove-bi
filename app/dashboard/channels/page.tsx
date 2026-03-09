@@ -25,7 +25,7 @@ function normPlatform(source: string): string {
   return source;
 }
 
-// ── Marketing Platform → Sales Channels served (sales POV, strict — no Scalev RO) ──
+// ── Marketing Platform → Sales Channels served (sales POV, strict — no CS Manual) ──
 // "Facebook Ads" is the DB value for Scalev Ads orders
 const PLATFORM_CHANNEL_MAP = {
   'Meta Ads':    ['Facebook Ads'],
@@ -37,13 +37,13 @@ const PLATFORM_CHANNEL_MAP = {
 // ── Sales channel display names (DB value → display label) ──
 const CHANNEL_DISPLAY_NAME: Record<string, string> = {
   'Facebook Ads': 'Scalev Ads',
-  'Organik': 'Scalev RO',
+  'Organik': 'CS Manual',
 };
 
 // ── Tooltips for sales channels ──
 const CHANNEL_TOOLTIP: Record<string, string> = {
   'Scalev Ads': 'Order yang masuk langsung ke Scalev dan melalui pengisian form oleh customer langsung',
-  'Scalev RO': 'Order yang masuk langsung ke Scalev dan dibuat manual oleh CS',
+  'CS Manual': 'Order yang masuk langsung ke Scalev dan dibuat manual oleh CS',
 };
 
 // ── Build reverse map: channel → platform ──
@@ -222,7 +222,7 @@ export default function ChannelsPage() {
       .filter(c => c.revenue > 0)
       .sort((a, b) => {
         // Pin Organik, Scalev, Reseller at top (in that order), rest sorted by revenue
-        const pinOrder = ['Scalev RO', 'Scalev Ads', 'Reseller'];
+        const pinOrder = ['CS Manual', 'Scalev Ads', 'Reseller'];
         const aPin = pinOrder.indexOf(a.name);
         const bPin = pinOrder.indexOf(b.name);
         if (aPin !== -1 && bPin !== -1) return aPin - bPin;
@@ -260,7 +260,7 @@ export default function ChannelsPage() {
     });
 
     // Sort channels: pin Organik, Scalev, Reseller first, rest by total revenue desc
-    const pinOrder = ['Scalev RO', 'Scalev Ads', 'Reseller'];
+    const pinOrder = ['CS Manual', 'Scalev Ads', 'Reseller'];
     const chTotals: Record<string, number> = {};
     Object.values(byDate).forEach(row => {
       Object.entries(row.channels).forEach(([ch, val]) => { chTotals[ch] = (chTotals[ch] || 0) + val; });
@@ -299,7 +299,7 @@ export default function ChannelsPage() {
     });
 
     // Sort channels: pin Organik, Scalev, Reseller first, rest by total count desc
-    const pinOrder = ['Scalev RO', 'Scalev Ads', 'Reseller'];
+    const pinOrder = ['CS Manual', 'Scalev Ads', 'Reseller'];
     const chTotals: Record<string, number> = {};
     Object.values(byDate).forEach(row => {
       Object.entries(row.channels).forEach(([ch, val]) => { chTotals[ch] = (chTotals[ch] || 0) + val; });

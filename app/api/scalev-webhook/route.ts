@@ -297,6 +297,10 @@ function deriveSalesChannelFromWebhook(data: any): string {
   if (data.is_purchase_fb === true || data.is_purchase_fb === 'true') return 'Facebook Ads';
   if (data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true') return 'TikTok Ads';
 
+  // Webhook doesn't send is_purchase_fb — use message_variables.advertiser instead
+  const advertiser = (data.message_variables?.advertiser || '').trim();
+  if (advertiser) return 'Facebook Ads';
+
   return 'Organik';
 }
 
@@ -332,7 +336,7 @@ async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any)
       tax_rate: tax.rate,
       sales_channel: salesChannel,
       shipped_time: shippedTime,
-      is_purchase_fb: data.is_purchase_fb === true || data.is_purchase_fb === 'true',
+      is_purchase_fb: data.is_purchase_fb === true || data.is_purchase_fb === 'true' || !!(data.message_variables?.advertiser || '').trim(),
       is_purchase_tiktok: data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true',
       is_purchase_kwai: data.is_purchase_kwai === true || data.is_purchase_kwai === 'true',
       synced_at: new Date().toISOString(),
@@ -381,7 +385,7 @@ async function handleOrderCreated(data: any, businessCode: string) {
     financial_entity: financialEntity,
     payment_method: data.payment_method || null,
     unique_code_discount: num(data.unique_code_discount),
-    is_purchase_fb: data.is_purchase_fb === true || data.is_purchase_fb === 'true',
+    is_purchase_fb: data.is_purchase_fb === true || data.is_purchase_fb === 'true' || !!(data.message_variables?.advertiser || '').trim(),
     is_purchase_tiktok: data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true',
     is_purchase_kwai: data.is_purchase_kwai === true || data.is_purchase_kwai === 'true',
     gross_revenue: num(data.gross_revenue),
@@ -584,6 +588,7 @@ async function handleStatusChanged(data: any, businessCode: string) {
           is_purchase_kwai: orderData.is_purchase_kwai,
           financial_entity: orderData.raw_data?.financial_entity,
           reseller_product_price: orderData.raw_data?.reseller_product_price,
+          message_variables: orderData.raw_data?.message_variables,
         });
 
         const { data: mismatchedLines } = await svc
@@ -728,7 +733,12 @@ async function handleOrderUpdated(data: any, businessCode: string) {
   // Derive platform from store name if not already set
   if (storeName) updateData.platform = derivePlatformFromStore(storeName, data.external_id, data);
   // Update purchase flags from webhook data
-  if (data.is_purchase_fb != null) updateData.is_purchase_fb = data.is_purchase_fb === true || data.is_purchase_fb === 'true';
+  if (data.is_purchase_fb != null) {
+    updateData.is_purchase_fb = data.is_purchase_fb === true || data.is_purchase_fb === 'true';
+  } else if ((data.message_variables?.advertiser || '').trim()) {
+    // Webhook doesn't send is_purchase_fb — derive from advertiser
+    updateData.is_purchase_fb = true;
+  }
   if (data.is_purchase_tiktok != null) updateData.is_purchase_tiktok = data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true';
   if (data.is_purchase_kwai != null) updateData.is_purchase_kwai = data.is_purchase_kwai === true || data.is_purchase_kwai === 'true';
 
@@ -773,7 +783,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
         console.warn(`[scalev-webhook][${businessCode}] order.updated lines replace error for ${orderId}:`, lineErr.message);
       }
     }
-  } else if (data.is_purchase_fb != null || data.is_purchase_tiktok != null) {
+  } else if (data.is_purchase_fb != null || data.is_purchase_tiktok != null || (data.message_variables?.advertiser || '').trim()) {
     // Orderlines weren't replaced but purchase flags may have changed.
     // Re-derive sales_channel on existing lines to prevent misclassification
     // (e.g. is_purchase_fb changed from true→false but lines still say 'Facebook Ads').
@@ -792,6 +802,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
         is_purchase_kwai: updatedOrder.is_purchase_kwai,
         financial_entity: updatedOrder.raw_data?.financial_entity,
         reseller_product_price: updatedOrder.raw_data?.reseller_product_price,
+        message_variables: updatedOrder.raw_data?.message_variables,
       });
 
       const { error: channelErr } = await svc
