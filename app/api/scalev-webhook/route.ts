@@ -582,7 +582,7 @@ async function handleStatusChanged(data: any, businessCode: string) {
           .eq('scalev_order_id', existing.id)
           .or('product_price_bt.is.null,product_price_bt.eq.0');
 
-        if (emptyLines && emptyLines.length > 0 && orderData.raw_data?.orderlines) {
+        if (emptyLines && emptyLines.length > 0 && orderData.raw_data?.orderlines?.length > 0) {
           // Delete old lines and re-insert enriched ones
           await svc.from('scalev_order_lines').delete().eq('scalev_order_id', existing.id);
           const enrichedLines = await buildEnrichedLines(orderId, existing.id, {

@@ -94,29 +94,23 @@ export default function MarketingPage() {
   const [prodData, setProdData] = useState<any[]>([]);
   const [adsData, setAdsData] = useState<any[]>([]);
   const [channelData, setChannelData] = useState<any[]>([]);
-  const [productMappings, setProductMappings] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [brandFilter, setBrandFilter] = useState('all');
-
 
   // ── Fetch data (with cache) ──
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     const { from, to } = dateRange;
 
-    // Check cache for all 4 tables
+    // Check cache for all 3 tables
     const cachedProd = getCached<any[]>('daily_product_summary_mkt', from, to);
     const cachedAds  = getCached<any[]>('daily_ads_spend', from, to);
     const cachedCh   = getCached<any[]>('daily_channel_data_mkt', from, to);
-    const cachedPm   = getCached<any[]>('product_mapping', from, to);
 
-    if (cachedProd && cachedAds && cachedCh && cachedPm) {
+    if (cachedProd && cachedAds && cachedCh) {
       setProdData(cachedProd.filter(d => isActiveBrand(d.product)));
       setAdsData(cachedAds);
       setChannelData(cachedCh);
-      const map: Record<string, string> = {};
-      cachedPm.forEach((r: any) => { map[r.product_name] = r.product_type; });
-      setProductMappings(map);
       setLoading(false);
       return;
     }
@@ -129,22 +123,16 @@ export default function MarketingPage() {
         .gte('date', from).lte('date', to),
       supabase.from('daily_channel_data').select('date, channel, product, net_sales, mp_admin_cost')
         .gte('date', from).lte('date', to),
-      supabase.from('product_mapping').select('product_name, product_type'),
-    ]).then(([{ data: prod }, { data: ads }, { data: ch }, { data: pm }]) => {
+    ]).then(([{ data: prod }, { data: ads }, { data: ch }]) => {
       const prodRows = prod || [];
       const adsRows = ads || [];
       const chRows = ch || [];
-      const pmRows = pm || [];
       setCache('daily_product_summary_mkt', from, to, prodRows);
       setCache('daily_ads_spend', from, to, adsRows);
       setCache('daily_channel_data_mkt', from, to, chRows);
-      setCache('product_mapping', from, to, pmRows);
       setProdData(prodRows.filter(d => isActiveBrand(d.product)));
       setAdsData(adsRows);
       setChannelData(chRows);
-      const map: Record<string, string> = {};
-      pmRows.forEach((r: any) => { map[r.product_name] = r.product_type; });
-      setProductMappings(map);
       setLoading(false);
     });
   }, [dateRange, supabase]);
@@ -297,20 +285,14 @@ const BRAND_COLORS = useMemo(() => {
 
     const channelRev: Record<string, number> = {};
     channelData.forEach(d => {
-      if (brandFilter !== 'all') {
-        const productBrand = productMappings[d.product] || '';
-        if (productBrand !== brandFilter) return;
-      }
+      if (brandFilter !== 'all' && d.product !== brandFilter) return;
       const ch = d.channel || 'Other';
       channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
     });
 
     const channelAdminFee: Record<string, number> = {};
     channelData.forEach(d => {
-      if (brandFilter !== 'all') {
-        const productBrand = productMappings[d.product] || '';
-        if (productBrand !== brandFilter) return;
-      }
+      if (brandFilter !== 'all' && d.product !== brandFilter) return;
       const ch = d.channel || 'Other';
       channelAdminFee[ch] = (channelAdminFee[ch] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
     });
@@ -369,7 +351,7 @@ const BRAND_COLORS = useMemo(() => {
     }
 
     return result;
-  }, [adsData, channelData, brandFilter, productMappings]);
+  }, [adsData, channelData, brandFilter]);
 
   // ── Per-brand matrix ──
   const brandPlatformMatrix = useMemo(() => {
@@ -389,6 +371,14 @@ const BRAND_COLORS = useMemo(() => {
       .sort((a, b) => b._total - a._total);
     return { rows, platforms };
   }, [adsData, brandFilter]);
+
+  // ── Filtered total revenue (respects brandFilter, no double counting) ──
+  const filteredTotalRevenue = useMemo(() => {
+    return channelData.reduce((sum, d) => {
+      if (brandFilter !== 'all' && d.product !== brandFilter) return sum;
+      return sum + Number(d.net_sales || 0);
+    }, 0);
+  }, [channelData, brandFilter]);
 
   // ── Styles ──
   const C = { bg: '#0a0f1a', card: '#111a2e', bdr: '#1a2744', dim: '#64748b', txt: '#e2e8f0' };
@@ -680,14 +670,16 @@ const BRAND_COLORS = useMemo(() => {
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>100%</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(platformBreakdown.reduce((s, p) => s + p.dailyAvg, 0))}</td>
                     <td style={{ padding: '8px 10px' }}></td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(totalRevenue)}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totalRoas >= 3 ? '#10b981' : totalRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{totalRoas.toFixed(1)}x</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>Rp {fmtCompact(filteredTotalRevenue)}</td>
                     {(() => {
+                      const filteredSpend = platformBreakdown.reduce((s, p) => s + p.spent, 0);
+                      const filteredRoas = filteredSpend > 0 ? filteredTotalRevenue / filteredSpend : 0;
                       const totalAdmin = platformBreakdown.reduce((s, p) => s + p.adminFee, 0);
-                      const totalAllCost = totalSpend + totalAdmin;
-                      const effRoas = totalAllCost > 0 ? totalRevenue / totalAllCost : 0;
+                      const totalAllCost = filteredSpend + totalAdmin;
+                      const effRoas = totalAllCost > 0 ? filteredTotalRevenue / totalAllCost : 0;
                       return (
                         <>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: filteredRoas >= 3 ? '#10b981' : filteredRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{filteredRoas.toFixed(1)}x</td>
                           <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f59e0b' }}>Rp {fmtCompact(totalAdmin)}</td>
                           <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: effRoas >= 3 ? '#10b981' : effRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{effRoas.toFixed(1)}x</td>
                         </>
