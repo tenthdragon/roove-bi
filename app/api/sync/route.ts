@@ -64,9 +64,8 @@ export async function POST(req: NextRequest) {
       try {
         console.log(`Syncing ads from spreadsheet: ${conn.spreadsheet_id} (${conn.label})`);
 
-        // Parse Google Sheet — only ads data is used now
-        // (brand tabs are still parsed for period detection, but dailyProduct/dailyChannel are ignored)
-        const parsed = await parseGoogleSheet(conn.spreadsheet_id, brandList);
+        // Parse Google Sheet — only ads data needed (brand/channel data comes from webhook)
+        const parsed = await parseGoogleSheet(conn.spreadsheet_id, brandList, { adsOnly: true });
 
         if (!parsed.period.month || !parsed.period.year) {
           results.push({

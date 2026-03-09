@@ -129,11 +129,13 @@ async function fetchRange(spreadsheetId: string, range: string): Promise<any[][]
 export async function parseGoogleSheet(
   spreadsheetId: string,
   brandList: Array<{ name: string; sheet_name: string }>,
+  options?: { adsOnly?: boolean },
 ): Promise<ParsedData> {
   // Defensive guard — prevents cryptic "e is not iterable" in production
   if (!brandList || !Array.isArray(brandList)) {
     throw new Error('brandList is required — pass the active brands array from the database');
   }
+  const adsOnly = options?.adsOnly === true;
   const sheetNames = await getSheetNames(spreadsheetId);
 
   let periodMonth = 0;
@@ -145,10 +147,10 @@ export async function parseGoogleSheet(
   const monthlySummary: ParsedData['monthlySummary'] = [];
 
   // ── Build brand sheets from registered brands ──
-  const brandSheets = buildBrandSheetMap(brandList, sheetNames);
+  const brandSheets = adsOnly ? {} : buildBrandSheetMap(brandList, sheetNames);
 
   // ── Parse General sheet (monthly summary) ──
-  if (sheetNames.includes('General')) {
+  if (!adsOnly && sheetNames.includes('General')) {
     const rows = await fetchRange(spreadsheetId, 'General!B2:K15');
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
@@ -168,7 +170,7 @@ export async function parseGoogleSheet(
     }
   }
 
-  // ── Parse brand sheets ──
+  // ── Parse brand sheets (skipped in adsOnly mode) ──
   for (const [sheetName, productName] of Object.entries(brandSheets)) {
     const rows = await fetchRange(spreadsheetId, `'${sheetName}'!A3:AI120`);
     if (!rows || rows.length === 0) continue;
