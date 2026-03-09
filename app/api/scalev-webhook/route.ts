@@ -275,6 +275,25 @@ function derivePlatformFromStore(storeName: string, externalId?: string, webhook
     if (fromCourier) return fromCourier;
     return 'marketplace';
   }
+  // Store name doesn't contain marketplace keyword — but could still be a
+  // marketplace order (e.g. "Osgard Oil Store", "Purvu The Secret Store").
+  // Check financial_entity, external_id, courier before defaulting to scalev.
+  if (webhookData) {
+    const feCode = (
+      webhookData?.financial_entity?.code ||
+      webhookData?.raw_data?.financial_entity?.code ||
+      ''
+    ).toLowerCase();
+    if (feCode === 'shopee') return 'shopee';
+    if (feCode === 'tiktokshop') return 'tiktokshop';
+    if (feCode === 'lazada') return 'lazada';
+    if (feCode === 'blibli') return 'blibli';
+    if (feCode === 'tokopedia') return 'tokopedia';
+    const detected = deriveMarketplaceFromExternalId(externalId || '');
+    if (detected) return detected;
+    const fromCourier = derivePlatformFromCourier(webhookData);
+    if (fromCourier) return fromCourier;
+  }
   return 'scalev';
 }
 
