@@ -66,6 +66,7 @@ export default function ChannelsPage() {
   const [shipmentCounts, setShipmentCounts] = useState<{ date: string; product: string; channel: string; order_count: number }[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState('all');
+  const [scalevExpanded, setScalevExpanded] = useState(false);
   const { isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
@@ -578,25 +579,27 @@ export default function ChannelsPage() {
             </tr>
           </thead>
           <tbody>
-            {/* ── Scalev Group (CS Manual + Scalev Ads) ── */}
+            {/* ── Scalev Group (collapsible) + Other Channels ── */}
             {(() => {
               const scalevGroup = channels.filter(c => SCALEV_CHANNELS.includes(c.name));
               const otherChannels = channels.filter(c => !SCALEV_CHANNELS.includes(c.name));
 
-              // Compute combined subtotal for scalev group
-              const combinedRevenue = scalevGroup.reduce((a, c) => a + c.revenue, 0);
-              const combinedGP = scalevGroup.reduce((a, c) => a + c.gp, 0);
-              const combinedMpAdmin = scalevGroup.reduce((a, c) => a + c.mpAdmin, 0);
-              const combinedAdsCost = scalevGroup.reduce((a, c) => a + c.adsCost, 0);
-              const combinedTotalCost = combinedMpAdmin + combinedAdsCost;
-              const combinedProfitAfterAll = combinedGP - combinedTotalCost;
-              const combinedPct = totalRevenue > 0 ? (combinedRevenue / totalRevenue) * 100 : 0;
-              const combinedCostRatio = combinedRevenue > 0 ? (combinedTotalCost / combinedRevenue) * 100 : 0;
-              const combinedMargin = combinedRevenue > 0 ? (combinedProfitAfterAll / combinedRevenue) * 100 : 0;
+              // Combined metrics for the Scalev row
+              const sv = {
+                revenue: scalevGroup.reduce((a, c) => a + c.revenue, 0),
+                gp: scalevGroup.reduce((a, c) => a + c.gp, 0),
+                mpAdmin: scalevGroup.reduce((a, c) => a + c.mpAdmin, 0),
+                adsCost: scalevGroup.reduce((a, c) => a + c.adsCost, 0),
+              };
+              const svTotalCost = sv.mpAdmin + sv.adsCost;
+              const svProfit = sv.gp - svTotalCost;
+              const svPct = totalRevenue > 0 ? (sv.revenue / totalRevenue) * 100 : 0;
+              const svCostRatio = sv.revenue > 0 ? (svTotalCost / sv.revenue) * 100 : 0;
+              const svMargin = sv.revenue > 0 ? (svProfit / sv.revenue) * 100 : 0;
 
-              const renderChannelRow = (c, indent = false, bg?: string) => (
-                <tr key={c.name} style={{ borderBottom: '1px solid #1a2744', background: bg || 'transparent', borderLeft: indent ? '3px solid #1877f2' : 'none' }}>
-                  <td style={{ padding: '8px 10px', paddingLeft: indent ? 24 : 10 }}>
+              const renderRow = (c) => (
+                <tr key={c.name} style={{ borderBottom: '1px solid #1a2744' }}>
+                  <td style={{ padding: '8px 10px' }}>
                     <div style={{ fontWeight: 600 }} title={CHANNEL_TOOLTIP[c.name] || ''}>{c.name}</div>
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(c.revenue)}</td>
@@ -631,58 +634,77 @@ export default function ChannelsPage() {
 
               return (
                 <>
-                  {/* Scalev group header */}
+                  {/* Scalev combined row (clickable to expand) */}
                   {scalevGroup.length > 0 && (
                     <>
-                      <tr style={{ background: '#0d1525', borderLeft: '3px solid #1877f2' }}>
-                        <td colSpan={8} style={{ padding: '6px 10px', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: '#1877f2' }}>
-                          Scalev
+                      <tr
+                        style={{ borderBottom: '1px solid #1a2744', cursor: 'pointer' }}
+                        onClick={() => setScalevExpanded(prev => !prev)}
+                        title="Klik untuk lihat breakdown CS Manual & Scalev Ads"
+                      >
+                        <td style={{ padding: '8px 10px' }}>
+                          <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <span style={{ fontSize: 9, color: '#64748b', transition: 'transform 0.15s', display: 'inline-block', transform: scalevExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                            Scalev
+                          </div>
                         </td>
-                      </tr>
-                      {scalevGroup.map(c => renderChannelRow(c, true, '#0d1525'))}
-                      {/* Combined subtotal row */}
-                      <tr style={{ borderTop: '1px dashed #1a2744', borderBottom: '1px solid #1a2744', background: '#0d1525', borderLeft: '3px solid #1877f2' }}>
-                        <td style={{ padding: '8px 10px', paddingLeft: 24 }}>
-                          <div style={{ fontWeight: 600, color: '#94a3b8' }}>Combined</div>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(sv.revenue)}</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>{svPct.toFixed(1)}%</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#8b5cf6' }}>
+                          {sv.mpAdmin > 0 ? fmtRupiah(sv.mpAdmin) : <span style={{ color: '#334155' }}>—</span>}
                         </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>{fmtRupiah(combinedRevenue)}</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: '#94a3b8' }}>{combinedPct.toFixed(1)}%</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600, color: '#8b5cf6' }}>
-                          {combinedMpAdmin > 0 ? fmtRupiah(combinedMpAdmin) : <span style={{ color: '#334155' }}>—</span>}
-                        </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600, color: '#f59e0b' }}>
-                          {combinedAdsCost > 0 ? fmtRupiah(combinedAdsCost) : <span style={{ color: '#334155' }}>—</span>}
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>
+                          {sv.adsCost > 0 ? fmtRupiah(sv.adsCost) : <span style={{ color: '#334155' }}>—</span>}
                         </td>
                         <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                          {combinedTotalCost > 0 ? (
+                          {svTotalCost > 0 ? (
                             <span style={{
                               padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                              background: combinedCostRatio > 40 ? '#7f1d1d' : combinedCostRatio > 25 ? '#78350f' : '#064e3b',
-                              color: combinedCostRatio > 40 ? '#ef4444' : combinedCostRatio > 25 ? '#f59e0b' : '#10b981',
-                            }}>{combinedCostRatio.toFixed(1)}%</span>
+                              background: svCostRatio > 40 ? '#7f1d1d' : svCostRatio > 25 ? '#78350f' : '#064e3b',
+                              color: svCostRatio > 40 ? '#ef4444' : svCostRatio > 25 ? '#f59e0b' : '#10b981',
+                            }}>{svCostRatio.toFixed(1)}%</span>
                           ) : <span style={{ color: '#334155' }}>—</span>}
                         </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600, color: combinedProfitAfterAll >= 0 ? '#10b981' : '#ef4444' }}>
-                          {fmtRupiah(combinedProfitAfterAll)}
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: svProfit >= 0 ? '#10b981' : '#ef4444' }}>
+                          {fmtRupiah(svProfit)}
                         </td>
                         <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                           <span style={{
                             padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                            background: combinedMargin >= 30 ? '#064e3b' : combinedMargin >= 10 ? '#78350f' : '#7f1d1d',
-                            color: combinedMargin >= 30 ? '#10b981' : combinedMargin >= 10 ? '#f59e0b' : '#ef4444',
-                          }}>{combinedMargin.toFixed(1)}%</span>
+                            background: svMargin >= 30 ? '#064e3b' : svMargin >= 10 ? '#78350f' : '#7f1d1d',
+                            color: svMargin >= 30 ? '#10b981' : svMargin >= 10 ? '#f59e0b' : '#ef4444',
+                          }}>{svMargin.toFixed(1)}%</span>
                         </td>
                       </tr>
-                      {/* Info note */}
-                      <tr style={{ background: '#0d1525', borderLeft: '3px solid #1877f2', borderBottom: '2px solid #1a2744' }}>
-                        <td colSpan={8} style={{ padding: '4px 10px 6px 24px', fontSize: 10, color: '#475569', fontStyle: 'italic' }}>
-                          Meta Ads cost dibebankan ke combined revenue kedua channel
-                        </td>
-                      </tr>
+                      {/* Nested breakdown (visible when expanded) */}
+                      {scalevExpanded && scalevGroup.map(c => (
+                        <tr key={c.name} style={{ borderBottom: '1px solid #1a2744', background: '#0b1121' }}>
+                          <td style={{ padding: '6px 10px', paddingLeft: 32 }}>
+                            <div style={{ fontWeight: 500, fontSize: 11, color: '#94a3b8' }} title={CHANNEL_TOOLTIP[c.name] || ''}>{c.name}</div>
+                          </td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: '#94a3b8' }}>{fmtRupiah(c.revenue)}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, color: '#475569' }}>{c.pct.toFixed(1)}%</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: '#7c3aed' }}>
+                            {c.mpAdmin > 0 ? fmtRupiah(c.mpAdmin) : <span style={{ color: '#334155' }}>—</span>}
+                          </td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: '#d97706' }}>
+                            {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: '#334155' }}>—</span>}
+                          </td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right' }}>
+                            {c.totalCost > 0 ? (
+                              <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, background: c.costRatio > 40 ? '#7f1d1d' : c.costRatio > 25 ? '#78350f' : '#064e3b', color: c.costRatio > 40 ? '#ef4444' : c.costRatio > 25 ? '#f59e0b' : '#10b981' }}>{c.costRatio.toFixed(1)}%</span>
+                            ) : <span style={{ color: '#334155' }}>—</span>}
+                          </td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: c.profitAfterAll >= 0 ? '#059669' : '#dc2626' }}>{fmtRupiah(c.profitAfterAll)}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right' }}>
+                            <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, background: c.marginAfterAll >= 30 ? '#064e3b' : c.marginAfterAll >= 10 ? '#78350f' : '#7f1d1d', color: c.marginAfterAll >= 30 ? '#10b981' : c.marginAfterAll >= 10 ? '#f59e0b' : '#ef4444' }}>{c.marginAfterAll.toFixed(1)}%</span>
+                          </td>
+                        </tr>
+                      ))}
                     </>
                   )}
                   {/* Other channels (flat) */}
-                  {otherChannels.map(c => renderChannelRow(c))}
+                  {otherChannels.map(c => renderRow(c))}
                 </>
               );
             })()}
