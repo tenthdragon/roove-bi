@@ -194,7 +194,6 @@ export default function OverviewPage() {
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#f59e0b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Mkt Fee</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#f59e0b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>MP Fee</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#06b6d4', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>GP After Mkt + Adm</th>
-                <th style={{ padding:'8px 10px', textAlign:'right', color:'#06b6d4', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Margin</th>
               </tr>
             </thead>
             <tbody>
@@ -206,21 +205,29 @@ export default function OverviewPage() {
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(row['Mkt Fee'])}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(row['MP Fee'])}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['GP After Mkt + Adm'] >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(row['GP After Mkt + Adm'])}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right' }}>
-                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background: marginBg(row.nM), color: marginColor(row.nM) }}>{row.nM.toFixed(1)}%</span>
-                  </td>
                 </tr>
               ))}
-              {/* TOTAL row */}
+              {/* TOTAL row with % of net sales */}
               <tr style={{ borderTop:'2px solid #1a2744', fontWeight:700 }}>
                 <td style={{ padding:'10px 10px', position:'sticky', left:0, background:'#111a2e', zIndex:1, textTransform:'uppercase', fontSize:11, letterSpacing:'0.05em' }}>Total</td>
-                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(kpi.ts)}</td>
-                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#ef4444' }}>{fmtRupiah(kpi.tCogs)}</td>
-                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tAds)}</td>
-                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tMp)}</td>
-                <td style={{ padding:'10px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: kpi.tn >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(kpi.tn)}</td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background: marginBg(kpi.nM), color: marginColor(kpi.nM) }}>{kpi.nM.toFixed(1)}%</span>
+                  <div style={{ fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(kpi.ts)}</div>
+                </td>
+                <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:'#ef4444' }}>{fmtRupiah(kpi.tCogs)}</div>
+                  <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : 0}%</div>
+                </td>
+                <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tAds)}</div>
+                  <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : 0}%</div>
+                </td>
+                <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tMp)}</div>
+                  <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : 0}%</div>
+                </td>
+                <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tn >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(kpi.tn)}</div>
+                  <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.nM), color: marginColor(kpi.nM) }}>{kpi.nM.toFixed(1)}%</span></div>
                 </td>
               </tr>
             </tbody>
