@@ -19,6 +19,30 @@ function getServiceSupabase() {
 
 export const maxDuration = 250;
 
+/**
+ * GET handler — called by Vercel Cron (`vercel.json`).
+ * Syncs last 3 days to self-heal any gaps from missed cron runs.
+ * The delete-before-insert pattern in POST ensures no duplicates.
+ */
+export async function GET(req: NextRequest) {
+  const now = new Date();
+  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
+  const end = new Date(wib);
+  end.setDate(end.getDate() - 1); // yesterday WIB
+  const start = new Date(wib);
+  start.setDate(start.getDate() - 3); // 3 days ago WIB
+
+  const url = new URL(req.url);
+  url.searchParams.set('date_start', start.toISOString().split('T')[0]);
+  url.searchParams.set('date_end', end.toISOString().split('T')[0]);
+
+  const proxyReq = new NextRequest(url, {
+    method: 'POST',
+    headers: req.headers,
+  });
+  return POST(proxyReq);
+}
+
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
