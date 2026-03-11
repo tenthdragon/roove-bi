@@ -61,6 +61,13 @@ export default function AdminPage() {
   const [taxMsg, setTaxMsg] = useState(null);
   const [editingTax, setEditingTax] = useState(null); // { name, rate, effective_from, isNew }
 
+  // Monthly Overhead states
+  const [overheadData, setOverheadData] = useState([]);
+  const [overheadLoading, setOverheadLoading] = useState(false);
+  const [overheadSaving, setOverheadSaving] = useState(false);
+  const [overheadMsg, setOverheadMsg] = useState(null);
+  const [editingOverhead, setEditingOverhead] = useState(null); // { year_month, amount, isNew }
+
   // User management states
   const [users, setUsers] = useState([]);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -144,10 +151,28 @@ export default function AdminPage() {
     }
   }, [supabase]);
 
+  // Load monthly overhead
+  const loadOverhead = useCallback(async () => {
+    setOverheadLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('monthly_overhead')
+        .select('*')
+        .order('year_month', { ascending: false });
+      if (error) throw error;
+      setOverheadData(data || []);
+    } catch (err) {
+      console.error('Failed to load overhead:', err);
+    } finally {
+      setOverheadLoading(false);
+    }
+  }, [supabase]);
+
   useEffect(() => {
     if (activeTab === 'data_ref') {
       if (commRates.length === 0) loadCommRates();
       if (taxRates.length === 0) loadTaxRates();
+      if (overheadData.length === 0) loadOverhead();
     }
   }, [activeTab]);
 
@@ -234,6 +259,48 @@ export default function AdminPage() {
       await loadTaxRates();
     } catch (err) {
       setTaxMsg({ type: 'error', text: err.message || 'Gagal menghapus' });
+    }
+  };
+
+  const handleSaveOverhead = async (row) => {
+    if (!row.year_month || !row.amount) {
+      setOverheadMsg({ type: 'error', text: 'Bulan dan nominal harus diisi' });
+      return;
+    }
+    setOverheadSaving(true);
+    setOverheadMsg(null);
+    try {
+      const amount = parseFloat(String(row.amount).replace(/[^0-9.-]/g, ''));
+      if (isNaN(amount) || amount < 0) {
+        throw new Error('Nominal harus berupa angka positif');
+      }
+      const { error } = await supabase
+        .from('monthly_overhead')
+        .upsert({
+          year_month: row.year_month,
+          amount,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'year_month' });
+      if (error) throw error;
+      setOverheadMsg({ type: 'success', text: `Overhead ${row.year_month} berhasil disimpan` });
+      setEditingOverhead(null);
+      await loadOverhead();
+    } catch (err) {
+      setOverheadMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
+    } finally {
+      setOverheadSaving(false);
+    }
+  };
+
+  const handleDeleteOverhead = async (id) => {
+    if (!confirm('Hapus overhead ini?')) return;
+    try {
+      const { error } = await supabase.from('monthly_overhead').delete().eq('id', id);
+      if (error) throw error;
+      setOverheadMsg({ type: 'success', text: 'Overhead dihapus' });
+      await loadOverhead();
+    } catch (err) {
+      setOverheadMsg({ type: 'error', text: err.message || 'Gagal menghapus' });
     }
   };
 
@@ -720,6 +787,143 @@ export default function AdminPage() {
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Monthly Overhead */}
+          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Monthly Overhead</div>
+              <button
+                onClick={() => {
+                  const now = new Date();
+                  const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+                  setEditingOverhead({ year_month: ym, amount: '', isNew: true });
+                }}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#3b82f6', color: '#fff', fontSize: 12, fontWeight: 600 }}
+              >
+                + Set Bulan
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+              Estimasi biaya overhead bulanan (gaji, sewa, operasional). Digunakan di Tren Harian untuk menghitung Est. Net Profit.
+            </div>
+
+            {overheadMsg && (
+              <div style={{
+                marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
+                background: overheadMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
+                color: overheadMsg.type === 'success' ? '#10b981' : '#ef4444'
+              }}>
+                {overheadMsg.type === 'success' ? '✅' : '❌'} {overheadMsg.text}
+              </div>
+            )}
+
+            {/* Add/Edit Overhead Form */}
+            {editingOverhead && (
+              <div style={{ background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: '#e2e8f0' }}>
+                  {editingOverhead.isNew ? 'Set Overhead Bulan Baru' : `Edit Overhead — ${editingOverhead.year_month}`}
+                </div>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                  <div style={{ flex: '0 0 150px' }}>
+                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Bulan</label>
+                    <input
+                      type="month"
+                      value={editingOverhead.year_month}
+                      onChange={e => setEditingOverhead({ ...editingOverhead, year_month: e.target.value })}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                    />
+                  </div>
+                  <div style={{ flex: '1 1 200px' }}>
+                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Overhead (Rp)</label>
+                    <input
+                      type="text"
+                      value={editingOverhead.amount}
+                      onChange={e => setEditingOverhead({ ...editingOverhead, amount: e.target.value })}
+                      placeholder="1000000000"
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none', fontFamily: 'monospace' }}
+                    />
+                    {editingOverhead.amount && !isNaN(parseFloat(String(editingOverhead.amount).replace(/[^0-9.-]/g, ''))) && (
+                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                        = Rp {parseFloat(String(editingOverhead.amount).replace(/[^0-9.-]/g, '')).toLocaleString('id-ID')}
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      onClick={() => handleSaveOverhead(editingOverhead)}
+                      disabled={overheadSaving}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: overheadSaving ? 'not-allowed' : 'pointer', background: '#10b981', color: '#fff', fontSize: 12, fontWeight: 600, opacity: overheadSaving ? 0.6 : 1 }}
+                    >
+                      {overheadSaving ? 'Saving...' : 'Simpan'}
+                    </button>
+                    <button
+                      onClick={() => { setEditingOverhead(null); setOverheadMsg(null); }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#94a3b8', fontSize: 12, fontWeight: 600 }}
+                    >
+                      Batal
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Overhead Table */}
+            {overheadLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+              </div>
+            ) : overheadData.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>Belum ada data overhead</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#0b1121' }}>
+                      {['Bulan', 'Overhead', 'Per Hari', 'Aksi'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Aksi' ? 'left' : h === 'Bulan' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overheadData.map((r) => {
+                      const [y, m] = r.year_month.split('-').map(Number);
+                      const daysInMonth = new Date(y, m, 0).getDate();
+                      const perDay = Number(r.amount) / daysInMonth;
+                      return (
+                        <tr key={r.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                          <td style={{ padding: '10px 12px', fontWeight: 600, color: '#e2e8f0' }}>
+                            {new Date(y, m - 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0' }}>
+                            Rp {Number(r.amount).toLocaleString('id-ID')}
+                          </td>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8', fontSize: 11 }}>
+                            Rp {Math.round(perDay).toLocaleString('id-ID')}/hari ({daysInMonth}d)
+                          </td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button
+                                onClick={() => setEditingOverhead({ year_month: r.year_month, amount: String(r.amount), isNew: false })}
+                                style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleDeleteOverhead(r.id)}
+                                style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #7f1d1d', cursor: 'pointer', background: 'transparent', color: '#ef4444', fontSize: 11, fontWeight: 500 }}
+                              >
+                                Hapus
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

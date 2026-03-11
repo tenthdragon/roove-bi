@@ -18,9 +18,12 @@ export default function OverviewPage() {
   const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [dailyData, setDailyData] = useState([]);
+  const [overheadData, setOverheadData] = useState([]);
+  const [shipmentData, setShipmentData] = useState([]);
   const [loading, setLoading] = useState(true);
   const { activeBrands, isActiveBrand } = useActiveBrands();
   const [userRole, setUserRole] = useState(null);
+  const [showDetail, setShowDetail] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -37,25 +40,62 @@ export default function OverviewPage() {
     if (cached) {
       setDailyData(cached.filter(row => isActiveBrand(row.product)));
       setLoading(false);
-      return;
+    } else {
+      setLoading(true);
+      supabase.from('daily_product_summary')
+        .select('*')
+        .gte('date', dateRange.from)
+        .lte('date', dateRange.to)
+        .order('date')
+        .then(({ data: d }) => {
+          const rows = d || [];
+          setCache('daily_product_summary', dateRange.from, dateRange.to, rows);
+          setDailyData(rows.filter(row => isActiveBrand(row.product)));
+          setLoading(false);
+        });
     }
-    setLoading(true);
-    supabase.from('daily_product_summary')
-      .select('*')
-      .gte('date', dateRange.from)
-      .lte('date', dateRange.to)
-      .order('date')
-      .then(({ data: d }) => {
-        const rows = d || [];
-        setCache('daily_product_summary', dateRange.from, dateRange.to, rows);
-        setDailyData(rows.filter(row => isActiveBrand(row.product)));
-        setLoading(false);
-      });
+    // Fetch shipment counts
+    supabase.rpc('get_daily_shipment_counts', { p_from: dateRange.from, p_to: dateRange.to })
+      .then(({ data }) => setShipmentData(data || []));
+    // Fetch overhead for months in range
+    const fromYM = dateRange.from.slice(0, 7);
+    const toYM = dateRange.to.slice(0, 7);
+    supabase.from('monthly_overhead')
+      .select('year_month, amount')
+      .gte('year_month', fromYM)
+      .lte('year_month', toYM)
+      .then(({ data }) => setOverheadData(data || []));
   }, [dateRange, supabase]);
 
   const totalMpFee = useMemo(() => {
     return dailyData.reduce((a, d) => a + Math.abs(Number(d.mp_admin_cost) || 0), 0);
   }, [dailyData]);
+
+  // Build overhead per-day lookup: date (YYYY-MM-DD) → daily overhead amount
+  const overheadPerDay = useMemo(() => {
+    const map = {};
+    overheadData.forEach(o => {
+      const [y, m] = o.year_month.split('-').map(Number);
+      const days = new Date(y, m, 0).getDate();
+      const daily = Number(o.amount) / days;
+      // Pre-compute for each day in the month
+      for (let d = 1; d <= days; d++) {
+        const key = `${o.year_month}-${String(d).padStart(2, '0')}`;
+        map[key] = daily;
+      }
+    });
+    return map;
+  }, [overheadData]);
+
+  // Build shipment-per-day lookup
+  const shipPerDay = useMemo(() => {
+    const map: Record<string, number> = {};
+    shipmentData.forEach((r: any) => {
+      if (!isActiveBrand(r.product)) return;
+      map[r.date] = (map[r.date] || 0) + Number(r.order_count);
+    });
+    return map;
+  }, [shipmentData, activeBrands]);
 
   const kpi = useMemo(() => {
     const byDate = {};
@@ -72,29 +112,41 @@ export default function OverviewPage() {
     const tn = dates.reduce((a,d) => a + byDate[d].n, 0);
     const tm = tg - tn;
     const ad = dates.filter(d => byDate[d].s > 0).length;
+    const hasOverhead = overheadData.length > 0;
     const chart = dates.map(d => {
       const totalMkt = byDate[d].g - byDate[d].n;
       const mpFee = byDate[d].mp;
       const adsFee = totalMkt - mpFee;
       const cogs = byDate[d].s - byDate[d].g;
+      const overhead = overheadPerDay[d] || 0;
+      const estNetProfit = byDate[d].n - overhead;
       const gpM = byDate[d].s > 0 ? byDate[d].g / byDate[d].s * 100 : 0;
       const nM = byDate[d].s > 0 ? byDate[d].n / byDate[d].s * 100 : 0;
+      const npM = byDate[d].s > 0 ? estNetProfit / byDate[d].s * 100 : 0;
       return {
         date: shortDate(d),
+        rawDate: d,
+        shipment: shipPerDay[d] || 0,
         'Net Sales': byDate[d].s,
         'Gross Profit': byDate[d].g,
         'COGS': cogs,
         'GP After Mkt + Adm': byDate[d].n,
         'Mkt Fee': adsFee,
         'MP Fee': mpFee,
-        gpM, nM,
+        'Overhead': overhead,
+        'Est. Net Profit': estNetProfit,
+        gpM, nM, npM,
       };
     });
+    const tShipment = chart.reduce((a,r) => a + r.shipment, 0);
     const tMp = dates.reduce((a,d) => a + byDate[d].mp, 0);
     const tAds = tm - tMp;
     const tCogs = ts - tg;
-    return { ts, tg, tn, tm, tMp, tAds, tCogs, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
-  }, [dailyData]);
+    const tOverhead = chart.reduce((a,r) => a + r['Overhead'], 0);
+    const tNetProfit = tn - tOverhead;
+    const npM = ts > 0 ? tNetProfit / ts * 100 : 0;
+    return { ts, tg, tn, tm, tMp, tAds, tCogs, tOverhead, tNetProfit, tShipment, npM, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
+  }, [dailyData, overheadPerDay, overheadData, shipPerDay]);
 
   const productTable = useMemo(() => {
     const byP = {};
@@ -184,39 +236,57 @@ export default function OverviewPage() {
 
       {kpi.chart.length > 0 && (
         <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16, marginBottom:20, overflowX:'auto' }}>
-          <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Tren Harian</div>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:820 }}>
+          <div style={{ fontSize:15, fontWeight:700, marginBottom:12, display:'flex', alignItems:'center', gap:10 }}>
+            Tren Harian
+            <button onClick={() => setShowDetail(v => !v)} style={{ background:'none', border:'1px solid #1a2744', borderRadius:6, padding:'2px 8px', cursor:'pointer', fontSize:10, color: showDetail ? '#a78bfa' : '#64748b', display:'flex', alignItems:'center', gap:4 }}>
+              <span style={{ transition:'transform 0.2s', display:'inline-block', transform: showDetail ? 'rotate(90deg)' : 'rotate(0deg)', fontSize:8 }}>&#9654;</span>
+              Detail
+            </button>
+          </div>
+          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? (kpi.hasOverhead ? 1100 : 920) : 820 }}>
             <thead>
               <tr style={{ borderBottom:'2px solid #1a2744' }}>
                 <th style={{ padding:'8px 10px', textAlign:'left', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'#111a2e', zIndex:1 }}>Tanggal</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Shipment</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#3b82f6', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Net Sales</th>
-                <th style={{ padding:'8px 10px', textAlign:'right', color:'#ef4444', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>COGS</th>
+                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'#ef4444', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>COGS</th>}
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#f59e0b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Mkt Fee</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#f59e0b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>MP Fee</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#06b6d4', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>GP After Mkt + Adm</th>
+                {kpi.hasOverhead && showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'#a78bfa', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Overhead</th>}
+                {kpi.hasOverhead && <th style={{ padding:'8px 10px', textAlign:'right', color:'#10b981', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Est. Net Profit</th>}
               </tr>
             </thead>
             <tbody>
               {kpi.chart.map((row, i) => (
                 <tr key={i} style={{ borderBottom:'1px solid #0f172a' }}>
                   <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap', position:'sticky', left:0, background:'#111a2e', zIndex:1 }}>{row.date}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#94a3b8' }}>{row.shipment > 0 ? row.shipment.toLocaleString('id-ID') : '—'}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(row['Net Sales'])}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#ef4444' }}>{fmtRupiah(row['COGS'])}</td>
+                  {showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#ef4444' }}>{fmtRupiah(row['COGS'])}</td>}
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(row['Mkt Fee'])}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(row['MP Fee'])}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['GP After Mkt + Adm'] >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(row['GP After Mkt + Adm'])}</td>
+                  {kpi.hasOverhead && showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#a78bfa' }}>{fmtRupiah(row['Overhead'])}</td>}
+                  {kpi.hasOverhead && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['Est. Net Profit'] >= 0 ? '#10b981' : '#ef4444' }}>{fmtRupiah(row['Est. Net Profit'])}</td>}
                 </tr>
               ))}
               {/* TOTAL row with % of net sales */}
               <tr style={{ borderTop:'2px solid #1a2744', fontWeight:700 }}>
                 <td style={{ padding:'10px 10px', position:'sticky', left:0, background:'#111a2e', zIndex:1, textTransform:'uppercase', fontSize:11, letterSpacing:'0.05em' }}>Total</td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(kpi.ts)}</div>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:'#94a3b8' }}>{kpi.tShipment.toLocaleString('id-ID')}</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'#ef4444' }}>{fmtRupiah(kpi.tCogs)}</div>
-                  <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : 0}%</div>
+                  <div style={{ fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(kpi.ts)}</div>
+                  <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>100%</div>
                 </td>
+                {showDetail && (
+                  <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                    <div style={{ fontFamily:'monospace', fontSize:11, color:'#ef4444' }}>{fmtRupiah(kpi.tCogs)}</div>
+                    <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : 0}%</div>
+                  </td>
+                )}
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
                   <div style={{ fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tAds)}</div>
                   <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : 0}%</div>
@@ -227,8 +297,20 @@ export default function OverviewPage() {
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
                   <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tn >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(kpi.tn)}</div>
-                  <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.nM), color: marginColor(kpi.nM) }}>{kpi.nM.toFixed(1)}%</span></div>
+                  <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tn / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
+                {kpi.hasOverhead && showDetail && (
+                  <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                    <div style={{ fontFamily:'monospace', fontSize:11, color:'#a78bfa' }}>{fmtRupiah(kpi.tOverhead)}</div>
+                    <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tOverhead / kpi.ts * 100).toFixed(1) : 0}%</div>
+                  </td>
+                )}
+                {kpi.hasOverhead && (
+                  <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                    <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tNetProfit >= 0 ? '#10b981' : '#ef4444' }}>{fmtRupiah(kpi.tNetProfit)}</div>
+                    <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.npM), color: marginColor(kpi.npM) }}>{kpi.npM.toFixed(1)}%</span></div>
+                  </td>
+                )}
               </tr>
             </tbody>
           </table>
