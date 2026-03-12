@@ -6,14 +6,8 @@ import { useState, useEffect, useMemo } from 'react';
 import { fetchShipmentStatus, type ShipmentChannelRow } from '@/lib/shipment-actions';
 import { fmtCompact, fmtRupiah, CHANNEL_COLORS } from '@/lib/utils';
 
-// ── Sales channel display names (same as channels page) ──
-const CHANNEL_DISPLAY_NAME: Record<string, string> = {
-  'Facebook Ads': 'Scalev Ads',
-  'Organik': 'CS Manual',
-};
-
 function displayName(ch: string) {
-  return CHANNEL_DISPLAY_NAME[ch] || ch;
+  return ch;
 }
 
 interface Props {

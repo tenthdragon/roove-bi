@@ -313,18 +313,18 @@ function deriveSalesChannelFromWebhook(data: any): string {
   if (resellerPrice > 0 && storeName.includes('reseller')) return 'Reseller';
   if (storeName.includes('reseller')) return 'Reseller';
 
-  if (data.is_purchase_fb === true || data.is_purchase_fb === 'true') return 'Facebook Ads';
-  if (data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true') return 'TikTok Ads';
+  if (data.is_purchase_fb === true || data.is_purchase_fb === 'true') return 'Scalev Ads';
+  if (data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true') return 'CS Manual';
 
   // Webhook doesn't send is_purchase_fb — use message_variables.advertiser as fallback.
   // BUT only if is_purchase_fb is not explicitly set (undefined/null).
   // If CSV already set is_purchase_fb=false, respect that (CSV is source of truth).
   if (data.is_purchase_fb == null) {
     const advertiser = (data.message_variables?.advertiser || '').trim();
-    if (advertiser) return 'Facebook Ads';
+    if (advertiser) return 'Scalev Ads';
   }
 
-  return 'Organik';
+  return 'CS Manual';
 }
 
 // ── Build enriched order lines from webhook orderlines payload ──
@@ -808,7 +808,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
   } else if (data.is_purchase_fb != null || data.is_purchase_tiktok != null) {
     // Orderlines weren't replaced but purchase flags may have changed.
     // Re-derive sales_channel on existing lines to prevent misclassification
-    // (e.g. is_purchase_fb changed from true→false but lines still say 'Facebook Ads').
+    // (e.g. is_purchase_fb changed from true→false but lines still say 'Scalev Ads').
     const { data: updatedOrder } = await svc
       .from('scalev_orders')
       .select('id, store_name, external_id, is_purchase_fb, is_purchase_tiktok, is_purchase_kwai, raw_data')

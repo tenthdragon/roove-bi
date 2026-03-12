@@ -554,7 +554,7 @@ export default function AdminPage() {
                         style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12 }}
                       >
                         <option value="">— Pilih Channel —</option>
-                        {['TikTok', 'Shopee', 'Lazada', 'BliBli', 'Tokopedia'].map(ch => (
+                        {['TikTok Shop', 'Shopee', 'Lazada', 'BliBli', 'Tokopedia'].map(ch => (
                           <option key={ch} value={ch}>{ch}</option>
                         ))}
                       </select>

@@ -83,11 +83,11 @@ function deriveSalesChannel(row: Record<string, string>): string {
   if (storeName.includes('reseller')) return 'Reseller';
 
   if (platform === 'scalev' || platform === '') {
-    if (isPurchaseFb) return 'Facebook Ads';
-    if (isPurchaseTiktok) return 'TikTok Ads';
-    return 'Organik';
+    if (isPurchaseFb) return 'Scalev Ads';
+    if (isPurchaseTiktok) return 'CS Manual';
+    return 'CS Manual';
   }
-  return 'Organik';
+  return 'CS Manual';
 }
 
 // ── Sales channel for ops file (simpler, uses platform field directly) ──
@@ -98,7 +98,7 @@ function deriveSalesChannelFromOps(platform: string): string {
   if (p === 'lazada') return 'Lazada';
   if (p === 'tokopedia') return 'Tokopedia';
   if (p === 'blibli') return 'BliBli';
-  return 'Organik';
+  return 'CS Manual';
 }
 
 // ── Detect file format ──

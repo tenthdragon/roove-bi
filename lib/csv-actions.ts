@@ -63,11 +63,11 @@ function deriveSalesChannel(row: Record<string, string>): string {
   if (storeName.includes('reseller')) return 'Reseller';
 
   if (platform === 'scalev' || platform === '') {
-    if (isPurchaseFb) return 'Facebook Ads';
-    if (isPurchaseTiktok) return 'TikTok Ads';
-    return 'Organik';
+    if (isPurchaseFb) return 'Scalev Ads';
+    if (isPurchaseTiktok) return 'CS Manual';
+    return 'CS Manual';
   }
-  return 'Organik';
+  return 'CS Manual';
 }
 
 export async function uploadCsvOrders(formData: FormData) {

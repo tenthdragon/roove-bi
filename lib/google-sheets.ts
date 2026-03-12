@@ -41,13 +41,15 @@ async function getSheets() {
   return google.sheets({ version: 'v4', auth });
 }
 
-const CHANNEL_MERGE: Record<string, string> = {
-  'TikTok Ads': 'TikTok',
-  'TikTok Shop': 'TikTok',
+// Legacy sheet names → canonical DB names
+const CHANNEL_RENAME: Record<string, string> = {
+  'Facebook Ads': 'Scalev Ads',
+  'Organik': 'CS Manual',
+  'TikTok Ads': 'CS Manual',
 };
 
 function resolveChannel(sheetChannel: string): string {
-  return CHANNEL_MERGE[sheetChannel] || sheetChannel;
+  return CHANNEL_RENAME[sheetChannel] || sheetChannel;
 }
 
 const MP_ADMIN_CHANNEL_OFFSETS: Record<string, number> = {
@@ -102,8 +104,8 @@ function detectNetAfterMktOrder(rows: any[][], startIdx: number): string[] {
     channels.push(ch);
   }
   return channels.length > 0 ? channels : [
-    'Facebook Ads', 'Google Ads', 'Organik', 'Reseller',
-    'Shopee', 'TikTok Ads', 'TikTok Shop', 'Tokopedia',
+    'Scalev Ads', 'Google Ads', 'CS Manual', 'Reseller',
+    'Shopee', 'CS Manual', 'TikTok Shop', 'Tokopedia',
     'BliBli', 'Lazada', 'SnackVideo Ads',
   ];
 }

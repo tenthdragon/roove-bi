@@ -26,18 +26,11 @@ function normPlatform(source: string): string {
 }
 
 // ── Marketing Platform → Sales Channels served (sales POV, strict — no CS Manual) ──
-// "Facebook Ads" is the DB value for Scalev Ads orders
 const PLATFORM_CHANNEL_MAP = {
-  'Meta Ads':    ['Facebook Ads'],
-  'Google Ads':  ['Facebook Ads'],
+  'Meta Ads':    ['Scalev Ads'],
+  'Google Ads':  ['Scalev Ads'],
   'Shopee Ads':  ['Shopee'],
-  'TikTok Ads':  ['TikTok', 'TikTok Shop'],
-};
-
-// ── Sales channel display names (DB value → display label) ──
-const CHANNEL_DISPLAY_NAME: Record<string, string> = {
-  'Facebook Ads': 'Scalev Ads',
-  'Organik': 'CS Manual',
+  'TikTok Ads':  ['TikTok Shop'],
 };
 
 // ── Tooltips for sales channels ──
@@ -210,7 +203,7 @@ export default function ChannelsPage() {
         const totalCost = v.mpAdmin + adsCost;
         const profitAfterAll = v.gp - totalCost;
         return {
-          name: CHANNEL_DISPLAY_NAME[ch] || ch,
+          name: ch,
           revenue: v.revenue,
           gp: v.gp,
           mpAdmin: v.mpAdmin,
@@ -245,10 +238,9 @@ export default function ChannelsPage() {
     channelData.forEach(d => {
       if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
       if (!d.date) return;
-      const displayName = CHANNEL_DISPLAY_NAME[d.channel] || d.channel;
-      channelSet.add(displayName);
+      channelSet.add(d.channel);
       if (!byDate[d.date]) byDate[d.date] = { channels: {}, mpFee: 0, adsFee: 0 };
-      byDate[d.date].channels[displayName] = (byDate[d.date].channels[displayName] || 0) + (Number(d.net_sales) || 0);
+      byDate[d.date].channels[d.channel] = (byDate[d.date].channels[d.channel] || 0) + (Number(d.net_sales) || 0);
       byDate[d.date].mpFee += Math.abs(Number(d.mp_admin_cost) || 0);
     });
 
@@ -296,10 +288,9 @@ export default function ChannelsPage() {
     shipmentCounts.forEach(d => {
       if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
       if (!d.date) return;
-      const displayName = CHANNEL_DISPLAY_NAME[d.channel] || d.channel;
-      channelSet.add(displayName);
+      channelSet.add(d.channel);
       if (!byDate[d.date]) byDate[d.date] = { channels: {} };
-      byDate[d.date].channels[displayName] = (byDate[d.date].channels[displayName] || 0) + Number(d.order_count || 0);
+      byDate[d.date].channels[d.channel] = (byDate[d.date].channels[d.channel] || 0) + Number(d.order_count || 0);
     });
 
     // Sort channels: pin Organik, Scalev, Reseller first, rest by total count desc

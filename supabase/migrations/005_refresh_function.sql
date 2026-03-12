@@ -14,11 +14,17 @@ BEGIN
     REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_ads_by_brand;
     REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_channel_complete;
     REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_product_complete;
+    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_daily_customer_type;
+    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_customer_cohort;
+    REFRESH MATERIALIZED VIEW CONCURRENTLY mv_monthly_cohort;
   ELSE
     REFRESH MATERIALIZED VIEW mv_daily_order_channel;
     REFRESH MATERIALIZED VIEW mv_daily_ads_by_brand;
     REFRESH MATERIALIZED VIEW mv_daily_channel_complete;
     REFRESH MATERIALIZED VIEW mv_daily_product_complete;
+    REFRESH MATERIALIZED VIEW mv_daily_customer_type;
+    REFRESH MATERIALIZED VIEW mv_customer_cohort;
+    REFRESH MATERIALIZED VIEW mv_monthly_cohort;
   END IF;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;

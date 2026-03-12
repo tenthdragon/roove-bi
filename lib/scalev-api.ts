@@ -89,14 +89,14 @@ export async function fetchOrderDetail(
 
 // ── Derive sales_channel from order data ──
 // Logic validated against spreadsheet data:
-// - is_purchase_fb=true + platform=scalev → "Facebook Ads"
+// - is_purchase_fb=true + platform=scalev → "Scalev Ads"
 // - platform=shopee or store contains shopee → "Shopee"
 // - platform=tiktok or store contains tiktok → "TikTok Shop"
 // - platform=lazada or store contains lazada → "Lazada"
 // - platform=tokopedia → "Tokopedia"
 // - is_reseller → "Reseller"
-// - platform=scalev + no ads → "Organik"
-// - else → "Organik"
+// - platform=scalev + no ads → "CS Manual"
+// - else → "CS Manual"
 export function deriveSalesChannel(order: any): string {
   const platform = (order.platform || '').toLowerCase();
   const storeName = (order.store?.name || '').toLowerCase();
@@ -125,15 +125,15 @@ export function deriveSalesChannel(order: any): string {
   // Scalev platform orders: check if from paid ads
   if (platform === 'scalev' || platform === '') {
     if (isPurchaseFb) {
-      return 'Facebook Ads';
+      return 'Scalev Ads';
     }
     if (isPurchaseTiktok) {
-      return 'TikTok Ads';
+      return 'CS Manual';
     }
-    return 'Organik';
+    return 'CS Manual';
   }
 
-  return 'Organik';
+  return 'CS Manual';
 }
 
 // ── Product type lookup with fallback chain ──

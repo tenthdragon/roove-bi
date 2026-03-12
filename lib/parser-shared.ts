@@ -5,8 +5,8 @@
 
 // ── Sales channels in order as they appear in brand sheets ──
 export const SALES_CHANNELS = [
-  'Facebook Ads', 'Google Ads', 'Organik', 'Reseller',
-  'Shopee', 'TikTok Ads', 'TikTok Shop', 'Tokopedia',
+  'Scalev Ads', 'Google Ads', 'CS Manual', 'Reseller',
+  'Shopee', 'CS Manual', 'TikTok Shop', 'Tokopedia',
   'BliBli', 'Lazada', 'SnackVideo Ads',
 ] as const;
 

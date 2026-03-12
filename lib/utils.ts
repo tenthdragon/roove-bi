@@ -142,11 +142,8 @@ export const PRODUCT_COLORS: Record<string, string> = {
 export const CHANNEL_COLORS: Record<string, string> = {
   'Shopee': '#ee4d2d',
   'TikTok Shop': '#00f2ea',
-  'TikTok': '#ff0050',
-  'Facebook Ads': '#1877f2',
   'Scalev Ads': '#1877f2',
   'CS Manual': '#10b981',
-  'Organik': '#10b981',
   'Reseller': '#f59e0b',
   'Lazada': '#0f1689',
   'Google Ads': '#ea4335',
@@ -154,6 +151,7 @@ export const CHANNEL_COLORS: Record<string, string> = {
   'BliBli': '#0066cc',
   'SnackVideo Ads': '#ff6600',
   'WhatsApp': '#25d366',
+  'Marketplace': '#9ca3af',
 };
 
 // ============================================================

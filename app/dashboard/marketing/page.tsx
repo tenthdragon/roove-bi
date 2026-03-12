@@ -25,8 +25,8 @@ function normStore(s: string): string {
 //
 // Sales Channel (DB)  | Marketing Channels that serve it
 // ────────────────────|──────────────────────────────────
-// Scalev Ads (="Facebook Ads" in DB) | Meta Ads (Non CPAS, WABA/CTWA), Google Ads
-// CS Manual (="Organik" in DB)      | WhatsApp BC / Marketing Message (future)
+// Scalev Ads              | Meta Ads (Non CPAS, WABA/CTWA), Google Ads
+// CS Manual               | WhatsApp BC / Marketing Message (future)
 // Shopee              | Shopee Ads, Meta Ads CPAS
 // TikTok Shop         | TikTok Ads, TikTokShop Ads
 // MP lain             | MP lain Ads (future)
@@ -58,12 +58,11 @@ function getSubSource(source: string): string | null {
 }
 
 // ── Marketing Platform → Sales Channels served (marketing POV, includes organic spillover) ──
-// "Facebook Ads" below is the DB value for Scalev Ads orders; "Organik" is the DB value for CS Manual orders
 const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
-  'Meta Ads':          ['Facebook Ads', 'Organik'],
-  'Google Ads':        ['Facebook Ads', 'Organik'],
+  'Meta Ads':          ['Scalev Ads', 'CS Manual'],
+  'Google Ads':        ['Scalev Ads', 'CS Manual'],
   'Shopee Ads':        ['Shopee'],
-  'TikTok Ads':        ['TikTok', 'TikTok Shop'],
+  'TikTok Ads':        ['TikTok Shop'],
   'Other Marketplace': ['Tokopedia', 'BliBli', 'Lazada'],
 };
 
@@ -71,7 +70,7 @@ const PLATFORM_CHANNEL_LABEL: Record<string, string> = {
   'Meta Ads':          'Scalev Ads',
   'Google Ads':        'Scalev Ads',
   'Shopee Ads':        'Shopee',
-  'TikTok Ads':        'TikTok',
+  'TikTok Ads':        'TikTok Shop',
   'Other Marketplace': 'Other MP',
 };
 
@@ -84,7 +83,7 @@ const PLATFORM_COLORS: Record<string, string> = {
 
 // ── Channel colors ──
 const CHANNEL_COLORS: Record<string, string> = {
-  'Scalev Ads': '#1877f2', 'CS Manual': '#10b981', 'Shopee': '#ee4d2d', 'TikTok': '#ff0050',
+  'Scalev Ads': '#1877f2', 'CS Manual': '#10b981', 'Shopee': '#ee4d2d', 'TikTok Shop': '#00f2ea',
   'Tokopedia': '#42b549', 'BliBli': '#06b6d4', 'Lazada': '#1a237e', 'Reseller': '#f59e0b',
 };
 

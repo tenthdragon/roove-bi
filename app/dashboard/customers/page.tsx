@@ -15,10 +15,9 @@ import {
 
 // ── Channel grouping ──
 const CHANNEL_GROUP_MAP = {
-  'Facebook Ads': 'Scalev Ads',
-  'Organik': 'CS Manual',
+  'Scalev Ads': 'Scalev Ads',
+  'CS Manual': 'CS Manual',
   'Google Ads': 'Scalev Ads',
-  'TikTok Ads': 'TikTok Shop',
   'TikTok Shop': 'TikTok Shop',
   'Reseller': 'Reseller',
   'Shopee': 'Shopee',
@@ -26,6 +25,7 @@ const CHANNEL_GROUP_MAP = {
   'BliBli': 'Other Marketplaces',
   'Lazada': 'Other Marketplaces',
   'SnackVideo Ads': 'Other Marketplaces',
+  'Marketplace': 'Other Marketplaces',
 };
 
 function getChannelGroup(sc) {
