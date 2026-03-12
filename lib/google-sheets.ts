@@ -273,6 +273,9 @@ export async function parseGoogleSheet(
 
   // ── Parse Ads sheet ──
   // New format (5 cols): Date, Ad Account, Spent, Source, Store
+  // Source = traffic source (e.g. "TikTok Ads", "Facebook Ads", "Shopee - Roove")
+  // Store  = brand/store name (e.g. "Roove", "Purvu Store", "Osgard")
+  const KNOWN_TRAFFIC_SOURCES = ['tiktok', 'shopee', 'facebook', 'cpas', 'google', 'snack', 'waba', 'whatsapp'];
   if (sheetNames.includes('Ads')) {
     const rows = await fetchRange(spreadsheetId, 'Ads!B3:F2000');
     for (let i = 1; i < rows.length; i++) {
@@ -281,12 +284,25 @@ export async function parseGoogleSheet(
       const dateStr = parseDateValue(row[0]);
       if (!dateStr) continue;
 
+      let source = String(row[3] || '');
+      let store = String(row[4] || '');
+
+      // Auto-fix swapped source/store: if store looks like a traffic source
+      // and source does NOT, they were likely entered in the wrong columns
+      const storeLower = store.toLowerCase();
+      const sourceLower = source.toLowerCase();
+      const storeIsTrafficSource = KNOWN_TRAFFIC_SOURCES.some(ts => storeLower.includes(ts));
+      const sourceIsTrafficSource = KNOWN_TRAFFIC_SOURCES.some(ts => sourceLower.includes(ts));
+      if (storeIsTrafficSource && !sourceIsTrafficSource) {
+        [source, store] = [store, source];
+      }
+
       ads.push({
         date: dateStr,
         ad_account: String(row[1] || ''),
         spent: toNum(row[2]),
-        source: String(row[3] || ''),
-        store: String(row[4] || ''),
+        source,
+        store,
       });
     }
   }
