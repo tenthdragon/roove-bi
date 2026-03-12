@@ -96,6 +96,8 @@ export default function MarketingPage() {
   const [channelData, setChannelData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [brandFilter, setBrandFilter] = useState('all');
+  const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
+  const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
 
   // ── Fetch data (with cache) ──
   useEffect(() => {
@@ -134,6 +136,38 @@ export default function MarketingPage() {
       setAdsData(adsRows);
       setChannelData(chRows);
       setLoading(false);
+    });
+  }, [dateRange, supabase]);
+
+  // ── Fetch previous full month data (for ROAS delta comparison) ──
+  useEffect(() => {
+    if (!dateRange.from || !dateRange.to) return;
+    const fromDate = new Date(dateRange.from + 'T00:00:00');
+    const prevMonthEnd = new Date(fromDate.getFullYear(), fromDate.getMonth(), 0);
+    const prevMonthStart = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth(), 1);
+    const prevFrom = `${prevMonthStart.getFullYear()}-${String(prevMonthStart.getMonth() + 1).padStart(2, '0')}-01`;
+    const prevTo = `${prevMonthEnd.getFullYear()}-${String(prevMonthEnd.getMonth() + 1).padStart(2, '0')}-${String(prevMonthEnd.getDate()).padStart(2, '0')}`;
+
+    const cachedPrevAds = getCached<any[]>('daily_ads_spend_prev', prevFrom, prevTo);
+    const cachedPrevCh = getCached<any[]>('daily_channel_data_prev', prevFrom, prevTo);
+    if (cachedPrevAds && cachedPrevCh) {
+      setPrevAdsData(cachedPrevAds);
+      setPrevChannelData(cachedPrevCh);
+      return;
+    }
+
+    Promise.all([
+      supabase.from('daily_ads_spend').select('date, source, spent, store')
+        .gte('date', prevFrom).lte('date', prevTo),
+      supabase.from('daily_channel_data').select('date, channel, product, net_sales, mp_admin_cost')
+        .gte('date', prevFrom).lte('date', prevTo),
+    ]).then(([{ data: ads }, { data: ch }]) => {
+      const adsRows = ads || [];
+      const chRows = ch || [];
+      setCache('daily_ads_spend_prev', prevFrom, prevTo, adsRows);
+      setCache('daily_channel_data_prev', prevFrom, prevTo, chRows);
+      setPrevAdsData(adsRows);
+      setPrevChannelData(chRows);
     });
   }, [dateRange, supabase]);
 
@@ -353,6 +387,68 @@ const BRAND_COLORS = useMemo(() => {
     return result;
   }, [adsData, channelData, brandFilter]);
 
+  // ── Previous month ROAS lookup (for delta comparison) ──
+  const prevRoasMap = useMemo(() => {
+    const map: Record<string, { roas: number; effectiveRoas: number }> = {};
+    if (prevAdsData.length === 0) return map;
+
+    const filteredPrevAds = brandFilter === 'all' ? prevAdsData : prevAdsData.filter(d => normStore(d.store) === brandFilter);
+
+    const byPlatform: Record<string, number> = {};
+    filteredPrevAds.forEach(d => {
+      const platform = normPlatform(d.source);
+      byPlatform[platform] = (byPlatform[platform] || 0) + Math.abs(Number(d.spent || 0));
+    });
+
+    const channelRev: Record<string, number> = {};
+    const channelAdmin: Record<string, number> = {};
+    prevChannelData.forEach(d => {
+      if (brandFilter !== 'all' && d.product !== brandFilter) return;
+      const ch = d.channel || 'Other';
+      channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
+      channelAdmin[ch] = (channelAdmin[ch] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
+    });
+
+    Object.entries(byPlatform).forEach(([platform, spent]) => {
+      const revenueChannels = PLATFORM_CHANNEL_MAP[platform];
+      const rev = revenueChannels ? revenueChannels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0) : 0;
+      const admin = revenueChannels ? revenueChannels.reduce((sum, ch) => sum + (channelAdmin[ch] || 0), 0) : 0;
+      const roas = spent > 0 && rev > 0 ? rev / spent : 0;
+      const totalCost = spent + admin;
+      const effectiveRoas = totalCost > 0 && rev > 0 ? rev / totalCost : 0;
+      map[platform] = { roas, effectiveRoas };
+    });
+
+    // Other Marketplace (no ads spend, admin fee only)
+    const otherMpChannels = PLATFORM_CHANNEL_MAP['Other Marketplace'] || [];
+    const otherMpRevenue = otherMpChannels.reduce((sum, ch) => sum + (channelRev[ch] || 0), 0);
+    const otherMpAdmin = otherMpChannels.reduce((sum, ch) => sum + (channelAdmin[ch] || 0), 0);
+    if (otherMpRevenue > 0) {
+      map['Other Marketplace'] = { roas: 0, effectiveRoas: otherMpAdmin > 0 ? otherMpRevenue / otherMpAdmin : 0 };
+    }
+
+    // TOTAL row
+    const totalSpendPrev = Object.values(byPlatform).reduce((a, b) => a + b, 0);
+    const totalRevPrev = prevChannelData.reduce((sum, d) => {
+      if (brandFilter !== 'all' && d.product !== brandFilter) return sum;
+      return sum + Number(d.net_sales || 0);
+    }, 0);
+    const totalAdminPrev = Object.values(channelAdmin).reduce((a, b) => a + b, 0);
+    const totalRoasPrev = totalSpendPrev > 0 ? totalRevPrev / totalSpendPrev : 0;
+    const totalEffRoasPrev = (totalSpendPrev + totalAdminPrev) > 0 ? totalRevPrev / (totalSpendPrev + totalAdminPrev) : 0;
+    map['__TOTAL__'] = { roas: totalRoasPrev, effectiveRoas: totalEffRoasPrev };
+
+    return map;
+  }, [prevAdsData, prevChannelData, brandFilter]);
+
+  // ── Delta helpers ──
+  const prevMonthLabel = useMemo(() => {
+    if (!dateRange.from) return '';
+    const fromDate = new Date(dateRange.from + 'T00:00:00');
+    const prevMonth = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, 1);
+    return prevMonth.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
+  }, [dateRange.from]);
+
   // ── Per-brand matrix ──
   const brandPlatformMatrix = useMemo(() => {
     if (brandFilter !== 'all') return [];
@@ -557,7 +653,7 @@ const BRAND_COLORS = useMemo(() => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 700 }}>Ad Spend by Traffic Source</div>
-            <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>ROAS per channel atribusi — exclusive, tanpa double count</div>
+            <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>ROAS per channel atribusi — exclusive, tanpa double count{prevMonthLabel ? ` • Delta vs ${prevMonthLabel}` : ''}</div>
           </div>
           <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)}
             style={{ background: '#1a2744', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none' }}>
@@ -655,12 +751,34 @@ const BRAND_COLORS = useMemo(() => {
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: C.dim }}>Rp {fmtCompact(p.channelRevenue)}</td>
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: p.roas >= 3 ? '#10b981' : p.roas >= 1.5 ? '#f59e0b' : '#ef4444' }}>
                         {p.roas > 0 ? `${p.roas.toFixed(1)}x` : '—'}
+                        {(() => {
+                          const prev = prevRoasMap[p.platform];
+                          if (!prev || prev.roas === 0 || p.roas === 0) return null;
+                          const d = p.roas - prev.roas;
+                          return (
+                            <div style={{ fontSize: 9, marginTop: 2, color: d > 0 ? '#5b8a7a' : d < 0 ? '#9b6b6b' : '#555' }}>
+                              {d > 0 ? '▲' : d < 0 ? '▼' : '—'} {d >= 0 ? '+' : ''}{d.toFixed(1)}x
+                            </div>
+                          );
+                        })()}
                       </td>
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: p.adminFee > 0 ? '#f59e0b' : `${C.dim}66` }}>
                         {p.adminFee > 0 ? `Rp ${fmtCompact(p.adminFee)}` : '—'}
                       </td>
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: p.effectiveRoas >= 3 ? '#10b981' : p.effectiveRoas >= 1.5 ? '#f59e0b' : p.effectiveRoas > 0 ? '#ef4444' : `${C.dim}44` }}>
                         {p.effectiveRoas > 0 ? `${p.effectiveRoas.toFixed(1)}x` : p.adminFee === 0 && p.roas > 0 ? `${p.roas.toFixed(1)}x` : '—'}
+                        {(() => {
+                          const prev = prevRoasMap[p.platform];
+                          const currEff = p.effectiveRoas > 0 ? p.effectiveRoas : (p.adminFee === 0 && p.roas > 0 ? p.roas : 0);
+                          const prevEff = prev ? prev.effectiveRoas : 0;
+                          if (prevEff === 0 || currEff === 0) return null;
+                          const d = currEff - prevEff;
+                          return (
+                            <div style={{ fontSize: 9, marginTop: 2, color: d > 0 ? '#5b8a7a' : d < 0 ? '#9b6b6b' : '#555' }}>
+                              {d > 0 ? '▲' : d < 0 ? '▼' : '—'} {d >= 0 ? '+' : ''}{d.toFixed(1)}x
+                            </div>
+                          );
+                        })()}
                       </td>
                     </tr>
                   ))}
@@ -679,9 +797,33 @@ const BRAND_COLORS = useMemo(() => {
                       const effRoas = totalAllCost > 0 ? filteredTotalRevenue / totalAllCost : 0;
                       return (
                         <>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: filteredRoas >= 3 ? '#10b981' : filteredRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{filteredRoas.toFixed(1)}x</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: filteredRoas >= 3 ? '#10b981' : filteredRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>
+                            {filteredRoas.toFixed(1)}x
+                            {(() => {
+                              const prev = prevRoasMap['__TOTAL__'];
+                              if (!prev || prev.roas === 0 || filteredRoas === 0) return null;
+                              const d = filteredRoas - prev.roas;
+                              return (
+                                <div style={{ fontSize: 9, marginTop: 2, color: d > 0 ? '#5b8a7a' : d < 0 ? '#9b6b6b' : '#555' }}>
+                                  {d > 0 ? '▲' : d < 0 ? '▼' : '—'} {d >= 0 ? '+' : ''}{d.toFixed(1)}x
+                                </div>
+                              );
+                            })()}
+                          </td>
                           <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f59e0b' }}>Rp {fmtCompact(totalAdmin)}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: effRoas >= 3 ? '#10b981' : effRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>{effRoas.toFixed(1)}x</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: effRoas >= 3 ? '#10b981' : effRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>
+                            {effRoas.toFixed(1)}x
+                            {(() => {
+                              const prev = prevRoasMap['__TOTAL__'];
+                              if (!prev || prev.effectiveRoas === 0 || effRoas === 0) return null;
+                              const d = effRoas - prev.effectiveRoas;
+                              return (
+                                <div style={{ fontSize: 9, marginTop: 2, color: d > 0 ? '#5b8a7a' : d < 0 ? '#9b6b6b' : '#555' }}>
+                                  {d > 0 ? '▲' : d < 0 ? '▼' : '—'} {d >= 0 ? '+' : ''}{d.toFixed(1)}x
+                                </div>
+                              );
+                            })()}
+                          </td>
                         </>
                       );
                     })()}
