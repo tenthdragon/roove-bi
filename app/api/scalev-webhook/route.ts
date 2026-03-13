@@ -562,10 +562,20 @@ async function handleStatusChanged(data: any, businessCode: string) {
 
   console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} updated ${existing.status} → ${newStatus}`);
 
-  // When order becomes shipped/completed, re-enrich lines that still have
-  // generic 'Marketplace' sales_channel — by now external_id should be available
+  // When order becomes shipped/completed, propagate shipped_time to line items
+  // and re-enrich lines that still have generic 'Marketplace' sales_channel
   if (newStatus === 'shipped' || newStatus === 'completed') {
     try {
+      // Propagate shipped_time to line items
+      const lineShippedTime = ts(data.shipped_time) || ts(data.completed_time) || null;
+      if (lineShippedTime) {
+        await svc
+          .from('scalev_order_lines')
+          .update({ shipped_time: lineShippedTime })
+          .eq('scalev_order_id', existing.id)
+          .is('shipped_time', null);
+      }
+
       // Fetch current order data (with external_id and store_name)
       const { data: orderData } = await svc
         .from('scalev_orders')

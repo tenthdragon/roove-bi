@@ -29,5 +29,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Single-MV refresh function — called by the API route one MV at a time
+-- to avoid PostgREST statement timeout when refreshing all 7 MVs.
+CREATE OR REPLACE FUNCTION refresh_single_mv(mv_name TEXT)
+RETURNS void AS $$
+BEGIN
+  EXECUTE 'REFRESH MATERIALIZED VIEW CONCURRENTLY ' || quote_ident(mv_name);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- ── Initial population (non-concurrent since MVs are empty) ──
 SELECT refresh_order_views(FALSE);

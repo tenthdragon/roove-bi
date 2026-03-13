@@ -313,13 +313,32 @@ export async function uploadCsvOrders(formData: FormData) {
       }
     }
   } else {
+    const existingIdMap: Record<string, number> = {};
+    for (const o of existingOrders) existingIdMap[o.order_id] = o.id;
+
     for (const [orderId, lines] of Object.entries(orderLinesMap)) {
-      if (!isNewOrder[orderId]) continue;
-      const dbId = insertedIdMap[orderId];
-      if (!dbId) continue;
-      const lineBatch = lines.map(line => ({ ...line, scalev_order_id: dbId }));
-      const { error: lineErr } = await svc.from('scalev_order_lines').insert(lineBatch);
-      if (lineErr) stats.errors.push(`Lines ${orderId}: ${lineErr.message}`);
+      if (isNewOrder[orderId]) {
+        // New order — insert line items
+        const dbId = insertedIdMap[orderId];
+        if (!dbId) continue;
+        const lineBatch = lines.map(line => ({ ...line, scalev_order_id: dbId }));
+        const { error: lineErr } = await svc.from('scalev_order_lines').insert(lineBatch);
+        if (lineErr) stats.errors.push(`Lines ${orderId}: ${lineErr.message}`);
+      } else {
+        // Existing order — update sales_channel & purchase flags on existing line items
+        const dbId = existingIdMap[orderId];
+        if (!dbId || !lines[0]) continue;
+        const { error: updErr } = await svc.from('scalev_order_lines')
+          .update({
+            sales_channel: lines[0].sales_channel,
+            is_purchase_fb: lines[0].is_purchase_fb,
+            is_purchase_tiktok: lines[0].is_purchase_tiktok,
+            is_purchase_kwai: lines[0].is_purchase_kwai,
+            synced_at: new Date().toISOString(),
+          })
+          .eq('scalev_order_id', dbId);
+        if (updErr) stats.errors.push(`Lines update ${orderId}: ${updErr.message}`);
+      }
     }
   }
 

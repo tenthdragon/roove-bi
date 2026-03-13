@@ -4,6 +4,16 @@
 
 import { createClient } from '@supabase/supabase-js';
 
+const MV_LIST = [
+  'mv_daily_order_channel',
+  'mv_daily_ads_by_brand',
+  'mv_daily_channel_complete',
+  'mv_daily_product_complete',
+  'mv_daily_customer_type',
+  'mv_customer_cohort',
+  'mv_monthly_cohort',
+];
+
 function getServiceSupabase() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,19 +24,23 @@ function getServiceSupabase() {
 
 /**
  * Trigger a concurrent refresh of all order materialized views.
+ * Refreshes one MV at a time to avoid PostgREST statement timeout.
  * Runs in the background — does not throw on failure, only logs.
  */
 export function triggerViewRefresh(): void {
   const svc = getServiceSupabase();
-  svc.rpc('refresh_order_views', { use_concurrent: true })
-    .then(({ error }) => {
+
+  (async () => {
+    for (const mv of MV_LIST) {
+      const { error } = await svc.rpc('refresh_single_mv', { mv_name: mv });
       if (error) {
-        console.warn('[refresh-views] Background refresh failed:', error.message);
+        console.warn(`[refresh-views] ${mv} failed:`, error.message);
       } else {
-        console.log('[refresh-views] Background refresh completed');
+        console.log(`[refresh-views] ${mv} refreshed`);
       }
-    })
-    .catch((err) => {
-      console.warn('[refresh-views] Background refresh error:', err.message);
-    });
+    }
+    console.log('[refresh-views] Background refresh completed');
+  })().catch((err) => {
+    console.warn('[refresh-views] Background refresh error:', err.message);
+  });
 }
