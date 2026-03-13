@@ -297,11 +297,18 @@ function derivePlatformFromStore(storeName: string, externalId?: string, webhook
   return 'scalev';
 }
 
+// ── Reseller stores (explicit list) ──
+const RESELLER_STORES = [
+  'drhyun reseller store',
+  'purvu dropship',
+  'reseller - dropship',
+  'reseller - mitra offline seller',
+];
+
 // ── Sales channel derivation from webhook data (mirrors csv-actions.ts) ──
 function deriveSalesChannelFromWebhook(data: any): string {
   const storeName = (data.store?.name || '').toLowerCase();
   const platform = derivePlatformFromStore(data.store?.name || '', data.external_id, data);
-  const resellerPrice = num(data.reseller_product_price);
 
   if (platform === 'shopee') return 'Shopee';
   if (platform === 'tiktokshop') return 'TikTok Shop';
@@ -310,8 +317,7 @@ function deriveSalesChannelFromWebhook(data: any): string {
   if (platform === 'blibli') return 'BliBli';
   if (platform === 'marketplace') return 'Marketplace';
 
-  if (resellerPrice > 0 && storeName.includes('reseller')) return 'Reseller';
-  if (storeName.includes('reseller')) return 'Reseller';
+  if (RESELLER_STORES.includes(storeName)) return 'Reseller';
 
   if (data.is_purchase_fb === true || data.is_purchase_fb === 'true') return 'Scalev Ads';
   if (data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true') return 'CS Manual';

@@ -47,20 +47,26 @@ function deriveBrandFromStore(storeName: string, brands: BrandKeyword[]): string
   return 'Unknown';
 }
 
+// ── Reseller stores (explicit list, must match webhook route.ts) ──
+const RESELLER_STORES = [
+  'drhyun reseller store',
+  'purvu dropship',
+  'reseller - dropship',
+  'reseller - mitra offline seller',
+];
+
 function deriveSalesChannel(row: Record<string, string>): string {
   const platform = (row.platform || '').toLowerCase();
   const storeName = (row.store || '').toLowerCase();
   const isPurchaseFb = row.is_purchase_fb === 'true';
   const isPurchaseTiktok = row.is_purchase_tiktok === 'true';
-  const resellerPrice = parseFloat(row.reseller_product_price || '0');
 
   if (platform === 'shopee' || storeName.includes('shopee')) return 'Shopee';
   if (platform === 'tiktokshop' || platform === 'tiktok' || storeName.includes('tiktok')) return 'TikTok Shop';
   if (platform === 'lazada' || storeName.includes('lazada')) return 'Lazada';
   if (platform === 'tokopedia' || storeName.includes('tokopedia')) return 'Tokopedia';
   if (platform === 'blibli' || storeName.includes('blibli')) return 'BliBli';
-  if (resellerPrice > 0 && storeName.includes('reseller')) return 'Reseller';
-  if (storeName.includes('reseller')) return 'Reseller';
+  if (RESELLER_STORES.includes(storeName)) return 'Reseller';
 
   if (platform === 'scalev' || platform === '') {
     if (isPurchaseFb) return 'Scalev Ads';
