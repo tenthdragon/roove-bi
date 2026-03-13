@@ -559,9 +559,14 @@ const BRAND_COLORS = useMemo(() => {
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
                   <th style={{ padding: '8px 10px', textAlign: 'left', color: C.dim, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', position: 'sticky', left: 0, background: C.card, zIndex: 1 }}>Date</th>
-                  {dailyTrafficSource.sources.map(s => (
-                    <th key={s} style={{ padding: '8px 8px', textAlign: 'right', color: PLATFORM_COLORS[s] || C.dim, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{s.replace(' Ads', '')}</th>
-                  ))}
+                  {dailyTrafficSource.sources.map(s => {
+                    const tooltip = s === 'Meta Ads' ? 'Meta Ads (not include Meta CPAS)' : s === 'Shopee Ads' ? 'Shopee Ads (include Meta CPAS)' : undefined;
+                    return (
+                      <th key={s} title={tooltip} style={{ padding: '8px 8px', textAlign: 'right', color: PLATFORM_COLORS[s] || C.dim, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', cursor: tooltip ? 'help' : undefined }}>
+                        {s}{tooltip ? ' ⓘ' : ''}
+                      </th>
+                    );
+                  })}
                   <th style={{ padding: '8px 10px', textAlign: 'right', color: C.dim, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Total</th>
                   <th style={{ padding: '8px 10px', textAlign: 'right', color: C.dim, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Mkt Ratio</th>
                 </tr>
