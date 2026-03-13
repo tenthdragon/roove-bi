@@ -27,7 +27,7 @@ function normStore(s: string): string {
 // ────────────────────|──────────────────────────────────
 // Scalev Ads              | Meta Ads (Non CPAS, WABA/CTWA), Google Ads
 // CS Manual               | WhatsApp BC / Marketing Message (future)
-// Shopee              | Shopee Ads, Meta Ads CPAS
+// Shopee              | Shopee Ads, Meta CPAS
 // TikTok Shop         | TikTok Ads, TikTokShop Ads
 // MP lain             | MP lain Ads (future)
 //
@@ -36,7 +36,7 @@ function normStore(s: string): string {
 function normPlatform(source: string): string {
   if (!source) return 'Other';
   const s = source.toLowerCase();
-  if (s.includes('cpas')) return 'Shopee Ads';
+  if (s.includes('cpas')) return 'Meta CPAS';
   if (s.includes('shopee')) return 'Shopee Ads';
   if (s.includes('tiktok')) return 'TikTok Ads';
   if (s.includes('facebook')) return 'Meta Ads';
@@ -50,7 +50,6 @@ function normPlatform(source: string): string {
 function getSubSource(source: string): string | null {
   if (!source) return null;
   const s = source.toLowerCase();
-  if (s.includes('cpas')) return 'CPAS';
   if (s.includes('shopee') && s.includes('live')) return 'Shopee Live';
   if (s.includes('whatsapp') || s.includes('waba')) return 'WABA/CTWA';
   if (s.includes('tiktok shop') || s.includes('tiktokshop')) return 'TikTok Shop';
@@ -61,6 +60,7 @@ function getSubSource(source: string): string | null {
 const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
   'Meta Ads':          ['Scalev Ads', 'CS Manual'],
   'Google Ads':        ['Scalev Ads', 'CS Manual'],
+  'Meta CPAS':         ['Shopee'],
   'Shopee Ads':        ['Shopee'],
   'TikTok Ads':        ['TikTok Shop'],
   'Other Marketplace': ['Tokopedia', 'BliBli', 'Lazada'],
@@ -69,6 +69,7 @@ const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
 const PLATFORM_CHANNEL_LABEL: Record<string, string> = {
   'Meta Ads':          'Scalev Ads',
   'Google Ads':        'Scalev Ads',
+  'Meta CPAS':         'Shopee',
   'Shopee Ads':        'Shopee',
   'TikTok Ads':        'TikTok Shop',
   'Other Marketplace': 'Other MP',
@@ -76,7 +77,7 @@ const PLATFORM_CHANNEL_LABEL: Record<string, string> = {
 
 // ── Platform colors ──
 const PLATFORM_COLORS: Record<string, string> = {
-  'Meta Ads': '#1877f2', 'Google Ads': '#4285f4', 'TikTok Ads': '#ff0050',
+  'Meta Ads': '#1877f2', 'Meta CPAS': '#8b5cf6', 'Google Ads': '#4285f4', 'TikTok Ads': '#ff0050',
   'Shopee Ads': '#ee4d2d', 'SnackVideo Ads': '#fbbf24', 'Other Marketplace': '#64748b',
   'Reseller': '#f59e0b', 'Other': '#64748b',
 };
