@@ -1,7 +1,9 @@
 // app/api/refresh-views/route.ts
-// Refreshes all materialized views (order → ads → channel → product)
+// Refreshes all materialized views (order → ads → channel → product → customer)
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+
+export const maxDuration = 120; // Customer MVs take ~30s each; total ~60s
 
 function getServiceSupabase() {
   return createClient(
