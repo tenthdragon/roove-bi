@@ -1,6 +1,6 @@
 // @ts-nocheck
 'use client';
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, shortDate, CHANNEL_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
@@ -229,37 +229,54 @@ export default function ChannelsPage() {
       });
   }, [channelData, selectedProduct, adsPerChannel]);
 
-  // ── Daily Sales pivot: date × channel → net_sales + Mkt Fee + MP Fee ──
-  const dailySales = useMemo(() => {
-    const byDate: Record<string, { channels: Record<string, number>; mpFee: number; adsFee: number }> = {};
+  // ── Combined Daily Sales + Shipments pivot: date × channel → { orders, revenue } + Mkt Fee + MP Fee ──
+  const dailyCombined = useMemo(() => {
+    const byDate: Record<string, { channels: Record<string, { orders: number; revenue: number }>; mpFee: number; adsFee: number }> = {};
     const channelSet = new Set<string>();
+
+    const ensureDate = (date: string) => {
+      if (!byDate[date]) byDate[date] = { channels: {}, mpFee: 0, adsFee: 0 };
+    };
+    const ensureChannel = (date: string, ch: string) => {
+      ensureDate(date);
+      if (!byDate[date].channels[ch]) byDate[date].channels[ch] = { orders: 0, revenue: 0 };
+    };
 
     // 1. Aggregate channel sales + mp_admin_cost per date
     channelData.forEach(d => {
       if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
       if (!d.date) return;
       channelSet.add(d.channel);
-      if (!byDate[d.date]) byDate[d.date] = { channels: {}, mpFee: 0, adsFee: 0 };
-      byDate[d.date].channels[d.channel] = (byDate[d.date].channels[d.channel] || 0) + (Number(d.net_sales) || 0);
+      ensureChannel(d.date, d.channel);
+      byDate[d.date].channels[d.channel].revenue += Number(d.net_sales) || 0;
       byDate[d.date].mpFee += Math.abs(Number(d.mp_admin_cost) || 0);
     });
 
-    // 2. Aggregate ads spend per date (ensures non-shipping days are included)
+    // 2. Aggregate shipment counts per date
+    shipmentCounts.forEach(d => {
+      if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
+      if (!d.date) return;
+      channelSet.add(d.channel);
+      ensureChannel(d.date, d.channel);
+      byDate[d.date].channels[d.channel].orders += Number(d.order_count || 0);
+    });
+
+    // 3. Aggregate ads spend per date (ensures non-shipping days are included)
     adsData.forEach(d => {
       if (!d.date) return;
       if (selectedProduct !== 'all') {
         const brand = getAdBrand(d.store);
         if (brand !== selectedProduct) return;
       }
-      if (!byDate[d.date]) byDate[d.date] = { channels: {}, mpFee: 0, adsFee: 0 };
+      ensureDate(d.date);
       byDate[d.date].adsFee += Math.abs(Number(d.spent) || 0);
     });
 
-    // Sort channels: pin Organik, Scalev, Reseller first, rest by total revenue desc
+    // Sort channels: pin CS Manual, Scalev Ads, Reseller first, rest by total revenue desc
     const pinOrder = ['CS Manual', 'Scalev Ads', 'Reseller'];
     const chTotals: Record<string, number> = {};
     Object.values(byDate).forEach(row => {
-      Object.entries(row.channels).forEach(([ch, val]) => { chTotals[ch] = (chTotals[ch] || 0) + val; });
+      Object.entries(row.channels).forEach(([ch, val]) => { chTotals[ch] = (chTotals[ch] || 0) + val.revenue; });
     });
     const sortedChannels = Array.from(channelSet).sort((a, b) => {
       const aPin = pinOrder.indexOf(a);
@@ -273,50 +290,13 @@ export default function ChannelsPage() {
     const rows = Object.entries(byDate)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, data]) => {
-        const total = Object.values(data.channels).reduce((sum, v) => sum + v, 0);
-        return { date, channels: data.channels, total, mpFee: data.mpFee, adsFee: data.adsFee };
+        const totalOrders = Object.values(data.channels).reduce((sum, v) => sum + v.orders, 0);
+        const totalRevenue = Object.values(data.channels).reduce((sum, v) => sum + v.revenue, 0);
+        return { date, channels: data.channels, totalOrders, totalRevenue, mpFee: data.mpFee, adsFee: data.adsFee };
       });
 
     return { rows, channelNames: sortedChannels };
-  }, [channelData, adsData, selectedProduct, storeBrandMap]);
-
-  // ── Daily Shipments pivot: date × channel → order_count ──
-  const dailyShipments = useMemo(() => {
-    const byDate: Record<string, { channels: Record<string, number> }> = {};
-    const channelSet = new Set<string>();
-
-    shipmentCounts.forEach(d => {
-      if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
-      if (!d.date) return;
-      channelSet.add(d.channel);
-      if (!byDate[d.date]) byDate[d.date] = { channels: {} };
-      byDate[d.date].channels[d.channel] = (byDate[d.date].channels[d.channel] || 0) + Number(d.order_count || 0);
-    });
-
-    // Sort channels: pin Organik, Scalev, Reseller first, rest by total count desc
-    const pinOrder = ['CS Manual', 'Scalev Ads', 'Reseller'];
-    const chTotals: Record<string, number> = {};
-    Object.values(byDate).forEach(row => {
-      Object.entries(row.channels).forEach(([ch, val]) => { chTotals[ch] = (chTotals[ch] || 0) + val; });
-    });
-    const sortedChannels = Array.from(channelSet).sort((a, b) => {
-      const aPin = pinOrder.indexOf(a);
-      const bPin = pinOrder.indexOf(b);
-      if (aPin !== -1 && bPin !== -1) return aPin - bPin;
-      if (aPin !== -1) return -1;
-      if (bPin !== -1) return 1;
-      return (chTotals[b] || 0) - (chTotals[a] || 0);
-    });
-
-    const rows = Object.entries(byDate)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, data]) => {
-        const total = Object.values(data.channels).reduce((sum, v) => sum + v, 0);
-        return { date, channels: data.channels, total };
-      });
-
-    return { rows, channelNames: sortedChannels };
-  }, [shipmentCounts, selectedProduct]);
+  }, [channelData, shipmentCounts, adsData, selectedProduct, storeBrandMap]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);
@@ -460,61 +440,15 @@ export default function ChannelsPage() {
         />
       </div>
 
-      {/* Daily Shipments Table */}
+      {/* Combined Daily Sales & Shipments Table */}
       <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto', marginBottom: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Shipments</div>
-        {dailyShipments.rows.length > 0 ? (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + dailyShipments.channelNames.length * 110) }}>
+        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Sales &amp; Shipments</div>
+        {dailyCombined.rows.length > 0 ? (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + dailyCombined.channelNames.length * 130 + 200) }}>
             <thead>
               <tr style={{ borderBottom: '2px solid #1a2744' }}>
                 <th style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>Date</th>
-                {dailyShipments.channelNames.map(ch => (
-                  <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: CHANNEL_COLORS[ch] || '#64748b' }}>{ch}</th>
-                ))}
-                <th style={{ padding: '8px 10px', textAlign: 'right', color: '#e2e8f0', fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dailyShipments.rows.map(row => (
-                <tr key={row.date} style={{ borderBottom: '1px solid #1a2744' }}>
-                  <td style={{ padding: '8px 10px', fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>{shortDate(row.date)}</td>
-                  {dailyShipments.channelNames.map(ch => (
-                    <td key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
-                      {row.channels[ch] ? row.channels[ch].toLocaleString('id-ID') : <span style={{ color: '#334155' }}>—</span>}
-                    </td>
-                  ))}
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{row.total.toLocaleString('id-ID')}</td>
-                </tr>
-              ))}
-              {/* Grand Total row */}
-              <tr style={{ borderTop: '2px solid #1a2744', background: '#0b1121' }}>
-                <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11, position: 'sticky', left: 0, background: '#0b1121', zIndex: 1 }}>TOTAL</td>
-                {dailyShipments.channelNames.map(ch => {
-                  const chTotal = dailyShipments.rows.reduce((sum, r) => sum + (r.channels[ch] || 0), 0);
-                  return (
-                    <td key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: CHANNEL_COLORS[ch] || '#e2e8f0' }}>
-                      {chTotal > 0 ? chTotal.toLocaleString('id-ID') : <span style={{ color: '#334155' }}>—</span>}
-                    </td>
-                  );
-                })}
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{dailyShipments.rows.reduce((sum, r) => sum + r.total, 0).toLocaleString('id-ID')}</td>
-              </tr>
-            </tbody>
-          </table>
-        ) : (
-          <div style={{ textAlign: 'center', padding: 24, color: '#64748b', fontSize: 12 }}>Tidak ada data shipment untuk periode ini.</div>
-        )}
-      </div>
-
-      {/* Daily Sales Table */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto', marginBottom: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Sales</div>
-        {dailySales.rows.length > 0 ? (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + dailySales.channelNames.length * 130) }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #1a2744' }}>
-                <th style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>Date</th>
-                {dailySales.channelNames.map(ch => (
+                {dailyCombined.channelNames.map(ch => (
                   <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: CHANNEL_COLORS[ch] || '#64748b' }}>{ch}</th>
                 ))}
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: '#e2e8f0', fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>Total</th>
@@ -523,33 +457,54 @@ export default function ChannelsPage() {
               </tr>
             </thead>
             <tbody>
-              {dailySales.rows.map(row => (
+              {dailyCombined.rows.map(row => (
                 <tr key={row.date} style={{ borderBottom: '1px solid #1a2744' }}>
                   <td style={{ padding: '8px 10px', fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>{shortDate(row.date)}</td>
-                  {dailySales.channelNames.map(ch => (
-                    <td key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
-                      {row.channels[ch] ? fmtRupiah(row.channels[ch]) : <span style={{ color: '#334155' }}>—</span>}
-                    </td>
-                  ))}
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(row.total)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>{row.adsFee > 0 ? fmtRupiah(row.adsFee) : <span style={{ color: '#334155' }}>—</span>}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>{row.mpFee > 0 ? fmtRupiah(row.mpFee) : <span style={{ color: '#334155' }}>—</span>}</td>
+                  {dailyCombined.channelNames.map(ch => {
+                    const cell = row.channels[ch];
+                    const hasData = cell && (cell.revenue || cell.orders);
+                    return (
+                      <td key={ch} style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
+                        {hasData ? (
+                          <>
+                            <div>{fmtRupiah(cell.revenue)}</div>
+                            {cell.orders > 0 && <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>{cell.orders.toLocaleString('id-ID')}</div>}
+                          </>
+                        ) : <span style={{ color: '#334155' }}>—</span>}
+                      </td>
+                    );
+                  })}
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>
+                    <div>{fmtRupiah(row.totalRevenue)}</div>
+                    <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>{row.totalOrders.toLocaleString('id-ID')}</div>
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>{row.adsFee > 0 ? fmtRupiah(row.adsFee) : <span style={{ color: '#334155' }}>—</span>}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>{row.mpFee > 0 ? fmtRupiah(row.mpFee) : <span style={{ color: '#334155' }}>—</span>}</td>
                 </tr>
               ))}
               {/* Grand Total row */}
               <tr style={{ borderTop: '2px solid #1a2744', background: '#0b1121' }}>
                 <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11, position: 'sticky', left: 0, background: '#0b1121', zIndex: 1 }}>TOTAL</td>
-                {dailySales.channelNames.map(ch => {
-                  const chTotal = dailySales.rows.reduce((sum, r) => sum + (r.channels[ch] || 0), 0);
+                {dailyCombined.channelNames.map(ch => {
+                  const chOrders = dailyCombined.rows.reduce((sum, r) => sum + (r.channels[ch]?.orders || 0), 0);
+                  const chRevenue = dailyCombined.rows.reduce((sum, r) => sum + (r.channels[ch]?.revenue || 0), 0);
                   return (
-                    <td key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: CHANNEL_COLORS[ch] || '#e2e8f0' }}>
-                      {chTotal > 0 ? fmtRupiah(chTotal) : <span style={{ color: '#334155' }}>—</span>}
+                    <td key={ch} style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: CHANNEL_COLORS[ch] || '#e2e8f0' }}>
+                      {chRevenue > 0 ? (
+                        <>
+                          <div>{fmtRupiah(chRevenue)}</div>
+                          {chOrders > 0 && <div style={{ fontSize: 10, fontStyle: 'italic', opacity: 0.7 }}>{chOrders.toLocaleString('id-ID')}</div>}
+                        </>
+                      ) : <span style={{ color: '#334155' }}>—</span>}
                     </td>
                   );
                 })}
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(dailySales.rows.reduce((sum, r) => sum + r.total, 0))}</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(dailySales.rows.reduce((sum, r) => sum + r.adsFee, 0))}</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(dailySales.rows.reduce((sum, r) => sum + r.mpFee, 0))}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>
+                  <div>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.totalRevenue, 0))}</div>
+                  <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>{dailyCombined.rows.reduce((sum, r) => sum + r.totalOrders, 0).toLocaleString('id-ID')}</div>
+                </td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.adsFee, 0))}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.mpFee, 0))}</td>
               </tr>
             </tbody>
           </table>
