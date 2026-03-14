@@ -18,13 +18,14 @@ function getServiceSupabase() {
 // Fallback: env vars SCALEV_WEBHOOK_SECRET_<CODE> or legacy SCALEV_WEBHOOK_SECRET
 // DB secrets are cached in memory for 60 seconds to avoid DB hits on every webhook
 
-type BusinessSecret = { code: string; name: string; secret: string };
+type BusinessSecret = { id: number; code: string; name: string; secret: string };
 
 let cachedSecrets: BusinessSecret[] | null = null;
 let cacheExpiry = 0;
 const CACHE_TTL_MS = 60_000; // 60 seconds
 
 // ── Store type cache (DB-based store_type lookup) ──
+// Keyed by "businessId:storeName" to avoid collisions across businesses
 let cachedStoreTypes: Map<string, StoreType> | null = null;
 let storeTypeCacheExpiry = 0;
 
@@ -36,12 +37,12 @@ async function getStoreTypeMap(): Promise<Map<string, StoreType>> {
     const svc = getServiceSupabase();
     const { data } = await svc
       .from('scalev_store_channels')
-      .select('store_name, store_type')
+      .select('store_name, store_type, business_id')
       .eq('is_active', true);
 
     cachedStoreTypes = new Map();
     for (const row of data || []) {
-      cachedStoreTypes.set(row.store_name.toLowerCase(), row.store_type as StoreType);
+      cachedStoreTypes.set(`${row.business_id}:${row.store_name.toLowerCase()}`, row.store_type as StoreType);
     }
     storeTypeCacheExpiry = Date.now() + CACHE_TTL_MS;
     return cachedStoreTypes;
@@ -50,14 +51,19 @@ async function getStoreTypeMap(): Promise<Map<string, StoreType>> {
   }
 }
 
+// Lookup store type by business_id + store_name
+function lookupStoreType(storeTypes: Map<string, StoreType>, businessId: number, storeName: string): StoreType | undefined {
+  return storeTypes.get(`${businessId}:${storeName.toLowerCase()}`);
+}
+
 // ── Derive channel using store_type from DB, fallback to guessed store_type ──
-async function deriveChannelWithDbLookup(data: any): Promise<string> {
+async function deriveChannelWithDbLookup(data: any, businessId: number): Promise<string> {
   const storeName = (data.store?.name || '').toLowerCase();
   const isPurchaseFb = data.is_purchase_fb === true || data.is_purchase_fb === 'true'
     || !!(data.message_variables?.advertiser || '').trim();
 
   const storeTypes = await getStoreTypeMap();
-  const storeType = storeTypes.get(storeName) ?? guessStoreType(data.store?.name || '');
+  const storeType = lookupStoreType(storeTypes, businessId, storeName) ?? guessStoreType(data.store?.name || '');
 
   return deriveChannelFromStoreType(storeType, isPurchaseFb, {
     external_id: data.external_id,
@@ -69,10 +75,10 @@ async function deriveChannelWithDbLookup(data: any): Promise<string> {
 }
 
 // ── Auto-register unknown store in scalev_store_channels ──
-async function autoRegisterStore(storeName: string, businessCode: string) {
+async function autoRegisterStore(storeName: string, businessCode: string, businessId: number) {
   if (!storeName) return;
   const storeTypes = await getStoreTypeMap();
-  if (storeTypes.has(storeName.toLowerCase())) return;
+  if (lookupStoreType(storeTypes, businessId, storeName) !== undefined) return;
 
   try {
     const svc = getServiceSupabase();
@@ -101,12 +107,13 @@ async function getBusinessSecretsFromDB(): Promise<BusinessSecret[]> {
     const svc = getServiceSupabase();
     const { data, error } = await svc
       .from('scalev_webhook_businesses')
-      .select('business_code, business_name, webhook_secret')
+      .select('id, business_code, business_name, webhook_secret')
       .eq('is_active', true);
 
     if (error || !data || data.length === 0) return [];
 
     return data.map((row: any) => ({
+      id: row.id,
       code: row.business_code,
       name: row.business_name,
       secret: row.webhook_secret,
@@ -132,13 +139,14 @@ async function getBusinessSecrets(): Promise<BusinessSecret[]> {
 
   // Fallback: env vars (backward compatible)
   const envSecrets: BusinessSecret[] = [];
+  const envBizIds: Record<string, number> = { RTI: 4, RLB: 5, RLT: 1 };
   for (const [code, name] of Object.entries({
     RTI: 'Roove Tijara Internasional',
     RLB: 'Roove Lautan Barat',
     RLT: 'Roove Lautan Timur',
   })) {
     const secret = process.env[`SCALEV_WEBHOOK_SECRET_${code}`];
-    if (secret) envSecrets.push({ code, name, secret });
+    if (secret) envSecrets.push({ id: envBizIds[code] || 0, code, name, secret });
   }
 
   if (envSecrets.length > 0) {
@@ -149,7 +157,7 @@ async function getBusinessSecrets(): Promise<BusinessSecret[]> {
 
   // Legacy fallback: single secret
   if (process.env.SCALEV_WEBHOOK_SECRET) {
-    const legacy = [{ code: 'RTI', name: 'Legacy', secret: process.env.SCALEV_WEBHOOK_SECRET }];
+    const legacy = [{ id: 4, code: 'RTI', name: 'Legacy', secret: process.env.SCALEV_WEBHOOK_SECRET }];
     cachedSecrets = legacy;
     cacheExpiry = Date.now() + CACHE_TTL_MS;
     return legacy;
@@ -177,17 +185,17 @@ function verifyHmac(rawBody: string, signature: string, secret: string): boolean
 
 /**
  * Try each business secret to verify the signature.
- * Returns the business code if a match is found, null otherwise.
+ * Returns the business code and id if a match is found, null otherwise.
  */
-async function resolveBusinessFromSignature(rawBody: string, signature: string | null): Promise<string | null> {
+async function resolveBusinessFromSignature(rawBody: string, signature: string | null): Promise<{ code: string; id: number } | null> {
   if (!signature) return null;
 
   const secrets = await getBusinessSecrets();
   if (secrets.length === 0) return null;
 
-  for (const { code, secret } of secrets) {
+  for (const { id, code, secret } of secrets) {
     if (verifyHmac(rawBody, signature, secret)) {
-      return code;
+      return { code, id };
     }
   }
 
@@ -371,12 +379,12 @@ function derivePlatformFromStore(storeName: string, externalId?: string, webhook
 }
 
 // ── Build enriched order lines from webhook orderlines payload ──
-async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any): Promise<any[]> {
+async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any, businessId: number): Promise<any[]> {
   if (!data.orderlines || !Array.isArray(data.orderlines) || data.orderlines.length === 0) {
     return [];
   }
 
-  const salesChannel = await deriveChannelWithDbLookup(data);
+  const salesChannel = await deriveChannelWithDbLookup(data, businessId);
   const shippedTime = ts(data.shipped_time) || ts(data.completed_time) || null;
   const tax = await getTaxRate('PPN');
 
@@ -412,7 +420,7 @@ async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any)
 }
 
 // ── Handle order.created: insert new order into scalev_orders ──
-async function handleOrderCreated(data: any, businessCode: string) {
+async function handleOrderCreated(data: any, businessCode: string, businessId: number) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -491,11 +499,11 @@ async function handleOrderCreated(data: any, businessCode: string) {
   }
 
   // Auto-register unknown store
-  await autoRegisterStore(storeName || '', businessCode);
+  await autoRegisterStore(storeName || '', businessCode, businessId);
 
   // Insert enriched order lines (with financial data) if present
   if (inserted) {
-    const lines = await buildEnrichedLines(orderId, inserted.id, data);
+    const lines = await buildEnrichedLines(orderId, inserted.id, data, businessId);
     if (lines.length > 0) {
       const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
       if (lineErr) {
@@ -527,7 +535,7 @@ async function handleOrderCreated(data: any, businessCode: string) {
 }
 
 // ── Handle order.status_changed: update existing order ──
-async function handleStatusChanged(data: any, businessCode: string) {
+async function handleStatusChanged(data: any, businessCode: string, businessId: number) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -668,7 +676,7 @@ async function handleStatusChanged(data: any, businessCode: string) {
           financial_entity: orderData.raw_data?.financial_entity,
           reseller_product_price: orderData.raw_data?.reseller_product_price,
           message_variables: orderData.raw_data?.message_variables,
-        });
+        }, businessId);
 
         const { data: mismatchedLines } = await svc
           .from('scalev_order_lines')
@@ -708,7 +716,7 @@ async function handleStatusChanged(data: any, businessCode: string) {
             is_purchase_fb: orderData.is_purchase_fb,
             is_purchase_tiktok: orderData.is_purchase_tiktok,
             is_purchase_kwai: orderData.is_purchase_kwai,
-          });
+          }, businessId);
           if (enrichedLines.length > 0) {
             const { error: reInsertErr } = await svc.from('scalev_order_lines').insert(enrichedLines);
             if (reInsertErr) {
@@ -733,7 +741,7 @@ async function handleStatusChanged(data: any, businessCode: string) {
             is_purchase_fb: orderData.is_purchase_fb,
             is_purchase_tiktok: orderData.is_purchase_tiktok,
             is_purchase_kwai: orderData.is_purchase_kwai,
-          });
+          }, businessId);
           if (newLines.length > 0) {
             const { error: insertErr } = await svc.from('scalev_order_lines').insert(newLines);
             if (insertErr) {
@@ -762,7 +770,7 @@ async function handleStatusChanged(data: any, businessCode: string) {
 }
 
 // ── Handle order.updated: full update of order data ──
-async function handleOrderUpdated(data: any, businessCode: string) {
+async function handleOrderUpdated(data: any, businessCode: string, businessId: number) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -785,7 +793,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
   if (!existing) {
     // Order not in DB yet — treat as create
     console.log(`[scalev-webhook][${businessCode}] order.updated: ${orderId} not found, treating as create`);
-    return handleOrderCreated(data, businessCode);
+    return handleOrderCreated(data, businessCode, businessId);
   }
 
   // Build update with all available fields
@@ -854,7 +862,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
     // Delete old lines
     await svc.from('scalev_order_lines').delete().eq('scalev_order_id', existing.id);
 
-    const lines = await buildEnrichedLines(orderId, existing.id, data);
+    const lines = await buildEnrichedLines(orderId, existing.id, data, businessId);
     if (lines.length > 0) {
       const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
       if (lineErr) {
@@ -881,7 +889,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
         financial_entity: updatedOrder.raw_data?.financial_entity,
         reseller_product_price: updatedOrder.raw_data?.reseller_product_price,
         message_variables: updatedOrder.raw_data?.message_variables,
-      });
+      }, businessId);
 
       const { error: channelErr } = await svc
         .from('scalev_order_lines')
@@ -1124,12 +1132,13 @@ export async function POST(req: NextRequest) {
 
     // Verify signature and resolve which business sent this webhook
     // (reads from DB with in-memory cache, falls back to env vars)
-    const businessCode = await resolveBusinessFromSignature(rawBody, signature);
-    if (!businessCode) {
+    const matched = await resolveBusinessFromSignature(rawBody, signature);
+    if (!matched) {
       console.error('[scalev-webhook] invalid signature — no matching business secret');
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
     }
 
+    const { code: businessCode, id: businessId } = matched;
     const businessName = getBusinessName(businessCode);
     console.log(`[scalev-webhook] Verified request from ${businessName} (${businessCode})`);
 
@@ -1148,19 +1157,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, business_code: businessCode, message: 'Test event received' });
     }
 
-    // Route to appropriate handler — all handlers now receive businessCode
+    // Route to appropriate handler — all handlers now receive businessCode + businessId
     switch (event) {
       case 'order.created':
-        return handleOrderCreated(data, businessCode);
+        return handleOrderCreated(data, businessCode, businessId);
 
       case 'order.updated':
-        return handleOrderUpdated(data, businessCode);
+        return handleOrderUpdated(data, businessCode, businessId);
 
       case 'order.deleted':
         return handleOrderDeleted(data, businessCode);
 
       case 'order.status_changed':
-        return handleStatusChanged(data, businessCode);
+        return handleStatusChanged(data, businessCode, businessId);
 
       case 'order.payment_status_changed':
         return handlePaymentStatusChanged(data, businessCode);

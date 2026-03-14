@@ -69,15 +69,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No businesses with API keys configured' }, { status: 500 });
     }
 
-    // ── Build store → type map from DB ──
+    // ── Build store → type map from DB (keyed by businessId:storeName) ──
     const { data: storeChannelRows } = await svc
       .from('scalev_store_channels')
-      .select('store_name, store_type')
+      .select('store_name, store_type, business_id')
       .eq('is_active', true);
 
     const storeTypeMap = new Map<string, StoreType>();
     for (const row of storeChannelRows || []) {
-      storeTypeMap.set(row.store_name.toLowerCase(), row.store_type as StoreType);
+      storeTypeMap.set(`${row.business_id}:${row.store_name.toLowerCase()}`, row.store_type as StoreType);
     }
 
     // ── Query all pending orders ──
@@ -135,10 +135,12 @@ export async function POST(req: NextRequest) {
       storeToBizId.set(row.store_name.toLowerCase(), row.business_id);
     }
 
-    // business_id → business_code
+    // business_id ↔ business_code
     const bizIdToCode = new Map<number, string>();
+    const bizCodeToId = new Map<string, number>();
     for (const b of businesses) {
       bizIdToCode.set(b.id, b.business_code);
+      bizCodeToId.set(b.business_code, b.id);
     }
 
     let updatedCount = 0;
@@ -174,7 +176,8 @@ export async function POST(req: NextRequest) {
               if (apiOrder) {
                 // Update business_code on the order
                 await svc.from('scalev_orders').update({ business_code: code }).eq('id', dbOrder.id);
-                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, details);
+                dbOrder.business_code = code;
+                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, details);
                 found = true;
                 updatedCount++;
                 break;
@@ -220,7 +223,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, details);
+        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, details);
         if (result === 'updated') updatedCount++;
         else if (result === 'still_pending') stillPendingCount++;
 
@@ -271,6 +274,7 @@ async function processOrder(
   dbOrder: any,
   apiOrder: any,
   storeTypeMap: Map<string, StoreType>,
+  bizCodeToId: Map<string, number>,
   details: any[]
 ): Promise<'updated' | 'still_pending'> {
   const newStatus = apiOrder.status;
@@ -300,7 +304,8 @@ async function processOrder(
 
   // For shipped/completed: enrich line items
   if (newStatus === 'shipped' || newStatus === 'completed') {
-    await enrichLineItems(svc, dbOrder.id, apiOrder, storeTypeMap);
+    const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
+    await enrichLineItems(svc, dbOrder.id, apiOrder, storeTypeMap, bizId);
   }
 
   details.push({
@@ -319,7 +324,8 @@ async function enrichLineItems(
   svc: any,
   dbOrderId: number,
   apiOrder: any,
-  storeTypeMap: Map<string, StoreType>
+  storeTypeMap: Map<string, StoreType>,
+  businessId: number
 ) {
   const shippedTime = apiOrder.shipped_time || apiOrder.completed_time || null;
 
@@ -335,7 +341,7 @@ async function enrichLineItems(
   // 2. Re-derive sales_channel from store_type
   const storeName = (apiOrder.store?.name || '').toLowerCase();
   const isPurchaseFb = apiOrder.is_purchase_fb || false;
-  const storeType = storeTypeMap.get(storeName) ?? guessStoreType(apiOrder.store?.name || '');
+  const storeType = storeTypeMap.get(`${businessId}:${storeName}`) ?? guessStoreType(apiOrder.store?.name || '');
   const newChannel = deriveChannelFromStoreType(storeType, isPurchaseFb, {
     external_id: apiOrder.external_id,
     financial_entity: apiOrder.financial_entity,
