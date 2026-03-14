@@ -10,6 +10,9 @@ export default function ScalevManager() {
   const [apiKey, setApiKey] = useState('');
   const [showApiForm, setShowApiForm] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [pendingCount, setPendingCount] = useState<number>(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<any>(null);
 
   useEffect(() => { loadStatus(); }, []);
 
@@ -18,10 +21,29 @@ export default function ScalevManager() {
       const s = await getScalevStatus();
       setConfigured(s.configured);
       setShowApiForm(!s.configured);
+      setPendingCount(s.pendingOrders);
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleSync() {
+    setSyncing(true);
+    setSyncResult(null);
+    setMessage(null);
+    try {
+      const res = await fetch('/api/scalev-sync', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Sync failed');
+      setSyncResult(data);
+      setMessage({ type: 'success', text: `Sync selesai: ${data.orders_updated} order diperbarui` });
+      await loadStatus();
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    } finally {
+      setSyncing(false);
     }
   }
 
@@ -122,6 +144,43 @@ export default function ScalevManager() {
         >
           Ganti Key
         </button>
+      )}
+
+      {/* Sync Pending Orders */}
+      {configured && (
+        <div style={{ marginTop:16, padding:14, background:'#0c1b3a', border:'1px solid #1e3a5f', borderRadius:8 }}>
+          <div style={{ fontWeight:600, fontSize:13, marginBottom:4 }}>Sinkronisasi Order Pending</div>
+          <div style={{ fontSize:11, color:'#64748b', marginBottom:10 }}>
+            {pendingCount > 0
+              ? `${pendingCount} order masih pending di database. Cek status terbaru dari Scalev API.`
+              : 'Tidak ada order pending.'}
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+            <button
+              onClick={handleSync}
+              disabled={syncing || pendingCount === 0}
+              style={{
+                padding:'7px 14px', borderRadius:8, border:'none', cursor:'pointer',
+                background: syncing ? '#1e3a5f' : '#1e40af',
+                color:'#93c5fd', fontSize:12, fontWeight:600,
+                opacity: (syncing || pendingCount === 0) ? 0.5 : 1,
+              }}
+            >
+              {syncing ? 'Menyinkronkan...' : 'Sinkronkan Sekarang'}
+            </button>
+            <span style={{ fontSize:11, color:'#475569' }}>Cron: setiap hari 02:00 WIB</span>
+          </div>
+          {syncResult && (
+            <div style={{ marginTop:10, padding:10, background:'#0b1121', borderRadius:6, fontSize:12, color:'#94a3b8' }}>
+              <div style={{ marginBottom:4, color:'#e2e8f0' }}>
+                Sync selesai ({(syncResult.duration_ms / 1000).toFixed(1)}s)
+              </div>
+              <div>
+                Dicek: {syncResult.pending_checked} | Diperbarui: {syncResult.orders_updated} | Masih pending: {syncResult.orders_still_pending} | Error: {syncResult.orders_errored}
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

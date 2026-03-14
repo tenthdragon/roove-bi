@@ -23,6 +23,11 @@ export async function getScalevStatus() {
       .select('*', { count: 'exact', head: true })
       .not('shipped_time', 'is', null);
 
+    const { count: pendingOrders } = await svc
+      .from('scalev_orders')
+      .select('*', { count: 'exact', head: true })
+      .eq('status', 'pending');
+
     const { data: lastSync } = await svc
       .from('scalev_sync_log')
       .select('*')
@@ -42,6 +47,7 @@ export async function getScalevStatus() {
       lastSyncId: config?.last_sync_id || 0,
       totalOrders: totalOrders || 0,
       shippedOrders: shippedOrders || 0,
+      pendingOrders: pendingOrders || 0,
       lastSync: lastSync || null,
       recentSyncs: recentSyncs || [],
     };
@@ -53,6 +59,7 @@ export async function getScalevStatus() {
       lastSyncId: 0,
       totalOrders: 0,
       shippedOrders: 0,
+      pendingOrders: 0,
       lastSync: null,
       recentSyncs: [],
     };

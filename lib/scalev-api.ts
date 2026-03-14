@@ -87,16 +87,16 @@ export async function fetchOrderDetail(
   return json.data;
 }
 
+// ── Reseller stores (explicit list, matches webhook route) ──
+export const RESELLER_STORES = [
+  'drhyun reseller store',
+  'purvu dropship',
+  'reseller - dropship',
+  'reseller - mitra offline seller',
+];
+
 // ── Derive sales_channel from order data ──
-// Logic validated against spreadsheet data:
-// - is_purchase_fb=true + platform=scalev → "Scalev Ads"
-// - platform=shopee or store contains shopee → "Shopee"
-// - platform=tiktok or store contains tiktok → "TikTok Shop"
-// - platform=lazada or store contains lazada → "Lazada"
-// - platform=tokopedia → "Tokopedia"
-// - is_reseller → "Reseller"
-// - platform=scalev + no ads → "CS Manual"
-// - else → "CS Manual"
+// Consistent with deriveSalesChannelFromWebhook() in scalev-webhook route
 export function deriveSalesChannel(order: any): string {
   const platform = (order.platform || '').toLowerCase();
   const storeName = (order.store?.name || '').toLowerCase();
@@ -104,32 +104,19 @@ export function deriveSalesChannel(order: any): string {
   const isPurchaseTiktok = order.is_purchase_tiktok || false;
 
   // Marketplace detection (from platform or store name)
-  if (platform === 'shopee' || storeName.includes('shopee')) {
-    return 'Shopee';
-  }
-  if (platform === 'tiktok' || storeName.includes('tiktok')) {
-    return 'TikTok Shop';
-  }
-  if (platform === 'lazada' || storeName.includes('lazada')) {
-    return 'Lazada';
-  }
-  if (platform === 'tokopedia' || storeName.includes('tokopedia')) {
-    return 'Tokopedia';
-  }
+  if (platform === 'shopee' || storeName.includes('shopee')) return 'Shopee';
+  if (platform === 'tiktokshop' || platform === 'tiktok' || storeName.includes('tiktok')) return 'TikTok Shop';
+  if (platform === 'lazada' || storeName.includes('lazada')) return 'Lazada';
+  if (platform === 'tokopedia' || storeName.includes('tokopedia')) return 'Tokopedia';
+  if (platform === 'blibli' || storeName.includes('blibli')) return 'BliBli';
 
-  // Reseller detection
-  if (order.is_reseller_product || order.reseller_transfer_status === 'pending') {
-    return 'Reseller';
-  }
+  // Reseller detection (explicit store list)
+  if (RESELLER_STORES.includes(storeName)) return 'Reseller';
 
   // Scalev platform orders: check if from paid ads
   if (platform === 'scalev' || platform === '') {
-    if (isPurchaseFb) {
-      return 'Scalev Ads';
-    }
-    if (isPurchaseTiktok) {
-      return 'CS Manual';
-    }
+    if (isPurchaseFb) return 'Scalev Ads';
+    if (isPurchaseTiktok) return 'CS Manual';
     return 'CS Manual';
   }
 
