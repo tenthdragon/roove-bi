@@ -316,6 +316,36 @@ export default function ConnectionManager() {
               Sync selesai ({(syncResult.duration_ms / 1000).toFixed(1)}s)
             </span>
             {' — '}Dicek: {syncResult.pending_checked} | Diperbarui: {syncResult.orders_updated} | Pending: {syncResult.orders_still_pending} | Error: {syncResult.orders_errored}
+
+            {/* Error details */}
+            {syncResult.details?.filter((d: any) => d.error).length > 0 && (
+              <div style={{ marginTop: 8, borderTop: '1px solid #1a2744', paddingTop: 8 }}>
+                <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: 4 }}>Detail Error:</div>
+                {syncResult.details.filter((d: any) => d.error).map((d: any, i: number) => (
+                  <div key={i} style={{ color: '#94a3b8', fontSize: 11, padding: '2px 0' }}>
+                    <span style={{ color: '#64748b' }}>[{d.business_code || '?'}]</span>{' '}
+                    <span style={{ color: '#e2e8f0' }}>{d.order_id}</span>{' '}
+                    <span style={{ color: '#475569' }}>({d.store_name || '?'})</span>{' — '}
+                    <span style={{ color: '#ef4444' }}>{d.error}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Updated details */}
+            {syncResult.details?.filter((d: any) => d.new_status).length > 0 && (
+              <div style={{ marginTop: 8, borderTop: '1px solid #1a2744', paddingTop: 8 }}>
+                <div style={{ color: '#10b981', fontWeight: 600, marginBottom: 4 }}>Diperbarui:</div>
+                {syncResult.details.filter((d: any) => d.new_status).map((d: any, i: number) => (
+                  <div key={i} style={{ color: '#94a3b8', fontSize: 11, padding: '2px 0' }}>
+                    <span style={{ color: '#64748b' }}>[{d.business_code || '?'}]</span>{' '}
+                    <span style={{ color: '#e2e8f0' }}>{d.order_id}</span>{' '}
+                    <span style={{ color: '#475569' }}>({d.store_name || '?'})</span>{' → '}
+                    <span style={{ color: '#10b981' }}>{d.new_status}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>

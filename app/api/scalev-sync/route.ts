@@ -153,7 +153,7 @@ export async function POST(req: NextRequest) {
         // Determine Scalev integer ID
         const scalevId = dbOrder.scalev_id || dbOrder.raw_data?.id;
         if (!scalevId) {
-          details.push({ order_id: dbOrder.order_id, error: 'No Scalev ID available' });
+          details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code, error: 'No Scalev ID available' });
           erroredCount++;
           continue;
         }
@@ -184,7 +184,7 @@ export async function POST(req: NextRequest) {
             }
           }
           if (!found) {
-            details.push({ order_id: dbOrder.order_id, error: 'No matching business API key found' });
+            details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code, error: 'No matching business API key found' });
             erroredCount++;
           }
           await new Promise(r => setTimeout(r, 200));
@@ -199,18 +199,18 @@ export async function POST(req: NextRequest) {
           apiOrder = await fetchOrderDetail(config.api_key, config.base_url, String(scalevId));
         } catch (apiErr: any) {
           if (apiErr.message.includes('404')) {
-            details.push({ order_id: dbOrder.order_id, error: `Order not found in Scalev (404) [${bizCode}]` });
+            details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: bizCode, error: `Order not found in Scalev (404)` });
           } else if (apiErr.message.includes('429')) {
             await new Promise(r => setTimeout(r, 2000));
             try {
               apiOrder = await fetchOrderDetail(config.api_key, config.base_url, String(scalevId));
             } catch {
-              details.push({ order_id: dbOrder.order_id, error: `API error after retry: ${apiErr.message}` });
+              details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: bizCode, error: `API error after retry: ${apiErr.message}` });
               erroredCount++;
               continue;
             }
           } else {
-            details.push({ order_id: dbOrder.order_id, error: `API error: ${apiErr.message}` });
+            details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: bizCode, error: `API error: ${apiErr.message}` });
             erroredCount++;
             continue;
           }
@@ -228,7 +228,7 @@ export async function POST(req: NextRequest) {
         await new Promise(r => setTimeout(r, 200));
 
       } catch (err: any) {
-        details.push({ order_id: dbOrder.order_id, error: err.message });
+        details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code, error: err.message });
         errors.push(`${dbOrder.order_id}: ${err.message}`);
         erroredCount++;
       }
@@ -305,6 +305,8 @@ async function processOrder(
 
   details.push({
     order_id: dbOrder.order_id,
+    store_name: dbOrder.store_name,
+    business_code: dbOrder.business_code,
     old_status: 'pending',
     new_status: newStatus,
   });
