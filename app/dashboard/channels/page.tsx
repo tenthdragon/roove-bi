@@ -441,10 +441,11 @@ export default function ChannelsPage() {
       </div>
 
       {/* Combined Daily Sales & Shipments Table */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto', marginBottom: 16 }}>
+      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, marginBottom: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Sales &amp; Shipments</div>
         {dailyCombined.rows.length > 0 ? (
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + dailyCombined.channelNames.length * 130 + 200) }}>
+          <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + dailyCombined.channelNames.length * 130 + 200), width: '100%' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid #1a2744' }}>
                 <th style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>Date</th>
@@ -508,6 +509,7 @@ export default function ChannelsPage() {
               </tr>
             </tbody>
           </table>
+          </div>
         ) : (
           <div style={{ textAlign: 'center', padding: 24, color: '#64748b', fontSize: 12 }}>Tidak ada data harian untuk periode ini.</div>
         )}

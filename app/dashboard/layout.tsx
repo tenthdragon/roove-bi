@@ -559,6 +559,7 @@ export default function DashboardLayout({ children }) {
         {/* ═══ MAIN CONTENT ═══ */}
         <div className="main-content-area" style={{
           flex:1,
+          minWidth:0,
           marginLeft: sidebarW,
           transition:'margin-left 0.2s ease',
           display:'flex',
@@ -606,7 +607,7 @@ export default function DashboardLayout({ children }) {
           </header>
 
           {/* Content */}
-          <main className="dashboard-content" style={{ padding:'16px 20px', maxWidth:1400, width:'100%' }}>
+          <main className="dashboard-content" style={{ padding:'16px 20px', maxWidth:1400, width:'100%', overflowX:'hidden' }}>
             {children}
           </main>
         </div>
