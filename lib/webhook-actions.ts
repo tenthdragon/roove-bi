@@ -2,6 +2,7 @@
 'use server';
 
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-server';
+import { fetchStoreList, guessStoreType } from '@/lib/scalev-api';
 
 // ── Auth helper: require owner role ──
 async function requireOwner() {
@@ -25,7 +26,7 @@ export async function getWebhookBusinesses() {
 
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
-    .select('id, business_code, business_name, is_active, created_at, updated_at')
+    .select('id, business_code, business_name, is_active, api_key, created_at, updated_at')
     .order('business_code', { ascending: true });
 
   if (error) throw error;
@@ -43,6 +44,8 @@ export async function getWebhookBusinesses() {
 
     businesses.push({
       ...biz,
+      has_api_key: !!biz.api_key,
+      api_key: undefined, // Never expose raw API key to client
       last_webhook_at: lastSync?.completed_at || null,
       last_sync_type: lastSync?.sync_type || null,
     });
@@ -57,6 +60,7 @@ export async function saveWebhookBusiness(input: {
   business_code: string;
   business_name: string;
   webhook_secret: string;
+  api_key?: string;
 }) {
   await requireOwner();
   const svc = createServiceSupabase();
@@ -64,6 +68,7 @@ export async function saveWebhookBusiness(input: {
   const code = input.business_code.trim().toUpperCase();
   const name = input.business_name.trim();
   const secret = input.webhook_secret.trim();
+  const apiKey = (input.api_key || '').trim();
 
   // For new entries, all fields required. For edits, secret is optional.
   if (!code || !name) {
@@ -88,6 +93,9 @@ export async function saveWebhookBusiness(input: {
     if (secret && secret !== 'unchanged') {
       updateData.webhook_secret = secret;
     }
+    if (apiKey && apiKey !== 'unchanged') {
+      updateData.api_key = apiKey;
+    }
 
     const { error } = await svc
       .from('scalev_webhook_businesses')
@@ -100,13 +108,16 @@ export async function saveWebhookBusiness(input: {
     }
   } else {
     // Insert new
+    const insertData: Record<string, any> = {
+      business_code: code,
+      business_name: name,
+      webhook_secret: secret,
+    };
+    if (apiKey) insertData.api_key = apiKey;
+
     const { error } = await svc
       .from('scalev_webhook_businesses')
-      .insert({
-        business_code: code,
-        business_name: name,
-        webhook_secret: secret,
-      });
+      .insert(insertData);
 
     if (error) {
       if (error.code === '23505') throw new Error(`Business code "${code}" sudah digunakan`);
@@ -143,4 +154,130 @@ export async function deleteWebhookBusiness(id: number) {
 
   if (error) throw error;
   return { success: true };
+}
+
+// ── List store channels for a business ──
+export async function getStoreChannels(businessId: number) {
+  const svc = createServiceSupabase();
+
+  const { data, error } = await svc
+    .from('scalev_store_channels')
+    .select('id, store_name, store_type, is_active, created_at')
+    .eq('business_id', businessId)
+    .order('store_name', { ascending: true });
+
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Create or update a store channel mapping ──
+export async function saveStoreChannel(input: {
+  id?: number;
+  business_id: number;
+  store_name: string;
+  store_type: string;
+}) {
+  await requireOwner();
+  const svc = createServiceSupabase();
+
+  const storeName = input.store_name.trim();
+  const storeType = input.store_type.trim();
+
+  if (!storeName || !storeType) {
+    throw new Error('Store name dan store type wajib diisi');
+  }
+  if (!['marketplace', 'scalev', 'reseller'].includes(storeType)) {
+    throw new Error('Store type harus marketplace, scalev, atau reseller');
+  }
+
+  if (input.id) {
+    const { error } = await svc
+      .from('scalev_store_channels')
+      .update({ store_name: storeName, store_type: storeType })
+      .eq('id', input.id);
+
+    if (error) {
+      if (error.code === '23505') throw new Error(`Store "${storeName}" sudah terdaftar di business ini`);
+      throw error;
+    }
+  } else {
+    const { error } = await svc
+      .from('scalev_store_channels')
+      .insert({ business_id: input.business_id, store_name: storeName, store_type: storeType });
+
+    if (error) {
+      if (error.code === '23505') throw new Error(`Store "${storeName}" sudah terdaftar di business ini`);
+      throw error;
+    }
+  }
+
+  return { success: true };
+}
+
+// ── Toggle store channel active status ──
+export async function toggleStoreChannel(id: number, isActive: boolean) {
+  await requireOwner();
+  const svc = createServiceSupabase();
+
+  const { error } = await svc
+    .from('scalev_store_channels')
+    .update({ is_active: isActive })
+    .eq('id', id);
+
+  if (error) throw error;
+  return { success: true };
+}
+
+// ── Delete a store channel mapping ──
+export async function deleteStoreChannel(id: number) {
+  await requireOwner();
+  const svc = createServiceSupabase();
+
+  const { error } = await svc
+    .from('scalev_store_channels')
+    .delete()
+    .eq('id', id);
+
+  if (error) throw error;
+  return { success: true };
+}
+
+// ── Fetch stores from Scalev API and auto-insert ──
+export async function fetchStoresFromScalev(businessId: number) {
+  await requireOwner();
+  const svc = createServiceSupabase();
+
+  // Get API key for this business
+  const { data: biz, error: bizErr } = await svc
+    .from('scalev_webhook_businesses')
+    .select('id, api_key, business_code')
+    .eq('id', businessId)
+    .single();
+
+  if (bizErr || !biz) throw new Error('Business tidak ditemukan');
+  if (!biz.api_key) throw new Error('API key belum diisi untuk business ini');
+
+  // Fetch stores from Scalev API
+  const stores = await fetchStoreList(biz.api_key, 'https://api.scalev.id/v2');
+
+  let inserted = 0;
+  let skipped = 0;
+
+  for (const store of stores) {
+    const storeType = guessStoreType(store.name);
+    const { error } = await svc
+      .from('scalev_store_channels')
+      .upsert(
+        { business_id: businessId, store_name: store.name, store_type: storeType },
+        { onConflict: 'business_id,store_name', ignoreDuplicates: true }
+      );
+
+    if (error) {
+      skipped++;
+    } else {
+      inserted++;
+    }
+  }
+
+  return { success: true, total: stores.length, inserted, skipped };
 }

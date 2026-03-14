@@ -8,11 +8,12 @@ export async function getScalevStatus() {
   try {
     const svc = createServiceSupabase();
 
-    const { data: config } = await svc
-      .from('scalev_config')
-      .select('id, base_url, is_active, last_sync_id, updated_at')
+    // Check if any businesses have API keys configured
+    const { count: bizWithApiKeys } = await svc
+      .from('scalev_webhook_businesses')
+      .select('*', { count: 'exact', head: true })
       .eq('is_active', true)
-      .maybeSingle();
+      .not('api_key', 'is', null);
 
     const { count: totalOrders } = await svc
       .from('scalev_orders')
@@ -42,9 +43,8 @@ export async function getScalevStatus() {
       .limit(5);
 
     return {
-      configured: !!config,
-      configId: config?.id || null,
-      lastSyncId: config?.last_sync_id || 0,
+      configured: (bizWithApiKeys || 0) > 0,
+      businessesWithApiKeys: bizWithApiKeys || 0,
       totalOrders: totalOrders || 0,
       shippedOrders: shippedOrders || 0,
       pendingOrders: pendingOrders || 0,
@@ -55,8 +55,7 @@ export async function getScalevStatus() {
     console.error('getScalevStatus error:', err.message);
     return {
       configured: false,
-      configId: null,
-      lastSyncId: 0,
+      businessesWithApiKeys: 0,
       totalOrders: 0,
       shippedOrders: 0,
       pendingOrders: 0,

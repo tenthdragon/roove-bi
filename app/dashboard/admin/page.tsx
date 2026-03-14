@@ -7,12 +7,12 @@ import { useSupabase } from '@/lib/supabase-browser';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
 import { invalidateAll } from '@/lib/dashboard-cache';
 import SheetManager from '@/components/SheetManager';
-import ScalevManager from '@/components/ScalevManager';
+import ConnectionManager from '@/components/ConnectionManager';
 import FinancialSheetManager from '@/components/FinancialSheetManager';
 import CsvOrderUploader from '@/components/CsvOrderUploader';
 import BrandManager from '@/components/BrandManager';
 import MetaManager from '@/components/MetaManager';
-import WebhookManager from '@/components/WebhookManager';
+// WebhookManager merged into ConnectionManager
 import WarehouseSheetManager from '@/components/WarehouseSheetManager';
 
 const TABS = [
@@ -21,7 +21,7 @@ const TABS = [
   { id: 'financial', label: 'Financial' },
   { id: 'warehouse', label: 'Warehouse' },
   { id: 'brands', label: 'Brands' },
-  { id: 'scalev', label: 'Scalev API' },
+  { id: 'connection', label: 'Connection' },
   { id: 'data_ref', label: 'Data Reference' },
   { id: 'users', label: 'Users' },
   { id: 'logs', label: 'Logs' },
@@ -502,11 +502,8 @@ export default function AdminPage() {
       )}
 
       {/* ═══ TAB: SCALEV API ═══ */}
-      {activeTab === 'scalev' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <ScalevManager />
-          <WebhookManager />
-        </div>
+      {activeTab === 'connection' && (
+        <ConnectionManager />
       )}
 
       {/* ═══ TAB: DATA REFERENCE ═══ */}

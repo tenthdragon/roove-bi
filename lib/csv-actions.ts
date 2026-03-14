@@ -47,33 +47,15 @@ function deriveBrandFromStore(storeName: string, brands: BrandKeyword[]): string
   return 'Unknown';
 }
 
-// ── Reseller stores (explicit list, must match webhook route.ts) ──
-const RESELLER_STORES = [
-  'drhyun reseller store',
-  'purvu dropship',
-  'reseller - dropship',
-  'reseller - mitra offline seller',
-];
+import { guessStoreType, deriveChannelFromStoreType } from '@/lib/scalev-api';
 
 function deriveSalesChannel(row: Record<string, string>): string {
-  const platform = (row.platform || '').toLowerCase();
-  const storeName = (row.store || '').toLowerCase();
+  const storeType = guessStoreType(row.store || '');
   const isPurchaseFb = row.is_purchase_fb === 'true';
-  const isPurchaseTiktok = row.is_purchase_tiktok === 'true';
-
-  if (platform === 'shopee' || storeName.includes('shopee')) return 'Shopee';
-  if (platform === 'tiktokshop' || platform === 'tiktok' || storeName.includes('tiktok')) return 'TikTok Shop';
-  if (platform === 'lazada' || storeName.includes('lazada')) return 'Lazada';
-  if (platform === 'tokopedia' || storeName.includes('tokopedia')) return 'Tokopedia';
-  if (platform === 'blibli' || storeName.includes('blibli')) return 'BliBli';
-  if (RESELLER_STORES.includes(storeName)) return 'Reseller';
-
-  if (platform === 'scalev' || platform === '') {
-    if (isPurchaseFb) return 'Scalev Ads';
-    if (isPurchaseTiktok) return 'CS Manual';
-    return 'CS Manual';
-  }
-  return 'CS Manual';
+  return deriveChannelFromStoreType(storeType, isPurchaseFb, {
+    platform: row.platform,
+    external_id: row.external_id,
+  });
 }
 
 export async function uploadCsvOrders(formData: FormData) {

@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { triggerViewRefresh } from '@/lib/refresh-views';
+import { deriveChannelFromStoreType, guessStoreType, type StoreType } from '@/lib/scalev-api';
 
 function getServiceSupabase() {
   return createClient(
@@ -22,6 +23,78 @@ type BusinessSecret = { code: string; name: string; secret: string };
 let cachedSecrets: BusinessSecret[] | null = null;
 let cacheExpiry = 0;
 const CACHE_TTL_MS = 60_000; // 60 seconds
+
+// ── Store type cache (DB-based store_type lookup) ──
+let cachedStoreTypes: Map<string, StoreType> | null = null;
+let storeTypeCacheExpiry = 0;
+
+async function getStoreTypeMap(): Promise<Map<string, StoreType>> {
+  if (cachedStoreTypes && Date.now() < storeTypeCacheExpiry) {
+    return cachedStoreTypes;
+  }
+  try {
+    const svc = getServiceSupabase();
+    const { data } = await svc
+      .from('scalev_store_channels')
+      .select('store_name, store_type')
+      .eq('is_active', true);
+
+    cachedStoreTypes = new Map();
+    for (const row of data || []) {
+      cachedStoreTypes.set(row.store_name.toLowerCase(), row.store_type as StoreType);
+    }
+    storeTypeCacheExpiry = Date.now() + CACHE_TTL_MS;
+    return cachedStoreTypes;
+  } catch {
+    return new Map();
+  }
+}
+
+// ── Derive channel using store_type from DB, fallback to guessed store_type ──
+async function deriveChannelWithDbLookup(data: any): Promise<string> {
+  const storeName = (data.store?.name || '').toLowerCase();
+  const isPurchaseFb = data.is_purchase_fb === true || data.is_purchase_fb === 'true'
+    || !!(data.message_variables?.advertiser || '').trim();
+
+  const storeTypes = await getStoreTypeMap();
+  const storeType = storeTypes.get(storeName) ?? guessStoreType(data.store?.name || '');
+
+  return deriveChannelFromStoreType(storeType, isPurchaseFb, {
+    external_id: data.external_id,
+    financial_entity: data.financial_entity,
+    raw_data: data,
+    courier_service: data.courier_service,
+    platform: data.platform,
+  });
+}
+
+// ── Auto-register unknown store in scalev_store_channels ──
+async function autoRegisterStore(storeName: string, businessCode: string) {
+  if (!storeName) return;
+  const storeTypes = await getStoreTypeMap();
+  if (storeTypes.has(storeName.toLowerCase())) return;
+
+  try {
+    const svc = getServiceSupabase();
+    const { data: biz } = await svc
+      .from('scalev_webhook_businesses')
+      .select('id')
+      .eq('business_code', businessCode)
+      .single();
+    if (!biz) return;
+
+    const storeType = guessStoreType(storeName);
+
+    await svc.from('scalev_store_channels').upsert(
+      { business_id: biz.id, store_name: storeName, store_type: storeType },
+      { onConflict: 'business_id,store_name', ignoreDuplicates: true }
+    );
+    cachedStoreTypes = null;
+    console.log(`[scalev-webhook] Auto-registered store "${storeName}" for ${businessCode} → ${storeType}`);
+  } catch (err: any) {
+    console.warn(`[scalev-webhook] Failed to auto-register store "${storeName}":`, err.message);
+  }
+}
 
 async function getBusinessSecretsFromDB(): Promise<BusinessSecret[]> {
   try {
@@ -297,49 +370,13 @@ function derivePlatformFromStore(storeName: string, externalId?: string, webhook
   return 'scalev';
 }
 
-// ── Reseller stores (explicit list) ──
-const RESELLER_STORES = [
-  'drhyun reseller store',
-  'purvu dropship',
-  'reseller - dropship',
-  'reseller - mitra offline seller',
-];
-
-// ── Sales channel derivation from webhook data (mirrors csv-actions.ts) ──
-function deriveSalesChannelFromWebhook(data: any): string {
-  const storeName = (data.store?.name || '').toLowerCase();
-  const platform = derivePlatformFromStore(data.store?.name || '', data.external_id, data);
-
-  if (platform === 'shopee') return 'Shopee';
-  if (platform === 'tiktokshop') return 'TikTok Shop';
-  if (platform === 'lazada') return 'Lazada';
-  if (platform === 'tokopedia') return 'Tokopedia';
-  if (platform === 'blibli') return 'BliBli';
-  if (platform === 'marketplace') return 'Marketplace';
-
-  if (RESELLER_STORES.includes(storeName)) return 'Reseller';
-
-  if (data.is_purchase_fb === true || data.is_purchase_fb === 'true') return 'Scalev Ads';
-  if (data.is_purchase_tiktok === true || data.is_purchase_tiktok === 'true') return 'CS Manual';
-
-  // Webhook doesn't send is_purchase_fb — use message_variables.advertiser as fallback.
-  // BUT only if is_purchase_fb is not explicitly set (undefined/null).
-  // If CSV already set is_purchase_fb=false, respect that (CSV is source of truth).
-  if (data.is_purchase_fb == null) {
-    const advertiser = (data.message_variables?.advertiser || '').trim();
-    if (advertiser) return 'Scalev Ads';
-  }
-
-  return 'CS Manual';
-}
-
 // ── Build enriched order lines from webhook orderlines payload ──
 async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any): Promise<any[]> {
   if (!data.orderlines || !Array.isArray(data.orderlines) || data.orderlines.length === 0) {
     return [];
   }
 
-  const salesChannel = deriveSalesChannelFromWebhook(data);
+  const salesChannel = await deriveChannelWithDbLookup(data);
   const shippedTime = ts(data.shipped_time) || ts(data.completed_time) || null;
   const tax = await getTaxRate('PPN');
 
@@ -452,6 +489,9 @@ async function handleOrderCreated(data: any, businessCode: string) {
     console.error(`[scalev-webhook][${businessCode}] order.created insert error for ${orderId}:`, insertErr.message);
     return NextResponse.json({ error: 'DB insert failed' }, { status: 500 });
   }
+
+  // Auto-register unknown store
+  await autoRegisterStore(storeName || '', businessCode);
 
   // Insert enriched order lines (with financial data) if present
   if (inserted) {
@@ -619,7 +659,7 @@ async function handleStatusChanged(data: any, businessCode: string) {
 
         // Re-derive sales_channel for lines that don't match current purchase flags
         // (handles misclassification from prior order.updated that changed flags without updating lines)
-        const correctChannel = deriveSalesChannelFromWebhook({
+        const correctChannel = await deriveChannelWithDbLookup({
           store: { name: orderData.store_name },
           external_id: orderData.external_id,
           is_purchase_fb: orderData.is_purchase_fb,
@@ -832,7 +872,7 @@ async function handleOrderUpdated(data: any, businessCode: string) {
       .single();
 
     if (updatedOrder) {
-      const correctChannel = deriveSalesChannelFromWebhook({
+      const correctChannel = await deriveChannelWithDbLookup({
         store: { name: updatedOrder.store_name },
         external_id: updatedOrder.external_id,
         is_purchase_fb: updatedOrder.is_purchase_fb,

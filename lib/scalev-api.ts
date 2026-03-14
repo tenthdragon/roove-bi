@@ -87,40 +87,113 @@ export async function fetchOrderDetail(
   return json.data;
 }
 
-// ── Reseller stores (explicit list, matches webhook route) ──
-export const RESELLER_STORES = [
-  'drhyun reseller store',
-  'purvu dropship',
-  'reseller - dropship',
-  'reseller - mitra offline seller',
-];
+// ── Store type system ──
+export type StoreType = 'marketplace' | 'scalev' | 'reseller';
 
-// ── Derive sales_channel from order data ──
-// Consistent with deriveSalesChannelFromWebhook() in scalev-webhook route
-export function deriveSalesChannel(order: any): string {
-  const platform = (order.platform || '').toLowerCase();
-  const storeName = (order.store?.name || '').toLowerCase();
-  const isPurchaseFb = order.is_purchase_fb || false;
-  const isPurchaseTiktok = order.is_purchase_tiktok || false;
+// Guess store_type from store name (for auto-register & API fetch)
+export function guessStoreType(storeName: string): StoreType {
+  const lower = (storeName || '').toLowerCase();
+  if (lower.includes('marketplace') || lower.includes('markerplace')
+    || lower.includes('shopee') || lower.includes('tiktok')
+    || lower.includes('lazada') || lower.includes('tokopedia')
+    || lower.includes('blibli')) {
+    return 'marketplace';
+  }
+  if (lower.includes('reseller') || lower.includes('dropship') || lower.includes('mitra')) {
+    return 'reseller';
+  }
+  return 'scalev';
+}
 
-  // Marketplace detection (from platform or store name)
-  if (platform === 'shopee' || storeName.includes('shopee')) return 'Shopee';
-  if (platform === 'tiktokshop' || platform === 'tiktok' || storeName.includes('tiktok')) return 'TikTok Shop';
-  if (platform === 'lazada' || storeName.includes('lazada')) return 'Lazada';
-  if (platform === 'tokopedia' || storeName.includes('tokopedia')) return 'Tokopedia';
-  if (platform === 'blibli' || storeName.includes('blibli')) return 'BliBli';
+// Detect specific marketplace from order data (for marketplace store_type)
+export function detectMarketplace(orderData: {
+  external_id?: string;
+  financial_entity?: { code?: string };
+  raw_data?: { financial_entity?: { code?: string } };
+  courier_service?: any;
+  courier?: string;
+  platform?: string;
+}): string {
+  // 1. financial_entity.code (most reliable)
+  const feCode = (
+    orderData.financial_entity?.code
+    || orderData.raw_data?.financial_entity?.code
+    || ''
+  ).toLowerCase();
+  if (feCode === 'shopee') return 'Shopee';
+  if (feCode === 'tiktokshop') return 'TikTok Shop';
+  if (feCode === 'lazada') return 'Lazada';
+  if (feCode === 'blibli') return 'BliBli';
+  if (feCode === 'tokopedia') return 'Tokopedia';
 
-  // Reseller detection (explicit store list)
-  if (RESELLER_STORES.includes(storeName)) return 'Reseller';
+  // 2. platform field (CSV/API)
+  const platform = (orderData.platform || '').toLowerCase();
+  if (platform === 'shopee') return 'Shopee';
+  if (platform === 'tiktokshop' || platform === 'tiktok') return 'TikTok Shop';
+  if (platform === 'lazada') return 'Lazada';
+  if (platform === 'tokopedia') return 'Tokopedia';
+  if (platform === 'blibli') return 'BliBli';
 
-  // Scalev platform orders: check if from paid ads
-  if (platform === 'scalev' || platform === '') {
-    if (isPurchaseFb) return 'Scalev Ads';
-    if (isPurchaseTiktok) return 'CS Manual';
-    return 'CS Manual';
+  // 3. external_id digit patterns
+  const eid = (orderData.external_id || '').trim();
+  if (/^\d+$/.test(eid)) {
+    const len = eid.length;
+    if (len >= 17) return 'TikTok Shop';
+    if (len >= 15) return 'Lazada';
+    if (len >= 10) return 'Shopee';
   }
 
-  return 'CS Manual';
+  // 4. courier code
+  const courierCode = (
+    orderData.courier_service?.courier?.code
+    || orderData.courier_service?.courier?.name
+    || orderData.courier
+    || ''
+  ).toLowerCase();
+  if (courierCode.includes('shopee')) return 'Shopee';
+  if (courierCode.includes('tiktok')) return 'TikTok Shop';
+  if (courierCode.includes('lazada')) return 'Lazada';
+  if (courierCode.includes('blibli')) return 'BliBli';
+  if (courierCode.includes('tokopedia')) return 'Tokopedia';
+
+  // 5. Fallback
+  return 'Marketplace';
+}
+
+// Derive channel from store_type + order data
+export function deriveChannelFromStoreType(
+  storeType: StoreType,
+  isPurchaseFb: boolean,
+  orderData: {
+    external_id?: string;
+    financial_entity?: { code?: string };
+    raw_data?: { financial_entity?: { code?: string } };
+    courier_service?: any;
+    courier?: string;
+    platform?: string;
+  }
+): string {
+  switch (storeType) {
+    case 'marketplace':
+      return detectMarketplace(orderData);
+    case 'reseller':
+      return 'Reseller';
+    case 'scalev':
+      return isPurchaseFb ? 'Scalev Ads' : 'CS Manual';
+  }
+}
+
+// ── Derive sales_channel from order data (no DB lookup) ──
+export function deriveSalesChannel(order: any): string {
+  const storeType = guessStoreType(order.store?.name || '');
+  const isPurchaseFb = order.is_purchase_fb || false;
+  return deriveChannelFromStoreType(storeType, isPurchaseFb, {
+    external_id: order.external_id,
+    financial_entity: order.financial_entity,
+    raw_data: order.raw_data,
+    courier_service: order.courier_service,
+    platform: order.platform,
+  });
 }
 
 // ── Product type lookup with fallback chain ──
@@ -199,6 +272,73 @@ export async function lookupProductType(productName: string): Promise<string> {
   }
 
   return 'Unknown';
+}
+
+// ── Fetch store list from Scalev API ──
+export async function fetchStoreList(
+  apiKey: string,
+  baseUrl: string
+): Promise<{ id: number; name: string; uuid: string }[]> {
+  const allStores: { id: number; name: string; uuid: string }[] = [];
+  let lastId = 0;
+  let hasNext = true;
+
+  while (hasNext) {
+    let url = `${baseUrl}/stores?page_size=25`;
+    if (lastId > 0) url += `&last_id=${lastId}`;
+
+    const res = await fetch(url, {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Scalev API error ${res.status}: ${await res.text()}`);
+    }
+
+    const json = await res.json();
+    if (json.code !== 200) {
+      throw new Error(`Scalev API returned code ${json.code}: ${json.status}`);
+    }
+
+    const results = json.data?.results || [];
+    for (const store of results) {
+      allStores.push({
+        id: store.id,
+        name: store.name,
+        uuid: store.uuid || '',
+      });
+    }
+
+    hasNext = json.data?.has_next || false;
+    lastId = json.data?.last_id || 0;
+  }
+
+  return allStores;
+}
+
+// ── Get all active businesses with API keys ──
+export async function getBusinessConfigs(): Promise<{
+  id: number;
+  business_code: string;
+  api_key: string;
+  base_url: string;
+}[]> {
+  const svc = getServiceSupabase();
+  const { data, error } = await svc
+    .from('scalev_webhook_businesses')
+    .select('id, business_code, api_key')
+    .eq('is_active', true)
+    .not('api_key', 'is', null);
+
+  if (error) throw error;
+  return (data || [])
+    .filter(b => b.api_key)
+    .map(b => ({
+      id: b.id,
+      business_code: b.business_code,
+      api_key: b.api_key,
+      base_url: 'https://api.scalev.id/v2',
+    }));
 }
 
 // ── Parse order data into DB-ready format ──
