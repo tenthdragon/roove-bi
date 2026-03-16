@@ -329,14 +329,15 @@ export async function POST(req: NextRequest) {
     let repairedCount = 0;
     if (syncMode === 'full') try {
       const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-      const { data: shippedOrders } = await svc
+      // First pass: get shipped order IDs only (no raw_data — lightweight)
+      const { data: shippedOrdersLight } = await svc
         .from('scalev_orders')
-        .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
+        .select('id')
         .in('status', ['shipped', 'completed'])
         .gte('shipped_time', cutoff);
 
-      // Batch-check which shipped orders have lines (1 query instead of N)
-      const shippedIds = (shippedOrders || []).map(o => o.id);
+      // Batch-check which have lines (1 query instead of N)
+      const shippedIds = (shippedOrdersLight || []).map(o => o.id);
       const idsWithLines = new Set<number>();
       if (shippedIds.length > 0) {
         const { data: withLines } = await svc
@@ -346,9 +347,18 @@ export async function POST(req: NextRequest) {
         for (const r of withLines || []) idsWithLines.add(r.scalev_order_id);
       }
 
-      for (const order of shippedOrders || []) {
-        if (idsWithLines.has(order.id)) continue;
+      // Only fetch full data for orders that need repair
+      const needRepairIds = shippedIds.filter(id => !idsWithLines.has(id));
+      let shippedOrders: any[] = [];
+      if (needRepairIds.length > 0) {
+        const { data } = await svc
+          .from('scalev_orders')
+          .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
+          .in('id', needRepairIds);
+        shippedOrders = data || [];
+      }
 
+      for (const order of shippedOrders) {
         // Try to insert lines from raw_data first
         const rawData = order.raw_data;
         if (rawData?.orderlines?.length > 0) {
