@@ -289,7 +289,7 @@ export async function uploadCsvOrders(formData: FormData) {
         }
         for (let j = 0; j < lineBatch.length; j += 500) {
           const subBatch = lineBatch.slice(j, j + 500);
-          const { error: lineErr } = await svc.from('scalev_order_lines').insert(subBatch);
+          const { error: lineErr } = await svc.from('scalev_order_lines').upsert(subBatch, { onConflict: 'scalev_order_id,product_name' });
           if (lineErr) stats.errors.push(`Lines batch: ${lineErr.message}`);
         }
       }
@@ -304,7 +304,7 @@ export async function uploadCsvOrders(formData: FormData) {
         const dbId = insertedIdMap[orderId];
         if (!dbId) continue;
         const lineBatch = lines.map(line => ({ ...line, scalev_order_id: dbId }));
-        const { error: lineErr } = await svc.from('scalev_order_lines').insert(lineBatch);
+        const { error: lineErr } = await svc.from('scalev_order_lines').upsert(lineBatch, { onConflict: 'scalev_order_id,product_name' });
         if (lineErr) stats.errors.push(`Lines ${orderId}: ${lineErr.message}`);
       } else {
         // Existing order — update sales_channel & purchase flags on existing line items

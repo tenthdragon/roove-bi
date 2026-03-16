@@ -505,7 +505,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   if (inserted) {
     const lines = await buildEnrichedLines(orderId, inserted.id, data, businessId);
     if (lines.length > 0) {
-      const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
+      const { error: lineErr } = await svc.from('scalev_order_lines').upsert(lines, { onConflict: 'scalev_order_id,product_name' });
       if (lineErr) {
         console.warn(`[scalev-webhook][${businessCode}] order.created lines insert error for ${orderId}:`, lineErr.message);
       }
@@ -718,7 +718,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
             is_purchase_kwai: orderData.is_purchase_kwai,
           }, businessId);
           if (enrichedLines.length > 0) {
-            const { error: reInsertErr } = await svc.from('scalev_order_lines').insert(enrichedLines);
+            const { error: reInsertErr } = await svc.from('scalev_order_lines').upsert(enrichedLines, { onConflict: 'scalev_order_id,product_name' });
             if (reInsertErr) {
               console.warn(`[scalev-webhook][${businessCode}] status_changed: re-enrich lines error for ${orderId}:`, reInsertErr.message);
             } else {
@@ -743,7 +743,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
             is_purchase_kwai: orderData.is_purchase_kwai,
           }, businessId);
           if (newLines.length > 0) {
-            const { error: insertErr } = await svc.from('scalev_order_lines').insert(newLines);
+            const { error: insertErr } = await svc.from('scalev_order_lines').upsert(newLines, { onConflict: 'scalev_order_id,product_name' });
             if (insertErr) {
               console.warn(`[scalev-webhook][${businessCode}] status_changed: insert missing lines error for ${orderId}:`, insertErr.message);
             } else {
@@ -864,7 +864,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
 
     const lines = await buildEnrichedLines(orderId, existing.id, data, businessId);
     if (lines.length > 0) {
-      const { error: lineErr } = await svc.from('scalev_order_lines').insert(lines);
+      const { error: lineErr } = await svc.from('scalev_order_lines').upsert(lines, { onConflict: 'scalev_order_id,product_name' });
       if (lineErr) {
         console.warn(`[scalev-webhook][${businessCode}] order.updated lines replace error for ${orderId}:`, lineErr.message);
       }
