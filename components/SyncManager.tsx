@@ -72,6 +72,10 @@ export default function SyncManager() {
         throw new Error(fetchErr.name === 'AbortError' ? 'Timeout: server tidak merespons dalam 130 detik' : fetchErr.message);
       }
       clearTimeout(timeout);
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        throw new Error(res.status === 504 ? 'Server timeout (504) — coba sync lebih sedikit order' : `Server error ${res.status}`);
+      }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Sync gagal');
       setSyncResult(data);
