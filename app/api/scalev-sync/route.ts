@@ -36,13 +36,21 @@ export async function POST(req: NextRequest) {
     const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
 
     if (!isCron) {
-      const { createServerSupabase } = await import('@/lib/supabase-server');
-      const supabase = createServerSupabase();
-      const { data: { user } } = await supabase.auth.getUser();
+      let user: any = null;
+      try {
+        const { createServerSupabase } = await import('@/lib/supabase-server');
+        const supabase = createServerSupabase();
+        const { data } = await supabase.auth.getUser();
+        user = data?.user;
+      } catch (authErr: any) {
+        console.error('[scalev-sync] Auth error:', authErr.message);
+        return NextResponse.json({ error: 'Sesi kedaluwarsa, silakan refresh halaman' }, { status: 401 });
+      }
       if (!user) {
         return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
       }
-      const { data: profile } = await supabase
+      const svcAuth = getServiceSupabase();
+      const { data: profile } = await svcAuth
         .from('profiles')
         .select('role')
         .eq('id', user.id)
