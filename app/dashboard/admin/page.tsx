@@ -8,6 +8,7 @@ import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
 import { invalidateAll } from '@/lib/dashboard-cache';
 import SheetManager from '@/components/SheetManager';
 import ConnectionManager from '@/components/ConnectionManager';
+import SyncManager from '@/components/SyncManager';
 import FinancialSheetManager from '@/components/FinancialSheetManager';
 import CsvOrderUploader from '@/components/CsvOrderUploader';
 import BrandManager from '@/components/BrandManager';
@@ -22,6 +23,7 @@ const TABS = [
   { id: 'warehouse', label: 'Warehouse' },
   { id: 'brands', label: 'Brands' },
   { id: 'connection', label: 'Connection' },
+  { id: 'sync', label: 'Sync' },
   { id: 'data_ref', label: 'Data Reference' },
   { id: 'users', label: 'Users' },
   { id: 'logs', label: 'Logs' },
@@ -546,6 +548,11 @@ export default function AdminPage() {
       {/* ═══ TAB: SCALEV API ═══ */}
       {activeTab === 'connection' && (
         <ConnectionManager />
+      )}
+
+      {/* ═══ TAB: SYNC ═══ */}
+      {activeTab === 'sync' && (
+        <SyncManager />
       )}
 
       {/* ═══ TAB: DATA REFERENCE ═══ */}

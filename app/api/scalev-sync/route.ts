@@ -61,6 +61,29 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Parse optional body for targeted sync ──
+    let syncMode: 'full' | 'date' | 'order_id' = 'full';
+    let targetDate: string | null = null;
+    let targetStatusFilter: string | null = null;
+    let targetOrderIds: string[] | null = null;
+
+    try {
+      const ct = req.headers.get('content-type');
+      if (ct?.includes('application/json')) {
+        const body = await req.json();
+        if (body.mode === 'date' && body.date) {
+          syncMode = 'date';
+          targetDate = body.date;
+          targetStatusFilter = body.status_filter || 'pending';
+        } else if (body.mode === 'order_id' && body.order_ids?.length > 0) {
+          syncMode = 'order_id';
+          targetOrderIds = body.order_ids;
+        }
+      }
+    } catch {
+      // No body or invalid JSON — full sync
+    }
+
     const svc = getServiceSupabase();
 
     // ── Get all active businesses with API keys ──
@@ -102,21 +125,49 @@ export async function POST(req: NextRequest) {
       storeTypeMap.set(`${row.business_id}:${row.store_name.toLowerCase()}`, row.store_type as StoreType);
     }
 
-    // ── Query all non-terminal orders (pending, ready, draft, confirmed, paid) ──
-    const { data: pendingOrders, error: queryErr } = await svc
-      .from('scalev_orders')
-      .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
-      .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid']);
+    // ── Query orders based on sync mode ──
+    let pendingOrders: any[] = [];
 
-    if (queryErr) throw queryErr;
+    if (syncMode === 'order_id' && targetOrderIds) {
+      const { data, error } = await svc
+        .from('scalev_orders')
+        .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
+        .in('order_id', targetOrderIds);
+      if (error) throw error;
+      pendingOrders = data || [];
+    } else if (syncMode === 'date' && targetDate) {
+      const dayStart = `${targetDate}T00:00:00+07:00`;
+      const dayEnd = `${targetDate}T23:59:59+07:00`;
+      let query = svc
+        .from('scalev_orders')
+        .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
+        .gte('pending_time', dayStart)
+        .lte('pending_time', dayEnd);
+      if (targetStatusFilter === 'pending') {
+        query = query.in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid']);
+      } else if (targetStatusFilter === 'shipped') {
+        query = query.in('status', ['shipped', 'completed']);
+      }
+      // 'all' = no status filter
+      const { data, error } = await query;
+      if (error) throw error;
+      pendingOrders = data || [];
+    } else {
+      const { data, error } = await svc
+        .from('scalev_orders')
+        .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
+        .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid']);
+      if (error) throw error;
+      pendingOrders = data || [];
+    }
 
     // ── Insert sync log ──
     const { data: logEntry } = await svc
       .from('scalev_sync_log')
       .insert({
         status: 'running',
-        sync_type: 'pending_reconcile',
-        orders_fetched: (pendingOrders || []).length,
+        sync_type: syncMode === 'full' ? 'pending_reconcile' : `targeted_${syncMode}`,
+        orders_fetched: pendingOrders.length,
         orders_updated: 0,
         orders_inserted: 0,
         started_at: new Date().toISOString(),
@@ -189,7 +240,7 @@ export async function POST(req: NextRequest) {
                 // Update business_code on the order
                 await svc.from('scalev_orders').update({ business_code: code }).eq('id', dbOrder.id);
                 dbOrder.business_code = code;
-                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details);
+                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode !== 'full');
                 found = true;
                 updatedCount++;
                 break;
@@ -235,7 +286,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details);
+        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode !== 'full');
         if (result === 'updated') updatedCount++;
         else if (result === 'still_pending') stillPendingCount++;
 
@@ -249,9 +300,9 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Repair pass: shipped/completed orders with 0 lines (last 14 days) ──
+    // ── Repair pass: shipped/completed orders with 0 lines (last 14 days) — full sync only ──
     let repairedCount = 0;
-    try {
+    if (syncMode === 'full') try {
       const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
       const { data: shippedOrders } = await svc
         .from('scalev_orders')
@@ -323,7 +374,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      pending_checked: (pendingOrders || []).length,
+      sync_mode: syncMode,
+      pending_checked: pendingOrders.length,
       orders_updated: updatedCount,
       orders_repaired: repairedCount,
       orders_still_pending: stillPendingCount,
@@ -347,13 +399,29 @@ async function processOrder(
   bizCodeToId: Map<string, number>,
   bizCodeToTaxRateName: Map<string, string>,
   taxRatesMap: Map<string, { rate: number; divisor: number }>,
-  details: any[]
+  details: any[],
+  forceUpdate = false
 ): Promise<'updated' | 'still_pending'> {
   const newStatus = apiOrder.status;
 
-  // Still pre-terminal — skip
+  // Still pre-terminal — skip (unless forced)
   if (['pending', 'draft', 'ready', 'confirmed', 'paid'].includes(newStatus)) {
-    return 'still_pending';
+    if (!forceUpdate) return 'still_pending';
+    // Force: refresh raw_data even if status unchanged
+    await svc.from('scalev_orders').update({
+      status: newStatus,
+      raw_data: apiOrder,
+      synced_at: new Date().toISOString(),
+    }).eq('id', dbOrder.id);
+    // Also enrich lines if they exist in API data
+    const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
+    const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
+    await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
+    details.push({
+      order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code,
+      old_status: dbOrder.status, new_status: newStatus, action: 'force_refreshed',
+    });
+    return 'updated';
   }
 
   // Status changed — update order

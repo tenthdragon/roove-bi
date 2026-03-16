@@ -52,12 +52,9 @@ const STORE_TYPES = [
 ];
 
 export default function ConnectionManager() {
-  // ── Sync state (from ScalevManager) ──
+  // ── Connection status ──
   const [configured, setConfigured] = useState(false);
-  const [pendingCount, setPendingCount] = useState<number>(0);
   const [bizCount, setBizCount] = useState<number>(0);
-  const [syncing, setSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<any>(null);
 
   // ── Business state ──
   const [businesses, setBusinesses] = useState<Business[]>([]);
@@ -85,32 +82,12 @@ export default function ConnectionManager() {
         getWebhookBusinesses(),
       ]);
       setConfigured(status.configured);
-      setPendingCount(status.pendingOrders);
       setBizCount(status.businessesWithApiKeys);
       setBusinesses(bizData);
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     } finally {
       setLoading(false);
-    }
-  }
-
-  // ── Sync ──
-  async function handleSync() {
-    setSyncing(true);
-    setSyncResult(null);
-    setMessage(null);
-    try {
-      const res = await fetch('/api/scalev-sync', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Sync failed');
-      setSyncResult(data);
-      setMessage({ type: 'success', text: `Sync selesai: ${data.orders_updated} order diperbarui` });
-      await loadAll();
-    } catch (err: any) {
-      setMessage({ type: 'error', text: err.message });
-    } finally {
-      setSyncing(false);
     }
   }
 
@@ -275,79 +252,16 @@ export default function ConnectionManager() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      {/* ── Status Bar + Sync ── */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{
-              padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
-              background: configured ? '#064e3b' : '#78350f',
-              color: configured ? '#10b981' : '#f59e0b',
-            }}>
-              {configured ? `${bizCount} business terhubung` : 'Belum ada API key'}
-            </span>
-            {pendingCount > 0 && (
-              <span style={{ fontSize: 12, color: '#94a3b8' }}>
-                {pendingCount} order pending
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              onClick={handleSync}
-              disabled={syncing || pendingCount === 0 || !configured}
-              style={{
-                padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                background: syncing ? '#1e3a5f' : '#1e40af',
-                color: '#93c5fd', fontSize: 12, fontWeight: 600,
-                opacity: (syncing || pendingCount === 0 || !configured) ? 0.5 : 1,
-              }}
-            >
-              {syncing ? 'Menyinkronkan...' : 'Sinkronkan Order'}
-            </button>
-            <span style={{ fontSize: 10, color: '#475569' }}>Cron: 02:00 WIB</span>
-          </div>
-        </div>
-
-        {/* Sync result */}
-        {syncResult && (
-          <div style={{ marginTop: 10, padding: 10, background: '#0b1121', borderRadius: 6, fontSize: 12, color: '#94a3b8' }}>
-            <span style={{ color: '#e2e8f0' }}>
-              Sync selesai ({(syncResult.duration_ms / 1000).toFixed(1)}s)
-            </span>
-            {' — '}Dicek: {syncResult.pending_checked} | Diperbarui: {syncResult.orders_updated} | Pending: {syncResult.orders_still_pending} | Error: {syncResult.orders_errored}
-
-            {/* Error details */}
-            {syncResult.details?.filter((d: any) => d.error).length > 0 && (
-              <div style={{ marginTop: 8, borderTop: '1px solid #1a2744', paddingTop: 8 }}>
-                <div style={{ color: '#ef4444', fontWeight: 600, marginBottom: 4 }}>Detail Error:</div>
-                {syncResult.details.filter((d: any) => d.error).map((d: any, i: number) => (
-                  <div key={i} style={{ color: '#94a3b8', fontSize: 11, padding: '2px 0' }}>
-                    <span style={{ color: '#64748b' }}>[{d.business_code || '?'}]</span>{' '}
-                    <span style={{ color: '#e2e8f0' }}>{d.order_id}</span>{' '}
-                    <span style={{ color: '#475569' }}>({d.store_name || '?'})</span>{' — '}
-                    <span style={{ color: '#ef4444' }}>{d.error}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Updated details */}
-            {syncResult.details?.filter((d: any) => d.new_status).length > 0 && (
-              <div style={{ marginTop: 8, borderTop: '1px solid #1a2744', paddingTop: 8 }}>
-                <div style={{ color: '#10b981', fontWeight: 600, marginBottom: 4 }}>Diperbarui:</div>
-                {syncResult.details.filter((d: any) => d.new_status).map((d: any, i: number) => (
-                  <div key={i} style={{ color: '#94a3b8', fontSize: 11, padding: '2px 0' }}>
-                    <span style={{ color: '#64748b' }}>[{d.business_code || '?'}]</span>{' '}
-                    <span style={{ color: '#e2e8f0' }}>{d.order_id}</span>{' '}
-                    <span style={{ color: '#475569' }}>({d.store_name || '?'})</span>{' → '}
-                    <span style={{ color: '#10b981' }}>{d.new_status}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+      {/* ── Status Bar ── */}
+      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+        <span style={{
+          padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
+          background: configured ? '#064e3b' : '#78350f',
+          color: configured ? '#10b981' : '#f59e0b',
+        }}>
+          {configured ? `${bizCount} business terhubung` : 'Belum ada API key'}
+        </span>
+        <span style={{ fontSize: 11, color: '#475569' }}>Sinkronisasi order tersedia di tab Sync</span>
       </div>
 
       {/* Messages */}
