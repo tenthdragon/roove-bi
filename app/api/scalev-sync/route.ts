@@ -87,24 +87,25 @@ export async function POST(req: NextRequest) {
 
     const svc = getServiceSupabase();
 
-    // ── Get all active businesses with API keys ──
-    const { data: bizConfigs, error: bizErr } = await svc
-      .from('scalev_webhook_businesses')
-      .select('id, business_code, api_key, tax_rate_name')
-      .eq('is_active', true)
-      .not('api_key', 'is', null);
+    // ── Parallel setup: fetch all config data in one round-trip ──
+    const [bizRes, taxRes, storeRes] = await Promise.all([
+      svc.from('scalev_webhook_businesses')
+        .select('id, business_code, api_key, tax_rate_name')
+        .eq('is_active', true)
+        .not('api_key', 'is', null),
+      svc.from('tax_rates')
+        .select('name, rate')
+        .order('effective_from', { ascending: false }),
+      svc.from('scalev_store_channels')
+        .select('store_name, store_type, business_id')
+        .eq('is_active', true),
+    ]);
 
-    if (bizErr) throw bizErr;
+    if (bizRes.error) throw bizRes.error;
+    const businesses = (bizRes.data || []).filter(b => b.api_key);
 
-    const businesses = (bizConfigs || []).filter(b => b.api_key);
-
-    // ── Tax rate lookup ──
-    const { data: taxRateRows } = await svc
-      .from('tax_rates')
-      .select('name, rate')
-      .order('effective_from', { ascending: false });
     const taxRatesMap = new Map<string, { rate: number; divisor: number }>();
-    for (const r of taxRateRows || []) {
+    for (const r of taxRes.data || []) {
       if (!taxRatesMap.has(r.name)) {
         const rate = Number(r.rate);
         taxRatesMap.set(r.name, { rate, divisor: 1 + rate / 100 });
@@ -115,14 +116,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No businesses with API keys configured' }, { status: 500 });
     }
 
-    // ── Build store → type map from DB (keyed by businessId:storeName) ──
-    const { data: storeChannelRows } = await svc
-      .from('scalev_store_channels')
-      .select('store_name, store_type, business_id')
-      .eq('is_active', true);
-
     const storeTypeMap = new Map<string, StoreType>();
-    for (const row of storeChannelRows || []) {
+    for (const row of storeRes.data || []) {
       storeTypeMap.set(`${row.business_id}:${row.store_name.toLowerCase()}`, row.store_type as StoreType);
     }
 
@@ -207,14 +202,9 @@ export async function POST(req: NextRequest) {
       bizApiKeys.set(b.business_code, { api_key: b.api_key, base_url: 'https://api.scalev.id/v2' });
     }
 
-    // ── Build store_name → business_code lookup for orders without business_code ──
-    const { data: storeBusinessRows } = await svc
-      .from('scalev_store_channels')
-      .select('store_name, business_id')
-      .eq('is_active', true);
-
+    // ── Build store_name → business_id lookup (reuse storeRes, no extra query) ──
     const storeToBizId = new Map<string, number>();
-    for (const row of storeBusinessRows || []) {
+    for (const row of storeRes.data || []) {
       storeToBizId.set(row.store_name.toLowerCase(), row.business_id);
     }
 
@@ -320,8 +310,8 @@ export async function POST(req: NextRequest) {
         if (result === 'updated') updatedCount++;
         else if (result === 'still_pending') stillPendingCount++;
 
-        // Rate limit delay between API calls
-        await new Promise(r => setTimeout(r, 200));
+        // Rate limit delay between API calls (shorter for targeted sync)
+        await new Promise(r => setTimeout(r, syncMode === 'full' ? 200 : 50));
 
       } catch (err: any) {
         details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code, error: err.message });
