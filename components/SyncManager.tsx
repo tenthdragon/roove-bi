@@ -4,25 +4,19 @@
 import { useState, useEffect } from 'react';
 import { getScalevStatus } from '@/lib/scalev-actions';
 
-type SyncMode = 'date' | 'order_id' | 'full';
-type StatusFilter = 'pending' | 'shipped' | 'all';
+type SyncMode = 'date' | 'repair' | 'order_id' | 'full';
 
-const MODES: { id: SyncMode; label: string }[] = [
-  { id: 'date', label: 'Tanggal' },
-  { id: 'order_id', label: 'Order ID' },
-  { id: 'full', label: 'Full Sync' },
-];
-
-const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
-  { id: 'pending', label: 'Pending' },
-  { id: 'shipped', label: 'Shipped' },
-  { id: 'all', label: 'Semua' },
+const MODES: { id: SyncMode; label: string; desc: string }[] = [
+  { id: 'date', label: 'Pending', desc: 'Cek order pending untuk tanggal tertentu' },
+  { id: 'repair', label: 'Perbaikan', desc: 'Cari order shipped yang belum punya lines' },
+  { id: 'order_id', label: 'Order ID', desc: 'Sync order tertentu berdasarkan ID' },
+  { id: 'full', label: 'Full Sync', desc: 'Cek semua order pending (bisa lama)' },
 ];
 
 export default function SyncManager() {
   const [mode, setMode] = useState<SyncMode>('date');
   const [syncDate, setSyncDate] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
+  const [repairDate, setRepairDate] = useState('');
   const [orderIdsInput, setOrderIdsInput] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<any>(null);
@@ -50,7 +44,10 @@ export default function SyncManager() {
         if (!syncDate) { setMessage({ type: 'error', text: 'Pilih tanggal terlebih dahulu' }); setSyncing(false); return; }
         body.mode = 'date';
         body.date = syncDate;
-        body.status_filter = statusFilter;
+      } else if (mode === 'repair') {
+        if (!repairDate) { setMessage({ type: 'error', text: 'Pilih tanggal terlebih dahulu' }); setSyncing(false); return; }
+        body.mode = 'repair';
+        body.date = repairDate;
       } else if (mode === 'order_id') {
         const ids = orderIdsInput.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
         if (ids.length === 0) { setMessage({ type: 'error', text: 'Masukkan minimal 1 Order ID' }); setSyncing(false); return; }
@@ -68,7 +65,7 @@ export default function SyncManager() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Sync gagal');
       setSyncResult(data);
-      const label = mode === 'date' ? syncDate : mode === 'order_id' ? `${body.order_ids.length} order` : 'full';
+      const label = mode === 'date' ? syncDate : mode === 'repair' ? `perbaikan ${repairDate}` : mode === 'order_id' ? `${body.order_ids.length} order` : 'full';
       setMessage({ type: 'success', text: `Sync ${label} selesai: ${data.orders_updated} diperbarui` });
       // Refresh status
       getScalevStatus().then(s => { setPendingCount(s.pendingOrders); });
@@ -127,31 +124,40 @@ export default function SyncManager() {
           ))}
         </div>
 
+        {/* Mode description */}
+        <p style={{ fontSize: 12, color: '#64748b', margin: '0 0 12px' }}>
+          {MODES.find(m => m.id === mode)?.desc}
+        </p>
+
         {/* Date mode */}
         {mode === 'date' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div>
-              <label style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4, display: 'block' }}>Tanggal</label>
-              <input
-                type="date"
-                value={syncDate}
-                onChange={e => setSyncDate(e.target.value)}
-                style={{
-                  padding: '8px 12px', borderRadius: 6, border: '1px solid #1a2744',
-                  background: '#0b1121', color: '#e2e8f0', fontSize: 13, width: 200,
-                }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4, display: 'block' }}>Filter Status</label>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {STATUS_FILTERS.map(sf => (
-                  <button key={sf.id} onClick={() => setStatusFilter(sf.id)} style={pill(statusFilter === sf.id)}>
-                    {sf.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+          <div>
+            <label style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4, display: 'block' }}>Tanggal</label>
+            <input
+              type="date"
+              value={syncDate}
+              onChange={e => setSyncDate(e.target.value)}
+              style={{
+                padding: '8px 12px', borderRadius: 6, border: '1px solid #1a2744',
+                background: '#0b1121', color: '#e2e8f0', fontSize: 13, width: 200,
+              }}
+            />
+          </div>
+        )}
+
+        {/* Repair mode */}
+        {mode === 'repair' && (
+          <div>
+            <label style={{ fontSize: 12, color: '#94a3b8', marginBottom: 4, display: 'block' }}>Tanggal</label>
+            <input
+              type="date"
+              value={repairDate}
+              onChange={e => setRepairDate(e.target.value)}
+              style={{
+                padding: '8px 12px', borderRadius: 6, border: '1px solid #1a2744',
+                background: '#0b1121', color: '#e2e8f0', fontSize: 13, width: 200,
+              }}
+            />
           </div>
         )}
 

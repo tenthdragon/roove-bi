@@ -62,9 +62,8 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Parse optional body for targeted sync ──
-    let syncMode: 'full' | 'date' | 'order_id' = 'full';
+    let syncMode: 'full' | 'date' | 'order_id' | 'repair' = 'full';
     let targetDate: string | null = null;
-    let targetStatusFilter: string | null = null;
     let targetOrderIds: string[] | null = null;
 
     try {
@@ -74,7 +73,9 @@ export async function POST(req: NextRequest) {
         if (body.mode === 'date' && body.date) {
           syncMode = 'date';
           targetDate = body.date;
-          targetStatusFilter = body.status_filter || 'pending';
+        } else if (body.mode === 'repair' && body.date) {
+          syncMode = 'repair';
+          targetDate = body.date;
         } else if (body.mode === 'order_id' && body.order_ids?.length > 0) {
           syncMode = 'order_id';
           targetOrderIds = body.order_ids;
@@ -140,22 +141,39 @@ export async function POST(req: NextRequest) {
       if (error) throw error;
       pendingOrders = data || [];
     } else if (syncMode === 'date' && targetDate) {
+      // Date mode: ONLY pre-terminal orders (the ones that might have changed)
       const dayStart = `${targetDate}T00:00:00+07:00`;
       const dayEnd = `${targetDate}T23:59:59+07:00`;
-      let query = svc
+      const { data, error } = await svc
         .from('scalev_orders')
         .select(lightCols)
         .gte('pending_time', dayStart)
-        .lte('pending_time', dayEnd);
-      if (targetStatusFilter === 'pending') {
-        query = query.in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid']);
-      } else if (targetStatusFilter === 'shipped') {
-        query = query.in('status', ['shipped', 'completed']);
-      }
-      // 'all' = no status filter
-      const { data, error } = await query;
+        .lte('pending_time', dayEnd)
+        .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid']);
       if (error) throw error;
       pendingOrders = data || [];
+    } else if (syncMode === 'repair' && targetDate) {
+      // Repair mode: shipped/completed orders that have 0 lines for this date
+      // Uses RPC or a lightweight approach to find orders with missing lines
+      const dayStart = `${targetDate}T00:00:00+07:00`;
+      const dayEnd = `${targetDate}T23:59:59+07:00`;
+      const { data: shippedForDate, error } = await svc
+        .from('scalev_orders')
+        .select(lightCols)
+        .gte('pending_time', dayStart)
+        .lte('pending_time', dayEnd)
+        .in('status', ['shipped', 'completed']);
+      if (error) throw error;
+      // Filter to only orders with 0 lines (check in batches to minimize IO)
+      for (const order of shippedForDate || []) {
+        const { count } = await svc
+          .from('scalev_order_lines')
+          .select('id', { count: 'exact', head: true })
+          .eq('scalev_order_id', order.id);
+        if (count === 0 || count === null) {
+          pendingOrders.push(order);
+        }
+      }
     } else {
       const { data, error } = await svc
         .from('scalev_orders')
@@ -170,7 +188,7 @@ export async function POST(req: NextRequest) {
       .from('scalev_sync_log')
       .insert({
         status: 'running',
-        sync_type: syncMode === 'full' ? 'pending_reconcile' : `targeted_${syncMode}`,
+        sync_type: syncMode === 'full' ? 'pending_reconcile' : syncMode === 'repair' ? 'repair_missing_lines' : `targeted_${syncMode}`,
         orders_fetched: pendingOrders.length,
         orders_updated: 0,
         orders_inserted: 0,
@@ -252,7 +270,7 @@ export async function POST(req: NextRequest) {
                 // Update business_code on the order
                 await svc.from('scalev_orders').update({ business_code: code }).eq('id', dbOrder.id);
                 dbOrder.business_code = code;
-                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode !== 'full');
+                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair');
                 found = true;
                 updatedCount++;
                 break;
@@ -298,7 +316,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode !== 'full');
+        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair');
         if (result === 'updated') updatedCount++;
         else if (result === 'still_pending') stillPendingCount++;
 
@@ -415,6 +433,11 @@ async function processOrder(
   forceUpdate = false
 ): Promise<'updated' | 'still_pending'> {
   const newStatus = apiOrder.status;
+
+  // No change — skip entirely (saves DB IO)
+  if (newStatus === dbOrder.status && !forceUpdate) {
+    return 'still_pending';
+  }
 
   // Still pre-terminal — skip (unless forced)
   if (['pending', 'draft', 'ready', 'confirmed', 'paid'].includes(newStatus)) {
