@@ -148,8 +148,8 @@ export async function POST(req: NextRequest) {
       if (error) throw error;
       pendingOrders = data || [];
     } else if (syncMode === 'repair' && targetDate) {
-      // Repair mode: shipped/completed orders that have 0 lines for this date
-      // Uses RPC or a lightweight approach to find orders with missing lines
+      // Repair mode: shipped/completed orders with 0 lines for this date
+      // Single query: get shipped orders, then batch-check which have lines
       const dayStart = `${targetDate}T00:00:00+07:00`;
       const dayEnd = `${targetDate}T23:59:59+07:00`;
       const { data: shippedForDate, error } = await svc
@@ -159,14 +159,19 @@ export async function POST(req: NextRequest) {
         .lte('pending_time', dayEnd)
         .in('status', ['shipped', 'completed']);
       if (error) throw error;
-      // Filter to only orders with 0 lines (check in batches to minimize IO)
-      for (const order of shippedForDate || []) {
-        const { count } = await svc
+      if (shippedForDate && shippedForDate.length > 0) {
+        // Single query: get all order IDs that DO have lines
+        const shippedIds = shippedForDate.map(o => o.id);
+        const { data: withLines } = await svc
           .from('scalev_order_lines')
-          .select('id', { count: 'exact', head: true })
-          .eq('scalev_order_id', order.id);
-        if (count === 0 || count === null) {
-          pendingOrders.push(order);
+          .select('scalev_order_id')
+          .in('scalev_order_id', shippedIds);
+        const idsWithLines = new Set((withLines || []).map(r => r.scalev_order_id));
+        // Only include orders that have NO lines
+        for (const order of shippedForDate) {
+          if (!idsWithLines.has(order.id)) {
+            pendingOrders.push(order);
+          }
         }
       }
     } else {
@@ -330,14 +335,19 @@ export async function POST(req: NextRequest) {
         .in('status', ['shipped', 'completed'])
         .gte('shipped_time', cutoff);
 
-      for (const order of shippedOrders || []) {
-        // Check if this order has any lines
-        const { count } = await svc
+      // Batch-check which shipped orders have lines (1 query instead of N)
+      const shippedIds = (shippedOrders || []).map(o => o.id);
+      const idsWithLines = new Set<number>();
+      if (shippedIds.length > 0) {
+        const { data: withLines } = await svc
           .from('scalev_order_lines')
-          .select('id', { count: 'exact', head: true })
-          .eq('scalev_order_id', order.id);
+          .select('scalev_order_id')
+          .in('scalev_order_id', shippedIds);
+        for (const r of withLines || []) idsWithLines.add(r.scalev_order_id);
+      }
 
-        if (count !== null && count > 0) continue;
+      for (const order of shippedOrders || []) {
+        if (idsWithLines.has(order.id)) continue;
 
         // Try to insert lines from raw_data first
         const rawData = order.raw_data;

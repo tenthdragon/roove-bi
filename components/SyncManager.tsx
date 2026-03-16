@@ -57,11 +57,21 @@ export default function SyncManager() {
         body.mode = 'full';
       }
 
-      const res = await fetch('/api/scalev-sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 130_000); // 130s (server max 120s + buffer)
+      let res: Response;
+      try {
+        res = await fetch('/api/scalev-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        });
+      } catch (fetchErr: any) {
+        clearTimeout(timeout);
+        throw new Error(fetchErr.name === 'AbortError' ? 'Timeout: server tidak merespons dalam 130 detik' : fetchErr.message);
+      }
+      clearTimeout(timeout);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Sync gagal');
       setSyncResult(data);
