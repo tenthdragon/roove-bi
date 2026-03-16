@@ -262,6 +262,26 @@ async function handleOpsUpload(
     cogsLookedUp: 0,
   };
 
+  // ── Fetch per-business tax config to determine which brands have no PPN ──
+  // Brand → business mapping: JHN = Purvu, Pluve, DrHyun, Calmara
+  const brandToBusinessCode: Record<string, string> = {
+    Purvu: 'JHN', Pluve: 'JHN', DrHyun: 'JHN', Calmara: 'JHN',
+    Roove: 'RTI', Osgard: 'RTI', Globite: 'RTI',
+    Almona: 'RLB', YUV: 'RLB', Veminine: 'RLB', Orelif: 'RLB',
+  };
+  const noTaxBrands = new Set<string>();
+  try {
+    const { data: bizData } = await svc
+      .from('scalev_webhook_businesses')
+      .select('business_code, tax_rate_name');
+    if (bizData) {
+      const noTaxCodes = new Set(bizData.filter((b: any) => b.tax_rate_name === 'NONE').map((b: any) => b.business_code));
+      for (const [brand, code] of Object.entries(brandToBusinessCode)) {
+        if (noTaxCodes.has(code)) noTaxBrands.add(brand);
+      }
+    }
+  } catch { /* non-fatal — default to PPN for all */ }
+
   // ── Parse all rows ──
   const parsedRows: Record<string, string>[] = [];
   for (let i = 1; i < lines.length; i++) {
@@ -401,10 +421,11 @@ async function handleOpsUpload(
         }
       }
 
-      // Tax rate: default 11% for marketplace
-      const taxRate = 11.0;
-      const priceBt = Math.round(price / (1 + taxRate / 100));
-      const cogsBt = Math.round(cogs / (1 + taxRate / 100));
+      // Tax rate: 0% for no-tax brands (e.g. JHN), 11% PPN for others
+      const taxRate = noTaxBrands.has(brand) ? 0 : 11.0;
+      const taxDivisor = 1 + taxRate / 100;
+      const priceBt = Math.round(price / taxDivisor);
+      const cogsBt = Math.round(cogs / taxDivisor);
 
       lineItems.push({
         order_id: extId,

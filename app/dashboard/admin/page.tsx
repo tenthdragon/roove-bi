@@ -68,6 +68,12 @@ export default function AdminPage() {
   const [overheadMsg, setOverheadMsg] = useState(null);
   const [editingOverhead, setEditingOverhead] = useState(null); // { year_month, amount, isNew }
 
+  // Business Tax Config states
+  const [bizTaxData, setBizTaxData] = useState([]);
+  const [bizTaxLoading, setBizTaxLoading] = useState(false);
+  const [bizTaxSaving, setBizTaxSaving] = useState(false);
+  const [bizTaxMsg, setBizTaxMsg] = useState(null);
+
   // User management states
   const [users, setUsers] = useState([]);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -168,11 +174,47 @@ export default function AdminPage() {
     }
   }, [supabase]);
 
+  // Load business tax config
+  const loadBizTax = useCallback(async () => {
+    setBizTaxLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('scalev_webhook_businesses')
+        .select('id, business_code, business_name, tax_rate_name, is_active')
+        .order('id');
+      if (error) throw error;
+      setBizTaxData(data || []);
+    } catch (err) {
+      console.error('Failed to load business tax config:', err);
+    } finally {
+      setBizTaxLoading(false);
+    }
+  }, [supabase]);
+
+  const handleBizTaxChange = async (bizId, newTaxRateName) => {
+    setBizTaxSaving(true);
+    setBizTaxMsg(null);
+    try {
+      const { error } = await supabase
+        .from('scalev_webhook_businesses')
+        .update({ tax_rate_name: newTaxRateName })
+        .eq('id', bizId);
+      if (error) throw error;
+      setBizTaxMsg({ type: 'success', text: 'Tax config updated' });
+      await loadBizTax();
+    } catch (err) {
+      setBizTaxMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
+    } finally {
+      setBizTaxSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'data_ref') {
       if (commRates.length === 0) loadCommRates();
       if (taxRates.length === 0) loadTaxRates();
       if (overheadData.length === 0) loadOverhead();
+      if (bizTaxData.length === 0) loadBizTax();
     }
   }, [activeTab]);
 
@@ -643,6 +685,71 @@ export default function AdminPage() {
                               Hapus
                             </button>
                           </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Business Tax Config */}
+          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Business Tax Config</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+              Pengaturan pajak per bisnis. NONE = tidak kena PPN (divisor 1.0). PPN = kena PPN sesuai rate di Tax Rates.
+            </div>
+
+            {bizTaxMsg && (
+              <div style={{
+                marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
+                background: bizTaxMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
+                color: bizTaxMsg.type === 'success' ? '#10b981' : '#ef4444'
+              }}>
+                {bizTaxMsg.type === 'success' ? '\u2705' : '\u274c'} {bizTaxMsg.text}
+              </div>
+            )}
+
+            {bizTaxLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+              </div>
+            ) : bizTaxData.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>Belum ada data bisnis</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#0b1121' }}>
+                      {['Bisnis', 'Kode', 'Status', 'Tax Rate'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {bizTaxData.map((b) => (
+                      <tr key={b.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: '#e2e8f0' }}>{b.business_name}</td>
+                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#94a3b8' }}>{b.business_code}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: b.is_active ? '#064e3b' : '#7f1d1d', color: b.is_active ? '#10b981' : '#ef4444' }}>
+                            {b.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <select
+                            value={b.tax_rate_name || 'PPN'}
+                            onChange={(e) => handleBizTaxChange(b.id, e.target.value)}
+                            disabled={bizTaxSaving}
+                            style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid #1a2744', background: '#0b1121', color: '#e2e8f0', fontSize: 12, cursor: bizTaxSaving ? 'not-allowed' : 'pointer' }}
+                          >
+                            <option value="PPN">PPN ({taxRates.find(t => t.name === 'PPN') ? Number(taxRates.find(t => t.name === 'PPN').rate).toFixed(0) + '%' : '11%'})</option>
+                            <option value="NONE">NONE (0%)</option>
+                            {taxRates.filter(t => t.name !== 'PPN').map(t => (
+                              <option key={t.name} value={t.name}>{t.name} ({Number(t.rate).toFixed(0)}%)</option>
+                            ))}
+                          </select>
                         </td>
                       </tr>
                     ))}
