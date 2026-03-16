@@ -24,10 +24,11 @@ export async function getScalevStatus() {
       .select('*', { count: 'exact', head: true })
       .not('shipped_time', 'is', null);
 
+    const PRE_TERMINAL = ['pending', 'ready', 'draft', 'confirmed', 'paid'];
     const { count: pendingOrders } = await svc
       .from('scalev_orders')
       .select('*', { count: 'exact', head: true })
-      .eq('status', 'pending');
+      .in('status', PRE_TERMINAL);
 
     const { data: lastSync } = await svc
       .from('scalev_sync_log')
@@ -63,6 +64,47 @@ export async function getScalevStatus() {
       recentSyncs: [],
     };
   }
+}
+
+// ── List all pre-terminal orders with line-existence flag ──
+export type PendingOrder = {
+  id: number;
+  order_id: string;
+  scalev_id: number | null;
+  status: string;
+  store_name: string | null;
+  business_code: string | null;
+  pending_time: string | null;
+  synced_at: string | null;
+  has_lines: boolean;
+};
+
+export async function getPendingOrders(): Promise<PendingOrder[]> {
+  const svc = createServiceSupabase();
+  const PRE_TERMINAL = ['pending', 'ready', 'draft', 'confirmed', 'paid'];
+
+  const { data: orders, error } = await svc
+    .from('scalev_orders')
+    .select('id, order_id, scalev_id, status, store_name, business_code, pending_time, synced_at')
+    .in('status', PRE_TERMINAL)
+    .order('pending_time', { ascending: false });
+
+  if (error) throw error;
+  if (!orders || orders.length === 0) return [];
+
+  // Batch check which orders have lines (1 query, not N)
+  const orderIds = orders.map(o => o.id);
+  const { data: withLines } = await svc
+    .from('scalev_order_lines')
+    .select('scalev_order_id')
+    .in('scalev_order_id', orderIds);
+
+  const idsWithLines = new Set((withLines || []).map(r => r.scalev_order_id));
+
+  return orders.map(o => ({
+    ...o,
+    has_lines: idsWithLines.has(o.id),
+  }));
 }
 
 // ── Save Scalev API key (owner only) ──
