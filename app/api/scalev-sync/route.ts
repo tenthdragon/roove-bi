@@ -261,7 +261,7 @@ export async function POST(req: NextRequest) {
               if (apiOrder) {
                 await svc.from('scalev_orders').update({ business_code: code }).eq('id', dbOrder.id);
                 dbOrder.business_code = code;
-                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair');
+                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair', syncMode === 'full' || syncMode === 'date');
                 found = true;
                 updatedCount++;
                 break;
@@ -301,7 +301,9 @@ export async function POST(req: NextRequest) {
           if (!apiOrder) { erroredCount++; return; }
         }
 
-        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair');
+        const forceUpdate = syncMode === 'order_id' || syncMode === 'repair';
+        const lightweight = syncMode === 'full' || syncMode === 'date';
+        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, forceUpdate, lightweight);
         if (result === 'updated') updatedCount++;
         else if (result === 'still_pending') stillPendingCount++;
       } catch (err: any) {
@@ -356,6 +358,7 @@ export async function POST(req: NextRequest) {
 }
 
 // ── Process a single order from API response ──
+// lightweight=true: only update status/timestamps, skip line enrichment (for full/date sync)
 async function processOrder(
   svc: any,
   dbOrder: any,
@@ -365,7 +368,8 @@ async function processOrder(
   bizCodeToTaxRateName: Map<string, string>,
   taxRatesMap: Map<string, { rate: number; divisor: number }>,
   details: any[],
-  forceUpdate = false
+  forceUpdate = false,
+  lightweight = false
 ): Promise<'updated' | 'still_pending'> {
   const newStatus = apiOrder.status;
 
@@ -383,13 +387,14 @@ async function processOrder(
       raw_data: apiOrder,
       synced_at: new Date().toISOString(),
     }).eq('id', dbOrder.id);
-    // Also enrich lines if they exist in API data
-    const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
-    const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
-    await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
+    if (!lightweight) {
+      const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
+      const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
+      await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
+    }
     details.push({
       order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code,
-      old_status: dbOrder.status, new_status: newStatus, action: 'force_refreshed',
+      old_status: dbOrder.status, new_status: newStatus, action: lightweight ? 'status_updated' : 'force_refreshed',
     });
     return 'updated';
   }
@@ -412,8 +417,8 @@ async function processOrder(
 
   await svc.from('scalev_orders').update(updateData).eq('id', dbOrder.id);
 
-  // For shipped/completed: enrich line items
-  if (newStatus === 'shipped' || newStatus === 'completed') {
+  // For shipped/completed: enrich line items (skip in lightweight mode — use Perbaikan mode instead)
+  if (!lightweight && (newStatus === 'shipped' || newStatus === 'completed')) {
     const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
     const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
     await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
