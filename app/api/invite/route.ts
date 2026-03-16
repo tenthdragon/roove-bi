@@ -3,6 +3,8 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // Service role client — bypasses RLS
 function getServiceSupabase() {
   return createClient(
@@ -44,21 +46,23 @@ export async function POST(req: NextRequest) {
     }
 
     const { email, role } = await req.json();
+    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const normalizedRole = String(role || '').trim().toLowerCase();
 
     // Validate input
-    if (!email || !email.includes('@')) {
+    if (!normalizedEmail || !EMAIL_REGEX.test(normalizedEmail)) {
       return NextResponse.json({ error: 'Email tidak valid' }, { status: 400 });
     }
-    
+
     const allowedRoles = ['admin', 'finance', 'brand_manager', 'sales_manager', 'staff'];
-    if (!allowedRoles.includes(role)) {
+    if (!allowedRoles.includes(normalizedRole)) {
       return NextResponse.json({ error: 'Role tidak valid' }, { status: 400 });
     }
 
     const svc = getServiceSupabase();
 
     // Check if user already exists in profiles
-    const { data: existing } = await svc.from('profiles').select('email').eq('email', email).maybeSingle();
+    const { data: existing } = await svc.from('profiles').select('email').eq('email', normalizedEmail).maybeSingle();
     if (existing) {
       return NextResponse.json({ error: 'User dengan email ini sudah terdaftar' }, { status: 409 });
     }
@@ -68,12 +72,12 @@ export async function POST(req: NextRequest) {
     const tempPassword = crypto.randomUUID() + '!Aa1'; // meets password requirements
     
     const { data: newUser, error: createError } = await svc.auth.admin.createUser({
-      email,
+      email: normalizedEmail,
       password: tempPassword,
       email_confirm: true, // auto-confirm since we're inviting
       user_metadata: {
         full_name: '',
-        email,
+        email: normalizedEmail,
         email_verified: true,
         phone_verified: false,
       },
@@ -100,7 +104,7 @@ export async function POST(req: NextRequest) {
     if (profileReady) {
       const { error: updateError } = await svc
         .from('profiles')
-        .update({ role })
+        .update({ role: normalizedRole })
         .eq('id', newUser.user.id);
       if (updateError) {
         console.error('[Invite] Update role error:', updateError);
@@ -110,7 +114,7 @@ export async function POST(req: NextRequest) {
       console.warn('[Invite] Profile trigger did not fire, inserting directly');
       const { error: insertError } = await svc
         .from('profiles')
-        .upsert({ id: newUser.user.id, email, role });
+        .upsert({ id: newUser.user.id, email: normalizedEmail, role: normalizedRole });
       if (insertError) {
         console.error('[Invite] Insert profile error:', insertError);
       }
@@ -119,7 +123,7 @@ export async function POST(req: NextRequest) {
     // Send password reset email so user can set their own password
     const { error: resetError } = await svc.auth.admin.generateLink({
       type: 'recovery',
-      email,
+      email: normalizedEmail,
       options: {
         redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://roove-bi.vercel.app'}/reset-password`,
       },
@@ -132,7 +136,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      message: `User ${email} berhasil di-invite sebagai ${role}. Mereka perlu reset password untuk login.`,
+      message: `User ${normalizedEmail} berhasil di-invite sebagai ${normalizedRole}. Mereka perlu reset password untuk login.`,
       userId: newUser.user.id,
     });
 
