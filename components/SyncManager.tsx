@@ -11,14 +11,13 @@ type RowState = {
   result: null | { success: boolean; newStatus?: string; error?: string; action?: string };
 };
 
-const PRE_TERMINAL = ['pending', 'ready', 'draft', 'confirmed', 'paid'];
+const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready'];
 
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
   pending: { bg: '#78350f', color: '#fbbf24' },
-  ready: { bg: '#1e3a5f', color: '#60a5fa' },
-  draft: { bg: '#1a2744', color: '#94a3b8' },
   confirmed: { bg: '#064e3b', color: '#10b981' },
-  paid: { bg: '#064e3b', color: '#10b981' },
+  processing: { bg: '#4a1d96', color: '#a78bfa' },
+  ready: { bg: '#1e3a5f', color: '#60a5fa' },
 };
 
 function formatTime(ts: string | null) {

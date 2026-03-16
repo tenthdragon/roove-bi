@@ -24,7 +24,7 @@ export async function getScalevStatus() {
       .select('*', { count: 'exact', head: true })
       .not('shipped_time', 'is', null);
 
-    const PRE_TERMINAL = ['pending', 'ready', 'draft', 'confirmed', 'paid'];
+    const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready'];
     const { count: pendingOrders } = await svc
       .from('scalev_orders')
       .select('*', { count: 'exact', head: true })
