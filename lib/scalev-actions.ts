@@ -81,7 +81,7 @@ export type PendingOrder = {
 
 export async function getPendingOrders(): Promise<PendingOrder[]> {
   const svc = createServiceSupabase();
-  const PRE_TERMINAL = ['pending', 'ready', 'draft', 'confirmed', 'paid'];
+  const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready'];
 
   const { data: orders, error } = await svc
     .from('scalev_orders')
