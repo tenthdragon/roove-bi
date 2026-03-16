@@ -229,10 +229,9 @@ export async function POST(req: NextRequest) {
     const details: any[] = [];
     const errors: string[] = [];
 
-    // ── Check each pending order against Scalev API ──
-    for (const dbOrder of pendingOrders || []) {
+    // ── Process a single order: fetch from API + update DB ──
+    async function syncOneOrder(dbOrder: any) {
       try {
-        // Determine Scalev integer ID (raw_data not loaded in initial query)
         let scalevId = dbOrder.scalev_id;
         if (!scalevId) {
           const { data: rawRow } = await svc
@@ -245,10 +244,9 @@ export async function POST(req: NextRequest) {
         if (!scalevId) {
           details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code, error: 'No Scalev ID available' });
           erroredCount++;
-          continue;
+          return;
         }
 
-        // Determine which business API key to use
         let bizCode = dbOrder.business_code;
         if (!bizCode && dbOrder.store_name) {
           const bizId = storeToBizId.get(dbOrder.store_name.toLowerCase());
@@ -256,13 +254,11 @@ export async function POST(req: NextRequest) {
         }
 
         if (!bizCode || !bizApiKeys.has(bizCode)) {
-          // Try all business API keys as fallback
           let found = false;
           for (const [code, config] of bizApiKeys) {
             try {
               const apiOrder = await fetchOrderDetail(config.api_key, config.base_url, String(scalevId));
               if (apiOrder) {
-                // Update business_code on the order
                 await svc.from('scalev_orders').update({ business_code: code }).eq('id', dbOrder.id);
                 dbOrder.business_code = code;
                 await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair');
@@ -278,13 +274,10 @@ export async function POST(req: NextRequest) {
             details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code, error: 'No matching business API key found' });
             erroredCount++;
           }
-          await new Promise(r => setTimeout(r, 200));
-          continue;
+          return;
         }
 
         const config = bizApiKeys.get(bizCode)!;
-
-        // Fetch current status from Scalev API
         let apiOrder: any;
         try {
           apiOrder = await fetchOrderDetail(config.api_key, config.base_url, String(scalevId));
@@ -298,26 +291,19 @@ export async function POST(req: NextRequest) {
             } catch {
               details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: bizCode, error: `API error after retry: ${apiErr.message}` });
               erroredCount++;
-              continue;
+              return;
             }
           } else {
             details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: bizCode, error: `API error: ${apiErr.message}` });
             erroredCount++;
-            continue;
+            return;
           }
-          if (!apiOrder) {
-            erroredCount++;
-            continue;
-          }
+          if (!apiOrder) { erroredCount++; return; }
         }
 
         const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair');
         if (result === 'updated') updatedCount++;
         else if (result === 'still_pending') stillPendingCount++;
-
-        // Rate limit delay between API calls (shorter for targeted sync)
-        await new Promise(r => setTimeout(r, syncMode === 'full' ? 200 : 50));
-
       } catch (err: any) {
         details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code, error: err.message });
         errors.push(`${dbOrder.order_id}: ${err.message}`);
@@ -325,80 +311,19 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Repair pass: shipped/completed orders with 0 lines (last 14 days) — full sync only ──
-    let repairedCount = 0;
-    if (syncMode === 'full') try {
-      const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-      // First pass: get shipped order IDs only (no raw_data — lightweight)
-      const { data: shippedOrdersLight } = await svc
-        .from('scalev_orders')
-        .select('id')
-        .in('status', ['shipped', 'completed'])
-        .gte('shipped_time', cutoff);
-
-      // Batch-check which have lines (1 query instead of N)
-      const shippedIds = (shippedOrdersLight || []).map(o => o.id);
-      const idsWithLines = new Set<number>();
-      if (shippedIds.length > 0) {
-        const { data: withLines } = await svc
-          .from('scalev_order_lines')
-          .select('scalev_order_id')
-          .in('scalev_order_id', shippedIds);
-        for (const r of withLines || []) idsWithLines.add(r.scalev_order_id);
-      }
-
-      // Only fetch full data for orders that need repair
-      const needRepairIds = shippedIds.filter(id => !idsWithLines.has(id));
-      let shippedOrders: any[] = [];
-      if (needRepairIds.length > 0) {
-        const { data } = await svc
-          .from('scalev_orders')
-          .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
-          .in('id', needRepairIds);
-        shippedOrders = data || [];
-      }
-
-      for (const order of shippedOrders) {
-        // Try to insert lines from raw_data first
-        const rawData = order.raw_data;
-        if (rawData?.orderlines?.length > 0) {
-          const bizId = bizCodeToId.get(order.business_code) || 0;
-          const taxRateName = bizCodeToTaxRateName.get(order.business_code) || 'PPN';
-          await enrichLineItems(svc, order.id, order.order_id, rawData, storeTypeMap, bizId, taxRateName, taxRatesMap);
-          repairedCount++;
-          details.push({ order_id: order.order_id, store_name: order.store_name, business_code: order.business_code, action: 'repaired_lines_from_raw_data' });
-          continue;
-        }
-
-        // If raw_data has no orderlines, try fetching from API
-        const bizCode = order.business_code;
-        if (!bizCode || !bizApiKeys.has(bizCode)) continue;
-        const config = bizApiKeys.get(bizCode)!;
-        const scalevId = order.scalev_id || rawData?.id;
-        if (!scalevId) continue;
-
-        try {
-          const apiOrder = await fetchOrderDetail(config.api_key, config.base_url, String(scalevId));
-          if (apiOrder?.orderlines?.length > 0) {
-            // Update raw_data with fresh API response
-            await svc.from('scalev_orders').update({ raw_data: apiOrder, synced_at: new Date().toISOString() }).eq('id', order.id);
-            const bizId = bizCodeToId.get(bizCode) || 0;
-            const taxRateName = bizCodeToTaxRateName.get(bizCode) || 'PPN';
-            await enrichLineItems(svc, order.id, order.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
-            repairedCount++;
-            details.push({ order_id: order.order_id, store_name: order.store_name, business_code: bizCode, action: 'repaired_lines_from_api' });
-          }
-          await new Promise(r => setTimeout(r, 200));
-        } catch {
-          // Skip on API error
-        }
-      }
-    } catch (repairErr: any) {
-      console.error('[scalev-sync] Repair pass error:', repairErr.message);
+    // ── Process orders in parallel batches of 5 ──
+    const BATCH_SIZE = 5;
+    for (let i = 0; i < pendingOrders.length; i += BATCH_SIZE) {
+      const batch = pendingOrders.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(syncOneOrder));
     }
 
+    // Repair pass removed from full sync — use dedicated "Perbaikan" mode instead.
+    // Full sync now only checks pre-terminal orders, keeping it fast and within Vercel timeout.
+    const repairedCount = syncMode === 'repair' ? updatedCount : 0;
+
     // ── Refresh MVs if any orders were updated to shipped/completed ──
-    if (updatedCount > 0 || repairedCount > 0) {
+    if (updatedCount > 0) {
       triggerViewRefresh();
     }
 
