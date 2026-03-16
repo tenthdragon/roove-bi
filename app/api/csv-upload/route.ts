@@ -12,6 +12,8 @@ function getServiceSupabase() {
 }
 
 export const maxDuration = 250;
+const MAX_CSV_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_CSV_LOGICAL_LINES = 200_000;
 
 // ── Types ──
 type FileFormat = 'scalev' | 'ops';
@@ -103,26 +105,35 @@ function deriveSalesChannelFromOps(platform: string): string {
 
 // ── Detect file format ──
 function detectFormat(firstLine: string): { format: FileFormat; delimiter: string; headers: string[] } {
+  const normalized = firstLine.replace(/^\uFEFF/, '').toLowerCase();
+
   // Ops file: comma-delimited, has 'username' column
   // Scalev file: semicolon-delimited, has 'order_id' column
-  
-  if (firstLine.includes(';') && firstLine.includes('order_id')) {
-    const headers = firstLine.split(';').map(h => h.trim());
+
+  if (normalized.includes(';') && normalized.includes('order_id')) {
+    const headers = firstLine.replace(/^\uFEFF/, '').split(';').map(h => sanitizeCsvCell(h));
     return { format: 'scalev', delimiter: ';', headers };
   }
-  
-  if (firstLine.includes(',') && firstLine.includes('username')) {
-    const headers = firstLine.split(',').map(h => h.trim());
+
+  if (normalized.includes(',') && normalized.includes('username')) {
+    const headers = firstLine.replace(/^\uFEFF/, '').split(',').map(h => sanitizeCsvCell(h));
     return { format: 'ops', delimiter: ',', headers };
   }
-  
+
   // Fallback: try semicolon first (Scalev)
-  if (firstLine.includes(';')) {
-    const headers = firstLine.split(';').map(h => h.trim());
+  if (normalized.includes(';')) {
+    const headers = firstLine.replace(/^\uFEFF/, '').split(';').map(h => sanitizeCsvCell(h));
     return { format: 'scalev', delimiter: ';', headers };
   }
-  
+
   throw new Error('Format CSV tidak dikenali. File harus berupa export Scalev (semicolon) atau file tim ops (comma, dengan kolom username).');
+}
+
+function sanitizeCsvCell(value: string): string {
+  return (value || '')
+    .replace(/\0/g, '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+    .trim();
 }
 
 // ── Parse CSV line respecting quotes ──
@@ -141,13 +152,13 @@ function parseCsvLine(line: string, delimiter: string): string[] {
         inQuotes = !inQuotes;
       }
     } else if (char === delimiter && !inQuotes) {
-      result.push(current.trim());
+      result.push(sanitizeCsvCell(current));
       current = '';
     } else {
       current += char;
     }
   }
-  result.push(current.trim());
+  result.push(sanitizeCsvCell(current));
   return result;
 }
 
@@ -163,19 +174,34 @@ function splitCsvLines(text: string): string[] {
   for (let i = 0; i < text.length; i++) {
     const char = text[i];
     if (char === '"') {
-      inQuotes = !inQuotes;
-      current += char;
+      if (inQuotes && text[i + 1] === '"') {
+        current += '""';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+        current += char;
+      }
     } else if ((char === '\n' || char === '\r') && !inQuotes) {
       // End of logical line
       if (char === '\r' && text[i + 1] === '\n') i++; // skip \r\n
-      if (current.trim()) lines.push(current);
+      if (current.trim()) lines.push(current.replace(/\0/g, ''));
       current = '';
     } else {
       current += char;
     }
+
+    if (lines.length > MAX_CSV_LOGICAL_LINES) {
+      throw new Error(`CSV terlalu besar. Maksimal ${MAX_CSV_LOGICAL_LINES.toLocaleString('en-US')} baris.`);
+    }
   }
-  if (current.trim()) lines.push(current);
+  if (current.trim()) lines.push(current.replace(/\0/g, ''));
   return lines;
+}
+
+function isLikelyCsv(file: File): boolean {
+  const lowerName = (file.name || '').toLowerCase();
+  const mime = (file.type || '').toLowerCase();
+  return lowerName.endsWith('.csv') || mime === 'text/csv' || mime === 'application/vnd.ms-excel';
 }
 
 export async function POST(req: NextRequest) {
@@ -186,7 +212,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
-    const csvText = await file.text();
+    if (!isLikelyCsv(file)) {
+      return NextResponse.json({ error: 'File harus berformat CSV' }, { status: 400 });
+    }
+
+    if (file.size > MAX_CSV_FILE_SIZE_BYTES) {
+      return NextResponse.json({ error: `File terlalu besar. Maksimal ${Math.round(MAX_CSV_FILE_SIZE_BYTES / (1024 * 1024))}MB` }, { status: 413 });
+    }
+
+    const csvText = (await file.text()).replace(/^\uFEFF/, '');
     const lines = splitCsvLines(csvText);
     if (lines.length < 2) {
       return NextResponse.json({ error: 'CSV is empty' }, { status: 400 });
