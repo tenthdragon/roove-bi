@@ -10,7 +10,7 @@ const MODES: { id: SyncMode; label: string; desc: string }[] = [
   { id: 'date', label: 'Pending', desc: 'Cek order pending untuk tanggal tertentu' },
   { id: 'repair', label: 'Perbaikan', desc: 'Cari order shipped yang belum punya lines' },
   { id: 'order_id', label: 'Order ID', desc: 'Sync order tertentu berdasarkan ID' },
-  { id: 'full', label: 'Full Sync', desc: 'Cek semua order pending (bisa lama)' },
+  { id: 'full', label: 'Full Sync', desc: 'Cek semua order pending di DB terhadap Scalev API' },
 ];
 
 export default function SyncManager() {
@@ -185,11 +185,19 @@ export default function SyncManager() {
         {mode === 'full' && (
           <div style={{
             padding: '12px 16px', borderRadius: 8,
-            background: '#78350f33', border: '1px solid #78350f',
-            color: '#fbbf24', fontSize: 13,
+            background: pendingCount > 50 ? '#78350f33' : '#064e3b33',
+            border: `1px solid ${pendingCount > 50 ? '#78350f' : '#064e3b'}`,
+            color: pendingCount > 50 ? '#fbbf24' : '#10b981',
+            fontSize: 13,
           }}>
-            Full sync akan memeriksa <b>semua</b> order non-terminal ({pendingCount}+ order).
-            Proses bisa memakan waktu lama dan mungkin timeout di server (maks 120 detik).
+            {pendingCount > 50 ? (
+              <>Akan memeriksa <b>{pendingCount}</b> order pending — bisa memakan waktu lama (maks 120 detik).</>
+            ) : (
+              <>Hanya <b>{pendingCount}</b> order pending saat ini — proses cepat, aman dijalankan.</>
+            )}
+            <div style={{ marginTop: 6, fontSize: 11, opacity: 0.7 }}>
+              Ini akan menangkap order yang terlewat webhook di status apapun (pending, ready, draft, confirmed, paid).
+            </div>
           </div>
         )}
 
