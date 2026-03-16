@@ -694,11 +694,11 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* Business Tax Config */}
+          {/* Company PKP Status */}
           <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Business Tax Config</div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Company PKP Status</div>
             <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
-              Pengaturan pajak per bisnis. NONE = tidak kena PPN (divisor 1.0). PPN = kena PPN sesuai rate di Tax Rates.
+              Status Pengusaha Kena Pajak (PKP) per perusahaan. Jika PKP, maka PPN sesuai rate di Tax Rates akan diterapkan.
             </div>
 
             {bizTaxMsg && (
@@ -722,7 +722,7 @@ export default function AdminPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: '#0b1121' }}>
-                      {['Bisnis', 'Kode', 'Status', 'Tax Rate'].map(h => (
+                      {['Perusahaan', 'Kode', 'Status', 'PKP'].map(h => (
                         <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
                       ))}
                     </tr>
@@ -744,11 +744,8 @@ export default function AdminPage() {
                             disabled={bizTaxSaving}
                             style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid #1a2744', background: '#0b1121', color: '#e2e8f0', fontSize: 12, cursor: bizTaxSaving ? 'not-allowed' : 'pointer' }}
                           >
-                            <option value="PPN">PPN ({taxRates.find(t => t.name === 'PPN') ? Number(taxRates.find(t => t.name === 'PPN').rate).toFixed(0) + '%' : '11%'})</option>
-                            <option value="NONE">NONE (0%)</option>
-                            {taxRates.filter(t => t.name !== 'PPN').map(t => (
-                              <option key={t.name} value={t.name}>{t.name} ({Number(t.rate).toFixed(0)}%)</option>
-                            ))}
+                            <option value="PPN">PKP</option>
+                            <option value="NONE">Non-PKP</option>
                           </select>
                         </td>
                       </tr>
