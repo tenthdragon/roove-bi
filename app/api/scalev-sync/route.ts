@@ -128,10 +128,14 @@ export async function POST(req: NextRequest) {
     // ── Query orders based on sync mode ──
     let pendingOrders: any[] = [];
 
+    // Omit raw_data from initial query — it's large JSON that causes timeouts
+    // We only need scalev_id; raw_data is fetched per-order when scalev_id is null
+    const lightCols = 'id, order_id, scalev_id, status, store_name, business_code';
+
     if (syncMode === 'order_id' && targetOrderIds) {
       const { data, error } = await svc
         .from('scalev_orders')
-        .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
+        .select(lightCols)
         .in('order_id', targetOrderIds);
       if (error) throw error;
       pendingOrders = data || [];
@@ -140,7 +144,7 @@ export async function POST(req: NextRequest) {
       const dayEnd = `${targetDate}T23:59:59+07:00`;
       let query = svc
         .from('scalev_orders')
-        .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
+        .select(lightCols)
         .gte('pending_time', dayStart)
         .lte('pending_time', dayEnd);
       if (targetStatusFilter === 'pending') {
@@ -155,7 +159,7 @@ export async function POST(req: NextRequest) {
     } else {
       const { data, error } = await svc
         .from('scalev_orders')
-        .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
+        .select(lightCols)
         .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid']);
       if (error) throw error;
       pendingOrders = data || [];
@@ -215,8 +219,16 @@ export async function POST(req: NextRequest) {
     // ── Check each pending order against Scalev API ──
     for (const dbOrder of pendingOrders || []) {
       try {
-        // Determine Scalev integer ID
-        const scalevId = dbOrder.scalev_id || dbOrder.raw_data?.id;
+        // Determine Scalev integer ID (raw_data not loaded in initial query)
+        let scalevId = dbOrder.scalev_id;
+        if (!scalevId) {
+          const { data: rawRow } = await svc
+            .from('scalev_orders')
+            .select('raw_data')
+            .eq('id', dbOrder.id)
+            .single();
+          scalevId = rawRow?.raw_data?.id;
+        }
         if (!scalevId) {
           details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code, error: 'No Scalev ID available' });
           erroredCount++;
