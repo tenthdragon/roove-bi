@@ -58,13 +58,27 @@ export async function POST(req: NextRequest) {
     // ── Get all active businesses with API keys ──
     const { data: bizConfigs, error: bizErr } = await svc
       .from('scalev_webhook_businesses')
-      .select('id, business_code, api_key')
+      .select('id, business_code, api_key, tax_rate_name')
       .eq('is_active', true)
       .not('api_key', 'is', null);
 
     if (bizErr) throw bizErr;
 
     const businesses = (bizConfigs || []).filter(b => b.api_key);
+
+    // ── Tax rate lookup ──
+    const { data: taxRateRows } = await svc
+      .from('tax_rates')
+      .select('name, rate')
+      .order('effective_from', { ascending: false });
+    const taxRatesMap = new Map<string, { rate: number; divisor: number }>();
+    for (const r of taxRateRows || []) {
+      if (!taxRatesMap.has(r.name)) {
+        const rate = Number(r.rate);
+        taxRatesMap.set(r.name, { rate, divisor: 1 + rate / 100 });
+      }
+    }
+    taxRatesMap.set('NONE', { rate: 0, divisor: 1.0 });
     if (businesses.length === 0) {
       return NextResponse.json({ error: 'No businesses with API keys configured' }, { status: 500 });
     }
@@ -80,25 +94,13 @@ export async function POST(req: NextRequest) {
       storeTypeMap.set(`${row.business_id}:${row.store_name.toLowerCase()}`, row.store_type as StoreType);
     }
 
-    // ── Query all pending orders ──
+    // ── Query all non-terminal orders (pending, ready, draft, confirmed, paid) ──
     const { data: pendingOrders, error: queryErr } = await svc
       .from('scalev_orders')
       .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
-      .eq('status', 'pending');
+      .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid']);
 
     if (queryErr) throw queryErr;
-
-    if (!pendingOrders || pendingOrders.length === 0) {
-      return NextResponse.json({
-        success: true,
-        pending_checked: 0,
-        orders_updated: 0,
-        orders_still_pending: 0,
-        orders_errored: 0,
-        duration_ms: Date.now() - startTime,
-        message: 'No pending orders',
-      });
-    }
 
     // ── Insert sync log ──
     const { data: logEntry } = await svc
@@ -106,7 +108,7 @@ export async function POST(req: NextRequest) {
       .insert({
         status: 'running',
         sync_type: 'pending_reconcile',
-        orders_fetched: pendingOrders.length,
+        orders_fetched: (pendingOrders || []).length,
         orders_updated: 0,
         orders_inserted: 0,
         started_at: new Date().toISOString(),
@@ -135,12 +137,14 @@ export async function POST(req: NextRequest) {
       storeToBizId.set(row.store_name.toLowerCase(), row.business_id);
     }
 
-    // business_id ↔ business_code
+    // business_id ↔ business_code + tax config
     const bizIdToCode = new Map<number, string>();
     const bizCodeToId = new Map<string, number>();
+    const bizCodeToTaxRateName = new Map<string, string>();
     for (const b of businesses) {
       bizIdToCode.set(b.id, b.business_code);
       bizCodeToId.set(b.business_code, b.id);
+      bizCodeToTaxRateName.set(b.business_code, b.tax_rate_name || 'PPN');
     }
 
     let updatedCount = 0;
@@ -150,7 +154,7 @@ export async function POST(req: NextRequest) {
     const errors: string[] = [];
 
     // ── Check each pending order against Scalev API ──
-    for (const dbOrder of pendingOrders) {
+    for (const dbOrder of pendingOrders || []) {
       try {
         // Determine Scalev integer ID
         const scalevId = dbOrder.scalev_id || dbOrder.raw_data?.id;
@@ -177,7 +181,7 @@ export async function POST(req: NextRequest) {
                 // Update business_code on the order
                 await svc.from('scalev_orders').update({ business_code: code }).eq('id', dbOrder.id);
                 dbOrder.business_code = code;
-                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, details);
+                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details);
                 found = true;
                 updatedCount++;
                 break;
@@ -223,7 +227,7 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, details);
+        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details);
         if (result === 'updated') updatedCount++;
         else if (result === 'still_pending') stillPendingCount++;
 
@@ -237,8 +241,65 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // ── Repair pass: shipped/completed orders with 0 lines (last 14 days) ──
+    let repairedCount = 0;
+    try {
+      const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: shippedOrders } = await svc
+        .from('scalev_orders')
+        .select('id, order_id, scalev_id, status, store_name, business_code, raw_data')
+        .in('status', ['shipped', 'completed'])
+        .gte('shipped_time', cutoff);
+
+      for (const order of shippedOrders || []) {
+        // Check if this order has any lines
+        const { count } = await svc
+          .from('scalev_order_lines')
+          .select('id', { count: 'exact', head: true })
+          .eq('scalev_order_id', order.id);
+
+        if (count !== null && count > 0) continue;
+
+        // Try to insert lines from raw_data first
+        const rawData = order.raw_data;
+        if (rawData?.orderlines?.length > 0) {
+          const bizId = bizCodeToId.get(order.business_code) || 0;
+          const taxRateName = bizCodeToTaxRateName.get(order.business_code) || 'PPN';
+          await enrichLineItems(svc, order.id, order.order_id, rawData, storeTypeMap, bizId, taxRateName, taxRatesMap);
+          repairedCount++;
+          details.push({ order_id: order.order_id, store_name: order.store_name, business_code: order.business_code, action: 'repaired_lines_from_raw_data' });
+          continue;
+        }
+
+        // If raw_data has no orderlines, try fetching from API
+        const bizCode = order.business_code;
+        if (!bizCode || !bizApiKeys.has(bizCode)) continue;
+        const config = bizApiKeys.get(bizCode)!;
+        const scalevId = order.scalev_id || rawData?.id;
+        if (!scalevId) continue;
+
+        try {
+          const apiOrder = await fetchOrderDetail(config.api_key, config.base_url, String(scalevId));
+          if (apiOrder?.orderlines?.length > 0) {
+            // Update raw_data with fresh API response
+            await svc.from('scalev_orders').update({ raw_data: apiOrder, synced_at: new Date().toISOString() }).eq('id', order.id);
+            const bizId = bizCodeToId.get(bizCode) || 0;
+            const taxRateName = bizCodeToTaxRateName.get(bizCode) || 'PPN';
+            await enrichLineItems(svc, order.id, order.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
+            repairedCount++;
+            details.push({ order_id: order.order_id, store_name: order.store_name, business_code: bizCode, action: 'repaired_lines_from_api' });
+          }
+          await new Promise(r => setTimeout(r, 200));
+        } catch {
+          // Skip on API error
+        }
+      }
+    } catch (repairErr: any) {
+      console.error('[scalev-sync] Repair pass error:', repairErr.message);
+    }
+
     // ── Refresh MVs if any orders were updated to shipped/completed ──
-    if (updatedCount > 0) {
+    if (updatedCount > 0 || repairedCount > 0) {
       triggerViewRefresh();
     }
 
@@ -254,8 +315,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      pending_checked: pendingOrders.length,
+      pending_checked: (pendingOrders || []).length,
       orders_updated: updatedCount,
+      orders_repaired: repairedCount,
       orders_still_pending: stillPendingCount,
       orders_errored: erroredCount,
       duration_ms: Date.now() - startTime,
@@ -275,12 +337,14 @@ async function processOrder(
   apiOrder: any,
   storeTypeMap: Map<string, StoreType>,
   bizCodeToId: Map<string, number>,
+  bizCodeToTaxRateName: Map<string, string>,
+  taxRatesMap: Map<string, { rate: number; divisor: number }>,
   details: any[]
 ): Promise<'updated' | 'still_pending'> {
   const newStatus = apiOrder.status;
 
-  // Still pending — skip
-  if (newStatus === 'pending' || newStatus === 'draft' || newStatus === 'confirmed' || newStatus === 'paid') {
+  // Still pre-terminal — skip
+  if (['pending', 'draft', 'ready', 'confirmed', 'paid'].includes(newStatus)) {
     return 'still_pending';
   }
 
@@ -305,14 +369,15 @@ async function processOrder(
   // For shipped/completed: enrich line items
   if (newStatus === 'shipped' || newStatus === 'completed') {
     const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
-    await enrichLineItems(svc, dbOrder.id, apiOrder, storeTypeMap, bizId);
+    const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
+    await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
   }
 
   details.push({
     order_id: dbOrder.order_id,
     store_name: dbOrder.store_name,
     business_code: dbOrder.business_code,
-    old_status: 'pending',
+    old_status: dbOrder.status,
     new_status: newStatus,
   });
 
@@ -323,22 +388,16 @@ async function processOrder(
 async function enrichLineItems(
   svc: any,
   dbOrderId: number,
+  orderId: string,
   apiOrder: any,
   storeTypeMap: Map<string, StoreType>,
-  businessId: number
+  businessId: number,
+  taxRateName: string,
+  taxRatesMap: Map<string, { rate: number; divisor: number }>
 ) {
   const shippedTime = apiOrder.shipped_time || apiOrder.completed_time || null;
 
-  // 1. Propagate shipped_time to lines
-  if (shippedTime) {
-    await svc
-      .from('scalev_order_lines')
-      .update({ shipped_time: shippedTime })
-      .eq('scalev_order_id', dbOrderId)
-      .is('shipped_time', null);
-  }
-
-  // 2. Re-derive sales_channel from store_type
+  // Derive sales channel
   const storeName = (apiOrder.store?.name || '').toLowerCase();
   const isPurchaseFb = apiOrder.is_purchase_fb || false;
   const storeType = storeTypeMap.get(`${businessId}:${storeName}`) ?? guessStoreType(apiOrder.store?.name || '');
@@ -350,6 +409,66 @@ async function enrichLineItems(
     platform: apiOrder.platform,
   });
 
+  // Check if order has any existing lines
+  const { count: lineCount } = await svc
+    .from('scalev_order_lines')
+    .select('id', { count: 'exact', head: true })
+    .eq('scalev_order_id', dbOrderId);
+
+  if ((lineCount === 0 || lineCount === null) && apiOrder.orderlines?.length > 0) {
+    // ── Insert missing lines from API data ──
+    const tax = taxRateName === 'NONE'
+      ? { rate: 0, divisor: 1.0 }
+      : (taxRatesMap.get(taxRateName) || { rate: 11, divisor: 1.11 });
+
+    const newLines: any[] = [];
+    for (const line of apiOrder.orderlines) {
+      const qty = line.quantity || 1;
+      const productPrice = Number(line.product_price) || 0;
+      const discount = Number(line.discount) || 0;
+      const cogs = Number(line.cogs || line.variant_cogs) || 0;
+      const brand = await lookupProductType(line.product_name || '');
+
+      newLines.push({
+        scalev_order_id: dbOrderId,
+        order_id: orderId,
+        product_name: line.product_name || null,
+        product_type: brand,
+        variant_sku: line.variant_unique_id || null,
+        quantity: qty,
+        product_price_bt: productPrice / tax.divisor,
+        discount_bt: discount / tax.divisor,
+        cogs_bt: cogs / tax.divisor,
+        tax_rate: tax.rate,
+        sales_channel: newChannel,
+        shipped_time: shippedTime,
+        is_purchase_fb: apiOrder.is_purchase_fb === true || apiOrder.is_purchase_fb === 'true' || !!(apiOrder.message_variables?.advertiser || '').trim(),
+        is_purchase_tiktok: apiOrder.is_purchase_tiktok === true || apiOrder.is_purchase_tiktok === 'true',
+        is_purchase_kwai: apiOrder.is_purchase_kwai === true || apiOrder.is_purchase_kwai === 'true',
+        synced_at: new Date().toISOString(),
+      });
+    }
+
+    if (newLines.length > 0) {
+      await svc
+        .from('scalev_order_lines')
+        .upsert(newLines, { onConflict: 'scalev_order_id,product_name' });
+    }
+    return;
+  }
+
+  // ── Update existing lines ──
+
+  // 1. Propagate shipped_time to lines
+  if (shippedTime) {
+    await svc
+      .from('scalev_order_lines')
+      .update({ shipped_time: shippedTime })
+      .eq('scalev_order_id', dbOrderId)
+      .is('shipped_time', null);
+  }
+
+  // 2. Re-derive sales_channel
   await svc
     .from('scalev_order_lines')
     .update({
