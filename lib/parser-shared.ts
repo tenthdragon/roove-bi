@@ -31,7 +31,10 @@ export function parseDateValue(val: any): string | null {
   }
   if (typeof val === 'string') {
     if (val.match(/^\d{4}-\d{2}-\d{2}/)) return val.split('T')[0];
-    // Handle M/D/Y or M/D/YY format (Google Sheets sometimes returns this)
+    // Handle slash-separated dates: Google Sheets returns M/D/Y (US locale),
+    // but Scalev CSVs use DD/MM/YYYY (Indonesian locale).
+    // We assume M/D/Y here since this parser is used for Google Sheets only.
+    // CSV uploads use csv-actions.ts which has its own DD/MM/YYYY parser.
     const parts = val.split('/');
     if (parts.length === 3) {
       const m = parts[0].padStart(2, '0');

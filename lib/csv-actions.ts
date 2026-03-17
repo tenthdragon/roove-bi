@@ -126,7 +126,25 @@ export async function uploadCsvOrders(formData: FormData) {
   }
 
   const num = (v: string) => parseFloat(v || '0') || 0;
-  const ts = (v: string) => (v && v.trim()) ? v.trim() : null;
+  // Normalize timestamp strings: Scalev CSV exports use DD/MM/YYYY format
+  // (Indonesian locale). PostgreSQL defaults to MDY, so 03/02/2026 would be
+  // misread as March 2 instead of February 3. Convert to ISO format here.
+  const ts = (v: string): string | null => {
+    if (!v || !v.trim()) return null;
+    const s = v.trim();
+    // Already ISO format (2026-02-03 or 2026-02-03T...)
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s;
+    // DD/MM/YYYY HH:mm[:ss] or DD/MM/YYYY
+    const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+(.*))?$/);
+    if (m) {
+      const day = m[1].padStart(2, '0');
+      const mon = m[2].padStart(2, '0');
+      const year = m[3];
+      const time = m[4] ? `T${m[4]}` : '';
+      return `${year}-${mon}-${day}${time}`;
+    }
+    return s;
+  };
 
   const toInsert: any[] = [];
   const toUpdate: { id: number; data: any; orderId: string }[] = [];
