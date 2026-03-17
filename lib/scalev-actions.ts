@@ -25,10 +25,15 @@ export async function getScalevStatus() {
       .not('shipped_time', 'is', null);
 
     const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready'];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayISO = today.toISOString();
+
     const { count: pendingOrders } = await svc
       .from('scalev_orders')
       .select('*', { count: 'exact', head: true })
-      .in('status', PRE_TERMINAL);
+      .in('status', PRE_TERMINAL)
+      .lt('pending_time', todayISO);
 
     const { data: lastSync } = await svc
       .from('scalev_sync_log')
@@ -83,10 +88,16 @@ export async function getPendingOrders(): Promise<PendingOrder[]> {
   const svc = createServiceSupabase();
   const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready'];
 
+  // Only show orders from before today (today's orders may still be processing normally)
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const todayISO = today.toISOString();
+
   const { data: orders, error } = await svc
     .from('scalev_orders')
     .select('id, order_id, scalev_id, status, store_name, business_code, pending_time, synced_at')
     .in('status', PRE_TERMINAL)
+    .lt('pending_time', todayISO)
     .order('pending_time', { ascending: false });
 
   if (error) throw error;

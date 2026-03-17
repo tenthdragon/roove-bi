@@ -88,7 +88,7 @@ export async function POST(req: NextRequest) {
     const svc = getServiceSupabase();
 
     // ── Parallel setup: fetch all config data in one round-trip ──
-    const [bizRes, taxRes, storeRes] = await Promise.all([
+    const [bizRes, taxRes, storeRes, formulaRes] = await Promise.all([
       svc.from('scalev_webhook_businesses')
         .select('id, business_code, api_key, tax_rate_name')
         .eq('is_active', true)
@@ -99,6 +99,8 @@ export async function POST(req: NextRequest) {
       svc.from('scalev_store_channels')
         .select('store_name, store_type, business_id')
         .eq('is_active', true),
+      svc.from('tax_formula_config')
+        .select('store_type, formula'),
     ]);
 
     if (bizRes.error) throw bizRes.error;
@@ -112,6 +114,10 @@ export async function POST(req: NextRequest) {
       }
     }
     taxRatesMap.set('NONE', { rate: 0, divisor: 1.0 });
+
+    const formulaMap = new Map<string, string>(
+      (formulaRes.data || []).map((r: any) => [r.store_type, r.formula])
+    );
     if (businesses.length === 0) {
       return NextResponse.json({ error: 'No businesses with API keys configured' }, { status: 500 });
     }
@@ -261,7 +267,7 @@ export async function POST(req: NextRequest) {
               if (apiOrder) {
                 await svc.from('scalev_orders').update({ business_code: code }).eq('id', dbOrder.id);
                 dbOrder.business_code = code;
-                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair', syncMode === 'full' || syncMode === 'date');
+                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair', syncMode === 'full' || syncMode === 'date', formulaMap);
                 found = true;
                 updatedCount++;
                 break;
@@ -303,7 +309,7 @@ export async function POST(req: NextRequest) {
 
         const forceUpdate = syncMode === 'order_id' || syncMode === 'repair';
         const lightweight = syncMode === 'full' || syncMode === 'date';
-        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, forceUpdate, lightweight);
+        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, forceUpdate, lightweight, formulaMap);
         if (result === 'updated') updatedCount++;
         else if (result === 'still_pending') stillPendingCount++;
       } catch (err: any) {
@@ -369,7 +375,8 @@ async function processOrder(
   taxRatesMap: Map<string, { rate: number; divisor: number }>,
   details: any[],
   forceUpdate = false,
-  lightweight = false
+  lightweight = false,
+  formulaMap: Map<string, string> = new Map()
 ): Promise<'updated' | 'still_pending'> {
   const newStatus = apiOrder.status;
 
@@ -390,7 +397,7 @@ async function processOrder(
     if (!lightweight) {
       const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
       const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
-      await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
+      await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap, formulaMap);
     }
     details.push({
       order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code,
@@ -421,7 +428,7 @@ async function processOrder(
   if (!lightweight && (newStatus === 'shipped' || newStatus === 'completed')) {
     const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
     const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
-    await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
+    await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap, formulaMap);
   }
 
   details.push({
@@ -444,7 +451,8 @@ async function enrichLineItems(
   storeTypeMap: Map<string, StoreType>,
   businessId: number,
   taxRateName: string,
-  taxRatesMap: Map<string, { rate: number; divisor: number }>
+  taxRatesMap: Map<string, { rate: number; divisor: number }>,
+  formulaMap: Map<string, string> = new Map()
 ) {
   const shippedTime = apiOrder.shipped_time || apiOrder.completed_time || null;
 
@@ -459,6 +467,13 @@ async function enrichLineItems(
     courier_service: apiOrder.courier_service,
     platform: apiOrder.platform,
   });
+
+  // Determine tax formula based on store type
+  const formula = taxRateName === 'NONE' ? 'divisor' : (formulaMap.get(storeType) || 'divisor');
+  function calcBT(price: number, tax: { rate: number; divisor: number }): number {
+    if (formula === 'dpp_nilai_lain') return price * tax.rate / (tax.rate + 1);
+    return price / tax.divisor;
+  }
 
   // Check if order has any existing lines
   const { count: lineCount } = await svc
@@ -487,9 +502,9 @@ async function enrichLineItems(
         product_type: brand,
         variant_sku: line.variant_unique_id || null,
         quantity: qty,
-        product_price_bt: productPrice / tax.divisor,
-        discount_bt: discount / tax.divisor,
-        cogs_bt: cogs / tax.divisor,
+        product_price_bt: calcBT(productPrice, tax),
+        discount_bt: calcBT(discount, tax),
+        cogs_bt: calcBT(cogs, tax),
         tax_rate: tax.rate,
         sales_channel: newChannel,
         shipped_time: shippedTime,

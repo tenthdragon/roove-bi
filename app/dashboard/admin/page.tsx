@@ -76,6 +76,12 @@ export default function AdminPage() {
   const [bizTaxSaving, setBizTaxSaving] = useState(false);
   const [bizTaxMsg, setBizTaxMsg] = useState(null);
 
+  // Tax Formula Config states (per-channel PPN formula)
+  const [formulaConfig, setFormulaConfig] = useState([]);
+  const [formulaLoading, setFormulaLoading] = useState(false);
+  const [formulaSaving, setFormulaSaving] = useState(null); // store_type being saved
+  const [formulaMsg, setFormulaMsg] = useState(null);
+
   // User management states
   const [users, setUsers] = useState([]);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -193,6 +199,41 @@ export default function AdminPage() {
     }
   }, [supabase]);
 
+  // Load tax formula config (per-channel)
+  const loadFormulaConfig = useCallback(async () => {
+    setFormulaLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('tax_formula_config')
+        .select('*')
+        .order('store_type');
+      if (error) throw error;
+      setFormulaConfig(data || []);
+    } catch (err) {
+      console.error('Failed to load formula config:', err);
+    } finally {
+      setFormulaLoading(false);
+    }
+  }, [supabase]);
+
+  const handleFormulaChange = async (storeType, newFormula) => {
+    setFormulaSaving(storeType);
+    setFormulaMsg(null);
+    try {
+      const { error } = await supabase
+        .from('tax_formula_config')
+        .update({ formula: newFormula, updated_at: new Date().toISOString() })
+        .eq('store_type', storeType);
+      if (error) throw error;
+      setFormulaMsg({ type: 'success', text: `Formula ${storeType} → ${newFormula === 'dpp_nilai_lain' ? 'DPP Nilai Lain' : 'Divisor'} tersimpan` });
+      await loadFormulaConfig();
+    } catch (err) {
+      setFormulaMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
+    } finally {
+      setFormulaSaving(null);
+    }
+  };
+
   const handleBizTaxChange = async (bizId, newTaxRateName) => {
     setBizTaxSaving(true);
     setBizTaxMsg(null);
@@ -217,6 +258,7 @@ export default function AdminPage() {
       if (taxRates.length === 0) loadTaxRates();
       if (overheadData.length === 0) loadOverhead();
       if (bizTaxData.length === 0) loadBizTax();
+      if (formulaConfig.length === 0) loadFormulaConfig();
     }
   }, [activeTab]);
 
@@ -895,6 +937,76 @@ export default function AdminPage() {
                         </td>
                       </tr>
                     ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Formula PPN per Channel */}
+          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Formula PPN per Channel</div>
+            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+              Pilih metode perhitungan PPN (before tax) per tipe channel. Divisor = harga ÷ 1.11, DPP Nilai Lain = harga × 11/12.
+            </div>
+
+            {formulaMsg && (
+              <div style={{
+                marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
+                background: formulaMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
+                color: formulaMsg.type === 'success' ? '#10b981' : '#ef4444'
+              }}>
+                {formulaMsg.type === 'success' ? '✅' : '❌'} {formulaMsg.text}
+              </div>
+            )}
+
+            {formulaLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+              </div>
+            ) : formulaConfig.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>Belum ada konfigurasi formula</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: '#0b1121' }}>
+                      {['Channel', 'Formula', 'Contoh (Rp 100.000)'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {formulaConfig.map((row) => {
+                      const ppnRate = taxRates.find(t => t.name === 'PPN')?.rate || 11;
+                      const example = row.formula === 'dpp_nilai_lain'
+                        ? (100000 * ppnRate / (ppnRate + 1))
+                        : (100000 / (1 + ppnRate / 100));
+                      const label = { marketplace: 'Marketplace', scalev: 'Scalev', reseller: 'Reseller' }[row.store_type] || row.store_type;
+                      return (
+                        <tr key={row.store_type} style={{ borderBottom: '1px solid #0f172a' }}>
+                          <td style={{ padding: '10px 12px', fontWeight: 600, color: '#e2e8f0' }}>{label}</td>
+                          <td style={{ padding: '10px 12px' }}>
+                            <select
+                              value={row.formula}
+                              onChange={(e) => handleFormulaChange(row.store_type, e.target.value)}
+                              disabled={formulaSaving === row.store_type}
+                              style={{
+                                padding: '6px 10px', borderRadius: 6, border: '1px solid #1a2744',
+                                background: '#0b1121', color: '#e2e8f0', fontSize: 12, cursor: 'pointer',
+                                opacity: formulaSaving === row.store_type ? 0.5 : 1,
+                              }}
+                            >
+                              <option value="divisor">Divisor (÷1.{ppnRate})</option>
+                              <option value="dpp_nilai_lain">DPP Nilai Lain (×{ppnRate}/{ppnRate + 1})</option>
+                            </select>
+                          </td>
+                          <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#94a3b8' }}>
+                            Rp {Math.round(example).toLocaleString('id-ID')}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
