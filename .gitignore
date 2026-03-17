@@ -31,3 +31,15 @@ next-env.d.ts
 plan-langkah1.md
 supabase/migrations/006_dashboard_switch_ROLLBACK.sql
 supabase/migrations/007_validation_queries.sql
+
+# claude code
+.claude/
+
+# temp scripts
+scripts/
+
+# docs
+docs/
+
+# supabase temp
+supabase/.temp/
