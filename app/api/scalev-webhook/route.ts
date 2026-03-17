@@ -364,9 +364,12 @@ function derivePlatformFromStore(storeName: string, externalId?: string, webhook
   // Generic marketplace — detect from financial_entity (most reliable), then external_id, then courier
   if (s.includes('marketplace') || s.includes('markerplace')) {
     // 1. financial_entity from webhook raw_data — definitive source
+    // financial_entity can be an object {code: "shopee"} or a plain string "Shopee"
+    const fe = webhookData?.financial_entity;
+    const rawFe = webhookData?.raw_data?.financial_entity;
     const feCode = (
-      webhookData?.financial_entity?.code ||
-      webhookData?.raw_data?.financial_entity?.code ||
+      (typeof fe === 'string' ? fe : fe?.code) ||
+      (typeof rawFe === 'string' ? rawFe : rawFe?.code) ||
       ''
     ).toLowerCase();
     if (feCode === 'shopee') return 'shopee';
@@ -386,9 +389,11 @@ function derivePlatformFromStore(storeName: string, externalId?: string, webhook
   // marketplace order (e.g. "Osgard Oil Store", "Purvu The Secret Store").
   // Check financial_entity, external_id, courier before defaulting to scalev.
   if (webhookData) {
+    const fe2 = webhookData?.financial_entity;
+    const rawFe2 = webhookData?.raw_data?.financial_entity;
     const feCode = (
-      webhookData?.financial_entity?.code ||
-      webhookData?.raw_data?.financial_entity?.code ||
+      (typeof fe2 === 'string' ? fe2 : fe2?.code) ||
+      (typeof rawFe2 === 'string' ? rawFe2 : rawFe2?.code) ||
       ''
     ).toLowerCase();
     if (feCode === 'shopee') return 'shopee';

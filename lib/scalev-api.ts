@@ -115,9 +115,12 @@ export function detectMarketplace(orderData: {
   platform?: string;
 }): string {
   // 1. financial_entity.code (most reliable)
+  // financial_entity can be an object {code: "shopee"} or a plain string "Shopee"
+  const fe = orderData.financial_entity;
+  const rawFe = orderData.raw_data?.financial_entity;
   const feCode = (
-    orderData.financial_entity?.code
-    || orderData.raw_data?.financial_entity?.code
+    (typeof fe === 'string' ? fe : fe?.code)
+    || (typeof rawFe === 'string' ? rawFe : rawFe?.code)
     || ''
   ).toLowerCase();
   if (feCode === 'shopee') return 'Shopee';
@@ -178,8 +181,17 @@ export function deriveChannelFromStoreType(
       return detectMarketplace(orderData);
     case 'reseller':
       return 'Reseller';
-    case 'scalev':
+    case 'scalev': {
+      // Before defaulting to Scalev Ads / CS Manual, check if this order
+      // is actually a marketplace order (store name doesn't contain
+      // marketplace keywords but platform/financial_entity/external_id does)
+      const mpDetected = detectMarketplace(orderData);
+      if (mpDetected !== 'Marketplace') {
+        // Specific marketplace detected (Shopee, TikTok Shop, etc.)
+        return mpDetected;
+      }
       return isPurchaseFb ? 'Scalev Ads' : 'CS Manual';
+    }
   }
 }
 
