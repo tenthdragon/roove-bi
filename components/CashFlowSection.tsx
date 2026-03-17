@@ -53,6 +53,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [channelOpen, setChannelOpen] = useState(false);
 
   useEffect(() => {
     if (!periodStart) return;
@@ -232,10 +233,14 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
       {/* ── Channel Breakdown Table ── */}
       {activeChannels.length > 0 && (
         <div>
-          <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+          <div
+            onClick={() => setChannelOpen(!channelOpen)}
+            style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: channelOpen ? 8 : 0, cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <span style={{ display: 'inline-block', transition: 'transform 0.2s', transform: channelOpen ? 'rotate(90deg)' : 'rotate(0deg)', fontSize: 10 }}>&#9654;</span>
             Breakdown per Channel
           </div>
-          <div style={{ overflowX: 'auto', margin: '0 -4px' }}>
+          {channelOpen && <div style={{ overflowX: 'auto', margin: '0 -4px' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11, tableLayout: 'auto' }}>
               <thead>
                 <tr>
@@ -299,7 +304,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
                 </tr>
               </tbody>
             </table>
-          </div>
+          </div>}
         </div>
       )}
     </div>
