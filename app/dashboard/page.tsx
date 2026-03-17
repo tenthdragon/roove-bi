@@ -137,7 +137,17 @@ export default function OverviewPage() {
   }, [shipmentData, activeBrands]);
 
   const kpi = useMemo(() => {
-    const byDate = {};
+    // Build all dates in the selected range so days with only overhead/ads still appear
+    const byDate: Record<string, { s:number; g:number; n:number; mp:number }> = {};
+    if (dateRange.from && dateRange.to) {
+      const cur = new Date(dateRange.from + 'T00:00:00');
+      const end = new Date(dateRange.to + 'T00:00:00');
+      while (cur <= end) {
+        const key = cur.toISOString().slice(0, 10);
+        byDate[key] = { s:0, g:0, n:0, mp:0 };
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
     dailyData.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { s:0, g:0, n:0, mp:0 };
       byDate[d.date].s += Number(d.net_sales);
@@ -185,7 +195,7 @@ export default function OverviewPage() {
     const tNetProfit = tn - tOverhead;
     const npM = ts > 0 ? tNetProfit / ts * 100 : 0;
     return { ts, tg, tn, tm, tMp, tAds, tCogs, tOverhead, tNetProfit, tShipment, npM, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
-  }, [dailyData, overheadPerDay, overheadData, shipPerDay]);
+  }, [dailyData, overheadPerDay, overheadData, shipPerDay, dateRange]);
 
   // ── Previous month KPIs (for delta comparison) ──
   const prevKpi = useMemo(() => {
