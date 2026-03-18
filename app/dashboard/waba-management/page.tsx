@@ -1,11 +1,18 @@
 // @ts-nocheck
 'use client';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { useSupabase } from '@/lib/supabase-browser';
 import { fmtRupiah } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
+
+// Lazy-load emoji picker to avoid SSR issues
+const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
+
+// Regex to detect emoji characters
+const EMOJI_RE = /[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}\u{20E3}\u{E0020}-\u{E007F}]/u;
 
 // ── Template types ──
 interface Template {
@@ -56,6 +63,31 @@ export default function WabaManagementPage() {
   const [formError, setFormError] = useState<string | null>(null);
   const [varSamples, setVarSamples] = useState<Record<string, string>>({});
   const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+
+  // ── Click-outside to close emoji picker ──
+  useEffect(() => {
+    if (!showEmojiPicker) return;
+    function handleClick(e: MouseEvent) {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [showEmojiPicker]);
+
+  // ── Insert emoji at cursor ──
+  function insertEmoji(emojiData: any) {
+    const emoji = emojiData.emoji;
+    const el = bodyRef.current;
+    const pos = el ? el.selectionStart : formBody.length;
+    const newText = formBody.substring(0, pos) + emoji + formBody.substring(pos);
+    setFormBody(newText);
+    setShowEmojiPicker(false);
+    setTimeout(() => { if (el) { el.focus(); const np = pos + emoji.length; el.setSelectionRange(np, np); } }, 0);
+  }
 
   // ── Body formatting helpers ──
   function wrapSelection(prefix: string, suffix: string) {
@@ -99,87 +131,78 @@ export default function WabaManagementPage() {
     return unique;
   }, [formBody]);
 
-  // ── Real-time validation ──
-  const validationErrors = useMemo(() => {
-    const errors: string[] = [];
-    const name = formName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
-
-    // Name validation
-    if (formName && name !== formName.toLowerCase().replace(/\s+/g, '_')) {
-      // Will be auto-sanitized, just show info
+  // ── Per-field real-time validation ──
+  const nameErrors = useMemo(() => {
+    const errs: string[] = [];
+    if (!formName) return errs;
+    const sanitized = formName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+    if (!/^[a-z][a-z0-9_]*$/.test(sanitized)) {
+      errs.push('Must start with a letter and contain only lowercase letters, numbers, and underscores.');
     }
-    if (formName && !/^[a-z][a-z0-9_]*$/.test(name)) {
-      errors.push('Template name must start with a letter and contain only lowercase letters, numbers, and underscores.');
-    }
-    if (formName.length > 512) {
-      errors.push(`Template name is too long (${formName.length}/512 characters).`);
-    }
+    if (formName.length > 512) errs.push(`Too long (${formName.length}/512 characters).`);
+    return errs;
+  }, [formName]);
 
-    // Body character limit
-    if (formBody.length > 1024) {
-      errors.push(`Body text exceeds maximum length (${formBody.length}/1024 characters).`);
-    }
+  const headerErrors = useMemo(() => {
+    const errs: string[] = [];
+    if (!formHeader) return errs;
+    if (formHeader.length > 60) errs.push(`Exceeds maximum length (${formHeader.length}/60 characters).`);
+    const headerVars = formHeader.match(/\{\{(\d+)\}\}/g) || [];
+    if (headerVars.length > 1) errs.push('Header supports only 1 variable maximum.');
+    if (EMOJI_RE.test(formHeader)) errs.push('Emoji not allowed in header text.');
+    if (/\n/.test(formHeader)) errs.push('Newlines not allowed in header.');
+    if (/[*_~`]/.test(formHeader)) errs.push('Formatting markup (*bold*, _italic_, etc.) not allowed in header.');
+    return errs;
+  }, [formHeader]);
 
-    // Header character limit
-    if (formHeader.length > 60) {
-      errors.push(`Header text exceeds maximum length (${formHeader.length}/60 characters).`);
-    }
-
-    // Footer character limit
-    if (formFooter.length > 60) {
-      errors.push(`Footer text exceeds maximum length (${formFooter.length}/60 characters).`);
-    }
-
-    // Button text limit (20 chars each)
-    formButtons.forEach((btn, i) => {
-      if (btn.trim() && btn.trim().length > 20) {
-        errors.push(`Button ${i + 1} text exceeds maximum length (${btn.trim().length}/20 characters).`);
-      }
-    });
-
-    // Variable count limit
-    if (detectedVars.length > 100) {
-      errors.push(`Too many variables (${detectedVars.length}/100 maximum).`);
-    }
-
+  const bodyErrors = useMemo(() => {
+    const errs: string[] = [];
+    if (!formBody) return errs;
+    if (formBody.length > 1024) errs.push(`Exceeds maximum length (${formBody.length}/1024 characters).`);
+    if (/\t/.test(formBody)) errs.push('Tab characters are not allowed.');
+    if (/ {5,}/.test(formBody)) errs.push('No more than 4 consecutive spaces allowed.');
+    if (/\n{3,}/.test(formBody)) errs.push('No more than 2 consecutive newlines allowed.');
+    if (detectedVars.length > 100) errs.push(`Too many variables (${detectedVars.length}/100 maximum).`);
     if (formBody.trim() && detectedVars.length > 0) {
-      // Variable-to-text ratio: for X variables, need at least 2X+1 non-variable words
       const textWithoutVars = formBody.replace(/\{\{\d+\}\}/g, '').trim();
       const wordCount = textWithoutVars.split(/\s+/).filter(w => w.length > 0).length;
       const minWords = 2 * detectedVars.length + 1;
       if (wordCount < minWords) {
-        errors.push(`Too many variables for message length. Need at least ${minWords} words of text for ${detectedVars.length} variable(s), currently have ${wordCount}.`);
+        errs.push(`Too many variables for message length. Need at least ${minWords} words for ${detectedVars.length} variable(s), currently have ${wordCount}.`);
       }
-
-      // No adjacent variables (separated only by space or nothing)
-      if (/\{\{\d+\}\}\s*\{\{\d+\}\}/.test(formBody)) {
-        errors.push('Variables cannot be adjacent — add text between consecutive variables.');
-      }
-
-      // No variable at start of body
-      if (/^\s*\{\{\d+\}\}/.test(formBody)) {
-        errors.push('Body cannot start with a variable. Add text before the first variable.');
-      }
-
-      // No variable at end of body (possibly followed by punctuation only)
-      if (/\{\{\d+\}\}\s*[.!?,;:]*\s*$/.test(formBody)) {
-        errors.push('Body cannot end with a variable. Add text after the last variable.');
-      }
-
-      // Sequential variable check (no skipping numbers)
+      if (/\{\{\d+\}\}\s*\{\{\d+\}\}/.test(formBody)) errs.push('Variables cannot be adjacent — add text between them.');
+      if (/^\s*\{\{\d+\}\}/.test(formBody)) errs.push('Body cannot start with a variable.');
+      if (/\{\{\d+\}\}\s*[.!?,;:]*\s*$/.test(formBody)) errs.push('Body cannot end with a variable.');
       const varNums = detectedVars.map(v => parseInt(v.replace(/\D/g, ''))).sort((a, b) => a - b);
       for (let i = 0; i < varNums.length; i++) {
-        if (varNums[i] !== i + 1) {
-          errors.push(`Variable numbering must be sequential starting from 1. Found gap or skip at {{${varNums[i]}}}.`);
-          break;
-        }
+        if (varNums[i] !== i + 1) { errs.push(`Variable numbering must be sequential (gap at {{${varNums[i]}}}).`); break; }
       }
     }
+    return errs;
+  }, [formBody, detectedVars]);
 
-    return errors;
-  }, [formName, formBody, formHeader, formFooter, formButtons, detectedVars]);
+  const footerErrors = useMemo(() => {
+    const errs: string[] = [];
+    if (!formFooter) return errs;
+    if (formFooter.length > 60) errs.push(`Exceeds maximum length (${formFooter.length}/60 characters).`);
+    if (/\{\{\d+\}\}/.test(formFooter)) errs.push('Variables not allowed in footer.');
+    if (EMOJI_RE.test(formFooter)) errs.push('Emoji not allowed in footer.');
+    if (/[*_~`]/.test(formFooter)) errs.push('Formatting markup not allowed in footer.');
+    if (/\n/.test(formFooter)) errs.push('Newlines not allowed in footer.');
+    return errs;
+  }, [formFooter]);
 
-  const hasValidationErrors = validationErrors.length > 0;
+  const buttonErrors = useMemo(() => {
+    const errs: string[] = [];
+    const activeButtons = formButtons.filter(b => b.trim());
+    if (activeButtons.length > 10) errs.push('Maximum 10 buttons allowed.');
+    formButtons.forEach((btn, i) => {
+      if (btn.trim() && btn.trim().length > 25) errs.push(`Button ${i + 1} exceeds maximum length (${btn.trim().length}/25).`);
+    });
+    return errs;
+  }, [formButtons]);
+
+  const hasValidationErrors = nameErrors.length + headerErrors.length + bodyErrors.length + footerErrors.length + buttonErrors.length > 0;
 
   // ── Preview body with samples substituted ──
   const previewBody = useMemo(() => {
@@ -473,8 +496,9 @@ export default function WabaManagementPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div>
                     <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Name</label>
-                    <input style={inputStyle} value={formName} onChange={e => setFormName(e.target.value)}
+                    <input style={{ ...inputStyle, borderColor: nameErrors.length > 0 ? '#ef4444' : '#1a2744' }} value={formName} onChange={e => setFormName(e.target.value)}
                       placeholder="e.g. promo_january" />
+                    {nameErrors.map((e, i) => <div key={i} style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>{e}</div>)}
                   </div>
                   <div>
                     <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Category</label>
@@ -499,8 +523,9 @@ export default function WabaManagementPage() {
                     <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>Header (optional)</label>
                     {formHeader.length > 0 && <span style={{ fontSize: 10, color: formHeader.length > 60 ? '#ef4444' : '#475569' }}>{formHeader.length}/60</span>}
                   </div>
-                  <input style={{ ...inputStyle, borderColor: formHeader.length > 60 ? '#7f1d1d' : '#1a2744' }} value={formHeader} onChange={e => setFormHeader(e.target.value)}
+                  <input style={{ ...inputStyle, borderColor: headerErrors.length > 0 ? '#ef4444' : '#1a2744' }} value={formHeader} onChange={e => setFormHeader(e.target.value)}
                     placeholder="Header text" />
+                  {headerErrors.map((e, i) => <div key={i} style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>{e}</div>)}
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
@@ -508,11 +533,24 @@ export default function WabaManagementPage() {
                     <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>Body *</label>
                     <span style={{ fontSize: 10, color: formBody.length > 1024 ? '#ef4444' : '#475569' }}>{formBody.length}/1024</span>
                   </div>
-                  <textarea ref={bodyRef} style={{ ...inputStyle, minHeight: 80, resize: 'vertical', borderColor: formBody.length > 1024 ? '#7f1d1d' : '#1a2744' }} value={formBody}
+                  <textarea ref={bodyRef} style={{ ...inputStyle, minHeight: 80, resize: 'vertical', borderColor: bodyErrors.length > 0 ? '#ef4444' : '#1a2744' }} value={formBody}
                     onChange={e => setFormBody(e.target.value)}
                     placeholder="Hi {{1}}, check out our latest promo! Use code {{2}} for discount." />
+                  {bodyErrors.map((e, i) => <div key={i} style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>{e}</div>)}
                   {/* Formatting toolbar */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2, marginTop: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2, marginTop: 6, position: 'relative' }}>
+                    {/* Emoji picker */}
+                    <div ref={emojiPickerRef} style={{ position: 'relative' }}>
+                      <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} title="Emoji"
+                        style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        😊
+                      </button>
+                      {showEmojiPicker && (
+                        <div style={{ position: 'absolute', bottom: 36, left: 0, zIndex: 100 }}>
+                          <EmojiPicker onEmojiClick={insertEmoji} theme="dark" width={320} height={400} searchPlaceHolder="Search emoji..." skinTonesDisabled previewConfig={{ showPreview: false }} />
+                        </div>
+                      )}
+                    </div>
                     <button type="button" onClick={() => wrapSelection('*', '*')} title="Bold"
                       style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       B
@@ -566,14 +604,15 @@ export default function WabaManagementPage() {
                     <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>Footer (optional)</label>
                     {formFooter.length > 0 && <span style={{ fontSize: 10, color: formFooter.length > 60 ? '#ef4444' : '#475569' }}>{formFooter.length}/60</span>}
                   </div>
-                  <input style={{ ...inputStyle, borderColor: formFooter.length > 60 ? '#7f1d1d' : '#1a2744' }} value={formFooter} onChange={e => setFormFooter(e.target.value)}
+                  <input style={{ ...inputStyle, borderColor: footerErrors.length > 0 ? '#ef4444' : '#1a2744' }} value={formFooter} onChange={e => setFormFooter(e.target.value)}
                     placeholder="e.g. Reply STOP to unsubscribe" />
+                  {footerErrors.map((e, i) => <div key={i} style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>{e}</div>)}
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
-                  <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Quick Reply Buttons (optional, max 3)</label>
+                  <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Quick Reply Buttons (optional, max 10, 25 chars each)</label>
                   {[0, 1, 2].map(i => (
-                    <input key={i} style={{ ...inputStyle, marginBottom: 6 }}
+                    <input key={i} style={{ ...inputStyle, marginBottom: 6, borderColor: formButtons[i]?.trim()?.length > 25 ? '#ef4444' : '#1a2744' }}
                       value={formButtons[i] || ''} onChange={e => {
                         const next = [...formButtons];
                         next[i] = e.target.value;
@@ -581,17 +620,13 @@ export default function WabaManagementPage() {
                       }}
                       placeholder={`Button ${i + 1} text`} />
                   ))}
+                  {buttonErrors.map((e, i) => <div key={i} style={{ color: '#ef4444', fontSize: 11, marginTop: 2 }}>{e}</div>)}
                 </div>
 
-                {/* Validation errors */}
-                {validationErrors.length > 0 && (
-                  <div style={{ background: '#1c1117', border: '1px solid #7f1d1d', borderRadius: 6, padding: 10, marginBottom: 12 }}>
-                    {validationErrors.map((err, i) => (
-                      <div key={i} style={{ color: '#f87171', fontSize: 11, marginBottom: i < validationErrors.length - 1 ? 4 : 0, display: 'flex', gap: 6 }}>
-                        <span style={{ flexShrink: 0 }}>•</span>
-                        <span>{err}</span>
-                      </div>
-                    ))}
+                {/* Authentication category info */}
+                {formCategory === 'AUTHENTICATION' && (
+                  <div style={{ background: '#1e1533', border: '1px solid #6b21a8', borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 11, color: '#c084fc' }}>
+                    Authentication templates have a fixed body format set by Meta: <strong>{'"{{1}} is your verification code."'}</strong> Your body text will be replaced.
                   </div>
                 )}
 
