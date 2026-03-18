@@ -13,6 +13,10 @@
       "schedule": "30 1 * * *"
     },
     {
+      "path": "/api/waba-template-sync",
+      "schedule": "0 2 * * *"
+    },
+    {
       "path": "/api/scalev-sync",
       "schedule": "0 19 * * *"
     }

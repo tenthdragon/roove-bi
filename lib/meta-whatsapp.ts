@@ -334,6 +334,116 @@ export async function fetchTemplateAnalytics(
   return { byTemplate, daily };
 }
 
+// ── Template Analytics (Raw for DB Storage) ──
+
+export interface TemplateAnalyticsDailyRow {
+  template_id: string;
+  date: string; // YYYY-MM-DD
+  sent: number;
+  delivered: number;
+  read: number;
+  clicked: number;
+  replied: number;
+  cost: number;
+}
+
+/**
+ * Fetch per-template daily analytics and return flat rows ready for DB upsert.
+ * One row per (template_id, date) combination.
+ * Batches in groups of 10 (API limit), 300ms delay between batches.
+ */
+export async function fetchTemplateAnalyticsRaw(
+  wabaId: string,
+  accessToken: string,
+  templateIds: string[],
+  startDate: string,
+  endDate: string
+): Promise<TemplateAnalyticsDailyRow[]> {
+  const startUnix = Math.floor(new Date(startDate + 'T00:00:00Z').getTime() / 1000);
+  const endUnix = Math.floor(new Date(endDate + 'T00:00:00Z').getTime() / 1000);
+
+  // Map keyed by "templateId|date" for dedup/aggregation
+  const rowMap = new Map<string, TemplateAnalyticsDailyRow>();
+
+  for (let i = 0; i < templateIds.length; i += 10) {
+    const batch = templateIds.slice(i, i + 10);
+
+    const templateAnalyticsField = [
+      `template_analytics`,
+      `.start(${startUnix})`,
+      `.end(${endUnix})`,
+      `.granularity(DAILY)`,
+      `.template_ids([${batch.join(',')}])`,
+    ].join('');
+
+    const params = new URLSearchParams({
+      access_token: accessToken,
+      fields: templateAnalyticsField,
+    });
+
+    const url = `${GRAPH_API_BASE}/${wabaId}?${params.toString()}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      const errorMsg = errorBody?.error?.message || response.statusText;
+      console.error(`[template_analytics_raw] API error: ${errorMsg}`);
+      if (i + 10 < templateIds.length) await sleep(300);
+      continue;
+    }
+
+    const json = await response.json();
+    const buckets = json?.template_analytics?.data || [];
+
+    for (const bucket of buckets) {
+      for (const dp of bucket.data_points || []) {
+        const tplId = String(dp.template_id);
+        if (!tplId) continue;
+
+        const date = new Date(dp.start * 1000).toISOString().split('T')[0];
+        const key = `${tplId}|${date}`;
+
+        const existing = rowMap.get(key);
+        const totalClicked = Array.isArray(dp.clicked)
+          ? dp.clicked.reduce((sum: number, c: any) => sum + (c.total || 0), 0)
+          : (dp.clicked || 0);
+
+        let costAmount = 0;
+        if (Array.isArray(dp.cost)) {
+          const amountSpent = dp.cost.find((c: any) => c.type === 'amount_spent');
+          if (amountSpent?.value) costAmount = Number(amountSpent.value) || 0;
+        } else if (typeof dp.cost === 'number') {
+          costAmount = dp.cost;
+        }
+
+        if (existing) {
+          existing.sent += dp.sent || 0;
+          existing.delivered += dp.delivered || 0;
+          existing.read += dp.read || 0;
+          existing.clicked += totalClicked;
+          existing.replied += dp.replied || 0;
+          existing.cost += costAmount;
+        } else {
+          rowMap.set(key, {
+            template_id: tplId,
+            date,
+            sent: dp.sent || 0,
+            delivered: dp.delivered || 0,
+            read: dp.read || 0,
+            clicked: totalClicked,
+            replied: dp.replied || 0,
+            cost: costAmount,
+          });
+        }
+      }
+    }
+
+    if (i + 10 < templateIds.length) await sleep(300);
+  }
+
+  return Array.from(rowMap.values());
+}
+
 // ── Template CRUD ──
 
 export interface MessageTemplate {

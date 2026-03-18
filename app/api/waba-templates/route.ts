@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import {
-  listMessageTemplates,
   createMessageTemplate,
   deleteMessageTemplate,
   type CreateTemplatePayload,
@@ -50,24 +49,32 @@ async function getWabaConfig() {
   return { wabaId: accounts[0].waba_id, accessToken };
 }
 
-/** GET — List message templates */
+/** GET — List message templates from DB (synced via /api/waba-template-sync) */
 export async function GET(req: NextRequest) {
   try {
     const auth = await authenticate(req);
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-    const { wabaId, accessToken } = await getWabaConfig();
-    const after = new URL(req.url).searchParams.get('after') || undefined;
-    const result = await listMessageTemplates(wabaId, accessToken, after);
+    const { wabaId } = await getWabaConfig();
+    const svc = getServiceSupabase();
 
-    return NextResponse.json(result);
+    const { data, error } = await svc
+      .from('waba_templates')
+      .select('id, name, status, category, language, components, is_auto_generated')
+      .eq('waba_id', wabaId)
+      .is('deleted_at', null)
+      .order('name');
+
+    if (error) throw error;
+
+    return NextResponse.json({ data: data || [] });
   } catch (err: any) {
     console.error('[waba-templates] GET error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
 
-/** POST — Create a message template */
+/** POST — Create a message template (write-through: Graph API + DB) */
 export async function POST(req: NextRequest) {
   try {
     const auth = await authenticate(req);
@@ -84,6 +91,24 @@ export async function POST(req: NextRequest) {
     body.name = body.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
 
     const result = await createMessageTemplate(wabaId, accessToken, body);
+
+    // Write-through: insert into DB so it appears immediately
+    const svc = getServiceSupabase();
+    await svc.from('waba_templates').upsert({
+      id: result.id,
+      waba_id: wabaId,
+      name: body.name,
+      status: result.status || 'PENDING',
+      category: result.category || body.category,
+      language: body.language,
+      components: body.components,
+      is_auto_generated: false,
+      synced_at: new Date().toISOString(),
+      deleted_at: null,
+    }, { onConflict: 'id' }).then(({ error }) => {
+      if (error) console.error('[waba-templates] Write-through insert error:', error);
+    });
+
     return NextResponse.json(result);
   } catch (err: any) {
     console.error('[waba-templates] POST error:', err.message);
@@ -91,7 +116,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-/** DELETE — Delete a message template */
+/** DELETE — Delete a message template (write-through: Graph API + DB soft-delete) */
 export async function DELETE(req: NextRequest) {
   try {
     const auth = await authenticate(req);
@@ -105,6 +130,16 @@ export async function DELETE(req: NextRequest) {
     }
 
     const result = await deleteMessageTemplate(wabaId, accessToken, body.hsm_id, body.name);
+
+    // Write-through: soft-delete in DB
+    const svc = getServiceSupabase();
+    await svc.from('waba_templates')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('id', body.hsm_id)
+      .then(({ error }) => {
+        if (error) console.error('[waba-templates] Write-through delete error:', error);
+      });
+
     return NextResponse.json(result);
   } catch (err: any) {
     console.error('[waba-templates] DELETE error:', err.message);

@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { fetchTemplateAnalytics } from '@/lib/meta-whatsapp';
 
 function getServiceSupabase() {
   return createClient(
@@ -28,30 +27,13 @@ async function authenticate(req: NextRequest) {
   return { user, profile };
 }
 
-async function getWabaConfig() {
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
-  if (!accessToken) throw new Error('WHATSAPP_ACCESS_TOKEN or META_ACCESS_TOKEN not configured');
-
-  const svc = getServiceSupabase();
-  const { data: accounts, error } = await svc
-    .from('waba_accounts')
-    .select('waba_id')
-    .eq('is_active', true)
-    .limit(1);
-
-  if (error) throw error;
-  if (!accounts || accounts.length === 0) throw new Error('No active WABA account configured');
-
-  return { wabaId: accounts[0].waba_id, accessToken };
-}
-
-/** GET — Fetch template performance analytics */
+/** GET — Fetch template performance analytics from DB */
 export async function GET(req: NextRequest) {
   try {
     const auth = await authenticate(req);
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-    const { wabaId, accessToken } = await getWabaConfig();
+    const svc = getServiceSupabase();
     const url = new URL(req.url);
     const templateIds = url.searchParams.get('template_ids')?.split(',').filter(Boolean) || [];
     const start = url.searchParams.get('start') || '';
@@ -64,8 +46,53 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'start and end date required (YYYY-MM-DD)' }, { status: 400 });
     }
 
-    const result = await fetchTemplateAnalytics(wabaId, accessToken, templateIds, start, end);
-    return NextResponse.json(result);
+    // Per-template aggregates (90-day view)
+    const { data: summaryData, error: summaryError } = await svc
+      .from('v_waba_template_analytics_90d')
+      .select('*')
+      .in('template_id', templateIds);
+
+    if (summaryError) throw summaryError;
+
+    const byTemplate: Record<string, { sent: number; delivered: number; read: number; clicked: number; replied: number; cost: number }> = {};
+    for (const row of summaryData || []) {
+      byTemplate[row.template_id] = {
+        sent: row.sent || 0,
+        delivered: row.delivered || 0,
+        read: row.read || 0,
+        clicked: row.clicked || 0,
+        replied: row.replied || 0,
+        cost: row.cost || 0,
+      };
+    }
+
+    // Daily breakdown aggregated across templates
+    const { data: dailyData, error: dailyError } = await svc
+      .from('waba_template_daily_analytics')
+      .select('date, sent, delivered, read, clicked, replied')
+      .in('template_id', templateIds)
+      .gte('date', start)
+      .lte('date', end)
+      .order('date');
+
+    if (dailyError) throw dailyError;
+
+    // Aggregate by date across all templates
+    const dailyMap: Record<string, { date: string; sent: number; delivered: number; read: number; clicked: number; replied: number }> = {};
+    for (const row of dailyData || []) {
+      if (!dailyMap[row.date]) {
+        dailyMap[row.date] = { date: row.date, sent: 0, delivered: 0, read: 0, clicked: 0, replied: 0 };
+      }
+      dailyMap[row.date].sent += row.sent || 0;
+      dailyMap[row.date].delivered += row.delivered || 0;
+      dailyMap[row.date].read += row.read || 0;
+      dailyMap[row.date].clicked += row.clicked || 0;
+      dailyMap[row.date].replied += row.replied || 0;
+    }
+
+    const daily = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
+
+    return NextResponse.json({ byTemplate, daily });
   } catch (err: any) {
     console.error('[waba-template-analytics] GET error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
