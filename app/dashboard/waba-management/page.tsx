@@ -1,6 +1,6 @@
 // @ts-nocheck
 'use client';
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { fmtRupiah } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
@@ -55,6 +55,38 @@ export default function WabaManagementPage() {
   const [formButtons, setFormButtons] = useState<string[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
   const [varSamples, setVarSamples] = useState<Record<string, string>>({});
+  const bodyRef = useRef<HTMLTextAreaElement>(null);
+
+  // ── Body formatting helpers ──
+  function wrapSelection(prefix: string, suffix: string) {
+    const el = bodyRef.current;
+    if (!el) return;
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const selected = formBody.substring(start, end);
+    const before = formBody.substring(0, start);
+    const after = formBody.substring(end);
+    if (selected) {
+      const newText = before + prefix + selected + suffix + after;
+      setFormBody(newText);
+      setTimeout(() => { el.focus(); el.setSelectionRange(start + prefix.length, end + prefix.length); }, 0);
+    } else {
+      const newText = before + prefix + suffix + after;
+      setFormBody(newText);
+      setTimeout(() => { el.focus(); el.setSelectionRange(start + prefix.length, start + prefix.length); }, 0);
+    }
+  }
+
+  function addVariable() {
+    const nextNum = (detectedVars.length > 0)
+      ? Math.max(...detectedVars.map(v => parseInt(v.replace(/\D/g, '')))) + 1
+      : 1;
+    const el = bodyRef.current;
+    const pos = el ? el.selectionStart : formBody.length;
+    const newText = formBody.substring(0, pos) + `{{${nextNum}}}` + formBody.substring(pos);
+    setFormBody(newText);
+    setTimeout(() => { if (el) { el.focus(); const np = pos + `{{${nextNum}}}`.length; el.setSelectionRange(np, np); } }, 0);
+  }
 
   // ── Auto-detect variables in body text ──
   const detectedVars = useMemo(() => {
@@ -285,6 +317,29 @@ export default function WabaManagementPage() {
     return body?.text || '—';
   }
 
+  // ── Render WhatsApp-formatted text as React elements ──
+  function renderWaFormatted(text: string) {
+    // Process formatting: *bold*, _italic_, ~strikethrough~, ```monospace```
+    const parts: React.ReactNode[] = [];
+    // Use regex to find formatted segments
+    const regex = /(\*([^*]+)\*|_([^_]+)_|~([^~]+)~|```([^`]+)```)/g;
+    let lastIndex = 0;
+    let match;
+    let key = 0;
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(text.substring(lastIndex, match.index));
+      }
+      if (match[2]) parts.push(<strong key={key++}>{match[2]}</strong>);
+      else if (match[3]) parts.push(<em key={key++}>{match[3]}</em>);
+      else if (match[4]) parts.push(<s key={key++}>{match[4]}</s>);
+      else if (match[5]) parts.push(<code key={key++} style={{ background: '#f0f0f0', borderRadius: 3, padding: '1px 4px', fontFamily: 'monospace', fontSize: 12 }}>{match[5]}</code>);
+      lastIndex = match.index + match[0].length;
+    }
+    if (lastIndex < text.length) parts.push(text.substring(lastIndex));
+    return parts.length > 0 ? parts : text;
+  }
+
   // ── Styles ──
   const card = { background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16 };
   const thStyle = { padding: '8px 10px', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' as const };
@@ -365,10 +420,33 @@ export default function WabaManagementPage() {
 
                 <div style={{ marginBottom: 12 }}>
                   <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Body *</label>
-                  <textarea style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} value={formBody}
+                  <textarea ref={bodyRef} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} value={formBody}
                     onChange={e => setFormBody(e.target.value)}
                     placeholder="Hi {{1}}, check out our latest promo! Use code {{2}} for discount." />
-                  <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>Use {'{{1}}'}, {'{{2}}'}, etc. for variable placeholders</div>
+                  {/* Formatting toolbar */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2, marginTop: 6 }}>
+                    <button type="button" onClick={() => wrapSelection('*', '*')} title="Bold"
+                      style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      B
+                    </button>
+                    <button type="button" onClick={() => wrapSelection('_', '_')} title="Italic"
+                      style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 14, fontStyle: 'italic', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      I
+                    </button>
+                    <button type="button" onClick={() => wrapSelection('~', '~')} title="Strikethrough"
+                      style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 14, textDecoration: 'line-through', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      S
+                    </button>
+                    <button type="button" onClick={() => wrapSelection('```', '```')} title="Monospace"
+                      style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 12, fontFamily: 'monospace', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {'</>'}
+                    </button>
+                    <div style={{ width: 1, height: 20, background: '#1a2744', margin: '0 4px' }} />
+                    <button type="button" onClick={addVariable} title="Add variable"
+                      style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, height: 28, padding: '0 10px', cursor: 'pointer', color: '#60a5fa', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      + Add variable
+                    </button>
+                  </div>
                 </div>
 
                 {/* Variable Samples — auto-detected from body */}
@@ -445,7 +523,7 @@ export default function WabaManagementPage() {
                     )}
                     {/* Body */}
                     <div style={{ fontSize: 13, color: '#303030', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {previewBody || <span style={{ color: '#999' }}>Message body will appear here...</span>}
+                      {previewBody ? renderWaFormatted(previewBody) : <span style={{ color: '#999' }}>Message body will appear here...</span>}
                     </div>
                     {/* Footer */}
                     {formFooter.trim() && (
