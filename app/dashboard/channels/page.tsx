@@ -824,45 +824,69 @@ export default function ChannelsPage() {
 
       {/* WABA Promotion Analysis */}
       {wabaAnalysis.rows.length > 0 && (
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, marginTop: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: '#25D366' }}>●</span> WABA Promotion Analysis
-          </div>
-          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid #1a2744' }}>
-                  {['Date', 'MM Sent', 'MM Delivered', 'Delivery Rate', 'Order Qty', 'WABA MM Cost', 'Total Purchase', 'Cost/Order'].map((h, i) => (
-                    <th key={h} style={{ padding: '8px 10px', textAlign: i === 0 ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {wabaAnalysis.rows.map(r => (
-                  <tr key={r.date} style={{ borderBottom: '1px solid #1a274422' }}>
-                    <td style={{ padding: '8px 10px', fontWeight: 500, whiteSpace: 'nowrap', fontSize: 12 }}>{r.dateLabel}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12 }}>{r.sent > 0 ? r.sent.toLocaleString() : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12 }}>{r.delivered > 0 ? r.delivered.toLocaleString() : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: r.deliveryRate >= 95 ? '#10b981' : r.deliveryRate >= 85 ? '#f59e0b' : '#ef4444' }}>{r.sent > 0 ? `${r.deliveryRate.toFixed(1)}%` : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{r.orders > 0 ? r.orders.toLocaleString() : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: '#25D366' }}>{r.cost > 0 ? fmtRupiah(r.cost) : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{r.revenue > 0 ? fmtRupiah(r.revenue) : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12 }}>{r.orders > 0 ? fmtRupiah(r.costPerOrder) : '—'}</td>
-                  </tr>
+        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, marginTop: 20, overflowX: 'auto' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>WABA Promotion Analysis</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid #1a2744' }}>
+                {['Date', 'MM Sent', 'MM Delivered', 'Delivery Rate', 'Order Qty', 'WABA MM Cost', 'Total Purchase', 'Cost/Order'].map(h => (
+                  <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Date' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
                 ))}
-                <tr style={{ borderTop: '2px solid #1a2744' }}>
-                  <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 12 }}>TOTAL</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{wabaAnalysis.totals.sent.toLocaleString()}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{wabaAnalysis.totals.delivered.toLocaleString()}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: wabaAnalysis.totals.deliveryRate >= 95 ? '#10b981' : '#f59e0b' }}>{wabaAnalysis.totals.sent > 0 ? `${wabaAnalysis.totals.deliveryRate.toFixed(1)}%` : '—'}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{wabaAnalysis.totals.orders.toLocaleString()}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: '#25D366' }}>{fmtRupiah(wabaAnalysis.totals.cost)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{fmtRupiah(wabaAnalysis.totals.revenue)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{wabaAnalysis.totals.orders > 0 ? fmtRupiah(wabaAnalysis.totals.costPerOrder) : '—'}</td>
+              </tr>
+            </thead>
+            <tbody>
+              {wabaAnalysis.rows.map(r => (
+                <tr key={r.date} style={{ borderBottom: '1px solid #1a2744' }}>
+                  <td style={{ padding: '8px 10px', fontWeight: 600 }}>{r.dateLabel}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
+                    {r.sent > 0 ? r.sent.toLocaleString() : <span style={{ color: '#334155' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
+                    {r.delivered > 0 ? r.delivered.toLocaleString() : <span style={{ color: '#334155' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                    {r.sent > 0 ? (
+                      <span style={{
+                        padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                        background: r.deliveryRate >= 95 ? '#064e3b' : r.deliveryRate >= 85 ? '#78350f' : '#7f1d1d',
+                        color: r.deliveryRate >= 95 ? '#10b981' : r.deliveryRate >= 85 ? '#f59e0b' : '#ef4444',
+                      }}>{r.deliveryRate.toFixed(1)}%</span>
+                    ) : <span style={{ color: '#334155' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>
+                    {r.orders > 0 ? r.orders.toLocaleString() : <span style={{ color: '#334155' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#25D366' }}>
+                    {r.cost > 0 ? fmtRupiah(r.cost) : <span style={{ color: '#334155' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
+                    {r.revenue > 0 ? fmtRupiah(r.revenue) : <span style={{ color: '#334155' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
+                    {r.orders > 0 ? fmtRupiah(r.costPerOrder) : <span style={{ color: '#334155' }}>—</span>}
+                  </td>
                 </tr>
-              </tbody>
-            </table>
-          </div>
+              ))}
+              <tr style={{ borderTop: '2px solid #1a2744' }}>
+                <td style={{ padding: '8px 10px', fontWeight: 700 }}>TOTAL</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.sent.toLocaleString()}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.delivered.toLocaleString()}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right' }}>
+                  {wabaAnalysis.totals.sent > 0 ? (
+                    <span style={{
+                      padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                      background: wabaAnalysis.totals.deliveryRate >= 95 ? '#064e3b' : '#78350f',
+                      color: wabaAnalysis.totals.deliveryRate >= 95 ? '#10b981' : '#f59e0b',
+                    }}>{wabaAnalysis.totals.deliveryRate.toFixed(1)}%</span>
+                  ) : <span style={{ color: '#334155' }}>—</span>}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.orders.toLocaleString()}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#25D366' }}>{fmtRupiah(wabaAnalysis.totals.cost)}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(wabaAnalysis.totals.revenue)}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.orders > 0 ? fmtRupiah(wabaAnalysis.totals.costPerOrder) : <span style={{ color: '#334155' }}>—</span>}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       )}
     </div>
