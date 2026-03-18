@@ -145,7 +145,7 @@ export async function POST(req: NextRequest) {
         .select(lightCols)
         .gte('pending_time', dayStart)
         .lte('pending_time', dayEnd)
-        .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid']);
+        .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid', 'in_process']);
       if (error) throw error;
       pendingOrders = data || [];
     } else if (syncMode === 'repair' && targetDate) {
@@ -179,7 +179,7 @@ export async function POST(req: NextRequest) {
       const { data, error } = await svc
         .from('scalev_orders')
         .select(lightCols)
-        .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid']);
+        .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid', 'in_process']);
       if (error) throw error;
       pendingOrders = data || [];
     }
@@ -380,7 +380,7 @@ async function processOrder(
   }
 
   // Still pre-terminal — skip (unless forced)
-  if (['pending', 'draft', 'ready', 'confirmed', 'paid'].includes(newStatus)) {
+  if (['pending', 'draft', 'ready', 'confirmed', 'paid', 'in_process'].includes(newStatus)) {
     if (!forceUpdate) return 'still_pending';
     // Force: refresh raw_data even if status unchanged
     await svc.from('scalev_orders').update({
