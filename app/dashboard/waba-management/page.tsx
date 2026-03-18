@@ -44,6 +44,87 @@ const CATEGORY_STYLE: Record<string, { bg: string; color: string }> = {
   AUTHENTICATION: { bg: '#3b1f4a', color: '#c084fc' },
 };
 
+// ── Template Preview Component (WhatsApp chat bubble) ──
+function TemplatePreview({ template, renderWaFormatted }: { template: Template; renderWaFormatted: (text: string) => React.ReactNode }) {
+  const header = template.components?.find((c: any) => c.type === 'HEADER');
+  const body = template.components?.find((c: any) => c.type === 'BODY');
+  const footer = template.components?.find((c: any) => c.type === 'FOOTER');
+  const buttons = template.components?.find((c: any) => c.type === 'BUTTONS');
+
+  return (
+    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+      {/* WhatsApp chat bubble preview */}
+      <div style={{ width: 300, flexShrink: 0 }}>
+        <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: 6 }}>WhatsApp Preview</div>
+        <div style={{ background: '#e5ddd5', borderRadius: 12, padding: 16, position: 'relative' }}>
+          <div style={{ position: 'absolute', inset: 0, borderRadius: 12, opacity: 0.05, background: 'url("data:image/svg+xml,%3Csvg width=\'40\' height=\'40\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M20 0L0 20h10L20 10l10 10h10z\' fill=\'%23000\'/%3E%3C/svg%3E")' }} />
+          <div style={{ position: 'relative', background: '#fff', borderRadius: '0 8px 8px 8px', padding: '8px 10px', maxWidth: '100%', boxShadow: '0 1px 2px rgba(0,0,0,0.13)' }}>
+            {/* Header */}
+            {header?.text && (
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 4, lineHeight: 1.3 }}>
+                {header.text}
+              </div>
+            )}
+            {header?.format === 'IMAGE' && (
+              <div style={{ background: '#f0f0f0', borderRadius: 6, height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6, color: '#999', fontSize: 11 }}>
+                📷 Image Header
+              </div>
+            )}
+            {/* Body */}
+            <div style={{ fontSize: 13, color: '#303030', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              {body?.text ? renderWaFormatted(body.text) : <span style={{ color: '#999' }}>No body text</span>}
+            </div>
+            {/* Footer */}
+            {footer?.text && (
+              <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 6 }}>{footer.text}</div>
+            )}
+            {/* Timestamp */}
+            <div style={{ textAlign: 'right', marginTop: 2 }}>
+              <span style={{ fontSize: 10, color: '#8c8c8c' }}>12:00</span>
+            </div>
+          </div>
+          {/* Buttons */}
+          {buttons?.buttons?.length > 0 && (
+            <div style={{ position: 'relative', marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+              {buttons.buttons.map((btn: any, i: number) => (
+                <div key={i} style={{ background: '#fff', borderRadius: 6, padding: '7px 10px', textAlign: 'center', fontSize: 13, color: '#00a5f4', fontWeight: 500, boxShadow: '0 1px 2px rgba(0,0,0,0.08)' }}>
+                  {btn.type === 'URL' ? '🔗 ' : btn.type === 'PHONE_NUMBER' ? '📞 ' : ''}{btn.text}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      {/* Template details */}
+      <div style={{ flex: 1, fontSize: 12, color: '#94a3b8' }}>
+        <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: 6 }}>Template Details</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px' }}>
+          <span style={{ color: '#475569' }}>ID:</span>
+          <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{template.id}</span>
+          <span style={{ color: '#475569' }}>Category:</span>
+          <span>{template.category}</span>
+          <span style={{ color: '#475569' }}>Language:</span>
+          <span>{template.language}</span>
+          <span style={{ color: '#475569' }}>Status:</span>
+          <span>{template.status}</span>
+          {header && (
+            <>
+              <span style={{ color: '#475569' }}>Header:</span>
+              <span>{header.format || 'TEXT'}{header.text ? `: ${header.text}` : ''}</span>
+            </>
+          )}
+          {buttons?.buttons?.length > 0 && (
+            <>
+              <span style={{ color: '#475569' }}>Buttons:</span>
+              <span>{buttons.buttons.map((b: any) => b.text).join(', ')}</span>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function WabaManagementPage() {
   const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
@@ -58,6 +139,7 @@ export default function WabaManagementPage() {
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [showAutoGenerated, setShowAutoGenerated] = useState(false);
+  const [expandedTemplate, setExpandedTemplate] = useState<string | null>(null);
 
   // ── Create form state ──
   const [formName, setFormName] = useState('');
@@ -238,7 +320,10 @@ export default function WabaManagementPage() {
   const [shipmentCounts, setShipmentCounts] = useState([]);
   const [loadingAnalytics, setLoadingAnalytics] = useState(true);
 
-  // ── Fetch templates ──
+  // Ref to track templates for auto-pagination (avoids stale closure)
+  const templatesRef = useRef<Template[]>([]);
+
+  // ── Fetch templates (with auto-pagination to ensure enough visible results) ──
   const fetchTemplates = useCallback(async (after?: string) => {
     setLoadingTemplates(true);
     setTemplateError(null);
@@ -247,12 +332,28 @@ export default function WabaManagementPage() {
       const res = await fetch(url);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || 'Failed to fetch templates');
+
+      let allData: Template[];
       if (after) {
-        setTemplates(prev => [...prev, ...json.data]);
+        const existing = new Set(templatesRef.current.map(t => t.id));
+        const newTemplates = (json.data || []).filter((t: Template) => !existing.has(t.id));
+        allData = [...templatesRef.current, ...newTemplates];
       } else {
-        setTemplates(json.data || []);
+        allData = json.data || [];
       }
-      setPagingAfter(json.paging?.after || null);
+      setTemplates(allData);
+      templatesRef.current = allData;
+
+      const nextCursor = json.paging?.after || null;
+      setPagingAfter(nextCursor);
+
+      // Auto-fetch more if we don't have enough non-auto-generated templates
+      const manualCount = allData.filter(t => !isAutoGenerated(t.name)).length;
+      if (manualCount < 10 && nextCursor) {
+        // Auto-fetch next page after a small delay
+        setTimeout(() => fetchTemplates(nextCursor), 100);
+        return; // don't set loadingTemplates to false yet
+      }
     } catch (err: any) {
       setTemplateError(err.message);
     } finally {
@@ -773,39 +874,60 @@ export default function WabaManagementPage() {
                     const cs = CATEGORY_STYLE[t.category] || CATEGORY_STYLE.UTILITY;
                     const bodyText = getBodyText(t.components);
                     const preview = bodyText.length > 80 ? bodyText.substring(0, 80) + '...' : bodyText;
+                    const isExpanded = expandedTemplate === t.id;
                     return (
-                      <tr key={t.id} style={{ borderBottom: '1px solid #1a2744' }}>
-                        <td style={{ ...tdStyle, fontWeight: 600, fontFamily: 'monospace' }}>{t.name}</td>
-                        <td style={tdStyle}>
-                          <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: cs.bg, color: cs.color }}>
-                            {t.category}
-                          </span>
-                        </td>
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>
-                          <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: ss.bg, color: ss.color }}>
-                            {t.status}
-                          </span>
-                        </td>
-                        <td style={{ ...tdStyle, textAlign: 'center', color: '#94a3b8' }}>{t.language}</td>
-                        <td style={{ ...tdStyle, color: '#94a3b8', maxWidth: 300 }}>{preview}</td>
-                        <td style={{ ...tdStyle, textAlign: 'center' }}>
-                          <button style={btnDanger} onClick={() => handleDelete(t)}
-                            disabled={deleting === t.id}>
-                            {deleting === t.id ? '...' : 'Delete'}
-                          </button>
-                        </td>
-                      </tr>
+                      <React.Fragment key={t.id}>
+                        <tr style={{ borderBottom: isExpanded ? 'none' : '1px solid #1a2744', cursor: 'pointer', transition: 'background 0.15s' }}
+                          onClick={() => setExpandedTemplate(isExpanded ? null : t.id)}
+                          onMouseEnter={e => (e.currentTarget.style.background = '#0d1a33')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                          <td style={{ ...tdStyle, fontWeight: 600, fontFamily: 'monospace' }}>
+                            <span style={{ marginRight: 6, fontSize: 9, color: '#475569' }}>{isExpanded ? '▼' : '▶'}</span>
+                            {t.name}
+                          </td>
+                          <td style={tdStyle}>
+                            <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: cs.bg, color: cs.color }}>
+                              {t.category}
+                            </span>
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'center' }}>
+                            <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: ss.bg, color: ss.color }}>
+                              {t.status}
+                            </span>
+                          </td>
+                          <td style={{ ...tdStyle, textAlign: 'center', color: '#94a3b8' }}>{t.language}</td>
+                          <td style={{ ...tdStyle, color: '#94a3b8', maxWidth: 300 }}>{preview}</td>
+                          <td style={{ ...tdStyle, textAlign: 'center' }}>
+                            <button style={btnDanger} onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
+                              disabled={deleting === t.id}>
+                              {deleting === t.id ? '...' : 'Delete'}
+                            </button>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr style={{ borderBottom: '1px solid #1a2744' }}>
+                            <td colSpan={6} style={{ padding: '12px 10px 16px' }}>
+                              <TemplatePreview template={t} renderWaFormatted={renderWaFormatted} />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
                     );
                   })}
                 </tbody>
               </table>
             </div>
 
-            {pagingAfter && (
+            {pagingAfter && !loadingTemplates && (
               <div style={{ textAlign: 'center', marginTop: 12 }}>
-                <button style={btnOutline} onClick={() => fetchTemplates(pagingAfter)} disabled={loadingTemplates}>
-                  {loadingTemplates ? 'Loading...' : 'Load More'}
+                <button style={btnOutline} onClick={() => fetchTemplates(pagingAfter)}>
+                  Load More Templates
                 </button>
+              </div>
+            )}
+            {loadingTemplates && templates.length > 0 && (
+              <div style={{ textAlign: 'center', marginTop: 12, color: '#64748b', fontSize: 12 }}>
+                Loading more templates...
               </div>
             )}
           </>
