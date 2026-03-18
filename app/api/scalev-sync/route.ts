@@ -507,7 +507,6 @@ async function enrichLineItems(
         cogs_bt: calcBT(cogs, tax),
         tax_rate: tax.rate,
         sales_channel: newChannel,
-        shipped_time: shippedTime,
         is_purchase_fb: apiOrder.is_purchase_fb === true || apiOrder.is_purchase_fb === 'true' || !!(apiOrder.message_variables?.advertiser || '').trim(),
         is_purchase_tiktok: apiOrder.is_purchase_tiktok === true || apiOrder.is_purchase_tiktok === 'true',
         is_purchase_kwai: apiOrder.is_purchase_kwai === true || apiOrder.is_purchase_kwai === 'true',
@@ -525,16 +524,7 @@ async function enrichLineItems(
 
   // ── Update existing lines ──
 
-  // 1. Propagate shipped_time to lines
-  if (shippedTime) {
-    await svc
-      .from('scalev_order_lines')
-      .update({ shipped_time: shippedTime })
-      .eq('scalev_order_id', dbOrderId)
-      .is('shipped_time', null);
-  }
-
-  // 2. Re-derive sales_channel
+  // 1. Re-derive sales_channel
   await svc
     .from('scalev_order_lines')
     .update({

@@ -403,7 +403,6 @@ export async function parseOrderForDb(order: any) {
       discount_bt: item.discount_bt || item.discount || 0,
       cogs_bt: item.cogs_bt || item.cogs || 0,
       tax_rate: 11.00,
-      shipped_time: shippedTime,
       sales_channel: salesChannel,
       is_purchase_fb: order.is_purchase_fb || false,
       is_purchase_tiktok: order.is_purchase_tiktok || false,
