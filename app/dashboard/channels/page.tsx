@@ -867,8 +867,8 @@ export default function ChannelsPage() {
                   </td>
                 </tr>
               ))}
-              <tr style={{ borderTop: '2px solid #1a2744' }}>
-                <td style={{ padding: '8px 10px', fontWeight: 700 }}>TOTAL</td>
+              <tr style={{ borderTop: '2px solid #1a2744', background: '#0b1121' }}>
+                <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.sent.toLocaleString()}</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.delivered.toLocaleString()}</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>
