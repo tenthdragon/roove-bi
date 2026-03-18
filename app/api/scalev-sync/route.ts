@@ -267,7 +267,7 @@ export async function POST(req: NextRequest) {
               if (apiOrder) {
                 await svc.from('scalev_orders').update({ business_code: code }).eq('id', dbOrder.id);
                 dbOrder.business_code = code;
-                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair', syncMode === 'full' || syncMode === 'date');
+                await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, syncMode === 'order_id' || syncMode === 'repair', syncMode === 'full' || syncMode === 'date', channelOverrideMap);
                 found = true;
                 updatedCount++;
                 break;
@@ -309,7 +309,7 @@ export async function POST(req: NextRequest) {
 
         const forceUpdate = syncMode === 'order_id' || syncMode === 'repair';
         const lightweight = syncMode === 'full' || syncMode === 'date';
-        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, forceUpdate, lightweight);
+        const result = await processOrder(svc, dbOrder, apiOrder, storeTypeMap, bizCodeToId, bizCodeToTaxRateName, taxRatesMap, details, forceUpdate, lightweight, channelOverrideMap);
         if (result === 'updated') updatedCount++;
         else if (result === 'still_pending') stillPendingCount++;
       } catch (err: any) {
@@ -376,6 +376,7 @@ async function processOrder(
   details: any[],
   forceUpdate = false,
   lightweight = false,
+  channelOverrideMap: Map<string, string> = new Map(),
 ): Promise<'updated' | 'still_pending'> {
   const newStatus = apiOrder.status;
 
@@ -427,7 +428,7 @@ async function processOrder(
   if (!lightweight && (newStatus === 'shipped' || newStatus === 'completed')) {
     const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
     const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
-    await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
+    await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap, channelOverrideMap);
   }
 
   details.push({
