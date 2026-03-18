@@ -447,13 +447,14 @@ export default function AdminPage() {
       <div style={{
         display: 'flex', gap: 2, marginBottom: 20,
         borderBottom: '1px solid #1a2744', paddingBottom: 0,
+        overflowX: 'auto', WebkitOverflowScrolling: 'touch',
       }}>
         {visibleTabs.map(tab => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             style={{
-              padding: '8px 16px', background: 'none', border: 'none',
+              padding: '8px 16px', background: 'none', border: 'none', whiteSpace: 'nowrap', flexShrink: 0,
               borderBottom: activeTab === tab.id ? '2px solid #3b82f6' : '2px solid transparent',
               color: activeTab === tab.id ? '#e2e8f0' : '#64748b',
               fontSize: 13, fontWeight: activeTab === tab.id ? 700 : 500,
