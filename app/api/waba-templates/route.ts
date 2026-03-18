@@ -26,8 +26,8 @@ async function authenticate(req: NextRequest) {
     .eq('id', user.id)
     .single();
 
-  if (profile?.role !== 'owner' && profile?.role !== 'finance') {
-    return { error: 'Only owners and finance users can manage templates', status: 403 };
+  if (profile?.role !== 'owner' && profile?.role !== 'finance' && profile?.role !== 'sales_manager') {
+    return { error: 'Only owners, finance, and sales managers can manage templates', status: 403 };
   }
   return { user, profile };
 }

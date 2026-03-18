@@ -170,7 +170,7 @@ export const ALL_TABS: TabDef[] = [
   // { id: 'products',    label: 'Products',           icon: 'Package' },  // Hidden — merged into Overview
   { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone' },
   { id: 'channels',       label: 'Sales Channel',      icon: 'Share2' },
-  { id: 'waba-management', label: 'WABA Management',   icon: 'MessageCircle', ownerOnly: true },
+  { id: 'waba-management', label: 'WABA Management',   icon: 'MessageCircle' },
   { id: 'customers',      label: 'Customer Analysis',  icon: 'Users' },
   { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers' },
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign' },

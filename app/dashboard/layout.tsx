@@ -24,7 +24,7 @@ function getAllowedTabs(prof) {
     return prof.allowed_tabs && prof.allowed_tabs.length > 0 ? prof.allowed_tabs : ['marketing'];
   }
   if (prof.role === 'sales_manager') {
-    return ['channels'];
+    return ['channels', 'waba-management'];
   }
   return null;
 }
