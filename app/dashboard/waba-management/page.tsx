@@ -291,78 +291,138 @@ export default function WabaManagementPage() {
           </button>
         </div>
 
-        {/* ── Create Form ── */}
+        {/* ── Create Form with Live Preview ── */}
         {showCreateForm && (
           <div style={{ background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8, padding: 16, marginBottom: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>New Template</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
-              <div>
-                <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Name</label>
-                <input style={inputStyle} value={formName} onChange={e => setFormName(e.target.value)}
-                  placeholder="e.g. promo_january" />
+            <div style={{ display: 'flex', gap: 20 }}>
+              {/* ── Left: Form Fields ── */}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Name</label>
+                    <input style={inputStyle} value={formName} onChange={e => setFormName(e.target.value)}
+                      placeholder="e.g. promo_january" />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Category</label>
+                    <select style={selectStyle} value={formCategory} onChange={e => setFormCategory(e.target.value as any)}>
+                      <option value="MARKETING">Marketing</option>
+                      <option value="UTILITY">Utility</option>
+                      <option value="AUTHENTICATION">Authentication</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Language</label>
+                    <select style={selectStyle} value={formLanguage} onChange={e => setFormLanguage(e.target.value)}>
+                      <option value="id">Indonesian (id)</option>
+                      <option value="en">English (en)</option>
+                      <option value="en_US">English US (en_US)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Header (optional)</label>
+                  <input style={inputStyle} value={formHeader} onChange={e => setFormHeader(e.target.value)}
+                    placeholder="Header text" />
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Body *</label>
+                  <textarea style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} value={formBody}
+                    onChange={e => setFormBody(e.target.value)}
+                    placeholder="Hi {{1}}, check out our latest promo! Use code {{2}} for discount." />
+                  <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>Use {'{{1}}'}, {'{{2}}'}, etc. for variable placeholders</div>
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Footer (optional)</label>
+                  <input style={inputStyle} value={formFooter} onChange={e => setFormFooter(e.target.value)}
+                    placeholder="e.g. Reply STOP to unsubscribe" />
+                </div>
+
+                <div style={{ marginBottom: 12 }}>
+                  <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Quick Reply Buttons (optional, max 3)</label>
+                  {[0, 1, 2].map(i => (
+                    <input key={i} style={{ ...inputStyle, marginBottom: 6 }}
+                      value={formButtons[i] || ''} onChange={e => {
+                        const next = [...formButtons];
+                        next[i] = e.target.value;
+                        setFormButtons(next);
+                      }}
+                      placeholder={`Button ${i + 1} text`} />
+                  ))}
+                </div>
+
+                {formError && <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 12 }}>{formError}</div>}
+
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button style={btnPrimary} onClick={handleCreate} disabled={creating}>
+                    {creating ? 'Creating...' : 'Submit Template'}
+                  </button>
+                  <button style={btnOutline} onClick={() => setShowCreateForm(false)}>Cancel</button>
+                </div>
+
+                <div style={{ fontSize: 11, color: '#475569', marginTop: 10 }}>
+                  New templates go to PENDING status and require Meta review (usually minutes to hours).
+                </div>
               </div>
-              <div>
-                <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Category</label>
-                <select style={selectStyle} value={formCategory} onChange={e => setFormCategory(e.target.value as any)}>
-                  <option value="MARKETING">Marketing</option>
-                  <option value="UTILITY">Utility</option>
-                  <option value="AUTHENTICATION">Authentication</option>
-                </select>
+
+              {/* ── Right: WhatsApp Chat Preview ── */}
+              <div style={{ width: 320, flexShrink: 0 }}>
+                <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: 8 }}>Template Preview</div>
+                {/* Phone frame */}
+                <div style={{ background: '#e5ddd5', borderRadius: 12, padding: 16, minHeight: 200, position: 'relative' }}>
+                  {/* Chat wallpaper pattern */}
+                  <div style={{ position: 'absolute', inset: 0, borderRadius: 12, opacity: 0.05, background: 'url("data:image/svg+xml,%3Csvg width=\'40\' height=\'40\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M20 0L0 20h10L20 10l10 10h10z\' fill=\'%23000\'/%3E%3C/svg%3E")' }} />
+                  {/* Message bubble */}
+                  <div style={{ position: 'relative', background: '#fff', borderRadius: '0 8px 8px 8px', padding: '8px 10px', maxWidth: '100%', boxShadow: '0 1px 2px rgba(0,0,0,0.13)' }}>
+                    {/* Header */}
+                    {formHeader.trim() && (
+                      <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a1a', marginBottom: 4, lineHeight: 1.3 }}>
+                        {formHeader}
+                      </div>
+                    )}
+                    {/* Body */}
+                    <div style={{ fontSize: 13, color: '#303030', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                      {formBody || <span style={{ color: '#999' }}>Message body will appear here...</span>}
+                    </div>
+                    {/* Footer */}
+                    {formFooter.trim() && (
+                      <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 6 }}>
+                        {formFooter}
+                      </div>
+                    )}
+                    {/* Timestamp */}
+                    <div style={{ textAlign: 'right', marginTop: 2 }}>
+                      <span style={{ fontSize: 10, color: '#8c8c8c' }}>
+                        {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                  </div>
+                  {/* Quick reply buttons */}
+                  {formButtons.filter(b => b.trim()).length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4 }}>
+                      {formButtons.filter(b => b.trim()).map((btn, i) => (
+                        <div key={i} style={{
+                          background: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center',
+                          fontSize: 13, color: '#00a5f4', fontWeight: 500, boxShadow: '0 1px 2px rgba(0,0,0,0.13)',
+                          cursor: 'default',
+                        }}>
+                          {btn}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* Category & Language info */}
+                <div style={{ marginTop: 10, fontSize: 10, color: '#64748b' }}>
+                  <div><strong>Category:</strong> {formCategory}</div>
+                  <div><strong>Language:</strong> {formLanguage}</div>
+                  {formName && <div><strong>Name:</strong> {formName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')}</div>}
+                </div>
               </div>
-              <div>
-                <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Language</label>
-                <select style={selectStyle} value={formLanguage} onChange={e => setFormLanguage(e.target.value)}>
-                  <option value="id">Indonesian (id)</option>
-                  <option value="en">English (en)</option>
-                  <option value="en_US">English US (en_US)</option>
-                </select>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Header (optional)</label>
-              <input style={inputStyle} value={formHeader} onChange={e => setFormHeader(e.target.value)}
-                placeholder="Header text" />
-            </div>
-
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Body *</label>
-              <textarea style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} value={formBody}
-                onChange={e => setFormBody(e.target.value)}
-                placeholder="Hi {{1}}, check out our latest promo! Use code {{2}} for discount." />
-              <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>Use {'{{1}}'}, {'{{2}}'}, etc. for variable placeholders</div>
-            </div>
-
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Footer (optional)</label>
-              <input style={inputStyle} value={formFooter} onChange={e => setFormFooter(e.target.value)}
-                placeholder="e.g. Reply STOP to unsubscribe" />
-            </div>
-
-            <div style={{ marginBottom: 12 }}>
-              <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Quick Reply Buttons (optional, max 3)</label>
-              {[0, 1, 2].map(i => (
-                <input key={i} style={{ ...inputStyle, marginBottom: 6 }}
-                  value={formButtons[i] || ''} onChange={e => {
-                    const next = [...formButtons];
-                    next[i] = e.target.value;
-                    setFormButtons(next);
-                  }}
-                  placeholder={`Button ${i + 1} text`} />
-              ))}
-            </div>
-
-            {formError && <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 12 }}>{formError}</div>}
-
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button style={btnPrimary} onClick={handleCreate} disabled={creating}>
-                {creating ? 'Creating...' : 'Submit Template'}
-              </button>
-              <button style={btnOutline} onClick={() => setShowCreateForm(false)}>Cancel</button>
-            </div>
-
-            <div style={{ fontSize: 11, color: '#475569', marginTop: 10 }}>
-              New templates go to PENDING status and require Meta review (usually minutes to hours).
             </div>
           </div>
         )}
