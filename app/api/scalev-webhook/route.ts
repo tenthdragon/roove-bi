@@ -254,28 +254,7 @@ async function getTaxRate(taxName = 'PPN'): Promise<{ rate: number; divisor: num
   return { rate: DEFAULT_TAX_RATE, divisor: DEFAULT_TAX_DIVISOR };
 }
 
-// ── Tax Formula Config per Channel (dynamic from DB, cached) ──
-const MARKETPLACE_PLATFORMS = ['shopee', 'tiktokshop', 'lazada', 'blibli', 'tokopedia', 'marketplace'];
-let cachedFormulaConfig: Map<string, string> | null = null;
-let formulaCacheExpiry = 0;
-
-async function getFormulaForStoreType(storeType: string): Promise<string> {
-  if (!cachedFormulaConfig || Date.now() >= formulaCacheExpiry) {
-    try {
-      const svc = getServiceSupabase();
-      const { data } = await svc.from('tax_formula_config').select('store_type, formula');
-      cachedFormulaConfig = new Map((data || []).map((r: any) => [r.store_type, r.formula]));
-      formulaCacheExpiry = Date.now() + CACHE_TTL_MS;
-    } catch {
-      cachedFormulaConfig = new Map();
-      formulaCacheExpiry = Date.now() + CACHE_TTL_MS;
-    }
-  }
-  return cachedFormulaConfig.get(storeType) || 'divisor';
-}
-
-function calcBeforeTax(price: number, tax: { rate: number; divisor: number }, formula: string): number {
-  if (formula === 'dpp_nilai_lain') return price * tax.rate / (tax.rate + 1);
+function calcBeforeTax(price: number, tax: { rate: number; divisor: number }): number {
   return price / tax.divisor;
 }
 
@@ -421,11 +400,6 @@ async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any,
     ? { rate: 0, divisor: 1.0 }
     : await getTaxRate(taxRateName || 'PPN');
 
-  // Derive store type for tax formula lookup
-  const platform = derivePlatformFromStore(data.store?.name || '', data.external_id, data);
-  const storeType = MARKETPLACE_PLATFORMS.includes(platform || '') ? 'marketplace' : 'scalev';
-  const formula = taxRateName === 'NONE' ? 'divisor' : await getFormulaForStoreType(storeType);
-
   const lines: any[] = [];
   for (const line of data.orderlines) {
     const qty = line.quantity || 1;
@@ -442,9 +416,9 @@ async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any,
       variant_sku: line.variant_unique_id || null,
       quantity: qty,
       // Financial fields: all values from webhook are line totals incl. tax
-      product_price_bt: calcBeforeTax(productPrice, tax, formula),
-      discount_bt: calcBeforeTax(discount, tax, formula),
-      cogs_bt: calcBeforeTax(cogs, tax, formula),
+      product_price_bt: calcBeforeTax(productPrice, tax),
+      discount_bt: calcBeforeTax(discount, tax),
+      cogs_bt: calcBeforeTax(cogs, tax),
       tax_rate: tax.rate,
       sales_channel: salesChannel,
       is_purchase_fb: data.is_purchase_fb === true || data.is_purchase_fb === 'true' || !!(data.message_variables?.advertiser || '').trim(),
