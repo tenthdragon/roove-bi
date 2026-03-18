@@ -278,31 +278,37 @@ export async function fetchTemplateAnalytics(
     }
 
     const json = await response.json();
-    const dataPoints = json?.template_analytics?.data || [];
-
-    for (const point of dataPoints) {
-      const tplId = point.template_id;
-      if (!tplId) continue;
-
-      if (!byTemplate[tplId]) {
-        byTemplate[tplId] = { sent: 0, delivered: 0, read: 0, clicked: 0, replied: 0, cost: 0 };
-      }
-
-      const metrics = byTemplate[tplId];
-      const dpList = point.data_points || [];
+    const buckets = json?.template_analytics?.data || [];
+    for (const bucket of buckets) {
+      const dpList = bucket.data_points || [];
       for (const dp of dpList) {
+        const tplId = String(dp.template_id);
+        if (!tplId) continue;
+
+        if (!byTemplate[tplId]) {
+          byTemplate[tplId] = { sent: 0, delivered: 0, read: 0, clicked: 0, replied: 0, cost: 0 };
+        }
+
+        const metrics = byTemplate[tplId];
         metrics.sent += dp.sent || 0;
         metrics.delivered += dp.delivered || 0;
         metrics.read += dp.read || 0;
+        metrics.replied += dp.replied || 0;
+
         // clicked is an array of button click objects with .total
         const totalClicked = Array.isArray(dp.clicked)
           ? dp.clicked.reduce((sum: number, c: any) => sum + (c.total || 0), 0)
           : (dp.clicked || 0);
         metrics.clicked += totalClicked;
 
-        // Cost data
-        if (dp.cost) {
-          metrics.cost += dp.cost.total_amount || dp.cost || 0;
+        // Cost is an array of objects like [{type:"amount_spent", value:...}, ...]
+        if (Array.isArray(dp.cost)) {
+          const amountSpent = dp.cost.find((c: any) => c.type === 'amount_spent');
+          if (amountSpent?.value) {
+            metrics.cost += Number(amountSpent.value) || 0;
+          }
+        } else if (typeof dp.cost === 'number') {
+          metrics.cost += dp.cost;
         }
 
         // Aggregate daily
@@ -314,6 +320,7 @@ export async function fetchTemplateAnalytics(
         dailyMap[date].delivered += dp.delivered || 0;
         dailyMap[date].read += dp.read || 0;
         dailyMap[date].clicked += totalClicked;
+        dailyMap[date].replied += dp.replied || 0;
       }
     }
 
