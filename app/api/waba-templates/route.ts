@@ -60,7 +60,7 @@ export async function GET(req: NextRequest) {
 
     const { data, error } = await svc
       .from('waba_templates')
-      .select('id, name, status, category, language, components, is_auto_generated')
+      .select('id, name, status, category, language, components, is_auto_generated, tags')
       .eq('waba_id', wabaId)
       .is('deleted_at', null)
       .order('name');
@@ -112,6 +112,33 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(result);
   } catch (err: any) {
     console.error('[waba-templates] POST error:', err.message);
+    return NextResponse.json({ error: err.message }, { status: 500 });
+  }
+}
+
+/** PATCH — Update template tags */
+export async function PATCH(req: NextRequest) {
+  try {
+    const auth = await authenticate(req);
+    if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
+    const body = await req.json();
+    if (!body.id || !Array.isArray(body.tags)) {
+      return NextResponse.json({ error: 'Missing required fields: id, tags (array)' }, { status: 400 });
+    }
+
+    const tags = body.tags.map((t: string) => t.trim().toLowerCase()).filter(Boolean);
+    const svc = getServiceSupabase();
+    const { error } = await svc
+      .from('waba_templates')
+      .update({ tags })
+      .eq('id', body.id);
+
+    if (error) throw error;
+
+    return NextResponse.json({ success: true, tags });
+  } catch (err: any) {
+    console.error('[waba-templates] PATCH error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
