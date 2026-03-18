@@ -11,6 +11,7 @@ const MV_LIST = [
   'mv_daily_ads_by_brand',
   'mv_daily_channel_complete',
   'mv_daily_product_complete',
+  'mv_customer_first_order',
   'mv_daily_customer_type',
   'mv_customer_cohort',
   'mv_monthly_cohort',
