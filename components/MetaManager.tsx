@@ -36,6 +36,16 @@ interface RemoteAccount {
   registration: any;
 }
 
+interface WabaAccount {
+  id: number;
+  waba_id: string;
+  waba_name: string;
+  store: string;
+  default_source: string;
+  default_advertiser: string;
+  is_active: boolean;
+}
+
 // Store mapping per selected account for bulk add
 interface SelectedAccountMapping {
   account_id: string;
@@ -75,6 +85,19 @@ export default function MetaManager() {
   const [syncDateStart, setSyncDateStart] = useState(getYesterday);
   const [syncDateEnd, setSyncDateEnd] = useState(getYesterday);
 
+  // WABA state
+  const [wabaAccounts, setWabaAccounts] = useState<WabaAccount[]>([]);
+  const [wabaLogs, setWabaLogs] = useState<SyncLog[]>([]);
+  const [wabaSyncing, setWabaSyncing] = useState(false);
+  const [wabaMessage, setWabaMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [wabaSyncDateStart, setWabaSyncDateStart] = useState(getYesterday);
+  const [wabaSyncDateEnd, setWabaSyncDateEnd] = useState(getYesterday);
+  const [showWabaForm, setShowWabaForm] = useState(false);
+  const [wabaForm, setWabaForm] = useState({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
+  const [savingWaba, setSavingWaba] = useState(false);
+  const [wabaEditingId, setWabaEditingId] = useState<number | null>(null);
+  const [wabaEditForm, setWabaEditForm] = useState({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
+
   // Dropdown options loaded from DB
   const [storeOptions, setStoreOptions] = useState<string[]>([]);
   const [sourceOptions] = useState<string[]>([
@@ -99,14 +122,18 @@ export default function MetaManager() {
 
   const loadData = useCallback(async () => {
     try {
-      const [{ data: accs }, { data: logs }, { data: stores }] = await Promise.all([
+      const [{ data: accs }, { data: logs }, { data: stores }, { data: wAbas }, { data: wLogs }] = await Promise.all([
         supabase.from('meta_ad_accounts').select('*').order('account_name'),
         supabase.from('meta_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
         supabase.from('ads_store_brand_mapping').select('store_pattern').order('store_pattern'),
+        supabase.from('waba_accounts').select('*').order('waba_name'),
+        supabase.from('waba_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
       ]);
       setAccounts(accs || []);
       setRecentLogs(logs || []);
       setStoreOptions((stores || []).map((s: any) => s.store_pattern));
+      setWabaAccounts(wAbas || []);
+      setWabaLogs(wLogs || []);
     } catch (err: any) {
       console.error('Failed to load Meta data:', err);
     } finally {
@@ -274,6 +301,98 @@ export default function MetaManager() {
       setMessage({ type: 'error', text: err.message || 'Sync gagal' });
     } finally {
       setSyncing(false);
+    }
+  };
+
+  // ── WABA handlers ──
+  const handleWabaSave = async () => {
+    if (!wabaForm.waba_id.trim() || !wabaForm.waba_name.trim() || !wabaForm.store.trim()) {
+      setWabaMessage({ type: 'error', text: 'WABA ID, Nama, dan Store wajib diisi' });
+      return;
+    }
+    setSavingWaba(true);
+    setWabaMessage(null);
+    try {
+      const { error } = await supabase.from('waba_accounts').upsert({
+        waba_id: wabaForm.waba_id.trim(),
+        waba_name: wabaForm.waba_name.trim(),
+        store: wabaForm.store.trim(),
+        default_source: wabaForm.default_source.trim() || 'WhatsApp Marketing',
+        default_advertiser: wabaForm.default_advertiser.trim() || 'WhatsApp Team',
+      }, { onConflict: 'waba_id' });
+      if (error) throw error;
+      setWabaMessage({ type: 'success', text: 'WABA account berhasil disimpan' });
+      setShowWabaForm(false);
+      setWabaForm({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
+      await loadData();
+    } catch (err: any) {
+      setWabaMessage({ type: 'error', text: err.message || 'Gagal menyimpan' });
+    } finally {
+      setSavingWaba(false);
+    }
+  };
+
+  const handleWabaEdit = (acc: WabaAccount) => {
+    setWabaEditForm({
+      waba_id: acc.waba_id, waba_name: acc.waba_name,
+      store: acc.store, default_source: acc.default_source,
+      default_advertiser: acc.default_advertiser,
+    });
+    setWabaEditingId(acc.id);
+  };
+
+  const handleWabaEditSave = async () => {
+    if (!wabaEditForm.store.trim()) {
+      setWabaMessage({ type: 'error', text: 'Store wajib diisi' });
+      return;
+    }
+    try {
+      const { error } = await supabase.from('waba_accounts').update({
+        waba_name: wabaEditForm.waba_name.trim(),
+        store: wabaEditForm.store.trim(),
+        default_source: wabaEditForm.default_source.trim(),
+        default_advertiser: wabaEditForm.default_advertiser.trim(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', wabaEditingId);
+      if (error) throw error;
+      setWabaMessage({ type: 'success', text: 'WABA account diperbarui' });
+      setWabaEditingId(null);
+      await loadData();
+    } catch (err: any) {
+      setWabaMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleWabaToggleActive = async (acc: WabaAccount) => {
+    try {
+      const { error } = await supabase.from('waba_accounts').update({
+        is_active: !acc.is_active, updated_at: new Date().toISOString(),
+      }).eq('id', acc.id);
+      if (error) throw error;
+      await loadData();
+    } catch (err: any) {
+      setWabaMessage({ type: 'error', text: err.message });
+    }
+  };
+
+  const handleWabaSyncNow = async () => {
+    setWabaSyncing(true);
+    setWabaMessage(null);
+    try {
+      const params = new URLSearchParams({ date_start: wabaSyncDateStart, date_end: wabaSyncDateEnd });
+      const res = await fetch(`/api/whatsapp-sync?${params}`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        setWabaMessage({ type: 'error', text: data.error || 'Sync gagal' });
+      } else {
+        const msg = `Sync ${data.status}: ${data.accounts_synced}/${data.accounts_total} akun, ${data.rows_inserted} baris data`;
+        setWabaMessage({ type: data.status === 'failed' ? 'error' : 'success', text: msg });
+        await loadData();
+      }
+    } catch (err: any) {
+      setWabaMessage({ type: 'error', text: err.message || 'Sync gagal' });
+    } finally {
+      setWabaSyncing(false);
     }
   };
 
@@ -661,6 +780,319 @@ export default function MetaManager() {
               </thead>
               <tbody>
                 {recentLogs.map(log => {
+                  const ss = statusStyle(log.status);
+                  return (
+                    <tr key={log.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                      <td style={{ padding: '10px 12px', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: 11 }}>
+                        {new Date(log.created_at).toLocaleString('id-ID', {
+                          day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+                        })}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: 11 }}>
+                        {log.date_range_start === log.date_range_end
+                          ? log.date_range_start
+                          : `${log.date_range_start} ~ ${log.date_range_end}`}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{log.accounts_synced}</td>
+                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{log.rows_inserted}</td>
+                      <td style={{ padding: '10px 12px' }}>
+                        <span style={{
+                          padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                          background: ss.bg, color: ss.color,
+                        }}>{ss.label}</span>
+                        {log.error_message && (
+                          <div style={{ fontSize: 10, color: '#ef4444', marginTop: 2, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {log.error_message}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: 11 }}>
+                        {log.duration_ms ? `${(log.duration_ms / 1000).toFixed(1)}s` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+      {/* ═══════════════════════════════════════════════════════ */}
+      {/* ─── WhatsApp Business Accounts (WABA) ─── */}
+      {/* ═══════════════════════════════════════════════════════ */}
+      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>WhatsApp Business Accounts</div>
+          <button
+            onClick={() => setShowWabaForm(true)}
+            style={{
+              padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+              background: '#25D366', color: '#fff',
+              fontSize: 12, fontWeight: 600,
+            }}
+          >
+            + Tambah WABA
+          </button>
+        </div>
+        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+          Daftar WABA yang datanya ditarik otomatis via WhatsApp Business Management API.
+        </div>
+
+        {/* ─── WABA Sync Controls ─── */}
+        {wabaAccounts.filter(a => a.is_active).length > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14,
+            padding: 12, background: '#0b1121', borderRadius: 8, border: '1px solid #1a2744',
+            flexWrap: 'wrap',
+          }}>
+            <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>Sync tanggal:</span>
+            <input
+              type="date"
+              value={wabaSyncDateStart}
+              onChange={e => setWabaSyncDateStart(e.target.value)}
+              style={{ ...inputStyle, width: 'auto', padding: '5px 8px', fontSize: 12 }}
+            />
+            <span style={{ fontSize: 12, color: '#64748b' }}>s/d</span>
+            <input
+              type="date"
+              value={wabaSyncDateEnd}
+              onChange={e => setWabaSyncDateEnd(e.target.value)}
+              style={{ ...inputStyle, width: 'auto', padding: '5px 8px', fontSize: 12 }}
+            />
+            <button
+              onClick={handleWabaSyncNow}
+              disabled={wabaSyncing}
+              style={{
+                padding: '6px 16px', borderRadius: 6, border: 'none',
+                cursor: wabaSyncing ? 'not-allowed' : 'pointer',
+                background: wabaSyncing ? '#1a2744' : '#25D366', color: '#fff',
+                fontSize: 12, fontWeight: 600, opacity: wabaSyncing ? 0.4 : 1,
+                marginLeft: 'auto',
+              }}
+            >
+              {wabaSyncing ? 'Syncing...' : 'Sync WABA'}
+            </button>
+          </div>
+        )}
+
+        {/* WABA Messages */}
+        {wabaMessage && (
+          <div style={{
+            marginBottom: 12, padding: 12, borderRadius: 8, fontSize: 13,
+            background: wabaMessage.type === 'success' ? '#064e3b' : '#7f1d1d',
+            color: wabaMessage.type === 'success' ? '#10b981' : '#ef4444',
+          }}>
+            {wabaMessage.type === 'success' ? '✅' : '❌'} {wabaMessage.text}
+          </div>
+        )}
+
+        {/* ─── Add WABA Form ─── */}
+        {showWabaForm && (
+          <div style={{
+            marginBottom: 16, padding: 16, background: '#0b1121',
+            borderRadius: 8, border: '1px solid #1a2744',
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600 }}>Tambah WABA Account</div>
+              <button
+                onClick={() => { setShowWabaForm(false); setWabaForm({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' }); }}
+                style={{
+                  padding: '4px 12px', borderRadius: 4, border: '1px solid #1a2744',
+                  background: 'transparent', color: '#64748b', fontSize: 11, cursor: 'pointer',
+                }}
+              >
+                Tutup
+              </button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
+              <div>
+                <label style={labelStyle}>WABA ID (wajib)</label>
+                <input
+                  value={wabaForm.waba_id}
+                  onChange={e => setWabaForm(f => ({ ...f, waba_id: e.target.value }))}
+                  placeholder="Contoh: 123456789012345"
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Nama WABA (wajib)</label>
+                <input
+                  value={wabaForm.waba_name}
+                  onChange={e => setWabaForm(f => ({ ...f, waba_name: e.target.value }))}
+                  placeholder="Contoh: RTI WhatsApp"
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Store (wajib)</label>
+                <select
+                  value={wabaForm.store}
+                  onChange={e => setWabaForm(f => ({ ...f, store: e.target.value }))}
+                  style={inputStyle}
+                >
+                  <option value="">— Pilih Store —</option>
+                  {storeOptions.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={labelStyle}>Source</label>
+                <input
+                  value={wabaForm.default_source}
+                  onChange={e => setWabaForm(f => ({ ...f, default_source: e.target.value }))}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Advertiser</label>
+                <input
+                  value={wabaForm.default_advertiser}
+                  onChange={e => setWabaForm(f => ({ ...f, default_advertiser: e.target.value }))}
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                onClick={handleWabaSave}
+                disabled={savingWaba}
+                style={{
+                  padding: '8px 24px', borderRadius: 6, border: 'none', cursor: savingWaba ? 'not-allowed' : 'pointer',
+                  background: savingWaba ? '#1a2744' : '#25D366', color: '#fff',
+                  fontSize: 13, fontWeight: 600, opacity: savingWaba ? 0.6 : 1,
+                }}
+              >
+                {savingWaba ? 'Menyimpan...' : 'Simpan WABA'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ─── WABA Account List ─── */}
+        {wabaAccounts.length === 0 && !showWabaForm ? (
+          <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>
+            Belum ada WABA account. Klik "+ Tambah WABA" untuk menambahkan.
+          </div>
+        ) : wabaAccounts.length > 0 && (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
+              <thead>
+                <tr style={{ background: '#0b1121' }}>
+                  {['Status', 'WABA ID', 'Nama', 'Store', 'Source', 'Advertiser', 'Aksi'].map(h => (
+                    <th key={h} style={{
+                      padding: '10px 12px', textAlign: 'left', color: '#64748b',
+                      fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
+                      borderBottom: '2px solid #1a2744',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {wabaAccounts.map(acc => (
+                  <tr key={acc.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                    {wabaEditingId === acc.id ? (
+                      <>
+                        <td style={{ padding: '8px 12px' }} colSpan={2}>
+                          <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#64748b' }}>{acc.waba_id}</span>
+                        </td>
+                        <td style={{ padding: '8px 6px' }}>
+                          <input value={wabaEditForm.waba_name} onChange={e => setWabaEditForm(f => ({ ...f, waba_name: e.target.value }))}
+                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }} />
+                        </td>
+                        <td style={{ padding: '8px 6px' }}>
+                          <select value={wabaEditForm.store} onChange={e => setWabaEditForm(f => ({ ...f, store: e.target.value }))}
+                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}>
+                            <option value="">— Pilih —</option>
+                            {storeOptions.map(s => (
+                              <option key={s} value={s}>{s}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td style={{ padding: '8px 6px' }}>
+                          <input value={wabaEditForm.default_source} onChange={e => setWabaEditForm(f => ({ ...f, default_source: e.target.value }))}
+                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }} />
+                        </td>
+                        <td style={{ padding: '8px 6px' }}>
+                          <input value={wabaEditForm.default_advertiser} onChange={e => setWabaEditForm(f => ({ ...f, default_advertiser: e.target.value }))}
+                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }} />
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button onClick={handleWabaEditSave} style={{
+                              padding: '4px 8px', borderRadius: 4, border: 'none',
+                              background: '#25D366', color: '#fff', fontSize: 10, cursor: 'pointer',
+                            }}>Simpan</button>
+                            <button onClick={() => setWabaEditingId(null)} style={{
+                              padding: '4px 8px', borderRadius: 4, border: '1px solid #1a2744',
+                              background: 'transparent', color: '#64748b', fontSize: 10, cursor: 'pointer',
+                            }}>Batal</button>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span style={{
+                            padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
+                            background: acc.is_active ? '#064e3b' : '#1a2744',
+                            color: acc.is_active ? '#10b981' : '#64748b',
+                          }}>
+                            {acc.is_active ? 'Aktif' : 'Nonaktif'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>
+                          {acc.waba_id}
+                        </td>
+                        <td style={{ padding: '10px 12px', color: '#e2e8f0', fontWeight: 600 }}>{acc.waba_name}</td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.store}</td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.default_source}</td>
+                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.default_advertiser}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <button onClick={() => handleWabaEdit(acc)} style={{
+                              padding: '4px 10px', borderRadius: 4, border: '1px solid #1a2744',
+                              background: 'transparent', color: '#60a5fa', fontSize: 11, cursor: 'pointer',
+                            }}>Edit</button>
+                            <button onClick={() => handleWabaToggleActive(acc)} style={{
+                              padding: '4px 10px', borderRadius: 4, border: '1px solid #1a2744',
+                              background: 'transparent', fontSize: 11, cursor: 'pointer',
+                              color: acc.is_active ? '#f59e0b' : '#10b981',
+                            }}>
+                              {acc.is_active ? 'Nonaktifkan' : 'Aktifkan'}
+                            </button>
+                          </div>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ─── WABA Sync Logs ─── */}
+      {wabaLogs.length > 0 && (
+        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Riwayat Sync WABA</div>
+          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>5 sync terakhir</div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 500 }}>
+              <thead>
+                <tr style={{ background: '#0b1121' }}>
+                  {['Waktu', 'Range', 'Akun', 'Baris', 'Status', 'Durasi'].map(h => (
+                    <th key={h} style={{
+                      padding: '10px 12px', textAlign: 'left', color: '#64748b',
+                      fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
+                      borderBottom: '2px solid #1a2744',
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {wabaLogs.map(log => {
                   const ss = statusStyle(log.status);
                   return (
                     <tr key={log.id} style={{ borderBottom: '1px solid #0f172a' }}>

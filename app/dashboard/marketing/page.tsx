@@ -40,7 +40,7 @@ function normPlatform(source: string): string {
   if (s.includes('shopee')) return 'Shopee Ads';
   if (s.includes('tiktok')) return 'TikTok Ads';
   if (s.includes('facebook')) return 'Meta Ads';
-  if (s.includes('whatsapp') || s.includes('waba')) return 'Meta Ads';
+  if (s.includes('whatsapp') || s.includes('waba')) return 'WABA MM Cost';
   if (s.includes('google')) return 'Google Ads';
   if (s.includes('snack')) return 'SnackVideo Ads';
   return source;
@@ -52,7 +52,7 @@ function getSubSource(source: string): string | null {
   const s = source.toLowerCase();
   if (s.includes('cpas')) return 'CPAS';
   if (s.includes('shopee') && s.includes('live')) return 'Shopee Live';
-  if (s.includes('whatsapp') || s.includes('waba')) return 'WABA/CTWA';
+  // WABA is its own platform now, no sub-source needed
   if (s.includes('tiktok shop') || s.includes('tiktokshop')) return 'TikTok Shop';
   return null;
 }
@@ -64,6 +64,7 @@ const PLATFORM_CHANNEL_MAP: Record<string, string[]> = {
   'Shopee Ads':        ['Shopee'],
   'TikTok Ads':        ['TikTok Shop'],
   'Other Marketplace': ['Tokopedia', 'BliBli', 'Lazada'],
+  'WABA MM Cost':      ['WABA'],
 };
 
 const PLATFORM_CHANNEL_LABEL: Record<string, string> = {
@@ -72,13 +73,14 @@ const PLATFORM_CHANNEL_LABEL: Record<string, string> = {
   'Shopee Ads':        'Shopee',
   'TikTok Ads':        'TikTok Shop',
   'Other Marketplace': 'Other MP',
+  'WABA MM Cost':      'WABA',
 };
 
 // ── Platform colors ──
 const PLATFORM_COLORS: Record<string, string> = {
   'Meta Ads': '#1877f2', 'Google Ads': '#4285f4', 'TikTok Ads': '#ff0050',
   'Shopee Ads': '#ee4d2d', 'SnackVideo Ads': '#fbbf24', 'Other Marketplace': '#64748b',
-  'Reseller': '#f59e0b', 'Other': '#64748b',
+  'Reseller': '#f59e0b', 'WABA MM Cost': '#25D366', 'Other': '#64748b',
 };
 
 // ── Channel colors ──
@@ -271,7 +273,7 @@ const BRAND_COLORS = useMemo(() => {
       byDate[d.date][platform] = (byDate[d.date][platform] || 0) + Math.abs(Number(d.spent || 0));
     });
 
-    const sourceOrder = ['Meta Ads', 'Google Ads', 'Shopee Ads', 'TikTok Ads', 'SnackVideo Ads', 'Other'];
+    const sourceOrder = ['Meta Ads', 'Google Ads', 'Shopee Ads', 'TikTok Ads', 'SnackVideo Ads', 'WABA MM Cost', 'Other'];
     const sortedSources = sourceOrder.filter(s => sources.has(s));
     sources.forEach(s => { if (!sortedSources.includes(s)) sortedSources.push(s); });
 
