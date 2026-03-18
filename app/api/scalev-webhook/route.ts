@@ -24,25 +24,31 @@ let cachedSecrets: BusinessSecret[] | null = null;
 let cacheExpiry = 0;
 const CACHE_TTL_MS = 60_000; // 60 seconds
 
-// ── Store type cache (DB-based store_type lookup) ──
+// ── Store type + channel override cache (DB-based lookup) ──
 // Keyed by "businessId:storeName" to avoid collisions across businesses
 let cachedStoreTypes: Map<string, StoreType> | null = null;
+let cachedChannelOverrides: Map<string, string> | null = null;
 let storeTypeCacheExpiry = 0;
 
 async function getStoreTypeMap(): Promise<Map<string, StoreType>> {
-  if (cachedStoreTypes && Date.now() < storeTypeCacheExpiry) {
+  if (cachedStoreTypes && cachedChannelOverrides && Date.now() < storeTypeCacheExpiry) {
     return cachedStoreTypes;
   }
   try {
     const svc = getServiceSupabase();
     const { data } = await svc
       .from('scalev_store_channels')
-      .select('store_name, store_type, business_id')
+      .select('store_name, store_type, business_id, channel_override')
       .eq('is_active', true);
 
     cachedStoreTypes = new Map();
+    cachedChannelOverrides = new Map();
     for (const row of data || []) {
-      cachedStoreTypes.set(`${row.business_id}:${row.store_name.toLowerCase()}`, row.store_type as StoreType);
+      const key = `${row.business_id}:${row.store_name.toLowerCase()}`;
+      cachedStoreTypes.set(key, row.store_type as StoreType);
+      if (row.channel_override) {
+        cachedChannelOverrides.set(key, row.channel_override);
+      }
     }
     storeTypeCacheExpiry = Date.now() + CACHE_TTL_MS;
     return cachedStoreTypes;
@@ -56,13 +62,24 @@ function lookupStoreType(storeTypes: Map<string, StoreType>, businessId: number,
   return storeTypes.get(`${businessId}:${storeName.toLowerCase()}`);
 }
 
+// Lookup channel override by business_id + store_name
+function lookupChannelOverride(businessId: number, storeName: string): string | undefined {
+  return cachedChannelOverrides?.get(`${businessId}:${storeName.toLowerCase()}`);
+}
+
 // ── Derive channel using store_type from DB, fallback to guessed store_type ──
 async function deriveChannelWithDbLookup(data: any, businessId: number): Promise<string> {
   const storeName = (data.store?.name || '').toLowerCase();
+
+  const storeTypes = await getStoreTypeMap();
+
+  // Check for store-specific channel override (e.g. WABA for Roove Mitra Store)
+  const override = lookupChannelOverride(businessId, storeName);
+  if (override) return override;
+
   const isPurchaseFb = data.is_purchase_fb === true || data.is_purchase_fb === 'true'
     || !!(data.message_variables?.advertiser || '').trim();
 
-  const storeTypes = await getStoreTypeMap();
   const storeType = lookupStoreType(storeTypes, businessId, storeName) ?? guessStoreType(data.store?.name || '');
 
   return deriveChannelFromStoreType(storeType, isPurchaseFb, {
@@ -96,6 +113,7 @@ async function autoRegisterStore(storeName: string, businessCode: string, busine
       { onConflict: 'business_id,store_name', ignoreDuplicates: true }
     );
     cachedStoreTypes = null;
+    cachedChannelOverrides = null;
     console.log(`[scalev-webhook] Auto-registered store "${storeName}" for ${businessCode} → ${storeType}`);
   } catch (err: any) {
     console.warn(`[scalev-webhook] Failed to auto-register store "${storeName}":`, err.message);

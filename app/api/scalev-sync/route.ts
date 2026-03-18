@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
         .select('name, rate')
         .order('effective_from', { ascending: false }),
       svc.from('scalev_store_channels')
-        .select('store_name, store_type, business_id')
+        .select('store_name, store_type, business_id, channel_override')
         .eq('is_active', true),
     ]);
 
@@ -118,8 +118,13 @@ export async function POST(req: NextRequest) {
     }
 
     const storeTypeMap = new Map<string, StoreType>();
+    const channelOverrideMap = new Map<string, string>();
     for (const row of storeRes.data || []) {
-      storeTypeMap.set(`${row.business_id}:${row.store_name.toLowerCase()}`, row.store_type as StoreType);
+      const key = `${row.business_id}:${row.store_name.toLowerCase()}`;
+      storeTypeMap.set(key, row.store_type as StoreType);
+      if (row.channel_override) {
+        channelOverrideMap.set(key, row.channel_override);
+      }
     }
 
     // ── Query orders based on sync mode ──
@@ -391,7 +396,7 @@ async function processOrder(
     if (!lightweight) {
       const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
       const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
-      await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap);
+      await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap, channelOverrideMap);
     }
     details.push({
       order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code,
@@ -446,20 +451,28 @@ async function enrichLineItems(
   businessId: number,
   taxRateName: string,
   taxRatesMap: Map<string, { rate: number; divisor: number }>,
+  channelOverrideMap: Map<string, string>,
 ) {
   const shippedTime = apiOrder.shipped_time || apiOrder.completed_time || null;
 
-  // Derive sales channel
+  // Derive sales channel (check store-specific override first)
   const storeName = (apiOrder.store?.name || '').toLowerCase();
-  const isPurchaseFb = apiOrder.is_purchase_fb || false;
-  const storeType = storeTypeMap.get(`${businessId}:${storeName}`) ?? guessStoreType(apiOrder.store?.name || '');
-  const newChannel = deriveChannelFromStoreType(storeType, isPurchaseFb, {
-    external_id: apiOrder.external_id,
-    financial_entity: apiOrder.financial_entity,
-    raw_data: apiOrder,
-    courier_service: apiOrder.courier_service,
-    platform: apiOrder.platform,
-  });
+  const overrideKey = `${businessId}:${storeName}`;
+  const channelOverride = channelOverrideMap.get(overrideKey);
+  let newChannel: string;
+  if (channelOverride) {
+    newChannel = channelOverride;
+  } else {
+    const isPurchaseFb = apiOrder.is_purchase_fb || false;
+    const storeType = storeTypeMap.get(overrideKey) ?? guessStoreType(apiOrder.store?.name || '');
+    newChannel = deriveChannelFromStoreType(storeType, isPurchaseFb, {
+      external_id: apiOrder.external_id,
+      financial_entity: apiOrder.financial_entity,
+      raw_data: apiOrder,
+      courier_service: apiOrder.courier_service,
+      platform: apiOrder.platform,
+    });
+  }
 
   function calcBT(price: number, tax: { rate: number; divisor: number }): number {
     return price / tax.divisor;

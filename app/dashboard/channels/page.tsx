@@ -40,7 +40,7 @@ const CHANNEL_TOOLTIP: Record<string, string> = {
 };
 
 // ── Channel grouping: channels under Scalev umbrella (share Meta Ads cost) ──
-const SCALEV_CHANNELS = ['CS Manual', 'Scalev Ads'];
+const SCALEV_CHANNELS = ['CS Manual', 'Scalev Ads', 'WABA'];
 
 // ── Build reverse map: channel → platform ──
 const CHANNEL_TO_PLATFORM = {};
