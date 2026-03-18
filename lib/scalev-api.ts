@@ -99,7 +99,7 @@ export function guessStoreType(storeName: string): StoreType {
     || lower.includes('blibli')) {
     return 'marketplace';
   }
-  if (lower.includes('reseller') || lower.includes('dropship') || lower.includes('mitra')) {
+  if (lower.includes('reseller') || lower.includes('dropship')) {
     return 'reseller';
   }
   return 'scalev';
