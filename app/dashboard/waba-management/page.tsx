@@ -99,6 +99,88 @@ export default function WabaManagementPage() {
     return unique;
   }, [formBody]);
 
+  // ── Real-time validation ──
+  const validationErrors = useMemo(() => {
+    const errors: string[] = [];
+    const name = formName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
+
+    // Name validation
+    if (formName && name !== formName.toLowerCase().replace(/\s+/g, '_')) {
+      // Will be auto-sanitized, just show info
+    }
+    if (formName && !/^[a-z][a-z0-9_]*$/.test(name)) {
+      errors.push('Template name must start with a letter and contain only lowercase letters, numbers, and underscores.');
+    }
+    if (formName.length > 512) {
+      errors.push(`Template name is too long (${formName.length}/512 characters).`);
+    }
+
+    // Body character limit
+    if (formBody.length > 1024) {
+      errors.push(`Body text exceeds maximum length (${formBody.length}/1024 characters).`);
+    }
+
+    // Header character limit
+    if (formHeader.length > 60) {
+      errors.push(`Header text exceeds maximum length (${formHeader.length}/60 characters).`);
+    }
+
+    // Footer character limit
+    if (formFooter.length > 60) {
+      errors.push(`Footer text exceeds maximum length (${formFooter.length}/60 characters).`);
+    }
+
+    // Button text limit (20 chars each)
+    formButtons.forEach((btn, i) => {
+      if (btn.trim() && btn.trim().length > 20) {
+        errors.push(`Button ${i + 1} text exceeds maximum length (${btn.trim().length}/20 characters).`);
+      }
+    });
+
+    // Variable count limit
+    if (detectedVars.length > 100) {
+      errors.push(`Too many variables (${detectedVars.length}/100 maximum).`);
+    }
+
+    if (formBody.trim() && detectedVars.length > 0) {
+      // Variable-to-text ratio: for X variables, need at least 2X+1 non-variable words
+      const textWithoutVars = formBody.replace(/\{\{\d+\}\}/g, '').trim();
+      const wordCount = textWithoutVars.split(/\s+/).filter(w => w.length > 0).length;
+      const minWords = 2 * detectedVars.length + 1;
+      if (wordCount < minWords) {
+        errors.push(`Too many variables for message length. Need at least ${minWords} words of text for ${detectedVars.length} variable(s), currently have ${wordCount}.`);
+      }
+
+      // No adjacent variables (separated only by space or nothing)
+      if (/\{\{\d+\}\}\s*\{\{\d+\}\}/.test(formBody)) {
+        errors.push('Variables cannot be adjacent — add text between consecutive variables.');
+      }
+
+      // No variable at start of body
+      if (/^\s*\{\{\d+\}\}/.test(formBody)) {
+        errors.push('Body cannot start with a variable. Add text before the first variable.');
+      }
+
+      // No variable at end of body (possibly followed by punctuation only)
+      if (/\{\{\d+\}\}\s*[.!?,;:]*\s*$/.test(formBody)) {
+        errors.push('Body cannot end with a variable. Add text after the last variable.');
+      }
+
+      // Sequential variable check (no skipping numbers)
+      const varNums = detectedVars.map(v => parseInt(v.replace(/\D/g, ''))).sort((a, b) => a - b);
+      for (let i = 0; i < varNums.length; i++) {
+        if (varNums[i] !== i + 1) {
+          errors.push(`Variable numbering must be sequential starting from 1. Found gap or skip at {{${varNums[i]}}}.`);
+          break;
+        }
+      }
+    }
+
+    return errors;
+  }, [formName, formBody, formHeader, formFooter, formButtons, detectedVars]);
+
+  const hasValidationErrors = validationErrors.length > 0;
+
   // ── Preview body with samples substituted ──
   const previewBody = useMemo(() => {
     if (!formBody) return '';
@@ -413,14 +495,20 @@ export default function WabaManagementPage() {
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
-                  <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Header (optional)</label>
-                  <input style={inputStyle} value={formHeader} onChange={e => setFormHeader(e.target.value)}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>Header (optional)</label>
+                    {formHeader.length > 0 && <span style={{ fontSize: 10, color: formHeader.length > 60 ? '#ef4444' : '#475569' }}>{formHeader.length}/60</span>}
+                  </div>
+                  <input style={{ ...inputStyle, borderColor: formHeader.length > 60 ? '#7f1d1d' : '#1a2744' }} value={formHeader} onChange={e => setFormHeader(e.target.value)}
                     placeholder="Header text" />
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
-                  <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Body *</label>
-                  <textarea ref={bodyRef} style={{ ...inputStyle, minHeight: 80, resize: 'vertical' }} value={formBody}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>Body *</label>
+                    <span style={{ fontSize: 10, color: formBody.length > 1024 ? '#ef4444' : '#475569' }}>{formBody.length}/1024</span>
+                  </div>
+                  <textarea ref={bodyRef} style={{ ...inputStyle, minHeight: 80, resize: 'vertical', borderColor: formBody.length > 1024 ? '#7f1d1d' : '#1a2744' }} value={formBody}
                     onChange={e => setFormBody(e.target.value)}
                     placeholder="Hi {{1}}, check out our latest promo! Use code {{2}} for discount." />
                   {/* Formatting toolbar */}
@@ -474,8 +562,11 @@ export default function WabaManagementPage() {
                 )}
 
                 <div style={{ marginBottom: 12 }}>
-                  <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Footer (optional)</label>
-                  <input style={inputStyle} value={formFooter} onChange={e => setFormFooter(e.target.value)}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>Footer (optional)</label>
+                    {formFooter.length > 0 && <span style={{ fontSize: 10, color: formFooter.length > 60 ? '#ef4444' : '#475569' }}>{formFooter.length}/60</span>}
+                  </div>
+                  <input style={{ ...inputStyle, borderColor: formFooter.length > 60 ? '#7f1d1d' : '#1a2744' }} value={formFooter} onChange={e => setFormFooter(e.target.value)}
                     placeholder="e.g. Reply STOP to unsubscribe" />
                 </div>
 
@@ -492,10 +583,23 @@ export default function WabaManagementPage() {
                   ))}
                 </div>
 
+                {/* Validation errors */}
+                {validationErrors.length > 0 && (
+                  <div style={{ background: '#1c1117', border: '1px solid #7f1d1d', borderRadius: 6, padding: 10, marginBottom: 12 }}>
+                    {validationErrors.map((err, i) => (
+                      <div key={i} style={{ color: '#f87171', fontSize: 11, marginBottom: i < validationErrors.length - 1 ? 4 : 0, display: 'flex', gap: 6 }}>
+                        <span style={{ flexShrink: 0 }}>•</span>
+                        <span>{err}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
                 {formError && <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 12 }}>{formError}</div>}
 
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button style={btnPrimary} onClick={handleCreate} disabled={creating}>
+                  <button style={{ ...btnPrimary, opacity: hasValidationErrors || creating ? 0.4 : 1, cursor: hasValidationErrors || creating ? 'not-allowed' : 'pointer' }}
+                    onClick={handleCreate} disabled={hasValidationErrors || creating}>
                     {creating ? 'Creating...' : 'Submit Template'}
                   </button>
                   <button style={btnOutline} onClick={() => setShowCreateForm(false)}>Cancel</button>
