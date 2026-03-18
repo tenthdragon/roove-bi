@@ -500,9 +500,9 @@ export default function WabaManagementPage() {
       byDate[d.date].orders += Number(d.order_count || 0);
     });
 
-    // Merge template analytics daily data
+    // Merge template analytics daily data (only for dates that already have WABA data)
     templateAnalyticsDaily.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { sent: 0, delivered: 0, orders: 0, cost: 0, revenue: 0, tplRead: 0, tplClicked: 0, tplReplied: 0 };
+      if (!byDate[d.date]) return; // Skip dates without WABA send data
       byDate[d.date].tplRead += d.read || 0;
       byDate[d.date].tplClicked += d.clicked || 0;
       byDate[d.date].tplReplied += d.replied || 0;
