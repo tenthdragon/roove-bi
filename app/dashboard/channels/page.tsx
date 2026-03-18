@@ -845,9 +845,9 @@ export default function ChannelsPage() {
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12 }}>{r.delivered > 0 ? r.delivered.toLocaleString() : '—'}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: r.deliveryRate >= 95 ? '#10b981' : r.deliveryRate >= 85 ? '#f59e0b' : '#ef4444' }}>{r.sent > 0 ? `${r.deliveryRate.toFixed(1)}%` : '—'}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{r.orders > 0 ? r.orders.toLocaleString() : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: '#25D366' }}>{r.cost > 0 ? fmtCompact(r.cost) : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{r.revenue > 0 ? fmtCompact(r.revenue) : '—'}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12 }}>{r.orders > 0 ? fmtCompact(r.costPerOrder) : '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: '#25D366' }}>{r.cost > 0 ? fmtRupiah(r.cost) : '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{r.revenue > 0 ? fmtRupiah(r.revenue) : '—'}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12 }}>{r.orders > 0 ? fmtRupiah(r.costPerOrder) : '—'}</td>
                   </tr>
                 ))}
                 <tr style={{ borderTop: '2px solid #1a2744' }}>
@@ -856,9 +856,9 @@ export default function ChannelsPage() {
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{wabaAnalysis.totals.delivered.toLocaleString()}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: wabaAnalysis.totals.deliveryRate >= 95 ? '#10b981' : '#f59e0b' }}>{wabaAnalysis.totals.sent > 0 ? `${wabaAnalysis.totals.deliveryRate.toFixed(1)}%` : '—'}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{wabaAnalysis.totals.orders.toLocaleString()}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: '#25D366' }}>{fmtCompact(wabaAnalysis.totals.cost)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{fmtCompact(wabaAnalysis.totals.revenue)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{wabaAnalysis.totals.orders > 0 ? fmtCompact(wabaAnalysis.totals.costPerOrder) : '—'}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: '#25D366' }}>{fmtRupiah(wabaAnalysis.totals.cost)}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{fmtRupiah(wabaAnalysis.totals.revenue)}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{wabaAnalysis.totals.orders > 0 ? fmtRupiah(wabaAnalysis.totals.costPerOrder) : '—'}</td>
                 </tr>
               </tbody>
             </table>
