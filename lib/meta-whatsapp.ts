@@ -204,6 +204,129 @@ export async function fetchAllWabaInsights(
   return results;
 }
 
+// ── Template Analytics ──
+
+export interface TemplateAnalyticsMetrics {
+  sent: number;
+  delivered: number;
+  read: number;
+  clicked: number;
+  replied: number;
+  cost: number;
+}
+
+export interface TemplateAnalyticsResult {
+  [templateId: string]: TemplateAnalyticsMetrics;
+}
+
+export interface TemplateAnalyticsDailyPoint {
+  date: string; // YYYY-MM-DD
+  sent: number;
+  delivered: number;
+  read: number;
+  clicked: number;
+  replied: number;
+}
+
+/**
+ * Fetch per-template analytics (sent/delivered/read/clicked/replied) from Graph API.
+ * Batches in groups of 10 (API limit).
+ * Returns aggregated totals per template + daily breakdown.
+ */
+export async function fetchTemplateAnalytics(
+  wabaId: string,
+  accessToken: string,
+  templateIds: string[],
+  startDate: string,
+  endDate: string
+): Promise<{ byTemplate: TemplateAnalyticsResult; daily: TemplateAnalyticsDailyPoint[] }> {
+  const startUnix = Math.floor(new Date(startDate + 'T00:00:00Z').getTime() / 1000);
+  const endUnix = Math.floor(new Date(endDate + 'T00:00:00Z').getTime() / 1000);
+
+  const byTemplate: TemplateAnalyticsResult = {};
+  const dailyMap: Record<string, TemplateAnalyticsDailyPoint> = {};
+
+  // Batch in groups of 10 (API limit)
+  for (let i = 0; i < templateIds.length; i += 10) {
+    const batch = templateIds.slice(i, i + 10);
+
+    // Use dot-notation field syntax (same pattern as fetchWabaAnalytics)
+    const templateAnalyticsField = [
+      `template_analytics`,
+      `.start(${startUnix})`,
+      `.end(${endUnix})`,
+      `.granularity(DAILY)`,
+      `.template_ids([${batch.join(',')}])`,
+    ].join('');
+
+    const params = new URLSearchParams({
+      access_token: accessToken,
+      fields: templateAnalyticsField,
+    });
+
+    const url = `${GRAPH_API_BASE}/${wabaId}?${params.toString()}`;
+    const response = await fetch(url);
+
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}));
+      const errorMsg = errorBody?.error?.message || response.statusText;
+      console.error(`[template_analytics] API error: ${errorMsg}`);
+      if (i + 10 < templateIds.length) {
+        await sleep(300);
+      }
+      continue;
+    }
+
+    const json = await response.json();
+    const dataPoints = json?.template_analytics?.data || [];
+
+    for (const point of dataPoints) {
+      const tplId = point.template_id;
+      if (!tplId) continue;
+
+      if (!byTemplate[tplId]) {
+        byTemplate[tplId] = { sent: 0, delivered: 0, read: 0, clicked: 0, replied: 0, cost: 0 };
+      }
+
+      const metrics = byTemplate[tplId];
+      const dpList = point.data_points || [];
+      for (const dp of dpList) {
+        metrics.sent += dp.sent || 0;
+        metrics.delivered += dp.delivered || 0;
+        metrics.read += dp.read || 0;
+        // clicked is an array of button click objects with .total
+        const totalClicked = Array.isArray(dp.clicked)
+          ? dp.clicked.reduce((sum: number, c: any) => sum + (c.total || 0), 0)
+          : (dp.clicked || 0);
+        metrics.clicked += totalClicked;
+
+        // Cost data
+        if (dp.cost) {
+          metrics.cost += dp.cost.total_amount || dp.cost || 0;
+        }
+
+        // Aggregate daily
+        const date = new Date(dp.start * 1000).toISOString().split('T')[0];
+        if (!dailyMap[date]) {
+          dailyMap[date] = { date, sent: 0, delivered: 0, read: 0, clicked: 0, replied: 0 };
+        }
+        dailyMap[date].sent += dp.sent || 0;
+        dailyMap[date].delivered += dp.delivered || 0;
+        dailyMap[date].read += dp.read || 0;
+        dailyMap[date].clicked += totalClicked;
+      }
+    }
+
+    // Rate limit between batches
+    if (i + 10 < templateIds.length) {
+      await sleep(300);
+    }
+  }
+
+  const daily = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
+  return { byTemplate, daily };
+}
+
 // ── Template CRUD ──
 
 export interface MessageTemplate {
