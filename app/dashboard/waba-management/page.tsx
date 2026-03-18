@@ -54,6 +54,32 @@ export default function WabaManagementPage() {
   const [formFooter, setFormFooter] = useState('');
   const [formButtons, setFormButtons] = useState<string[]>([]);
   const [formError, setFormError] = useState<string | null>(null);
+  const [varSamples, setVarSamples] = useState<Record<string, string>>({});
+
+  // ── Auto-detect variables in body text ──
+  const detectedVars = useMemo(() => {
+    const matches = formBody.match(/\{\{(\d+)\}\}/g) || [];
+    const unique = [...new Set(matches)].sort((a, b) => {
+      const numA = parseInt(a.replace(/\D/g, ''));
+      const numB = parseInt(b.replace(/\D/g, ''));
+      return numA - numB;
+    });
+    return unique;
+  }, [formBody]);
+
+  // ── Preview body with samples substituted ──
+  const previewBody = useMemo(() => {
+    if (!formBody) return '';
+    let text = formBody;
+    for (const v of detectedVars) {
+      const key = v.replace(/[{}]/g, '');
+      const sample = varSamples[key];
+      if (sample) {
+        text = text.replaceAll(v, sample);
+      }
+    }
+    return text;
+  }, [formBody, detectedVars, varSamples]);
 
   // ── Analytics state ──
   const [adsData, setAdsData] = useState([]);
@@ -192,7 +218,16 @@ export default function WabaManagementPage() {
     if (formHeader.trim()) {
       components.push({ type: 'HEADER', format: 'TEXT', text: formHeader.trim() });
     }
-    components.push({ type: 'BODY', text: formBody.trim() });
+    const bodyComponent: any = { type: 'BODY', text: formBody.trim() };
+    // Include variable samples as example for Meta review
+    if (detectedVars.length > 0) {
+      const exampleValues = detectedVars.map(v => {
+        const key = v.replace(/[{}]/g, '');
+        return varSamples[key] || v;
+      });
+      bodyComponent.example = { body_text: [exampleValues] };
+    }
+    components.push(bodyComponent);
     if (formFooter.trim()) {
       components.push({ type: 'FOOTER', text: formFooter.trim() });
     }
@@ -214,7 +249,7 @@ export default function WabaManagementPage() {
       if (!res.ok) throw new Error(json.error || 'Failed to create template');
 
       // Reset form and refetch
-      setFormName(''); setFormBody(''); setFormHeader(''); setFormFooter(''); setFormButtons([]);
+      setFormName(''); setFormBody(''); setFormHeader(''); setFormFooter(''); setFormButtons([]); setVarSamples({});
       setShowCreateForm(false);
       fetchTemplates();
     } catch (err: any) {
@@ -336,6 +371,30 @@ export default function WabaManagementPage() {
                   <div style={{ fontSize: 10, color: '#475569', marginTop: 4 }}>Use {'{{1}}'}, {'{{2}}'}, etc. for variable placeholders</div>
                 </div>
 
+                {/* Variable Samples — auto-detected from body */}
+                {detectedVars.length > 0 && (
+                  <div style={{ marginBottom: 12, background: '#0d1526', border: '1px solid #1a2744', borderRadius: 6, padding: 12 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Variable Samples</div>
+                    <div style={{ fontSize: 10, color: '#475569', marginBottom: 10 }}>
+                      Provide sample content for each variable to help Meta review your template.
+                    </div>
+                    {detectedVars.map(v => {
+                      const key = v.replace(/[{}]/g, '');
+                      return (
+                        <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                          <span style={{
+                            background: '#1a2744', borderRadius: 4, padding: '4px 10px', fontSize: 12,
+                            fontFamily: 'monospace', color: '#94a3b8', minWidth: 50, textAlign: 'center', flexShrink: 0,
+                          }}>{v}</span>
+                          <input style={inputStyle} value={varSamples[key] || ''}
+                            onChange={e => setVarSamples(prev => ({ ...prev, [key]: e.target.value }))}
+                            placeholder={`Enter sample for ${v}`} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
                 <div style={{ marginBottom: 12 }}>
                   <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Footer (optional)</label>
                   <input style={inputStyle} value={formFooter} onChange={e => setFormFooter(e.target.value)}
@@ -386,7 +445,7 @@ export default function WabaManagementPage() {
                     )}
                     {/* Body */}
                     <div style={{ fontSize: 13, color: '#303030', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {formBody || <span style={{ color: '#999' }}>Message body will appear here...</span>}
+                      {previewBody || <span style={{ color: '#999' }}>Message body will appear here...</span>}
                     </div>
                     {/* Footer */}
                     {formFooter.trim() && (
