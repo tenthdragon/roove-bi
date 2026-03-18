@@ -204,6 +204,97 @@ export async function fetchAllWabaInsights(
   return results;
 }
 
+// ── Template CRUD ──
+
+export interface MessageTemplate {
+  id: string;
+  name: string;
+  status: string;
+  category: string;
+  language: string;
+  components: any[];
+}
+
+export interface CreateTemplatePayload {
+  name: string;
+  category: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION';
+  language: string;
+  components: any[];
+}
+
+export async function listMessageTemplates(
+  wabaId: string,
+  accessToken: string,
+  after?: string
+): Promise<{ data: MessageTemplate[]; paging: { after?: string } }> {
+  const params = new URLSearchParams({
+    access_token: accessToken,
+    fields: 'name,status,category,language,components,id',
+    limit: '50',
+  });
+  if (after) params.set('after', after);
+
+  const url = `${GRAPH_API_BASE}/${wabaId}/message_templates?${params.toString()}`;
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody?.error?.message || response.statusText);
+  }
+
+  const json = await response.json();
+  return {
+    data: json.data || [],
+    paging: { after: json.paging?.cursors?.after },
+  };
+}
+
+export async function createMessageTemplate(
+  wabaId: string,
+  accessToken: string,
+  payload: CreateTemplatePayload
+): Promise<{ id: string; status: string; category: string }> {
+  const url = `${GRAPH_API_BASE}/${wabaId}/message_templates`;
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      ...payload,
+      access_token: accessToken,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody?.error?.message || response.statusText);
+  }
+
+  return response.json();
+}
+
+export async function deleteMessageTemplate(
+  wabaId: string,
+  accessToken: string,
+  hsmId: string,
+  name: string
+): Promise<{ success: boolean }> {
+  const params = new URLSearchParams({
+    access_token: accessToken,
+    hsm_id: hsmId,
+    name,
+  });
+
+  const url = `${GRAPH_API_BASE}/${wabaId}/message_templates?${params.toString()}`;
+  const response = await fetch(url, { method: 'DELETE' });
+
+  if (!response.ok) {
+    const errorBody = await response.json().catch(() => ({}));
+    throw new Error(errorBody?.error?.message || response.statusText);
+  }
+
+  return response.json();
+}
+
 // Re-export for convenience
 export { getYesterdayWIB };
 
