@@ -73,16 +73,16 @@ function fullDateID(d: string) {
 
 // ── KPI Card ──
 
-function KPICard({ label, value, color = '#3b82f6', sub }: { label: string; value: string; color?: string; sub?: string }) {
+function KPICard({ label, value, color = 'var(--accent)', sub }: { label: string; value: string; color?: string; sub?: string }) {
   return (
     <div style={{
-      background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12,
+      background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
       padding: 16, flex: 1, minWidth: 160,
       borderTop: `3px solid ${color}`,
     }}>
-      <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700, color: '#e2e8f0', fontFamily: 'monospace' }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>{sub}</div>}
+      <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', fontFamily: 'monospace' }}>{value}</div>
+      {sub && <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
@@ -199,7 +199,7 @@ export default function WarehousePage() {
   if (loading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-        <div className="spinner" style={{ width: 32, height: 32, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+        <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
       </div>
     );
   }
@@ -214,8 +214,8 @@ export default function WarehousePage() {
         setSelectedMonth(m);
       }}
       style={{
-        background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8,
-        padding: '6px 12px', color: '#e2e8f0', fontSize: 13, outline: 'none',
+        background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+        padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none',
       }}
     >
       {availablePeriods.map(p => (
@@ -237,8 +237,8 @@ export default function WarehousePage() {
       value={categoryFilter}
       onChange={(e) => setCategoryFilter(e.target.value)}
       style={{
-        background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8,
-        padding: '6px 12px', color: '#e2e8f0', fontSize: 13, outline: 'none',
+        background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+        padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none',
       }}
     >
       <option value="all">Semua Kategori</option>
@@ -259,7 +259,7 @@ export default function WarehousePage() {
       {/* Sub-tab navigation */}
       <div style={{
         display: 'flex', gap: 2, marginBottom: 20,
-        borderBottom: '1px solid #1a2744', paddingBottom: 0,
+        borderBottom: '1px solid var(--border)', paddingBottom: 0,
         overflowX: 'auto',
       }}>
         {SUB_TABS.map(t => (
@@ -269,9 +269,9 @@ export default function WarehousePage() {
             style={{
               padding: '8px 16px', borderRadius: '8px 8px 0 0', border: 'none',
               cursor: 'pointer', fontSize: 13, fontWeight: 600,
-              background: activeTab === t.id ? '#1a2744' : 'transparent',
-              color: activeTab === t.id ? '#60a5fa' : '#64748b',
-              borderBottom: activeTab === t.id ? '2px solid #3b82f6' : '2px solid transparent',
+              background: activeTab === t.id ? 'var(--border)' : 'transparent',
+              color: activeTab === t.id ? '#60a5fa' : 'var(--dim)',
+              borderBottom: activeTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
               whiteSpace: 'nowrap',
             }}
           >
@@ -306,9 +306,9 @@ function RingkasanTab({ data, categories, categoryFilter, setCategoryFilter }: {
     <>
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <KPICard label="Total Nilai Stock" value={fmtRupiah(totalValue)} color="#3b82f6" />
+        <KPICard label="Total Nilai Stock" value={fmtRupiah(totalValue)} color="var(--accent)" />
         <KPICard label="Jumlah Produk" value={String(productCount)} color="#8b5cf6" />
-        <KPICard label="Total Masuk" value={fmtCompact(totalIn)} color="#10b981" />
+        <KPICard label="Total Masuk" value={fmtCompact(totalIn)} color="var(--green)" />
         <KPICard label="Total Keluar" value={fmtCompact(totalOut)} color="#f97316" />
       </div>
 
@@ -318,8 +318,8 @@ function RingkasanTab({ data, categories, categoryFilter, setCategoryFilter }: {
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
           style={{
-            background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8,
-            padding: '6px 12px', color: '#e2e8f0', fontSize: 13, outline: 'none',
+            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+            padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none',
           }}
         >
           <option value="all">Semua Kategori</option>
@@ -331,54 +331,54 @@ function RingkasanTab({ data, categories, categoryFilter, setCategoryFilter }: {
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid #1a2744' }}>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
               {['No', 'Produk', 'Kategori', 'First Day', 'IN', 'OUT', 'Last Day', 'Expired', 'Harga', 'Nilai'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Produk' || h === 'Kategori' ? 'left' : 'right', color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Produk' || h === 'Kategori' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {data.map((r, i) => (
-              <tr key={r.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                <td style={{ padding: '6px 10px', textAlign: 'right', color: '#475569', fontFamily: 'monospace' }}>{i + 1}</td>
-                <td style={{ padding: '6px 10px', color: '#e2e8f0', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
+              <tr key={r.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                <td style={{ padding: '6px 10px', textAlign: 'right', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{i + 1}</td>
+                <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
                 <td style={{ padding: '6px 10px' }}>
-                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: '#1e293b', color: '#94a3b8' }}>{r.category}</span>
+                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text-secondary)' }}>{r.category}</span>
                 </td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0' }}>{r.first_day_stock.toLocaleString('id-ID')}</td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#10b981' }}>{r.total_in.toLocaleString('id-ID')}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{r.first_day_stock.toLocaleString('id-ID')}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--green)' }}>{r.total_in.toLocaleString('id-ID')}</td>
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#f97316' }}>{r.total_out.toLocaleString('id-ID')}</td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0', fontWeight: 600 }}>{r.last_day_stock.toLocaleString('id-ID')}</td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', color: '#94a3b8', fontSize: 11 }}>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)', fontWeight: 600 }}>{r.last_day_stock.toLocaleString('id-ID')}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', color: 'var(--text-secondary)', fontSize: 11 }}>
                   {r.expired_date ? shortDateID(r.expired_date) : '-'}
                 </td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8' }}>{fmtRupiah(r.price_list)}</td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0' }}>{fmtRupiah(r.sub_total_value)}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{fmtRupiah(r.price_list)}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{fmtRupiah(r.sub_total_value)}</td>
               </tr>
             ))}
             {data.length === 0 && (
-              <tr><td colSpan={10} style={{ padding: 24, textAlign: 'center', color: '#475569' }}>Belum ada data untuk periode ini</td></tr>
+              <tr><td colSpan={10} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada data untuk periode ini</td></tr>
             )}
           </tbody>
           {data.length > 0 && (
             <tfoot>
-              <tr style={{ borderTop: '2px solid #1a2744' }}>
-                <td colSpan={3} style={{ padding: '8px 10px', fontWeight: 700, color: '#e2e8f0' }}>Total</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#e2e8f0' }}>
+              <tr style={{ borderTop: '2px solid var(--border)' }}>
+                <td colSpan={3} style={{ padding: '8px 10px', fontWeight: 700, color: 'var(--text)' }}>Total</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
                   {data.reduce((s, r) => s + r.first_day_stock, 0).toLocaleString('id-ID')}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#10b981' }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--green)' }}>
                   {totalIn.toLocaleString('id-ID')}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f97316' }}>
                   {totalOut.toLocaleString('id-ID')}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#e2e8f0' }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
                   {data.reduce((s, r) => s + r.last_day_stock, 0).toLocaleString('id-ID')}
                 </td>
                 <td />
                 <td />
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#e2e8f0' }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
                   {fmtRupiah(totalValue)}
                 </td>
               </tr>
@@ -406,9 +406,9 @@ function HarianTab({ data, chartData, categories, categoryFilter, setCategoryFil
     <>
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <KPICard label="Total Masuk (Bulan)" value={fmtCompact(totalIn)} color="#10b981" />
+        <KPICard label="Total Masuk (Bulan)" value={fmtCompact(totalIn)} color="var(--green)" />
         <KPICard label="Total Keluar (Bulan)" value={fmtCompact(totalOut)} color="#f97316" />
-        <KPICard label="Net Change" value={(netChange >= 0 ? '+' : '') + fmtCompact(netChange)} color={netChange >= 0 ? '#10b981' : '#ef4444'} />
+        <KPICard label="Net Change" value={(netChange >= 0 ? '+' : '') + fmtCompact(netChange)} color={netChange >= 0 ? 'var(--green)' : 'var(--red)'} />
       </div>
 
       {/* Category filter */}
@@ -417,8 +417,8 @@ function HarianTab({ data, chartData, categories, categoryFilter, setCategoryFil
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
           style={{
-            background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8,
-            padding: '6px 12px', color: '#e2e8f0', fontSize: 13, outline: 'none',
+            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+            padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none',
           }}
         >
           <option value="all">Semua Kategori</option>
@@ -428,15 +428,15 @@ function HarianTab({ data, chartData, categories, categoryFilter, setCategoryFil
 
       {/* Chart */}
       {chartData.length > 0 && (
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', marginBottom: 12 }}>Pergerakan Stock Harian</div>
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 12 }}>Pergerakan Stock Harian</div>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={chartData} barGap={2}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
               <XAxis dataKey="date" tickFormatter={(d) => shortDateID(d)} tick={{ fill: '#64748b', fontSize: 11 }} axisLine={{ stroke: '#1a2744' }} />
               <YAxis tick={{ fill: '#64748b', fontSize: 11 }} axisLine={{ stroke: '#1a2744' }} tickFormatter={(v) => fmtCompact(v)} />
               <Tooltip
-                contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8, fontSize: 12 }}
+                contentStyle={{ background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
                 labelFormatter={(d) => fullDateID(d)}
                 formatter={(v: number, name: string) => [v.toLocaleString('id-ID'), name === 'in' ? 'Masuk' : 'Keluar']}
               />
@@ -452,30 +452,30 @@ function HarianTab({ data, chartData, categories, categoryFilter, setCategoryFil
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid #1a2744' }}>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
               {['Tanggal', 'Produk', 'Kategori', 'Masuk (IN)', 'Keluar (OUT)'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Produk' || h === 'Kategori' || h === 'Tanggal' ? 'left' : 'right', color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Produk' || h === 'Kategori' || h === 'Tanggal' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {data.map(r => (
-              <tr key={r.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                <td style={{ padding: '6px 10px', color: '#94a3b8', fontSize: 11 }}>{shortDateID(r.date)}</td>
-                <td style={{ padding: '6px 10px', color: '#e2e8f0', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
+              <tr key={r.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{shortDateID(r.date)}</td>
+                <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
                 <td style={{ padding: '6px 10px' }}>
-                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: '#1e293b', color: '#94a3b8' }}>{r.category}</span>
+                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text-secondary)' }}>{r.category}</span>
                 </td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: r.stock_in > 0 ? '#10b981' : '#475569' }}>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: r.stock_in > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
                   {r.stock_in > 0 ? r.stock_in.toLocaleString('id-ID') : '-'}
                 </td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: r.stock_out > 0 ? '#f97316' : '#475569' }}>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: r.stock_out > 0 ? '#f97316' : 'var(--text-muted)' }}>
                   {r.stock_out > 0 ? r.stock_out.toLocaleString('id-ID') : '-'}
                 </td>
               </tr>
             ))}
             {data.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: '#475569' }}>Belum ada data harian untuk periode ini</td></tr>
+              <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada data harian untuk periode ini</td></tr>
             )}
           </tbody>
         </table>
@@ -500,14 +500,14 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
     <>
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <KPICard label="Total SO Events" value={String(totalEvents)} color="#3b82f6" />
-        <KPICard label="Item dengan Selisih" value={String(totalItemsWithSelisih)} color="#f59e0b" />
-        <KPICard label="Total |Selisih|" value={fmtCompact(totalAbsSelisih)} color="#ef4444" />
+        <KPICard label="Total SO Events" value={String(totalEvents)} color="var(--accent)" />
+        <KPICard label="Item dengan Selisih" value={String(totalItemsWithSelisih)} color="var(--yellow)" />
+        <KPICard label="Total |Selisih|" value={fmtCompact(totalAbsSelisih)} color="var(--red)" />
       </div>
 
       {/* SO event cards */}
       {soSummary.length === 0 ? (
-        <div style={{ padding: 24, textAlign: 'center', color: '#475569', background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12 }}>Belum ada data stock opname</div>
+        <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>Belum ada data stock opname</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {soSummary.map(so => {
@@ -517,7 +517,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
             const hasSelisih = so.items_with_selisih > 0;
 
             return (
-              <div key={key} style={{ background: '#111a2e', border: `1px solid ${hasSelisih ? '#92400e' : '#1a2744'}`, borderRadius: 12, overflow: 'hidden' }}>
+              <div key={key} style={{ background: 'var(--card)', border: `1px solid ${hasSelisih ? '#92400e' : 'var(--border)'}`, borderRadius: 12, overflow: 'hidden' }}>
                 {/* Header */}
                 <button
                   onClick={() => setExpandedSO(isExpanded ? null : key)}
@@ -528,20 +528,20 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>{so.opname_label}</span>
-                    <span style={{ color: '#64748b', fontSize: 11 }}>{fullDateID(so.opname_date)}</span>
+                    <span style={{ color: 'var(--text)', fontSize: 13, fontWeight: 600 }}>{so.opname_label}</span>
+                    <span style={{ color: 'var(--dim)', fontSize: 11 }}>{fullDateID(so.opname_date)}</span>
                   </div>
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                    <span style={{ fontSize: 11, color: '#94a3b8' }}>{so.item_count} item</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{so.item_count} item</span>
                     {hasSelisih && (
                       <span style={{
                         padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                        background: '#7f1d1d', color: '#fca5a5',
+                        background: 'var(--badge-red-bg)', color: '#fca5a5',
                       }}>
                         {so.items_with_selisih} selisih
                       </span>
                     )}
-                    <span style={{ color: '#64748b', fontSize: 14, transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>
+                    <span style={{ color: 'var(--dim)', fontSize: 14, transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>
                       &#9660;
                     </span>
                   </div>
@@ -549,27 +549,27 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
 
                 {/* Expanded detail */}
                 {isExpanded && (
-                  <div style={{ borderTop: '1px solid #1a2744', padding: '0 16px 12px' }}>
+                  <div style={{ borderTop: '1px solid var(--border)', padding: '0 16px 12px' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 }}>
                       <thead>
-                        <tr style={{ borderBottom: '1px solid #1a2744' }}>
+                        <tr style={{ borderBottom: '1px solid var(--border)' }}>
                           {['Produk', 'Kategori', 'Sebelum SO', 'Sesudah SO', 'Selisih'].map(h => (
-                            <th key={h} style={{ padding: '6px 8px', textAlign: h === 'Produk' || h === 'Kategori' ? 'left' : 'right', color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                            <th key={h} style={{ padding: '6px 8px', textAlign: h === 'Produk' || h === 'Kategori' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {details.map(d => (
-                          <tr key={d.id} style={{ borderBottom: '1px solid #0f172a', background: d.selisih !== 0 ? 'rgba(239,68,68,0.05)' : 'transparent' }}>
-                            <td style={{ padding: '5px 8px', color: '#e2e8f0', fontWeight: 500, whiteSpace: 'nowrap' }}>{d.product_name}</td>
+                          <tr key={d.id} style={{ borderBottom: '1px solid var(--bg-deep)', background: d.selisih !== 0 ? 'var(--red-subtle)' : 'transparent' }}>
+                            <td style={{ padding: '5px 8px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{d.product_name}</td>
                             <td style={{ padding: '5px 8px' }}>
-                              <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: '#1e293b', color: '#94a3b8' }}>{d.category}</span>
+                              <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text-secondary)' }}>{d.category}</span>
                             </td>
-                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0' }}>{d.sebelum_so.toLocaleString('id-ID')}</td>
-                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0' }}>{d.sesudah_so.toLocaleString('id-ID')}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{d.sebelum_so.toLocaleString('id-ID')}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{d.sesudah_so.toLocaleString('id-ID')}</td>
                             <td style={{
                               padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
-                              color: d.selisih > 0 ? '#10b981' : d.selisih < 0 ? '#ef4444' : '#475569',
+                              color: d.selisih > 0 ? 'var(--green)' : d.selisih < 0 ? 'var(--red)' : 'var(--text-muted)',
                             }}>
                               {d.selisih > 0 ? '+' : ''}{d.selisih.toLocaleString('id-ID')}
                             </td>
@@ -606,10 +606,10 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
   }, [allData]);
 
   const statusConfig: Record<string, { bg: string; color: string; label: string; border: string }> = {
-    expired: { bg: '#7f1d1d', color: '#fca5a5', label: 'Expired', border: '#991b1b' },
-    critical: { bg: '#78350f', color: '#fcd34d', label: 'Critical (<30 hari)', border: '#92400e' },
+    expired: { bg: 'var(--badge-red-bg)', color: '#fca5a5', label: 'Expired', border: '#991b1b' },
+    critical: { bg: 'var(--badge-yellow-bg)', color: '#fcd34d', label: 'Critical (<30 hari)', border: '#92400e' },
     warning: { bg: '#713f12', color: '#fde68a', label: 'Warning (<90 hari)', border: '#854d0e' },
-    safe: { bg: '#064e3b', color: '#6ee7b7', label: 'Aman', border: '#065f46' },
+    safe: { bg: 'var(--badge-green-bg)', color: '#6ee7b7', label: 'Aman', border: '#065f46' },
   };
 
   return (
@@ -621,14 +621,14 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
             key={key}
             onClick={() => setExpiryFilter(expiryFilter === key ? 'all' : key)}
             style={{
-              background: '#111a2e', border: `1px solid ${expiryFilter === key ? cfg.border : '#1a2744'}`,
+              background: 'var(--card)', border: `1px solid ${expiryFilter === key ? cfg.border : 'var(--border)'}`,
               borderRadius: 12, padding: 16, flex: 1, minWidth: 130, cursor: 'pointer',
               borderTop: `3px solid ${cfg.color}`,
               opacity: expiryFilter !== 'all' && expiryFilter !== key ? 0.5 : 1,
               transition: 'opacity 0.2s',
             }}
           >
-            <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', textAlign: 'left' }}>{cfg.label}</div>
+            <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', textAlign: 'left' }}>{cfg.label}</div>
             <div style={{ fontSize: 24, fontWeight: 700, color: cfg.color, fontFamily: 'monospace', textAlign: 'left' }}>{statusCounts[key as keyof typeof statusCounts]}</div>
           </button>
         ))}
@@ -639,8 +639,8 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
         <button
           onClick={() => setExpiryFilter('all')}
           style={{
-            padding: '4px 12px', borderRadius: 6, border: '1px solid #1a2744',
-            background: 'transparent', color: '#64748b', fontSize: 11, cursor: 'pointer',
+            padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border)',
+            background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer',
             marginBottom: 12, fontWeight: 600,
           }}
         >
@@ -652,9 +652,9 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
-            <tr style={{ borderBottom: '1px solid #1a2744' }}>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
               {['Produk', 'Kategori', 'Expired Date', 'Sisa Hari', 'Stok', 'Nilai', 'Status'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Produk' || h === 'Kategori' || h === 'Status' ? 'left' : 'right', color: '#64748b', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Produk' || h === 'Kategori' || h === 'Status' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -662,17 +662,17 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
             {data.map((r, i) => {
               const cfg = statusConfig[r.expiry_status] || statusConfig.safe;
               return (
-                <tr key={i} style={{ borderBottom: '1px solid #0f172a' }}>
-                  <td style={{ padding: '6px 10px', color: '#e2e8f0', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
+                <tr key={i} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                  <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
                   <td style={{ padding: '6px 10px' }}>
-                    <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: '#1e293b', color: '#94a3b8' }}>{r.category}</span>
+                    <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text-secondary)' }}>{r.category}</span>
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0' }}>{fullDateID(r.expired_date)}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{fullDateID(r.expired_date)}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: cfg.color }}>
                     {r.days_remaining}
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0' }}>{r.last_day_stock.toLocaleString('id-ID')}</td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0' }}>{fmtRupiah(r.sub_total_value)}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{r.last_day_stock.toLocaleString('id-ID')}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{fmtRupiah(r.sub_total_value)}</td>
                   <td style={{ padding: '6px 10px' }}>
                     <span style={{
                       padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
@@ -685,7 +685,7 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
               );
             })}
             {data.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: '#475569' }}>Tidak ada produk dengan status expired yang dipilih</td></tr>
+              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Tidak ada produk dengan status expired yang dipilih</td></tr>
             )}
           </tbody>
         </table>

@@ -9,6 +9,7 @@ import { ALL_TABS, canAccessTab } from '@/lib/utils';
 import { DateRangeProvider, useDateRange } from '@/lib/DateRangeContext';
 import DateRangePicker from '@/components/DateRangePicker';
 import { ActiveBrandsProvider } from '@/lib/ActiveBrandsContext';
+import ThemeToggle from '@/components/ThemeToggle';
 
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
@@ -158,8 +159,8 @@ function RefreshViewsButton() {
       case 'running': return '#60a5fa';
       case 'success': return '#22c55e';
       case 'error': return '#ef4444';
-      case 'skipped': return '#64748b';
-      default: return '#475569';
+      case 'skipped': return 'var(--dim)';
+      default: return 'var(--text-muted)';
     }
   };
 
@@ -198,9 +199,9 @@ function RefreshViewsButton() {
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 34, height: 34, borderRadius: 8,
-          border: '1px solid #1a2744',
-          background: status === 'loading' ? '#1a2744' : '#111a2e',
-          color: '#94a3b8', cursor: status === 'loading' ? 'wait' : 'pointer',
+          border: '1px solid var(--border)',
+          background: status === 'loading' ? 'var(--border)' : 'var(--card)',
+          color: 'var(--text-secondary)', cursor: status === 'loading' ? 'wait' : 'pointer',
           transition: 'all 0.15s ease', flexShrink: 0,
         }}
       >
@@ -211,11 +212,11 @@ function RefreshViewsButton() {
       {showDetail && status === 'loading' && (
         <div style={{
           position: 'absolute', top: '100%', right: 0, marginTop: 8,
-          background: '#111a2e', border: '1px solid #1a2744', borderRadius: 10,
+          background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10,
           padding: '12px 14px', minWidth: 250, zIndex: 999,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+          boxShadow: 'var(--shadow)',
         }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.5px' }}>
             Sync Progress
           </div>
           {[
@@ -234,7 +235,7 @@ function RefreshViewsButton() {
               }}>
                 {stepIcon(steps[key])}
               </span>
-              <span style={{ fontWeight: 600, color: '#e2e8f0', minWidth: 95 }}>{label}</span>
+              <span style={{ fontWeight: 600, color: 'var(--text)', minWidth: 95 }}>{label}</span>
               <span style={{ color: stepColor(steps[key]), fontSize: 11, flex: 1, textAlign: 'right' }}>
                 {stepMessages[key] || (steps[key] === 'running' ? 'Syncing...' : steps[key] === 'pending' ? 'Menunggu' : '')}
               </span>
@@ -340,22 +341,22 @@ export default function DashboardLayout({ children }) {
 
   if (loading) {
     return (
-      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#0b1121' }}>
-        <div className="spinner" style={{ width:32, height:32, border:'3px solid #1a2744', borderTop:'3px solid #3b82f6', borderRadius:'50%' }} />
+      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)' }}>
+        <div className="spinner" style={{ width:32, height:32, border:'3px solid var(--border)', borderTop:'3px solid var(--accent)', borderRadius:'50%' }} />
       </div>
     );
   }
 
   if (isPending) {
     return (
-      <div style={{ minHeight:'100vh', background:'#0b1121', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
-        <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:16, padding:40, textAlign:'center', maxWidth:420 }}>
+      <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+        <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16, padding:40, textAlign:'center', maxWidth:420 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>⏳</div>
           <h2 style={{ margin:'0 0 8px', fontSize:20, fontWeight:700 }}>Menunggu Persetujuan</h2>
-          <p style={{ margin:'0 0 24px', color:'#64748b', fontSize:14, lineHeight:1.6 }}>
+          <p style={{ margin:'0 0 24px', color:'var(--dim)', fontSize:14, lineHeight:1.6 }}>
             Akun Anda telah terdaftar. Silakan hubungi Owner untuk mengaktifkan akses dashboard.
           </p>
-          <button onClick={handleLogout} style={{ padding:'10px 24px', borderRadius:8, border:'1px solid #1a2744', background:'transparent', color:'#64748b', fontSize:13, cursor:'pointer', fontWeight:600 }}>
+          <button onClick={handleLogout} style={{ padding:'10px 24px', borderRadius:8, border:'1px solid var(--border)', background:'transparent', color:'var(--dim)', fontSize:13, cursor:'pointer', fontWeight:600 }}>
             Keluar
           </button>
         </div>
@@ -366,8 +367,8 @@ export default function DashboardLayout({ children }) {
   const bmAllowed = getAllowedTabs(profile);
   if (bmAllowed !== null && !bmAllowed.includes(currentTab)) {
     return (
-      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'#0b1121' }}>
-        <div className="spinner" style={{ width:32, height:32, border:'3px solid #1a2744', borderTop:'3px solid #3b82f6', borderRadius:'50%' }} />
+      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)' }}>
+        <div className="spinner" style={{ width:32, height:32, border:'3px solid var(--border)', borderTop:'3px solid var(--accent)', borderRadius:'50%' }} />
       </div>
     );
   }
@@ -399,8 +400,8 @@ export default function DashboardLayout({ children }) {
                   cursor:'pointer',
                   fontSize:14,
                   fontWeight: active ? 600 : 500,
-                  background: active ? 'rgba(59,130,246,0.12)' : 'transparent',
-                  color: active ? '#60a5fa' : '#94a3b8',
+                  background: active ? 'var(--sidebar-active)' : 'transparent',
+                  color: active ? 'var(--accent)' : 'var(--text-secondary)',
                   transition:'all 0.15s ease',
                   whiteSpace:'nowrap',
                   width:'100%',
@@ -414,7 +415,7 @@ export default function DashboardLayout({ children }) {
         </nav>
 
         {/* Logout at bottom */}
-        <div style={{ padding:'12px 8px', borderTop:'1px solid #1a2744' }}>
+        <div style={{ padding:'12px 8px', borderTop:'1px solid var(--border)' }}>
           <button
             onClick={handleLogout}
             style={{
@@ -422,7 +423,7 @@ export default function DashboardLayout({ children }) {
               padding: (!isMobile && sidebarCollapsed) ? '10px 0' : '10px 12px',
               justifyContent: (!isMobile && sidebarCollapsed) ? 'center' : 'flex-start',
               borderRadius:8, border:'none', cursor:'pointer',
-              background:'transparent', color:'#64748b', fontSize:14, fontWeight:500,
+              background:'transparent', color:'var(--dim)', fontSize:14, fontWeight:500,
             }}
           >
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -438,14 +439,14 @@ export default function DashboardLayout({ children }) {
   return (
     <DateRangeProvider>
       <ActiveBrandsProvider>
-      <div style={{ minHeight:'100vh', background:'#0b1121', display:'flex' }}>
+      <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex' }}>
 
         {/* ═══ DESKTOP SIDEBAR ═══ */}
         <aside className="desktop-sidebar" style={{
           width: sidebarW,
           minHeight:'100vh',
-          background:'linear-gradient(180deg, #0f172a 0%, #111a2e 100%)',
-          borderRight:'1px solid #1a2744',
+          background:'var(--sidebar-bg)',
+          borderRight:'1px solid var(--border)',
           display:'flex',
           flexDirection:'column',
           position:'fixed',
@@ -457,7 +458,7 @@ export default function DashboardLayout({ children }) {
           {/* Logo */}
           <div style={{
             padding: sidebarCollapsed ? '16px 0' : '16px 16px',
-            borderBottom:'1px solid #1a2744',
+            borderBottom:'1px solid var(--border)',
             display:'flex',
             alignItems:'center',
             justifyContent: sidebarCollapsed ? 'center' : 'space-between',
@@ -473,12 +474,12 @@ export default function DashboardLayout({ children }) {
                 fontSize:15, fontWeight:800, color:'#fff',
               }}>R</div>
               {!sidebarCollapsed && (
-                <span style={{ fontSize:16, fontWeight:700, color:'#e2e8f0', whiteSpace:'nowrap' }}>Roove BI</span>
+                <span style={{ fontSize:16, fontWeight:700, color:'var(--text)', whiteSpace:'nowrap' }}>Roove BI</span>
               )}
             </div>
             {!sidebarCollapsed && (
               <button onClick={() => setSidebarCollapsed(true)} style={{
-                background:'none', border:'none', cursor:'pointer', color:'#475569', padding:4,
+                background:'none', border:'none', cursor:'pointer', color:'var(--text-muted)', padding:4,
               }}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M11 17l-5-5 5-5M18 17l-5-5 5-5"/>
@@ -487,9 +488,9 @@ export default function DashboardLayout({ children }) {
             )}
             {sidebarCollapsed && (
               <button onClick={() => setSidebarCollapsed(false)} style={{
-                border:'1px solid #1a2744', cursor:'pointer', color:'#475569',
+                border:'1px solid var(--border)', cursor:'pointer', color:'var(--text-muted)',
                 padding:4, position:'absolute', right:-12, top:16,
-                background:'#111a2e', borderRadius:'50%',
+                background:'var(--card)', borderRadius:'50%',
                 width:24, height:24, display:'flex', alignItems:'center', justifyContent:'center',
               }}>
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -510,7 +511,7 @@ export default function DashboardLayout({ children }) {
             className="mobile-overlay"
             style={{
               position:'fixed', top:0, left:0, right:0, bottom:0,
-              background:'rgba(0,0,0,0.6)',
+              background:'var(--overlay-bg)',
               zIndex:100,
               backdropFilter:'blur(2px)',
             }}
@@ -518,8 +519,8 @@ export default function DashboardLayout({ children }) {
             <aside style={{
               width:260,
               height:'100%',
-              background:'linear-gradient(180deg, #0f172a 0%, #111a2e 100%)',
-              borderRight:'1px solid #1a2744',
+              background:'var(--sidebar-bg)',
+              borderRight:'1px solid var(--border)',
               display:'flex',
               flexDirection:'column',
               animation:'slideIn 0.2s ease-out',
@@ -527,7 +528,7 @@ export default function DashboardLayout({ children }) {
               {/* Mobile sidebar header */}
               <div style={{
                 padding:'16px 16px',
-                borderBottom:'1px solid #1a2744',
+                borderBottom:'1px solid var(--border)',
                 display:'flex',
                 alignItems:'center',
                 justifyContent:'space-between',
@@ -540,10 +541,10 @@ export default function DashboardLayout({ children }) {
                     display:'flex', alignItems:'center', justifyContent:'center',
                     fontSize:15, fontWeight:800, color:'#fff',
                   }}>R</div>
-                  <span style={{ fontSize:16, fontWeight:700, color:'#e2e8f0' }}>Roove BI</span>
+                  <span style={{ fontSize:16, fontWeight:700, color:'var(--text)' }}>Roove BI</span>
                 </div>
                 <button onClick={() => setMobileMenuOpen(false)} style={{
-                  background:'none', border:'none', cursor:'pointer', color:'#64748b', padding:4,
+                  background:'none', border:'none', cursor:'pointer', color:'var(--dim)', padding:4,
                 }}>
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                     <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
@@ -569,11 +570,11 @@ export default function DashboardLayout({ children }) {
           {/* Top Bar */}
           <header style={{
             padding:'10px 16px',
-            borderBottom:'1px solid #1a2744',
+            borderBottom:'1px solid var(--border)',
             display:'flex',
             alignItems:'center',
             justifyContent:'space-between',
-            background:'rgba(11,17,33,0.8)',
+            background:'var(--header-bg)',
             backdropFilter:'blur(8px)',
             position:'sticky',
             top:0,
@@ -585,7 +586,7 @@ export default function DashboardLayout({ children }) {
               {/* Hamburger - mobile only */}
               <button className="mobile-hamburger" onClick={() => setMobileMenuOpen(true)} style={{
                 display:'none', /* shown via CSS on mobile */
-                background:'none', border:'none', cursor:'pointer', color:'#94a3b8', padding:4,
+                background:'none', border:'none', cursor:'pointer', color:'var(--text-secondary)', padding:4,
               }}>
                 <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <line x1="3" y1="6" x2="21" y2="6"/>
@@ -593,14 +594,15 @@ export default function DashboardLayout({ children }) {
                   <line x1="3" y1="18" x2="21" y2="18"/>
                 </svg>
               </button>
-              <div style={{ fontSize:14, fontWeight:600, color:'#94a3b8' }}>
+              <div style={{ fontSize:14, fontWeight:600, color:'var(--text-secondary)' }}>
                 {visibleTabs.find(t => t.id === currentTab)?.label || 'Dashboard'}
               </div>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
               <RefreshViewsButton />
               {showDatePicker && <HeaderDatePicker />}
-              <div className="desktop-sidebar" style={{ fontSize:11, color:'#475569', fontWeight:500 }}>
+              <ThemeToggle />
+              <div className="desktop-sidebar" style={{ fontSize:11, color:'var(--text-muted)', fontWeight:500 }}>
                 {profile?.full_name || profile?.email}
               </div>
             </div>

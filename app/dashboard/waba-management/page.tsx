@@ -33,10 +33,10 @@ interface Template {
 
 // ── Status badge colors ──
 const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
-  APPROVED: { bg: '#064e3b', color: '#10b981' },
-  PENDING:  { bg: '#78350f', color: '#f59e0b' },
-  REJECTED: { bg: '#7f1d1d', color: '#ef4444' },
-  PAUSED:   { bg: '#1e293b', color: '#94a3b8' },
+  APPROVED: { bg: 'var(--badge-green-bg)', color: 'var(--green)' },
+  PENDING:  { bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)' },
+  REJECTED: { bg: 'var(--badge-red-bg)', color: 'var(--red)' },
+  PAUSED:   { bg: 'var(--bg-deep)', color: 'var(--text-secondary)' },
 };
 
 const CATEGORY_STYLE: Record<string, { bg: string; color: string }> = {
@@ -56,7 +56,7 @@ function TemplatePreview({ template, renderWaFormatted, analytics }: { template:
     <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
       {/* WhatsApp chat bubble preview */}
       <div style={{ width: 300, flexShrink: 0 }}>
-        <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: 6 }}>WhatsApp Preview</div>
+        <div style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 6 }}>WhatsApp Preview</div>
         <div style={{ background: '#e5ddd5', borderRadius: 12, padding: 16, position: 'relative' }}>
           <div style={{ position: 'absolute', inset: 0, borderRadius: 12, opacity: 0.05, background: 'url("data:image/svg+xml,%3Csvg width=\'40\' height=\'40\' xmlns=\'http://www.w3.org/2000/svg\'%3E%3Cpath d=\'M20 0L0 20h10L20 10l10 10h10z\' fill=\'%23000\'/%3E%3C/svg%3E")' }} />
           <div style={{ position: 'relative', background: '#fff', borderRadius: '0 8px 8px 8px', padding: '8px 10px', maxWidth: '100%', boxShadow: '0 1px 2px rgba(0,0,0,0.13)' }}>
@@ -97,26 +97,26 @@ function TemplatePreview({ template, renderWaFormatted, analytics }: { template:
         </div>
       </div>
       {/* Template details */}
-      <div style={{ flex: 1, fontSize: 12, color: '#94a3b8' }}>
-        <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: 6 }}>Template Details</div>
+      <div style={{ flex: 1, fontSize: 12, color: 'var(--text-secondary)' }}>
+        <div style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 6 }}>Template Details</div>
         <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '4px 12px' }}>
-          <span style={{ color: '#475569' }}>ID:</span>
+          <span style={{ color: 'var(--text-muted)' }}>ID:</span>
           <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{template.id}</span>
-          <span style={{ color: '#475569' }}>Category:</span>
+          <span style={{ color: 'var(--text-muted)' }}>Category:</span>
           <span>{template.category}</span>
-          <span style={{ color: '#475569' }}>Language:</span>
+          <span style={{ color: 'var(--text-muted)' }}>Language:</span>
           <span>{template.language}</span>
-          <span style={{ color: '#475569' }}>Status:</span>
+          <span style={{ color: 'var(--text-muted)' }}>Status:</span>
           <span>{template.status}</span>
           {header && (
             <>
-              <span style={{ color: '#475569' }}>Header:</span>
+              <span style={{ color: 'var(--text-muted)' }}>Header:</span>
               <span>{header.format || 'TEXT'}{header.text ? `: ${header.text}` : ''}</span>
             </>
           )}
           {buttons?.buttons?.length > 0 && (
             <>
-              <span style={{ color: '#475569' }}>Buttons:</span>
+              <span style={{ color: 'var(--text-muted)' }}>Buttons:</span>
               <span>{buttons.buttons.map((b: any) => b.text).join(', ')}</span>
             </>
           )}
@@ -125,35 +125,35 @@ function TemplatePreview({ template, renderWaFormatted, analytics }: { template:
         {/* Performance section */}
         {analytics && analytics.sent > 0 && (
           <div style={{ marginTop: 16 }}>
-            <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: 6 }}>Performance (90d)</div>
+            <div style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 6 }}>Performance (90d)</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
               {[
                 { label: 'Sent', value: analytics.sent.toLocaleString() },
                 { label: 'Delivered', value: analytics.delivered.toLocaleString() },
                 { label: 'Read', value: analytics.read.toLocaleString() },
               ].map(m => (
-                <div key={m.label} style={{ background: '#0b1121', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 9, color: '#475569', textTransform: 'uppercase' }}>{m.label}</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: '#e2e8f0' }}>{m.value}</div>
+                <div key={m.label} style={{ background: 'var(--bg)', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{m.label}</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: 'var(--text)' }}>{m.value}</div>
                 </div>
               ))}
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 8 }}>
-              <div style={{ background: '#0b1121', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
-                <div style={{ fontSize: 9, color: '#475569', textTransform: 'uppercase' }}>Click Rate</div>
+              <div style={{ background: 'var(--bg)', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Click Rate</div>
                 <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: '#60a5fa' }}>
                   {analytics.read > 0 ? (analytics.clicked / analytics.read * 100).toFixed(1) + '%' : '—'}
                 </div>
               </div>
-              <div style={{ background: '#0b1121', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
-                <div style={{ fontSize: 9, color: '#475569', textTransform: 'uppercase' }}>Reply Rate</div>
-                <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: '#10b981' }}>
+              <div style={{ background: 'var(--bg)', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Reply Rate</div>
+                <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: 'var(--green)' }}>
                   {analytics.read > 0 ? (analytics.replied / analytics.read * 100).toFixed(1) + '%' : '—'}
                 </div>
               </div>
-              <div style={{ background: '#0b1121', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
-                <div style={{ fontSize: 9, color: '#475569', textTransform: 'uppercase' }}>Cost/Reply</div>
-                <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: '#f59e0b' }}>
+              <div style={{ background: 'var(--bg)', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
+                <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Cost/Reply</div>
+                <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: 'var(--yellow)' }}>
                   {analytics.replied > 0 && analytics.cost > 0 ? 'Rp ' + Math.round(analytics.cost / analytics.replied).toLocaleString() : '—'}
                 </div>
               </div>
@@ -680,12 +680,12 @@ export default function WabaManagementPage() {
   }
 
   // ── Styles ──
-  const card = { background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16 };
-  const thStyle = { padding: '8px 10px', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' as const };
+  const card = { background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 };
+  const thStyle = { padding: '8px 10px', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' as const };
   const tdStyle = { padding: '8px 10px', fontSize: 11 };
   const inputStyle = {
-    background: '#0b1121', border: '1px solid #1a2744', borderRadius: 6, padding: '8px 12px',
-    color: '#e2e8f0', fontSize: 13, width: '100%', outline: 'none',
+    background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 12px',
+    color: 'var(--text)', fontSize: 13, width: '100%', outline: 'none',
   };
   const selectStyle = { ...inputStyle, cursor: 'pointer' };
   const btnPrimary = {
@@ -693,16 +693,16 @@ export default function WabaManagementPage() {
     fontWeight: 700, fontSize: 12, cursor: 'pointer',
   };
   const btnOutline = {
-    background: 'transparent', border: '1px solid #1a2744', borderRadius: 6, padding: '8px 16px',
-    color: '#94a3b8', fontWeight: 600, fontSize: 12, cursor: 'pointer',
+    background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '8px 16px',
+    color: 'var(--text-secondary)', fontWeight: 600, fontSize: 12, cursor: 'pointer',
   };
   const btnDanger = {
-    background: 'transparent', border: '1px solid #7f1d1d', borderRadius: 6, padding: '4px 10px',
-    color: '#ef4444', fontWeight: 600, fontSize: 11, cursor: 'pointer',
+    background: 'transparent', border: '1px solid var(--badge-red-bg)', borderRadius: 6, padding: '4px 10px',
+    color: 'var(--red)', fontWeight: 600, fontSize: 11, cursor: 'pointer',
   };
 
   if (dateLoading) {
-    return <div style={{ padding: 40, textAlign: 'center', color: '#64748b' }}>Loading...</div>;
+    return <div style={{ padding: 40, textAlign: 'center', color: 'var(--dim)' }}>Loading...</div>;
   }
 
   return (
@@ -717,7 +717,7 @@ export default function WabaManagementPage() {
           <div>
             <div style={{ fontSize: 15, fontWeight: 700 }}>Message Templates</div>
             {lastSynced && (
-              <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>
+              <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
                 Last synced: {new Date(lastSynced).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
               </div>
             )}
@@ -749,20 +749,20 @@ export default function WabaManagementPage() {
 
         {/* ── Create Form with Live Preview ── */}
         {showCreateForm && (
-          <div style={{ background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8, padding: 16, marginBottom: 16 }}>
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>New Template</div>
             <div style={{ display: 'flex', gap: 20 }}>
               {/* ── Left: Form Fields ── */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
                   <div>
-                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Name</label>
-                    <input style={{ ...inputStyle, borderColor: nameErrors.length > 0 ? '#ef4444' : '#1a2744' }} value={formName} onChange={e => setFormName(e.target.value)}
+                    <label style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Name</label>
+                    <input style={{ ...inputStyle, borderColor: nameErrors.length > 0 ? 'var(--red)' : 'var(--border)' }} value={formName} onChange={e => setFormName(e.target.value)}
                       placeholder="e.g. promo_january" />
-                    {nameErrors.map((e, i) => <div key={i} style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>{e}</div>)}
+                    {nameErrors.map((e, i) => <div key={i} style={{ color: 'var(--red)', fontSize: 11, marginTop: 4 }}>{e}</div>)}
                   </div>
                   <div>
-                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Category</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Category</label>
                     <select style={selectStyle} value={formCategory} onChange={e => setFormCategory(e.target.value as any)}>
                       <option value="MARKETING">Marketing</option>
                       <option value="UTILITY">Utility</option>
@@ -770,7 +770,7 @@ export default function WabaManagementPage() {
                     </select>
                   </div>
                   <div>
-                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Language</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Language</label>
                     <select style={selectStyle} value={formLanguage} onChange={e => setFormLanguage(e.target.value)}>
                       <option value="id">Indonesian (id)</option>
                       <option value="en">English (en)</option>
@@ -781,29 +781,29 @@ export default function WabaManagementPage() {
 
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>Header (optional)</label>
-                    {formHeader.length > 0 && <span style={{ fontSize: 10, color: formHeader.length > 60 ? '#ef4444' : '#475569' }}>{formHeader.length}/60</span>}
+                    <label style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase' }}>Header (optional)</label>
+                    {formHeader.length > 0 && <span style={{ fontSize: 10, color: formHeader.length > 60 ? 'var(--red)' : 'var(--text-muted)' }}>{formHeader.length}/60</span>}
                   </div>
-                  <input style={{ ...inputStyle, borderColor: headerErrors.length > 0 ? '#ef4444' : '#1a2744' }} value={formHeader} onChange={e => setFormHeader(e.target.value)}
+                  <input style={{ ...inputStyle, borderColor: headerErrors.length > 0 ? 'var(--red)' : 'var(--border)' }} value={formHeader} onChange={e => setFormHeader(e.target.value)}
                     placeholder="Header text" />
-                  {headerErrors.map((e, i) => <div key={i} style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>{e}</div>)}
+                  {headerErrors.map((e, i) => <div key={i} style={{ color: 'var(--red)', fontSize: 11, marginTop: 4 }}>{e}</div>)}
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>Body *</label>
-                    <span style={{ fontSize: 10, color: formBody.length > 1024 ? '#ef4444' : '#475569' }}>{formBody.length}/1024</span>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase' }}>Body *</label>
+                    <span style={{ fontSize: 10, color: formBody.length > 1024 ? 'var(--red)' : 'var(--text-muted)' }}>{formBody.length}/1024</span>
                   </div>
-                  <textarea ref={bodyRef} style={{ ...inputStyle, minHeight: 80, resize: 'vertical', borderColor: bodyErrors.length > 0 ? '#ef4444' : '#1a2744' }} value={formBody}
+                  <textarea ref={bodyRef} style={{ ...inputStyle, minHeight: 80, resize: 'vertical', borderColor: bodyErrors.length > 0 ? 'var(--red)' : 'var(--border)' }} value={formBody}
                     onChange={e => setFormBody(e.target.value)}
                     placeholder="Hi {{1}}, check out our latest promo! Use code {{2}} for discount." />
-                  {bodyErrors.map((e, i) => <div key={i} style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>{e}</div>)}
+                  {bodyErrors.map((e, i) => <div key={i} style={{ color: 'var(--red)', fontSize: 11, marginTop: 4 }}>{e}</div>)}
                   {/* Formatting toolbar */}
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 2, marginTop: 6, position: 'relative' }}>
                     {/* Emoji picker */}
                     <div ref={emojiPickerRef} style={{ position: 'relative' }}>
                       <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} title="Emoji"
-                        style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 16, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         😊
                       </button>
                       {showEmojiPicker && (
@@ -813,24 +813,24 @@ export default function WabaManagementPage() {
                       )}
                     </div>
                     <button type="button" onClick={() => wrapSelection('*', '*')} title="Bold"
-                      style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 14, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       B
                     </button>
                     <button type="button" onClick={() => wrapSelection('_', '_')} title="Italic"
-                      style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 14, fontStyle: 'italic', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 14, fontStyle: 'italic', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       I
                     </button>
                     <button type="button" onClick={() => wrapSelection('~', '~')} title="Strikethrough"
-                      style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 14, textDecoration: 'line-through', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 14, textDecoration: 'line-through', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       S
                     </button>
                     <button type="button" onClick={() => wrapSelection('```', '```')} title="Monospace"
-                      style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: '#94a3b8', fontSize: 12, fontFamily: 'monospace', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, width: 30, height: 28, cursor: 'pointer', color: 'var(--text-secondary)', fontSize: 12, fontFamily: 'monospace', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {'</>'}
                     </button>
-                    <div style={{ width: 1, height: 20, background: '#1a2744', margin: '0 4px' }} />
+                    <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
                     <button type="button" onClick={addVariable} title="Add variable"
-                      style={{ background: 'transparent', border: '1px solid #1a2744', borderRadius: 4, height: 28, padding: '0 10px', cursor: 'pointer', color: '#60a5fa', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, height: 28, padding: '0 10px', cursor: 'pointer', color: '#60a5fa', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
                       + Add variable
                     </button>
                   </div>
@@ -838,9 +838,9 @@ export default function WabaManagementPage() {
 
                 {/* Variable Samples — auto-detected from body */}
                 {detectedVars.length > 0 && (
-                  <div style={{ marginBottom: 12, background: '#0d1526', border: '1px solid #1a2744', borderRadius: 6, padding: 12 }}>
+                  <div style={{ marginBottom: 12, background: '#0d1526', border: '1px solid var(--border)', borderRadius: 6, padding: 12 }}>
                     <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 4 }}>Variable Samples</div>
-                    <div style={{ fontSize: 10, color: '#475569', marginBottom: 10 }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 10 }}>
                       Provide sample content for each variable to help Meta review your template.
                     </div>
                     {detectedVars.map(v => {
@@ -848,8 +848,8 @@ export default function WabaManagementPage() {
                       return (
                         <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
                           <span style={{
-                            background: '#1a2744', borderRadius: 4, padding: '4px 10px', fontSize: 12,
-                            fontFamily: 'monospace', color: '#94a3b8', minWidth: 50, textAlign: 'center', flexShrink: 0,
+                            background: 'var(--border)', borderRadius: 4, padding: '4px 10px', fontSize: 12,
+                            fontFamily: 'monospace', color: 'var(--text-secondary)', minWidth: 50, textAlign: 'center', flexShrink: 0,
                           }}>{v}</span>
                           <input style={inputStyle} value={varSamples[key] || ''}
                             onChange={e => setVarSamples(prev => ({ ...prev, [key]: e.target.value }))}
@@ -862,18 +862,18 @@ export default function WabaManagementPage() {
 
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase' }}>Footer (optional)</label>
-                    {formFooter.length > 0 && <span style={{ fontSize: 10, color: formFooter.length > 60 ? '#ef4444' : '#475569' }}>{formFooter.length}/60</span>}
+                    <label style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase' }}>Footer (optional)</label>
+                    {formFooter.length > 0 && <span style={{ fontSize: 10, color: formFooter.length > 60 ? 'var(--red)' : 'var(--text-muted)' }}>{formFooter.length}/60</span>}
                   </div>
-                  <input style={{ ...inputStyle, borderColor: footerErrors.length > 0 ? '#ef4444' : '#1a2744' }} value={formFooter} onChange={e => setFormFooter(e.target.value)}
+                  <input style={{ ...inputStyle, borderColor: footerErrors.length > 0 ? 'var(--red)' : 'var(--border)' }} value={formFooter} onChange={e => setFormFooter(e.target.value)}
                     placeholder="e.g. Reply STOP to unsubscribe" />
-                  {footerErrors.map((e, i) => <div key={i} style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>{e}</div>)}
+                  {footerErrors.map((e, i) => <div key={i} style={{ color: 'var(--red)', fontSize: 11, marginTop: 4 }}>{e}</div>)}
                 </div>
 
                 <div style={{ marginBottom: 12 }}>
-                  <label style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Quick Reply Buttons (optional, max 10, 25 chars each)</label>
+                  <label style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 4, display: 'block' }}>Quick Reply Buttons (optional, max 10, 25 chars each)</label>
                   {[0, 1, 2].map(i => (
-                    <input key={i} style={{ ...inputStyle, marginBottom: 6, borderColor: formButtons[i]?.trim()?.length > 25 ? '#ef4444' : '#1a2744' }}
+                    <input key={i} style={{ ...inputStyle, marginBottom: 6, borderColor: formButtons[i]?.trim()?.length > 25 ? 'var(--red)' : 'var(--border)' }}
                       value={formButtons[i] || ''} onChange={e => {
                         const next = [...formButtons];
                         next[i] = e.target.value;
@@ -881,7 +881,7 @@ export default function WabaManagementPage() {
                       }}
                       placeholder={`Button ${i + 1} text`} />
                   ))}
-                  {buttonErrors.map((e, i) => <div key={i} style={{ color: '#ef4444', fontSize: 11, marginTop: 2 }}>{e}</div>)}
+                  {buttonErrors.map((e, i) => <div key={i} style={{ color: 'var(--red)', fontSize: 11, marginTop: 2 }}>{e}</div>)}
                 </div>
 
                 {/* Authentication category info */}
@@ -891,7 +891,7 @@ export default function WabaManagementPage() {
                   </div>
                 )}
 
-                {formError && <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 12 }}>{formError}</div>}
+                {formError && <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 12 }}>{formError}</div>}
 
                 <div style={{ display: 'flex', gap: 8 }}>
                   <button style={{ ...btnPrimary, opacity: hasValidationErrors || creating ? 0.4 : 1, cursor: hasValidationErrors || creating ? 'not-allowed' : 'pointer' }}
@@ -901,14 +901,14 @@ export default function WabaManagementPage() {
                   <button style={btnOutline} onClick={() => setShowCreateForm(false)}>Cancel</button>
                 </div>
 
-                <div style={{ fontSize: 11, color: '#475569', marginTop: 10 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10 }}>
                   New templates go to PENDING status and require Meta review (usually minutes to hours).
                 </div>
               </div>
 
               {/* ── Right: WhatsApp Chat Preview ── */}
               <div style={{ width: 320, flexShrink: 0 }}>
-                <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, marginBottom: 8 }}>Template Preview</div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', fontWeight: 600, marginBottom: 8 }}>Template Preview</div>
                 {/* Phone frame */}
                 <div style={{ background: '#e5ddd5', borderRadius: 12, padding: 16, minHeight: 200, position: 'relative' }}>
                   {/* Chat wallpaper pattern */}
@@ -954,7 +954,7 @@ export default function WabaManagementPage() {
                   )}
                 </div>
                 {/* Category & Language info */}
-                <div style={{ marginTop: 10, fontSize: 10, color: '#64748b' }}>
+                <div style={{ marginTop: 10, fontSize: 10, color: 'var(--dim)' }}>
                   <div><strong>Category:</strong> {formCategory}</div>
                   <div><strong>Language:</strong> {formLanguage}</div>
                   {formName && <div><strong>Name:</strong> {formName.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')}</div>}
@@ -965,7 +965,7 @@ export default function WabaManagementPage() {
         )}
 
         {/* ── Template List ── */}
-        {templateError && <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 12 }}>{templateError}</div>}
+        {templateError && <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 12 }}>{templateError}</div>}
 
         {/* Search + Filter toggles */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -975,8 +975,8 @@ export default function WabaManagementPage() {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             style={{
-              background: '#0b1121', border: '1px solid #1a2744', borderRadius: 6,
-              padding: '5px 12px', color: '#e2e8f0', fontSize: 11, width: 180,
+              background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
+              padding: '5px 12px', color: 'var(--text)', fontSize: 11, width: 180,
               outline: 'none',
             }}
           />
@@ -987,16 +987,16 @@ export default function WabaManagementPage() {
               onClick={() => setShowAutoGenerated(!showAutoGenerated)}
               style={{
                 background: showAutoGenerated ? '#1e3a5f' : 'transparent',
-                border: `1px solid ${showAutoGenerated ? '#3b82f6' : '#1a2744'}`,
+                border: `1px solid ${showAutoGenerated ? 'var(--accent)' : 'var(--border)'}`,
                 borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-                color: showAutoGenerated ? '#60a5fa' : '#64748b',
+                color: showAutoGenerated ? '#60a5fa' : 'var(--dim)',
                 fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
               }}
             >
               <span style={{
                 display: 'inline-block', width: 14, height: 14, borderRadius: 3,
-                border: `1.5px solid ${showAutoGenerated ? '#3b82f6' : '#475569'}`,
-                background: showAutoGenerated ? '#3b82f6' : 'transparent',
+                border: `1.5px solid ${showAutoGenerated ? 'var(--accent)' : 'var(--text-muted)'}`,
+                background: showAutoGenerated ? 'var(--accent)' : 'transparent',
                 lineHeight: '12px', textAlign: 'center', fontSize: 10, color: '#fff',
               }}>{showAutoGenerated ? '✓' : ''}</span>
               Show auto-generated CTWA templates ({autoGeneratedCount})
@@ -1005,22 +1005,22 @@ export default function WabaManagementPage() {
           <button
             onClick={() => setShowOnlySent(!showOnlySent)}
             style={{
-              background: showOnlySent ? '#064e3b' : 'transparent',
-              border: `1px solid ${showOnlySent ? '#10b981' : '#1a2744'}`,
+              background: showOnlySent ? 'var(--badge-green-bg)' : 'transparent',
+              border: `1px solid ${showOnlySent ? 'var(--green)' : 'var(--border)'}`,
               borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-              color: showOnlySent ? '#10b981' : '#64748b',
+              color: showOnlySent ? 'var(--green)' : 'var(--dim)',
               fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
             }}
           >
             <span style={{
               display: 'inline-block', width: 14, height: 14, borderRadius: 3,
-              border: `1.5px solid ${showOnlySent ? '#10b981' : '#475569'}`,
-              background: showOnlySent ? '#10b981' : 'transparent',
+              border: `1.5px solid ${showOnlySent ? 'var(--green)' : 'var(--text-muted)'}`,
+              background: showOnlySent ? 'var(--green)' : 'transparent',
               lineHeight: '12px', textAlign: 'center', fontSize: 10, color: '#fff',
             }}>{showOnlySent ? '✓' : ''}</span>
             Sent &gt; 0 only
           </button>
-          <span style={{ fontSize: 10, color: '#475569' }}>
+          <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
             Showing {filteredTemplates.length} of {templates.length} templates
           </span>
         </div>
@@ -1028,13 +1028,13 @@ export default function WabaManagementPage() {
         {/* Tag filter chips */}
         {allTags.length > 0 && (
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
-            <span style={{ fontSize: 10, color: '#475569', alignSelf: 'center', marginRight: 4 }}>Tags:</span>
+            <span style={{ fontSize: 10, color: 'var(--text-muted)', alignSelf: 'center', marginRight: 4 }}>Tags:</span>
             {allTags.map(tag => (
               <button key={tag} onClick={() => setFilterTag(filterTag === tag ? null : tag)}
                 style={{
-                  background: filterTag === tag ? '#3b82f6' : '#1e293b',
-                  color: filterTag === tag ? '#fff' : '#94a3b8',
-                  border: `1px solid ${filterTag === tag ? '#3b82f6' : '#334155'}`,
+                  background: filterTag === tag ? 'var(--accent)' : 'var(--bg-deep)',
+                  color: filterTag === tag ? '#fff' : 'var(--text-secondary)',
+                  border: `1px solid ${filterTag === tag ? 'var(--accent)' : 'var(--border)'}`,
                   borderRadius: 12, padding: '2px 10px', fontSize: 10, fontWeight: 600,
                   cursor: 'pointer', transition: 'all 0.15s',
                 }}>
@@ -1043,7 +1043,7 @@ export default function WabaManagementPage() {
             ))}
             {filterTag && (
               <button onClick={() => setFilterTag(null)}
-                style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: 10, cursor: 'pointer', padding: '2px 6px' }}>
+                style={{ background: 'transparent', border: 'none', color: 'var(--red)', fontSize: 10, cursor: 'pointer', padding: '2px 6px' }}>
                 ✕ Clear
               </button>
             )}
@@ -1051,9 +1051,9 @@ export default function WabaManagementPage() {
         )}
 
         {loadingTemplates && templates.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 24, color: '#64748b' }}>Loading templates...</div>
+          <div style={{ textAlign: 'center', padding: 24, color: 'var(--dim)' }}>Loading templates...</div>
         ) : filteredTemplates.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 24, color: '#64748b' }}>
+          <div style={{ textAlign: 'center', padding: 24, color: 'var(--dim)' }}>
             {templates.length > 0 ? 'All templates are auto-generated. Toggle above to show them.' : 'No templates found'}
           </div>
         ) : (
@@ -1061,7 +1061,7 @@ export default function WabaManagementPage() {
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 950 }}>
                 <thead>
-                  <tr style={{ borderBottom: '2px solid #1a2744' }}>
+                  <tr style={{ borderBottom: '2px solid var(--border)' }}>
                     <th style={{ ...thStyle, textAlign: 'left' }}>Name</th>
                     <th style={{ ...thStyle, textAlign: 'left' }}>Category</th>
                     <th style={{ ...thStyle, textAlign: 'center' }}>Status</th>
@@ -1083,13 +1083,13 @@ export default function WabaManagementPage() {
                     const metrics = templateAnalytics[t.id];
                     return (
                       <React.Fragment key={t.id}>
-                        <tr style={{ borderBottom: isExpanded ? 'none' : '1px solid #1a2744', cursor: 'pointer', transition: 'background 0.15s' }}
+                        <tr style={{ borderBottom: isExpanded ? 'none' : '1px solid var(--border)', cursor: 'pointer', transition: 'background 0.15s' }}
                           onClick={() => setExpandedTemplate(isExpanded ? null : t.id)}
-                          onMouseEnter={e => (e.currentTarget.style.background = '#0d1a33')}
+                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--card-hover)')}
                           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                           <td style={{ ...tdStyle, fontWeight: 600, fontFamily: 'monospace' }}>
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                              <span style={{ fontSize: 9, color: '#475569' }}>{isExpanded ? '▼' : '▶'}</span>
+                              <span style={{ fontSize: 9, color: 'var(--text-muted)' }}>{isExpanded ? '▼' : '▶'}</span>
                               {t.name}
                               <button
                                 title="Copy template name"
@@ -1099,7 +1099,7 @@ export default function WabaManagementPage() {
                                   setCopiedName(t.id);
                                   setTimeout(() => setCopiedName(prev => prev === t.id ? null : prev), 1500);
                                 }}
-                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '0 2px', fontSize: 12, color: copiedName === t.id ? '#10b981' : '#475569', lineHeight: 1 }}
+                                style={{ background: 'transparent', border: 'none', cursor: 'pointer', padding: '0 2px', fontSize: 12, color: copiedName === t.id ? 'var(--green)' : 'var(--text-muted)', lineHeight: 1 }}
                               >
                                 {copiedName === t.id ? '✓' : '📋'}
                               </button>
@@ -1145,8 +1145,8 @@ export default function WabaManagementPage() {
                                   onClick={e => e.stopPropagation()}
                                   placeholder="tag..."
                                   style={{
-                                    width: 60, background: '#0f172a', border: '1px solid #334155',
-                                    borderRadius: 8, padding: '1px 6px', fontSize: 9, color: '#e2e8f0',
+                                    width: 60, background: 'var(--bg-deep)', border: '1px solid var(--border)',
+                                    borderRadius: 8, padding: '1px 6px', fontSize: 9, color: 'var(--text)',
                                     outline: 'none', fontFamily: 'sans-serif',
                                   }}
                                 />
@@ -1156,8 +1156,8 @@ export default function WabaManagementPage() {
                                   setEditingTagId(t.id);
                                   setTagInput('');
                                 }} style={{
-                                  background: '#0f172a', border: '1px solid #334155', borderRadius: 8,
-                                  padding: '1px 6px', fontSize: 9, color: '#475569', cursor: 'pointer',
+                                  background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: 8,
+                                  padding: '1px 6px', fontSize: 9, color: 'var(--text-muted)', cursor: 'pointer',
                                   fontFamily: 'sans-serif',
                                 }}>+</button>
                               )}
@@ -1173,24 +1173,24 @@ export default function WabaManagementPage() {
                               {t.status}
                             </span>
                           </td>
-                          <td style={{ ...tdStyle, textAlign: 'center', color: '#94a3b8' }}>{t.language}</td>
-                          <td style={{ ...tdStyle, color: '#94a3b8', maxWidth: 300 }}>{preview}</td>
+                          <td style={{ ...tdStyle, textAlign: 'center', color: 'var(--text-secondary)' }}>{t.language}</td>
+                          <td style={{ ...tdStyle, color: 'var(--text-secondary)', maxWidth: 300 }}>{preview}</td>
                           <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
-                            {metrics?.sent ? metrics.sent.toLocaleString() : <span style={{ color: '#334155' }}>—</span>}
+                            {metrics?.sent ? metrics.sent.toLocaleString() : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           </td>
                           <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
                             {metrics?.read && metrics.read > 0 ? (
                               <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1e3a5f', color: '#60a5fa' }}>
                                 {(metrics.clicked / metrics.read * 100).toFixed(1)}%
                               </span>
-                            ) : <span style={{ color: '#334155' }}>—</span>}
+                            ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           </td>
                           <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
                             {metrics?.read && metrics.read > 0 ? (
-                              <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#064e3b', color: '#10b981' }}>
+                              <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-green-bg)', color: 'var(--green)' }}>
                                 {(metrics.replied / metrics.read * 100).toFixed(1)}%
                               </span>
-                            ) : <span style={{ color: '#334155' }}>—</span>}
+                            ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           </td>
                           <td style={{ ...tdStyle, textAlign: 'center' }}>
                             <button style={btnDanger} onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
@@ -1200,7 +1200,7 @@ export default function WabaManagementPage() {
                           </td>
                         </tr>
                         {isExpanded && (
-                          <tr style={{ borderBottom: '1px solid #1a2744' }}>
+                          <tr style={{ borderBottom: '1px solid var(--border)' }}>
                             <td colSpan={9} style={{ padding: '12px 10px 16px' }}>
                               <TemplatePreview template={t} renderWaFormatted={renderWaFormatted} analytics={metrics} />
                             </td>
@@ -1224,53 +1224,53 @@ export default function WabaManagementPage() {
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>WABA Promotion Analysis</div>
 
         {loadingAnalytics ? (
-          <div style={{ textAlign: 'center', padding: 24, color: '#64748b' }}>Loading analytics...</div>
+          <div style={{ textAlign: 'center', padding: 24, color: 'var(--dim)' }}>Loading analytics...</div>
         ) : wabaAnalysis.rows.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 24, color: '#64748b' }}>No WABA data for selected period</div>
+          <div style={{ textAlign: 'center', padding: 24, color: 'var(--dim)' }}>No WABA data for selected period</div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
               <thead>
-                <tr style={{ borderBottom: '2px solid #1a2744' }}>
+                <tr style={{ borderBottom: '2px solid var(--border)' }}>
                   {['Date', 'MM Sent', 'MM Delivered', 'Delivery Rate', 'Order Qty', 'WABA MM Cost', 'Total Purchase', 'Cost/Order'].map(h => (
-                    <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Date' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+                    <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Date' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {wabaAnalysis.rows.map(r => (
-                  <tr key={r.date} style={{ borderBottom: '1px solid #1a2744' }}>
+                  <tr key={r.date} style={{ borderBottom: '1px solid var(--border)' }}>
                     <td style={{ padding: '8px 10px', fontWeight: 600 }}>{r.dateLabel}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
-                      {r.sent > 0 ? r.sent.toLocaleString() : <span style={{ color: '#334155' }}>—</span>}
+                      {r.sent > 0 ? r.sent.toLocaleString() : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
-                      {r.delivered > 0 ? r.delivered.toLocaleString() : <span style={{ color: '#334155' }}>—</span>}
+                      {r.delivered > 0 ? r.delivered.toLocaleString() : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                       {r.sent > 0 ? (
                         <span style={{
                           padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                          background: r.deliveryRate >= 95 ? '#064e3b' : r.deliveryRate >= 85 ? '#78350f' : '#7f1d1d',
-                          color: r.deliveryRate >= 95 ? '#10b981' : r.deliveryRate >= 85 ? '#f59e0b' : '#ef4444',
+                          background: r.deliveryRate >= 95 ? 'var(--badge-green-bg)' : r.deliveryRate >= 85 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
+                          color: r.deliveryRate >= 95 ? 'var(--green)' : r.deliveryRate >= 85 ? 'var(--yellow)' : 'var(--red)',
                         }}>{r.deliveryRate.toFixed(1)}%</span>
-                      ) : <span style={{ color: '#334155' }}>—</span>}
+                      ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>
-                      {r.orders > 0 ? r.orders.toLocaleString() : <span style={{ color: '#334155' }}>—</span>}
+                      {r.orders > 0 ? r.orders.toLocaleString() : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#25D366' }}>
-                      {r.cost > 0 ? fmtRupiah(r.cost) : <span style={{ color: '#334155' }}>—</span>}
+                      {r.cost > 0 ? fmtRupiah(r.cost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
-                      {r.revenue > 0 ? fmtRupiah(r.revenue) : <span style={{ color: '#334155' }}>—</span>}
+                      {r.revenue > 0 ? fmtRupiah(r.revenue) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
-                      {r.orders > 0 ? fmtRupiah(r.costPerOrder) : <span style={{ color: '#334155' }}>—</span>}
+                      {r.orders > 0 ? fmtRupiah(r.costPerOrder) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                   </tr>
                 ))}
-                <tr style={{ borderTop: '2px solid #1a2744', background: '#0b1121' }}>
+                <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg)' }}>
                   <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.sent.toLocaleString()}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.delivered.toLocaleString()}</td>
@@ -1278,15 +1278,15 @@ export default function WabaManagementPage() {
                     {wabaAnalysis.totals.sent > 0 ? (
                       <span style={{
                         padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                        background: wabaAnalysis.totals.deliveryRate >= 95 ? '#064e3b' : '#78350f',
-                        color: wabaAnalysis.totals.deliveryRate >= 95 ? '#10b981' : '#f59e0b',
+                        background: wabaAnalysis.totals.deliveryRate >= 95 ? 'var(--badge-green-bg)' : 'var(--badge-yellow-bg)',
+                        color: wabaAnalysis.totals.deliveryRate >= 95 ? 'var(--green)' : 'var(--yellow)',
                       }}>{wabaAnalysis.totals.deliveryRate.toFixed(1)}%</span>
-                    ) : <span style={{ color: '#334155' }}>—</span>}
+                    ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.orders.toLocaleString()}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#25D366' }}>{fmtRupiah(wabaAnalysis.totals.cost)}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(wabaAnalysis.totals.revenue)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.orders > 0 ? fmtRupiah(wabaAnalysis.totals.costPerOrder) : <span style={{ color: '#334155' }}>—</span>}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.orders > 0 ? fmtRupiah(wabaAnalysis.totals.costPerOrder) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                 </tr>
               </tbody>
             </table>

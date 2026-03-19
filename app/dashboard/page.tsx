@@ -11,8 +11,8 @@ import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from 
 import CashFlowSection from '@/components/CashFlowSection';
 
 // Daily trend color coding for margin
-const marginColor = (v: number) => v >= 30 ? '#10b981' : v >= 0 ? '#f59e0b' : '#ef4444';
-const marginBg = (v: number) => v >= 30 ? '#064e3b' : v >= 0 ? '#78350f' : '#7f1d1d';
+const marginColor = (v: number) => v >= 30 ? 'var(--green)' : v >= 0 ? 'var(--yellow)' : 'var(--red)';
+const marginBg = (v: number) => v >= 30 ? 'var(--badge-green-bg)' : v >= 0 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)';
 
 export default function OverviewPage() {
   const supabase = useSupabase();
@@ -252,12 +252,12 @@ export default function OverviewPage() {
 
   const isOwnerOrAdmin = userRole === 'owner' || userRole === 'admin';
 
-  const KPI = ({ label, val, sub, color='#3b82f6', delta }: { label: string; val: string; sub?: string; color?: string; delta?: { value: number; suffix?: string; higherIsBetter?: boolean } }) => (
-    <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:'16px 18px', flex:'1 1 160px', minWidth:150, position:'relative', overflow:'hidden' }}>
+  const KPI = ({ label, val, sub, color='var(--accent)', delta }: { label: string; val: string; sub?: string; color?: string; delta?: { value: number; suffix?: string; higherIsBetter?: boolean } }) => (
+    <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 18px', flex:'1 1 160px', minWidth:150, position:'relative', overflow:'hidden' }}>
       <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:color }} />
-      <div style={{ fontSize:11, color:'#64748b', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6, fontWeight:600 }}>{label}</div>
+      <div style={{ fontSize:11, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6, fontWeight:600 }}>{label}</div>
       <div style={{ fontSize:20, fontWeight:700, fontFamily:'monospace', lineHeight:1.1 }}>{val}</div>
-      {sub && <div style={{ fontSize:11, color:'#64748b', marginTop:4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize:11, color:'var(--dim)', marginTop:4 }}>{sub}</div>}
       {delta && delta.value !== 0 && (
         <div style={{ fontSize: 10, marginTop: 4, color: ((delta.value > 0) === (delta.higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
           {delta.value > 0 ? '▲' : '▼'} {delta.value >= 0 ? '+' : ''}{delta.value.toFixed(1)}{delta.suffix || '%'} vs {prevMonthLabel}
@@ -268,8 +268,8 @@ export default function OverviewPage() {
 
   if (dateLoading || (loading && dailyData.length === 0)) {
     return (
-      <div style={{ textAlign:'center', padding:60, color:'#64748b' }}>
-        <div className="spinner" style={{ width:32, height:32, border:'3px solid #1a2744', borderTop:'3px solid #3b82f6', borderRadius:'50%', margin:'0 auto 12px' }} />
+      <div style={{ textAlign:'center', padding:60, color:'var(--dim)' }}>
+        <div className="spinner" style={{ width:32, height:32, border:'3px solid var(--border)', borderTop:'3px solid var(--accent)', borderRadius:'50%', margin:'0 auto 12px' }} />
         <div>Memuat data...</div>
       </div>
     );
@@ -279,7 +279,7 @@ export default function OverviewPage() {
     return (
       <div className="fade-in">
         <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
-        <div style={{ textAlign:'center', padding:60, color:'#64748b', background:'#111a2e', border:'1px solid #1a2744', borderRadius:12 }}>
+        <div style={{ textAlign:'center', padding:60, color:'var(--dim)', background:'var(--card)', border:'1px solid var(--border)', borderRadius:12 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>📊</div>
           <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
           <div style={{ fontSize:13 }}>Coba pilih rentang tanggal lain menggunakan filter di atas, atau upload data di halaman Admin.</div>
@@ -291,16 +291,16 @@ export default function OverviewPage() {
   return (
     <div className="fade-in">
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:12 }}>
-        <div><h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2><div style={{ fontSize:12, color:'#64748b' }}>{kpi.ad} active days</div></div>
+        <div><h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2><div style={{ fontSize:12, color:'var(--dim)' }}>{kpi.ad} active days</div></div>
       </div>
 
       {/* ── KPI Cards ── */}
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
         <KPI label="Net Sales" val={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg: ${fmtRupiah(kpi.avg)}/hari`}
           delta={prevKpi && prevKpi.ts > 0 ? { value: ((kpi.ts - prevKpi.ts) / prevKpi.ts) * 100 } : undefined} />
-        <KPI label="Gross Profit" val={`Rp ${fmtCompact(kpi.tg)}`} sub={`GP Margin: ${kpi.gpM.toFixed(1)}%`} color="#10b981"
+        <KPI label="Gross Profit" val={`Rp ${fmtCompact(kpi.tg)}`} sub={`GP Margin: ${kpi.gpM.toFixed(1)}%`} color="var(--green)"
           delta={prevKpi && prevKpi.tg > 0 ? { value: kpi.gpM - prevKpi.gpM, suffix: 'pp' } : undefined} />
-        <KPI label="Mkt Cost + MP Fee" val={`Rp ${fmtCompact(kpi.tm)}`} sub={totalMpFee > 0 ? `MP Fee: Rp ${fmtCompact(totalMpFee)} (${mpFeePercent.toFixed(1)}%)` : 'MP Fee: tidak tersedia'} color="#f59e0b"
+        <KPI label="Mkt Cost + MP Fee" val={`Rp ${fmtCompact(kpi.tm)}`} sub={totalMpFee > 0 ? `MP Fee: Rp ${fmtCompact(totalMpFee)} (${mpFeePercent.toFixed(1)}%)` : 'MP Fee: tidak tersedia'} color="var(--yellow)"
           delta={prevKpi && prevKpi.tm > 0 ? { value: ((kpi.tm - prevKpi.tm) / prevKpi.tm) * 100, higherIsBetter: false } : undefined} />
         <KPI label="GP After Mkt + Adm" val={`Rp ${fmtCompact(kpi.tn)}`} sub={`Margin After Mkt: ${kpi.nM.toFixed(1)}%`} color="#06b6d4"
           delta={prevKpi && prevKpi.nM > 0 ? { value: kpi.nM - prevKpi.nM, suffix: 'pp' } : undefined} />
@@ -319,79 +319,79 @@ export default function OverviewPage() {
       )}
 
       {kpi.chart.length > 0 && (
-        <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16, marginBottom:20, overflowX:'auto' }}>
+        <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16, marginBottom:20, overflowX:'auto' }}>
           <div style={{ fontSize:15, fontWeight:700, marginBottom:12, display:'flex', alignItems:'center', gap:10 }}>
             Tren Harian
-            <button onClick={() => setShowDetail(v => !v)} style={{ background:'none', border:'1px solid #1a2744', borderRadius:6, padding:'2px 8px', cursor:'pointer', fontSize:10, color: showDetail ? '#a78bfa' : '#64748b', display:'flex', alignItems:'center', gap:4 }}>
+            <button onClick={() => setShowDetail(v => !v)} style={{ background:'none', border:'1px solid var(--border)', borderRadius:6, padding:'2px 8px', cursor:'pointer', fontSize:10, color: showDetail ? '#a78bfa' : 'var(--dim)', display:'flex', alignItems:'center', gap:4 }}>
               <span style={{ transition:'transform 0.2s', display:'inline-block', transform: showDetail ? 'rotate(90deg)' : 'rotate(0deg)', fontSize:8 }}>&#9654;</span>
               Detail
             </button>
           </div>
           <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? (kpi.hasOverhead ? 1100 : 920) : 820 }}>
             <thead>
-              <tr style={{ borderBottom:'2px solid #1a2744' }}>
-                <th style={{ padding:'8px 10px', textAlign:'left', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'#111a2e', zIndex:1 }}>Tanggal</th>
-                <th style={{ padding:'8px 10px', textAlign:'right', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Shipment</th>
-                <th style={{ padding:'8px 10px', textAlign:'right', color:'#3b82f6', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Net Sales</th>
-                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'#ef4444', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>COGS</th>}
-                <th style={{ padding:'8px 10px', textAlign:'right', color:'#f59e0b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Mkt Fee</th>
-                <th style={{ padding:'8px 10px', textAlign:'right', color:'#f59e0b', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>MP Fee</th>
+              <tr style={{ borderBottom:'2px solid var(--border)' }}>
+                <th style={{ padding:'8px 10px', textAlign:'left', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>Tanggal</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Shipment</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--accent)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Net Sales</th>
+                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--red)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>COGS</th>}
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--yellow)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Mkt Fee</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--yellow)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>MP Fee</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'#06b6d4', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>GP After Mkt + Adm</th>
                 {kpi.hasOverhead && showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'#a78bfa', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Overhead</th>}
-                {kpi.hasOverhead && <th style={{ padding:'8px 10px', textAlign:'right', color:'#10b981', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Est. Net Profit</th>}
+                {kpi.hasOverhead && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--green)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Est. Net Profit</th>}
               </tr>
             </thead>
             <tbody>
               {kpi.chart.map((row, i) => (
-                <tr key={i} style={{ borderBottom:'1px solid #0f172a' }}>
-                  <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap', position:'sticky', left:0, background:'#111a2e', zIndex:1 }}>{row.date}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#94a3b8' }}>{row.shipment > 0 ? row.shipment.toLocaleString('id-ID') : '—'}</td>
+                <tr key={i} style={{ borderBottom:'1px solid var(--bg-deep)' }}>
+                  <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>{row.date}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--text-secondary)' }}>{row.shipment > 0 ? row.shipment.toLocaleString('id-ID') : '—'}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(row['Net Sales'])}</td>
-                  {showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#ef4444' }}>{fmtRupiah(row['COGS'])}</td>}
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(row['Mkt Fee'])}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(row['MP Fee'])}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['GP After Mkt + Adm'] >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(row['GP After Mkt + Adm'])}</td>
+                  {showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--red)' }}>{fmtRupiah(row['COGS'])}</td>}
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(row['Mkt Fee'])}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(row['MP Fee'])}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['GP After Mkt + Adm'] >= 0 ? '#06b6d4' : 'var(--red)' }}>{fmtRupiah(row['GP After Mkt + Adm'])}</td>
                   {kpi.hasOverhead && showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#a78bfa' }}>{fmtRupiah(row['Overhead'])}</td>}
-                  {kpi.hasOverhead && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['Est. Net Profit'] >= 0 ? '#10b981' : '#ef4444' }}>{fmtRupiah(row['Est. Net Profit'])}</td>}
+                  {kpi.hasOverhead && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['Est. Net Profit'] >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtRupiah(row['Est. Net Profit'])}</td>}
                 </tr>
               ))}
               {/* TOTAL row with % of net sales */}
-              <tr style={{ borderTop:'2px solid #1a2744', fontWeight:700 }}>
-                <td style={{ padding:'10px 10px', position:'sticky', left:0, background:'#111a2e', zIndex:1, textTransform:'uppercase', fontSize:11, letterSpacing:'0.05em' }}>Total</td>
+              <tr style={{ borderTop:'2px solid var(--border)', fontWeight:700 }}>
+                <td style={{ padding:'10px 10px', position:'sticky', left:0, background:'var(--card)', zIndex:1, textTransform:'uppercase', fontSize:11, letterSpacing:'0.05em' }}>Total</td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'#94a3b8' }}>{kpi.tShipment.toLocaleString('id-ID')}</div>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--text-secondary)' }}>{kpi.tShipment.toLocaleString('id-ID')}</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
                   <div style={{ fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(kpi.ts)}</div>
-                  <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>100%</div>
+                  <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>100%</div>
                 </td>
                 {showDetail && (
                   <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                    <div style={{ fontFamily:'monospace', fontSize:11, color:'#ef4444' }}>{fmtRupiah(kpi.tCogs)}</div>
-                    <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : 0}%</div>
+                    <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--red)' }}>{fmtRupiah(kpi.tCogs)}</div>
+                    <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : 0}%</div>
                   </td>
                 )}
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tAds)}</div>
-                  <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : 0}%</div>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(kpi.tAds)}</div>
+                  <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(kpi.tMp)}</div>
-                  <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : 0}%</div>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(kpi.tMp)}</div>
+                  <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tn >= 0 ? '#06b6d4' : '#ef4444' }}>{fmtRupiah(kpi.tn)}</div>
-                  <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tn / kpi.ts * 100).toFixed(1) : 0}%</div>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tn >= 0 ? '#06b6d4' : 'var(--red)' }}>{fmtRupiah(kpi.tn)}</div>
+                  <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tn / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
                 {kpi.hasOverhead && showDetail && (
                   <td style={{ padding:'10px 10px', textAlign:'right' }}>
                     <div style={{ fontFamily:'monospace', fontSize:11, color:'#a78bfa' }}>{fmtRupiah(kpi.tOverhead)}</div>
-                    <div style={{ fontSize:9, color:'#64748b', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tOverhead / kpi.ts * 100).toFixed(1) : 0}%</div>
+                    <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tOverhead / kpi.ts * 100).toFixed(1) : 0}%</div>
                   </td>
                 )}
                 {kpi.hasOverhead && (
                   <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                    <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tNetProfit >= 0 ? '#10b981' : '#ef4444' }}>{fmtRupiah(kpi.tNetProfit)}</div>
+                    <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtRupiah(kpi.tNetProfit)}</div>
                     <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.npM), color: marginColor(kpi.npM) }}>{kpi.npM.toFixed(1)}%</span></div>
                   </td>
                 )}
@@ -401,32 +401,32 @@ export default function OverviewPage() {
         </div>
       )}
 
-      <div style={{ background:'#111a2e', border:'1px solid #1a2744', borderRadius:12, padding:16, overflowX:'auto' }}>
+      <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16, overflowX:'auto' }}>
         <div style={{ fontSize:15, fontWeight:700, marginBottom:12 }}>Ringkasan Per Produk</div>
         <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:900 }}>
-          <thead><tr style={{ borderBottom:'2px solid #1a2744' }}>
+          <thead><tr style={{ borderBottom:'2px solid var(--border)' }}>
             {['SKU','Net Sales','%','COGS','Mkt Fee','Admin Fee','GP After Mkt + Adm','Margin After Mkt','Mkt Ratio'].map(h => (
-              <th key={h} style={{ padding:'8px 10px', textAlign:h==='SKU'?'left':'right', color:'#64748b', fontWeight:600, fontSize:10, textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>
+              <th key={h} style={{ padding:'8px 10px', textAlign:h==='SKU'?'left':'right', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>
             ))}
           </tr></thead>
           <tbody>
             {productTable.map(p => (
-              <tr key={p.sku} style={{ borderBottom:'1px solid #1a2744' }}>
+              <tr key={p.sku} style={{ borderBottom:'1px solid var(--border)' }}>
                 <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap' }}>
-                  <span style={{ display:'inline-block', width:8, height:8, borderRadius:2, background: getBrandColor(p.sku, activeBrands) || PRODUCT_COLORS[p.sku] || '#64748b', marginRight:8, verticalAlign:'middle' }} />{p.sku}
+                  <span style={{ display:'inline-block', width:8, height:8, borderRadius:2, background: getBrandColor(p.sku, activeBrands) || PRODUCT_COLORS[p.sku] || 'var(--dim)', marginRight:8, verticalAlign:'middle' }} />{p.sku}
                 </td>
                 <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(p.sales)}</td>
-                <td style={{ padding:'8px 10px', textAlign:'right', color:'#64748b' }}>{p.sp.toFixed(1)}%</td>
-                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#64748b' }}>{fmtRupiah(p.cogs)}</td>
-                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#f59e0b' }}>{fmtRupiah(p.adsFee)}</td>
-                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#64748b' }}>{fmtRupiah(p.mpFee)}</td>
-                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:p.nam>=0?'#10b981':'#ef4444' }}>{fmtRupiah(p.nam)}</td>
+                <td style={{ padding:'8px 10px', textAlign:'right', color:'var(--dim)' }}>{p.sp.toFixed(1)}%</td>
+                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--dim)' }}>{fmtRupiah(p.cogs)}</td>
+                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(p.adsFee)}</td>
+                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--dim)' }}>{fmtRupiah(p.mpFee)}</td>
+                <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:p.nam>=0?'var(--green)':'var(--red)' }}>{fmtRupiah(p.nam)}</td>
                 <td style={{ padding:'8px 10px', textAlign:'right' }}>
-                  <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:p.gmpR>=30?'#064e3b':p.gmpR>=0?'#78350f':'#7f1d1d', color:p.gmpR>=30?'#10b981':p.gmpR>=0?'#f59e0b':'#ef4444' }}>{p.gmpR.toFixed(1)}%</span>
+                  <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:p.gmpR>=30?'var(--badge-green-bg)':p.gmpR>=0?'var(--badge-yellow-bg)':'var(--badge-red-bg)', color:p.gmpR>=30?'var(--green)':p.gmpR>=0?'var(--yellow)':'var(--red)' }}>{p.gmpR.toFixed(1)}%</span>
                 </td>
                 <td style={{ padding:'8px 10px', textAlign:'right' }}>
-                  <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:p.mktR>40?'#7f1d1d':p.mktR>25?'#78350f':'#064e3b', color:p.mktR>40?'#ef4444':p.mktR>25?'#f59e0b':'#10b981' }}>{p.mktR.toFixed(1)}%</span>
+                  <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:p.mktR>40?'var(--badge-red-bg)':p.mktR>25?'var(--badge-yellow-bg)':'var(--badge-green-bg)', color:p.mktR>40?'var(--red)':p.mktR>25?'var(--yellow)':'var(--green)' }}>{p.mktR.toFixed(1)}%</span>
                 </td>
               </tr>
             ))}
@@ -440,19 +440,19 @@ export default function OverviewPage() {
               const marginR = tSales > 0 ? tNam / tSales * 100 : 0;
               const mktR = tSales > 0 ? tMc / tSales * 100 : 0;
               return (
-                <tr style={{ borderTop:'2px solid #1a2744' }}>
+                <tr style={{ borderTop:'2px solid var(--border)' }}>
                   <td style={{ padding:'8px 10px', fontWeight:700, fontSize:12 }}>TOTAL</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700 }}>{fmtRupiah(tSales)}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', color:'#64748b', fontWeight:700 }}>100%</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'#64748b' }}>{fmtRupiah(tCogs)}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'#f59e0b' }}>{fmtRupiah(tAds)}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'#64748b' }}>{fmtRupiah(tMp)}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:tNam>=0?'#10b981':'#ef4444' }}>{fmtRupiah(tNam)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', color:'var(--dim)', fontWeight:700 }}>100%</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'var(--dim)' }}>{fmtRupiah(tCogs)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'var(--yellow)' }}>{fmtRupiah(tAds)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'var(--dim)' }}>{fmtRupiah(tMp)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:tNam>=0?'var(--green)':'var(--red)' }}>{fmtRupiah(tNam)}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right' }}>
-                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:marginR>=30?'#064e3b':marginR>=0?'#78350f':'#7f1d1d', color:marginR>=30?'#10b981':marginR>=0?'#f59e0b':'#ef4444' }}>{marginR.toFixed(1)}%</span>
+                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:marginR>=30?'var(--badge-green-bg)':marginR>=0?'var(--badge-yellow-bg)':'var(--badge-red-bg)', color:marginR>=30?'var(--green)':marginR>=0?'var(--yellow)':'var(--red)' }}>{marginR.toFixed(1)}%</span>
                   </td>
                   <td style={{ padding:'8px 10px', textAlign:'right' }}>
-                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:mktR>40?'#7f1d1d':mktR>25?'#78350f':'#064e3b', color:mktR>40?'#ef4444':mktR>25?'#f59e0b':'#10b981' }}>{mktR.toFixed(1)}%</span>
+                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:mktR>40?'var(--badge-red-bg)':mktR>25?'var(--badge-yellow-bg)':'var(--badge-green-bg)', color:mktR>40?'var(--red)':mktR>25?'var(--yellow)':'var(--green)' }}>{mktR.toFixed(1)}%</span>
                   </td>
                 </tr>
               );

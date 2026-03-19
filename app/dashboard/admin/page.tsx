@@ -409,7 +409,7 @@ export default function AdminPage() {
 
   if (profile?.role !== 'owner' && profile?.role !== 'finance' && profile?.role !== 'staff') {
     return (
-      <div style={{ textAlign: 'center', padding: 60, color: '#64748b' }}>
+      <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
         <div style={{ fontSize: 18, fontWeight: 600 }}>Akses Ditolak</div>
         <div>Hanya Owner dan Finance yang bisa mengakses halaman ini.</div>
@@ -419,14 +419,14 @@ export default function AdminPage() {
 
   const roleLabel = (r) => {
     switch (r) {
-      case 'owner': return { text: 'Owner', bg: '#312e81', color: '#818cf8' };
-      case 'admin': return { text: 'Admin', bg: '#064e3b', color: '#10b981' };
-      case 'finance': return { text: 'Finance', bg: '#1e3a5f', color: '#60a5fa' };
-      case 'brand_manager': return { text: 'Brand Manager', bg: '#78350f', color: '#f59e0b' };
-      case 'sales_manager': return { text: 'Sales Manager', bg: '#4a1d6e', color: '#c084fc' };
-      case 'pending': return { text: 'Menunggu Approval', bg: '#7f1d1d', color: '#ef4444' };
-      case 'staff': return { text: 'Staff', bg: '#1e3a5f', color: '#38bdf8' };
-      default: return { text: r, bg: '#1a2744', color: '#64748b' };
+      case 'owner': return { text: 'Owner', bg: 'var(--accent-subtle)', color: '#818cf8' };
+      case 'admin': return { text: 'Admin', bg: 'var(--badge-green-bg)', color: 'var(--green)' };
+      case 'finance': return { text: 'Finance', bg: 'var(--accent-subtle)', color: '#60a5fa' };
+      case 'brand_manager': return { text: 'Brand Manager', bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)' };
+      case 'sales_manager': return { text: 'Sales Manager', bg: 'var(--accent-subtle)', color: '#c084fc' };
+      case 'pending': return { text: 'Menunggu Approval', bg: 'var(--badge-red-bg)', color: 'var(--red)' };
+      case 'staff': return { text: 'Staff', bg: 'var(--accent-subtle)', color: '#38bdf8' };
+      default: return { text: r, bg: 'var(--border)', color: 'var(--dim)' };
     }
   };
 
@@ -446,7 +446,7 @@ export default function AdminPage() {
       {/* Tab Navigation */}
       <div style={{
         display: 'flex', gap: 2, marginBottom: 20,
-        borderBottom: '1px solid #1a2744', paddingBottom: 0,
+        borderBottom: '1px solid var(--border)', paddingBottom: 0,
         overflowX: 'auto', WebkitOverflowScrolling: 'touch',
       }}>
         {visibleTabs.map(tab => (
@@ -455,8 +455,8 @@ export default function AdminPage() {
             onClick={() => setActiveTab(tab.id)}
             style={{
               padding: '8px 16px', background: 'none', border: 'none', whiteSpace: 'nowrap', flexShrink: 0,
-              borderBottom: activeTab === tab.id ? '2px solid #3b82f6' : '2px solid transparent',
-              color: activeTab === tab.id ? '#e2e8f0' : '#64748b',
+              borderBottom: activeTab === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
+              color: activeTab === tab.id ? 'var(--text)' : 'var(--dim)',
               fontSize: 13, fontWeight: activeTab === tab.id ? 700 : 500,
               cursor: 'pointer', transition: 'all 0.15s',
             }}
@@ -474,9 +474,9 @@ export default function AdminPage() {
 
           {/* Excel Upload — only visible with ?advanced=true */}
           {showAdvanced && (
-            <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Upload Data Excel</div>
-              <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+              <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
                 Upload file .xlsx. Upload ulang bulan yang sama akan menimpa data sebelumnya.
               </div>
               <div
@@ -497,24 +497,24 @@ export default function AdminPage() {
               >
                 {uploading ? (
                   <div>
-                    <div className="spinner" style={{ width: 32, height: 32, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%', margin: '0 auto 12px' }} />
-                    <div style={{ color: '#64748b' }}>Mengupload & memproses data...</div>
+                    <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 12px' }} />
+                    <div style={{ color: 'var(--dim)' }}>Mengupload & memproses data...</div>
                   </div>
                 ) : (
                   <div>
                     <div style={{ fontSize: 28, marginBottom: 6 }}>📁</div>
                     <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 13 }}>Drag & drop file Excel di sini</div>
-                    <div style={{ fontSize: 11, color: '#64748b' }}>atau klik untuk memilih file</div>
+                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>atau klik untuk memilih file</div>
                   </div>
                 )}
               </div>
               {uploadResult && (
-                <div style={{ marginTop: 12, padding: 12, background: '#064e3b', borderRadius: 8, color: '#10b981', fontSize: 13 }}>
+                <div style={{ marginTop: 12, padding: 12, background: 'var(--badge-green-bg)', borderRadius: 8, color: 'var(--green)', fontSize: 13 }}>
                   ✅ Berhasil! Periode: {uploadResult.period.month}/{uploadResult.period.year}. Data: {uploadResult.counts.dailyProduct} daily, {uploadResult.counts.dailyChannel} channel, {uploadResult.counts.ads} ads.
                 </div>
               )}
               {uploadError && (
-                <div style={{ marginTop: 12, padding: 12, background: '#7f1d1d', borderRadius: 8, color: '#ef4444', fontSize: 13 }}>
+                <div style={{ marginTop: 12, padding: 12, background: 'var(--badge-red-bg)', borderRadius: 8, color: 'var(--red)', fontSize: 13 }}>
                   ❌ {uploadError}
                 </div>
               )}
@@ -560,17 +560,17 @@ export default function AdminPage() {
       {activeTab === 'data_ref' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Marketplace Commission Rates */}
-          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Marketplace Commission Rates</div>
               <button
                 onClick={() => setEditingRate({ channel: '', rate: '', effective_from: new Date().toISOString().slice(0, 10), isNew: true })}
-                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#3b82f6', color: '#fff', fontSize: 12, fontWeight: 600 }}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600 }}
               >
                 + Tambah Rate
               </button>
             </div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
               Rate komisi marketplace yang digunakan untuk menghitung biaya admin (mp_admin_cost = net_sales × rate).
               Perubahan rate akan berlaku sesuai tanggal efektif.
             </div>
@@ -578,8 +578,8 @@ export default function AdminPage() {
             {commMsg && (
               <div style={{
                 marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
-                background: commMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
-                color: commMsg.type === 'success' ? '#10b981' : '#ef4444'
+                background: commMsg.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+                color: commMsg.type === 'success' ? 'var(--green)' : 'var(--red)'
               }}>
                 {commMsg.type === 'success' ? '✅' : '❌'} {commMsg.text}
               </div>
@@ -587,18 +587,18 @@ export default function AdminPage() {
 
             {/* Add/Edit Form */}
             {editingRate && (
-              <div style={{ background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8, padding: 14, marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: '#e2e8f0' }}>
+              <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text)' }}>
                   {editingRate.isNew ? 'Tambah Rate Baru' : `Edit Rate — ${editingRate.channel}`}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                   <div style={{ flex: '1 1 140px' }}>
-                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Channel</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', display: 'block', marginBottom: 3 }}>Channel</label>
                     {editingRate.isNew ? (
                       <select
                         value={editingRate.channel}
                         onChange={e => setEditingRate({ ...editingRate, channel: e.target.value })}
-                        style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12 }}
+                        style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12 }}
                       >
                         <option value="">— Pilih Channel —</option>
                         {['TikTok Shop', 'Shopee', 'Lazada', 'BliBli', 'Tokopedia'].map(ch => (
@@ -606,42 +606,42 @@ export default function AdminPage() {
                         ))}
                       </select>
                     ) : (
-                      <div style={{ padding: '7px 10px', fontSize: 12, color: '#94a3b8' }}>{editingRate.channel}</div>
+                      <div style={{ padding: '7px 10px', fontSize: 12, color: 'var(--text-secondary)' }}>{editingRate.channel}</div>
                     )}
                   </div>
                   <div style={{ flex: '0 0 120px' }}>
-                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Rate (desimal)</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', display: 'block', marginBottom: 3 }}>Rate (desimal)</label>
                     <input
                       type="text"
                       value={editingRate.rate}
                       onChange={e => setEditingRate({ ...editingRate, rate: e.target.value })}
                       placeholder="0.19"
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, outline: 'none' }}
                     />
                     {editingRate.rate && !isNaN(parseFloat(editingRate.rate)) && (
-                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>= {(parseFloat(editingRate.rate) * 100).toFixed(2)}%</div>
+                      <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>= {(parseFloat(editingRate.rate) * 100).toFixed(2)}%</div>
                     )}
                   </div>
                   <div style={{ flex: '0 0 140px' }}>
-                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Berlaku Sejak</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', display: 'block', marginBottom: 3 }}>Berlaku Sejak</label>
                     <input
                       type="date"
                       value={editingRate.effective_from}
                       onChange={e => setEditingRate({ ...editingRate, effective_from: e.target.value })}
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, outline: 'none' }}
                     />
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button
                       onClick={() => handleSaveRate(editingRate)}
                       disabled={commSaving}
-                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: commSaving ? 'not-allowed' : 'pointer', background: '#10b981', color: '#fff', fontSize: 12, fontWeight: 600, opacity: commSaving ? 0.6 : 1 }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: commSaving ? 'not-allowed' : 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: commSaving ? 0.6 : 1 }}
                     >
                       {commSaving ? 'Saving...' : 'Simpan'}
                     </button>
                     <button
                       onClick={() => { setEditingRate(null); setCommMsg(null); }}
-                      style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#94a3b8', fontSize: 12, fontWeight: 600 }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600 }}
                     >
                       Batal
                     </button>
@@ -653,42 +653,42 @@ export default function AdminPage() {
             {/* Rates Table */}
             {commLoading ? (
               <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
-                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
               </div>
             ) : commRates.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>Belum ada data commission rate</div>
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>Belum ada data commission rate</div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
-                    <tr style={{ background: '#0b1121' }}>
+                    <tr style={{ background: 'var(--bg)' }}>
                       {['Channel', 'Rate', 'Berlaku Sejak', 'Aksi'].map(h => (
-                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {commRates.map((r) => (
-                      <tr key={r.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 600, color: '#e2e8f0' }}>{r.channel}</td>
+                      <tr key={r.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text)' }}>{r.channel}</td>
                         <td style={{ padding: '10px 12px' }}>
-                          <span style={{ fontFamily: 'monospace', color: '#e2e8f0' }}>{(r.rate * 100).toFixed(2)}%</span>
-                          <span style={{ color: '#64748b', marginLeft: 6, fontSize: 10 }}>({r.rate})</span>
+                          <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{(r.rate * 100).toFixed(2)}%</span>
+                          <span style={{ color: 'var(--dim)', marginLeft: 6, fontSize: 10 }}>({r.rate})</span>
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
                           {new Date(r.effective_from).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
                         </td>
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button
                               onClick={() => setEditingRate({ channel: r.channel, rate: String(r.rate), effective_from: r.effective_from, isNew: false })}
-                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
+                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
                             >
                               Edit
                             </button>
                             <button
                               onClick={() => handleDeleteRate(r.id)}
-                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #7f1d1d', cursor: 'pointer', background: 'transparent', color: '#ef4444', fontSize: 11, fontWeight: 500 }}
+                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--badge-red-bg)', cursor: 'pointer', background: 'transparent', color: 'var(--red)', fontSize: 11, fontWeight: 500 }}
                             >
                               Hapus
                             </button>
@@ -703,17 +703,17 @@ export default function AdminPage() {
           </div>
 
           {/* Company PKP Status */}
-          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Company PKP Status</div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
               Status Pengusaha Kena Pajak (PKP) per perusahaan. Jika PKP, maka PPN sesuai rate di Tax Rates akan diterapkan.
             </div>
 
             {bizTaxMsg && (
               <div style={{
                 marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
-                background: bizTaxMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
-                color: bizTaxMsg.type === 'success' ? '#10b981' : '#ef4444'
+                background: bizTaxMsg.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+                color: bizTaxMsg.type === 'success' ? 'var(--green)' : 'var(--red)'
               }}>
                 {bizTaxMsg.type === 'success' ? '\u2705' : '\u274c'} {bizTaxMsg.text}
               </div>
@@ -721,27 +721,27 @@ export default function AdminPage() {
 
             {bizTaxLoading ? (
               <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
-                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
               </div>
             ) : bizTaxData.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>Belum ada data bisnis</div>
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>Belum ada data bisnis</div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
-                    <tr style={{ background: '#0b1121' }}>
+                    <tr style={{ background: 'var(--bg)' }}>
                       {['Perusahaan', 'Kode', 'Status', 'PKP'].map(h => (
-                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {bizTaxData.map((b) => (
-                      <tr key={b.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 600, color: '#e2e8f0' }}>{b.business_name}</td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#94a3b8' }}>{b.business_code}</td>
+                      <tr key={b.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text)' }}>{b.business_name}</td>
+                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{b.business_code}</td>
                         <td style={{ padding: '10px 12px' }}>
-                          <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: b.is_active ? '#064e3b' : '#7f1d1d', color: b.is_active ? '#10b981' : '#ef4444' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: b.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: b.is_active ? 'var(--green)' : 'var(--red)' }}>
                             {b.is_active ? 'Active' : 'Inactive'}
                           </span>
                         </td>
@@ -750,7 +750,7 @@ export default function AdminPage() {
                             value={b.tax_rate_name || 'PPN'}
                             onChange={(e) => handleBizTaxChange(b.id, e.target.value)}
                             disabled={bizTaxSaving}
-                            style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid #1a2744', background: '#0b1121', color: '#e2e8f0', fontSize: 12, cursor: bizTaxSaving ? 'not-allowed' : 'pointer' }}
+                            style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, cursor: bizTaxSaving ? 'not-allowed' : 'pointer' }}
                           >
                             <option value="PPN">PKP</option>
                             <option value="NONE">Non-PKP</option>
@@ -765,17 +765,17 @@ export default function AdminPage() {
           </div>
 
           {/* Tax Rates (PPN) */}
-          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Tax Rates</div>
               <button
                 onClick={() => setEditingTax({ name: 'PPN', rate: '', effective_from: new Date().toISOString().slice(0, 10), isNew: true })}
-                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#3b82f6', color: '#fff', fontSize: 12, fontWeight: 600 }}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600 }}
               >
                 + Tambah Rate
               </button>
             </div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
               Tax rate (PPN) yang digunakan untuk konversi harga inklusif pajak ke harga sebelum pajak (before tax).
               Rate disimpan dalam persen (contoh: 11 = 11%). Perubahan rate berlaku sesuai tanggal efektif.
             </div>
@@ -783,8 +783,8 @@ export default function AdminPage() {
             {taxMsg && (
               <div style={{
                 marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
-                background: taxMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
-                color: taxMsg.type === 'success' ? '#10b981' : '#ef4444'
+                background: taxMsg.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+                color: taxMsg.type === 'success' ? 'var(--green)' : 'var(--red)'
               }}>
                 {taxMsg.type === 'success' ? '✅' : '❌'} {taxMsg.text}
               </div>
@@ -792,54 +792,54 @@ export default function AdminPage() {
 
             {/* Add/Edit Tax Form */}
             {editingTax && (
-              <div style={{ background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8, padding: 14, marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: '#e2e8f0' }}>
+              <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text)' }}>
                   {editingTax.isNew ? 'Tambah Tax Rate Baru' : `Edit Tax Rate — ${editingTax.name}`}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                   <div style={{ flex: '1 1 140px' }}>
-                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Nama</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', display: 'block', marginBottom: 3 }}>Nama</label>
                     <input
                       type="text"
                       value={editingTax.name}
                       onChange={e => setEditingTax({ ...editingTax, name: e.target.value })}
                       placeholder="PPN"
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, outline: 'none' }}
                     />
                   </div>
                   <div style={{ flex: '0 0 120px' }}>
-                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Rate (%)</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', display: 'block', marginBottom: 3 }}>Rate (%)</label>
                     <input
                       type="text"
                       value={editingTax.rate}
                       onChange={e => setEditingTax({ ...editingTax, rate: e.target.value })}
                       placeholder="11"
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, outline: 'none' }}
                     />
                     {editingTax.rate && !isNaN(parseFloat(editingTax.rate)) && (
-                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>Divisor: {(1 + parseFloat(editingTax.rate) / 100).toFixed(4)}</div>
+                      <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>Divisor: {(1 + parseFloat(editingTax.rate) / 100).toFixed(4)}</div>
                     )}
                   </div>
                   <div style={{ flex: '0 0 140px' }}>
-                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Berlaku Sejak</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', display: 'block', marginBottom: 3 }}>Berlaku Sejak</label>
                     <input
                       type="date"
                       value={editingTax.effective_from}
                       onChange={e => setEditingTax({ ...editingTax, effective_from: e.target.value })}
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, outline: 'none' }}
                     />
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button
                       onClick={() => handleSaveTax(editingTax)}
                       disabled={taxSaving}
-                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: taxSaving ? 'not-allowed' : 'pointer', background: '#10b981', color: '#fff', fontSize: 12, fontWeight: 600, opacity: taxSaving ? 0.6 : 1 }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: taxSaving ? 'not-allowed' : 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: taxSaving ? 0.6 : 1 }}
                     >
                       {taxSaving ? 'Saving...' : 'Simpan'}
                     </button>
                     <button
                       onClick={() => { setEditingTax(null); setTaxMsg(null); }}
-                      style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#94a3b8', fontSize: 12, fontWeight: 600 }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600 }}
                     >
                       Batal
                     </button>
@@ -851,44 +851,44 @@ export default function AdminPage() {
             {/* Tax Rates Table */}
             {taxLoading ? (
               <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
-                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
               </div>
             ) : taxRates.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>Belum ada data tax rate</div>
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>Belum ada data tax rate</div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
-                    <tr style={{ background: '#0b1121' }}>
+                    <tr style={{ background: 'var(--bg)' }}>
                       {['Nama', 'Rate', 'Divisor', 'Berlaku Sejak', 'Aksi'].map(h => (
-                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {taxRates.map((r) => (
-                      <tr key={r.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 600, color: '#e2e8f0' }}>{r.name}</td>
+                      <tr key={r.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text)' }}>{r.name}</td>
                         <td style={{ padding: '10px 12px' }}>
-                          <span style={{ fontFamily: 'monospace', color: '#e2e8f0' }}>{Number(r.rate).toFixed(1)}%</span>
+                          <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{Number(r.rate).toFixed(1)}%</span>
                         </td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: '#94a3b8' }}>
+                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>
                           {(1 + Number(r.rate) / 100).toFixed(4)}
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
                           {new Date(r.effective_from).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
                         </td>
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button
                               onClick={() => setEditingTax({ name: r.name, rate: String(r.rate), effective_from: r.effective_from, isNew: false })}
-                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
+                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
                             >
                               Edit
                             </button>
                             <button
                               onClick={() => handleDeleteTax(r.id)}
-                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #7f1d1d', cursor: 'pointer', background: 'transparent', color: '#ef4444', fontSize: 11, fontWeight: 500 }}
+                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--badge-red-bg)', cursor: 'pointer', background: 'transparent', color: 'var(--red)', fontSize: 11, fontWeight: 500 }}
                             >
                               Hapus
                             </button>
@@ -903,15 +903,15 @@ export default function AdminPage() {
           </div>
 
           {/* Formula PPN */}
-          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Formula PPN</div>
-            <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.6 }}>
-              Semua channel menggunakan formula divisor: <span style={{ fontFamily: 'monospace', color: '#e2e8f0' }}>harga ÷ 1.{taxRates.find(t => t.name === 'PPN')?.rate || 11}</span>
+            <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              Semua channel menggunakan formula divisor: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>harga ÷ 1.{taxRates.find(t => t.name === 'PPN')?.rate || 11}</span>
             </div>
           </div>
 
           {/* Monthly Overhead */}
-          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Monthly Overhead</div>
               <button
@@ -920,20 +920,20 @@ export default function AdminPage() {
                   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
                   setEditingOverhead({ year_month: ym, amount: '', isNew: true });
                 }}
-                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#3b82f6', color: '#fff', fontSize: 12, fontWeight: 600 }}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600 }}
               >
                 + Set Bulan
               </button>
             </div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
               Estimasi biaya overhead bulanan (gaji, sewa, operasional). Digunakan di Tren Harian untuk menghitung Est. Net Profit.
             </div>
 
             {overheadMsg && (
               <div style={{
                 marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
-                background: overheadMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
-                color: overheadMsg.type === 'success' ? '#10b981' : '#ef4444'
+                background: overheadMsg.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+                color: overheadMsg.type === 'success' ? 'var(--green)' : 'var(--red)'
               }}>
                 {overheadMsg.type === 'success' ? '✅' : '❌'} {overheadMsg.text}
               </div>
@@ -941,31 +941,31 @@ export default function AdminPage() {
 
             {/* Add/Edit Overhead Form */}
             {editingOverhead && (
-              <div style={{ background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8, padding: 14, marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: '#e2e8f0' }}>
+              <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text)' }}>
                   {editingOverhead.isNew ? 'Set Overhead Bulan Baru' : `Edit Overhead — ${editingOverhead.year_month}`}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                   <div style={{ flex: '0 0 150px' }}>
-                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Bulan</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', display: 'block', marginBottom: 3 }}>Bulan</label>
                     <input
                       type="month"
                       value={editingOverhead.year_month}
                       onChange={e => setEditingOverhead({ ...editingOverhead, year_month: e.target.value })}
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none' }}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, outline: 'none' }}
                     />
                   </div>
                   <div style={{ flex: '1 1 200px' }}>
-                    <label style={{ fontSize: 10, color: '#64748b', display: 'block', marginBottom: 3 }}>Overhead (Rp)</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', display: 'block', marginBottom: 3 }}>Overhead (Rp)</label>
                     <input
                       type="text"
                       value={editingOverhead.amount}
                       onChange={e => setEditingOverhead({ ...editingOverhead, amount: e.target.value })}
                       placeholder="1000000000"
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#111a2e', color: '#e2e8f0', fontSize: 12, outline: 'none', fontFamily: 'monospace' }}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, outline: 'none', fontFamily: 'monospace' }}
                     />
                     {editingOverhead.amount && !isNaN(parseFloat(String(editingOverhead.amount).replace(/[^0-9.-]/g, ''))) && (
-                      <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+                      <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>
                         = Rp {parseFloat(String(editingOverhead.amount).replace(/[^0-9.-]/g, '')).toLocaleString('id-ID')}
                       </div>
                     )}
@@ -974,13 +974,13 @@ export default function AdminPage() {
                     <button
                       onClick={() => handleSaveOverhead(editingOverhead)}
                       disabled={overheadSaving}
-                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: overheadSaving ? 'not-allowed' : 'pointer', background: '#10b981', color: '#fff', fontSize: 12, fontWeight: 600, opacity: overheadSaving ? 0.6 : 1 }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: overheadSaving ? 'not-allowed' : 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: overheadSaving ? 0.6 : 1 }}
                     >
                       {overheadSaving ? 'Saving...' : 'Simpan'}
                     </button>
                     <button
                       onClick={() => { setEditingOverhead(null); setOverheadMsg(null); }}
-                      style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#94a3b8', fontSize: 12, fontWeight: 600 }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: 'var(--text-secondary)', fontSize: 12, fontWeight: 600 }}
                     >
                       Batal
                     </button>
@@ -992,17 +992,17 @@ export default function AdminPage() {
             {/* Overhead Table */}
             {overheadLoading ? (
               <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
-                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
               </div>
             ) : overheadData.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>Belum ada data overhead</div>
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>Belum ada data overhead</div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
-                    <tr style={{ background: '#0b1121' }}>
+                    <tr style={{ background: 'var(--bg)' }}>
                       {['Bulan', 'Overhead', 'Per Hari', 'Aksi'].map(h => (
-                        <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Aksi' ? 'left' : h === 'Bulan' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                        <th key={h} style={{ padding: '10px 12px', textAlign: h === 'Aksi' ? 'left' : h === 'Bulan' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
@@ -1012,27 +1012,27 @@ export default function AdminPage() {
                       const daysInMonth = new Date(y, m, 0).getDate();
                       const perDay = Number(r.amount) / daysInMonth;
                       return (
-                        <tr key={r.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                          <td style={{ padding: '10px 12px', fontWeight: 600, color: '#e2e8f0' }}>
+                        <tr key={r.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                          <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text)' }}>
                             {new Date(y, m - 1).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' })}
                           </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0' }}>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>
                             Rp {Number(r.amount).toLocaleString('id-ID')}
                           </td>
-                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8', fontSize: 11 }}>
+                          <td style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: 11 }}>
                             Rp {Math.round(perDay).toLocaleString('id-ID')}/hari ({daysInMonth}d)
                           </td>
                           <td style={{ padding: '10px 12px' }}>
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button
                                 onClick={() => setEditingOverhead({ year_month: r.year_month, amount: String(r.amount), isNew: false })}
-                                style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #1a2744', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
+                                style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
                               >
                                 Edit
                               </button>
                               <button
                                 onClick={() => handleDeleteOverhead(r.id)}
-                                style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid #7f1d1d', cursor: 'pointer', background: 'transparent', color: '#ef4444', fontSize: 11, fontWeight: 500 }}
+                                style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--badge-red-bg)', cursor: 'pointer', background: 'transparent', color: 'var(--red)', fontSize: 11, fontWeight: 500 }}
                               >
                                 Hapus
                               </button>
@@ -1101,31 +1101,31 @@ export default function AdminPage() {
         ];
         const statusStyle = (s) => {
           switch (s) {
-            case 'success': return { bg: '#064e3b', color: '#10b981', label: 'Sukses' };
-            case 'partial': return { bg: '#78350f', color: '#f59e0b', label: 'Partial' };
-            case 'error': return { bg: '#7f1d1d', color: '#ef4444', label: 'Error' };
-            case 'running': return { bg: '#1e3a5f', color: '#60a5fa', label: 'Running' };
-            default: return { bg: '#1a2744', color: '#64748b', label: s };
+            case 'success': return { bg: 'var(--badge-green-bg)', color: 'var(--green)', label: 'Sukses' };
+            case 'partial': return { bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)', label: 'Partial' };
+            case 'error': return { bg: 'var(--badge-red-bg)', color: 'var(--red)', label: 'Error' };
+            case 'running': return { bg: 'var(--accent-subtle)', color: '#60a5fa', label: 'Running' };
+            default: return { bg: 'var(--border)', color: 'var(--dim)', label: s };
           }
         };
         const typeStyle = (t) => {
-          if (t.includes('CSV') || t.includes('OPS')) return { bg: '#164e63', color: '#06b6d4' };
-          if (t === 'Webhook' || t.includes('Webhook')) return { bg: '#14532d', color: '#22c55e' };
-          if (t.includes('Scalev')) return { bg: '#2e1065', color: '#8b5cf6' };
-          if (t.includes('Excel')) return { bg: '#1e3a5f', color: '#3b82f6' };
-          return { bg: '#1a2744', color: '#64748b' };
+          if (t.includes('CSV') || t.includes('OPS')) return { bg: 'var(--accent-subtle)', color: '#06b6d4' };
+          if (t === 'Webhook' || t.includes('Webhook')) return { bg: 'var(--green-subtle)', color: '#22c55e' };
+          if (t.includes('Scalev')) return { bg: 'var(--accent-subtle)', color: '#8b5cf6' };
+          if (t.includes('Excel')) return { bg: 'var(--accent-subtle)', color: 'var(--accent)' };
+          return { bg: 'var(--border)', color: 'var(--dim)' };
         };
 
         return (
           <div>
-            <p style={{ margin: '0 0 16px', fontSize: 13, color: '#64748b' }}>Riwayat semua upload dan sync data</p>
+            <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--dim)' }}>Riwayat semua upload dan sync data</p>
             <div style={{ display: 'flex', gap: 4, marginBottom: 16, flexWrap: 'wrap' }}>
               {LOG_FILTERS.map(f => (
                 <button key={f.id} onClick={() => setLogFilter(f.id)} style={{
                   padding: '6px 14px', borderRadius: 20, border: '1px solid',
-                  borderColor: logFilter === f.id ? '#3b82f6' : '#1a2744',
-                  background: logFilter === f.id ? 'rgba(59,130,246,0.12)' : 'transparent',
-                  color: logFilter === f.id ? '#60a5fa' : '#94a3b8',
+                  borderColor: logFilter === f.id ? 'var(--accent)' : 'var(--border)',
+                  background: logFilter === f.id ? 'var(--accent-subtle)' : 'transparent',
+                  color: logFilter === f.id ? '#60a5fa' : 'var(--text-secondary)',
                   fontSize: 12, fontWeight: 600, cursor: 'pointer',
                 }}>
                   {f.label} {f.count !== null && <span style={{ opacity: 0.7 }}>({f.count})</span>}
@@ -1134,18 +1134,18 @@ export default function AdminPage() {
             </div>
             {logsLoading ? (
               <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-                <div className="spinner" style={{ width: 32, height: 32, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+                <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
               </div>
             ) : filtered.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 60, color: '#64748b' }}>Belum ada log aktivitas</div>
+              <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>Belum ada log aktivitas</div>
             ) : (
-              <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, overflow: 'hidden' }}>
+              <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700 }}>
                     <thead>
-                      <tr style={{ background: '#0b1121' }}>
+                      <tr style={{ background: 'var(--bg)' }}>
                         {['Waktu', 'Tipe', 'Status', 'Detail', 'File', 'Oleh'].map(h => (
-                          <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid #1a2744' }}>{h}</th>
+                          <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
@@ -1154,8 +1154,8 @@ export default function AdminPage() {
                         const ss = statusStyle(log.status);
                         const ts = typeStyle(log.type);
                         return (
-                          <tr key={log.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                            <td style={{ padding: '10px 12px', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: 11 }}>
+                          <tr key={log.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                            <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontSize: 11 }}>
                               {new Date(log.time).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </td>
                             <td style={{ padding: '10px 12px' }}>
@@ -1164,17 +1164,17 @@ export default function AdminPage() {
                             <td style={{ padding: '10px 12px' }}>
                               <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: ss.bg, color: ss.color }}>{ss.label}</span>
                             </td>
-                            <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>
+                            <td style={{ padding: '10px 12px', color: 'var(--text)' }}>
                               {log.webhookEvent && (
-                                <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 600, background: '#1a2744', color: '#94a3b8', marginRight: 6 }}>{log.webhookEvent}</span>
+                                <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 600, background: 'var(--border)', color: 'var(--text-secondary)', marginRight: 6 }}>{log.webhookEvent}</span>
                               )}
                               {log.detail}
                               {log.error && (
-                                <div style={{ fontSize: 10, color: '#ef4444', marginTop: 2, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.error}</div>
+                                <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 2, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.error}</div>
                               )}
                             </td>
-                            <td style={{ padding: '10px 12px', color: '#64748b', fontSize: 11, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.filename || '—'}</td>
-                            <td style={{ padding: '10px 12px', color: '#64748b', fontSize: 11 }}>{log.uploadedBy || '—'}</td>
+                            <td style={{ padding: '10px 12px', color: 'var(--dim)', fontSize: 11, maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis' }}>{log.filename || '—'}</td>
+                            <td style={{ padding: '10px 12px', color: 'var(--dim)', fontSize: 11 }}>{log.uploadedBy || '—'}</td>
                           </tr>
                         );
                       })}
@@ -1191,26 +1191,26 @@ export default function AdminPage() {
       {activeTab === 'users' && profile?.role === 'owner' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Invite Form */}
-          <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Invite User Baru</div>
-            <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+            <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
               Masukkan email dan pilih role. User akan menerima email untuk set password.
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div style={{ flex: '1 1 200px' }}>
-                <label style={{ fontSize: 11, color: '#64748b', display: 'block', marginBottom: 4 }}>Email</label>
+                <label style={{ fontSize: 11, color: 'var(--dim)', display: 'block', marginBottom: 4 }}>Email</label>
                 <input
                   type="email" value={inviteEmail}
                   onChange={e => setInviteEmail(e.target.value)}
                   placeholder="nama@email.com"
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #1a2744', background: '#0b1121', color: '#e2e8f0', fontSize: 13, outline: 'none' }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13, outline: 'none' }}
                 />
               </div>
               <div style={{ flex: '0 0 140px' }}>
-                <label style={{ fontSize: 11, color: '#64748b', display: 'block', marginBottom: 4 }}>Role</label>
+                <label style={{ fontSize: 11, color: 'var(--dim)', display: 'block', marginBottom: 4 }}>Role</label>
                 <select
                   value={inviteRole} onChange={e => setInviteRole(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid #1a2744', background: '#0b1121', color: '#e2e8f0', fontSize: 13 }}
+                  style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}
                 >
                   <option value="admin">Admin</option>
                   <option value="finance">Finance</option>
@@ -1224,7 +1224,7 @@ export default function AdminPage() {
                 style={{
                   padding: '8px 20px', borderRadius: 6, border: 'none',
                   cursor: inviting ? 'not-allowed' : 'pointer',
-                  background: inviting ? '#1a2744' : '#3b82f6', color: '#fff',
+                  background: inviting ? 'var(--border)' : 'var(--accent)', color: '#fff',
                   fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
                   opacity: inviting ? 0.6 : 1
                 }}
@@ -1235,8 +1235,8 @@ export default function AdminPage() {
             {inviteMsg && (
               <div style={{
                 marginTop: 10, padding: 10, borderRadius: 6, fontSize: 12,
-                background: inviteMsg.type === 'success' ? '#064e3b' : '#7f1d1d',
-                color: inviteMsg.type === 'success' ? '#10b981' : '#ef4444'
+                background: inviteMsg.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+                color: inviteMsg.type === 'success' ? 'var(--green)' : 'var(--red)'
               }}>
                 {inviteMsg.type === 'success' ? '✅' : '❌'} {inviteMsg.text}
               </div>
@@ -1262,8 +1262,8 @@ export default function AdminPage() {
               const rl = roleLabel(u.role);
               return (
                 <div key={u.id} style={{
-                  padding: 14, background: '#111a2e', borderRadius: 8,
-                  border: u.role === 'pending' ? '1px solid #7f1d1d' : '1px solid #1a2744',
+                  padding: 14, background: 'var(--card)', borderRadius: 8,
+                  border: u.role === 'pending' ? '1px solid var(--badge-red-bg)' : '1px solid var(--border)',
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                   flexWrap: 'wrap', gap: 8
                 }}>
@@ -1277,17 +1277,17 @@ export default function AdminPage() {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {u.role === 'pending' ? (
                         <>
-                          <button onClick={() => handleRoleChange(u.id, 'staff')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#1e3a5f', color: '#38bdf8', fontSize: 12, fontWeight: 600 }}>✓ Staff</button>
-                          <button onClick={() => handleRoleChange(u.id, 'admin')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#064e3b', color: '#10b981', fontSize: 12, fontWeight: 600 }}>✓ Admin</button>
-                          <button onClick={() => handleRoleChange(u.id, 'finance')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#1e3a5f', color: '#60a5fa', fontSize: 12, fontWeight: 600 }}>✓ Finance</button>
-                          <button onClick={() => handleRoleChange(u.id, 'brand_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#78350f', color: '#f59e0b', fontSize: 12, fontWeight: 600 }}>✓ Brand Manager</button>
-                          <button onClick={() => handleRoleChange(u.id, 'sales_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#4a1d6e', color: '#c084fc', fontSize: 12, fontWeight: 600 }}>✓ Sales Manager</button>
+                          <button onClick={() => handleRoleChange(u.id, 'staff')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#38bdf8', fontSize: 12, fontWeight: 600 }}>✓ Staff</button>
+                          <button onClick={() => handleRoleChange(u.id, 'admin')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--badge-green-bg)', color: 'var(--green)', fontSize: 12, fontWeight: 600 }}>✓ Admin</button>
+                          <button onClick={() => handleRoleChange(u.id, 'finance')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#60a5fa', fontSize: 12, fontWeight: 600 }}>✓ Finance</button>
+                          <button onClick={() => handleRoleChange(u.id, 'brand_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 12, fontWeight: 600 }}>✓ Brand Manager</button>
+                          <button onClick={() => handleRoleChange(u.id, 'sales_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#c084fc', fontSize: 12, fontWeight: 600 }}>✓ Sales Manager</button>
                         </>
                       ) : (
                         <select
                           value={u.role}
                           onChange={(e) => handleRoleChange(u.id, e.target.value)}
-                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #1a2744', background: '#0b1121', color: '#e2e8f0', fontSize: 12 }}
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}
                         >
                           <option value="staff">Staff</option>
                           <option value="admin">Admin</option>

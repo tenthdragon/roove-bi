@@ -478,9 +478,9 @@ const BRAND_COLORS = useMemo(() => {
   }, [channelData, brandFilter]);
 
   // ── Styles ──
-  const C = { bg: '#0a0f1a', card: '#111a2e', bdr: '#1a2744', dim: '#64748b', txt: '#e2e8f0' };
+  const C = { bg: 'var(--bg)', card: 'var(--card)', bdr: 'var(--border)', dim: 'var(--dim)', txt: 'var(--text)' };
 
-  const KPI = ({ label, val, sub, color = '#3b82f6' }: any) => (
+  const KPI = ({ label, val, sub, color = 'var(--accent)' }: any) => (
     <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: color }} />
       <div style={{ fontSize: 11, color: C.dim, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>{label}</div>
@@ -509,9 +509,9 @@ const BRAND_COLORS = useMemo(() => {
 
       {/* ── KPI Cards ── */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI label="Total Revenue" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalRevenue / activeDays : 0)}/hari`} color="#3b82f6" />
-        <KPI label="Total Ad Spend" val={`Rp ${fmtCompact(totalSpend)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalSpend / activeDays : 0)}/hari`} color="#f59e0b" />
-        <KPI label="Mkt Ratio" val={`${totalRatio.toFixed(1)}%`} sub={`Avg: ${avgDailyRatio.toFixed(1)}%/hari`} color={totalRatio > 30 ? '#ef4444' : totalRatio > 20 ? '#f59e0b' : '#10b981'} />
+        <KPI label="Total Revenue" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalRevenue / activeDays : 0)}/hari`} color="var(--accent)" />
+        <KPI label="Total Ad Spend" val={`Rp ${fmtCompact(totalSpend)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalSpend / activeDays : 0)}/hari`} color="var(--yellow)" />
+        <KPI label="Mkt Ratio" val={`${totalRatio.toFixed(1)}%`} sub={`Avg: ${avgDailyRatio.toFixed(1)}%/hari`} color={totalRatio > 30 ? 'var(--red)' : totalRatio > 20 ? 'var(--yellow)' : 'var(--green)'} />
         <KPI label="Eff. ROAS" val={`${(() => { const totalAdmin = platformBreakdown.reduce((s, p) => s + (p.adminFee || 0), 0); const tc = totalSpend + totalAdmin; return tc > 0 ? (totalRevenue / tc).toFixed(1) : '0.0'; })()}x`} sub={`Ads only: ${totalRoas.toFixed(1)}x`} color="#8b5cf6" />
       </div>
 
@@ -521,15 +521,15 @@ const BRAND_COLORS = useMemo(() => {
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Ad Spend & Marketing Ratio</div>
           <ResponsiveContainer width="100%" height={300}>
             <ComposedChart data={ratioChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.bdr} />
-              <XAxis dataKey="date" stroke={C.dim} fontSize={11} />
-              <YAxis yAxisId="left" stroke={C.dim} fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
+              <XAxis dataKey="date" stroke="#64748b" fontSize={11} />
+              <YAxis yAxisId="left" stroke="#64748b" fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
               <YAxis yAxisId="right" orientation="right" stroke="#ef4444" fontSize={11} tickFormatter={(v: number) => `${v}%`} />
               <Tooltip
                 content={({ active, payload, label }) => {
                   if (!active || !payload?.length) return null;
                   return (
-                    <div style={{ background: '#1e293b', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
+                    <div style={{ background: 'var(--bg-deep)', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
                       <div style={{ fontWeight: 700, marginBottom: 6 }}>{label}</div>
                       {payload.map((p: any, i: number) => (
                         <div key={i} style={{ color: p.color || p.stroke, marginBottom: 2, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
@@ -583,7 +583,7 @@ const BRAND_COLORS = useMemo(() => {
                       </td>
                     ))}
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{fmtCompact(r.total)}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, fontSize: 12, color: r.ratio > 40 ? '#ef4444' : r.ratio > 25 ? '#f59e0b' : '#10b981' }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, fontSize: 12, color: r.ratio > 40 ? 'var(--red)' : r.ratio > 25 ? 'var(--yellow)' : 'var(--green)' }}>
                       {r.ratio > 0 ? `${r.ratio.toFixed(1)}%` : '—'}
                     </td>
                   </tr>
@@ -596,7 +596,7 @@ const BRAND_COLORS = useMemo(() => {
                     </td>
                   ))}
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{fmtCompact(dailyTrafficSource.grandTotal)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: dailyTrafficSource.grandRatio > 40 ? '#ef4444' : dailyTrafficSource.grandRatio > 25 ? '#f59e0b' : '#10b981' }}>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: dailyTrafficSource.grandRatio > 40 ? 'var(--red)' : dailyTrafficSource.grandRatio > 25 ? 'var(--yellow)' : 'var(--green)' }}>
                     {dailyTrafficSource.grandRatio.toFixed(1)}%
                   </td>
                 </tr>
@@ -613,15 +613,15 @@ const BRAND_COLORS = useMemo(() => {
           <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Breakdown pengeluaran iklan harian per brand</div>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={dailyBrandData.data}>
-              <CartesianGrid strokeDasharray="3 3" stroke={C.bdr} />
-              <XAxis dataKey="date" stroke={C.dim} fontSize={11} />
-              <YAxis stroke={C.dim} fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
+              <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
+              <XAxis dataKey="date" stroke="#64748b" fontSize={11} />
+              <YAxis stroke="#64748b" fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
               <Tooltip
                 content={({ active, payload, label }) => {
                   if (!active || !payload?.length) return null;
                   const total = payload.reduce((s: number, p: any) => s + (p.value || 0), 0);
                   return (
-                    <div style={{ background: '#1e293b', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
+                    <div style={{ background: 'var(--bg-deep)', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
                       <div style={{ fontWeight: 700, marginBottom: 6 }}>{label}</div>
                       {payload.filter((p: any) => p.value > 0).map((p: any, i: number) => (
                         <div key={i} style={{ color: p.fill, marginBottom: 2, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
@@ -629,7 +629,7 @@ const BRAND_COLORS = useMemo(() => {
                           <span style={{ fontFamily: 'monospace' }}>Rp {fmtCompact(p.value)}</span>
                         </div>
                       ))}
-                      <div style={{ borderTop: '1px solid #334155', marginTop: 4, paddingTop: 4, fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
+                      <div style={{ borderTop: '1px solid var(--border)', marginTop: 4, paddingTop: 4, fontWeight: 700, display: 'flex', justifyContent: 'space-between' }}>
                         <span>Total</span><span style={{ fontFamily: 'monospace' }}>Rp {fmtCompact(total)}</span>
                       </div>
                     </div>
@@ -662,7 +662,7 @@ const BRAND_COLORS = useMemo(() => {
             <div style={{ fontSize: 12, color: C.dim, marginTop: 2 }}>ROAS per channel atribusi — exclusive, tanpa double count{prevMonthLabel ? ` • Delta vs ${prevMonthLabel}` : ''}</div>
           </div>
           <select value={brandFilter} onChange={(e) => setBrandFilter(e.target.value)}
-            style={{ background: '#1a2744', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none' }}>
+            style={{ background: 'var(--border)', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '6px 12px', color: C.txt, fontSize: 13, cursor: 'pointer', outline: 'none' }}>
             <option value="all">All Brands</option>
             {uniqueBrands.map(b => <option key={b} value={b}>{b}</option>)}
           </select>
@@ -673,15 +673,15 @@ const BRAND_COLORS = useMemo(() => {
             {/* Bar chart */}
             <ResponsiveContainer width="100%" height={Math.max(platformBreakdown.length * 50, 120)}>
               <BarChart data={platformBreakdown} layout="vertical" margin={{ left: 10, right: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke={C.bdr} horizontal={false} />
-                <XAxis type="number" stroke={C.dim} fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
-                <YAxis type="category" dataKey="platform" stroke={C.dim} fontSize={12} width={110} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" horizontal={false} />
+                <XAxis type="number" stroke="#64748b" fontSize={11} tickFormatter={(v: number) => fmtCompact(v)} />
+                <YAxis type="category" dataKey="platform" stroke="#64748b" fontSize={12} width={110} />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (!active || !payload?.length) return null;
                     const d = payload[0].payload;
                     return (
-                      <div style={{ background: '#1e293b', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
+                      <div style={{ background: 'var(--bg-deep)', border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
                         <div style={{ fontWeight: 700, marginBottom: 6, color: d.color }}>{d.platform}</div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20, marginBottom: 2 }}>
                           <span style={{ color: C.dim }}>Total Spent</span>
@@ -693,15 +693,15 @@ const BRAND_COLORS = useMemo(() => {
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 20 }}>
                           <span style={{ color: C.dim }}>ROAS</span>
-                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: d.roas >= 3 ? '#10b981' : d.roas >= 1.5 ? '#f59e0b' : '#ef4444' }}>
+                          <span style={{ fontFamily: 'monospace', fontWeight: 700, color: d.roas >= 3 ? 'var(--green)' : d.roas >= 1.5 ? 'var(--yellow)' : 'var(--red)' }}>
                             {d.roas > 0 ? `${d.roas.toFixed(1)}x` : '—'}
                           </span>
                         </div>
                         {d.subDetails.length > 0 && (
-                          <div style={{ borderTop: '1px solid #334155', marginTop: 6, paddingTop: 6 }}>
+                          <div style={{ borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 6 }}>
                             <div style={{ fontSize: 10, color: C.dim, marginBottom: 3 }}>Termasuk:</div>
                             {d.subDetails.map((s: any) => (
-                              <div key={s.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: '#94a3b8' }}>
+                              <div key={s.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, fontSize: 11, color: 'var(--text-secondary)' }}>
                                 <span>{s.name}</span>
                                 <span style={{ fontFamily: 'monospace' }}>{fmtRupiah(s.spent)} ({s.pct.toFixed(0)}%)</span>
                               </div>
@@ -755,7 +755,7 @@ const BRAND_COLORS = useMemo(() => {
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: C.dim }}>Rp {fmtCompact(p.dailyAvg)}</td>
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 11, color: CHANNEL_COLORS[p.revenueChannel] || C.dim }}>{p.revenueChannel}</td>
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: C.dim }}>Rp {fmtCompact(p.channelRevenue)}</td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: p.roas >= 3 ? '#10b981' : p.roas >= 1.5 ? '#f59e0b' : '#ef4444' }}>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: p.roas >= 3 ? 'var(--green)' : p.roas >= 1.5 ? 'var(--yellow)' : 'var(--red)' }}>
                         {p.roas > 0 ? `${p.roas.toFixed(1)}x` : '—'}
                         {(() => {
                           const prev = prevRoasMap[p.platform];
@@ -768,10 +768,10 @@ const BRAND_COLORS = useMemo(() => {
                           );
                         })()}
                       </td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: p.adminFee > 0 ? '#f59e0b' : `${C.dim}66` }}>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: p.adminFee > 0 ? 'var(--yellow)' : `${C.dim}66` }}>
                         {p.adminFee > 0 ? `Rp ${fmtCompact(p.adminFee)}` : '—'}
                       </td>
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: p.effectiveRoas >= 3 ? '#10b981' : p.effectiveRoas >= 1.5 ? '#f59e0b' : p.effectiveRoas > 0 ? '#ef4444' : `${C.dim}44` }}>
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: p.effectiveRoas >= 3 ? 'var(--green)' : p.effectiveRoas >= 1.5 ? 'var(--yellow)' : p.effectiveRoas > 0 ? 'var(--red)' : `${C.dim}44` }}>
                         {p.effectiveRoas > 0 ? `${p.effectiveRoas.toFixed(1)}x` : p.adminFee === 0 && p.roas > 0 ? `${p.roas.toFixed(1)}x` : '—'}
                         {(() => {
                           const prev = prevRoasMap[p.platform];
@@ -803,7 +803,7 @@ const BRAND_COLORS = useMemo(() => {
                       const effRoas = totalAllCost > 0 ? filteredTotalRevenue / totalAllCost : 0;
                       return (
                         <>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: filteredRoas >= 3 ? '#10b981' : filteredRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: filteredRoas >= 3 ? 'var(--green)' : filteredRoas >= 1.5 ? 'var(--yellow)' : 'var(--red)' }}>
                             {filteredRoas.toFixed(1)}x
                             {(() => {
                               const prev = prevRoasMap['__TOTAL__'];
@@ -816,8 +816,8 @@ const BRAND_COLORS = useMemo(() => {
                               );
                             })()}
                           </td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f59e0b' }}>Rp {fmtCompact(totalAdmin)}</td>
-                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: effRoas >= 3 ? '#10b981' : effRoas >= 1.5 ? '#f59e0b' : '#ef4444' }}>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--yellow)' }}>Rp {fmtCompact(totalAdmin)}</td>
+                          <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: effRoas >= 3 ? 'var(--green)' : effRoas >= 1.5 ? 'var(--yellow)' : 'var(--red)' }}>
                             {effRoas.toFixed(1)}x
                             {(() => {
                               const prev = prevRoasMap['__TOTAL__'];
@@ -847,7 +847,7 @@ const BRAND_COLORS = useMemo(() => {
                   ROAS Meta Ads dihitung exclusive terhadap revenue <span style={{ color: CHANNEL_COLORS['Scalev'], fontWeight: 600 }}>Scalev</span>.
                   Namun Meta Ads juga menciptakan demand yang spillover ke{' '}
                   <span style={{ color: CHANNEL_COLORS['Shopee'], fontWeight: 600 }}>Shopee</span> (konsumen search di marketplace setelah lihat iklan)
-                  dan <span style={{ color: '#10b981', fontWeight: 600 }}>repeat order organik</span>.
+                  dan <span style={{ color: 'var(--green)', fontWeight: 600 }}>repeat order organik</span>.
                   Kontribusi sebenarnya Meta Ads kemungkinan lebih besar dari ROAS yang ditampilkan.
                 </div>
               </div>

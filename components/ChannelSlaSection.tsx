@@ -9,29 +9,29 @@ function displayName(ch: string) {
 }
 
 function slaColor(days: number): string {
-  if (days <= 5) return '#10b981';
-  if (days <= 10) return '#f59e0b';
+  if (days <= 5) return 'var(--green)';
+  if (days <= 10) return 'var(--yellow)';
   if (days <= 15) return '#f97316';
-  return '#ef4444';
+  return 'var(--red)';
 }
 
 function slaBg(days: number): string {
-  if (days <= 5) return '#064e3b';
-  if (days <= 10) return '#78350f';
+  if (days <= 5) return 'var(--badge-green-bg)';
+  if (days <= 10) return 'var(--badge-yellow-bg)';
   if (days <= 15) return '#7c2d12';
-  return '#7f1d1d';
+  return 'var(--badge-red-bg)';
 }
 
 const PAYMENT_STYLE: Record<string, { bg: string; color: string; label: string }> = {
   cod:           { bg: '#7c2d12', color: '#fb923c', label: 'COD' },
   marketplace:   { bg: '#1e3a5f', color: '#60a5fa', label: 'Marketplace' },
   bank_transfer: { bg: '#064e3b', color: '#34d399', label: 'Bank Transfer' },
-  no_payment:    { bg: '#1e293b', color: '#94a3b8', label: 'No Payment' },
-  unknown:       { bg: '#1e293b', color: '#64748b', label: 'Unknown' },
+  no_payment:    { bg: 'var(--bg-deep)', color: 'var(--text-secondary)', label: 'No Payment' },
+  unknown:       { bg: 'var(--bg-deep)', color: 'var(--dim)', label: 'Unknown' },
 };
 
 function paymentStyle(method: string) {
-  return PAYMENT_STYLE[method] || { bg: '#1e293b', color: '#94a3b8', label: method };
+  return PAYMENT_STYLE[method] || { bg: 'var(--bg-deep)', color: 'var(--text-secondary)', label: method };
 }
 
 interface Props {
@@ -150,27 +150,27 @@ export default function ChannelSlaSection({ from, to }: Props) {
 
   if (loading) {
     return (
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Order SLA · Shipped → Completed</div>
-        <div style={{ textAlign: 'center', padding: 20, color: '#64748b', fontSize: 12 }}>Memuat data SLA...</div>
+        <div style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 12 }}>Memuat data SLA...</div>
       </div>
     );
   }
 
   if (tableRows.length === 0) {
     return (
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Order SLA · Shipped → Completed</div>
-        <div style={{ textAlign: 'center', padding: 20, color: '#64748b', fontSize: 12 }}>Tidak ada data SLA untuk periode ini.</div>
+        <div style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 12 }}>Tidak ada data SLA untuk periode ini.</div>
       </div>
     );
   }
 
   return (
-    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto' }}>
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, overflowX: 'auto' }}>
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 15, fontWeight: 700 }}>Order SLA · Shipped → Completed</div>
-        <div style={{ fontSize: 11, color: '#64748b' }}>
+        <div style={{ fontSize: 11, color: 'var(--dim)' }}>
           Waktu dari pengiriman hingga selesai per store · Anomali data dikeluarkan
         </div>
       </div>
@@ -179,21 +179,21 @@ export default function ChannelSlaSection({ from, to }: Props) {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
         {/* Overall card */}
         <div style={{
-          background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8,
+          background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
           padding: '10px 14px', flex: '1 1 120px', minWidth: 110, position: 'relative', overflow: 'hidden',
         }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: '#64748b' }} />
-          <div style={{ fontSize: 9, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: 4 }}>Semua</div>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'var(--dim)' }} />
+          <div style={{ fontSize: 9, color: 'var(--dim)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: 4 }}>Semua</div>
           <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: slaColor(overallAvg) }}>
             {overallAvg}d
           </div>
-          <div style={{ fontSize: 9, color: '#475569', marginTop: 2 }}>{totalOrders.toLocaleString('id-ID')} orders</div>
+          <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>{totalOrders.toLocaleString('id-ID')} orders</div>
         </div>
         {paymentSummary.filter(p => p.method !== 'unknown' && p.method !== 'no_payment').map(p => {
           const ps = paymentStyle(p.method);
           return (
             <div key={p.method} style={{
-              background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8,
+              background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
               padding: '10px 14px', flex: '1 1 120px', minWidth: 110, position: 'relative', overflow: 'hidden',
             }}>
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: ps.color }} />
@@ -203,7 +203,7 @@ export default function ChannelSlaSection({ from, to }: Props) {
               <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: slaColor(p.avgDays) }}>
                 {p.avgDays}d
               </div>
-              <div style={{ fontSize: 9, color: '#475569', marginTop: 2 }}>{p.orders.toLocaleString('id-ID')} orders</div>
+              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>{p.orders.toLocaleString('id-ID')} orders</div>
             </div>
           );
         })}
@@ -215,7 +215,7 @@ export default function ChannelSlaSection({ from, to }: Props) {
         style={{
           display: 'flex', alignItems: 'center', gap: 6, width: '100%',
           padding: '8px 0', background: 'none', border: 'none', cursor: 'pointer',
-          color: '#64748b', fontSize: 11, fontWeight: 600, marginBottom: showTable ? 10 : 0,
+          color: 'var(--dim)', fontSize: 11, fontWeight: 600, marginBottom: showTable ? 10 : 0,
         }}
       >
         <span style={{
@@ -223,7 +223,7 @@ export default function ChannelSlaSection({ from, to }: Props) {
           transform: showTable ? 'rotate(90deg)' : 'rotate(0deg)',
         }}>▶</span>
         Breakdown per Store
-        <span style={{ fontSize: 10, fontWeight: 400, color: '#475569' }}>
+        <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>
           ({tableRows.filter(r => r.type === 'channel').length} stores)
         </span>
       </button>
@@ -232,12 +232,12 @@ export default function ChannelSlaSection({ from, to }: Props) {
         <>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700 }}>
             <thead>
-              <tr style={{ borderBottom: '2px solid #1a2744' }}>
+              <tr style={{ borderBottom: '2px solid var(--border)' }}>
                 {['Store', 'Payment', 'Orders', 'Median', 'Avg', 'P90', 'Min', 'Max'].map(h => (
                   <th key={h} style={{
                     padding: '8px 10px',
                     textAlign: h === 'Store' || h === 'Payment' ? 'left' : 'right',
-                    color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
+                    color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
                   }}>{h}</th>
                 ))}
               </tr>
@@ -251,14 +251,14 @@ export default function ChannelSlaSection({ from, to }: Props) {
                   <tr
                     key={`${row.channel}-${row.paymentType || 'all'}`}
                     style={{
-                      borderBottom: `1px solid ${isChannel ? '#1e293b' : '#141d2e'}`,
-                      background: isChannel && row.hasMultiple ? '#0c1524' : 'transparent',
+                      borderBottom: '1px solid var(--bg-deep)',
+                      background: isChannel && row.hasMultiple ? 'var(--bg-deep)' : 'transparent',
                     }}
                   >
                     {/* Store */}
                     <td style={{ padding: '8px 10px', fontWeight: isChannel ? 600 : 400 }}>
                       {isChannel ? displayName(row.channel) : (
-                        <span style={{ paddingLeft: 16, color: '#64748b' }}>└</span>
+                        <span style={{ paddingLeft: 16, color: 'var(--dim)' }}>└</span>
                       )}
                     </td>
 
@@ -275,14 +275,14 @@ export default function ChannelSlaSection({ from, to }: Props) {
                           </span>
                         );
                       })() : isChannel && row.hasMultiple ? (
-                        <span style={{ fontSize: 10, color: '#475569' }}>All</span>
+                        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>All</span>
                       ) : null}
                     </td>
 
                     {/* Orders */}
                     <td style={{
                       padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace',
-                      fontWeight: isChannel ? 600 : 400, color: isSubRow ? '#94a3b8' : '#e2e8f0',
+                      fontWeight: isChannel ? 600 : 400, color: isSubRow ? 'var(--text-secondary)' : 'var(--text)',
                     }}>
                       {row.orders.toLocaleString('id-ID')}
                     </td>
@@ -301,7 +301,7 @@ export default function ChannelSlaSection({ from, to }: Props) {
                     {/* Avg */}
                     <td style={{
                       padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace',
-                      color: isSubRow ? '#64748b' : '#94a3b8',
+                      color: isSubRow ? 'var(--dim)' : 'var(--text-secondary)',
                     }}>
                       {row.avg}d
                     </td>
@@ -309,18 +309,18 @@ export default function ChannelSlaSection({ from, to }: Props) {
                     {/* P90 */}
                     <td style={{
                       padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace',
-                      color: isSubRow ? '#475569' : '#64748b',
+                      color: isSubRow ? 'var(--text-muted)' : 'var(--dim)',
                     }}>
                       {row.p90}d
                     </td>
 
                     {/* Min */}
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#475569' }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
                       {row.min}d
                     </td>
 
                     {/* Max */}
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#475569' }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-muted)' }}>
                       {row.max}d
                     </td>
                   </tr>
@@ -330,11 +330,11 @@ export default function ChannelSlaSection({ from, to }: Props) {
           </table>
 
           {/* Legend */}
-          <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 10, color: '#475569' }}>
-            <span><span style={{ color: '#10b981' }}>●</span> ≤5 hari</span>
-            <span><span style={{ color: '#f59e0b' }}>●</span> 6–10 hari</span>
+          <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 10, color: 'var(--text-muted)' }}>
+            <span><span style={{ color: 'var(--green)' }}>●</span> ≤5 hari</span>
+            <span><span style={{ color: 'var(--yellow)' }}>●</span> 6–10 hari</span>
             <span><span style={{ color: '#f97316' }}>●</span> 11–15 hari</span>
-            <span><span style={{ color: '#ef4444' }}>●</span> &gt;15 hari</span>
+            <span><span style={{ color: 'var(--red)' }}>●</span> &gt;15 hari</span>
             <span style={{ marginLeft: 'auto', fontStyle: 'italic' }}>P90 = 90% orders selesai dalam X hari</span>
           </div>
         </>

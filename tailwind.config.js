@@ -8,10 +8,10 @@ module.exports = {
     extend: {
       colors: {
         brand: {
-          bg: '#0b1121',
-          card: '#111a2e',
-          border: '#1a2744',
-          accent: '#3b82f6',
+          bg: 'var(--bg)',
+          card: 'var(--card)',
+          border: 'var(--border)',
+          accent: 'var(--accent)',
         },
       },
       fontFamily: {

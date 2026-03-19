@@ -37,11 +37,11 @@ const CHANNEL_ORDER = ['Global', 'Scalev Ads', 'CS Manual', 'Reseller', 'TikTok 
 const CHANNEL_TAB_COLORS = {
   'Global': '#3b82f6',
   'Scalev Ads': '#1877f2',
-  'CS Manual': '#10b981',
-  'Reseller': '#f59e0b',
+  'CS Manual': 'var(--green)',
+  'Reseller': 'var(--yellow)',
   'TikTok Shop': '#00f2ea',
   'Shopee': '#ee4d2d',
-  'Other Marketplaces': '#64748b',
+  'Other Marketplaces': 'var(--dim)',
 };
 
 const SUB_TABS = [
@@ -190,7 +190,7 @@ export default function CustomersPage() {
         totalRevenue: tR, repeatRevenue: d.repeatRevenue,
         repeatRevShare: tR > 0 ? (d.repeatRevenue / tR) * 100 : 0,
         unidOrders: d.unidOrders, unidRevenue: d.unidRevenue,
-        color: CHANNEL_TAB_COLORS[ch] || '#64748b'
+        color: CHANNEL_TAB_COLORS[ch] || 'var(--dim)'
       };
     });
     const gN = rows.reduce((s, r) => s + r.newCustomers, 0);
@@ -221,7 +221,7 @@ export default function CustomersPage() {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700 }}>Customer Analytics</h2>
-          <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>New vs Repeat vs Unidentified</p>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>New vs Repeat vs Unidentified</p>
         </div>
         <DateRangePicker
           from={dateRange.from} to={dateRange.to}
@@ -231,19 +231,19 @@ export default function CustomersPage() {
       </div>
 
       {/* ═══ SUB TABS ═══ */}
-      <div style={{ display: 'flex', gap: 2, background: '#0f172a', borderRadius: 10, padding: 3, border: '1px solid #1a2744', marginBottom: 20, width: 'fit-content' }}>
+      <div style={{ display: 'flex', gap: 2, background: 'var(--bg-deep)', borderRadius: 10, padding: 3, border: '1px solid var(--border)', marginBottom: 20, width: 'fit-content' }}>
         {SUB_TABS.map(t => (
           <button key={t.id} onClick={() => setSubTab(t.id)} style={{
             padding: '7px 16px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-            background: subTab === t.id ? '#3b82f6' : 'transparent',
-            color: subTab === t.id ? '#fff' : '#64748b',
+            background: subTab === t.id ? 'var(--accent)' : 'transparent',
+            color: subTab === t.id ? '#fff' : 'var(--dim)',
           }}>{t.label}</button>
         ))}
       </div>
 
       {loading ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-          <div className="spinner" style={{ width: 32, height: 32, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%' }} />
+          <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
         </div>
       ) : (
         <>
@@ -259,7 +259,7 @@ export default function CustomersPage() {
 // OVERVIEW TAB
 // ═══════════════════════════════════════════════════
 function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, setChannelFilter, availableChannels, topCustomers, rtsCancel }) {
-  if (!k) return <div style={{ color: '#64748b', padding: 40, textAlign: 'center' }}>Belum ada data customer untuk periode ini.</div>;
+  if (!k) return <div style={{ color: 'var(--dim)', padding: 40, textAlign: 'center' }}>Belum ada data customer untuk periode ini.</div>;
 
   const maxOrders = Math.max(...chartData.map(d => d.new + d.repeat + d.unidentified), 1);
   const totalRevAll = k.totalRevenue;
@@ -270,26 +270,26 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
   return (
     <>
       {/* ═══ 1. CHANNEL PERFORMANCE TABLE ═══ */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, marginBottom: 20, overflowX: 'auto' }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 20, overflowX: 'auto' }}>
         <h3 style={{ margin: '0 0 14px', fontSize: 14, fontWeight: 700 }}>Repeat Rate per Channel</h3>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
           <thead>
-            <tr style={{ borderBottom: '2px solid #1a2744' }}>
+            <tr style={{ borderBottom: '2px solid var(--border)' }}>
               {['Channel', 'Orders', 'New', 'Repeat', 'Repeat Rate', 'Revenue', 'Repeat Rev %'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {channelPerformance.rows.map(row => <ChannelRow key={row.channel} row={row} />)}
-            <tr style={{ borderTop: '2px solid #1a2744', background: 'rgba(59,130,246,0.06)' }}>
-              <td style={{ padding: '10px', fontWeight: 700, color: '#e2e8f0' }}><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: '#3b82f6' }} />Global</div></td>
-              <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#e2e8f0' }}>{channelPerformance.globalRow.totalOrders}</td>
-              <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', color: '#10b981', fontWeight: 600 }}>{channelPerformance.globalRow.newCustomers}</td>
-              <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', color: '#f59e0b', fontWeight: 600 }}>{channelPerformance.globalRow.repeatCustomers}</td>
+            <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--accent-subtle)' }}>
+              <td style={{ padding: '10px', fontWeight: 700, color: 'var(--text)' }}><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: '#3b82f6' }} />Global</div></td>
+              <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{channelPerformance.globalRow.totalOrders}</td>
+              <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--green)', fontWeight: 600 }}>{channelPerformance.globalRow.newCustomers}</td>
+              <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--yellow)', fontWeight: 600 }}>{channelPerformance.globalRow.repeatCustomers}</td>
               <td style={{ padding: '10px', textAlign: 'right' }}><RepeatRateBadge value={channelPerformance.globalRow.repeatRate} bold /></td>
-              <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#e2e8f0' }}>{fmtCompact(channelPerformance.globalRow.totalRevenue)}</td>
-              <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#e2e8f0' }}>{fmtPct(channelPerformance.globalRow.repeatRevShare)}</td>
+              <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{fmtCompact(channelPerformance.globalRow.totalRevenue)}</td>
+              <td style={{ padding: '10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{fmtPct(channelPerformance.globalRow.repeatRevShare)}</td>
             </tr>
           </tbody>
         </table>
@@ -300,9 +300,9 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
         {availableChannels.map(ch => (
           <button key={ch} onClick={() => setChannelFilter(ch)} style={{
             padding: '5px 14px', borderRadius: 20, border: '1px solid',
-            borderColor: channelFilter === ch ? (CHANNEL_TAB_COLORS[ch] || '#3b82f6') : '#1a2744',
+            borderColor: channelFilter === ch ? (CHANNEL_TAB_COLORS[ch] || '#3b82f6') : 'var(--border)',
             background: channelFilter === ch ? `${CHANNEL_TAB_COLORS[ch] || '#3b82f6'}18` : 'transparent',
-            color: channelFilter === ch ? (CHANNEL_TAB_COLORS[ch] || '#3b82f6') : '#94a3b8',
+            color: channelFilter === ch ? (CHANNEL_TAB_COLORS[ch] || '#3b82f6') : 'var(--text-secondary)',
             fontSize: 11, fontWeight: 600, cursor: 'pointer',
           }}>{ch}</button>
         ))}
@@ -311,10 +311,10 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
       {/* ═══ 3. KPI CARDS ═══ */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginBottom: 14 }}>
         {[
-          { label: 'Total Customer', value: k.totalCustomers?.toLocaleString('id-ID'), color: '#3b82f6', sub: `${k.newOrders + k.repeatOrders} orders` },
-          { label: 'New Customer', value: k.newCustomers?.toLocaleString('id-ID'), color: '#10b981', sub: fmtCompact(k.newRevenue) },
-          { label: 'Repeat Customer', value: k.repeatCustomers?.toLocaleString('id-ID'), color: '#f59e0b', sub: fmtCompact(k.repeatRevenue) },
-          { label: 'Repeat Rate', value: fmtPct(k.repeatRate), color: k.repeatRate > 20 ? '#10b981' : '#ef4444', sub: 'identified only' },
+          { label: 'Total Customer', value: k.totalCustomers?.toLocaleString('id-ID'), color: 'var(--accent)', sub: `${k.newOrders + k.repeatOrders} orders` },
+          { label: 'New Customer', value: k.newCustomers?.toLocaleString('id-ID'), color: 'var(--green)', sub: fmtCompact(k.newRevenue) },
+          { label: 'Repeat Customer', value: k.repeatCustomers?.toLocaleString('id-ID'), color: 'var(--yellow)', sub: fmtCompact(k.repeatRevenue) },
+          { label: 'Repeat Rate', value: fmtPct(k.repeatRate), color: k.repeatRate > 20 ? 'var(--green)' : 'var(--red)', sub: 'identified only' },
           { label: 'AOV', value: fmtCompact(k.avgOrderValue), color: '#8b5cf6', sub: 'per order' },
         ].map((card, i) => (
           <KpiCard key={i} {...card} />
@@ -328,8 +328,8 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
           label="New Customer Revenue"
           value={k.newRevenue}
           pct={newRevPct}
-          color="#10b981"
-          bgColor="#064e3b"
+          color="var(--green)"
+          bgColor="var(--badge-green-bg)"
           orders={k.newOrders}
         />
         {/* Repeat Customer Revenue */}
@@ -337,8 +337,8 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
           label="Repeat Order Revenue"
           value={k.repeatRevenue}
           pct={repRevPct}
-          color="#f59e0b"
-          bgColor="#78350f"
+          color="var(--yellow)"
+          bgColor="var(--badge-yellow-bg)"
           orders={k.repeatOrders}
         />
         {/* Unidentified Revenue */}
@@ -346,19 +346,19 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
           label="Unidentified Revenue"
           value={k.unidentifiedRevenue}
           pct={unidRevPct}
-          color="#64748b"
-          bgColor="#1e293b"
+          color="var(--dim)"
+          bgColor="var(--bg-deep)"
           orders={k.unidentifiedOrders}
           tooltip="FBS & orders tanpa nama customer"
         />
       </div>
 
       {/* ═══ 4. DAILY CHART ═══ */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, marginBottom: 20 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 20 }}>
         <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Daily Orders by Customer Type</h3>
-        <p style={{ margin: '0 0 14px', fontSize: 12, color: '#64748b' }}>{channelFilter === 'Global' ? 'Semua channel' : channelFilter}</p>
+        <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--dim)' }}>{channelFilter === 'Global' ? 'Semua channel' : channelFilter}</p>
         {chartData.length === 0 ? (
-          <div style={{ color: '#64748b', textAlign: 'center', padding: 40 }}>Tidak ada data untuk periode ini</div>
+          <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>Tidak ada data untuk periode ini</div>
         ) : (
           <div>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 180 }}>
@@ -371,11 +371,11 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
                   <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: 160, width: '100%', alignItems: 'center' }}>
                       {/* Top: Unidentified (gray) */}
-                      <div style={{ width: '70%', maxWidth: 20, height: unidH, background: '#475569', borderRadius: (d.repeat > 0 || d.new > 0) ? '3px 3px 0 0' : '3px 3px 0 0', minHeight: d.unidentified > 0 ? 2 : 0 }} title={`Unidentified: ${d.unidentified}`} />
+                      <div style={{ width: '70%', maxWidth: 20, height: unidH, background: 'var(--text-muted)', borderRadius: (d.repeat > 0 || d.new > 0) ? '3px 3px 0 0' : '3px 3px 0 0', minHeight: d.unidentified > 0 ? 2 : 0 }} title={`Unidentified: ${d.unidentified}`} />
                       {/* Middle: Repeat (amber) */}
-                      <div style={{ width: '70%', maxWidth: 20, height: repH, background: '#f59e0b', borderRadius: d.unidentified > 0 ? '0' : '3px 3px 0 0', minHeight: d.repeat > 0 ? 2 : 0 }} title={`Repeat: ${d.repeat}`} />
+                      <div style={{ width: '70%', maxWidth: 20, height: repH, background: 'var(--yellow)', borderRadius: d.unidentified > 0 ? '0' : '3px 3px 0 0', minHeight: d.repeat > 0 ? 2 : 0 }} title={`Repeat: ${d.repeat}`} />
                       {/* Bottom: New (green) */}
-                      <div style={{ width: '70%', maxWidth: 20, height: newH, background: '#10b981', borderRadius: (d.repeat > 0 || d.unidentified > 0) ? '0' : '3px 3px 0 0', minHeight: d.new > 0 ? 2 : 0 }} title={`New: ${d.new}`} />
+                      <div style={{ width: '70%', maxWidth: 20, height: newH, background: 'var(--green)', borderRadius: (d.repeat > 0 || d.unidentified > 0) ? '0' : '3px 3px 0 0', minHeight: d.new > 0 ? 2 : 0 }} title={`New: ${d.new}`} />
                     </div>
                   </div>
                 );
@@ -386,7 +386,7 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
                 const step = Math.max(1, Math.ceil(chartData.length / 12));
                 return (
                   <div key={i} style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
-                    {i % step === 0 && <div style={{ fontSize: 9, color: '#475569', whiteSpace: 'nowrap' }}>{new Date(d.date + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</div>}
+                    {i % step === 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(d.date + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</div>}
                   </div>
                 );
               })}
@@ -394,9 +394,9 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
           </div>
         )}
         <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: '#10b981' }} /><span style={{ fontSize: 10, color: '#94a3b8' }}>New</span></div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: '#f59e0b' }} /><span style={{ fontSize: 10, color: '#94a3b8' }}>Repeat</span></div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: '#475569' }} /><span style={{ fontSize: 10, color: '#94a3b8' }}>Unidentified</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--green)' }} /><span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>New</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--yellow)' }} /><span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Repeat</span></div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--text-muted)' }} /><span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Unidentified</span></div>
         </div>
       </div>
 
@@ -412,10 +412,10 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
 
 function RevenueCard({ label, value, pct, color, bgColor, orders, tooltip }) {
   return (
-    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 10, padding: 16 }}>
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
         <div>
-          <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</div>
+          <div style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</div>
           <div style={{ fontSize: 22, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace" }}>{fmtCompact(value)}</div>
         </div>
         <div style={{ fontSize: 13, fontWeight: 700, color, fontFamily: "'JetBrains Mono', monospace", background: bgColor, padding: '3px 10px', borderRadius: 8 }}>
@@ -423,14 +423,14 @@ function RevenueCard({ label, value, pct, color, bgColor, orders, tooltip }) {
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <div style={{ flex: 1, height: 6, background: '#0f172a', borderRadius: 3, overflow: 'hidden' }}>
+        <div style={{ flex: 1, height: 6, background: 'var(--bg-deep)', borderRadius: 3, overflow: 'hidden' }}>
           <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.5s ease' }} />
         </div>
       </div>
-      <div style={{ fontSize: 10, color: '#475569', marginTop: 6 }}>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 6 }}>
         {orders.toLocaleString('id-ID')} orders
         {orders > 0 && ` · AOV ${fmtCompact(value / orders)}`}
-        {tooltip && <span style={{ marginLeft: 4, color: '#334155' }} title={tooltip}>ⓘ</span>}
+        {tooltip && <span style={{ marginLeft: 4, color: 'var(--text-muted)' }} title={tooltip}>ⓘ</span>}
       </div>
     </div>
   );
@@ -438,10 +438,10 @@ function RevenueCard({ label, value, pct, color, bgColor, orders, tooltip }) {
 
 function KpiCard({ label, value, color, sub }) {
   return (
-    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 10, padding: 14 }}>
-      <div style={{ fontSize: 10, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</div>
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
+      <div style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
-      <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>{sub}</div>
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>
     </div>
   );
 }
@@ -449,21 +449,21 @@ function KpiCard({ label, value, color, sub }) {
 function TopCustomersSection({ customers, channelFilter }) {
   if (!customers || customers.length === 0) {
     return (
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
         <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Top Customers by Revenue</h3>
-        <p style={{ margin: 0, fontSize: 12, color: '#64748b' }}>Tidak ada data customer untuk periode dan channel ini.</p>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>Tidak ada data customer untuk periode dan channel ini.</p>
       </div>
     );
   }
   return (
-    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, overflowX: 'auto' }}>
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, overflowX: 'auto' }}>
       <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Top {Math.min(customers.length, 50)} Customers by Revenue</h3>
-      <p style={{ margin: '0 0 14px', fontSize: 12, color: '#64748b' }}>{channelFilter === 'Global' ? 'Semua channel' : channelFilter} — dalam periode yang dipilih</p>
+      <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--dim)' }}>{channelFilter === 'Global' ? 'Semua channel' : channelFilter} — dalam periode yang dipilih</p>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700 }}>
         <thead>
           <tr>
             {['#', 'Customer', 'Channel', 'Orders', 'Revenue', 'AOV', 'First', 'Last', 'Type'].map(h => (
-              <th key={h} style={{ padding: '8px 10px', textAlign: ['#', 'Customer', 'Channel', 'Type'].includes(h) ? 'left' : 'right', color: '#64748b', borderBottom: '1px solid #1a2744', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+              <th key={h} style={{ padding: '8px 10px', textAlign: ['#', 'Customer', 'Channel', 'Type'].includes(h) ? 'left' : 'right', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
             ))}
           </tr>
         </thead>
@@ -473,22 +473,22 @@ function TopCustomersSection({ customers, channelFilter }) {
             const maskedPhone = phone.length > 7 ? phone.slice(0, 4) + '****' + phone.slice(-3) : phone;
             const cg = CHANNEL_GROUP_MAP[c.first_channel] || c.first_channel || 'Unknown';
             return (
-              <tr key={i} style={{ borderBottom: '1px solid #0f172a' }}>
-                <td style={{ padding: '7px 10px', color: '#475569', fontSize: 11 }}>{i + 1}</td>
+              <tr key={i} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                <td style={{ padding: '7px 10px', color: 'var(--text-muted)', fontSize: 11 }}>{i + 1}</td>
                 <td style={{ padding: '7px 10px' }}>
-                  <div style={{ fontWeight: 600, color: '#e2e8f0', fontSize: 12 }}>{c.first_name || 'N/A'}</div>
-                  {maskedPhone && <div style={{ fontSize: 9, color: '#475569', fontFamily: 'monospace' }}>{maskedPhone}</div>}
+                  <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 12 }}>{c.first_name || 'N/A'}</div>
+                  {maskedPhone && <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{maskedPhone}</div>}
                 </td>
                 <td style={{ padding: '7px 10px' }}>
-                  <span style={{ padding: '2px 7px', borderRadius: 10, fontSize: 9, fontWeight: 600, background: `${CHANNEL_TAB_COLORS[cg] || '#64748b'}20`, color: CHANNEL_TAB_COLORS[cg] || '#94a3b8' }}>{cg}</span>
+                  <span style={{ padding: '2px 7px', borderRadius: 10, fontSize: 9, fontWeight: 600, background: `${CHANNEL_TAB_COLORS[cg] || 'var(--dim)'}20`, color: CHANNEL_TAB_COLORS[cg] || 'var(--text-secondary)' }}>{cg}</span>
                 </td>
                 <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{c.total_orders}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: '#10b981' }}>{fmtRupiah(c.total_revenue)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8', fontSize: 11 }}>{fmtRupiah(c.avg_order_value)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontSize: 10, color: '#94a3b8' }}>{c.first_order_date}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontSize: 10, color: '#94a3b8' }}>{c.last_order_date}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: 'var(--green)' }}>{fmtRupiah(c.total_revenue)}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: 11 }}>{fmtRupiah(c.avg_order_value)}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontSize: 10, color: 'var(--text-secondary)' }}>{c.first_order_date}</td>
+                <td style={{ padding: '7px 10px', textAlign: 'right', fontSize: 10, color: 'var(--text-secondary)' }}>{c.last_order_date}</td>
                 <td style={{ padding: '7px 10px' }}>
-                  <span style={{ padding: '2px 7px', borderRadius: 10, fontSize: 9, fontWeight: 700, background: c.is_repeat ? '#78350f' : '#064e3b', color: c.is_repeat ? '#f59e0b' : '#10b981' }}>{c.is_repeat ? 'Repeat' : 'New'}</span>
+                  <span style={{ padding: '2px 7px', borderRadius: 10, fontSize: 9, fontWeight: 700, background: c.is_repeat ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)', color: c.is_repeat ? 'var(--yellow)' : 'var(--green)' }}>{c.is_repeat ? 'Repeat' : 'New'}</span>
                 </td>
               </tr>
             );
@@ -501,21 +501,21 @@ function TopCustomersSection({ customers, channelFilter }) {
 
 function ChannelRow({ row }) {
   return (
-    <tr style={{ borderBottom: '1px solid #0f172a' }}>
-      <td style={{ padding: '8px 10px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: row.color, flexShrink: 0 }} /><span style={{ fontWeight: 600, color: '#e2e8f0' }}>{row.channel}</span></div></td>
-      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8' }}>{row.totalOrders}</td>
-      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#10b981' }}>{row.newCustomers}</td>
-      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#f59e0b' }}>{row.repeatCustomers}</td>
+    <tr style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+      <td style={{ padding: '8px 10px' }}><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: row.color, flexShrink: 0 }} /><span style={{ fontWeight: 600, color: 'var(--text)' }}>{row.channel}</span></div></td>
+      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{row.totalOrders}</td>
+      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--green)' }}>{row.newCustomers}</td>
+      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--yellow)' }}>{row.repeatCustomers}</td>
       <td style={{ padding: '8px 10px', textAlign: 'right' }}><RepeatRateBadge value={row.repeatRate} /></td>
-      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#e2e8f0' }}>{fmtCompact(row.totalRevenue)}</td>
-      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#94a3b8' }}>{fmtPct(row.repeatRevShare)}</td>
+      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{fmtCompact(row.totalRevenue)}</td>
+      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{fmtPct(row.repeatRevShare)}</td>
     </tr>
   );
 }
 
 function RepeatRateBadge({ value, bold = false }) {
-  const color = value >= 50 ? '#10b981' : value >= 30 ? '#f59e0b' : '#ef4444';
-  const bg = value >= 50 ? '#064e3b' : value >= 30 ? '#78350f' : '#7f1d1d';
+  const color = value >= 50 ? 'var(--green)' : value >= 30 ? 'var(--yellow)' : 'var(--red)';
+  const bg = value >= 50 ? 'var(--badge-green-bg)' : value >= 30 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)';
   return <span style={{ padding: '3px 8px', borderRadius: 10, fontSize: 10, fontWeight: bold ? 800 : 700, fontFamily: 'monospace', background: bg, color }}>{fmtPct(value, 1)}</span>;
 }
 
@@ -524,7 +524,7 @@ function RepeatRateBadge({ value, bold = false }) {
 // ═══════════════════════════════════════════════════
 
 function CohortTab({ data }) {
-  if (!data || data.length === 0) return <div style={{ color: '#64748b', textAlign: 'center', padding: 40 }}>Belum ada data cohort. Minimal perlu data 2+ bulan.</div>;
+  if (!data || data.length === 0) return <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>Belum ada data cohort. Minimal perlu data 2+ bulan.</div>;
 
   const cohorts = {};
   for (const row of data) {
@@ -535,15 +535,15 @@ function CohortTab({ data }) {
   const maxM = Math.max(...data.map(d => d.months_since_first), 0);
 
   return (
-    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, overflowX: 'auto' }}>
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, overflowX: 'auto' }}>
       <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Cohort Retention</h3>
-      <p style={{ margin: '0 0 14px', fontSize: 12, color: '#64748b' }}>Customer dari cohort bulan X yang masih order di bulan-bulan berikutnya</p>
+      <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--dim)' }}>Customer dari cohort bulan X yang masih order di bulan-bulan berikutnya</p>
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
         <thead><tr>
-          <th style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', borderBottom: '1px solid #1a2744', fontWeight: 600 }}>Cohort</th>
-          <th style={{ padding: '8px 10px', textAlign: 'center', color: '#64748b', borderBottom: '1px solid #1a2744', fontWeight: 600 }}>Size</th>
+          <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Cohort</th>
+          <th style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Size</th>
           {Array.from({ length: Math.min(maxM + 1, 7) }, (_, i) =>
-            <th key={i} style={{ padding: '8px 10px', textAlign: 'center', color: '#64748b', borderBottom: '1px solid #1a2744', fontWeight: 600 }}>{i === 0 ? 'M0' : `M+${i}`}</th>
+            <th key={i} style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>{i === 0 ? 'M0' : `M+${i}`}</th>
           )}
         </tr></thead>
         <tbody>
@@ -551,16 +551,16 @@ function CohortTab({ data }) {
             const base = cohorts[month][0]?.customers || 0;
             return (
               <tr key={month}>
-                <td style={{ padding: '8px 10px', borderBottom: '1px solid #0f172a', fontWeight: 600, color: '#e2e8f0' }}>{month}</td>
-                <td style={{ padding: '8px 10px', borderBottom: '1px solid #0f172a', textAlign: 'center', fontFamily: 'monospace', color: '#94a3b8' }}>{base}</td>
+                <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', fontWeight: 600, color: 'var(--text)' }}>{month}</td>
+                <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', textAlign: 'center', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{base}</td>
                 {Array.from({ length: Math.min(maxM + 1, 7) }, (_, i) => {
                   const cell = cohorts[month][i];
-                  if (!cell) return <td key={i} style={{ padding: '8px 10px', borderBottom: '1px solid #0f172a', textAlign: 'center', color: '#1a2744' }}>—</td>;
+                  if (!cell) return <td key={i} style={{ padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', textAlign: 'center', color: 'var(--border)' }}>—</td>;
                   const ret = base > 0 ? (cell.customers / base) * 100 : 0;
                   return <td key={i} style={{
-                    padding: '8px 10px', borderBottom: '1px solid #0f172a', textAlign: 'center',
-                    background: i === 0 ? 'rgba(59,130,246,0.15)' : `rgba(16,185,129,${Math.min(ret / 100, 1) * 0.3})`,
-                    color: i === 0 ? '#60a5fa' : ret > 10 ? '#10b981' : '#475569',
+                    padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', textAlign: 'center',
+                    background: i === 0 ? 'var(--accent-subtle)' : `rgba(16,185,129,${Math.min(ret / 100, 1) * 0.3})`,
+                    color: i === 0 ? '#60a5fa' : ret > 10 ? 'var(--green)' : 'var(--text-muted)',
                     fontWeight: ret > 20 ? 700 : 400, fontFamily: 'monospace', fontSize: 11
                   }}>{fmtPct(ret, 0)}</td>;
                 })}

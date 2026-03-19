@@ -398,28 +398,28 @@ export default function MetaManager() {
 
   const statusStyle = (s: string) => {
     switch (s) {
-      case 'success': return { bg: '#064e3b', color: '#10b981', label: 'Sukses' };
-      case 'partial': return { bg: '#78350f', color: '#f59e0b', label: 'Partial' };
-      case 'failed': return { bg: '#7f1d1d', color: '#ef4444', label: 'Gagal' };
+      case 'success': return { bg: 'var(--badge-green-bg)', color: 'var(--green)', label: 'Sukses' };
+      case 'partial': return { bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)', label: 'Partial' };
+      case 'failed': return { bg: 'var(--badge-red-bg)', color: 'var(--red)', label: 'Gagal' };
       case 'running': return { bg: '#1e3a5f', color: '#60a5fa', label: 'Running' };
-      default: return { bg: '#1a2744', color: '#64748b', label: s };
+      default: return { bg: 'var(--border)', color: 'var(--dim)', label: s };
     }
   };
 
   if (loading) {
     return (
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
-        <div style={{ color: '#64748b', fontSize: 13 }}>Memuat data Meta Ads...</div>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+        <div style={{ color: 'var(--dim)', fontSize: 13 }}>Memuat data Meta Ads...</div>
       </div>
     );
   }
 
   const inputStyle: React.CSSProperties = {
     width: '100%', padding: '8px 12px', borderRadius: 6,
-    border: '1px solid #1a2744', background: '#0b1121',
-    color: '#e2e8f0', fontSize: 13, outline: 'none',
+    border: '1px solid var(--border)', background: 'var(--bg)',
+    color: 'var(--text)', fontSize: 13, outline: 'none',
   };
-  const labelStyle: React.CSSProperties = { fontSize: 11, color: '#64748b', display: 'block', marginBottom: 4 };
+  const labelStyle: React.CSSProperties = { fontSize: 11, color: 'var(--dim)', display: 'block', marginBottom: 4 };
 
   // Filtered remote accounts for the picker
   const filteredRemote = remoteAccounts.filter(a =>
@@ -430,7 +430,7 @@ export default function MetaManager() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* ─── Meta Ad Accounts ─── */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>Meta Ad Accounts</div>
           <button
@@ -438,14 +438,14 @@ export default function MetaManager() {
             disabled={loadingRemote}
             style={{
               padding: '6px 14px', borderRadius: 6, border: 'none', cursor: loadingRemote ? 'not-allowed' : 'pointer',
-              background: loadingRemote ? '#1a2744' : '#3b82f6', color: '#fff',
+              background: loadingRemote ? 'var(--border)' : 'var(--accent)', color: '#fff',
               fontSize: 12, fontWeight: 600, opacity: loadingRemote ? 0.6 : 1,
             }}
           >
             {loadingRemote ? 'Memuat...' : '+ Tambah Akun'}
           </button>
         </div>
-        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
           Daftar akun Meta Ads yang datanya ditarik otomatis via Marketing API.
         </div>
 
@@ -453,17 +453,17 @@ export default function MetaManager() {
         {accounts.filter(a => a.is_active).length > 0 && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14,
-            padding: 12, background: '#0b1121', borderRadius: 8, border: '1px solid #1a2744',
+            padding: 12, background: 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)',
             flexWrap: 'wrap',
           }}>
-            <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>Sync tanggal:</span>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>Sync tanggal:</span>
             <input
               type="date"
               value={syncDateStart}
               onChange={e => setSyncDateStart(e.target.value)}
               style={{ ...inputStyle, width: 'auto', padding: '5px 8px', fontSize: 12 }}
             />
-            <span style={{ fontSize: 12, color: '#64748b' }}>s/d</span>
+            <span style={{ fontSize: 12, color: 'var(--dim)' }}>s/d</span>
             <input
               type="date"
               value={syncDateEnd}
@@ -476,11 +476,13 @@ export default function MetaManager() {
               style={{
                 padding: '6px 16px', borderRadius: 6, border: 'none',
                 cursor: syncing ? 'not-allowed' : 'pointer',
-                background: syncing ? '#1a2744' : '#7c3aed', color: '#fff',
+                background: syncing ? 'var(--border)' : 'var(--green)', color: syncing ? 'var(--dim)' : '#fff',
                 fontSize: 12, fontWeight: 600, opacity: syncing ? 0.4 : 1,
                 marginLeft: 'auto',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
               }}
             >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={syncing ? { animation: 'spin 1s linear infinite' } : undefined}><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
               {syncing ? 'Syncing...' : 'Sync Now'}
             </button>
           </div>
@@ -490,8 +492,8 @@ export default function MetaManager() {
         {message && (
           <div style={{
             marginBottom: 12, padding: 12, borderRadius: 8, fontSize: 13,
-            background: message.type === 'success' ? '#064e3b' : '#7f1d1d',
-            color: message.type === 'success' ? '#10b981' : '#ef4444',
+            background: message.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+            color: message.type === 'success' ? 'var(--green)' : 'var(--red)',
           }}>
             {message.type === 'success' ? '✅' : '❌'} {message.text}
           </div>
@@ -500,8 +502,8 @@ export default function MetaManager() {
         {/* ─── Account Picker (multi-select from Meta API) ─── */}
         {showPicker && (
           <div style={{
-            marginBottom: 16, padding: 16, background: '#0b1121',
-            borderRadius: 8, border: '1px solid #1a2744',
+            marginBottom: 16, padding: 16, background: 'var(--bg)',
+            borderRadius: 8, border: '1px solid var(--border)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>
@@ -510,8 +512,8 @@ export default function MetaManager() {
               <button
                 onClick={() => { setShowPicker(false); setSelectedMappings(new Map()); setSearchFilter(''); }}
                 style={{
-                  padding: '4px 12px', borderRadius: 4, border: '1px solid #1a2744',
-                  background: 'transparent', color: '#64748b', fontSize: 11, cursor: 'pointer',
+                  padding: '4px 12px', borderRadius: 4, border: '1px solid var(--border)',
+                  background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer',
                 }}
               >
                 Tutup
@@ -528,8 +530,8 @@ export default function MetaManager() {
 
             {/* Account checklist */}
             <div style={{
-              maxHeight: 350, overflowY: 'auto', border: '1px solid #1a2744',
-              borderRadius: 6, background: '#111a2e',
+              maxHeight: 350, overflowY: 'auto', border: '1px solid var(--border)',
+              borderRadius: 6, background: 'var(--card)',
             }}>
               {filteredRemote.map(acc => {
                 const isSelected = selectedMappings.has(acc.account_id);
@@ -538,8 +540,8 @@ export default function MetaManager() {
 
                 return (
                   <div key={acc.account_id} style={{
-                    borderBottom: '1px solid #0f172a',
-                    background: isSelected ? 'rgba(59,130,246,0.08)' : 'transparent',
+                    borderBottom: '1px solid var(--bg-deep)',
+                    background: isSelected ? 'var(--accent-subtle)' : 'transparent',
                   }}>
                     {/* Row: checkbox + info */}
                     <div
@@ -555,19 +557,19 @@ export default function MetaManager() {
                         disabled={acc.is_registered}
                         onChange={() => !acc.is_registered && toggleSelection(acc)}
                         onClick={e => e.stopPropagation()}
-                        style={{ accentColor: '#3b82f6', cursor: acc.is_registered ? 'default' : 'pointer' }}
+                        style={{ accentColor: 'var(--accent)', cursor: acc.is_registered ? 'default' : 'pointer' }}
                       />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0' }}>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>
                           {acc.name}
                           {acc.is_registered && (
                             <span style={{
                               marginLeft: 8, padding: '1px 6px', borderRadius: 4,
-                              fontSize: 9, fontWeight: 600, background: '#064e3b', color: '#10b981',
+                              fontSize: 9, fontWeight: 600, background: 'var(--badge-green-bg)', color: 'var(--green)',
                             }}>Sudah terdaftar</span>
                           )}
                         </div>
-                        <div style={{ fontSize: 10, color: '#64748b' }}>
+                        <div style={{ fontSize: 10, color: 'var(--dim)' }}>
                           {acc.account_id} · {statusLabel} · {acc.currency}
                         </div>
                       </div>
@@ -622,7 +624,7 @@ export default function MetaManager() {
                 );
               })}
               {filteredRemote.length === 0 && (
-                <div style={{ padding: 24, textAlign: 'center', color: '#64748b', fontSize: 12 }}>
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>
                   {searchFilter ? 'Tidak ada akun yang cocok' : 'Tidak ada akun ditemukan'}
                 </div>
               )}
@@ -631,7 +633,7 @@ export default function MetaManager() {
             {/* Save button */}
             {selectedMappings.size > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                   {selectedMappings.size} akun dipilih
                 </div>
                 <button
@@ -639,7 +641,7 @@ export default function MetaManager() {
                   disabled={savingBulk}
                   style={{
                     padding: '8px 24px', borderRadius: 6, border: 'none', cursor: savingBulk ? 'not-allowed' : 'pointer',
-                    background: savingBulk ? '#1a2744' : '#3b82f6', color: '#fff',
+                    background: savingBulk ? 'var(--border)' : 'var(--accent)', color: '#fff',
                     fontSize: 13, fontWeight: 600, opacity: savingBulk ? 0.6 : 1,
                   }}
                 >
@@ -652,31 +654,31 @@ export default function MetaManager() {
 
         {/* ─── Registered Account List ─── */}
         {accounts.length === 0 && !showPicker ? (
-          <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>
             Belum ada akun Meta Ads. Klik "+ Tambah Akun" untuk memuat daftar dari Meta API.
           </div>
         ) : accounts.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
               <thead>
-                <tr style={{ background: '#0b1121' }}>
+                <tr style={{ background: 'var(--bg)' }}>
                   {['Status', 'Account ID', 'Nama Akun', 'Store', 'Source', 'Advertiser', 'Aksi'].map(h => (
                     <th key={h} style={{
-                      padding: '10px 12px', textAlign: 'left', color: '#64748b',
+                      padding: '10px 12px', textAlign: 'left', color: 'var(--dim)',
                       fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
-                      borderBottom: '2px solid #1a2744',
+                      borderBottom: '2px solid var(--border)',
                     }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {accounts.map(acc => (
-                  <tr key={acc.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                  <tr key={acc.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                     {editingId === acc.id ? (
                       /* ── Inline edit mode ── */
                       <>
                         <td style={{ padding: '8px 12px' }} colSpan={2}>
-                          <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#64748b' }}>{acc.account_id}</span>
+                          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--dim)' }}>{acc.account_id}</span>
                         </td>
                         <td style={{ padding: '8px 6px' }}>
                           <input value={editForm.account_name} onChange={e => setEditForm(f => ({ ...f, account_name: e.target.value }))}
@@ -707,11 +709,11 @@ export default function MetaManager() {
                           <div style={{ display: 'flex', gap: 4 }}>
                             <button onClick={handleEditSave} style={{
                               padding: '4px 8px', borderRadius: 4, border: 'none',
-                              background: '#3b82f6', color: '#fff', fontSize: 10, cursor: 'pointer',
+                              background: 'var(--accent)', color: '#fff', fontSize: 10, cursor: 'pointer',
                             }}>Simpan</button>
                             <button onClick={() => setEditingId(null)} style={{
-                              padding: '4px 8px', borderRadius: 4, border: '1px solid #1a2744',
-                              background: 'transparent', color: '#64748b', fontSize: 10, cursor: 'pointer',
+                              padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)',
+                              background: 'transparent', color: 'var(--dim)', fontSize: 10, cursor: 'pointer',
                             }}>Batal</button>
                           </div>
                         </td>
@@ -722,29 +724,29 @@ export default function MetaManager() {
                         <td style={{ padding: '10px 12px' }}>
                           <span style={{
                             padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
-                            background: acc.is_active ? '#064e3b' : '#1a2744',
-                            color: acc.is_active ? '#10b981' : '#64748b',
+                            background: acc.is_active ? 'var(--badge-green-bg)' : 'var(--border)',
+                            color: acc.is_active ? 'var(--green)' : 'var(--dim)',
                           }}>
                             {acc.is_active ? 'Aktif' : 'Nonaktif'}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 11 }}>
                           {acc.account_id}
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#e2e8f0', fontWeight: 600 }}>{acc.account_name}</td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.store}</td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.default_source}</td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.default_advertiser}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text)', fontWeight: 600 }}>{acc.account_name}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.store}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_source}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_advertiser}</td>
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button onClick={() => handleEdit(acc)} style={{
-                              padding: '4px 10px', borderRadius: 4, border: '1px solid #1a2744',
+                              padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)',
                               background: 'transparent', color: '#60a5fa', fontSize: 11, cursor: 'pointer',
                             }}>Edit</button>
                             <button onClick={() => handleToggleActive(acc)} style={{
-                              padding: '4px 10px', borderRadius: 4, border: '1px solid #1a2744',
+                              padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)',
                               background: 'transparent', fontSize: 11, cursor: 'pointer',
-                              color: acc.is_active ? '#f59e0b' : '#10b981',
+                              color: acc.is_active ? 'var(--yellow)' : 'var(--green)',
                             }}>
                               {acc.is_active ? 'Nonaktifkan' : 'Aktifkan'}
                             </button>
@@ -762,18 +764,18 @@ export default function MetaManager() {
 
       {/* ─── Recent Sync Logs ─── */}
       {recentLogs.length > 0 && (
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Riwayat Sync Meta</div>
-          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>5 sync terakhir</div>
+          <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>5 sync terakhir</div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 500 }}>
               <thead>
-                <tr style={{ background: '#0b1121' }}>
+                <tr style={{ background: 'var(--bg)' }}>
                   {['Waktu', 'Range', 'Akun', 'Baris', 'Status', 'Durasi'].map(h => (
                     <th key={h} style={{
-                      padding: '10px 12px', textAlign: 'left', color: '#64748b',
+                      padding: '10px 12px', textAlign: 'left', color: 'var(--dim)',
                       fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
-                      borderBottom: '2px solid #1a2744',
+                      borderBottom: '2px solid var(--border)',
                     }}>{h}</th>
                   ))}
                 </tr>
@@ -782,31 +784,31 @@ export default function MetaManager() {
                 {recentLogs.map(log => {
                   const ss = statusStyle(log.status);
                   return (
-                    <tr key={log.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                      <td style={{ padding: '10px 12px', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: 11 }}>
+                    <tr key={log.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontSize: 11 }}>
                         {new Date(log.created_at).toLocaleString('id-ID', {
                           day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
                         })}
                       </td>
-                      <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: 11 }}>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
                         {log.date_range_start === log.date_range_end
                           ? log.date_range_start
                           : `${log.date_range_start} ~ ${log.date_range_end}`}
                       </td>
-                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{log.accounts_synced}</td>
-                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{log.rows_inserted}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text)' }}>{log.accounts_synced}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text)' }}>{log.rows_inserted}</td>
                       <td style={{ padding: '10px 12px' }}>
                         <span style={{
                           padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
                           background: ss.bg, color: ss.color,
                         }}>{ss.label}</span>
                         {log.error_message && (
-                          <div style={{ fontSize: 10, color: '#ef4444', marginTop: 2, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 2, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {log.error_message}
                           </div>
                         )}
                       </td>
-                      <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: 11 }}>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
                         {log.duration_ms ? `${(log.duration_ms / 1000).toFixed(1)}s` : '—'}
                       </td>
                     </tr>
@@ -820,7 +822,7 @@ export default function MetaManager() {
       {/* ═══════════════════════════════════════════════════════ */}
       {/* ─── WhatsApp Business Accounts (WABA) ─── */}
       {/* ═══════════════════════════════════════════════════════ */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>WhatsApp Business Accounts</div>
           <button
@@ -834,7 +836,7 @@ export default function MetaManager() {
             + Tambah WABA
           </button>
         </div>
-        <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>
+        <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
           Daftar WABA yang datanya ditarik otomatis via WhatsApp Business Management API.
         </div>
 
@@ -842,17 +844,17 @@ export default function MetaManager() {
         {wabaAccounts.filter(a => a.is_active).length > 0 && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14,
-            padding: 12, background: '#0b1121', borderRadius: 8, border: '1px solid #1a2744',
+            padding: 12, background: 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)',
             flexWrap: 'wrap',
           }}>
-            <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>Sync tanggal:</span>
+            <span style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>Sync tanggal:</span>
             <input
               type="date"
               value={wabaSyncDateStart}
               onChange={e => setWabaSyncDateStart(e.target.value)}
               style={{ ...inputStyle, width: 'auto', padding: '5px 8px', fontSize: 12 }}
             />
-            <span style={{ fontSize: 12, color: '#64748b' }}>s/d</span>
+            <span style={{ fontSize: 12, color: 'var(--dim)' }}>s/d</span>
             <input
               type="date"
               value={wabaSyncDateEnd}
@@ -865,7 +867,7 @@ export default function MetaManager() {
               style={{
                 padding: '6px 16px', borderRadius: 6, border: 'none',
                 cursor: wabaSyncing ? 'not-allowed' : 'pointer',
-                background: wabaSyncing ? '#1a2744' : '#25D366', color: '#fff',
+                background: wabaSyncing ? 'var(--border)' : '#25D366', color: '#fff',
                 fontSize: 12, fontWeight: 600, opacity: wabaSyncing ? 0.4 : 1,
                 marginLeft: 'auto',
               }}
@@ -879,8 +881,8 @@ export default function MetaManager() {
         {wabaMessage && (
           <div style={{
             marginBottom: 12, padding: 12, borderRadius: 8, fontSize: 13,
-            background: wabaMessage.type === 'success' ? '#064e3b' : '#7f1d1d',
-            color: wabaMessage.type === 'success' ? '#10b981' : '#ef4444',
+            background: wabaMessage.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+            color: wabaMessage.type === 'success' ? 'var(--green)' : 'var(--red)',
           }}>
             {wabaMessage.type === 'success' ? '✅' : '❌'} {wabaMessage.text}
           </div>
@@ -889,16 +891,16 @@ export default function MetaManager() {
         {/* ─── Add WABA Form ─── */}
         {showWabaForm && (
           <div style={{
-            marginBottom: 16, padding: 16, background: '#0b1121',
-            borderRadius: 8, border: '1px solid #1a2744',
+            marginBottom: 16, padding: 16, background: 'var(--bg)',
+            borderRadius: 8, border: '1px solid var(--border)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>Tambah WABA Account</div>
               <button
                 onClick={() => { setShowWabaForm(false); setWabaForm({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' }); }}
                 style={{
-                  padding: '4px 12px', borderRadius: 4, border: '1px solid #1a2744',
-                  background: 'transparent', color: '#64748b', fontSize: 11, cursor: 'pointer',
+                  padding: '4px 12px', borderRadius: 4, border: '1px solid var(--border)',
+                  background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer',
                 }}
               >
                 Tutup
@@ -959,7 +961,7 @@ export default function MetaManager() {
                 disabled={savingWaba}
                 style={{
                   padding: '8px 24px', borderRadius: 6, border: 'none', cursor: savingWaba ? 'not-allowed' : 'pointer',
-                  background: savingWaba ? '#1a2744' : '#25D366', color: '#fff',
+                  background: savingWaba ? 'var(--border)' : '#25D366', color: '#fff',
                   fontSize: 13, fontWeight: 600, opacity: savingWaba ? 0.6 : 1,
                 }}
               >
@@ -971,30 +973,30 @@ export default function MetaManager() {
 
         {/* ─── WABA Account List ─── */}
         {wabaAccounts.length === 0 && !showWabaForm ? (
-          <div style={{ textAlign: 'center', padding: 40, color: '#64748b', fontSize: 13 }}>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>
             Belum ada WABA account. Klik "+ Tambah WABA" untuk menambahkan.
           </div>
         ) : wabaAccounts.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
               <thead>
-                <tr style={{ background: '#0b1121' }}>
+                <tr style={{ background: 'var(--bg)' }}>
                   {['Status', 'WABA ID', 'Nama', 'Store', 'Source', 'Advertiser', 'Aksi'].map(h => (
                     <th key={h} style={{
-                      padding: '10px 12px', textAlign: 'left', color: '#64748b',
+                      padding: '10px 12px', textAlign: 'left', color: 'var(--dim)',
                       fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
-                      borderBottom: '2px solid #1a2744',
+                      borderBottom: '2px solid var(--border)',
                     }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {wabaAccounts.map(acc => (
-                  <tr key={acc.id} style={{ borderBottom: '1px solid #0f172a' }}>
+                  <tr key={acc.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                     {wabaEditingId === acc.id ? (
                       <>
                         <td style={{ padding: '8px 12px' }} colSpan={2}>
-                          <span style={{ fontFamily: 'monospace', fontSize: 11, color: '#64748b' }}>{acc.waba_id}</span>
+                          <span style={{ fontFamily: 'monospace', fontSize: 11, color: 'var(--dim)' }}>{acc.waba_id}</span>
                         </td>
                         <td style={{ padding: '8px 6px' }}>
                           <input value={wabaEditForm.waba_name} onChange={e => setWabaEditForm(f => ({ ...f, waba_name: e.target.value }))}
@@ -1024,8 +1026,8 @@ export default function MetaManager() {
                               background: '#25D366', color: '#fff', fontSize: 10, cursor: 'pointer',
                             }}>Simpan</button>
                             <button onClick={() => setWabaEditingId(null)} style={{
-                              padding: '4px 8px', borderRadius: 4, border: '1px solid #1a2744',
-                              background: 'transparent', color: '#64748b', fontSize: 10, cursor: 'pointer',
+                              padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)',
+                              background: 'transparent', color: 'var(--dim)', fontSize: 10, cursor: 'pointer',
                             }}>Batal</button>
                           </div>
                         </td>
@@ -1035,29 +1037,29 @@ export default function MetaManager() {
                         <td style={{ padding: '10px 12px' }}>
                           <span style={{
                             padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600,
-                            background: acc.is_active ? '#064e3b' : '#1a2744',
-                            color: acc.is_active ? '#10b981' : '#64748b',
+                            background: acc.is_active ? 'var(--badge-green-bg)' : 'var(--border)',
+                            color: acc.is_active ? 'var(--green)' : 'var(--dim)',
                           }}>
                             {acc.is_active ? 'Aktif' : 'Nonaktif'}
                           </span>
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8', fontFamily: 'monospace', fontSize: 11 }}>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 11 }}>
                           {acc.waba_id}
                         </td>
-                        <td style={{ padding: '10px 12px', color: '#e2e8f0', fontWeight: 600 }}>{acc.waba_name}</td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.store}</td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.default_source}</td>
-                        <td style={{ padding: '10px 12px', color: '#94a3b8' }}>{acc.default_advertiser}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text)', fontWeight: 600 }}>{acc.waba_name}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.store}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_source}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_advertiser}</td>
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button onClick={() => handleWabaEdit(acc)} style={{
-                              padding: '4px 10px', borderRadius: 4, border: '1px solid #1a2744',
+                              padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)',
                               background: 'transparent', color: '#60a5fa', fontSize: 11, cursor: 'pointer',
                             }}>Edit</button>
                             <button onClick={() => handleWabaToggleActive(acc)} style={{
-                              padding: '4px 10px', borderRadius: 4, border: '1px solid #1a2744',
+                              padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)',
                               background: 'transparent', fontSize: 11, cursor: 'pointer',
-                              color: acc.is_active ? '#f59e0b' : '#10b981',
+                              color: acc.is_active ? 'var(--yellow)' : 'var(--green)',
                             }}>
                               {acc.is_active ? 'Nonaktifkan' : 'Aktifkan'}
                             </button>
@@ -1075,18 +1077,18 @@ export default function MetaManager() {
 
       {/* ─── WABA Sync Logs ─── */}
       {wabaLogs.length > 0 && (
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Riwayat Sync WABA</div>
-          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 14 }}>5 sync terakhir</div>
+          <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>5 sync terakhir</div>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 500 }}>
               <thead>
-                <tr style={{ background: '#0b1121' }}>
+                <tr style={{ background: 'var(--bg)' }}>
                   {['Waktu', 'Range', 'Akun', 'Baris', 'Status', 'Durasi'].map(h => (
                     <th key={h} style={{
-                      padding: '10px 12px', textAlign: 'left', color: '#64748b',
+                      padding: '10px 12px', textAlign: 'left', color: 'var(--dim)',
                       fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
-                      borderBottom: '2px solid #1a2744',
+                      borderBottom: '2px solid var(--border)',
                     }}>{h}</th>
                   ))}
                 </tr>
@@ -1095,31 +1097,31 @@ export default function MetaManager() {
                 {wabaLogs.map(log => {
                   const ss = statusStyle(log.status);
                   return (
-                    <tr key={log.id} style={{ borderBottom: '1px solid #0f172a' }}>
-                      <td style={{ padding: '10px 12px', color: '#94a3b8', whiteSpace: 'nowrap', fontSize: 11 }}>
+                    <tr key={log.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontSize: 11 }}>
                         {new Date(log.created_at).toLocaleString('id-ID', {
                           day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
                         })}
                       </td>
-                      <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: 11 }}>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
                         {log.date_range_start === log.date_range_end
                           ? log.date_range_start
                           : `${log.date_range_start} ~ ${log.date_range_end}`}
                       </td>
-                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{log.accounts_synced}</td>
-                      <td style={{ padding: '10px 12px', color: '#e2e8f0' }}>{log.rows_inserted}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text)' }}>{log.accounts_synced}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text)' }}>{log.rows_inserted}</td>
                       <td style={{ padding: '10px 12px' }}>
                         <span style={{
                           padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
                           background: ss.bg, color: ss.color,
                         }}>{ss.label}</span>
                         {log.error_message && (
-                          <div style={{ fontSize: 10, color: '#ef4444', marginTop: 2, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 2, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                             {log.error_message}
                           </div>
                         )}
                       </td>
-                      <td style={{ padding: '10px 12px', color: '#94a3b8', fontSize: 11 }}>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
                         {log.duration_ms ? `${(log.duration_ms / 1000).toFixed(1)}s` : '—'}
                       </td>
                     </tr>

@@ -82,26 +82,26 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
 
   if (loading) {
     return (
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, marginBottom: 20 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 20 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Cash Flow Status</div>
-        <div style={{ textAlign: 'center', padding: 20, color: '#64748b', fontSize: 12 }}>Memuat data cash flow...</div>
+        <div style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 12 }}>Memuat data cash flow...</div>
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20, marginBottom: 20 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 20 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Cash Flow Status</div>
         <div style={{ textAlign: 'center', padding: 20 }}>
-          <div style={{ color: '#ef4444', fontSize: 12, marginBottom: 8 }}>
+          <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 8 }}>
             {error || 'Data tidak tersedia'}
           </div>
           <button
             onClick={loadCashFlow}
             style={{
-              background: '#1e293b', border: '1px solid #334155', borderRadius: 6,
-              color: '#94a3b8', padding: '6px 16px', fontSize: 12, cursor: 'pointer',
+              background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: 6,
+              color: 'var(--text-secondary)', padding: '6px 16px', fontSize: 12, cursor: 'pointer',
             }}
           >
             Coba Lagi
@@ -121,20 +121,20 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
   );
 
   return (
-    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
 
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
         <div>
           <div style={{ fontSize: 15, fontWeight: 700 }}>Cash Flow Status</div>
-          <div style={{ fontSize: 11, color: '#64748b' }}>
+          <div style={{ fontSize: 11, color: 'var(--dim)' }}>
             {periodLabel} · Sumber data: Scalev Orders
           </div>
         </div>
       </div>
 
       {/* ── Row 1: Cash Masuk ── */}
-      <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+      <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
         Cash Masuk
       </div>
       <div style={{ display: 'flex', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
@@ -143,8 +143,8 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           value={data.cashReceived}
           orders={data.cashReceivedOrders}
           pctValue={pct(data.cashReceived)}
-          color="#10b981"
-          bgAccent="#064e3b"
+          color="var(--green)"
+          bgAccent="var(--badge-green-bg)"
           sub="Completed shipment + Bank Transfer shipped bulan ini"
         />
         <MiniCard
@@ -153,27 +153,27 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           orders={data.spillOverOrders}
           pctValue={pct(data.spillOver)}
           color="#8b5cf6"
-          bgAccent="#2e1065"
+          bgAccent="var(--accent-subtle)"
           sub="COD & MP shipped bulan lalu, completed bulan ini"
         />
         {/* Total Cash In — highlighted */}
         <div style={{
-          flex: '1 1 180px', background: '#0f2318', borderRadius: 10,
-          padding: '14px 16px', border: '2px solid #10b981',
+          flex: '1 1 180px', background: 'var(--badge-green-bg)', borderRadius: 10,
+          padding: '14px 16px', border: '2px solid var(--green)',
           position: 'relative', overflow: 'hidden',
         }}>
-          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: '#10b981' }} />
-          <div style={{ fontSize: 10, color: '#10b981', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.04em', marginBottom: 6 }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: 'var(--green)' }} />
+          <div style={{ fontSize: 10, color: 'var(--green)', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.04em', marginBottom: 6 }}>
             Total Cash Masuk
           </div>
-          <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'monospace', color: '#10b981', lineHeight: 1.1 }}>
+          <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'monospace', color: 'var(--green)', lineHeight: 1.1 }}>
             Rp {fmtCompact(totalCashIn)}
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11 }}>
-            <span style={{ color: '#64748b' }}>{(data.cashReceivedOrders + data.spillOverOrders).toLocaleString('id-ID')} orders</span>
+            <span style={{ color: 'var(--dim)' }}>{(data.cashReceivedOrders + data.spillOverOrders).toLocaleString('id-ID')} orders</span>
             <span style={{
               padding: '2px 8px', borderRadius: 4, fontWeight: 800, fontSize: 11,
-              background: '#064e3b', color: '#10b981', fontFamily: 'monospace',
+              background: 'var(--badge-green-bg)', color: 'var(--green)', fontFamily: 'monospace',
             }}>
               {pct(totalCashIn).toFixed(1)}%
             </span>
@@ -185,7 +185,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
       </div>
 
       {/* ── Row 2: Cash Belum Masuk ── */}
-      <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
+      <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 8 }}>
         Cash Belum Masuk
       </div>
       <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -194,8 +194,8 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           value={data.cashInProgress}
           orders={data.cashInProgressOrders}
           pctValue={pct(data.cashInProgress)}
-          color="#f59e0b"
-          bgAccent="#78350f"
+          color="var(--yellow)"
+          bgAccent="var(--badge-yellow-bg)"
           sub="COD & MP shipped bulan ini, menunggu completed"
         />
         <MiniCard
@@ -203,8 +203,8 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
           value={data.overdue}
           orders={data.overdueOrders}
           pctValue={pct(data.overdue)}
-          color={data.overdueOrders > 0 ? '#ef4444' : '#64748b'}
-          bgAccent={data.overdueOrders > 0 ? '#7f1d1d' : '#1e293b'}
+          color={data.overdueOrders > 0 ? 'var(--red)' : 'var(--dim)'}
+          bgAccent={data.overdueOrders > 0 ? 'var(--badge-red-bg)' : 'var(--bg-deep)'}
           sub="COD & MP shipped bulan lalu, bulan ini masih belum completed"
           warn={data.overdueOrders > 100}
         />
@@ -213,19 +213,19 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
       {/* ── Progress Bar ── */}
       <div style={{ marginBottom: 16 }}>
         <div style={{
-          display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: '#1e293b',
+          display: 'flex', height: 6, borderRadius: 3, overflow: 'hidden', background: 'var(--bg-deep)',
         }}>
           {pct(data.cashReceived) > 0 && (
-            <div style={{ width: `${pct(data.cashReceived)}%`, background: '#10b981', transition: 'width 0.5s' }} />
+            <div style={{ width: `${pct(data.cashReceived)}%`, background: 'var(--green)', transition: 'width 0.5s' }} />
           )}
           {pct(data.spillOver) > 0 && (
             <div style={{ width: `${pct(data.spillOver)}%`, background: '#8b5cf6', transition: 'width 0.5s' }} />
           )}
           {pct(data.cashInProgress) > 0 && (
-            <div style={{ width: `${Math.min(pct(data.cashInProgress), 100 - pct(data.cashReceived) - pct(data.spillOver))}%`, background: '#f59e0b', opacity: 0.6, transition: 'width 0.5s' }} />
+            <div style={{ width: `${Math.min(pct(data.cashInProgress), 100 - pct(data.cashReceived) - pct(data.spillOver))}%`, background: 'var(--yellow)', opacity: 0.6, transition: 'width 0.5s' }} />
           )}
           {pct(data.overdue) > 0 && (
-            <div style={{ width: `${Math.min(pct(data.overdue), 5)}%`, background: '#ef4444', opacity: 0.8, transition: 'width 0.5s' }} />
+            <div style={{ width: `${Math.min(pct(data.overdue), 5)}%`, background: 'var(--red)', opacity: 0.8, transition: 'width 0.5s' }} />
           )}
         </div>
       </div>
@@ -235,7 +235,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
         <div>
           <div
             onClick={() => setChannelOpen(!channelOpen)}
-            style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: channelOpen ? 8 : 0, cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
+            style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: channelOpen ? 8 : 0, cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 6 }}
           >
             <span style={{ display: 'inline-block', transition: 'transform 0.2s', transform: channelOpen ? 'rotate(90deg)' : 'rotate(0deg)', fontSize: 10 }}>&#9654;</span>
             Breakdown per Channel
@@ -254,9 +254,9 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
               </thead>
               <tbody>
                 {activeChannels.map(ch => {
-                  const chColor = CH_COLORS[ch] || '#94a3b8';
+                  const chColor = CH_COLORS[ch] || 'var(--text-secondary)';
                   return (
-                    <tr key={ch} style={{ borderBottom: '1px solid #1a2744' }}>
+                    <tr key={ch} style={{ borderBottom: '1px solid var(--border)' }}>
                       <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>
                         <span style={{
                           display: 'inline-block', width: 8, height: 8, borderRadius: 2,
@@ -272,13 +272,13 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
                           <td key={cat} style={{ padding: '7px 6px', textAlign: 'right', fontFamily: 'monospace' }}>
                             {val > 0 ? (
                               <div>
-                                <div style={{ color: '#e2e8f0' }}>{fmtCompact(val)}</div>
-                                <div style={{ color: '#475569', fontSize: 9 }}>
+                                <div style={{ color: 'var(--text)' }}>{fmtCompact(val)}</div>
+                                <div style={{ color: 'var(--text-muted)', fontSize: 9 }}>
                                   {ord.toLocaleString('id-ID')} ord
                                 </div>
                               </div>
                             ) : (
-                              <span style={{ color: '#334155' }}>-</span>
+                              <span style={{ color: 'var(--text-muted)' }}>-</span>
                             )}
                           </td>
                         );
@@ -287,15 +287,15 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
                   );
                 })}
                 {/* ── Totals row ── */}
-                <tr style={{ borderTop: '2px solid #1a2744' }}>
-                  <td style={{ padding: '8px 6px', fontWeight: 700, color: '#94a3b8' }}>Total</td>
+                <tr style={{ borderTop: '2px solid var(--border)' }}>
+                  <td style={{ padding: '8px 6px', fontWeight: 700, color: 'var(--text-secondary)' }}>Total</td>
                   {CATEGORY_KEYS.map(cat => {
                     const catTotal = activeChannels.reduce((s, ch) => s + (byChannel[cat]?.[ch]?.total || 0), 0);
                     const catOrders = activeChannels.reduce((s, ch) => s + (byChannel[cat]?.[ch]?.orders || 0), 0);
                     return (
                       <td key={cat} style={{ padding: '7px 6px', textAlign: 'right', fontFamily: 'monospace' }}>
                         <div style={{ color: CAT_COLORS[cat], fontWeight: 700 }}>{fmtCompact(catTotal)}</div>
-                        <div style={{ color: '#64748b', fontSize: 9 }}>
+                        <div style={{ color: 'var(--dim)', fontSize: 9 }}>
                           {catOrders.toLocaleString('id-ID')} ord
                         </div>
                       </td>
@@ -314,9 +314,9 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
 /* ── Shared table header style ── */
 const thStyle: React.CSSProperties = {
   padding: '6px 6px 8px',
-  borderBottom: '2px solid #1a2744',
+  borderBottom: '2px solid var(--border)',
   fontWeight: 600,
-  color: '#64748b',
+  color: 'var(--dim)',
   fontSize: 10,
   textTransform: 'uppercase',
   letterSpacing: '0.04em',
@@ -326,19 +326,19 @@ const thStyle: React.CSSProperties = {
 function MiniCard({ label, value, orders, pctValue, color, bgAccent, sub, warn = false }) {
   return (
     <div style={{
-      flex: '1 1 180px', background: '#0c1524', borderRadius: 10,
-      padding: '14px 16px', border: '1px solid #1a2744',
+      flex: '1 1 180px', background: 'var(--bg-deep)', borderRadius: 10,
+      padding: '14px 16px', border: '1px solid var(--border)',
       position: 'relative', overflow: 'hidden',
     }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: color }} />
-      <div style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 6 }}>
+      <div style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.04em', marginBottom: 6 }}>
         {label}
       </div>
       <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', color, lineHeight: 1.1 }}>
         Rp {fmtCompact(value)}
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, fontSize: 11 }}>
-        <span style={{ color: '#64748b' }}>{orders.toLocaleString('id-ID')} orders</span>
+        <span style={{ color: 'var(--dim)' }}>{orders.toLocaleString('id-ID')} orders</span>
         <span style={{
           padding: '1px 6px', borderRadius: 4, fontWeight: 700, fontSize: 10,
           background: bgAccent, color, fontFamily: 'monospace',
@@ -346,8 +346,8 @@ function MiniCard({ label, value, orders, pctValue, color, bgAccent, sub, warn =
           {pctValue.toFixed(1)}%
         </span>
       </div>
-      <div style={{ fontSize: 10, color: '#475569', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-        {warn && <span style={{ color: '#ef4444' }}>!</span>}
+      <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+        {warn && <span style={{ color: 'var(--red)' }}>!</span>}
         {sub}
       </div>
     </div>

@@ -95,9 +95,9 @@ export default function FinancialSheetManager() {
   }
 
   return (
-    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
       <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>📊 Financial Report Sync</div>
-      <div style={{ fontSize: 12, color: '#64748b', marginBottom: 16 }}>
+      <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 16 }}>
         Hubungkan Google Sheets laporan keuangan (PL, CF, Rasio)
       </div>
 
@@ -109,8 +109,8 @@ export default function FinancialSheetManager() {
           value={newLabel}
           onChange={(e) => setNewLabel(e.target.value)}
           style={{
-            background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8,
-            padding: '8px 12px', color: '#e2e8f0', fontSize: 13, outline: 'none', width: 130,
+            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+            padding: '8px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', width: 130,
           }}
         />
         <input
@@ -119,8 +119,8 @@ export default function FinancialSheetManager() {
           value={newId}
           onChange={(e) => setNewId(e.target.value)}
           style={{
-            background: '#0b1121', border: '1px solid #1a2744', borderRadius: 8,
-            padding: '8px 12px', color: '#e2e8f0', fontSize: 13, outline: 'none', flex: 1,
+            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+            padding: '8px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', flex: 1,
           }}
         />
         <button
@@ -128,7 +128,7 @@ export default function FinancialSheetManager() {
           disabled={loading || !newId.trim() || !newLabel.trim()}
           style={{
             padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-            background: '#064e3b', color: '#10b981', fontSize: 13, fontWeight: 600,
+            background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600,
             opacity: loading || !newId.trim() || !newLabel.trim() ? 0.5 : 1,
           }}
         >
@@ -142,19 +142,21 @@ export default function FinancialSheetManager() {
         disabled={syncing || connections.filter(c => c.is_active).length === 0}
         style={{
           padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-          background: '#1e3a5f', color: '#3b82f6', fontSize: 13, fontWeight: 600,
+          background: 'var(--green)', color: '#fff', fontSize: 13, fontWeight: 600,
           marginBottom: 12,
           opacity: syncing || connections.filter(c => c.is_active).length === 0 ? 0.5 : 1,
+          display: 'inline-flex', alignItems: 'center', gap: 6,
         }}
       >
-        {syncing ? '⏳ Syncing...' : '🔄 Sync Now'}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={syncing ? { animation: 'spin 1s linear infinite' } : undefined}><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
+        {syncing ? 'Syncing...' : 'Sync Now'}
       </button>
 
       {/* Status message */}
       {message && (
         <div style={{
-          padding: 12, background: '#0b1121', border: '1px solid #1a2744',
-          borderRadius: 8, marginBottom: 12, fontSize: 12, color: '#94a3b8',
+          padding: 12, background: 'var(--bg)', border: '1px solid var(--border)',
+          borderRadius: 8, marginBottom: 12, fontSize: 12, color: 'var(--text-secondary)',
           whiteSpace: 'pre-wrap',
         }}>
           {message}
@@ -163,15 +165,15 @@ export default function FinancialSheetManager() {
 
       {/* Connection list */}
       {connections.length === 0 ? (
-        <div style={{ color: '#64748b', fontSize: 13 }}>Belum ada spreadsheet terhubung</div>
+        <div style={{ color: 'var(--dim)', fontSize: 13 }}>Belum ada spreadsheet terhubung</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {connections.map((conn) => (
             <div
               key={conn.id}
               style={{
-                padding: 12, background: '#0b1121', borderRadius: 8,
-                border: '1px solid #1a2744',
+                padding: 12, background: 'var(--bg)', borderRadius: 8,
+                border: '1px solid var(--border)',
                 opacity: conn.is_active ? 1 : 0.5,
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
                 flexWrap: 'wrap', gap: 8,
@@ -181,18 +183,18 @@ export default function FinancialSheetManager() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={{
                     width: 8, height: 8, borderRadius: '50%',
-                    background: conn.is_active ? '#10b981' : '#64748b',
+                    background: conn.is_active ? 'var(--green)' : 'var(--dim)',
                     display: 'inline-block',
                   }} />
-                  <span style={{ color: '#e2e8f0', fontSize: 13, fontWeight: 600 }}>{conn.label}</span>
-                  <span style={{ color: '#475569', fontSize: 11, fontFamily: 'monospace' }}>
+                  <span style={{ color: 'var(--text)', fontSize: 13, fontWeight: 600 }}>{conn.label}</span>
+                  <span style={{ color: 'var(--text-muted)', fontSize: 11, fontFamily: 'monospace' }}>
                     {conn.spreadsheet_id.substring(0, 20)}...
                   </span>
                 </div>
                 {conn.last_synced && (
-                  <div style={{ marginTop: 4, fontSize: 11, color: '#64748b' }}>
+                  <div style={{ marginTop: 4, fontSize: 11, color: 'var(--dim)' }}>
                     Last sync: {new Date(conn.last_synced).toLocaleString('id-ID')} —{' '}
-                    <span style={{ color: conn.last_sync_status === 'error' ? '#ef4444' : '#10b981' }}>
+                    <span style={{ color: conn.last_sync_status === 'error' ? 'var(--red)' : 'var(--green)' }}>
                       {conn.last_sync_message}
                     </span>
                   </div>
@@ -202,8 +204,8 @@ export default function FinancialSheetManager() {
                 <button
                   onClick={() => handleToggle(conn.id, conn.is_active)}
                   style={{
-                    padding: '4px 10px', borderRadius: 6, border: '1px solid #1a2744',
-                    cursor: 'pointer', background: 'transparent', color: '#64748b',
+                    padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)',
+                    cursor: 'pointer', background: 'transparent', color: 'var(--dim)',
                     fontSize: 11, fontWeight: 600,
                   }}
                 >
@@ -212,8 +214,8 @@ export default function FinancialSheetManager() {
                 <button
                   onClick={() => handleRemove(conn.id)}
                   style={{
-                    padding: '4px 10px', borderRadius: 6, border: '1px solid #7f1d1d',
-                    cursor: 'pointer', background: 'transparent', color: '#ef4444',
+                    padding: '4px 10px', borderRadius: 6, border: '1px solid var(--badge-red-bg)',
+                    cursor: 'pointer', background: 'transparent', color: 'var(--red)',
                     fontSize: 11, fontWeight: 600,
                   }}
                 >
@@ -226,8 +228,8 @@ export default function FinancialSheetManager() {
       )}
 
       {/* Info */}
-      <div style={{ marginTop: 16, fontSize: 11, color: '#475569' }}>
-        <div>Share spreadsheet ke: <code style={{ color: '#64748b' }}>roove-bi-reader@roove-bi.iam.gserviceaccount.com</code> (Viewer)</div>
+      <div style={{ marginTop: 16, fontSize: 11, color: 'var(--text-muted)' }}>
+        <div>Share spreadsheet ke: <code style={{ color: 'var(--dim)' }}>roove-bi-reader@roove-bi.iam.gserviceaccount.com</code> (Viewer)</div>
         <div style={{ marginTop: 4 }}>Data: PL (Laba Rugi), CF (Cash Flow), Rasio Keuangan. Auto-sync 1x/hari.</div>
         <div style={{ marginTop: 4 }}>⚠️ Revenue basis: PL = Delivered | Daily Income = Confirmed (normal ada selisih)</div>
       </div>

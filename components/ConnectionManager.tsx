@@ -46,9 +46,9 @@ type FormData = {
 const EMPTY_FORM: FormData = { business_code: '', business_name: '', webhook_secret: '', api_key: '' };
 
 const STORE_TYPES = [
-  { value: 'marketplace' as const, label: 'Marketplace', color: '#0ea5e9', bg: '#0c4a6e' },
-  { value: 'scalev' as const, label: 'Scalev', color: '#a78bfa', bg: '#312e81' },
-  { value: 'reseller' as const, label: 'Reseller', color: '#f59e0b', bg: '#78350f' },
+  { value: 'marketplace' as const, label: 'Marketplace', color: '#0ea5e9', bg: 'var(--accent-subtle)' },
+  { value: 'scalev' as const, label: 'Scalev', color: '#a78bfa', bg: 'var(--accent-subtle)' },
+  { value: 'reseller' as const, label: 'Reseller', color: 'var(--yellow)', bg: 'var(--badge-yellow-bg)' },
 ];
 
 export default function ConnectionManager() {
@@ -244,8 +244,8 @@ export default function ConnectionManager() {
 
   if (loading) {
     return (
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
-        <div style={{ color: '#64748b', fontSize: 13 }}>Memuat koneksi Scalev...</div>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+        <div style={{ color: 'var(--dim)', fontSize: 13 }}>Memuat koneksi Scalev...</div>
       </div>
     );
   }
@@ -253,45 +253,45 @@ export default function ConnectionManager() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* ── Status Bar ── */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
         <span style={{
           padding: '4px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600,
-          background: configured ? '#064e3b' : '#78350f',
-          color: configured ? '#10b981' : '#f59e0b',
+          background: configured ? 'var(--badge-green-bg)' : 'var(--badge-yellow-bg)',
+          color: configured ? 'var(--green)' : 'var(--yellow)',
         }}>
           {configured ? `${bizCount} business terhubung` : 'Belum ada API key'}
         </span>
-        <span style={{ fontSize: 11, color: '#475569' }}>Sinkronisasi order tersedia di tab Sync</span>
+        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Sinkronisasi order tersedia di tab Sync</span>
       </div>
 
       {/* Messages */}
       {message && (
         <div style={{
           padding: 12, borderRadius: 8, fontSize: 13,
-          background: message.type === 'success' ? '#064e3b' : '#7f1d1d',
-          color: message.type === 'success' ? '#10b981' : '#ef4444',
+          background: message.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+          color: message.type === 'success' ? 'var(--green)' : 'var(--red)',
         }}>
           {message.text}
         </div>
       )}
 
       {/* ── Businesses ── */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 20 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>Businesses</div>
           <button
             onClick={openAddForm}
             style={{
               padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-              background: '#3b82f6', color: '#fff', fontSize: 12, fontWeight: 600,
+              background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600,
             }}
           >
             + Tambah Business
           </button>
         </div>
-        <div style={{ fontSize: 11, color: '#475569', padding: '8px 10px', background: '#0c1b3a', borderRadius: 6, marginTop: 10, marginBottom: 14 }}>
+        <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 10px', background: 'var(--accent-subtle)', borderRadius: 6, marginTop: 10, marginBottom: 14 }}>
           <strong>Webhook URL:</strong>{' '}
-          <span style={{ color: '#94a3b8', fontFamily: 'JetBrains Mono, monospace' }}>
+          <span style={{ color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono, monospace' }}>
             https://roove-bi.vercel.app/api/scalev-webhook
           </span>
         </div>
@@ -299,7 +299,7 @@ export default function ConnectionManager() {
         {/* ── Add/Edit Form ── */}
         {showForm && (
           <div style={{
-            padding: 14, background: '#0c1b3a', border: '1px solid #1e3a5f',
+            padding: 14, background: 'var(--accent-subtle)', border: '1px solid var(--border)',
             borderRadius: 8, marginBottom: 14,
           }}>
             <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>
@@ -308,7 +308,7 @@ export default function ConnectionManager() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <div style={{ flex: '0 0 120px' }}>
-                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Kode (unik)</div>
+                  <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>Kode (unik)</div>
                   <input
                     type="text"
                     value={form.business_code}
@@ -317,22 +317,22 @@ export default function ConnectionManager() {
                     maxLength={10}
                     disabled={!!form.id}
                     style={{
-                      width: '100%', padding: '8px 12px', background: form.id ? '#1a2744' : '#0b1121',
-                      border: '1px solid #1a2744', borderRadius: 6, color: '#e2e8f0', fontSize: 13,
+                      width: '100%', padding: '8px 12px', background: form.id ? 'var(--border)' : 'var(--bg)',
+                      border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 13,
                       outline: 'none', opacity: form.id ? 0.6 : 1,
                     }}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>Nama Business</div>
+                  <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>Nama Business</div>
                   <input
                     type="text"
                     value={form.business_name}
                     onChange={(e) => setForm({ ...form, business_name: e.target.value })}
                     placeholder="Roove Tijara Internasional"
                     style={{
-                      width: '100%', padding: '8px 12px', background: '#0b1121',
-                      border: '1px solid #1a2744', borderRadius: 6, color: '#e2e8f0', fontSize: 13,
+                      width: '100%', padding: '8px 12px', background: 'var(--bg)',
+                      border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 13,
                       outline: 'none',
                     }}
                   />
@@ -340,8 +340,8 @@ export default function ConnectionManager() {
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>
-                    Webhook Secret {form.id && <span style={{ color: '#475569' }}>(kosongkan jika tidak diubah)</span>}
+                  <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>
+                    Webhook Secret {form.id && <span style={{ color: 'var(--text-muted)' }}>(kosongkan jika tidak diubah)</span>}
                   </div>
                   <input
                     type="password"
@@ -349,15 +349,15 @@ export default function ConnectionManager() {
                     onChange={(e) => setForm({ ...form, webhook_secret: e.target.value })}
                     placeholder={form.id ? '••••••••••' : 'Secret dari Scalev dashboard'}
                     style={{
-                      width: '100%', padding: '8px 12px', background: '#0b1121',
-                      border: '1px solid #1a2744', borderRadius: 6, color: '#e2e8f0', fontSize: 13,
+                      width: '100%', padding: '8px 12px', background: 'var(--bg)',
+                      border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 13,
                       outline: 'none',
                     }}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 11, color: '#64748b', marginBottom: 4 }}>
-                    API Key {form.id && <span style={{ color: '#475569' }}>(kosongkan jika tidak diubah)</span>}
+                  <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>
+                    API Key {form.id && <span style={{ color: 'var(--text-muted)' }}>(kosongkan jika tidak diubah)</span>}
                   </div>
                   <input
                     type="password"
@@ -365,8 +365,8 @@ export default function ConnectionManager() {
                     onChange={(e) => setForm({ ...form, api_key: e.target.value })}
                     placeholder={form.id ? '••••••••••' : 'API key dari Scalev'}
                     style={{
-                      width: '100%', padding: '8px 12px', background: '#0b1121',
-                      border: '1px solid #1a2744', borderRadius: 6, color: '#e2e8f0', fontSize: 13,
+                      width: '100%', padding: '8px 12px', background: 'var(--bg)',
+                      border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)', fontSize: 13,
                       outline: 'none',
                     }}
                   />
@@ -378,7 +378,7 @@ export default function ConnectionManager() {
                   disabled={saving || !form.business_code.trim() || !form.business_name.trim() || (!form.id && !form.webhook_secret.trim())}
                   style={{
                     padding: '8px 16px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                    background: '#1e40af', color: '#93c5fd', fontSize: 12, fontWeight: 600,
+                    background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600,
                     opacity: saving ? 0.5 : 1,
                   }}
                 >
@@ -387,8 +387,8 @@ export default function ConnectionManager() {
                 <button
                   onClick={() => { setShowForm(false); setForm(EMPTY_FORM); }}
                   style={{
-                    padding: '8px 16px', borderRadius: 6, border: '1px solid #1a2744', cursor: 'pointer',
-                    background: 'transparent', color: '#64748b', fontSize: 12, fontWeight: 600,
+                    padding: '8px 16px', borderRadius: 6, border: '1px solid var(--border)', cursor: 'pointer',
+                    background: 'transparent', color: 'var(--dim)', fontSize: 12, fontWeight: 600,
                   }}
                 >
                   Batal
@@ -400,65 +400,65 @@ export default function ConnectionManager() {
 
         {/* ── Business Table ── */}
         {businesses.length === 0 ? (
-          <div style={{ color: '#64748b', fontSize: 13, textAlign: 'center', padding: 20 }}>
+          <div style={{ color: 'var(--dim)', fontSize: 13, textAlign: 'center', padding: 20 }}>
             Belum ada business terdaftar.
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid #1a2744' }}>
-                  <th style={{ textAlign: 'left', padding: '8px 10px', color: '#64748b', fontWeight: 600, fontSize: 11 }}>KODE</th>
-                  <th style={{ textAlign: 'left', padding: '8px 10px', color: '#64748b', fontWeight: 600, fontSize: 11 }}>NAMA BUSINESS</th>
-                  <th style={{ textAlign: 'left', padding: '8px 10px', color: '#64748b', fontWeight: 600, fontSize: 11 }}>KONEKSI</th>
-                  <th style={{ textAlign: 'left', padding: '8px 10px', color: '#64748b', fontWeight: 600, fontSize: 11 }}>AKTIVITAS</th>
-                  <th style={{ textAlign: 'right', padding: '8px 10px', color: '#64748b', fontWeight: 600, fontSize: 11 }}>AKSI</th>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  <th style={{ textAlign: 'left', padding: '8px 10px', color: 'var(--dim)', fontWeight: 600, fontSize: 11 }}>KODE</th>
+                  <th style={{ textAlign: 'left', padding: '8px 10px', color: 'var(--dim)', fontWeight: 600, fontSize: 11 }}>NAMA BUSINESS</th>
+                  <th style={{ textAlign: 'left', padding: '8px 10px', color: 'var(--dim)', fontWeight: 600, fontSize: 11 }}>KONEKSI</th>
+                  <th style={{ textAlign: 'left', padding: '8px 10px', color: 'var(--dim)', fontWeight: 600, fontSize: 11 }}>AKTIVITAS</th>
+                  <th style={{ textAlign: 'right', padding: '8px 10px', color: 'var(--dim)', fontWeight: 600, fontSize: 11 }}>AKSI</th>
                 </tr>
               </thead>
               <tbody>
                 {businesses.map((biz) => (
                   <>{/* Fragment for business row + expanded stores */}
-                    <tr key={biz.id} style={{ borderBottom: expandedBiz === biz.id ? 'none' : '1px solid #0f1d32' }}>
-                      <td style={{ padding: '10px 10px', fontFamily: 'JetBrains Mono, monospace', color: '#e2e8f0', fontWeight: 600 }}>
+                    <tr key={biz.id} style={{ borderBottom: expandedBiz === biz.id ? 'none' : '1px solid var(--border)' }}>
+                      <td style={{ padding: '10px 10px', fontFamily: 'JetBrains Mono, monospace', color: 'var(--text)', fontWeight: 600 }}>
                         <span onClick={() => toggleExpand(biz.id)} style={{ cursor: 'pointer' }}>
                           {expandedBiz === biz.id ? '▼' : '▶'} {biz.business_code}
                         </span>
                       </td>
-                      <td style={{ padding: '10px 10px', color: '#e2e8f0' }}>
+                      <td style={{ padding: '10px 10px', color: 'var(--text)' }}>
                         {biz.business_name}
                       </td>
                       <td style={{ padding: '10px 10px' }}>
                         <div style={{ display: 'flex', gap: 4 }}>
                           <span style={{
                             padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-                            background: biz.has_api_key ? '#064e3b' : '#1a2744',
-                            color: biz.has_api_key ? '#10b981' : '#475569',
+                            background: biz.has_api_key ? 'var(--badge-green-bg)' : 'var(--border)',
+                            color: biz.has_api_key ? 'var(--green)' : 'var(--text-muted)',
                           }}>API</span>
                           <span style={{
                             padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-                            background: biz.is_active ? '#064e3b' : '#1a2744',
-                            color: biz.is_active ? '#10b981' : '#475569',
+                            background: biz.is_active ? 'var(--badge-green-bg)' : 'var(--border)',
+                            color: biz.is_active ? 'var(--green)' : 'var(--text-muted)',
                           }}>Webhook</span>
                         </div>
                       </td>
-                      <td style={{ padding: '10px 10px', color: '#64748b', fontSize: 12 }}>
+                      <td style={{ padding: '10px 10px', color: 'var(--dim)', fontSize: 12 }}>
                         {formatTime(biz.last_webhook_at)}
                         {biz.last_sync_type && (
-                          <span style={{ color: '#475569', marginLeft: 6 }}>
+                          <span style={{ color: 'var(--text-muted)', marginLeft: 6 }}>
                             ({biz.last_sync_type.replace('webhook_', '')})
                           </span>
                         )}
                       </td>
                       <td style={{ padding: '10px 10px', textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                          <button onClick={() => openEditForm(biz)} style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid #1a2744', background: 'transparent', color: '#94a3b8', fontSize: 11, cursor: 'pointer' }}>Edit</button>
+                          <button onClick={() => openEditForm(biz)} style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: 11, cursor: 'pointer' }}>Edit</button>
                           {confirmDelete === biz.id ? (
                             <>
-                              <button onClick={() => handleDelete(biz.id)} style={{ padding: '4px 10px', borderRadius: 4, border: 'none', background: '#7f1d1d', color: '#ef4444', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>Yakin?</button>
-                              <button onClick={() => setConfirmDelete(null)} style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid #1a2744', background: 'transparent', color: '#64748b', fontSize: 11, cursor: 'pointer' }}>Batal</button>
+                              <button onClick={() => handleDelete(biz.id)} style={{ padding: '4px 10px', borderRadius: 4, border: 'none', background: 'var(--badge-red-bg)', color: 'var(--red)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>Yakin?</button>
+                              <button onClick={() => setConfirmDelete(null)} style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer' }}>Batal</button>
                             </>
                           ) : (
-                            <button onClick={() => setConfirmDelete(biz.id)} style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid #2d1515', background: 'transparent', color: '#ef4444', fontSize: 11, cursor: 'pointer' }}>Hapus</button>
+                            <button onClick={() => setConfirmDelete(biz.id)} style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid var(--badge-red-bg)', background: 'transparent', color: 'var(--red)', fontSize: 11, cursor: 'pointer' }}>Hapus</button>
                           )}
                         </div>
                       </td>
@@ -468,12 +468,12 @@ export default function ConnectionManager() {
                     {expandedBiz === biz.id && (
                       <tr key={`stores-${biz.id}`}>
                         <td colSpan={5} style={{ padding: '0 10px 12px 10px' }}>
-                          <div style={{ background: '#0c1b3a', border: '1px solid #1e3a5f', borderRadius: 8, padding: 14 }}>
+                          <div style={{ background: 'var(--accent-subtle)', border: '1px solid var(--border)', borderRadius: 8, padding: 14 }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                                <div style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>
                                   Stores
-                                  <span style={{ fontWeight: 400, color: '#475569', marginLeft: 6 }}>
+                                  <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 6 }}>
                                     {storeChannels.filter(sc => sc.is_active).length} aktif
                                     {storeChannels.some(sc => !sc.is_active) && ` / ${storeChannels.length} total`}
                                   </span>
@@ -482,9 +482,9 @@ export default function ConnectionManager() {
                                   <button
                                     onClick={() => setHideInactive(!hideInactive)}
                                     style={{
-                                      padding: '2px 8px', borderRadius: 4, border: '1px solid #1a2744', cursor: 'pointer',
-                                      background: hideInactive ? 'transparent' : '#1a2744',
-                                      color: '#64748b', fontSize: 10, fontWeight: 500,
+                                      padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer',
+                                      background: hideInactive ? 'transparent' : 'var(--border)',
+                                      color: 'var(--dim)', fontSize: 10, fontWeight: 500,
                                     }}
                                   >
                                     {hideInactive ? 'Tampilkan inactive' : 'Sembunyikan inactive'}
@@ -497,7 +497,7 @@ export default function ConnectionManager() {
                                   disabled={fetchingStores}
                                   style={{
                                     padding: '4px 10px', borderRadius: 4, border: 'none', cursor: 'pointer',
-                                    background: '#1e40af', color: '#93c5fd', fontSize: 11, fontWeight: 600,
+                                    background: 'var(--accent)', color: '#fff', fontSize: 11, fontWeight: 600,
                                     opacity: fetchingStores ? 0.5 : 1,
                                   }}
                                 >
@@ -507,9 +507,9 @@ export default function ConnectionManager() {
                             </div>
 
                             {loadingStores ? (
-                              <div style={{ color: '#64748b', fontSize: 12 }}>Memuat stores...</div>
+                              <div style={{ color: 'var(--dim)', fontSize: 12 }}>Memuat stores...</div>
                             ) : storeChannels.length === 0 ? (
-                              <div style={{ color: '#64748b', fontSize: 12, textAlign: 'center', padding: 12 }}>
+                              <div style={{ color: 'var(--dim)', fontSize: 12, textAlign: 'center', padding: 12 }}>
                                 {biz.has_api_key
                                   ? 'Belum ada stores. Klik "Refresh dari API" untuk mengambil dari Scalev.'
                                   : 'Masukkan API key terlebih dahulu.'}
@@ -522,7 +522,7 @@ export default function ConnectionManager() {
                                   .map((sc) => (
                                   <div key={sc.id} style={{
                                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                                    padding: '8px 10px', background: '#0b1121', borderRadius: 6, gap: 10,
+                                    padding: '8px 10px', background: 'var(--bg)', borderRadius: 6, gap: 10,
                                     opacity: sc.is_active ? 1 : 0.45,
                                   }}>
                                     <button
@@ -530,14 +530,14 @@ export default function ConnectionManager() {
                                       title={sc.is_active ? 'Nonaktifkan store' : 'Aktifkan store'}
                                       style={{
                                         width: 14, height: 14, borderRadius: 3, border: 'none', cursor: 'pointer',
-                                        background: sc.is_active ? '#10b981' : '#334155', flexShrink: 0,
+                                        background: sc.is_active ? 'var(--green)' : 'var(--text-muted)', flexShrink: 0,
                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                                         padding: 0, fontSize: 9, color: '#fff', lineHeight: 1,
                                       }}
                                     >
                                       {sc.is_active ? '✓' : ''}
                                     </button>
-                                    <div style={{ flex: 1, fontSize: 12, color: sc.is_active ? '#e2e8f0' : '#475569', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    <div style={{ flex: 1, fontSize: 12, color: sc.is_active ? 'var(--text)' : 'var(--text-muted)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                       {sc.store_name}
                                     </div>
                                     <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
@@ -553,7 +553,7 @@ export default function ConnectionManager() {
                                             padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
                                             fontSize: 10, fontWeight: 600,
                                             background: sc.store_type === st.value ? st.bg : 'transparent',
-                                            color: sc.store_type === st.value ? st.color : '#475569',
+                                            color: sc.store_type === st.value ? st.color : 'var(--text-muted)',
                                             opacity: sc.store_type === st.value ? 1 : 0.6,
                                           }}
                                         >
@@ -564,11 +564,11 @@ export default function ConnectionManager() {
                                     <div style={{ flexShrink: 0 }}>
                                       {confirmDeleteStore === sc.id ? (
                                         <div style={{ display: 'flex', gap: 4 }}>
-                                          <button onClick={() => handleDeleteStore(sc.id)} style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: '#7f1d1d', color: '#ef4444', fontSize: 10, cursor: 'pointer', fontWeight: 600 }}>Yakin?</button>
-                                          <button onClick={() => setConfirmDeleteStore(null)} style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #1a2744', background: 'transparent', color: '#64748b', fontSize: 10, cursor: 'pointer' }}>Batal</button>
+                                          <button onClick={() => handleDeleteStore(sc.id)} style={{ padding: '3px 8px', borderRadius: 4, border: 'none', background: 'var(--badge-red-bg)', color: 'var(--red)', fontSize: 10, cursor: 'pointer', fontWeight: 600 }}>Yakin?</button>
+                                          <button onClick={() => setConfirmDeleteStore(null)} style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 10, cursor: 'pointer' }}>Batal</button>
                                         </div>
                                       ) : (
-                                        <button onClick={() => setConfirmDeleteStore(sc.id)} style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid #2d1515', background: 'transparent', color: '#ef4444', fontSize: 10, cursor: 'pointer' }}>Hapus</button>
+                                        <button onClick={() => setConfirmDeleteStore(sc.id)} style={{ padding: '3px 8px', borderRadius: 4, border: '1px solid var(--badge-red-bg)', background: 'transparent', color: 'var(--red)', fontSize: 10, cursor: 'pointer' }}>Hapus</button>
                                       )}
                                     </div>
                                   </div>

@@ -4,16 +4,75 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
 
+/* ═══ THEME VARIABLES ═══ */
+
 :root {
+  /* Dark theme (default) */
   --bg: #0b1121;
+  --bg-deep: #0f172a;
   --card: #111a2e;
+  --card-hover: #162040;
   --border: #1a2744;
   --text: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #475569;
   --dim: #64748b;
   --accent: #3b82f6;
+  --accent-hover: #2563eb;
   --green: #10b981;
   --red: #ef4444;
   --yellow: #f59e0b;
+  --header-bg: rgba(11,17,33,0.8);
+  --sidebar-bg: #0b1121;
+  --sidebar-active: rgba(59,130,246,0.1);
+  --sidebar-active-border: #3b82f6;
+  --badge-green-bg: #064e3b;
+  --badge-yellow-bg: #78350f;
+  --badge-red-bg: #7f1d1d;
+  --badge-green-text: #10b981;
+  --badge-yellow-text: #f59e0b;
+  --badge-red-text: #ef4444;
+  --input-bg: #0f172a;
+  --overlay-bg: rgba(0,0,0,0.6);
+  --shadow: 0 4px 24px rgba(0,0,0,0.3);
+  --accent-subtle: rgba(59,130,246,0.1);
+  --green-subtle: rgba(16,185,129,0.1);
+  --red-subtle: rgba(239,68,68,0.1);
+  --yellow-subtle: rgba(245,158,11,0.1);
+}
+
+[data-theme='light'] {
+  --bg: #ffffff;
+  --bg-deep: #f8fafc;
+  --card: #ffffff;
+  --card-hover: #f8fafc;
+  --border: rgba(0,0,0,0.06);
+  --text: #1e293b;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --dim: #64748b;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --green: #059669;
+  --red: #dc2626;
+  --yellow: #d97706;
+  --header-bg: rgba(255,255,255,0.85);
+  --sidebar-bg: #ffffff;
+  --sidebar-active: rgba(37,99,235,0.08);
+  --sidebar-active-border: #2563eb;
+  --badge-green-bg: #d1fae5;
+  --badge-yellow-bg: #fef3c7;
+  --badge-red-bg: #fee2e2;
+  --badge-green-text: #059669;
+  --badge-yellow-text: #d97706;
+  --badge-red-text: #dc2626;
+  --input-bg: #f1f5f9;
+  --overlay-bg: rgba(0,0,0,0.3);
+  --shadow: 0 4px 24px rgba(0,0,0,0.08);
+  --accent-subtle: rgba(37,99,235,0.08);
+  --green-subtle: rgba(5,150,105,0.08);
+  --red-subtle: rgba(220,38,38,0.08);
+  --yellow-subtle: rgba(217,119,6,0.08);
 }
 
 * { box-sizing: border-box; }
@@ -80,9 +139,9 @@ body {
 }
 
 /* Badge styles */
-.badge-green { background: #064e3b; color: #10b981; }
-.badge-yellow { background: #78350f; color: #f59e0b; }
-.badge-red { background: #7f1d1d; color: #ef4444; }
+.badge-green { background: var(--badge-green-bg); color: var(--badge-green-text); }
+.badge-yellow { background: var(--badge-yellow-bg); color: var(--badge-yellow-text); }
+.badge-red { background: var(--badge-red-bg); color: var(--badge-red-text); }
 
 /* Loading spinner */
 .spinner { animation: spin 1s linear infinite; }
@@ -109,5 +168,5 @@ body {
 }
 .drop-zone:hover, .drop-zone.drag-over {
   border-color: var(--accent);
-  background: rgba(59, 130, 246, 0.05);
+  background: var(--accent-subtle);
 }

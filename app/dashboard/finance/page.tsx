@@ -114,36 +114,36 @@ const S = {
   table: { width: '100%', borderCollapse: 'collapse' as const, fontSize: 13, minWidth: 900 },
   thSticky: {
     position: 'sticky' as const, left: 0, zIndex: 2,
-    background: '#1f2937', padding: '8px 12px', textAlign: 'left' as const,
-    color: '#9ca3af', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const,
-    borderBottom: '1px solid #374151', minWidth: 190,
+    background: 'var(--card)', padding: '8px 12px', textAlign: 'left' as const,
+    color: 'var(--text-secondary)', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const,
+    borderBottom: '1px solid var(--border)', minWidth: 190,
   },
   th: {
     padding: '8px 10px', textAlign: 'right' as const,
-    color: '#9ca3af', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const,
-    borderBottom: '1px solid #374151', minWidth: 105,
+    color: 'var(--text-secondary)', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' as const,
+    borderBottom: '1px solid var(--border)', minWidth: 105,
   },
   tdSticky: (bold: boolean) => ({
     position: 'sticky' as const, left: 0, zIndex: 1,
-    background: '#1f2937', padding: '6px 12px',
-    color: bold ? '#f3f4f6' : '#d1d5db', fontWeight: bold ? 600 : 400,
+    background: 'var(--card)', padding: '6px 12px',
+    color: bold ? 'var(--text)' : 'var(--text-secondary)', fontWeight: bold ? 600 : 400,
     whiteSpace: 'nowrap' as const, borderBottom: '1px solid rgba(55,65,81,0.4)', minWidth: 190,
   }),
   td: (negative: boolean) => ({
     padding: '6px 10px', textAlign: 'right' as const,
-    color: negative ? '#f87171' : '#e5e7eb',
+    color: negative ? '#f87171' : 'var(--text)',
     borderBottom: '1px solid rgba(55,65,81,0.4)', whiteSpace: 'nowrap' as const, minWidth: 105,
   }),
   tdItalicSticky: {
     position: 'sticky' as const, left: 0, zIndex: 1,
-    background: '#1f2937', padding: '6px 12px',
-    color: '#9ca3af', fontStyle: 'italic' as const, whiteSpace: 'nowrap' as const,
-    borderTop: '1px solid #4b5563', minWidth: 190,
+    background: 'var(--card)', padding: '6px 12px',
+    color: 'var(--text-secondary)', fontStyle: 'italic' as const, whiteSpace: 'nowrap' as const,
+    borderTop: '1px solid var(--text-muted)', minWidth: 190,
   },
   tdItalic: (negative: boolean) => ({
     padding: '6px 10px', textAlign: 'right' as const,
-    color: negative ? '#f87171' : '#9ca3af', fontStyle: 'italic' as const,
-    borderTop: '1px solid #4b5563', whiteSpace: 'nowrap' as const, minWidth: 105,
+    color: negative ? '#f87171' : 'var(--text-secondary)', fontStyle: 'italic' as const,
+    borderTop: '1px solid var(--text-muted)', whiteSpace: 'nowrap' as const, minWidth: 105,
   }),
 };
 
@@ -155,10 +155,10 @@ function KPICard({ label, value, sub, color }: {
   label: string; value: string; sub?: string; color?: string;
 }) {
   return (
-    <div style={{ background: '#1f2937', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
-      <p style={{ color: '#9ca3af', fontSize: 11, marginBottom: 4 }}>{label}</p>
+    <div style={{ background: 'var(--card)', borderRadius: 8, padding: 16, border: '1px solid var(--border)' }}>
+      <p style={{ color: 'var(--text-secondary)', fontSize: 11, marginBottom: 4 }}>{label}</p>
       <p style={{ fontSize: 20, fontWeight: 700, color: color || '#fff' }}>{value}</p>
-      {sub && <p style={{ fontSize: 11, marginTop: 4, color: '#6b7280' }}>{sub}</p>}
+      {sub && <p style={{ fontSize: 11, marginTop: 4, color: 'var(--dim)' }}>{sub}</p>}
     </div>
   );
 }
@@ -184,7 +184,7 @@ function PLTable({ data }: { data: PLSummary[] }) {
     { key: 'laba_rugi', label: 'Laba / (Rugi) Bersih', bold: true },
   ];
   return (
-    <div style={{ background: '#1f2937', borderRadius: 8, border: '1px solid #374151', padding: '16px 0' }}>
+    <div style={{ background: 'var(--card)', borderRadius: 8, border: '1px solid var(--border)', padding: '16px 0' }}>
       <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 15, margin: '0 0 12px 16px' }}>📋 Profit & Loss — Delivered Basis</h3>
       <div style={S.scrollArea}>
         <table style={S.table}>
@@ -234,7 +234,7 @@ function CFTable({ data }: { data: CFSummary[] }) {
     { key: 'free_cash_flow', label: 'Free Cash Flow', bold: true },
   ];
   return (
-    <div style={{ background: '#1f2937', borderRadius: 8, border: '1px solid #374151', padding: '16px 0' }}>
+    <div style={{ background: 'var(--card)', borderRadius: 8, border: '1px solid var(--border)', padding: '16px 0' }}>
       <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 15, margin: '0 0 12px 16px' }}>💰 Cash Flow</h3>
       <div style={S.scrollArea}>
         <table style={S.table}>
@@ -285,7 +285,7 @@ function RatiosTable({ data }: { data: RatioData[] }) {
   };
   const statusColor: Record<string, string> = { healthy: '#34d399', warning: '#fbbf24', critical: '#f87171' };
   return (
-    <div style={{ background: '#1f2937', borderRadius: 8, border: '1px solid #374151', padding: '16px 0' }}>
+    <div style={{ background: 'var(--card)', borderRadius: 8, border: '1px solid var(--border)', padding: '16px 0' }}>
       <h3 style={{ color: '#fff', fontWeight: 700, fontSize: 15, margin: '0 0 12px 16px' }}>📊 Rasio Keuangan vs Benchmark</h3>
       <div style={S.scrollArea}>
         <table style={S.table}>
@@ -301,10 +301,10 @@ function RatiosTable({ data }: { data: RatioData[] }) {
               return (
                 <tr key={rn}>
                   <td style={{ ...S.tdSticky(false), minWidth: 170 }}>{niceLabel[rn] || rn}</td>
-                  <td style={{ ...S.td(false), textAlign: 'center', color: '#6b7280', fontSize: 11 }}>{items[0]?.benchmark_label || '-'}</td>
+                  <td style={{ ...S.td(false), textAlign: 'center', color: 'var(--dim)', fontSize: 11 }}>{items[0]?.benchmark_label || '-'}</td>
                   {months.map(m => {
                     const item = items.find(i => i.month === m);
-                    if (!item) return <td key={m} style={{ ...S.td(false), color: '#4b5563' }}>-</td>;
+                    if (!item) return <td key={m} style={{ ...S.td(false), color: 'var(--text-muted)' }}>-</td>;
                     const status = ratioStatus(item.value, bMin ?? null, bMax ?? null);
                     const isPercent = ['gpm', 'npm', 'roa', 'roe', 'ocf_to_asset'].includes(rn);
                     return <td key={m} style={{ ...S.td(false), color: statusColor[status] }}>{isPercent ? fmtPct(item.value) : item.value.toFixed(2)}</td>;
@@ -315,7 +315,7 @@ function RatiosTable({ data }: { data: RatioData[] }) {
           </tbody>
         </table>
       </div>
-      <p style={{ fontSize: 11, color: '#6b7280', margin: '8px 16px 0' }}>
+      <p style={{ fontSize: 11, color: 'var(--dim)', margin: '8px 16px 0' }}>
         <span style={{ color: '#34d399' }}>●</span> Dalam benchmark &nbsp;<span style={{ color: '#fbbf24' }}>●</span> Di luar &nbsp;<span style={{ color: '#f87171' }}>●</span> Jauh di luar
       </p>
     </div>
@@ -385,33 +385,33 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
   }
 
   const sevCard = (sev: string) => ({
-    background: sev === 'high' || sev === 'critical' ? 'rgba(127,29,29,0.15)' : sev === 'medium' || sev === 'warning' ? 'rgba(120,53,15,0.15)' : '#111827',
-    border: `1px solid ${sev === 'high' || sev === 'critical' ? 'rgba(153,27,27,0.5)' : sev === 'medium' || sev === 'warning' ? 'rgba(146,64,14,0.5)' : '#374151'}`,
+    background: sev === 'high' || sev === 'critical' ? 'rgba(127,29,29,0.15)' : sev === 'medium' || sev === 'warning' ? 'rgba(120,53,15,0.15)' : 'var(--bg-deep)',
+    border: `1px solid ${sev === 'high' || sev === 'critical' ? 'rgba(153,27,27,0.5)' : sev === 'medium' || sev === 'warning' ? 'rgba(146,64,14,0.5)' : 'var(--border)'}`,
     borderRadius: 8, padding: 14, fontSize: 13,
   });
   const secTitle = (text: string) => (
-    <p style={{ color: '#9ca3af', fontSize: 11, fontWeight: 600, marginBottom: 10, letterSpacing: 0.5, textTransform: 'uppercase' as const }}>{text}</p>
+    <p style={{ color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600, marginBottom: 10, letterSpacing: 0.5, textTransform: 'uppercase' as const }}>{text}</p>
   );
   const infoGrid = (items: [string, string, string?][]) => (
     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 13 }}>
       {items.map(([label, value, color], i) => (
-        <div key={i}><span style={{ color: '#6b7280' }}>{label}:</span> <span style={{ color: color || '#fff' }}>{value}</span></div>
+        <div key={i}><span style={{ color: 'var(--dim)' }}>{label}:</span> <span style={{ color: color || '#fff' }}>{value}</span></div>
       ))}
     </div>
   );
 
   return (
-    <div style={{ background: '#1f2937', borderRadius: 8, border: '1px solid #374151', padding: 20 }}>
+    <div style={{ background: 'var(--card)', borderRadius: 8, border: '1px solid var(--border)', padding: 20 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
           <h3 style={{ color: '#fff', fontWeight: 700, margin: 0, fontSize: 16 }}>🔮 The Unspoken Truth — Strategic Advisory</h3>
-          <p style={{ color: '#6b7280', fontSize: 11, marginTop: 4 }}>
+          <p style={{ color: 'var(--dim)', fontSize: 11, marginTop: 4 }}>
             Powered by Claude Opus 4.6 {analysisTime ? `• Terakhir: ${timeAgo(analysisTime)}` : ''}
           </p>
         </div>
         <button onClick={generate} disabled={loading} style={{
           padding: '10px 20px', borderRadius: 8, border: 'none', cursor: 'pointer',
-          background: loading ? '#374151' : 'linear-gradient(135deg, #d97706, #b45309)',
+          background: loading ? 'var(--bg-deep)' : 'linear-gradient(135deg, #d97706, #b45309)',
           color: '#fff', fontSize: 13, fontWeight: 600, opacity: loading ? 0.6 : 1,
         }}>
           {loading ? '⏳ Analyzing with Opus...' : analysis ? '🔄 Re-generate' : '⚡ Generate Analysis'}
@@ -420,9 +420,9 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
 
       {error && <p style={{ color: '#f87171', fontSize: 13, marginBottom: 12 }}>{error}</p>}
       {!analysis && !loading && !loadingPrev && (
-        <p style={{ color: '#6b7280', fontSize: 13 }}>Klik &quot;Generate Analysis&quot; untuk insight strategis dari Claude Opus 4.6.</p>
+        <p style={{ color: 'var(--dim)', fontSize: 13 }}>Klik &quot;Generate Analysis&quot; untuk insight strategis dari Claude Opus 4.6.</p>
       )}
-      {loadingPrev && !analysis && <p style={{ color: '#6b7280', fontSize: 13 }}>Memuat analisis terakhir...</p>}
+      {loadingPrev && !analysis && <p style={{ color: 'var(--dim)', fontSize: 13 }}>Memuat analisis terakhir...</p>}
 
       {analysis && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -435,7 +435,7 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
             }}>{analysis.health_score}</div>
             <div>
               <p style={{ color: '#fff', fontWeight: 700, fontSize: 18 }}>{analysis.health_label}</p>
-              <p style={{ color: '#9ca3af', fontSize: 13 }}>Business Health Score</p>
+              <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>Business Health Score</p>
             </div>
           </div>
 
@@ -443,40 +443,40 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
           {analysis.unspoken_truth && (
             <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid rgba(153,27,27,0.5)', borderRadius: 8, padding: 16 }}>
               <p style={{ color: '#fca5a5', fontSize: 13, fontWeight: 600, marginBottom: 8 }}>💀 The Unspoken Truth</p>
-              <p style={{ color: '#f3f4f6', fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-line' }}>{analysis.unspoken_truth}</p>
+              <p style={{ color: 'var(--text)', fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-line' }}>{analysis.unspoken_truth}</p>
             </div>
           )}
 
           {/* ── Strategic Advice ── */}
           {analysis.strategic_advice && (
-            <div style={{ background: '#111827', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
+            <div style={{ background: 'var(--bg-deep)', borderRadius: 8, padding: 16, border: '1px solid var(--border)' }}>
               {secTitle('🎯 Strategic Advice')}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 {/* Stop */}
                 <div style={{ background: 'rgba(127,29,29,0.1)', borderRadius: 6, padding: 12, border: '1px solid rgba(153,27,27,0.3)' }}>
                   <p style={{ color: '#f87171', fontSize: 12, fontWeight: 600, marginBottom: 8 }}>🛑 STOP Minggu Ini</p>
                   {(analysis.strategic_advice.stop_immediately || []).map((s, i) => (
-                    <p key={i} style={{ color: '#e5e7eb', fontSize: 12, marginBottom: 6, paddingLeft: 8, borderLeft: '2px solid #991b1b', lineHeight: 1.5 }}>{s}</p>
+                    <p key={i} style={{ color: 'var(--text)', fontSize: 12, marginBottom: 6, paddingLeft: 8, borderLeft: '2px solid #991b1b', lineHeight: 1.5 }}>{s}</p>
                   ))}
                 </div>
                 {/* Start */}
                 <div style={{ background: 'rgba(6,78,59,0.1)', borderRadius: 6, padding: 12, border: '1px solid rgba(6,78,59,0.3)' }}>
                   <p style={{ color: '#34d399', fontSize: 12, fontWeight: 600, marginBottom: 8 }}>🚀 START Bulan Ini</p>
                   {(analysis.strategic_advice.start_this_month || []).map((s, i) => (
-                    <p key={i} style={{ color: '#e5e7eb', fontSize: 12, marginBottom: 6, paddingLeft: 8, borderLeft: '2px solid #065f46', lineHeight: 1.5 }}>{s}</p>
+                    <p key={i} style={{ color: 'var(--text)', fontSize: 12, marginBottom: 6, paddingLeft: 8, borderLeft: '2px solid #065f46', lineHeight: 1.5 }}>{s}</p>
                   ))}
                 </div>
               </div>
               {analysis.strategic_advice.big_decision_this_quarter && (
                 <div style={{ marginTop: 12, background: 'rgba(120,53,15,0.1)', borderRadius: 6, padding: 12, border: '1px solid rgba(120,53,15,0.3)' }}>
                   <p style={{ color: '#fbbf24', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>⚡ Keputusan Besar Kuartal Ini</p>
-                  <p style={{ color: '#f3f4f6', fontSize: 13, lineHeight: 1.6 }}>{analysis.strategic_advice.big_decision_this_quarter}</p>
+                  <p style={{ color: 'var(--text)', fontSize: 13, lineHeight: 1.6 }}>{analysis.strategic_advice.big_decision_this_quarter}</p>
                 </div>
               )}
               {analysis.strategic_advice.if_only_one_brand && (
                 <div style={{ marginTop: 12, background: 'rgba(88,28,135,0.1)', borderRadius: 6, padding: 12, border: '1px solid rgba(88,28,135,0.3)' }}>
                   <p style={{ color: '#c084fc', fontSize: 12, fontWeight: 600, marginBottom: 4 }}>🏆 Jika Harus All-In 1 Brand</p>
-                  <p style={{ color: '#f3f4f6', fontSize: 13, lineHeight: 1.6 }}>{analysis.strategic_advice.if_only_one_brand}</p>
+                  <p style={{ color: 'var(--text)', fontSize: 13, lineHeight: 1.6 }}>{analysis.strategic_advice.if_only_one_brand}</p>
                 </div>
               )}
             </div>
@@ -484,7 +484,7 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
 
           {/* ── Cash Analysis ── */}
           {analysis.cash_analysis && (
-            <div style={{ background: '#111827', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
+            <div style={{ background: 'var(--bg-deep)', borderRadius: 8, padding: 16, border: '1px solid var(--border)' }}>
               {secTitle('💰 Cash Analysis')}
               {infoGrid([
                 ['Position', analysis.cash_analysis.current_position],
@@ -497,7 +497,7 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
               {analysis.cash_analysis.cash_traps && (
                 <div style={{ marginTop: 10, padding: 10, background: 'rgba(120,53,15,0.1)', borderRadius: 6, border: '1px solid rgba(120,53,15,0.2)' }}>
                   <p style={{ color: '#fbbf24', fontSize: 11, fontWeight: 600, marginBottom: 4 }}>🪤 Cash Traps</p>
-                  <p style={{ color: '#e5e7eb', fontSize: 12, lineHeight: 1.5 }}>{analysis.cash_analysis.cash_traps}</p>
+                  <p style={{ color: 'var(--text)', fontSize: 12, lineHeight: 1.5 }}>{analysis.cash_analysis.cash_traps}</p>
                 </div>
               )}
             </div>
@@ -505,17 +505,17 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
 
           {/* ── Revenue Quality ── */}
           {analysis.revenue_quality && (
-            <div style={{ background: '#111827', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
+            <div style={{ background: 'var(--bg-deep)', borderRadius: 8, padding: 16, border: '1px solid var(--border)' }}>
               {secTitle('📈 Revenue Quality')}
-              <p style={{ color: '#e5e7eb', fontSize: 13, lineHeight: 1.6, marginBottom: 8 }}>{analysis.revenue_quality.assessment}</p>
+              <p style={{ color: 'var(--text)', fontSize: 13, lineHeight: 1.6, marginBottom: 8 }}>{analysis.revenue_quality.assessment}</p>
               {analysis.revenue_quality.paid_vs_organic_dependency && (
-                <p style={{ color: '#9ca3af', fontSize: 12, marginBottom: 4 }}><span style={{ color: '#fbbf24' }}>Ad Dependency:</span> {analysis.revenue_quality.paid_vs_organic_dependency}</p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}><span style={{ color: '#fbbf24' }}>Ad Dependency:</span> {analysis.revenue_quality.paid_vs_organic_dependency}</p>
               )}
               {analysis.revenue_quality.if_ads_stopped && (
-                <p style={{ color: '#9ca3af', fontSize: 12, marginBottom: 4 }}><span style={{ color: '#f87171' }}>If Ads Stopped:</span> {analysis.revenue_quality.if_ads_stopped}</p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}><span style={{ color: '#f87171' }}>If Ads Stopped:</span> {analysis.revenue_quality.if_ads_stopped}</p>
               )}
               {analysis.revenue_quality.concern && (
-                <p style={{ color: '#9ca3af', fontSize: 12 }}><span style={{ color: '#fbbf24' }}>Concern:</span> {analysis.revenue_quality.concern}</p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 12 }}><span style={{ color: '#fbbf24' }}>Concern:</span> {analysis.revenue_quality.concern}</p>
               )}
             </div>
           )}
@@ -531,8 +531,8 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
                       <p style={{ color: '#fff', fontWeight: 600 }}>{alert.category}</p>
                       {alert.estimated_saving && <span style={{ color: '#34d399', fontSize: 11 }}>Saving: {alert.estimated_saving}</span>}
                     </div>
-                    <p style={{ color: '#d1d5db', lineHeight: 1.5 }}>{alert.issue}</p>
-                    <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 6 }}>→ {alert.recommendation}</p>
+                    <p style={{ color: 'var(--text-secondary)', lineHeight: 1.5 }}>{alert.issue}</p>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 6 }}>→ {alert.recommendation}</p>
                   </div>
                 ))}
               </div>
@@ -545,9 +545,9 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
               {secTitle('🔍 Hidden Patterns')}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {analysis.hidden_patterns.map((p: any, i: number) => (
-                  <div key={i} style={{ background: '#111827', borderRadius: 8, padding: 14, border: '1px solid #374151', fontSize: 13 }}>
+                  <div key={i} style={{ background: 'var(--bg-deep)', borderRadius: 8, padding: 14, border: '1px solid var(--border)', fontSize: 13 }}>
                     <p style={{ color: '#c084fc', fontWeight: 600, marginBottom: 4 }}>{p.pattern}</p>
-                    <p style={{ color: '#d1d5db', lineHeight: 1.5, marginBottom: 4 }}>{p.evidence}</p>
+                    <p style={{ color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 4 }}>{p.evidence}</p>
                     <p style={{ color: '#fbbf24', fontSize: 12 }}>Implikasi: {p.implication}</p>
                     <p style={{ color: '#34d399', fontSize: 12, marginTop: 2 }}>Action: {p.action}</p>
                   </div>
@@ -562,18 +562,18 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
               {secTitle('🎯 Strategic Risks')}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {analysis.strategic_risks.map((risk: any, i: number) => (
-                  <div key={i} style={{ background: '#111827', borderRadius: 8, padding: 14, border: '1px solid #374151', fontSize: 13 }}>
+                  <div key={i} style={{ background: 'var(--bg-deep)', borderRadius: 8, padding: 14, border: '1px solid var(--border)', fontSize: 13 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <span style={{
                         fontSize: 11, padding: '2px 8px', borderRadius: 4,
-                        background: risk.probability === 'high' ? '#7f1d1d' : risk.probability === 'medium' ? '#78350f' : '#374151',
-                        color: risk.probability === 'high' ? '#fecaca' : risk.probability === 'medium' ? '#fde68a' : '#d1d5db',
+                        background: risk.probability === 'high' ? '#7f1d1d' : risk.probability === 'medium' ? '#78350f' : 'var(--bg-deep)',
+                        color: risk.probability === 'high' ? '#fecaca' : risk.probability === 'medium' ? '#fde68a' : 'var(--text-secondary)',
                       }}>{risk.probability}</span>
                       <span style={{ color: '#fff', fontWeight: 600 }}>{risk.risk}</span>
                     </div>
-                    <p style={{ color: '#9ca3af', fontSize: 12 }}>Impact: {risk.impact}</p>
-                    {risk.timeline && <p style={{ color: '#9ca3af', fontSize: 12 }}>Timeline: {risk.timeline}</p>}
-                    <p style={{ color: '#9ca3af', fontSize: 12 }}>Mitigation: {risk.mitigation}</p>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Impact: {risk.impact}</p>
+                    {risk.timeline && <p style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Timeline: {risk.timeline}</p>}
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12 }}>Mitigation: {risk.mitigation}</p>
                   </div>
                 ))}
               </div>
@@ -582,14 +582,14 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
 
           {/* ── Competitive Survival ── */}
           {analysis.competitive_survival && (
-            <div style={{ background: '#111827', borderRadius: 8, padding: 16, border: '1px solid #374151' }}>
+            <div style={{ background: 'var(--bg-deep)', borderRadius: 8, padding: 16, border: '1px solid var(--border)' }}>
               {secTitle('⏱️ Competitive Survival')}
               {infoGrid([
                 ['Runway (current rate)', analysis.competitive_survival.months_at_current_rate],
                 ['Break-even req.', analysis.competitive_survival.break_even_requirement],
               ])}
               {analysis.competitive_survival.unit_economics_verdict && (
-                <p style={{ color: '#e5e7eb', fontSize: 13, marginTop: 10, lineHeight: 1.6, padding: 10, background: 'rgba(55,65,81,0.3)', borderRadius: 6 }}>
+                <p style={{ color: 'var(--text)', fontSize: 13, marginTop: 10, lineHeight: 1.6, padding: 10, background: 'rgba(55,65,81,0.3)', borderRadius: 6 }}>
                   {analysis.competitive_survival.unit_economics_verdict}
                 </p>
               )}
@@ -604,8 +604,8 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
                 {analysis.key_ratios_alert.map((ra: any, i: number) => (
                   <div key={i} style={sevCard(ra.status === 'critical' ? 'high' : ra.status === 'warning' ? 'medium' : 'low')}>
                     <p style={{ color: '#fff', fontWeight: 600, fontSize: 12, marginBottom: 2 }}>{ra.ratio}</p>
-                    <p style={{ color: '#d1d5db', fontSize: 13 }}>{ra.current} <span style={{ color: '#6b7280', fontSize: 11 }}>({ra.benchmark})</span></p>
-                    <p style={{ color: '#9ca3af', fontSize: 12, marginTop: 4, lineHeight: 1.4 }}>{ra.interpretation}</p>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{ra.current} <span style={{ color: 'var(--dim)', fontSize: 11 }}>({ra.benchmark})</span></p>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4, lineHeight: 1.4 }}>{ra.interpretation}</p>
                   </div>
                 ))}
               </div>
@@ -688,21 +688,21 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
   // ── Helpers ──
   const arrow = (delta: number) => delta > 0 ? '▲' : delta < 0 ? '▼' : '—';
   const deltaColor = (delta: number, higherIsBetter: boolean) => {
-    if (delta === 0) return '#6b7280';
+    if (delta === 0) return 'var(--dim)';
     return (delta > 0) === higherIsBetter ? '#34d399' : '#f87171';
   };
 
   // ── Card style ──
   const cardStyle = (borderColor: string) => ({
-    background: '#111827', borderRadius: 10, padding: 16,
+    background: 'var(--bg-deep)', borderRadius: 10, padding: 16,
     border: `1px solid ${borderColor}`, position: 'relative' as const,
     display: 'flex', flexDirection: 'column' as const, gap: 6,
   });
-  const labelStyle = { color: '#9ca3af', fontSize: 11, fontWeight: 600 as const, letterSpacing: 0.3 };
+  const labelStyle = { color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 as const, letterSpacing: 0.3 };
   const valueStyle = (color: string) => ({ fontSize: 22, fontWeight: 700 as const, color, lineHeight: 1.2 });
-  const subStyle = { fontSize: 11, color: '#6b7280', lineHeight: 1.4 };
+  const subStyle = { fontSize: 11, color: 'var(--dim)', lineHeight: 1.4 };
   const defStyle = {
-    fontSize: 10, color: '#4b5563', marginTop: 6, paddingTop: 6,
+    fontSize: 10, color: 'var(--text-muted)', marginTop: 6, paddingTop: 6,
     borderTop: '1px solid rgba(75,85,99,0.3)', lineHeight: 1.4,
   };
 
@@ -711,7 +711,7 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 12 }}>
       {/* ── Cash in Hand ── */}
-      <div style={cardStyle('#1e3a5f')}>
+      <div style={cardStyle('var(--accent-subtle)')}>
         <p style={labelStyle}>💰 Cash in Hand</p>
         {noBSData ? (
           <p style={{ ...subStyle, color: '#fbbf24' }}>Sync BS data dulu</p>
@@ -733,7 +733,7 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
 
       {/* ── RCY Rolling 3 Month ── */}
       <div style={cardStyle(
-        rcyCurrent ? (rcyCurrent.rcy >= 5 ? '#065f46' : rcyCurrent.rcy >= 0 ? '#78350f' : '#7f1d1d') : '#374151'
+        rcyCurrent ? (rcyCurrent.rcy >= 5 ? '#065f46' : rcyCurrent.rcy >= 0 ? '#78350f' : '#7f1d1d') : 'var(--border)'
       )}>
         <p style={labelStyle}>🏦 Real Cash Yield (3M)</p>
         {rcyCurrent ? (
@@ -743,8 +743,8 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
             </p>
             <p style={subStyle}>
               NPM: {rcyCurrent.npm.toFixed(1)}%
-              <span style={{ color: '#4b5563' }}> → </span>
-              Gap: <span style={{ color: npmRcyGap && npmRcyGap < -3 ? '#f87171' : '#6b7280' }}>
+              <span style={{ color: 'var(--text-muted)' }}> → </span>
+              Gap: <span style={{ color: npmRcyGap && npmRcyGap < -3 ? '#f87171' : 'var(--dim)' }}>
                 {npmRcyGap ? `${npmRcyGap.toFixed(1)}pp` : '-'}
               </span>
               {rcyPrev && (
@@ -762,7 +762,7 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
 
       {/* ── DPO-DIO Gap ── */}
       <div style={cardStyle(
-        dpoDioCurrent ? (dpoDioCurrent.gap >= 20 ? '#065f46' : dpoDioCurrent.gap >= 10 ? '#78350f' : '#7f1d1d') : '#374151'
+        dpoDioCurrent ? (dpoDioCurrent.gap >= 20 ? '#065f46' : dpoDioCurrent.gap >= 10 ? '#78350f' : '#7f1d1d') : 'var(--border)'
       )}>
         <p style={labelStyle}>⏱️ DPO–DIO Gap</p>
         {noBSData ? (
@@ -789,7 +789,7 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
 
       {/* ── NPM vs RCY Gap ── */}
       <div style={cardStyle(
-        npmRcyGap !== null ? (npmRcyGap >= -2 ? '#065f46' : npmRcyGap >= -5 ? '#78350f' : '#7f1d1d') : '#374151'
+        npmRcyGap !== null ? (npmRcyGap >= -2 ? '#065f46' : npmRcyGap >= -5 ? '#78350f' : '#7f1d1d') : 'var(--border)'
       )}>
         <p style={labelStyle}>📊 Profit vs Cash Gap</p>
         {rcyCurrent ? (
@@ -856,7 +856,7 @@ export default function FinancePage() {
     setLoading(false);
   }
 
-  if (loading) return <div style={{ padding: 24, color: '#9ca3af' }}><p>Loading financial data...</p></div>;
+  if (loading) return <div style={{ padding: 24, color: 'var(--text-secondary)' }}><p>Loading financial data...</p></div>;
 
   if (error) {
     return (
@@ -864,7 +864,7 @@ export default function FinancePage() {
         <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 8, padding: 16, color: '#fca5a5' }}>
           <p style={{ fontWeight: 700 }}>Error loading financial data</p>
           <p style={{ fontSize: 13, marginTop: 4 }}>{error}</p>
-          <p style={{ fontSize: 11, marginTop: 8, color: '#9ca3af' }}>Pastikan tabel financial sudah dibuat dan data sudah di-sync dari admin page.</p>
+          <p style={{ fontSize: 11, marginTop: 8, color: 'var(--text-secondary)' }}>Pastikan tabel financial sudah dibuat dan data sudah di-sync dari admin page.</p>
         </div>
       </div>
     );
@@ -873,9 +873,9 @@ export default function FinancePage() {
   if (pl.length === 0 && cf.length === 0 && ratios.length === 0) {
     return (
       <div style={{ padding: 24 }}>
-        <div style={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 12, padding: 24, textAlign: 'center' }}>
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, textAlign: 'center' }}>
           <p style={{ color: '#fff', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>📊 Finance Dashboard</p>
-          <p style={{ color: '#9ca3af' }}>Belum ada data keuangan. Hubungkan dan sync Google Sheets di Admin page.</p>
+          <p style={{ color: 'var(--text-secondary)' }}>Belum ada data keuangan. Hubungkan dan sync Google Sheets di Admin page.</p>
         </div>
       </div>
     );
@@ -890,13 +890,13 @@ export default function FinancePage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: 0 }}>📊 Finance</h1>
-          <p style={{ color: '#9ca3af', fontSize: 13, marginTop: 4 }}>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 4 }}>
             Laporan Keuangan — Delivered Basis &nbsp;|&nbsp; Latest: {latestPL ? monthLabel(latestPL.month) : '-'}
           </p>
         </div>
         <button onClick={loadData} style={{
-          background: 'transparent', border: '1px solid #374151', borderRadius: 6,
-          padding: '6px 12px', color: '#9ca3af', fontSize: 12, cursor: 'pointer',
+          background: 'transparent', border: '1px solid var(--border)', borderRadius: 6,
+          padding: '6px 12px', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer',
         }}>🔄 Refresh</button>
       </div>
 
@@ -939,7 +939,7 @@ export default function FinancePage() {
       <CFTable data={cf} />
       <RatiosTable data={ratios} />
 
-      <div style={{ fontSize: 11, color: '#4b5563', textAlign: 'center', padding: '16px 0' }}>
+      <div style={{ fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', padding: '16px 0' }}>
         ⚠️ PL & CF = Delivered basis | Daily Income = Confirmed basis | BS data aktif untuk metrik diagnostik
       </div>
     </div>

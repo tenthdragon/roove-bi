@@ -353,19 +353,19 @@ export default function ChannelsPage() {
   }, [channelData, adsData, selectedProduct, storeBrandMap, totalRevenue]);
 
 
-  const KPI = ({ label, val, sub, color = '#3b82f6' }) => (
-    <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
+  const KPI = ({ label, val, sub, color = 'var(--accent)' }) => (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: color }} />
-      <div style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>{val}</div>
-      {sub && <div style={{ fontSize: 11, color: '#64748b', marginTop: 4 }}>{sub}</div>}
+      {sub && <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>{sub}</div>}
     </div>
   );
 
   if (dateLoading || (loading && channelData.length === 0)) {
     return (
-      <div style={{ textAlign: 'center', padding: 60, color: '#64748b' }}>
-        <div className="spinner" style={{ width: 32, height: 32, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%', margin: '0 auto 12px' }} />
+      <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>
+        <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 12px' }} />
         <div>Memuat data...</div>
       </div>
     );
@@ -375,7 +375,7 @@ export default function ChannelsPage() {
     return (
       <div className="fade-in">
         <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Channel</h2>
-        <div style={{ textAlign: 'center', padding: 60, color: '#64748b', background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12 }}>
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>📡</div>
           <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Belum Ada Data untuk Periode Ini</div>
           <div style={{ fontSize: 13 }}>Coba pilih rentang tanggal lain menggunakan filter di atas.</div>
@@ -393,8 +393,8 @@ export default function ChannelsPage() {
           value={selectedProduct}
           onChange={e => setSelectedProduct(e.target.value)}
           style={{
-            padding: '8px 14px', borderRadius: 8, border: '1px solid #1a2744',
-            background: '#111a2e', color: '#e2e8f0', fontSize: 13, fontWeight: 500,
+            padding: '8px 14px', borderRadius: 8, border: '1px solid var(--border)',
+            background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontWeight: 500,
             cursor: 'pointer', outline: 'none',
           }}
         >
@@ -413,17 +413,17 @@ export default function ChannelsPage() {
 
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI label="Net Sales" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.length} active channels`} color="#3b82f6" />
+        <KPI label="Net Sales" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.length} active channels`} color="var(--accent)" />
         <KPI
           label="Admin Fee"
           val={`Rp ${fmtCompact(totalMpAdmin)}`}
           sub={
             <span>
               <span style={{ color: '#c4b5fd' }}>{totalMpRevenue > 0 ? (totalMpAdmin / totalMpRevenue * 100).toFixed(1) : 0}%</span>
-              <span style={{ color: '#64748b' }}> of MP rev</span>
-              <span style={{ color: '#64748b', margin: '0 5px' }}>·</span>
-              <span style={{ color: '#94a3b8' }}>{totalRevenue > 0 ? (totalMpAdmin / totalRevenue * 100).toFixed(1) : 0}%</span>
-              <span style={{ color: '#64748b' }}> of total</span>
+              <span style={{ color: 'var(--dim)' }}> of MP rev</span>
+              <span style={{ color: 'var(--dim)', margin: '0 5px' }}>·</span>
+              <span style={{ color: 'var(--text-secondary)' }}>{totalRevenue > 0 ? (totalMpAdmin / totalRevenue * 100).toFixed(1) : 0}%</span>
+              <span style={{ color: 'var(--dim)' }}> of total</span>
             </span>
           }
           color="#8b5cf6"
@@ -432,37 +432,37 @@ export default function ChannelsPage() {
           label="Mkt Cost"
           val={`Rp ${fmtCompact(totalAdsCost)}`}
           sub={`${totalRevenue > 0 ? (totalAdsCost / totalRevenue * 100).toFixed(1) : 0}% of revenue`}
-          color="#f59e0b"
+          color="var(--yellow)"
         />
         <KPI
           label="GP After Mkt + Adm"
           val={`Rp ${fmtCompact(totalProfitAfterAll)}`}
           sub={`Margin: ${totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%`}
-          color={totalProfitAfterAll >= 0 ? '#06b6d4' : '#ef4444'}
+          color={totalProfitAfterAll >= 0 ? '#06b6d4' : 'var(--red)'}
         />
       </div>
 
       {/* Combined Daily Sales & Shipments Table */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Sales &amp; Shipments</div>
         {dailyCombined.rows.length > 0 ? (
           <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + dailyCombined.channelNames.length * 130 + 200), width: '100%' }}>
             <thead>
-              <tr style={{ borderBottom: '2px solid #1a2744' }}>
-                <th style={{ padding: '8px 10px', textAlign: 'left', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>Date</th>
+              <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>Date</th>
                 {dailyCombined.channelNames.map(ch => (
-                  <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: CHANNEL_COLORS[ch] || '#64748b' }}>{ch}</th>
+                  <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: CHANNEL_COLORS[ch] || 'var(--dim)' }}>{ch}</th>
                 ))}
-                <th style={{ padding: '8px 10px', textAlign: 'right', color: '#e2e8f0', fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>Total</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f59e0b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Mkt Fee</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f59e0b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>MP Fee</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>Total</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--yellow)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Mkt Fee</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--yellow)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>MP Fee</th>
               </tr>
             </thead>
             <tbody>
               {dailyCombined.rows.map(row => (
-                <tr key={row.date} style={{ borderBottom: '1px solid #1a2744' }}>
-                  <td style={{ padding: '8px 10px', fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: '#111a2e', zIndex: 1 }}>{shortDate(row.date)}</td>
+                <tr key={row.date} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '8px 10px', fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>{shortDate(row.date)}</td>
                   {dailyCombined.channelNames.map(ch => {
                     const cell = row.channels[ch];
                     const hasData = cell && (cell.revenue || cell.orders);
@@ -471,60 +471,60 @@ export default function ChannelsPage() {
                         {hasData ? (
                           <>
                             <div>{fmtRupiah(cell.revenue)}</div>
-                            {cell.orders > 0 && <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>{cell.orders.toLocaleString('id-ID')}</div>}
+                            {cell.orders > 0 && <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{cell.orders.toLocaleString('id-ID')}</div>}
                           </>
-                        ) : <span style={{ color: '#334155' }}>—</span>}
+                        ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                       </td>
                     );
                   })}
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>
                     <div>{fmtRupiah(row.totalRevenue)}</div>
-                    <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>{row.totalOrders.toLocaleString('id-ID')}</div>
+                    <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{row.totalOrders.toLocaleString('id-ID')}</div>
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>{row.adsFee > 0 ? fmtRupiah(row.adsFee) : <span style={{ color: '#334155' }}>—</span>}</td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>{row.mpFee > 0 ? fmtRupiah(row.mpFee) : <span style={{ color: '#334155' }}>—</span>}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>{row.adsFee > 0 ? fmtRupiah(row.adsFee) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>{row.mpFee > 0 ? fmtRupiah(row.mpFee) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                 </tr>
               ))}
               {/* Grand Total row */}
-              <tr style={{ borderTop: '2px solid #1a2744', background: '#0b1121' }}>
-                <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11, position: 'sticky', left: 0, background: '#0b1121', zIndex: 1 }}>TOTAL</td>
+              <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg)' }}>
+                <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11, position: 'sticky', left: 0, background: 'var(--bg)', zIndex: 1 }}>TOTAL</td>
                 {dailyCombined.channelNames.map(ch => {
                   const chOrders = dailyCombined.rows.reduce((sum, r) => sum + (r.channels[ch]?.orders || 0), 0);
                   const chRevenue = dailyCombined.rows.reduce((sum, r) => sum + (r.channels[ch]?.revenue || 0), 0);
                   return (
-                    <td key={ch} style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: CHANNEL_COLORS[ch] || '#e2e8f0' }}>
+                    <td key={ch} style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: CHANNEL_COLORS[ch] || 'var(--text)' }}>
                       {chRevenue > 0 ? (
                         <>
                           <div>{fmtRupiah(chRevenue)}</div>
                           {chOrders > 0 && <div style={{ fontSize: 10, fontStyle: 'italic', opacity: 0.7 }}>{chOrders.toLocaleString('id-ID')}</div>}
                         </>
-                      ) : <span style={{ color: '#334155' }}>—</span>}
+                      ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                   );
                 })}
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>
                   <div>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.totalRevenue, 0))}</div>
-                  <div style={{ fontSize: 10, color: '#64748b', fontStyle: 'italic' }}>{dailyCombined.rows.reduce((sum, r) => sum + r.totalOrders, 0).toLocaleString('id-ID')}</div>
+                  <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{dailyCombined.rows.reduce((sum, r) => sum + r.totalOrders, 0).toLocaleString('id-ID')}</div>
                 </td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.adsFee, 0))}</td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.mpFee, 0))}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.adsFee, 0))}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.mpFee, 0))}</td>
               </tr>
             </tbody>
           </table>
           </div>
         ) : (
-          <div style={{ textAlign: 'center', padding: 24, color: '#64748b', fontSize: 12 }}>Tidak ada data harian untuk periode ini.</div>
+          <div style={{ textAlign: 'center', padding: 24, color: 'var(--dim)', fontSize: 12 }}>Tidak ada data harian untuk periode ini.</div>
         )}
       </div>
 
       {/* Channel Breakdown Table */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto' }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, overflowX: 'auto' }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Channel Breakdown</div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
           <thead>
-            <tr style={{ borderBottom: '2px solid #1a2744' }}>
+            <tr style={{ borderBottom: '2px solid var(--border)' }}>
               {['Channel', 'Net Sales', '% Share', 'Admin Fee', 'Mkt Cost', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -548,35 +548,35 @@ export default function ChannelsPage() {
               const svMargin = sv.revenue > 0 ? (svProfit / sv.revenue) * 100 : 0;
 
               const renderRow = (c) => (
-                <tr key={c.name} style={{ borderBottom: '1px solid #1a2744' }}>
+                <tr key={c.name} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td style={{ padding: '8px 10px' }}>
                     <div style={{ fontWeight: 600 }} title={CHANNEL_TOOLTIP[c.name] || ''}>{c.name}</div>
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(c.revenue)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>{c.pct.toFixed(1)}%</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--dim)' }}>{c.pct.toFixed(1)}%</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#8b5cf6' }}>
-                    {c.mpAdmin > 0 ? fmtRupiah(c.mpAdmin) : <span style={{ color: '#334155' }}>—</span>}
+                    {c.mpAdmin > 0 ? fmtRupiah(c.mpAdmin) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                   </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>
-                    {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: '#334155' }}>—</span>}
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
+                    {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                     {c.totalCost > 0 ? (
                       <span style={{
                         padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                        background: c.costRatio > 40 ? '#7f1d1d' : c.costRatio > 25 ? '#78350f' : '#064e3b',
-                        color: c.costRatio > 40 ? '#ef4444' : c.costRatio > 25 ? '#f59e0b' : '#10b981',
+                        background: c.costRatio > 40 ? 'var(--badge-red-bg)' : c.costRatio > 25 ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)',
+                        color: c.costRatio > 40 ? 'var(--red)' : c.costRatio > 25 ? 'var(--yellow)' : 'var(--green)',
                       }}>{c.costRatio.toFixed(1)}%</span>
-                    ) : <span style={{ color: '#334155' }}>—</span>}
+                    ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                   </td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: c.profitAfterAll >= 0 ? '#10b981' : '#ef4444' }}>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: c.profitAfterAll >= 0 ? 'var(--green)' : 'var(--red)' }}>
                     {fmtRupiah(c.profitAfterAll)}
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                     <span style={{
                       padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                      background: c.marginAfterAll >= 30 ? '#064e3b' : c.marginAfterAll >= 10 ? '#78350f' : '#7f1d1d',
-                      color: c.marginAfterAll >= 30 ? '#10b981' : c.marginAfterAll >= 10 ? '#f59e0b' : '#ef4444',
+                      background: c.marginAfterAll >= 30 ? 'var(--badge-green-bg)' : c.marginAfterAll >= 10 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
+                      color: c.marginAfterAll >= 30 ? 'var(--green)' : c.marginAfterAll >= 10 ? 'var(--yellow)' : 'var(--red)',
                     }}>{c.marginAfterAll.toFixed(1)}%</span>
                   </td>
                 </tr>
@@ -588,66 +588,66 @@ export default function ChannelsPage() {
                   {scalevGroup.length > 0 && (
                     <>
                       <tr
-                        style={{ borderBottom: '1px solid #1a2744', cursor: 'pointer' }}
+                        style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
                         onClick={() => setScalevExpanded(prev => !prev)}
                         title="Klik untuk lihat breakdown CS Manual & Scalev Ads"
                       >
                         <td style={{ padding: '8px 10px' }}>
                           <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <span style={{ fontSize: 9, color: '#64748b', transition: 'transform 0.15s', display: 'inline-block', transform: scalevExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
+                            <span style={{ fontSize: 9, color: 'var(--dim)', transition: 'transform 0.15s', display: 'inline-block', transform: scalevExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}>▶</span>
                             Scalev
                           </div>
                         </td>
                         <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(sv.revenue)}</td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>{svPct.toFixed(1)}%</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--dim)' }}>{svPct.toFixed(1)}%</td>
                         <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#8b5cf6' }}>
-                          {sv.mpAdmin > 0 ? fmtRupiah(sv.mpAdmin) : <span style={{ color: '#334155' }}>—</span>}
+                          {sv.mpAdmin > 0 ? fmtRupiah(sv.mpAdmin) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                         </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>
-                          {sv.adsCost > 0 ? fmtRupiah(sv.adsCost) : <span style={{ color: '#334155' }}>—</span>}
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
+                          {sv.adsCost > 0 ? fmtRupiah(sv.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                         </td>
                         <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                           {svTotalCost > 0 ? (
                             <span style={{
                               padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                              background: svCostRatio > 40 ? '#7f1d1d' : svCostRatio > 25 ? '#78350f' : '#064e3b',
-                              color: svCostRatio > 40 ? '#ef4444' : svCostRatio > 25 ? '#f59e0b' : '#10b981',
+                              background: svCostRatio > 40 ? 'var(--badge-red-bg)' : svCostRatio > 25 ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)',
+                              color: svCostRatio > 40 ? 'var(--red)' : svCostRatio > 25 ? 'var(--yellow)' : 'var(--green)',
                             }}>{svCostRatio.toFixed(1)}%</span>
-                          ) : <span style={{ color: '#334155' }}>—</span>}
+                          ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                         </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: svProfit >= 0 ? '#10b981' : '#ef4444' }}>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: svProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>
                           {fmtRupiah(svProfit)}
                         </td>
                         <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                           <span style={{
                             padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                            background: svMargin >= 30 ? '#064e3b' : svMargin >= 10 ? '#78350f' : '#7f1d1d',
-                            color: svMargin >= 30 ? '#10b981' : svMargin >= 10 ? '#f59e0b' : '#ef4444',
+                            background: svMargin >= 30 ? 'var(--badge-green-bg)' : svMargin >= 10 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
+                            color: svMargin >= 30 ? 'var(--green)' : svMargin >= 10 ? 'var(--yellow)' : 'var(--red)',
                           }}>{svMargin.toFixed(1)}%</span>
                         </td>
                       </tr>
                       {/* Nested breakdown (visible when expanded) */}
                       {scalevExpanded && scalevGroup.map(c => (
-                        <tr key={c.name} style={{ borderBottom: '1px solid #1a2744', background: '#0b1121' }}>
+                        <tr key={c.name} style={{ borderBottom: '1px solid var(--border)', background: 'var(--bg)' }}>
                           <td style={{ padding: '6px 10px', paddingLeft: 32 }}>
-                            <div style={{ fontWeight: 500, fontSize: 11, color: '#94a3b8' }} title={CHANNEL_TOOLTIP[c.name] || ''}>{c.name}</div>
+                            <div style={{ fontWeight: 500, fontSize: 11, color: 'var(--text-secondary)' }} title={CHANNEL_TOOLTIP[c.name] || ''}>{c.name}</div>
                           </td>
-                          <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: '#94a3b8' }}>{fmtRupiah(c.revenue)}</td>
-                          <td style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, color: '#475569' }}>{c.pct.toFixed(1)}%</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: 'var(--text-secondary)' }}>{fmtRupiah(c.revenue)}</td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontSize: 10, color: 'var(--text-muted)' }}>{c.pct.toFixed(1)}%</td>
                           <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: '#7c3aed' }}>
-                            {c.mpAdmin > 0 ? fmtRupiah(c.mpAdmin) : <span style={{ color: '#334155' }}>—</span>}
+                            {c.mpAdmin > 0 ? fmtRupiah(c.mpAdmin) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           </td>
                           <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: '#d97706' }}>
-                            {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: '#334155' }}>—</span>}
+                            {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           </td>
                           <td style={{ padding: '6px 10px', textAlign: 'right' }}>
                             {c.totalCost > 0 ? (
-                              <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, background: c.costRatio > 40 ? '#7f1d1d' : c.costRatio > 25 ? '#78350f' : '#064e3b', color: c.costRatio > 40 ? '#ef4444' : c.costRatio > 25 ? '#f59e0b' : '#10b981' }}>{c.costRatio.toFixed(1)}%</span>
-                            ) : <span style={{ color: '#334155' }}>—</span>}
+                              <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, background: c.costRatio > 40 ? 'var(--badge-red-bg)' : c.costRatio > 25 ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)', color: c.costRatio > 40 ? 'var(--red)' : c.costRatio > 25 ? 'var(--yellow)' : 'var(--green)' }}>{c.costRatio.toFixed(1)}%</span>
+                            ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           </td>
                           <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: c.profitAfterAll >= 0 ? '#059669' : '#dc2626' }}>{fmtRupiah(c.profitAfterAll)}</td>
                           <td style={{ padding: '6px 10px', textAlign: 'right' }}>
-                            <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, background: c.marginAfterAll >= 30 ? '#064e3b' : c.marginAfterAll >= 10 ? '#78350f' : '#7f1d1d', color: c.marginAfterAll >= 30 ? '#10b981' : c.marginAfterAll >= 10 ? '#f59e0b' : '#ef4444' }}>{c.marginAfterAll.toFixed(1)}%</span>
+                            <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, background: c.marginAfterAll >= 30 ? 'var(--badge-green-bg)' : c.marginAfterAll >= 10 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)', color: c.marginAfterAll >= 30 ? 'var(--green)' : c.marginAfterAll >= 10 ? 'var(--yellow)' : 'var(--red)' }}>{c.marginAfterAll.toFixed(1)}%</span>
                           </td>
                         </tr>
                       ))}
@@ -659,22 +659,22 @@ export default function ChannelsPage() {
               );
             })()}
             {/* Total row */}
-            <tr style={{ borderTop: '2px solid #1a2744', background: '#0b1121' }}>
+            <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg)' }}>
               <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalRevenue)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>{fmtRupiah(totalMpAdmin)}</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(totalAdsCost)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(totalAdsCost)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1a2744', color: '#e2e8f0' }}>
+                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--border)', color: 'var(--text)' }}>
                   {totalRevenue > 0 ? (totalCost / totalRevenue * 100).toFixed(1) : 0}%
                 </span>
               </td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalProfitAfterAll >= 0 ? '#10b981' : '#ef4444' }}>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalProfitAfterAll >= 0 ? 'var(--green)' : 'var(--red)' }}>
                 {fmtRupiah(totalProfitAfterAll)}
               </td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1a2744', color: '#e2e8f0' }}>
+                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--border)', color: 'var(--text)' }}>
                   {totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%
                 </span>
               </td>
@@ -684,68 +684,68 @@ export default function ChannelsPage() {
       </div>
 
       {/* Product Breakdown Table */}
-      <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16, overflowX: 'auto', marginTop: 16 }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, overflowX: 'auto', marginTop: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Product Breakdown</div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
           <thead>
-            <tr style={{ borderBottom: '2px solid #1a2744' }}>
+            <tr style={{ borderBottom: '2px solid var(--border)' }}>
               {['Product', 'Net Sales', '% Share', 'Admin Fee', 'Mkt Cost', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Product' ? 'left' : 'right', color: '#64748b', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Product' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {productBreakdown.map(p => (
-              <tr key={p.name} style={{ borderBottom: '1px solid #1a2744' }}>
+              <tr key={p.name} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={{ padding: '8px 10px' }}>
                   <div style={{ fontWeight: 600 }}>{p.name}</div>
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(p.revenue)}</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', color: '#64748b' }}>{p.pct.toFixed(1)}%</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--dim)' }}>{p.pct.toFixed(1)}%</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#8b5cf6' }}>
-                  {p.mpAdmin > 0 ? fmtRupiah(p.mpAdmin) : <span style={{ color: '#334155' }}>—</span>}
+                  {p.mpAdmin > 0 ? fmtRupiah(p.mpAdmin) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#f59e0b' }}>
-                  {p.adsCost > 0 ? fmtRupiah(p.adsCost) : <span style={{ color: '#334155' }}>—</span>}
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
+                  {p.adsCost > 0 ? fmtRupiah(p.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                   {p.totalCost > 0 ? (
                     <span style={{
                       padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                      background: p.costRatio > 40 ? '#7f1d1d' : p.costRatio > 25 ? '#78350f' : '#064e3b',
-                      color: p.costRatio > 40 ? '#ef4444' : p.costRatio > 25 ? '#f59e0b' : '#10b981',
+                      background: p.costRatio > 40 ? 'var(--badge-red-bg)' : p.costRatio > 25 ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)',
+                      color: p.costRatio > 40 ? 'var(--red)' : p.costRatio > 25 ? 'var(--yellow)' : 'var(--green)',
                     }}>{p.costRatio.toFixed(1)}%</span>
-                  ) : <span style={{ color: '#334155' }}>—</span>}
+                  ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: p.profitAfterAll >= 0 ? '#10b981' : '#ef4444' }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: p.profitAfterAll >= 0 ? 'var(--green)' : 'var(--red)' }}>
                   {fmtRupiah(p.profitAfterAll)}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                   <span style={{
                     padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                    background: p.marginAfterAll >= 30 ? '#064e3b' : p.marginAfterAll >= 10 ? '#78350f' : '#7f1d1d',
-                    color: p.marginAfterAll >= 30 ? '#10b981' : p.marginAfterAll >= 10 ? '#f59e0b' : '#ef4444',
+                    background: p.marginAfterAll >= 30 ? 'var(--badge-green-bg)' : p.marginAfterAll >= 10 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
+                    color: p.marginAfterAll >= 30 ? 'var(--green)' : p.marginAfterAll >= 10 ? 'var(--yellow)' : 'var(--red)',
                   }}>{p.marginAfterAll.toFixed(1)}%</span>
                 </td>
               </tr>
             ))}
             {/* Total row */}
-            <tr style={{ borderTop: '2px solid #1a2744', background: '#0b1121' }}>
+            <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg)' }}>
               <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalRevenue)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>{fmtRupiah(totalMpAdmin)}</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#f59e0b' }}>{fmtRupiah(totalAdsCost)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(totalAdsCost)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1a2744', color: '#e2e8f0' }}>
+                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--border)', color: 'var(--text)' }}>
                   {totalRevenue > 0 ? (totalCost / totalRevenue * 100).toFixed(1) : 0}%
                 </span>
               </td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalProfitAfterAll >= 0 ? '#10b981' : '#ef4444' }}>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalProfitAfterAll >= 0 ? 'var(--green)' : 'var(--red)' }}>
                 {fmtRupiah(totalProfitAfterAll)}
               </td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1a2744', color: '#e2e8f0' }}>
+                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--border)', color: 'var(--text)' }}>
                   {totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%
                 </span>
               </td>

@@ -66,12 +66,12 @@ export default function RegisterPage() {
 
   const inputStyle = {
     width: '100%', padding: '10px 14px', borderRadius: 8,
-    border: '1px solid #1a2744', background: '#0b1121',
-    color: '#e2e8f0', fontSize: 16, outline: 'none',
+    border: '1px solid var(--border)', background: 'var(--bg)',
+    color: 'var(--text)', fontSize: 16, outline: 'none',
   };
 
   const labelStyle = {
-    display: 'block' as const, fontSize: 12, fontWeight: 600, color: '#64748b',
+    display: 'block' as const, fontSize: 12, fontWeight: 600, color: 'var(--dim)',
     marginBottom: 6, textTransform: 'uppercase' as const, letterSpacing: '0.05em',
   };
 
@@ -79,10 +79,10 @@ export default function RegisterPage() {
     return (
       <div style={{
         minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'linear-gradient(135deg, #0b1121 0%, #1e1b4b 50%, #0b1121 100%)', padding: 20,
+        background: 'linear-gradient(135deg, var(--bg) 0%, #1e1b4b 50%, var(--bg) 100%)', padding: 20,
       }}>
         <div style={{
-          background: '#111a2e', border: '1px solid #1a2744', borderRadius: 16,
+          background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16,
           padding: 40, width: '100%', maxWidth: 400, textAlign: 'center',
         }}>
           <div style={{
@@ -94,15 +94,15 @@ export default function RegisterPage() {
           <h2 style={{ margin: '0 0 12px', fontSize: 18, fontWeight: 700 }}>
             Pendaftaran Berhasil
           </h2>
-          <p style={{ color: '#94a3b8', fontSize: 14, lineHeight: 1.6, margin: '0 0 20px' }}>
-            Akun Anda telah dibuat dengan status <strong style={{ color: '#f59e0b' }}>pending</strong>.
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, lineHeight: 1.6, margin: '0 0 20px' }}>
+            Akun Anda telah dibuat dengan status <strong style={{ color: 'var(--yellow)' }}>pending</strong>.
             Admin akan mengaktifkan akun Anda. Silakan hubungi admin untuk proses approval.
           </p>
           <button
             onClick={() => router.push('/')}
             style={{
               padding: '10px 24px', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: 'linear-gradient(135deg, #3b82f6, #6366f1)',
+              background: 'linear-gradient(135deg, var(--accent), #6366f1)',
               color: '#fff', fontSize: 14, fontWeight: 600,
             }}
           >
@@ -116,24 +116,24 @@ export default function RegisterPage() {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'linear-gradient(135deg, #0b1121 0%, #1e1b4b 50%, #0b1121 100%)', padding: 20,
+      background: 'linear-gradient(135deg, var(--bg) 0%, #1e1b4b 50%, var(--bg) 100%)', padding: 20,
     }}>
       <div style={{
-        background: '#111a2e', border: '1px solid #1a2744', borderRadius: 16,
+        background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16,
         padding: 40, width: '100%', maxWidth: 400,
       }}>
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{
             width: 56, height: 56, borderRadius: 14,
-            background: 'linear-gradient(135deg, #3b82f6, #8b5cf6)',
+            background: 'linear-gradient(135deg, var(--accent), #8b5cf6)',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 24, fontWeight: 800, color: '#fff', marginBottom: 16,
           }}>R</div>
           <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, letterSpacing: '-0.02em' }}>
             Daftar Akun
           </h1>
-          <p style={{ margin: '8px 0 0', color: '#64748b', fontSize: 14 }}>
+          <p style={{ margin: '8px 0 0', color: 'var(--dim)', fontSize: 14 }}>
             Roove BI — Internal Only
           </p>
         </div>
@@ -148,8 +148,8 @@ export default function RegisterPage() {
               required
               placeholder="Nama lengkap"
               style={inputStyle}
-              onFocus={e => e.target.style.borderColor = '#3b82f6'}
-              onBlur={e => e.target.style.borderColor = '#1a2744'}
+              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border)'}
             />
           </div>
 
@@ -162,10 +162,10 @@ export default function RegisterPage() {
               required
               placeholder="nama@roove.co.id"
               style={inputStyle}
-              onFocus={e => e.target.style.borderColor = '#3b82f6'}
-              onBlur={e => e.target.style.borderColor = '#1a2744'}
+              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border)'}
             />
-            <p style={{ margin: '6px 0 0', fontSize: 11, color: '#475569' }}>
+            <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
               Hanya email @roove.co.id yang diterima
             </p>
           </div>
@@ -180,8 +180,8 @@ export default function RegisterPage() {
               minLength={6}
               placeholder="Minimal 6 karakter"
               style={inputStyle}
-              onFocus={e => e.target.style.borderColor = '#3b82f6'}
-              onBlur={e => e.target.style.borderColor = '#1a2744'}
+              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border)'}
             />
           </div>
 
@@ -194,15 +194,15 @@ export default function RegisterPage() {
               required
               minLength={6}
               style={inputStyle}
-              onFocus={e => e.target.style.borderColor = '#3b82f6'}
-              onBlur={e => e.target.style.borderColor = '#1a2744'}
+              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border)'}
             />
           </div>
 
           {error && (
             <div style={{
               padding: '10px 14px', borderRadius: 8, marginBottom: 16,
-              background: '#7f1d1d', color: '#ef4444', fontSize: 13,
+              background: '#7f1d1d', color: 'var(--red)', fontSize: 13,
             }}>{error}</div>
           )}
 
@@ -210,7 +210,7 @@ export default function RegisterPage() {
             width: '100%', padding: '12px 16px', borderRadius: 10,
             border: 'none', cursor: loading ? 'not-allowed' : 'pointer',
             fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em',
-            background: loading ? '#1e40af' : 'linear-gradient(135deg, #3b82f6, #6366f1)',
+            background: loading ? '#1e40af' : 'linear-gradient(135deg, var(--accent), #6366f1)',
             color: '#fff', transition: 'all 0.2s',
             opacity: loading ? 0.7 : 1,
           }}>
@@ -221,9 +221,9 @@ export default function RegisterPage() {
         <div style={{ marginTop: 20, textAlign: 'center' }}>
           <a
             href="/"
-            style={{ fontSize: 13, color: '#3b82f6', textDecoration: 'none' }}
+            style={{ fontSize: 13, color: 'var(--accent)', textDecoration: 'none' }}
             onMouseEnter={e => (e.target as HTMLAnchorElement).style.color = '#60a5fa'}
-            onMouseLeave={e => (e.target as HTMLAnchorElement).style.color = '#3b82f6'}
+            onMouseLeave={e => (e.target as HTMLAnchorElement).style.color = 'var(--accent)'}
           >
             Sudah punya akun? Masuk
           </a>

@@ -84,8 +84,8 @@ export default function ProductsPage() {
 
   if (dateLoading || (loading && data.length === 0)) {
     return (
-      <div style={{ textAlign: 'center', padding: 60, color: '#64748b' }}>
-        <div className="spinner" style={{ width: 32, height: 32, border: '3px solid #1a2744', borderTop: '3px solid #3b82f6', borderRadius: '50%', margin: '0 auto 12px' }} />
+      <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>
+        <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 12px' }} />
         <div>Memuat data...</div>
       </div>
     );
@@ -95,7 +95,7 @@ export default function ProductsPage() {
     return (
       <div className="fade-in">
         <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Produk</h2>
-        <div style={{ textAlign: 'center', padding: 60, color: '#64748b', background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12 }}>
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>📦</div>
           <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Belum Ada Data untuk Periode Ini</div>
           <div style={{ fontSize: 13 }}>Coba pilih rentang tanggal lain menggunakan filter di atas.</div>
@@ -117,39 +117,39 @@ export default function ProductsPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 14, marginBottom: 20 }}>
         {products.map(p => (
-          <div key={p.sku} style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 18, position: 'relative', overflow: 'hidden' }}>
+          <div key={p.sku} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, position: 'relative', overflow: 'hidden' }}>
             {/* Top color bar */}
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: getBrandColor(p.sku, activeBrands) || '#64748b' }} />
+            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: getBrandColor(p.sku, activeBrands) || 'var(--dim)' }} />
 
             {/* Header: SKU name + share of total */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div style={{ fontSize: 15, fontWeight: 700 }}>{p.sku}</div>
-              <span style={{ fontSize: 10, color: '#64748b' }}>{p.salesPct.toFixed(1)}% of total</span>
+              <span style={{ fontSize: 10, color: 'var(--dim)' }}>{p.salesPct.toFixed(1)}% of total</span>
             </div>
 
             {/* Metrics grid */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
               {/* Net Sales */}
               <div>
-                <div style={{ fontSize: 10, color: '#64748b' }}>NET SALES</div>
+                <div style={{ fontSize: 10, color: 'var(--dim)' }}>NET SALES</div>
                 <div style={{ fontWeight: 700, fontFamily: 'monospace' }}>Rp {fmtCompact(p.sales)}</div>
               </div>
 
               {/* Gross Profit */}
               <div>
-                <div style={{ fontSize: 10, color: '#64748b' }}>GROSS PROFIT</div>
-                <div style={{ fontWeight: 700, fontFamily: 'monospace', color: '#10b981' }}>
+                <div style={{ fontSize: 10, color: 'var(--dim)' }}>GROSS PROFIT</div>
+                <div style={{ fontWeight: 700, fontFamily: 'monospace', color: 'var(--green)' }}>
                   Rp {fmtCompact(p.gp)}
-                  <span style={{ fontSize: 9, fontWeight: 600, color: '#64748b', marginLeft: 4 }}>{p.gpPct.toFixed(1)}%</span>
+                  <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--dim)', marginLeft: 4 }}>{p.gpPct.toFixed(1)}%</span>
                 </div>
               </div>
 
               {/* Mkt Cost (ads only) */}
               <div>
-                <div style={{ fontSize: 10, color: '#64748b' }}>MKT COST</div>
-                <div style={{ fontWeight: 700, fontFamily: 'monospace', color: '#f59e0b' }}>
+                <div style={{ fontSize: 10, color: 'var(--dim)' }}>MKT COST</div>
+                <div style={{ fontWeight: 700, fontFamily: 'monospace', color: 'var(--yellow)' }}>
                   Rp {fmtCompact(p.mpFee > 0 ? p.adsCost : p.totalMkt)}
-                  <span style={{ fontSize: 9, fontWeight: 600, color: '#64748b', marginLeft: 4 }}>
+                  <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--dim)', marginLeft: 4 }}>
                     {p.mpFee > 0 ? p.adsCostPct.toFixed(1) : p.mktR.toFixed(1)}%
                   </span>
                 </div>
@@ -157,34 +157,34 @@ export default function ProductsPage() {
 
               {/* MP Fee */}
               <div>
-                <div style={{ fontSize: 10, color: '#64748b' }}>MP FEE</div>
+                <div style={{ fontSize: 10, color: 'var(--dim)' }}>MP FEE</div>
                 {hasPreFebData && !hasPostFebData ? (
-                  <div style={{ fontWeight: 700, fontFamily: 'monospace', color: '#475569', fontSize: 11 }}>N/A</div>
+                  <div style={{ fontWeight: 700, fontFamily: 'monospace', color: 'var(--text-muted)', fontSize: 11 }}>N/A</div>
                 ) : p.mpFee > 0 ? (
                   <div style={{ fontWeight: 700, fontFamily: 'monospace', color: '#8b5cf6' }}>
                     Rp {fmtCompact(p.mpFee)}
-                    <span style={{ fontSize: 9, fontWeight: 600, color: '#64748b', marginLeft: 4 }}>{p.mpFeePct.toFixed(1)}%</span>
+                    <span style={{ fontSize: 9, fontWeight: 600, color: 'var(--dim)', marginLeft: 4 }}>{p.mpFeePct.toFixed(1)}%</span>
                   </div>
                 ) : (
-                  <div style={{ fontWeight: 700, fontFamily: 'monospace', color: '#475569', fontSize: 11 }}>
+                  <div style={{ fontWeight: 700, fontFamily: 'monospace', color: 'var(--text-muted)', fontSize: 11 }}>
                     {isMixed ? 'N/A' : 'Rp 0'}
                   </div>
                 )}
               </div>
 
               {/* Net Profit - full width */}
-              <div style={{ gridColumn: '1 / -1', borderTop: '1px solid #1a2744', paddingTop: 8, marginTop: 2 }}>
+              <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)', paddingTop: 8, marginTop: 2 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
-                    <div style={{ fontSize: 10, color: '#64748b' }}>PROFIT AFTER MKT</div>
-                    <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 14, color: p.nam >= 0 ? '#06b6d4' : '#ef4444' }}>
+                    <div style={{ fontSize: 10, color: 'var(--dim)' }}>PROFIT AFTER MKT</div>
+                    <div style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 14, color: p.nam >= 0 ? '#06b6d4' : 'var(--red)' }}>
                       Rp {fmtCompact(p.nam)}
                     </div>
                   </div>
                   <span style={{
                     padding: '3px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700,
-                    background: p.profitPct >= 20 ? '#064e3b' : p.profitPct >= 0 ? '#78350f' : '#7f1d1d',
-                    color: p.profitPct >= 20 ? '#10b981' : p.profitPct >= 0 ? '#f59e0b' : '#ef4444',
+                    background: p.profitPct >= 20 ? 'var(--badge-green-bg)' : p.profitPct >= 0 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
+                    color: p.profitPct >= 20 ? 'var(--green)' : p.profitPct >= 0 ? 'var(--yellow)' : 'var(--red)',
                   }}>
                     {p.profitPct.toFixed(1)}%
                   </span>
@@ -196,7 +196,7 @@ export default function ProductsPage() {
       </div>
 
       {products.length > 0 && (
-        <div style={{ background: '#111a2e', border: '1px solid #1a2744', borderRadius: 12, padding: 16 }}>
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
           <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Net Sales vs GP After Mkt + Adm</div>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={products.map(p => ({ name: p.sku, 'Net Sales': p.sales, 'GP After Mkt + Adm': p.nam }))} layout="vertical">

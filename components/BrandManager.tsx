@@ -16,7 +16,7 @@ export default function BrandManager() {
   const [editingKeywords, setEditingKeywords] = useState(null); // { id, keywords }
   const [savingKeywords, setSavingKeywords] = useState(false);
 
-  const C = { card: '#111a2e', bdr: '#1a2744', dim: '#64748b', txt: '#e2e8f0', bg: '#0b1121' };
+  const C = { card: 'var(--card)', bdr: 'var(--border)', dim: 'var(--dim)', txt: 'var(--text)', bg: 'var(--bg)' };
 
   const loadBrands = useCallback(async () => {
     try {
@@ -131,13 +131,13 @@ export default function BrandManager() {
           <button
             onClick={handleAdd}
             disabled={adding}
-            style={{ padding: '8px 20px', borderRadius: 6, border: 'none', cursor: adding ? 'not-allowed' : 'pointer', background: adding ? '#1a2744' : '#3b82f6', color: '#fff', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', opacity: adding ? 0.6 : 1 }}
+            style={{ padding: '8px 20px', borderRadius: 6, border: 'none', cursor: adding ? 'not-allowed' : 'pointer', background: adding ? 'var(--border)' : 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', opacity: adding ? 0.6 : 1 }}
           >
             {adding ? 'Menambahkan...' : '+ Tambah'}
           </button>
         </div>
         {msg && (
-          <div style={{ marginTop: 10, padding: 10, borderRadius: 6, fontSize: 12, background: msg.type === 'success' ? '#064e3b' : '#7f1d1d', color: msg.type === 'success' ? '#10b981' : '#ef4444' }}>
+          <div style={{ marginTop: 10, padding: 10, borderRadius: 6, fontSize: 12, background: msg.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: msg.type === 'success' ? 'var(--green)' : 'var(--red)' }}>
             {msg.type === 'success' ? '✅' : '❌'} {msg.text}
           </div>
         )}
@@ -161,7 +161,7 @@ export default function BrandManager() {
                 </div>
                 <button
                   onClick={() => handleToggle(b)}
-                  style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${C.bdr}`, cursor: 'pointer', background: 'none', color: '#f59e0b', fontSize: 11, fontWeight: 600 }}
+                  style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${C.bdr}`, cursor: 'pointer', background: 'none', color: 'var(--yellow)', fontSize: 11, fontWeight: 600 }}
                 >
                   Nonaktifkan
                 </button>
@@ -177,14 +177,14 @@ export default function BrandManager() {
                       placeholder={b.name.toLowerCase()}
                       style={{ flex: 1, padding: '4px 8px', borderRadius: 4, border: `1px solid ${C.bdr}`, background: C.card, color: C.txt, fontSize: 11, outline: 'none', minWidth: 150 }}
                     />
-                    <button onClick={handleSaveKeywords} disabled={savingKeywords} style={{ padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', background: '#10b981', color: '#fff', fontSize: 10, fontWeight: 600 }}>
+                    <button onClick={handleSaveKeywords} disabled={savingKeywords} style={{ padding: '3px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', background: 'var(--green)', color: '#fff', fontSize: 10, fontWeight: 600 }}>
                       {savingKeywords ? '...' : 'Simpan'}
                     </button>
                     <button onClick={() => setEditingKeywords(null)} style={{ padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer', background: 'none', color: C.dim, fontSize: 10 }}>Batal</button>
                   </>
                 ) : (
                   <>
-                    <span style={{ fontSize: 11, color: '#94a3b8', fontFamily: 'monospace' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
                       {b.keywords || b.name.toLowerCase()}
                     </span>
                     <button
@@ -213,7 +213,7 @@ export default function BrandManager() {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {inactiveBrands.map(b => (
-              <div key={b.id} style={{ padding: '10px 14px', background: C.bg, borderRadius: 8, border: '1px solid #7f1d1d33', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, opacity: 0.7 }}>
+              <div key={b.id} style={{ padding: '10px 14px', background: C.bg, borderRadius: 8, border: '1px solid var(--badge-red-bg)33', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, opacity: 0.7 }}>
                 <div>
                   <span style={{ fontWeight: 600, fontSize: 13, color: C.dim }}>{b.name}</span>
                   {b.sheet_name !== b.name && (
@@ -223,7 +223,7 @@ export default function BrandManager() {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button
                     onClick={() => handleToggle(b)}
-                    style={{ padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#064e3b', color: '#10b981', fontSize: 11, fontWeight: 600 }}
+                    style={{ padding: '4px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--badge-green-bg)', color: 'var(--green)', fontSize: 11, fontWeight: 600 }}
                   >
                     Aktifkan
                   </button>
@@ -233,12 +233,12 @@ export default function BrandManager() {
                         value={deleteTyped}
                         onChange={e => setDeleteTyped(e.target.value)}
                         placeholder={`Ketik "${b.name}"`}
-                        style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid #7f1d1d', background: '#0b1121', color: '#ef4444', fontSize: 11, width: 120 }}
+                        style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid var(--badge-red-bg)', background: 'var(--bg)', color: 'var(--red)', fontSize: 11, width: 120 }}
                       />
                       <button
                         onClick={() => handleDeletePermanent(b)}
                         disabled={deleteTyped !== b.name}
-                        style={{ padding: '4px 10px', borderRadius: 4, border: 'none', cursor: deleteTyped === b.name ? 'pointer' : 'not-allowed', background: deleteTyped === b.name ? '#7f1d1d' : '#1a2744', color: deleteTyped === b.name ? '#ef4444' : '#64748b', fontSize: 11, fontWeight: 700 }}
+                        style={{ padding: '4px 10px', borderRadius: 4, border: 'none', cursor: deleteTyped === b.name ? 'pointer' : 'not-allowed', background: deleteTyped === b.name ? 'var(--badge-red-bg)' : 'var(--border)', color: deleteTyped === b.name ? 'var(--red)' : 'var(--dim)', fontSize: 11, fontWeight: 700 }}
                       >
                         Hapus
                       </button>
@@ -252,7 +252,7 @@ export default function BrandManager() {
                   ) : (
                     <button
                       onClick={() => setConfirmDelete(b.id)}
-                      style={{ padding: '4px 12px', borderRadius: 6, border: '1px solid #7f1d1d', cursor: 'pointer', background: 'none', color: '#ef4444', fontSize: 11, fontWeight: 600 }}
+                      style={{ padding: '4px 12px', borderRadius: 6, border: '1px solid var(--badge-red-bg)', cursor: 'pointer', background: 'none', color: 'var(--red)', fontSize: 11, fontWeight: 600 }}
                     >
                       Hapus Permanen
                     </button>

@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata, Viewport } from 'next';
+import ThemeProvider from '@/components/ThemeProvider';
 
 export const metadata: Metadata = {
   title: 'Roove BI Dashboard',
@@ -15,8 +16,10 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="id">
-      <body>{children}</body>
+    <html lang="id" suppressHydrationWarning>
+      <body>
+        <ThemeProvider>{children}</ThemeProvider>
+      </body>
     </html>
   );
 }
