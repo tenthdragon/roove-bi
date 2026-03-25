@@ -533,42 +533,90 @@ function CohortTab({ data }) {
   }
   const cohortMonths = Object.keys(cohorts).sort();
   const maxM = Math.max(...data.map(d => d.months_since_first), 0);
+  const displayM = Math.min(maxM, 11); // show up to M+11 (12 columns)
+
+  // find last month with data per cohort (for trimming trailing dashes)
+  const lastDataCol = {};
+  for (const month of cohortMonths) {
+    let last = 0;
+    for (let i = 0; i <= displayM; i++) { if (cohorts[month][i]) last = i; }
+    lastDataCol[month] = last;
+  }
+
+  const downloadFullCsv = () => {
+    const headers = ['Cohort', 'Size', ...Array.from({ length: maxM + 1 }, (_, i) => i === 0 ? 'M0' : `M+${i}`)];
+    const rows = cohortMonths.map(month => {
+      const base = cohorts[month][0]?.customers || 0;
+      return [month, base, ...Array.from({ length: maxM + 1 }, (_, i) => {
+        const cell = cohorts[month][i];
+        if (!cell) return '';
+        return base > 0 ? `${((cell.customers / base) * 100).toFixed(1)}%` : '0%';
+      })];
+    });
+    const csv = [headers, ...rows].map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `cohort_retention_full.csv`; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const stickyBase = { position: 'sticky' as const, zIndex: 2, background: 'var(--card)' };
 
   return (
-    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, overflowX: 'auto' }}>
-      <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Cohort Retention</h3>
-      <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--dim)' }}>Customer dari cohort bulan X yang masih order di bulan-bulan berikutnya</p>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-        <thead><tr>
-          <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Cohort</th>
-          <th style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Size</th>
-          {Array.from({ length: Math.min(maxM + 1, 7) }, (_, i) =>
-            <th key={i} style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>{i === 0 ? 'M0' : `M+${i}`}</th>
-          )}
-        </tr></thead>
-        <tbody>
-          {cohortMonths.map(month => {
-            const base = cohorts[month][0]?.customers || 0;
-            return (
-              <tr key={month}>
-                <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', fontWeight: 600, color: 'var(--text)' }}>{month}</td>
-                <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', textAlign: 'center', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{base}</td>
-                {Array.from({ length: Math.min(maxM + 1, 7) }, (_, i) => {
-                  const cell = cohorts[month][i];
-                  if (!cell) return <td key={i} style={{ padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', textAlign: 'center', color: 'var(--border)' }}>—</td>;
-                  const ret = base > 0 ? (cell.customers / base) * 100 : 0;
-                  return <td key={i} style={{
-                    padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', textAlign: 'center',
-                    background: i === 0 ? 'var(--accent-subtle)' : `rgba(16,185,129,${Math.min(ret / 100, 1) * 0.3})`,
-                    color: i === 0 ? '#60a5fa' : ret > 10 ? 'var(--green)' : 'var(--text-muted)',
-                    fontWeight: ret > 20 ? 700 : 400, fontFamily: 'monospace', fontSize: 11
-                  }}>{fmtPct(ret, 0)}</td>;
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
+        <div>
+          <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Cohort Retention</h3>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>Customer dari cohort bulan X yang masih order di bulan-bulan berikutnya</p>
+        </div>
+        {maxM > displayM && (
+          <button onClick={downloadFullCsv} style={{
+            padding: '6px 12px', fontSize: 11, fontWeight: 600, borderRadius: 6,
+            border: '1px solid var(--border)', background: 'var(--bg-deep)', color: 'var(--text-secondary)',
+            cursor: 'pointer', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 4
+          }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Full data (M+{maxM})
+          </button>
+        )}
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead><tr>
+            <th style={{ ...stickyBase, left: 0, padding: '8px 10px', textAlign: 'left', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Cohort</th>
+            <th style={{ ...stickyBase, left: 75, padding: '8px 10px', textAlign: 'center', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>Size</th>
+            {Array.from({ length: displayM + 1 }, (_, i) =>
+              <th key={i} style={{ padding: '8px 10px', textAlign: 'center', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600 }}>{i === 0 ? 'M0' : `M+${i}`}</th>
+            )}
+          </tr></thead>
+          <tbody>
+            {cohortMonths.map(month => {
+              const base = cohorts[month][0]?.customers || 0;
+              return (
+                <tr key={month}>
+                  <td style={{ ...stickyBase, left: 0, padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', fontWeight: 600, color: 'var(--text)' }}>{month}</td>
+                  <td style={{ ...stickyBase, left: 75, padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', textAlign: 'center', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{base}</td>
+                  {Array.from({ length: displayM + 1 }, (_, i) => {
+                    const cell = cohorts[month][i];
+                    if (!cell) {
+                      if (i > lastDataCol[month]) return <td key={i} style={{ padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)' }} />;
+                      return <td key={i} style={{ padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', textAlign: 'center', color: 'var(--border)' }}>—</td>;
+                    }
+                    const ret = base > 0 ? (cell.customers / base) * 100 : 0;
+                    return <td key={i} style={{
+                      padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', textAlign: 'center',
+                      background: i === 0 ? 'var(--accent-subtle)' : `rgba(16,185,129,${Math.min(ret / 100, 1) * 0.3})`,
+                      color: i === 0 ? '#60a5fa' : ret > 10 ? 'var(--green)' : 'var(--text-muted)',
+                      fontWeight: ret > 20 ? 700 : 400, fontFamily: 'monospace', fontSize: 11
+                    }}>{fmtPct(ret, 0)}</td>;
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
