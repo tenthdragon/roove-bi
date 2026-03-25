@@ -678,7 +678,7 @@ function LtvTab({ data }) {
   if (!data || data.length === 0) return <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>Memuat data LTV...</div>;
 
   const globalRow = data.find(r => r.channel_group === 'Global');
-  const channelRows = data.filter(r => r.channel_group !== 'Global');
+  const channelRows = data.filter(r => r.channel_group !== 'Global' && r.channel_group !== 'Reseller');
 
   const thStyle = { padding: '10px 14px', textAlign: 'left' as const, color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase' as const };
   const tdStyle = { padding: '10px 14px', borderBottom: '1px solid var(--bg-deep)', fontFamily: 'monospace', fontSize: 12 };
@@ -705,7 +705,7 @@ function LtvTab({ data }) {
 
       {/* Per-channel table */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, overflowX: 'auto' }}>
-        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>LTV 90 Hari per Channel — Roove Only</h3>
+        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>LTV 90 Hari per Channel — Roove Retail</h3>
         <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--dim)' }}>Rata-rata nilai customer Roove dalam 90 hari pertama sejak first order, berdasarkan acquisition channel</p>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead><tr>
