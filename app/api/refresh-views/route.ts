@@ -1,6 +1,7 @@
 // app/api/refresh-views/route.ts
-// Force-recalculates all summary tables from base data.
-// This is a safety valve — normally summary tables are updated incrementally via triggers.
+// Recalculates summary tables from base data.
+// Supports optional date range (from/to) for fast partial recalculation.
+// Without date range, recalculates ALL data (slow, use sparingly).
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -38,27 +39,51 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Parse optional date range from body
+    let fromDate: string | null = null;
+    let toDate: string | null = null;
+    try {
+      const body = await req.json();
+      fromDate = body.from || null;
+      toDate = body.to || null;
+    } catch {
+      // No body or invalid JSON — recalculate all
+    }
+
     const svc = getServiceSupabase();
     const start = Date.now();
 
-    const { error } = await svc.rpc('recalculate_all_summaries');
+    let error: any;
+    let mode: string;
+
+    if (fromDate && toDate) {
+      // Fast: recalculate only the specified date range
+      mode = `${fromDate} to ${toDate}`;
+      ({ error } = await svc.rpc('recalculate_summaries_range', { p_from: fromDate, p_to: toDate }));
+    } else {
+      // Full: recalculate everything
+      mode = 'all';
+      ({ error } = await svc.rpc('recalculate_all_summaries'));
+    }
 
     const elapsed = Date.now() - start;
 
     if (error) {
-      console.error(`[refresh-views] recalculate failed (${elapsed}ms):`, error.message);
+      console.error(`[refresh-views] recalculate (${mode}) failed (${elapsed}ms):`, error.message);
       return NextResponse.json({
         success: false,
         elapsed_ms: elapsed,
+        mode,
         error: error.message,
       }, { status: 500 });
     }
 
-    console.log(`[refresh-views] All summaries recalculated in ${elapsed}ms`);
+    console.log(`[refresh-views] Summaries recalculated (${mode}) in ${elapsed}ms`);
     return NextResponse.json({
       success: true,
       elapsed_ms: elapsed,
-      message: `Summaries recalculated in ${(elapsed / 1000).toFixed(1)}s`,
+      mode,
+      message: `Summaries recalculated (${mode}) in ${(elapsed / 1000).toFixed(1)}s`,
     });
   } catch (err: any) {
     console.error('[refresh-views] Error:', err);

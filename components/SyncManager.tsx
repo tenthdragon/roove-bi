@@ -4,7 +4,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getScalevStatus, getPendingOrders, type PendingOrder } from '@/lib/scalev-actions';
 
-type ViewMode = 'pending' | 'repair' | 'views';
+type ViewMode = 'pending' | 'repair';
 
 type RowState = {
   syncing: boolean;
@@ -50,20 +50,6 @@ export default function SyncManager() {
   const [repairSyncing, setRepairSyncing] = useState(false);
   const [repairResult, setRepairResult] = useState<any>(null);
 
-  // Refresh views
-  const MV_LIST = [
-    { key: 'mv_daily_order_channel', label: 'Daily Order Channel' },
-    { key: 'mv_daily_ads_by_brand', label: 'Daily Ads by Brand' },
-    { key: 'mv_daily_channel_complete', label: 'Daily Channel Complete' },
-    { key: 'mv_daily_product_complete', label: 'Daily Product Complete' },
-    { key: 'mv_customer_first_order', label: 'Customer First Order' },
-    { key: 'mv_daily_customer_type', label: 'Daily Customer Type' },
-    { key: 'mv_customer_cohort', label: 'Customer Cohort' },
-    { key: 'mv_monthly_cohort', label: 'Monthly Cohort' },
-  ];
-  const [mvStates, setMvStates] = useState<Record<string, { status: 'idle' | 'refreshing' | 'done' | 'error'; ms?: number; error?: string }>>({});
-  const [refreshingAll, setRefreshingAll] = useState(false);
-  const mvAbortRef = useRef(false);
 
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -149,37 +135,6 @@ export default function SyncManager() {
     setRowStates({});
   }
 
-  async function refreshSingleMv(mvKey: string) {
-    setMvStates(prev => ({ ...prev, [mvKey]: { status: 'refreshing' } }));
-    try {
-      const res = await fetch('/api/refresh-single-view', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mv_name: mvKey }),
-      });
-      const ct = res.headers.get('content-type') || '';
-      if (!ct.includes('application/json')) {
-        throw new Error(res.status === 504 ? 'Timeout' : `Error ${res.status}`);
-      }
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Refresh gagal');
-      setMvStates(prev => ({ ...prev, [mvKey]: { status: 'done', ms: data.ms } }));
-    } catch (err: any) {
-      setMvStates(prev => ({ ...prev, [mvKey]: { status: 'error', error: err.message } }));
-    }
-  }
-
-  async function refreshAllMvs() {
-    mvAbortRef.current = false;
-    setRefreshingAll(true);
-    setMvStates({});
-    for (const mv of MV_LIST) {
-      if (mvAbortRef.current) break;
-      await refreshSingleMv(mv.key);
-    }
-    setRefreshingAll(false);
-  }
-
   async function handleRepair() {
     if (!repairDate) { setMessage({ type: 'error', text: 'Pilih tanggal terlebih dahulu' }); return; }
     setRepairSyncing(true);
@@ -251,9 +206,6 @@ export default function SyncManager() {
           </button>
           <button onClick={() => { setViewMode('repair'); setMessage(null); }} style={pill(viewMode === 'repair')}>
             Perbaikan
-          </button>
-          <button onClick={() => { setViewMode('views'); setMessage(null); }} style={pill(viewMode === 'views')}>
-            Refresh Views
           </button>
           {viewMode === 'pending' && orders.length > 0 && (
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -386,79 +338,6 @@ export default function SyncManager() {
                 Sync per order memanggil Scalev API + update DB + enrichment lines.
               </div>
             )}
-          </>
-        )}
-
-        {/* ── Refresh Views ── */}
-        {viewMode === 'views' && (
-          <>
-            <p style={{ fontSize: 12, color: 'var(--dim)', margin: '0 0 12px' }}>
-              Refresh materialized view satu per satu untuk menghindari timeout.
-            </p>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-              {!refreshingAll ? (
-                <button
-                  onClick={refreshAllMvs}
-                  style={{
-                    padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                    background: '#047857', color: '#fff', fontSize: 12, fontWeight: 600,
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                  }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
-                  Refresh Semua
-                </button>
-              ) : (
-                <button
-                  onClick={() => { mvAbortRef.current = true; }}
-                  style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--badge-red-bg)', background: 'transparent', color: '#fca5a5', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-                >
-                  Batal
-                </button>
-              )}
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {MV_LIST.map(mv => {
-                const st = mvStates[mv.key] || { status: 'idle' };
-                return (
-                  <div key={mv.key} style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
-                    borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)',
-                  }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{mv.label}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{mv.key}</div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {st.status === 'done' && (
-                        <span style={{ fontSize: 11, color: 'var(--green)' }}>
-                          {st.ms !== undefined ? `${(st.ms / 1000).toFixed(1)}s` : 'OK'}
-                        </span>
-                      )}
-                      {st.status === 'error' && (
-                        <span style={{ fontSize: 11, color: '#fca5a5' }} title={st.error}>Error</span>
-                      )}
-                      {st.status === 'refreshing' && (
-                        <span style={{ fontSize: 11, color: 'var(--dim)' }}>Refreshing...</span>
-                      )}
-                      <button
-                        onClick={() => refreshSingleMv(mv.key)}
-                        disabled={st.status === 'refreshing' || refreshingAll}
-                        style={{
-                          padding: '4px 10px', borderRadius: 4, border: 'none',
-                          background: st.status === 'refreshing' || refreshingAll ? 'var(--border)' : 'var(--accent)',
-                          color: '#fff', fontSize: 11, fontWeight: 600,
-                          cursor: st.status === 'refreshing' || refreshingAll ? 'not-allowed' : 'pointer',
-                          opacity: st.status === 'refreshing' || refreshingAll ? 0.5 : 1,
-                        }}
-                      >
-                        Refresh
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
           </>
         )}
 

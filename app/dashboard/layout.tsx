@@ -36,9 +36,8 @@ function RefreshViewsButton() {
   const [steps, setSteps] = useState({
     sheets: 'pending' as 'pending' | 'running' | 'success' | 'error' | 'skipped',
     meta: 'pending' as 'pending' | 'running' | 'success' | 'error' | 'skipped',
-    views: 'pending' as 'pending' | 'running' | 'success' | 'error',
   });
-  const [stepMessages, setStepMessages] = useState({ sheets: '', meta: '', views: '' });
+  const [stepMessages, setStepMessages] = useState({ sheets: '', meta: '' });
   const detailRef = useRef<HTMLDivElement>(null);
 
   // Close detail popup on outside click
@@ -56,8 +55,8 @@ function RefreshViewsButton() {
   const handleRefresh = async () => {
     setStatus('loading');
     setShowDetail(true);
-    setSteps({ sheets: 'running', meta: 'running', views: 'pending' });
-    setStepMessages({ sheets: '', meta: '', views: '' });
+    setSteps({ sheets: 'running', meta: 'running' });
+    setStepMessages({ sheets: '', meta: '' });
 
     let sheetsOk = false;
     let metaOk = false;
@@ -120,27 +119,11 @@ function RefreshViewsButton() {
       setStepMessages(s => ({ ...s, meta: 'Network error' }));
     }
 
-    // Step 2: Refresh materialized views
-    setSteps(s => ({ ...s, views: 'running' }));
-    try {
-      const res = await fetch('/api/refresh-views', { method: 'POST' });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setSteps(s => ({ ...s, views: 'success' }));
-        setStepMessages(s => ({ ...s, views: 'Selesai' }));
-        setStatus('success');
-        setTimeout(() => window.location.reload(), 1200);
-      } else {
-        setSteps(s => ({ ...s, views: 'error' }));
-        setStepMessages(s => ({ ...s, views: data.error || 'Gagal' }));
-        setStatus(sheetsOk || metaOk ? 'success' : 'error');
-        setTimeout(() => setStatus('idle'), 4000);
-      }
-    } catch (err) {
-      console.error('[refresh]', err);
-      setSteps(s => ({ ...s, views: 'error' }));
-      setStepMessages(s => ({ ...s, views: 'Network error' }));
-      setStatus('error');
+    // Done — summary tables are updated automatically via triggers
+    setStatus(sheetsOk || metaOk ? 'success' : 'error');
+    if (sheetsOk || metaOk) {
+      setTimeout(() => window.location.reload(), 1200);
+    } else {
       setTimeout(() => setStatus('idle'), 4000);
     }
   };
@@ -222,7 +205,6 @@ function RefreshViewsButton() {
           {[
             { key: 'sheets', label: 'Google Sheets' },
             { key: 'meta', label: 'Meta Ads' },
-            { key: 'views', label: 'Refresh Views' },
           ].map(({ key, label }) => (
             <div key={key} style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '5px 0',
