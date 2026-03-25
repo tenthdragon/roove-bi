@@ -11,6 +11,7 @@ import {
   fetchCustomerCohort,
   fetchMonthlyCohort,
   fetchMonthlyCohortByChannel,
+  fetchChannelLtv90d,
   fetchRtsCancelStats,
 } from '@/lib/scalev-actions';
 
@@ -48,6 +49,7 @@ const CHANNEL_TAB_COLORS = {
 const SUB_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'cohort', label: 'Cohort' },
+  { id: 'ltv', label: 'LTV' },
 ];
 
 export default function CustomersPage() {
@@ -57,6 +59,7 @@ export default function CustomersPage() {
   const [dailyData, setDailyData] = useState([]);
   const [cohortData, setCohortData] = useState([]);
   const [cohortChannelData, setCohortChannelData] = useState([]);
+  const [ltvData, setLtvData] = useState([]);
   const [topCustomers, setTopCustomers] = useState([]);
   const [rtsCancel, setRtsCancel] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -78,11 +81,12 @@ export default function CustomersPage() {
   async function loadData() {
     setLoading(true);
     try {
-      const [kpiData, daily, cohort, cohortCh, customers, rts] = await Promise.all([
+      const [kpiData, daily, cohort, cohortCh, ltv, customers, rts] = await Promise.all([
         fetchCustomerKPIs(dateRange.from, dateRange.to),
         fetchCustomerTypeDaily(dateRange.from, dateRange.to),
         fetchMonthlyCohort(),
         fetchMonthlyCohortByChannel(),
+        fetchChannelLtv90d(),
         fetchCustomerCohort(50, dateRange.from, dateRange.to),
         fetchRtsCancelStats(dateRange.from, dateRange.to),
       ]);
@@ -90,6 +94,7 @@ export default function CustomersPage() {
       setDailyData(daily);
       setCohortData(cohort);
       setCohortChannelData(cohortCh);
+      setLtvData(ltv);
       setTopCustomers(customers);
       setRtsCancel(rts);
     } catch (err) {
@@ -253,6 +258,7 @@ export default function CustomersPage() {
         <>
           {subTab === 'overview' && <OverviewTab kpis={filteredKpis} chartData={chartData} channelPerformance={channelPerformance} channelFilter={channelFilter} setChannelFilter={setChannelFilter} availableChannels={availableChannels} topCustomers={filteredTopCustomers} rtsCancel={rtsCancel} />}
           {subTab === 'cohort' && <CohortTab data={cohortData} channelData={cohortChannelData} />}
+          {subTab === 'ltv' && <LtvTab data={ltvData} />}
         </>
       )}
     </div>
@@ -660,6 +666,87 @@ function CohortTab({ data, channelData }) {
           csvFilename={`cohort_retention_${key.toLowerCase().replace(/\s+/g, '_')}`}
         />
       ))}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// LTV TAB
+// ═══════════════════════════════════════════════════
+
+function LtvTab({ data }) {
+  if (!data || data.length === 0) return <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>Memuat data LTV...</div>;
+
+  const globalRow = data.find(r => r.channel_group === 'Global');
+  const channelRows = data.filter(r => r.channel_group !== 'Global');
+
+  const thStyle = { padding: '10px 14px', textAlign: 'left' as const, color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase' as const };
+  const tdStyle = { padding: '10px 14px', borderBottom: '1px solid var(--bg-deep)', fontFamily: 'monospace', fontSize: 12 };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Summary cards */}
+      {globalRow && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+          {[
+            { label: 'AVG LTV 90D', value: fmtRupiah(globalRow.avg_ltv_90d), sub: `${fmtCompact(globalRow.num_customers)} customers` },
+            { label: 'FIRST PURCHASE', value: fmtRupiah(globalRow.avg_first_purchase), sub: 'avg per customer' },
+            { label: 'REPEAT VALUE', value: fmtRupiah(globalRow.avg_repeat_value), sub: 'within 90 days' },
+            { label: 'REPEAT RATE', value: `${globalRow.repeat_rate}%`, sub: 'bought Roove again in 90d', color: globalRow.repeat_rate > 25 ? 'var(--green)' : 'var(--yellow)' },
+          ].map((card, i) => (
+            <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 6 }}>{card.label}</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: card.color || 'var(--text)', fontFamily: 'monospace' }}>{card.value}</div>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{card.sub}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Per-channel table */}
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, overflowX: 'auto' }}>
+        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>LTV 90 Hari per Channel — Roove Only</h3>
+        <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--dim)' }}>Rata-rata nilai customer Roove dalam 90 hari pertama sejak first order, berdasarkan acquisition channel</p>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead><tr>
+            <th style={thStyle}>Channel</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Customers</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Avg First Purchase</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Avg Repeat (90d)</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Avg LTV 90d</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Repeat Rate</th>
+          </tr></thead>
+          <tbody>
+            {channelRows.map(row => {
+              const isHighLtv = globalRow && row.avg_ltv_90d >= globalRow.avg_ltv_90d;
+              return (
+                <tr key={row.channel_group}>
+                  <td style={{ ...tdStyle, fontWeight: 700, fontFamily: 'inherit', color: 'var(--text)' }}>{row.channel_group}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-secondary)' }}>{Number(row.num_customers).toLocaleString()}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtRupiah(row.avg_first_purchase)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtRupiah(row.avg_repeat_value)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: isHighLtv ? 'var(--green)' : 'var(--text)' }}>{fmtRupiah(row.avg_ltv_90d)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', color: row.repeat_rate > 25 ? 'var(--green)' : 'var(--text-muted)' }}>{row.repeat_rate}%</td>
+                </tr>
+              );
+            })}
+            {/* Global row */}
+            {globalRow && (
+              <tr style={{ borderTop: '2px solid var(--border)' }}>
+                <td style={{ ...tdStyle, fontWeight: 700, fontFamily: 'inherit', color: 'var(--text)' }}>Global</td>
+                <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-secondary)' }}>{Number(globalRow.num_customers).toLocaleString()}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(globalRow.avg_first_purchase)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(globalRow.avg_repeat_value)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(globalRow.avg_ltv_90d)}</td>
+                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{globalRow.repeat_rate}%</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+        <p style={{ margin: '14px 0 0', fontSize: 11, color: 'var(--dim)' }}>
+          Hanya customer dengan first order &ge; 90 hari yang lalu. Revenue dihitung dari produk Roove saja (termasuk Roove dalam bundling).
+        </p>
+      </div>
     </div>
   );
 }

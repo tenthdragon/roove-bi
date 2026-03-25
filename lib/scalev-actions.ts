@@ -286,6 +286,14 @@ export async function fetchMonthlyCohortByChannel() {
   return data || [];
 }
 
+// ── Get per-channel LTV 90-day for Roove brand ──
+export async function fetchChannelLtv90d() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc.rpc('get_channel_ltv_90d');
+  if (error) throw error;
+  return data || [];
+}
+
 // ── Get RTS and Canceled order stats with platform breakdown ──
 export async function fetchRtsCancelStats(from?: string, to?: string) {
   const svc = createServiceSupabase();
