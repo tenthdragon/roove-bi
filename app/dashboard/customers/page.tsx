@@ -10,6 +10,7 @@ import {
   fetchCustomerKPIs,
   fetchCustomerCohort,
   fetchMonthlyCohort,
+  fetchMonthlyCohortByChannel,
   fetchRtsCancelStats,
 } from '@/lib/scalev-actions';
 
@@ -55,6 +56,7 @@ export default function CustomersPage() {
   const [kpis, setKpis] = useState(null);
   const [dailyData, setDailyData] = useState([]);
   const [cohortData, setCohortData] = useState([]);
+  const [cohortChannelData, setCohortChannelData] = useState([]);
   const [topCustomers, setTopCustomers] = useState([]);
   const [rtsCancel, setRtsCancel] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -76,16 +78,18 @@ export default function CustomersPage() {
   async function loadData() {
     setLoading(true);
     try {
-      const [kpiData, daily, cohort, customers, rts] = await Promise.all([
+      const [kpiData, daily, cohort, cohortCh, customers, rts] = await Promise.all([
         fetchCustomerKPIs(dateRange.from, dateRange.to),
         fetchCustomerTypeDaily(dateRange.from, dateRange.to),
         fetchMonthlyCohort(),
+        fetchMonthlyCohortByChannel(),
         fetchCustomerCohort(50, dateRange.from, dateRange.to),
         fetchRtsCancelStats(dateRange.from, dateRange.to),
       ]);
       setKpis(kpiData);
       setDailyData(daily);
       setCohortData(cohort);
+      setCohortChannelData(cohortCh);
       setTopCustomers(customers);
       setRtsCancel(rts);
     } catch (err) {
@@ -248,7 +252,7 @@ export default function CustomersPage() {
       ) : (
         <>
           {subTab === 'overview' && <OverviewTab kpis={filteredKpis} chartData={chartData} channelPerformance={channelPerformance} channelFilter={channelFilter} setChannelFilter={setChannelFilter} availableChannels={availableChannels} topCustomers={filteredTopCustomers} rtsCancel={rtsCancel} />}
-          {subTab === 'cohort' && <CohortTab data={cohortData} />}
+          {subTab === 'cohort' && <CohortTab data={cohortData} channelData={cohortChannelData} />}
         </>
       )}
     </div>
@@ -523,8 +527,20 @@ function RepeatRateBadge({ value, bold = false }) {
 // COHORT TAB
 // ═══════════════════════════════════════════════════
 
-function CohortTab({ data }) {
-  if (!data || data.length === 0) return <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>Belum ada data cohort. Minimal perlu data 2+ bulan.</div>;
+const COHORT_CHANNELS = [
+  { key: 'Scalev', label: 'Scalev (CS Manual + Scalev Ads)' },
+  { key: 'Shopee', label: 'Shopee' },
+  { key: 'TikTok Shop', label: 'TikTok Shop' },
+  { key: 'Reseller', label: 'Reseller' },
+];
+
+function CohortTable({ data, title, subtitle, csvFilename }) {
+  if (!data || data.length === 0) return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+      <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>{title}</h3>
+      <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>Belum ada data cohort.</p>
+    </div>
+  );
 
   const cohorts = {};
   for (const row of data) {
@@ -533,9 +549,8 @@ function CohortTab({ data }) {
   }
   const cohortMonths = Object.keys(cohorts).sort();
   const maxM = Math.max(...data.map(d => d.months_since_first), 0);
-  const displayM = Math.min(maxM, 11); // show up to M+11 (12 columns)
+  const displayM = Math.min(maxM, 11);
 
-  // find last month with data per cohort (for trimming trailing dashes)
   const lastDataCol = {};
   for (const month of cohortMonths) {
     let last = 0;
@@ -557,7 +572,7 @@ function CohortTab({ data }) {
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `cohort_retention_full.csv`; a.click();
+    a.href = url; a.download = `${csvFilename || 'cohort_retention'}.csv`; a.click();
     URL.revokeObjectURL(url);
   };
 
@@ -567,8 +582,8 @@ function CohortTab({ data }) {
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
         <div>
-          <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Cohort Retention</h3>
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>Customer dari cohort bulan X yang masih order di bulan-bulan berikutnya</p>
+          <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>{title}</h3>
+          {subtitle && <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>{subtitle}</p>}
         </div>
         {maxM > displayM && (
           <button onClick={downloadFullCsv} style={{
@@ -617,6 +632,34 @@ function CohortTab({ data }) {
           </tbody>
         </table>
       </div>
+    </div>
+  );
+}
+
+function CohortTab({ data, channelData }) {
+  const grouped = {};
+  for (const row of (channelData || [])) {
+    if (!grouped[row.channel_group]) grouped[row.channel_group] = [];
+    grouped[row.channel_group].push(row);
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      <CohortTable
+        data={data}
+        title="Cohort Retention — All Channels"
+        subtitle="Customer dari cohort bulan X yang masih order di bulan-bulan berikutnya"
+        csvFilename="cohort_retention_all"
+      />
+      {COHORT_CHANNELS.map(({ key, label }) => (
+        <CohortTable
+          key={key}
+          data={grouped[key] || []}
+          title={`Cohort Retention — ${label}`}
+          subtitle="Berdasarkan acquisition channel pertama customer"
+          csvFilename={`cohort_retention_${key.toLowerCase().replace(/\s+/g, '_')}`}
+        />
+      ))}
     </div>
   );
 }

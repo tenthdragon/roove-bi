@@ -274,6 +274,18 @@ export async function fetchMonthlyCohort() {
   return data || [];
 }
 
+// ── Get monthly cohort data per channel group ──
+export async function fetchMonthlyCohortByChannel() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('v_monthly_cohort_channel')
+    .select('*')
+    .order('channel_group', { ascending: true })
+    .order('cohort_month', { ascending: true });
+  if (error) throw error;
+  return data || [];
+}
+
 // ── Get RTS and Canceled order stats with platform breakdown ──
 export async function fetchRtsCancelStats(from?: string, to?: string) {
   const svc = createServiceSupabase();
