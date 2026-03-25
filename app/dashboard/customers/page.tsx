@@ -528,7 +528,7 @@ function RepeatRateBadge({ value, bold = false }) {
 // ═══════════════════════════════════════════════════
 
 const COHORT_CHANNELS = [
-  { key: 'Scalev', label: 'Scalev (CS Manual + Scalev Ads)' },
+  { key: 'Scalev', label: 'Scalev (CS Manual + Scalev Ads + WABA)' },
   { key: 'Shopee', label: 'Shopee' },
   { key: 'TikTok Shop', label: 'TikTok Shop' },
   { key: 'Reseller', label: 'Reseller' },

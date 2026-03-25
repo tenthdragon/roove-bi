@@ -14,7 +14,7 @@ RETURNS TEXT
 LANGUAGE sql IMMUTABLE
 AS $$
   SELECT CASE
-    WHEN p_channel IN ('CS Manual', 'Scalev Ads') THEN 'Scalev'
+    WHEN p_channel IN ('CS Manual', 'Scalev Ads', 'WABA') THEN 'Scalev'
     WHEN p_channel = 'Shopee' THEN 'Shopee'
     WHEN p_channel = 'TikTok Shop' THEN 'TikTok Shop'
     WHEN p_channel = 'Reseller' THEN 'Reseller'
