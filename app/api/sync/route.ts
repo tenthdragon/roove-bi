@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { parseGoogleSheet } from '@/lib/google-sheets';
-import { triggerViewRefresh } from '@/lib/refresh-views';
+
 
 function getServiceSupabase() {
   return createClient(
@@ -151,10 +151,7 @@ export async function POST(req: NextRequest) {
           last_sync_message: syncMsg,
         }).eq('id', conn.id);
 
-        // Refresh materialized views (ads data affects mkt_cost in MVs)
-        if (filteredAds.length > 0) {
-          triggerViewRefresh();
-        }
+
 
         results.push({
           spreadsheet_id: conn.spreadsheet_id,

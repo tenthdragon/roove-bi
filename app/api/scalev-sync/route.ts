@@ -6,7 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { fetchOrderDetail, deriveChannelFromStoreType, guessStoreType, lookupProductType, clearProductMappingCache, type StoreType } from '@/lib/scalev-api';
-import { triggerViewRefresh } from '@/lib/refresh-views';
+
 
 export const maxDuration = 120;
 
@@ -330,10 +330,7 @@ export async function POST(req: NextRequest) {
     // Full sync now only checks pre-terminal orders, keeping it fast and within Vercel timeout.
     const repairedCount = syncMode === 'repair' ? updatedCount : 0;
 
-    // ── Refresh MVs if any orders were updated to shipped/completed ──
-    if (updatedCount > 0) {
-      triggerViewRefresh();
-    }
+
 
     // ── Update sync log ──
     if (logId) {

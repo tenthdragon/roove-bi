@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { triggerViewRefresh } from '@/lib/refresh-views';
+
 import { deriveChannelFromStoreType, guessStoreType, type StoreType } from '@/lib/scalev-api';
 
 function getServiceSupabase() {
@@ -775,7 +775,6 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
       console.warn(`[scalev-webhook][${businessCode}] status_changed: re-enrich failed for ${orderId}:`, enrichErr.message);
     }
 
-    triggerViewRefresh();
   }
 
   return NextResponse.json({
@@ -941,11 +940,6 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
 
   console.log(`[scalev-webhook][${businessCode}] order.updated: ${orderId} updated successfully`);
 
-  // Refresh views if relevant status
-  if (data.status === 'shipped' || data.status === 'completed') {
-    triggerViewRefresh();
-  }
-
   return NextResponse.json({ ok: true, order_id: orderId, business_code: businessCode, action: 'updated' });
 }
 
@@ -1003,7 +997,6 @@ async function handleOrderDeleted(data: any, businessCode: string) {
   });
 
   console.log(`[scalev-webhook][${businessCode}] order.deleted: ${orderId} marked as deleted (was ${existing.status})`);
-  triggerViewRefresh();
 
   return NextResponse.json({ ok: true, order_id: orderId, business_code: businessCode, action: 'deleted', old_status: existing.status });
 }

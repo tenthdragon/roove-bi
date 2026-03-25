@@ -1,7 +1,7 @@
 // app/api/csv-upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { triggerViewRefresh } from '@/lib/refresh-views';
+
 
 function getServiceSupabase() {
   return createClient(
@@ -600,8 +600,7 @@ async function handleOpsUpload(
     completed_at: new Date().toISOString(),
   });
 
-  // Refresh materialized views so dashboard reflects new data
-  triggerViewRefresh();
+
 
   return NextResponse.json({
     success: true,
@@ -991,8 +990,7 @@ async function handleScalevUpload(
     completed_at: new Date().toISOString(),
   });
 
-  // Refresh materialized views so dashboard reflects new data
-  triggerViewRefresh();
+
 
   return NextResponse.json({
     success: true,

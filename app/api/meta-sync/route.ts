@@ -7,7 +7,7 @@ import {
   type MetaAdAccount,
   type DailyAdSpendRow,
 } from '@/lib/meta-marketing';
-import { triggerViewRefresh } from '@/lib/refresh-views';
+
 
 function getServiceSupabase() {
   return createClient(
@@ -182,10 +182,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Refresh materialized views ──
-    if (rowsInserted > 0) {
-      triggerViewRefresh();
-    }
+
 
     // ── Update sync log ──
     const duration = Date.now() - startTime;
