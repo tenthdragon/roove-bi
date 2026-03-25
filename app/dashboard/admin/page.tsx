@@ -243,8 +243,6 @@ export default function AdminPage() {
       setCommMsg({ type: 'success', text: `Rate ${row.channel} berhasil disimpan` });
       setEditingRate(null);
       await loadCommRates();
-      // Trigger MV refresh so mp_admin_cost recalculates
-      supabase.rpc('refresh_order_views', { use_concurrent: true }).then(() => {}).catch(() => {});
     } catch (err) {
       setCommMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
     } finally {
@@ -253,7 +251,7 @@ export default function AdminPage() {
   };
 
   const handleDeleteRate = async (id) => {
-    if (!confirm('Hapus rate ini? Data mp_admin_cost yang sudah dihitung tidak akan berubah sampai views di-refresh.')) return;
+    if (!confirm('Hapus rate ini? Data mp_admin_cost akan otomatis dihitung ulang.')) return;
     try {
       const { error } = await supabase.from('marketplace_commission_rates').delete().eq('id', id);
       if (error) throw error;

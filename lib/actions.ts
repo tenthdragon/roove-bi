@@ -169,13 +169,13 @@ export async function uploadExcelData(formData: FormData) {
     const lastDay = new Date(parsed.period.year, parsed.period.month, 0).getDate();
     const periodEnd = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
-    const del1 = await svc.from('daily_product_summary').delete()
+    const del1 = await svc.from('summary_daily_product_complete').delete()
       .gte('date', periodStart).lte('date', periodEnd);
-    if (del1.error) throw new Error(`Delete daily_product_summary failed: ${del1.error.message}`);
+    if (del1.error) throw new Error(`Delete summary_daily_product_complete failed: ${del1.error.message}`);
 
-    const del2 = await svc.from('daily_channel_data').delete()
+    const del2 = await svc.from('summary_daily_channel_complete').delete()
       .gte('date', periodStart).lte('date', periodEnd);
-    if (del2.error) throw new Error(`Delete daily_channel_data failed: ${del2.error.message}`);
+    if (del2.error) throw new Error(`Delete summary_daily_channel_complete failed: ${del2.error.message}`);
 
     const del3 = await svc.from('daily_ads_spend').delete()
       .gte('date', periodStart).lte('date', periodEnd);
@@ -189,7 +189,7 @@ export async function uploadExcelData(formData: FormData) {
     // Insert daily product data
     if (parsed.dailyProduct.length > 0) {
       const rows = parsed.dailyProduct.map(d => ({ ...d, import_id: importId }));
-      const { error } = await svc.from('daily_product_summary').insert(rows);
+      const { error } = await svc.from('summary_daily_product_complete').insert(rows);
       if (error) throw error;
     }
 
@@ -198,7 +198,7 @@ export async function uploadExcelData(formData: FormData) {
       const rows = parsed.dailyChannel.map(d => ({ ...d, import_id: importId }));
       for (let i = 0; i < rows.length; i += 500) {
         const batch = rows.slice(i, i + 500);
-        const { error } = await svc.from('daily_channel_data').insert(batch);
+        const { error } = await svc.from('summary_daily_channel_complete').insert(batch);
         if (error) throw error;
       }
     }
