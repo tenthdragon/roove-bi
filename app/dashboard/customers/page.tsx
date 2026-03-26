@@ -665,17 +665,13 @@ function LtvTab() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Brand selector even while loading */}
       {brands.length > 0 && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {brands.map(b => (
-            <button key={b.brand} onClick={() => setSelectedBrand(b.brand)} style={{
-              padding: '5px 14px', borderRadius: 20, border: '1px solid',
-              borderColor: selectedBrand === b.brand ? 'var(--accent)' : 'var(--border)',
-              background: selectedBrand === b.brand ? 'var(--accent-subtle)' : 'transparent',
-              color: selectedBrand === b.brand ? 'var(--accent)' : 'var(--text-secondary)',
-              fontSize: 11, fontWeight: 600, cursor: 'pointer',
-            }}>{b.brand}</button>
-          ))}
-        </div>
+        <select value={selectedBrand} onChange={e => setSelectedBrand(e.target.value)} style={{
+          padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)',
+          background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontWeight: 600,
+          cursor: 'pointer', width: 'fit-content',
+        }}>
+          {brands.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
+        </select>
       )}
       <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>
         <div className="spinner" style={{ width: 24, height: 24, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 8px' }} />
@@ -698,17 +694,13 @@ function LtvTab() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Brand selector */}
       {brands.length > 0 && (
-        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-          {brands.map(b => (
-            <button key={b.brand} onClick={() => setSelectedBrand(b.brand)} style={{
-              padding: '5px 14px', borderRadius: 20, border: '1px solid',
-              borderColor: selectedBrand === b.brand ? 'var(--accent)' : 'var(--border)',
-              background: selectedBrand === b.brand ? 'var(--accent-subtle)' : 'transparent',
-              color: selectedBrand === b.brand ? 'var(--accent)' : 'var(--text-secondary)',
-              fontSize: 11, fontWeight: 600, cursor: 'pointer',
-            }}>{b.brand}</button>
-          ))}
-        </div>
+        <select value={selectedBrand} onChange={e => setSelectedBrand(e.target.value)} style={{
+          padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)',
+          background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontWeight: 600,
+          cursor: 'pointer', width: 'fit-content',
+        }}>
+          {brands.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
+        </select>
       )}
 
       {/* Summary cards */}
