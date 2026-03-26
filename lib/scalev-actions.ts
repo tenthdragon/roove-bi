@@ -322,6 +322,16 @@ export async function fetchAvailableBrands() {
   return data || [];
 }
 
+// ── Get monthly CAC per channel ──
+export async function fetchMonthlyCac(brand?: string | null) {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc.rpc('get_monthly_cac', {
+    brand_filter: brand || null,
+  });
+  if (error) throw error;
+  return data || [];
+}
+
 // ── Get RTS and Canceled order stats with platform breakdown ──
 export async function fetchRtsCancelStats(from?: string, to?: string) {
   const svc = createServiceSupabase();

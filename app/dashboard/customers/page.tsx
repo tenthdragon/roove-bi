@@ -15,6 +15,7 @@ import {
   fetchChannelCac,
   fetchLtvTrend,
   fetchAvailableBrands,
+  fetchMonthlyCac,
   fetchRtsCancelStats,
 } from '@/lib/scalev-actions';
 
@@ -53,6 +54,7 @@ const SUB_TABS = [
   { id: 'overview', label: 'Overview' },
   { id: 'cohort', label: 'Cohort' },
   { id: 'ltv', label: 'LTV' },
+  { id: 'cac', label: 'CAC' },
 ];
 
 export default function CustomersPage() {
@@ -247,6 +249,7 @@ export default function CustomersPage() {
           {subTab === 'overview' && <OverviewTab kpis={filteredKpis} channelPerformance={channelPerformance} channelFilter={channelFilter} setChannelFilter={setChannelFilter} availableChannels={availableChannels} topCustomers={filteredTopCustomers} rtsCancel={rtsCancel} />}
           {subTab === 'cohort' && <CohortTab data={cohortData} channelData={cohortChannelData} />}
           {subTab === 'ltv' && <LtvTab />}
+          {subTab === 'cac' && <CacTab />}
         </>
       )}
     </div>
@@ -898,6 +901,219 @@ function LtvTab() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// CAC TAB
+// ═══════════════════════════════════════════════════
+
+const CAC_COLORS = { 'Scalev': '#8b5cf6', 'Shopee': '#f97316', 'TikTok Shop': '#ef4444' };
+const fmtRp = (n) => 'Rp ' + fmtCompact(n);
+const fmtNum = (n) => n >= 10000 ? fmtCompact(n) : Number(n).toLocaleString();
+
+function CacTab() {
+  const [cacData, setCacData] = useState([]);
+  const [cacLoading, setCacLoading] = useState(true);
+  const [selectedChannel, setSelectedChannel] = useState('all');
+  const [selectedBrand, setSelectedBrand] = useState(null);
+  const [brands, setBrands] = useState([]);
+
+  // Load brands
+  useEffect(() => {
+    fetchAvailableBrands().then(setBrands).catch(() => {});
+  }, []);
+
+  // Load CAC data (re-fetch when brand changes)
+  useEffect(() => {
+    let cancelled = false;
+    setCacLoading(true);
+    fetchMonthlyCac(selectedBrand)
+      .then(d => { if (!cancelled) setCacData(d); })
+      .catch(err => console.error('Failed to load CAC:', err))
+      .finally(() => { if (!cancelled) setCacLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedBrand]);
+
+  const brandSelector = brands.length > 0 && (
+    <select value={selectedBrand || ''} onChange={e => setSelectedBrand(e.target.value || null)} style={{
+      padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)',
+      background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontWeight: 600,
+      cursor: 'pointer', width: 'fit-content',
+    }}>
+      <option value="">All Brands</option>
+      {brands.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
+    </select>
+  );
+
+  if (cacLoading) return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {brandSelector}
+      <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>
+        <div className="spinner" style={{ width: 24, height: 24, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 8px' }} />
+        Memuat data CAC{selectedBrand ? ` ${selectedBrand}` : ''}...
+      </div>
+    </div>
+  );
+
+  // Only show months with ad spend data
+  const withSpend = cacData.filter(r => Number(r.ad_spend) > 0);
+  const months = [...new Set(withSpend.map(r => r.month))].sort();
+  const channels = [...new Set(withSpend.map(r => r.channel_group))].sort();
+
+  const filtered = selectedChannel === 'all' ? withSpend : withSpend.filter(r => r.channel_group === selectedChannel);
+
+  // Summary: totals across all months with spend
+  const totalSpend = withSpend.reduce((s, r) => s + Number(r.ad_spend || 0), 0);
+  const totalNew = withSpend.reduce((s, r) => s + Number(r.new_customers || 0), 0);
+  const avgCac = totalNew > 0 ? Math.round(totalSpend / totalNew) : 0;
+
+  // Per-channel summary
+  const channelSummary = channels.map(ch => {
+    const rows = withSpend.filter(r => r.channel_group === ch);
+    const spend = rows.reduce((s, r) => s + Number(r.ad_spend || 0), 0);
+    const nc = rows.reduce((s, r) => s + Number(r.new_customers || 0), 0);
+    return { channel: ch, spend, newCustomers: nc, cac: nc > 0 ? Math.round(spend / nc) : 0 };
+  });
+
+  const thStyle = { padding: '10px 14px', textAlign: 'left' as const, color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase' as const };
+  const tdStyle = { padding: '10px 14px', borderBottom: '1px solid var(--bg-deep)', fontFamily: 'monospace', fontSize: 12 };
+
+  // Bar chart: CAC per month per channel
+  const maxCac = Math.max(...filtered.map(r => Number(r.cac) || 0), 1);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+      {/* Brand selector */}
+      {brandSelector}
+
+      {/* Summary cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+        {[
+          { label: 'TOTAL AD SPEND', value: fmtRp(totalSpend), sub: `${months.length} bulan data` },
+          { label: 'NEW CUSTOMERS', value: totalNew.toLocaleString(), sub: selectedBrand || 'all brands' },
+          { label: 'AVG CAC', value: fmtRp(avgCac), sub: 'all channels combined' },
+        ].map((card, i) => (
+          <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 6 }}>{card.label}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: card.color || 'var(--text)', fontFamily: 'monospace' }}>{card.value}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{card.sub}</div>
+          </div>
+        ))}
+        {channelSummary.map(ch => (
+          <div key={ch.channel} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 6 }}>CAC {ch.channel}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: CAC_COLORS[ch.channel] || 'var(--text)', fontFamily: 'monospace' }}>{fmtRp(ch.cac)}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{ch.newCustomers.toLocaleString()} customers</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Monthly CAC table */}
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, overflowX: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+          <div>
+            <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Monthly CAC per Channel</h3>
+            <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>CAC = Total ad spend / New customers (konservatif, seluruh spend → akuisisi)</p>
+          </div>
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            <button onClick={() => setSelectedChannel('all')} style={{
+              padding: '4px 12px', borderRadius: 16, border: '1px solid',
+              borderColor: selectedChannel === 'all' ? 'var(--accent)' : 'var(--border)',
+              background: selectedChannel === 'all' ? 'var(--accent-subtle)' : 'transparent',
+              color: selectedChannel === 'all' ? 'var(--accent)' : 'var(--text-secondary)',
+              fontSize: 11, fontWeight: 600, cursor: 'pointer',
+            }}>All</button>
+            {channels.map(ch => (
+              <button key={ch} onClick={() => setSelectedChannel(ch)} style={{
+                padding: '4px 12px', borderRadius: 16, border: '1px solid',
+                borderColor: selectedChannel === ch ? (CAC_COLORS[ch] || 'var(--accent)') : 'var(--border)',
+                background: selectedChannel === ch ? `${CAC_COLORS[ch] || 'var(--accent)'}18` : 'transparent',
+                color: selectedChannel === ch ? (CAC_COLORS[ch] || 'var(--accent)') : 'var(--text-secondary)',
+                fontSize: 11, fontWeight: 600, cursor: 'pointer',
+              }}>{ch}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* CAC bar chart */}
+        {selectedChannel !== 'all' && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 140, marginBottom: 4 }}>
+              {months.map((m, i) => {
+                const row = filtered.find(r => r.month === m);
+                const cac = row ? Number(row.cac) || 0 : 0;
+                const h = (cac / maxCac) * 120;
+                const color = CAC_COLORS[selectedChannel] || '#3b82f6';
+                return (
+                  <div key={m} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0 }}>
+                    <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 2, whiteSpace: 'nowrap' }}>{cac > 0 ? fmtCompact(cac) : ''}</div>
+                    <div style={{ width: '70%', maxWidth: 50, height: h, background: color, borderRadius: '4px 4px 0 0', minHeight: cac > 0 ? 2 : 0, opacity: 0.85 }} />
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {months.map(m => (
+                <div key={m} style={{ flex: 1, textAlign: 'center', fontSize: 9, color: 'var(--text-muted)', minWidth: 0 }}>
+                  {m.slice(2).replace('-', '/')}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Detail table */}
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead><tr>
+            <th style={thStyle}>Month</th>
+            {selectedChannel === 'all' ? null : <th style={thStyle}>Channel</th>}
+            <th style={{ ...thStyle, textAlign: 'right' }}>Ad Spend</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>New Customers</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>CAC</th>
+          </tr></thead>
+          <tbody>
+            {selectedChannel === 'all' ? (
+              // Aggregated per month
+              months.map(m => {
+                const rows = withSpend.filter(r => r.month === m);
+                const mSpend = rows.reduce((s, r) => s + Number(r.ad_spend || 0), 0);
+                const mNew = rows.reduce((s, r) => s + Number(r.new_customers || 0), 0);
+                const mCac = mNew > 0 ? Math.round(mSpend / mNew) : 0;
+                return (
+                  <tr key={m} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                    <td style={{ ...tdStyle, fontWeight: 600, fontFamily: 'inherit' }}>{m}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtRp(mSpend)}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{mNew.toLocaleString()}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{mCac ? fmtRp(mCac) : '—'}</td>
+                  </tr>
+                );
+              })
+            ) : (
+              // Per channel
+              months.map(m => {
+                const row = filtered.find(r => r.month === m);
+                if (!row) return null;
+                return (
+                  <tr key={m} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                    <td style={{ ...tdStyle, fontWeight: 600, fontFamily: 'inherit' }}>{m}</td>
+                    <td style={{ ...tdStyle, fontFamily: 'inherit' }}>
+                      <span style={{ color: CAC_COLORS[row.channel_group] || 'var(--text)' }}>{row.channel_group}</span>
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtRp(row.ad_spend)}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right' }}>{Number(row.new_customers).toLocaleString()}</td>
+                    <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{row.cac ? fmtRp(row.cac) : '—'}</td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+        <p style={{ margin: '14px 0 0', fontSize: 11, color: 'var(--dim)' }}>
+          Hanya menampilkan bulan dengan data ad spend. CAC konservatif: seluruh ad spend diatribusikan ke akuisisi customer baru.
+        </p>
+      </div>
     </div>
   );
 }
