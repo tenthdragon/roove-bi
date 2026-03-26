@@ -1160,11 +1160,63 @@ function XlsxAdsUploader() {
     setUploading(true);
     const newResults: any[] = [];
 
+    // Dynamic import xlsx for client-side parsing
+    const XLSX = await import('xlsx');
+
     for (const file of files) {
       try {
-        const form = new FormData();
-        form.append('file', file);
-        const res = await fetch('/api/xlsx-ads-upload', { method: 'POST', body: form });
+        // Parse xlsx client-side
+        const buffer = await file.arrayBuffer();
+        const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
+        const adsSheet = wb.Sheets['Ads'] || wb.Sheets['ads'] || wb.Sheets['ADS'];
+        if (!adsSheet) {
+          newResults.push({ filename: file.name, error: `Sheet "Ads" not found. Available: ${wb.SheetNames.join(', ')}` });
+          continue;
+        }
+
+        const rawRows: any[][] = XLSX.utils.sheet_to_json(adsSheet, { header: 1, raw: false, dateNF: 'yyyy-mm-dd' });
+
+        // Find header row
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(rawRows.length, 10); i++) {
+          const row = (rawRows[i] || []).map((v: any) => String(v || '').trim());
+          if (row.includes('Date') && row.includes('Spent')) { headerIdx = i; break; }
+        }
+        if (headerIdx === -1) {
+          newResults.push({ filename: file.name, error: 'Header row with "Date" and "Spent" not found' });
+          continue;
+        }
+
+        const headers = rawRows[headerIdx].map((v: any) => String(v || '').trim());
+        const ci = {
+          date: headers.indexOf('Date'), ad_account: headers.indexOf('Ad Account'),
+          spent: headers.indexOf('Spent'), objective: headers.indexOf('Objective'),
+          source: headers.indexOf('Source'), store: headers.indexOf('Store'),
+          advertiser: headers.indexOf('Advertiser'),
+        };
+
+        // Extract rows as JSON
+        const rows = [];
+        for (let i = headerIdx + 1; i < rawRows.length; i++) {
+          const r = rawRows[i];
+          if (!r || !r[ci.date]) continue;
+          rows.push({
+            date: String(r[ci.date] || '').trim(),
+            ad_account: ci.ad_account >= 0 ? String(r[ci.ad_account] || '').trim() : '',
+            spent: String(r[ci.spent] || '0'),
+            objective: ci.objective >= 0 ? String(r[ci.objective] || '').trim() : '',
+            source: ci.source >= 0 ? String(r[ci.source] || '').trim() : '',
+            store: ci.store >= 0 ? String(r[ci.store] || '').trim() : '',
+            advertiser: ci.advertiser >= 0 ? String(r[ci.advertiser] || '').trim() : '',
+          });
+        }
+
+        // Send parsed JSON to API
+        const res = await fetch('/api/xlsx-ads-upload', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filename: file.name, rows }),
+        });
         const data = await res.json();
         newResults.push({ filename: file.name, ...data });
       } catch (err: any) {
