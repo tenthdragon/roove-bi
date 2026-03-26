@@ -294,6 +294,22 @@ export async function fetchChannelLtv90d() {
   return data || [];
 }
 
+// ── Get conservative CAC per channel ──
+export async function fetchChannelCac() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc.rpc('get_channel_cac');
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Get LTV 90d trend per cohort month per channel ──
+export async function fetchLtvTrend() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc.rpc('get_ltv_trend_by_cohort');
+  if (error) throw error;
+  return data || [];
+}
+
 // ── Get RTS and Canceled order stats with platform breakdown ──
 export async function fetchRtsCancelStats(from?: string, to?: string) {
   const svc = createServiceSupabase();

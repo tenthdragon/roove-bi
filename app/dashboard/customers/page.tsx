@@ -12,6 +12,8 @@ import {
   fetchMonthlyCohort,
   fetchMonthlyCohortByChannel,
   fetchChannelLtv90d,
+  fetchChannelCac,
+  fetchLtvTrend,
   fetchRtsCancelStats,
 } from '@/lib/scalev-actions';
 
@@ -60,6 +62,8 @@ export default function CustomersPage() {
   const [cohortData, setCohortData] = useState([]);
   const [cohortChannelData, setCohortChannelData] = useState([]);
   const [ltvData, setLtvData] = useState([]);
+  const [cacData, setCacData] = useState([]);
+  const [ltvTrend, setLtvTrend] = useState([]);
   const [topCustomers, setTopCustomers] = useState([]);
   const [rtsCancel, setRtsCancel] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -81,12 +85,14 @@ export default function CustomersPage() {
   async function loadData() {
     setLoading(true);
     try {
-      const [kpiData, daily, cohort, cohortCh, ltv, customers, rts] = await Promise.all([
+      const [kpiData, daily, cohort, cohortCh, ltv, cac, trend, customers, rts] = await Promise.all([
         fetchCustomerKPIs(dateRange.from, dateRange.to),
         fetchCustomerTypeDaily(dateRange.from, dateRange.to),
         fetchMonthlyCohort(),
         fetchMonthlyCohortByChannel(),
         fetchChannelLtv90d(),
+        fetchChannelCac(),
+        fetchLtvTrend(),
         fetchCustomerCohort(50, dateRange.from, dateRange.to),
         fetchRtsCancelStats(dateRange.from, dateRange.to),
       ]);
@@ -95,6 +101,8 @@ export default function CustomersPage() {
       setCohortData(cohort);
       setCohortChannelData(cohortCh);
       setLtvData(ltv);
+      setCacData(cac);
+      setLtvTrend(trend);
       setTopCustomers(customers);
       setRtsCancel(rts);
     } catch (err) {
@@ -246,7 +254,7 @@ export default function CustomersPage() {
         <>
           {subTab === 'overview' && <OverviewTab kpis={filteredKpis} channelPerformance={channelPerformance} channelFilter={channelFilter} setChannelFilter={setChannelFilter} availableChannels={availableChannels} topCustomers={filteredTopCustomers} rtsCancel={rtsCancel} />}
           {subTab === 'cohort' && <CohortTab data={cohortData} channelData={cohortChannelData} />}
-          {subTab === 'ltv' && <LtvTab data={ltvData} />}
+          {subTab === 'ltv' && <LtvTab data={ltvData} trendData={ltvTrend} />}
         </>
       )}
     </div>
@@ -620,7 +628,13 @@ function CohortTab({ data, channelData }) {
 // LTV TAB
 // ═══════════════════════════════════════════════════
 
-function LtvTab({ data }) {
+const TREND_CHANNELS = ['Scalev', 'Shopee', 'TikTok Shop'];
+const TREND_COLORS = { 'Global': '#3b82f6', 'Scalev': '#8b5cf6', 'Shopee': '#f97316', 'TikTok Shop': '#ef4444' };
+
+function LtvTab({ data, trendData = [] }) {
+  const [trendChannel, setTrendChannel] = useState('Global');
+  const [hoveredBar, setHoveredBar] = useState(null);
+
   if (!data || data.length === 0) return <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>Memuat data LTV...</div>;
 
   const globalRow = data.find(r => r.channel_group === 'Global');
@@ -629,11 +643,15 @@ function LtvTab({ data }) {
   const thStyle = { padding: '10px 14px', textAlign: 'left' as const, color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 11, textTransform: 'uppercase' as const };
   const tdStyle = { padding: '10px 14px', borderBottom: '1px solid var(--bg-deep)', fontFamily: 'monospace', fontSize: 12 };
 
+  // Trend data for selected channel
+  const trendFiltered = trendData.filter(r => r.channel_group === trendChannel).sort((a, b) => a.cohort_month.localeCompare(b.cohort_month));
+  const maxLifetime = Math.max(...trendFiltered.map(r => Number(r.avg_ltv_lifetime) || Number(r.avg_ltv_90d) || 0), 1);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Summary cards */}
       {globalRow && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
           {[
             { label: 'AVG LTV 90D', value: fmtRupiah(globalRow.avg_ltv_90d), sub: `${fmtCompact(globalRow.num_customers)} customers` },
             { label: 'FIRST PURCHASE', value: fmtRupiah(globalRow.avg_first_purchase), sub: 'avg per customer' },
@@ -657,9 +675,9 @@ function LtvTab({ data }) {
           <thead><tr>
             <th style={thStyle}>Channel</th>
             <th style={{ ...thStyle, textAlign: 'right' }}>Customers</th>
-            <th style={{ ...thStyle, textAlign: 'right' }}>Avg First Purchase</th>
-            <th style={{ ...thStyle, textAlign: 'right' }}>Avg Repeat (90d)</th>
-            <th style={{ ...thStyle, textAlign: 'right' }}>Avg LTV 90d</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>First Purchase</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Repeat (90d)</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>LTV 90d</th>
             <th style={{ ...thStyle, textAlign: 'right' }}>Repeat Rate</th>
           </tr></thead>
           <tbody>
@@ -676,7 +694,6 @@ function LtvTab({ data }) {
                 </tr>
               );
             })}
-            {/* Global row */}
             {globalRow && (
               <tr style={{ borderTop: '2px solid var(--border)' }}>
                 <td style={{ ...tdStyle, fontWeight: 700, fontFamily: 'inherit', color: 'var(--text)' }}>Global</td>
@@ -693,6 +710,128 @@ function LtvTab({ data }) {
           Hanya customer dengan first order &ge; 90 hari yang lalu. Revenue dihitung dari produk Roove saja (termasuk Roove dalam bundling).
         </p>
       </div>
+
+      {/* LTV Trend per Cohort */}
+      {trendFiltered.length > 0 && (
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12, marginBottom: 16 }}>
+            <div>
+              <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>LTV 90d Trend per Cohort</h3>
+              <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>Pergerakan kualitas customer yang diakuisisi setiap bulan</p>
+            </div>
+            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+              {['Global', ...TREND_CHANNELS].map(ch => (
+                <button key={ch} onClick={() => setTrendChannel(ch)} style={{
+                  padding: '4px 12px', borderRadius: 16, border: '1px solid',
+                  borderColor: trendChannel === ch ? (TREND_COLORS[ch] || '#3b82f6') : 'var(--border)',
+                  background: trendChannel === ch ? `${TREND_COLORS[ch] || '#3b82f6'}18` : 'transparent',
+                  color: trendChannel === ch ? (TREND_COLORS[ch] || '#3b82f6') : 'var(--text-secondary)',
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                }}>{ch}</button>
+              ))}
+            </div>
+          </div>
+
+          {/* Stacked bar chart: 90d (solid) + after 90d (transparent) */}
+          <div style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 180, marginBottom: 4 }}>
+              {trendFiltered.map((r, i) => {
+                const ltv90 = Number(r.avg_ltv_90d) || 0;
+                const after90 = Number(r.avg_after_90d) || 0;
+                const lifetime = ltv90 + after90;
+                const h90 = (ltv90 / maxLifetime) * 155;
+                const hAfter = (after90 / maxLifetime) * 155;
+                const color = TREND_COLORS[trendChannel] || '#3b82f6';
+                const isHovered = hoveredBar === i;
+                return (
+                  <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 0, cursor: 'pointer', position: 'relative' }}
+                    onMouseEnter={() => setHoveredBar(i)} onMouseLeave={() => setHoveredBar(null)}
+                    onClick={() => setHoveredBar(hoveredBar === i ? null : i)}>
+                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', width: '100%' }}>
+                      {/* After 90d bar (top, transparent) */}
+                      <div style={{ width: '70%', maxWidth: 40, height: hAfter, background: color, opacity: 0.3, borderRadius: hAfter > 0 ? '4px 4px 0 0' : 0, minHeight: after90 > 0 ? 1 : 0 }} />
+                      {/* 90d bar (bottom, solid) */}
+                      <div style={{ width: '70%', maxWidth: 40, height: h90, background: color, opacity: 0.85, borderRadius: hAfter > 0 ? 0 : '4px 4px 0 0', minHeight: 2 }} />
+                    </div>
+                    {/* Tooltip */}
+                    {isHovered && (
+                      <div style={{
+                        position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+                        background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: 8,
+                        padding: '8px 12px', fontSize: 10, whiteSpace: 'nowrap', zIndex: 10,
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.3)', marginBottom: 4,
+                      }}>
+                        <div style={{ fontWeight: 700, marginBottom: 4, color: 'var(--text)' }}>{r.cohort_month}</div>
+                        <div style={{ color }}><span style={{ opacity: 0.6 }}>LTV 90d:</span> {fmtRupiah(ltv90)}</div>
+                        <div style={{ color, opacity: 0.6 }}><span>After 90d:</span> +{fmtRupiah(after90)}</div>
+                        <div style={{ fontWeight: 700, color: 'var(--text)', marginTop: 2, borderTop: '1px solid var(--border)', paddingTop: 3 }}>Lifetime: {fmtRupiah(lifetime)}</div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ display: 'flex', gap: 3 }}>
+              {trendFiltered.map((r, i) => (
+                <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 9, color: 'var(--text-muted)', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden' }}>
+                  {r.cohort_month.slice(2).replace('-', '/')}
+                </div>
+              ))}
+            </div>
+            {/* Legend */}
+            <div style={{ display: 'flex', gap: 16, marginTop: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 12, height: 12, borderRadius: 3, background: TREND_COLORS[trendChannel] || '#3b82f6', opacity: 0.85 }} />
+                <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>LTV 90d</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 12, height: 12, borderRadius: 3, background: TREND_COLORS[trendChannel] || '#3b82f6', opacity: 0.3 }} />
+                <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>After 90d</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Trend detail table */}
+          <div style={{ overflowX: 'auto', marginTop: 16 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead><tr>
+                <th style={{ ...thStyle, fontSize: 10 }}>Cohort</th>
+                <th style={{ ...thStyle, textAlign: 'right', fontSize: 10 }}>Customers</th>
+                <th style={{ ...thStyle, textAlign: 'right', fontSize: 10 }}>LTV 90d</th>
+                <th style={{ ...thStyle, textAlign: 'right', fontSize: 10 }}>+After 90d</th>
+                <th style={{ ...thStyle, textAlign: 'right', fontSize: 10 }}>Lifetime</th>
+                <th style={{ ...thStyle, textAlign: 'right', fontSize: 10 }}>Repeat Rate</th>
+              </tr></thead>
+              <tbody>
+                {trendFiltered.map((r, i) => {
+                  const ltv90 = Number(r.avg_ltv_90d) || 0;
+                  const after90 = Number(r.avg_after_90d) || 0;
+                  const lifetime = Number(r.avg_ltv_lifetime) || (ltv90 + after90);
+                  const prevLifetime = i > 0 ? (Number(trendFiltered[i - 1].avg_ltv_lifetime) || 0) : null;
+                  const delta = prevLifetime ? ((lifetime - prevLifetime) / prevLifetime) * 100 : null;
+                  return (
+                    <tr key={r.cohort_month}>
+                      <td style={{ ...tdStyle, fontWeight: 600, fontFamily: 'inherit', fontSize: 11 }}>{r.cohort_month}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-secondary)', fontSize: 11 }}>{Number(r.num_customers).toLocaleString()}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontSize: 11 }}>{fmtRupiah(ltv90)}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontSize: 11, color: after90 > 0 ? 'var(--text-secondary)' : 'var(--dim)' }}>{after90 > 0 ? `+${fmtRupiah(after90)}` : '—'}</td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, fontSize: 11 }}>
+                        {fmtRupiah(lifetime)}
+                        {delta !== null && (
+                          <span style={{ marginLeft: 6, fontSize: 9, color: delta >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                            {delta >= 0 ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}%
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: 'right', fontSize: 11, color: Number(r.repeat_rate) > 25 ? 'var(--green)' : 'var(--text-muted)' }}>{r.repeat_rate}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
