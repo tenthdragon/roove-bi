@@ -1132,6 +1132,129 @@ export default function MetaManager() {
           </div>
         </div>
       )}
+      {/* ═══ XLSX ADS UPLOAD ═══ */}
+      <XlsxAdsUploader />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
+// XLSX ADS UPLOADER
+// ═══════════════════════════════════════════════════
+function XlsxAdsUploader() {
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [results, setResults] = useState<any[]>([]);
+  const [dragOver, setDragOver] = useState(false);
+
+  const handleFiles = (newFiles: FileList | null) => {
+    if (!newFiles) return;
+    const xlsxFiles = Array.from(newFiles).filter(f =>
+      f.name.endsWith('.xlsx') || f.name.endsWith('.xls')
+    );
+    setFiles(prev => [...prev, ...xlsxFiles]);
+  };
+
+  const uploadAll = async () => {
+    if (files.length === 0) return;
+    setUploading(true);
+    const newResults: any[] = [];
+
+    for (const file of files) {
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch('/api/xlsx-ads-upload', { method: 'POST', body: form });
+        const data = await res.json();
+        newResults.push({ filename: file.name, ...data });
+      } catch (err: any) {
+        newResults.push({ filename: file.name, error: err.message });
+      }
+    }
+
+    setResults(newResults);
+    setFiles([]);
+    setUploading(false);
+  };
+
+  const removeFile = (idx: number) => setFiles(prev => prev.filter((_, i) => i !== idx));
+
+  return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginTop: 20 }}>
+      <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 700 }}>Upload Ads from Excel</h3>
+      <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--dim)' }}>
+        Upload .xlsx files with an "Ads" sheet. Columns: Date, Ad Account, Spent, Objective, Source, Store, Advertiser.
+      </p>
+
+      {/* Drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+        onClick={() => { const inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.xlsx,.xls'; inp.multiple = true; inp.onchange = () => handleFiles(inp.files); inp.click(); }}
+        style={{
+          border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
+          borderRadius: 10, padding: '24px 16px', textAlign: 'center', cursor: 'pointer',
+          background: dragOver ? 'var(--accent-subtle)' : 'transparent',
+          transition: 'all 0.2s',
+        }}
+      >
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 600 }}>
+          {dragOver ? 'Drop files here' : 'Drag & drop .xlsx files or click to browse'}
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>
+          Supports multiple files (one per month)
+        </div>
+      </div>
+
+      {/* File queue */}
+      {files.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          {files.map((f, i) => (
+            <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--bg-deep)' }}>
+              <span style={{ fontSize: 12, color: 'var(--text)' }}>{f.name}</span>
+              <button onClick={(e) => { e.stopPropagation(); removeFile(i); }} style={{
+                background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 11, fontWeight: 600,
+              }}>Remove</button>
+            </div>
+          ))}
+          <button onClick={uploadAll} disabled={uploading} style={{
+            marginTop: 10, padding: '8px 20px', borderRadius: 8, border: 'none',
+            background: uploading ? 'var(--dim)' : 'var(--accent)',
+            color: '#fff', fontSize: 13, fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer',
+          }}>
+            {uploading ? 'Uploading...' : `Upload ${files.length} file${files.length > 1 ? 's' : ''}`}
+          </button>
+        </div>
+      )}
+
+      {/* Results */}
+      {results.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>Upload Results</h4>
+          {results.map((r, i) => (
+            <div key={i} style={{
+              padding: '10px 14px', borderRadius: 8, marginBottom: 6,
+              background: r.success ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+              border: `1px solid ${r.success ? 'var(--green)' : 'var(--red)'}20`,
+            }}>
+              <div style={{ fontWeight: 600, fontSize: 12, color: r.success ? 'var(--green)' : 'var(--red)' }}>
+                {r.filename}
+              </div>
+              {r.success ? (
+                <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  {r.inserted} rows inserted
+                  {r.skipped > 0 && `, ${r.skipped} skipped`}
+                  {r.skippedStores?.length > 0 && ` (${r.skippedStores.join(', ')})`}
+                  {r.dateRange && ` — ${r.dateRange.from} to ${r.dateRange.to}`}
+                </div>
+              ) : (
+                <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2 }}>{r.error}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
