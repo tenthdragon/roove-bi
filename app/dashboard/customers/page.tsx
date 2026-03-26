@@ -723,8 +723,8 @@ function LtvTab() {
 
       {/* Per-channel table */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, overflowX: 'auto' }}>
-        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>LTV 90 Hari per Channel — {selectedBrand}</h3>
-        <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--dim)' }}>Rata-rata nilai customer {selectedBrand} dalam 90 hari pertama sejak first order, berdasarkan acquisition channel</p>
+        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>LTV per Channel — {selectedBrand}</h3>
+        <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--dim)' }}>Rata-rata nilai customer {selectedBrand}, berdasarkan acquisition channel</p>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead><tr>
             <th style={thStyle}>Channel</th>
@@ -732,11 +732,15 @@ function LtvTab() {
             <th style={{ ...thStyle, textAlign: 'right' }}>First Purchase</th>
             <th style={{ ...thStyle, textAlign: 'right' }}>Repeat (90d)</th>
             <th style={{ ...thStyle, textAlign: 'right' }}>LTV 90d</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>+After 90d</th>
+            <th style={{ ...thStyle, textAlign: 'right' }}>Lifetime</th>
             <th style={{ ...thStyle, textAlign: 'right' }}>Repeat Rate</th>
           </tr></thead>
           <tbody>
             {channelRows.map(row => {
               const isHighLtv = globalRow && row.avg_ltv_90d >= globalRow.avg_ltv_90d;
+              const after90 = Number(row.avg_after_90d) || 0;
+              const lifetime = Number(row.avg_ltv_lifetime) || (Number(row.avg_ltv_90d) + after90);
               return (
                 <tr key={row.channel_group}>
                   <td style={{ ...tdStyle, fontWeight: 700, fontFamily: 'inherit', color: 'var(--text)' }}>{row.channel_group}</td>
@@ -744,20 +748,28 @@ function LtvTab() {
                   <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtRupiah(row.avg_first_purchase)}</td>
                   <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtRupiah(row.avg_repeat_value)}</td>
                   <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: isHighLtv ? 'var(--green)' : 'var(--text)' }}>{fmtRupiah(row.avg_ltv_90d)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', color: after90 > 0 ? 'var(--text-secondary)' : 'var(--dim)' }}>{after90 > 0 ? `+${fmtRupiah(after90)}` : '—'}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(lifetime)}</td>
                   <td style={{ ...tdStyle, textAlign: 'right', color: row.repeat_rate > 25 ? 'var(--green)' : 'var(--text-muted)' }}>{row.repeat_rate}%</td>
                 </tr>
               );
             })}
-            {globalRow && (
-              <tr style={{ borderTop: '2px solid var(--border)' }}>
-                <td style={{ ...tdStyle, fontWeight: 700, fontFamily: 'inherit', color: 'var(--text)' }}>Global</td>
-                <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-secondary)' }}>{Number(globalRow.num_customers).toLocaleString()}</td>
-                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(globalRow.avg_first_purchase)}</td>
-                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(globalRow.avg_repeat_value)}</td>
-                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(globalRow.avg_ltv_90d)}</td>
-                <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{globalRow.repeat_rate}%</td>
-              </tr>
-            )}
+            {globalRow && (() => {
+              const gAfter90 = Number(globalRow.avg_after_90d) || 0;
+              const gLifetime = Number(globalRow.avg_ltv_lifetime) || (Number(globalRow.avg_ltv_90d) + gAfter90);
+              return (
+                <tr style={{ borderTop: '2px solid var(--border)' }}>
+                  <td style={{ ...tdStyle, fontWeight: 700, fontFamily: 'inherit', color: 'var(--text)' }}>Global</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', color: 'var(--text-secondary)' }}>{Number(globalRow.num_customers).toLocaleString()}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(globalRow.avg_first_purchase)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(globalRow.avg_repeat_value)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(globalRow.avg_ltv_90d)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700, color: 'var(--text-secondary)' }}>{gAfter90 > 0 ? `+${fmtRupiah(gAfter90)}` : '—'}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{fmtRupiah(gLifetime)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'right', fontWeight: 700 }}>{globalRow.repeat_rate}%</td>
+                </tr>
+              );
+            })()}
           </tbody>
         </table>
         <p style={{ margin: '14px 0 0', fontSize: 11, color: 'var(--dim)' }}>

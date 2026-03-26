@@ -317,6 +317,8 @@ RETURNS TABLE(
   avg_first_purchase NUMERIC,
   avg_repeat_value NUMERIC,
   avg_ltv_90d NUMERIC,
+  avg_ltv_lifetime NUMERIC,
+  avg_after_90d NUMERIC,
   repeat_rate NUMERIC
 )
 LANGUAGE plpgsql
@@ -333,13 +335,15 @@ BEGIN
       AND s.channel_group IS NOT NULL
       AND s.first_order_date <= CURRENT_DATE - 90
   )
-  SELECT r.cg, r.nc, r.afp, r.arv, r.altv, r.rr
+  SELECT r.cg, r.nc, r.afp, r.arv, r.altv, r.altvl, r.aa90, r.rr
   FROM (
     SELECT b.cg,
       COUNT(*)::BIGINT AS nc,
       ROUND(AVG(b.first_purchase_revenue), 0) AS afp,
       ROUND(AVG(b.repeat_90d_revenue), 0) AS arv,
       ROUND(AVG(b.first_purchase_revenue + b.repeat_90d_revenue), 0) AS altv,
+      ROUND(AVG(b.first_purchase_revenue + b.repeat_90d_revenue + b.after_90d_revenue), 0) AS altvl,
+      ROUND(AVG(b.after_90d_revenue), 0) AS aa90,
       ROUND(SUM(CASE WHEN b.is_repeater_90d THEN 1 ELSE 0 END)::NUMERIC
             / NULLIF(COUNT(*), 0) * 100, 1) AS rr,
       1 AS sort_order
@@ -349,6 +353,8 @@ BEGIN
       ROUND(AVG(b.first_purchase_revenue), 0),
       ROUND(AVG(b.repeat_90d_revenue), 0),
       ROUND(AVG(b.first_purchase_revenue + b.repeat_90d_revenue), 0),
+      ROUND(AVG(b.first_purchase_revenue + b.repeat_90d_revenue + b.after_90d_revenue), 0),
+      ROUND(AVG(b.after_90d_revenue), 0),
       ROUND(SUM(CASE WHEN b.is_repeater_90d THEN 1 ELSE 0 END)::NUMERIC
             / NULLIF(COUNT(*), 0) * 100, 1),
       0
