@@ -119,18 +119,6 @@ export default function CustomersPage() {
     return CHANNEL_ORDER.filter(ch => ch === 'Global' || groups.has(ch));
   }, [groupedDaily]);
 
-  // ── Chart data: now with 3 categories ──
-  const chartData = useMemo(() => {
-    const byDate = {};
-    for (const row of filteredDaily) {
-      if (!byDate[row.date]) byDate[row.date] = { date: row.date, new: 0, repeat: 0, unidentified: 0 };
-      if (row.customer_type === 'new') byDate[row.date].new += row.order_count || 0;
-      else if (row.customer_type === 'ro') byDate[row.date].repeat += row.order_count || 0;
-      else if (row.customer_type === 'unidentified') byDate[row.date].unidentified += row.order_count || 0;
-    }
-    return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
-  }, [filteredDaily]);
-
   // ── KPIs: now with unidentified ──
   const filteredKpis = useMemo(() => {
     if (!kpis) return null;
@@ -256,7 +244,7 @@ export default function CustomersPage() {
         </div>
       ) : (
         <>
-          {subTab === 'overview' && <OverviewTab kpis={filteredKpis} chartData={chartData} channelPerformance={channelPerformance} channelFilter={channelFilter} setChannelFilter={setChannelFilter} availableChannels={availableChannels} topCustomers={filteredTopCustomers} rtsCancel={rtsCancel} />}
+          {subTab === 'overview' && <OverviewTab kpis={filteredKpis} channelPerformance={channelPerformance} channelFilter={channelFilter} setChannelFilter={setChannelFilter} availableChannels={availableChannels} topCustomers={filteredTopCustomers} rtsCancel={rtsCancel} />}
           {subTab === 'cohort' && <CohortTab data={cohortData} channelData={cohortChannelData} />}
           {subTab === 'ltv' && <LtvTab data={ltvData} />}
         </>
@@ -268,10 +256,9 @@ export default function CustomersPage() {
 // ═══════════════════════════════════════════════════
 // OVERVIEW TAB
 // ═══════════════════════════════════════════════════
-function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, setChannelFilter, availableChannels, topCustomers, rtsCancel }) {
+function OverviewTab({ kpis: k, channelPerformance, channelFilter, setChannelFilter, availableChannels, topCustomers, rtsCancel }) {
   if (!k) return <div style={{ color: 'var(--dim)', padding: 40, textAlign: 'center' }}>Belum ada data customer untuk periode ini.</div>;
 
-  const maxOrders = Math.max(...chartData.map(d => d.new + d.repeat + d.unidentified), 1);
   const totalRevAll = k.totalRevenue;
   const newRevPct = totalRevAll > 0 ? (k.newRevenue / totalRevAll) * 100 : 0;
   const repRevPct = totalRevAll > 0 ? (k.repeatRevenue / totalRevAll) * 100 : 0;
@@ -363,54 +350,7 @@ function OverviewTab({ kpis: k, chartData, channelPerformance, channelFilter, se
         />
       </div>
 
-      {/* ═══ 4. DAILY CHART ═══ */}
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 20 }}>
-        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Daily Orders by Customer Type</h3>
-        <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--dim)' }}>{channelFilter === 'Global' ? 'Semua channel' : channelFilter}</p>
-        {chartData.length === 0 ? (
-          <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>Tidak ada data untuk periode ini</div>
-        ) : (
-          <div>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 180 }}>
-              {chartData.map((d, i) => {
-                const total = d.new + d.repeat + d.unidentified;
-                const newH = (d.new / maxOrders) * 160;
-                const repH = (d.repeat / maxOrders) * 160;
-                const unidH = (d.unidentified / maxOrders) * 160;
-                return (
-                  <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', height: 160, width: '100%', alignItems: 'center' }}>
-                      {/* Top: Unidentified (gray) */}
-                      <div style={{ width: '70%', maxWidth: 20, height: unidH, background: 'var(--text-muted)', borderRadius: (d.repeat > 0 || d.new > 0) ? '3px 3px 0 0' : '3px 3px 0 0', minHeight: d.unidentified > 0 ? 2 : 0 }} title={`Unidentified: ${d.unidentified}`} />
-                      {/* Middle: Repeat (amber) */}
-                      <div style={{ width: '70%', maxWidth: 20, height: repH, background: 'var(--yellow)', borderRadius: d.unidentified > 0 ? '0' : '3px 3px 0 0', minHeight: d.repeat > 0 ? 2 : 0 }} title={`Repeat: ${d.repeat}`} />
-                      {/* Bottom: New (green) */}
-                      <div style={{ width: '70%', maxWidth: 20, height: newH, background: 'var(--green)', borderRadius: (d.repeat > 0 || d.unidentified > 0) ? '0' : '3px 3px 0 0', minHeight: d.new > 0 ? 2 : 0 }} title={`New: ${d.new}`} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ display: 'flex', height: 24, marginTop: 4 }}>
-              {chartData.map((d, i) => {
-                const step = Math.max(1, Math.ceil(chartData.length / 12));
-                return (
-                  <div key={i} style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
-                    {i % step === 0 && <div style={{ fontSize: 9, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(d.date + 'T00:00:00').toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })}</div>}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 16, marginTop: 10 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--green)' }} /><span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>New</span></div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--yellow)' }} /><span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Repeat</span></div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ width: 10, height: 10, borderRadius: 3, background: 'var(--text-muted)' }} /><span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>Unidentified</span></div>
-        </div>
-      </div>
-
-      {/* ═══ 5. TOP 50 CUSTOMERS ═══ */}
+      {/* ═══ 4. TOP 50 CUSTOMERS (collapsible) ═══ */}
       <TopCustomersSection customers={topCustomers} channelFilter={channelFilter} />
     </>
   );
@@ -457,54 +397,60 @@ function KpiCard({ label, value, color, sub }) {
 }
 
 function TopCustomersSection({ customers, channelFilter }) {
-  if (!customers || customers.length === 0) {
-    return (
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Top Customers by Revenue</h3>
-        <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>Tidak ada data customer untuk periode dan channel ini.</p>
-      </div>
-    );
-  }
+  const [open, setOpen] = useState(false);
+
   return (
-    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, overflowX: 'auto' }}>
-      <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Top {Math.min(customers.length, 50)} Customers by Revenue</h3>
-      <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--dim)' }}>{channelFilter === 'Global' ? 'Semua channel' : channelFilter} — dalam periode yang dipilih</p>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700 }}>
-        <thead>
-          <tr>
-            {['#', 'Customer', 'Channel', 'Orders', 'Revenue', 'AOV', 'First', 'Last', 'Type'].map(h => (
-              <th key={h} style={{ padding: '8px 10px', textAlign: ['#', 'Customer', 'Channel', 'Type'].includes(h) ? 'left' : 'right', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {customers.slice(0, 50).map((c, i) => {
-            const phone = c.customer_phone || '';
-            const maskedPhone = phone.length > 7 ? phone.slice(0, 4) + '****' + phone.slice(-3) : phone;
-            const cg = CHANNEL_GROUP_MAP[c.first_channel] || c.first_channel || 'Unknown';
-            return (
-              <tr key={i} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                <td style={{ padding: '7px 10px', color: 'var(--text-muted)', fontSize: 11 }}>{i + 1}</td>
-                <td style={{ padding: '7px 10px' }}>
-                  <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 12 }}>{c.first_name || 'N/A'}</div>
-                  {maskedPhone && <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{maskedPhone}</div>}
-                </td>
-                <td style={{ padding: '7px 10px' }}>
-                  <span style={{ padding: '2px 7px', borderRadius: 10, fontSize: 9, fontWeight: 600, background: `${CHANNEL_TAB_COLORS[cg] || 'var(--dim)'}20`, color: CHANNEL_TAB_COLORS[cg] || 'var(--text-secondary)' }}>{cg}</span>
-                </td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{c.total_orders}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: 'var(--green)' }}>{fmtRupiah(c.total_revenue)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: 11 }}>{fmtRupiah(c.avg_order_value)}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontSize: 10, color: 'var(--text-secondary)' }}>{c.first_order_date}</td>
-                <td style={{ padding: '7px 10px', textAlign: 'right', fontSize: 10, color: 'var(--text-secondary)' }}>{c.last_order_date}</td>
-                <td style={{ padding: '7px 10px' }}>
-                  <span style={{ padding: '2px 7px', borderRadius: 10, fontSize: 9, fontWeight: 700, background: c.is_repeat ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)', color: c.is_repeat ? 'var(--yellow)' : 'var(--green)' }}>{c.is_repeat ? 'Repeat' : 'New'}</span>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, overflowX: open ? 'auto' : 'hidden' }}>
+      <div
+        onClick={() => setOpen(!open)}
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', userSelect: 'none' }}
+      >
+        <div>
+          <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 700 }}>Top {Math.min((customers || []).length, 50)} Customers by Revenue</h3>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>{channelFilter === 'Global' ? 'Semua channel' : channelFilter} — all-time revenue, filtered by last order in period</p>
+        </div>
+        <span style={{ fontSize: 18, color: 'var(--dim)', transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}>▼</span>
+      </div>
+      {open && (!customers || customers.length === 0 ? (
+        <p style={{ margin: '14px 0 0', fontSize: 12, color: 'var(--dim)' }}>Tidak ada data customer untuk periode dan channel ini.</p>
+      ) : (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 700, marginTop: 14 }}>
+          <thead>
+            <tr>
+              {['#', 'Customer', 'Channel', 'Orders', 'Revenue', 'AOV', 'First', 'Last', 'Type'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['#', 'Customer', 'Channel', 'Type'].includes(h) ? 'left' : 'right', color: 'var(--dim)', borderBottom: '1px solid var(--border)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {customers.slice(0, 50).map((c, i) => {
+              const phone = c.customer_phone || '';
+              const maskedPhone = phone.length > 7 ? phone.slice(0, 4) + '****' + phone.slice(-3) : phone;
+              const cg = CHANNEL_GROUP_MAP[c.first_channel] || c.first_channel || 'Unknown';
+              return (
+                <tr key={i} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                  <td style={{ padding: '7px 10px', color: 'var(--text-muted)', fontSize: 11 }}>{i + 1}</td>
+                  <td style={{ padding: '7px 10px' }}>
+                    <div style={{ fontWeight: 600, color: 'var(--text)', fontSize: 12 }}>{c.first_name || 'N/A'}</div>
+                    {maskedPhone && <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{maskedPhone}</div>}
+                  </td>
+                  <td style={{ padding: '7px 10px' }}>
+                    <span style={{ padding: '2px 7px', borderRadius: 10, fontSize: 9, fontWeight: 600, background: `${CHANNEL_TAB_COLORS[cg] || 'var(--dim)'}20`, color: CHANNEL_TAB_COLORS[cg] || 'var(--text-secondary)' }}>{cg}</span>
+                  </td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{c.total_orders}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: 'var(--green)' }}>{fmtRupiah(c.total_revenue)}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: 11 }}>{fmtRupiah(c.avg_order_value)}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', fontSize: 10, color: 'var(--text-secondary)' }}>{c.first_order_date}</td>
+                  <td style={{ padding: '7px 10px', textAlign: 'right', fontSize: 10, color: 'var(--text-secondary)' }}>{c.last_order_date}</td>
+                  <td style={{ padding: '7px 10px' }}>
+                    <span style={{ padding: '2px 7px', borderRadius: 10, fontSize: 9, fontWeight: 700, background: c.is_repeat ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)', color: c.is_repeat ? 'var(--yellow)' : 'var(--green)' }}>{c.is_repeat ? 'Repeat' : 'New'}</span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      ))}
     </div>
   );
 }
