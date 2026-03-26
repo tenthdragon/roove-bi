@@ -287,9 +287,11 @@ export async function fetchMonthlyCohortByChannel() {
 }
 
 // ── Get per-channel LTV 90-day for Roove brand ──
-export async function fetchChannelLtv90d() {
+export async function fetchChannelLtv90d(brand?: string | null) {
   const svc = createServiceSupabase();
-  const { data, error } = await svc.rpc('get_channel_ltv_90d');
+  const { data, error } = await svc.rpc('get_channel_ltv_90d', {
+    brand_filter: brand || null,
+  });
   if (error) throw error;
   return data || [];
 }
@@ -303,9 +305,19 @@ export async function fetchChannelCac() {
 }
 
 // ── Get LTV 90d trend per cohort month per channel ──
-export async function fetchLtvTrend() {
+export async function fetchLtvTrend(brand?: string | null) {
   const svc = createServiceSupabase();
-  const { data, error } = await svc.rpc('get_ltv_trend_by_cohort');
+  const { data, error } = await svc.rpc('get_ltv_trend_by_cohort', {
+    brand_filter: brand || null,
+  });
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Get available brands for selector ──
+export async function fetchAvailableBrands() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc.rpc('get_available_brands');
   if (error) throw error;
   return data || [];
 }
