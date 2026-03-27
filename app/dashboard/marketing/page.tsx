@@ -99,6 +99,7 @@ export default function MarketingPage() {
   const [brandFilter, setBrandFilter] = useState('all');
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
+  const [dailyAdSpendOpen, setDailyAdSpendOpen] = useState(false);
 
   // ── Fetch data (with cache) ──
   useEffect(() => {
@@ -552,10 +553,18 @@ const BRAND_COLORS = useMemo(() => {
         </div>
       )}
 
-      {/* ── Daily Ad Spend by Traffic Source — Standalone Table ── */}
+      {/* ── Daily Ad Spend (Collapsible) ── */}
       {dailyTrafficSource.rows.length > 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 16 }}>Daily Ad Spend</div>
+          <div
+            onClick={() => setDailyAdSpendOpen(!dailyAdSpendOpen)}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}
+          >
+            <span style={{ fontSize: 13, color: C.dim, transition: 'transform 0.2s', transform: dailyAdSpendOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>&#9654;</span>
+            <span style={{ fontSize: 15, fontWeight: 700 }}>Daily Ad Spend</span>
+            <span style={{ fontSize: 12, color: C.dim }}>({dailyTrafficSource.rows.length} hari)</span>
+          </div>
+          {dailyAdSpendOpen && (<div style={{ marginTop: 16 }}>
           <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
               <thead>
@@ -603,13 +612,10 @@ const BRAND_COLORS = useMemo(() => {
               </tbody>
             </table>
           </div>
-        </div>
-      )}
 
       {/* ── Daily Ad Spend by Brand ── */}
-      {dailyBrandData.data.length > 0 && (
-        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>Daily Ad Spend — By Brand</div>
+      {dailyBrandData.data.length > 0 && (<>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4, marginTop: 20 }}>Daily Ad Spend — By Brand</div>
           <div style={{ fontSize: 12, color: C.dim, marginBottom: 16 }}>Breakdown pengeluaran iklan harian per brand</div>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={dailyBrandData.data}>
@@ -649,6 +655,8 @@ const BRAND_COLORS = useMemo(() => {
               </div>
             ))}
           </div>
+      </>)}
+          </div>)}
         </div>
       )}
 
