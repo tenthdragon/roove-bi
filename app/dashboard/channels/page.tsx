@@ -61,6 +61,8 @@ export default function ChannelsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState('all');
   const [scalevExpanded, setScalevExpanded] = useState(false);
+  const [dailySalesOpen, setDailySalesOpen] = useState(false);
+  const [hiddenChannels, setHiddenChannels] = useState<Set<string>>(new Set());
   const { isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
@@ -442,16 +444,54 @@ export default function ChannelsPage() {
         />
       </div>
 
-      {/* Combined Daily Sales & Shipments Table */}
+      {/* Combined Daily Sales & Shipments Table (Collapsible) */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Daily Sales &amp; Shipments</div>
-        {dailyCombined.rows.length > 0 ? (
+        <div
+          onClick={() => setDailySalesOpen(!dailySalesOpen)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}
+        >
+          <span style={{ fontSize: 13, color: 'var(--dim)', transition: 'transform 0.2s', transform: dailySalesOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>&#9654;</span>
+          <span style={{ fontSize: 15, fontWeight: 700 }}>Daily Sales &amp; Shipments</span>
+          <span style={{ fontSize: 12, color: 'var(--dim)' }}>({dailyCombined.rows.length} hari)</span>
+        </div>
+        {dailySalesOpen && dailyCombined.rows.length > 0 ? (<>
+          {/* Hide/unhide channel toggles */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '12px 0' }}>
+            {dailyCombined.channelNames.map(ch => {
+              const isHidden = hiddenChannels.has(ch);
+              return (
+                <button key={ch} onClick={() => {
+                  setHiddenChannels(prev => {
+                    const next = new Set(prev);
+                    if (next.has(ch)) next.delete(ch); else next.add(ch);
+                    return next;
+                  });
+                }} style={{
+                  padding: '4px 10px', fontSize: 11, fontWeight: 600, borderRadius: 6,
+                  border: `1px solid ${isHidden ? 'var(--border)' : (CHANNEL_COLORS[ch] || 'var(--dim)')}`,
+                  background: isHidden ? 'transparent' : `${CHANNEL_COLORS[ch] || 'var(--dim)'}15`,
+                  color: isHidden ? 'var(--dim)' : (CHANNEL_COLORS[ch] || 'var(--text)'),
+                  cursor: 'pointer', opacity: isHidden ? 0.5 : 1, textDecoration: isHidden ? 'line-through' : 'none',
+                }}>
+                  {ch}
+                </button>
+              );
+            })}
+          </div>
+          {(() => {
+            const visibleChannels = dailyCombined.channelNames.filter(ch => !hiddenChannels.has(ch));
+            const visibleRows = dailyCombined.rows.filter(row => {
+              const totalOrders = visibleChannels.reduce((sum, ch) => sum + (row.channels[ch]?.orders || 0), 0);
+              const totalRevenue = visibleChannels.reduce((sum, ch) => sum + (row.channels[ch]?.revenue || 0), 0);
+              return totalOrders > 0 || totalRevenue > 0;
+            });
+            return (
           <div style={{ overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + dailyCombined.channelNames.length * 130 + 200), width: '100%' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + visibleChannels.length * 130 + 200), width: '100%' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border)' }}>
                 <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>Date</th>
-                {dailyCombined.channelNames.map(ch => (
+                {visibleChannels.map(ch => (
                   <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: CHANNEL_COLORS[ch] || 'var(--dim)' }}>{ch}</th>
                 ))}
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>Total</th>
@@ -460,10 +500,13 @@ export default function ChannelsPage() {
               </tr>
             </thead>
             <tbody>
-              {dailyCombined.rows.map(row => (
+              {visibleRows.map(row => {
+                const rowTotalOrders = visibleChannels.reduce((sum, ch) => sum + (row.channels[ch]?.orders || 0), 0);
+                const rowTotalRevenue = visibleChannels.reduce((sum, ch) => sum + (row.channels[ch]?.revenue || 0), 0);
+                return (
                 <tr key={row.date} style={{ borderBottom: '1px solid var(--border)' }}>
                   <td style={{ padding: '8px 10px', fontWeight: 600, fontSize: 11, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>{shortDate(row.date)}</td>
-                  {dailyCombined.channelNames.map(ch => {
+                  {visibleChannels.map(ch => {
                     const cell = row.channels[ch];
                     const hasData = cell && (cell.revenue || cell.orders);
                     return (
@@ -478,19 +521,20 @@ export default function ChannelsPage() {
                     );
                   })}
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>
-                    <div>{fmtRupiah(row.totalRevenue)}</div>
-                    <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{row.totalOrders.toLocaleString('id-ID')}</div>
+                    <div>{fmtRupiah(rowTotalRevenue)}</div>
+                    <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{rowTotalOrders.toLocaleString('id-ID')}</div>
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>{row.adsFee > 0 ? fmtRupiah(row.adsFee) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>{row.mpFee > 0 ? fmtRupiah(row.mpFee) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                 </tr>
-              ))}
+                );
+              })}
               {/* Grand Total row */}
               <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg)' }}>
                 <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11, position: 'sticky', left: 0, background: 'var(--bg)', zIndex: 1 }}>TOTAL</td>
-                {dailyCombined.channelNames.map(ch => {
-                  const chOrders = dailyCombined.rows.reduce((sum, r) => sum + (r.channels[ch]?.orders || 0), 0);
-                  const chRevenue = dailyCombined.rows.reduce((sum, r) => sum + (r.channels[ch]?.revenue || 0), 0);
+                {visibleChannels.map(ch => {
+                  const chOrders = visibleRows.reduce((sum, r) => sum + (r.channels[ch]?.orders || 0), 0);
+                  const chRevenue = visibleRows.reduce((sum, r) => sum + (r.channels[ch]?.revenue || 0), 0);
                   return (
                     <td key={ch} style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: CHANNEL_COLORS[ch] || 'var(--text)' }}>
                       {chRevenue > 0 ? (
@@ -503,18 +547,20 @@ export default function ChannelsPage() {
                   );
                 })}
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>
-                  <div>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.totalRevenue, 0))}</div>
-                  <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{dailyCombined.rows.reduce((sum, r) => sum + r.totalOrders, 0).toLocaleString('id-ID')}</div>
+                  <div>{fmtRupiah(visibleRows.reduce((sum, r) => sum + visibleChannels.reduce((s, ch) => s + (r.channels[ch]?.revenue || 0), 0), 0))}</div>
+                  <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{visibleRows.reduce((sum, r) => sum + visibleChannels.reduce((s, ch) => s + (r.channels[ch]?.orders || 0), 0), 0).toLocaleString('id-ID')}</div>
                 </td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.adsFee, 0))}</td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(dailyCombined.rows.reduce((sum, r) => sum + r.mpFee, 0))}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(visibleRows.reduce((sum, r) => sum + r.adsFee, 0))}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(visibleRows.reduce((sum, r) => sum + r.mpFee, 0))}</td>
               </tr>
             </tbody>
           </table>
           </div>
-        ) : (
+            );
+          })()}
+        </>) : dailySalesOpen ? (
           <div style={{ textAlign: 'center', padding: 24, color: 'var(--dim)', fontSize: 12 }}>Tidak ada data harian untuk periode ini.</div>
-        )}
+        ) : null}
       </div>
 
       {/* Channel Breakdown Table */}
