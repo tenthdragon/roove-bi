@@ -86,7 +86,7 @@ export type PendingOrder = {
 
 export async function getPendingOrders(): Promise<PendingOrder[]> {
   const svc = createServiceSupabase();
-  const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready'];
+  const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready', 'in_process'];
 
   // Only show orders from before today (today's orders may still be processing normally)
   const today = new Date();
