@@ -103,14 +103,20 @@ export async function getPendingOrders(): Promise<PendingOrder[]> {
   if (error) throw error;
   if (!orders || orders.length === 0) return [];
 
-  // Batch check which orders have lines (1 query, not N)
+  // Batch check which orders have lines
+  // Use chunked queries to avoid PostgREST default 1000-row limit
   const orderIds = orders.map(o => o.id);
-  const { data: withLines } = await svc
-    .from('scalev_order_lines')
-    .select('scalev_order_id')
-    .in('scalev_order_id', orderIds);
-
-  const idsWithLines = new Set((withLines || []).map(r => r.scalev_order_id));
+  const idsWithLines = new Set<number>();
+  const chunkSize = 200;
+  for (let i = 0; i < orderIds.length; i += chunkSize) {
+    const chunk = orderIds.slice(i, i + chunkSize);
+    const { data: withLines } = await svc
+      .from('scalev_order_lines')
+      .select('scalev_order_id')
+      .in('scalev_order_id', chunk)
+      .limit(10000);
+    (withLines || []).forEach(r => idsWithLines.add(r.scalev_order_id));
+  }
 
   return orders.map(o => ({
     ...o,

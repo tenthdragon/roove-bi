@@ -166,13 +166,19 @@ export async function POST(req: NextRequest) {
         .in('status', ['shipped', 'completed']);
       if (error) throw error;
       if (shippedForDate && shippedForDate.length > 0) {
-        // Single query: get all order IDs that DO have lines
+        // Chunked query to avoid PostgREST default 1000-row limit
         const shippedIds = shippedForDate.map(o => o.id);
-        const { data: withLines } = await svc
-          .from('scalev_order_lines')
-          .select('scalev_order_id')
-          .in('scalev_order_id', shippedIds);
-        const idsWithLines = new Set((withLines || []).map(r => r.scalev_order_id));
+        const idsWithLines = new Set<number>();
+        const chunkSize = 200;
+        for (let i = 0; i < shippedIds.length; i += chunkSize) {
+          const chunk = shippedIds.slice(i, i + chunkSize);
+          const { data: withLines } = await svc
+            .from('scalev_order_lines')
+            .select('scalev_order_id')
+            .in('scalev_order_id', chunk)
+            .limit(10000);
+          (withLines || []).forEach(r => idsWithLines.add(r.scalev_order_id));
+        }
         // Only include orders that have NO lines
         for (const order of shippedForDate) {
           if (!idsWithLines.has(order.id)) {
