@@ -24,7 +24,7 @@ export async function getScalevStatus() {
       .select('*', { count: 'exact', head: true })
       .not('shipped_time', 'is', null);
 
-    const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready'];
+    const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready', 'in_process'];
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const todayISO = today.toISOString();
