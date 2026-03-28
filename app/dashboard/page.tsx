@@ -26,6 +26,7 @@ export default function OverviewPage() {
   const { activeBrands, isActiveBrand } = useActiveBrands();
   const [userRole, setUserRole] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
+  const [showTren, setShowTren] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -149,7 +150,7 @@ export default function OverviewPage() {
       }
     }
     dailyData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { s:0, g:0, n:0, mp:0 };
+      if (!byDate[d.date]) return; // skip dates outside selected range
       byDate[d.date].s += Number(d.net_sales);
       byDate[d.date].g += Number(d.gross_profit);
       byDate[d.date].n += Number(d.net_after_mkt);
@@ -320,14 +321,17 @@ export default function OverviewPage() {
 
       {kpi.chart.length > 0 && (
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16, marginBottom:20, overflowX:'auto' }}>
-          <div style={{ fontSize:15, fontWeight:700, marginBottom:12, display:'flex', alignItems:'center', gap:10 }}>
+          <div style={{ fontSize:15, fontWeight:700, marginBottom: showTren ? 12 : 0, display:'flex', alignItems:'center', gap:10, cursor:'pointer' }} onClick={() => setShowTren(v => !v)}>
+            <span style={{ transition:'transform 0.2s', display:'inline-block', transform: showTren ? 'rotate(90deg)' : 'rotate(0deg)', fontSize:10, color:'var(--dim)' }}>&#9654;</span>
             Tren Harian
-            <button onClick={() => setShowDetail(v => !v)} style={{ background:'none', border:'1px solid var(--border)', borderRadius:6, padding:'2px 8px', cursor:'pointer', fontSize:10, color: showDetail ? '#a78bfa' : 'var(--dim)', display:'flex', alignItems:'center', gap:4 }}>
-              <span style={{ transition:'transform 0.2s', display:'inline-block', transform: showDetail ? 'rotate(90deg)' : 'rotate(0deg)', fontSize:8 }}>&#9654;</span>
-              Detail
-            </button>
+            {showTren && (
+              <button onClick={e => { e.stopPropagation(); setShowDetail(v => !v); }} style={{ background:'none', border:'1px solid var(--border)', borderRadius:6, padding:'2px 8px', cursor:'pointer', fontSize:10, color: showDetail ? '#a78bfa' : 'var(--dim)', display:'flex', alignItems:'center', gap:4 }}>
+                <span style={{ transition:'transform 0.2s', display:'inline-block', transform: showDetail ? 'rotate(90deg)' : 'rotate(0deg)', fontSize:8 }}>&#9654;</span>
+                Detail
+              </button>
+            )}
           </div>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? (kpi.hasOverhead ? 1100 : 920) : 820 }}>
+          {showTren && <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? (kpi.hasOverhead ? 1100 : 920) : 820 }}>
             <thead>
               <tr style={{ borderBottom:'2px solid var(--border)' }}>
                 <th style={{ padding:'8px 10px', textAlign:'left', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>Tanggal</th>
@@ -397,7 +401,7 @@ export default function OverviewPage() {
                 )}
               </tr>
             </tbody>
-          </table>
+          </table>}
         </div>
       )}
 
