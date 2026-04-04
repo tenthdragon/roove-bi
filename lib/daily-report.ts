@@ -58,13 +58,13 @@ const MP_PATTERNS = ['marketplace', 'shopee', 'tiktok', 'lazada', 'tokopedia', '
 
 async function fetchProductSummary(svc: any, from: string, to: string) {
   const { data } = await svc.from('summary_daily_product_complete')
-    .select('date, net_sales, net_after_mkt, mkt_cost').gte('date', from).lte('date', to);
+    .select('date, net_sales, net_after_mkt, mkt_cost').gte('date', from).lte('date', to).limit(5000);
   return data || [];
 }
 
 async function fetchChannelSummary(svc: any, from: string, to: string) {
   const { data } = await svc.from('summary_daily_order_channel')
-    .select('date, channel, net_sales').gte('date', from).lte('date', to);
+    .select('date, channel, net_sales').gte('date', from).lte('date', to).limit(5000);
   return data || [];
 }
 
@@ -79,7 +79,7 @@ async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
   // Only Facebook Ads (exclude CPAS, TikTok, Shopee, WhatsApp)
   const { data } = await svc.from('daily_ads_spend')
     .select('date, spent').gte('date', from).lte('date', to)
-    .eq('source', 'Facebook Ads');
+    .eq('source', 'Facebook Ads').limit(5000);
   const byDate: Record<string, number> = {};
   for (const r of data || []) byDate[r.date] = (byDate[r.date] || 0) + Number(r.spent);
   return byDate;
