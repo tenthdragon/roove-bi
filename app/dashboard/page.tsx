@@ -144,7 +144,7 @@ export default function OverviewPage() {
       const cur = new Date(dateRange.from + 'T00:00:00');
       const end = new Date(dateRange.to + 'T00:00:00');
       while (cur <= end) {
-        const key = cur.toISOString().slice(0, 10);
+        const key = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
         byDate[key] = { s:0, g:0, n:0, mp:0 };
         cur.setDate(cur.getDate() + 1);
       }
