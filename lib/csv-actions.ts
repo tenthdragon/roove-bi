@@ -24,6 +24,20 @@ async function fetchBrandKeywords(): Promise<BrandKeyword[]> {
   }
 }
 
+// ── Fetch bonus item names from product_mapping ──
+async function fetchBonusItemNames(): Promise<Set<string>> {
+  try {
+    const svc = createServiceSupabase();
+    const { data } = await svc
+      .from('product_mapping')
+      .select('product_name')
+      .eq('is_bonus', true);
+    return new Set((data || []).map((r: any) => r.product_name.toLowerCase()));
+  } catch {
+    return new Set();
+  }
+}
+
 // ── Brand detection from item_name or item_owner (dynamic) ──
 function deriveBrandFromItem(itemName: string, itemOwner: string, brands: BrandKeyword[]): string {
   const n = (itemName || '').toLowerCase();
@@ -78,6 +92,7 @@ export async function uploadCsvOrders(formData: FormData) {
 
   // Fetch brand keywords from DB for dynamic detection
   const brandKeywords = await fetchBrandKeywords();
+  const bonusNames = await fetchBonusItemNames();
 
   // ── Collect CSV order IDs ──
   const csvOrderIdSet = new Set<string>();
@@ -193,6 +208,28 @@ export async function uploadCsvOrders(formData: FormData) {
         is_purchase_kwai: firstRow.is_purchase_kwai === 'true',
         synced_at: new Date().toISOString(),
       });
+    }
+
+    // Reassign bonus items to the dominant non-bonus brand in this order
+    if (isProductBased && bonusNames.size > 0) {
+      const bonusIdx: number[] = [];
+      for (let i = 0; i < lineItems.length; i++) {
+        if (bonusNames.has(lineItems[i].product_name.toLowerCase())) bonusIdx.push(i);
+      }
+      if (bonusIdx.length > 0 && bonusIdx.length < lineItems.length) {
+        const brandRev: Record<string, number> = {};
+        for (let i = 0; i < lineItems.length; i++) {
+          if (bonusIdx.includes(i)) continue;
+          const b = lineItems[i].product_type;
+          if (b && b !== 'Unknown' && b !== 'Other') {
+            brandRev[b] = (brandRev[b] || 0) + (lineItems[i].product_price_bt - lineItems[i].discount_bt);
+          }
+        }
+        const dominant = Object.entries(brandRev).sort((a, b) => b[1] - a[1])[0]?.[0];
+        if (dominant) {
+          for (const i of bonusIdx) lineItems[i].product_type = dominant;
+        }
+      }
     }
 
     stats.totalLineItems += lineItems.length;

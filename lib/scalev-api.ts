@@ -212,21 +212,25 @@ export function deriveSalesChannel(order: any): string {
 // 1. Exact match from product_mapping table
 // 2. Fuzzy match (case-insensitive contains)
 // 3. Keyword-based fallback
-let productMappingCache: Map<string, string> | null = null;
+interface ProductInfo { type: string; isBonus: boolean }
+let productMappingCache: Map<string, ProductInfo> | null = null;
 
-export async function loadProductMappings(): Promise<Map<string, string>> {
+export async function loadProductMappings(): Promise<Map<string, ProductInfo>> {
   if (productMappingCache) return productMappingCache;
 
   const svc = getServiceSupabase();
   const { data, error } = await svc
     .from('product_mapping')
-    .select('product_name, product_type');
+    .select('product_name, product_type, is_bonus');
 
   if (error) throw error;
 
   productMappingCache = new Map();
   for (const row of data || []) {
-    productMappingCache.set(row.product_name.toLowerCase(), row.product_type);
+    productMappingCache.set(row.product_name.toLowerCase(), {
+      type: row.product_type,
+      isBonus: row.is_bonus || false,
+    });
   }
   return productMappingCache;
 }
@@ -235,7 +239,7 @@ export function clearProductMappingCache() {
   productMappingCache = null;
 }
 
-export async function lookupProductType(productName: string): Promise<string> {
+export async function lookupProductInfo(productName: string): Promise<ProductInfo> {
   const mappings = await loadProductMappings();
   const nameLower = productName.toLowerCase().trim();
 
@@ -245,45 +249,50 @@ export async function lookupProductType(productName: string): Promise<string> {
   }
 
   // 2. Fuzzy match — check if any mapping key is contained in product name or vice versa
-  for (const [key, type] of mappings) {
+  for (const [key, info] of mappings) {
     if (nameLower.includes(key) || key.includes(nameLower)) {
-      return type;
+      return info;
     }
   }
 
   // 3. Keyword fallback
-  const keywordMap: Record<string, string> = {
-    'roove': 'Roove',
-    'almona': 'Almona',
-    'pluve': 'Pluve',
-    'purvu': 'Purvu',
-    'the secret': 'Purvu',
-    'arabian': 'Purvu',
-    'mediterranean': 'Purvu',
-    'discovery set': 'Purvu',
-    'drhyun': 'DrHyun',
-    'dr hyun': 'DrHyun',
-    'calmara': 'Calmara',
-    'osgard': 'Osgard',
-    'globite': 'Globite',
-    'orelif': 'Orelif',
-    'verazui': 'Verazui',
-    'clola': 'YUV',
-    'veminine': 'Veminine',
-    'prime serum': 'Veminine',
-    'shaker': 'Other',
-    'brosur': 'Other',
-    'jam tangan': 'Other',
-    'baby gold': 'Other',
+  const keywordMap: Record<string, ProductInfo> = {
+    'roove': { type: 'Roove', isBonus: false },
+    'almona': { type: 'Almona', isBonus: false },
+    'pluve': { type: 'Pluve', isBonus: false },
+    'purvu': { type: 'Purvu', isBonus: false },
+    'the secret': { type: 'Purvu', isBonus: false },
+    'arabian': { type: 'Purvu', isBonus: false },
+    'mediterranean': { type: 'Purvu', isBonus: false },
+    'discovery set': { type: 'Purvu', isBonus: false },
+    'drhyun': { type: 'DrHyun', isBonus: false },
+    'dr hyun': { type: 'DrHyun', isBonus: false },
+    'calmara': { type: 'Calmara', isBonus: false },
+    'osgard': { type: 'Osgard', isBonus: false },
+    'globite': { type: 'Globite', isBonus: false },
+    'orelif': { type: 'Orelif', isBonus: false },
+    'verazui': { type: 'Verazui', isBonus: false },
+    'clola': { type: 'YUV', isBonus: false },
+    'veminine': { type: 'Veminine', isBonus: false },
+    'prime serum': { type: 'Veminine', isBonus: false },
+    'shaker': { type: 'Other', isBonus: true },
+    'brosur': { type: 'Other', isBonus: true },
+    'jam tangan': { type: 'Other', isBonus: true },
+    'baby gold': { type: 'Other', isBonus: true },
   };
 
-  for (const [keyword, type] of Object.entries(keywordMap)) {
+  for (const [keyword, info] of Object.entries(keywordMap)) {
     if (nameLower.includes(keyword)) {
-      return type;
+      return info;
     }
   }
 
-  return 'Unknown';
+  return { type: 'Unknown', isBonus: false };
+}
+
+// Backward-compatible wrapper
+export async function lookupProductType(productName: string): Promise<string> {
+  return (await lookupProductInfo(productName)).type;
 }
 
 // ── Fetch store list from Scalev API ──
@@ -388,15 +397,17 @@ export async function parseOrderForDb(order: any) {
 
   // Parse order lines (products in this order)
   const orderLines = [];
+  const bonusIndices: number[] = [];
   const items = order.order_line || order.items || [];
   for (const item of items) {
     const productName = item.product?.name || item.product_name || 'Unknown';
-    const productType = await lookupProductType(productName);
+    const info = await lookupProductInfo(productName);
 
+    const idx = orderLines.length;
     orderLines.push({
       order_id: order.order_id,
       product_name: productName,
-      product_type: productType,
+      product_type: info.type,
       variant_sku: item.variant?.sku || item.sku || null,
       quantity: item.quantity || 1,
       product_price_bt: item.product_price_bt || item.price || 0,
@@ -409,6 +420,26 @@ export async function parseOrderForDb(order: any) {
       is_purchase_kwai: order.is_purchase_kwai || false,
       synced_at: new Date().toISOString(),
     });
+    if (info.isBonus) bonusIndices.push(idx);
+  }
+
+  // Reassign bonus items to the dominant non-bonus brand in this order
+  if (bonusIndices.length > 0 && bonusIndices.length < orderLines.length) {
+    const brandRevenue: Record<string, number> = {};
+    for (let i = 0; i < orderLines.length; i++) {
+      if (bonusIndices.includes(i)) continue;
+      const b = orderLines[i].product_type;
+      if (b && b !== 'Unknown') {
+        brandRevenue[b] = (brandRevenue[b] || 0) +
+          (orderLines[i].product_price_bt - orderLines[i].discount_bt);
+      }
+    }
+    const dominant = Object.entries(brandRevenue).sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (dominant) {
+      for (const i of bonusIndices) {
+        orderLines[i].product_type = dominant;
+      }
+    }
   }
 
   return { orderHeader, orderLines, salesChannel };
