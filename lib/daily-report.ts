@@ -78,30 +78,15 @@ async function fetchChannelSummary(svc: any, from: string, to: string) {
   return data || [];
 }
 
-async function fetchShipmentCounts(svc: any, from: string, to: string) {
-  // Use summary_daily_order_channel which already has aggregated data,
-  // instead of RPC which may timeout on large date ranges.
-  // COUNT DISTINCT orders per day isn't available here, so we use
-  // scalev_orders count grouped by shipped_date instead.
+async function fetchShipmentCount(svc: any, from: string, to: string): Promise<number> {
   const { utcFrom, utcTo } = wibRangeToUtc(from, to);
-  const { data, error } = await svc.from('scalev_orders')
-    .select('shipped_time')
+  const { count, error } = await svc.from('scalev_orders')
+    .select('id', { count: 'exact', head: true })
     .in('status', ['shipped', 'completed'])
     .gte('shipped_time', utcFrom)
-    .lt('shipped_time', utcTo)
-    .not('shipped_time', 'is', null)
-    .limit(50000);
-  if (error) console.error('[report] fetchShipmentCounts error:', error);
-
-  const byDate: Record<string, number> = {};
-  for (const r of data || []) {
-    if (!r.shipped_time) continue;
-    const dt = new Date(r.shipped_time);
-    const wib = new Date(dt.getTime() + 7 * 3600_000);
-    const key = `${wib.getFullYear()}-${String(wib.getMonth() + 1).padStart(2, '0')}-${String(wib.getDate()).padStart(2, '0')}`;
-    byDate[key] = (byDate[key] || 0) + 1;
-  }
-  return byDate;
+    .lt('shipped_time', utcTo);
+  if (error) console.error('[report] fetchShipmentCount error:', error);
+  return count || 0;
 }
 
 async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
@@ -145,24 +130,22 @@ async function fetchCRForRange(svc: any, from: string, to: string): Promise<{ cr
 
 // ── Compute range totals ──
 
-function computeRange(from: string, to: string, productRows: any[], channelRows: any[],
-  shipByDate: Record<string, number>, metaByDate: Record<string, number>) {
+function computeRange(from: string, to: string, productRows: any[], channelRows: any[], metaByDate: Record<string, number>) {
   const dates = [...new Set(productRows.filter(r => r.date >= from && r.date <= to && Number(r.net_sales) > 0).map(r => r.date))].sort();
   const n = dates.length;
-  if (!n) return { ns: 0, nam: 0, mkt: 0, ship: 0, meta: 0, scalev: 0, activeDays: 0 };
+  if (!n) return { ns: 0, nam: 0, mkt: 0, meta: 0, scalev: 0, activeDays: 0 };
 
-  let tns = 0, tnam = 0, tmkt = 0, tship = 0, tmeta = 0, tscalev = 0;
+  let tns = 0, tnam = 0, tmkt = 0, tmeta = 0, tscalev = 0;
   for (const d of dates) {
     const dp = productRows.filter(r => r.date === d);
     const dc = channelRows.filter(r => r.date === d);
     tns += dp.reduce((a: number, r: any) => a + Number(r.net_sales), 0);
     tnam += dp.reduce((a: number, r: any) => a + Number(r.net_after_mkt), 0);
     tmkt += dp.reduce((a: number, r: any) => a + Number(r.mkt_cost), 0);
-    tship += shipByDate[d] || 0;
     tmeta += metaByDate[d] || 0;
     tscalev += dc.filter((r: any) => r.channel === SCALEV_ADS_CHANNEL).reduce((a: number, r: any) => a + Number(r.net_sales), 0);
   }
-  return { ns: tns, nam: tnam, mkt: tmkt, ship: tship, meta: tmeta, scalev: tscalev, activeDays: n };
+  return { ns: tns, nam: tnam, mkt: tmkt, meta: tmeta, scalev: tscalev, activeDays: n };
 }
 
 // ── Main ──
@@ -178,11 +161,13 @@ export async function buildDailyReport(): Promise<string> {
   console.log(`[report] Building report for yesterday=${yesterday}, thisMonth=${thisMonthFrom}, prevMonth=${prev.from}→${prev.to}`);
 
   // Fetch all data in parallel
-  const [productRows, channelRows, shipByDate, metaByDate, crYd, crThis, crPrev] = await Promise.all([
+  const [productRows, channelRows, metaByDate, shipYd, shipThis, shipPrev, crYd, crThis, crPrev] = await Promise.all([
     fetchProductSummary(svc, prev.from, yesterday),
     fetchChannelSummary(svc, prev.from, yesterday),
-    fetchShipmentCounts(svc, prev.from, yesterday),
     fetchMetaAdsSpend(svc, prev.from, yesterday),
+    fetchShipmentCount(svc, yesterday, yesterday),
+    fetchShipmentCount(svc, thisMonthFrom, yesterday),
+    fetchShipmentCount(svc, prev.from, prev.to),
     fetchCRForRange(svc, yesterday, yesterday),
     fetchCRForRange(svc, thisMonthFrom, yesterday),
     fetchCRForRange(svc, prev.from, prev.to),
@@ -190,41 +175,37 @@ export async function buildDailyReport(): Promise<string> {
 
   // @ts-ignore
   buildDailyReport._debug = {
-    yesterday,
-    productRows: productRows.length,
-    channelRows: channelRows.length,
-    shipDates: Object.keys(shipByDate),
-    shipYesterday: shipByDate[yesterday] || 0,
-    crYd, crThis, crPrev,
+    yesterday, productRows: productRows.length, channelRows: channelRows.length,
+    shipYd, shipThis, shipPrev, crYd, crThis, crPrev,
   };
 
   // Yesterday
-  const ydR = computeRange(yesterday, yesterday, productRows, channelRows, shipByDate, metaByDate);
+  const ydR = computeRange(yesterday, yesterday, productRows, channelRows, metaByDate);
   const gpm = ydR.ns > 0 ? (ydR.nam / ydR.ns) * 100 : 0;
-  const aov = ydR.ship > 0 ? ydR.ns / ydR.ship : 0;
+  const aov = shipYd > 0 ? ydR.ns / shipYd : 0;
   const mktPct = ydR.ns > 0 ? (ydR.mkt / ydR.ns) * 100 : 0;
   const roas = ydR.meta > 0 ? ydR.scalev / ydR.meta : 0;
   const crPct = crYd.created > 0 ? (crYd.shipped / crYd.created) * 100 : 0;
 
   // This month avg
-  const thisR = computeRange(thisMonthFrom, yesterday, productRows, channelRows, shipByDate, metaByDate);
+  const thisR = computeRange(thisMonthFrom, yesterday, productRows, channelRows, metaByDate);
   const tn = thisR.activeDays || 1;
   const aThis = {
     ns: thisR.ns / tn, nam: thisR.nam / tn,
     gpm: thisR.ns > 0 ? (thisR.nam / thisR.ns) * 100 : 0,
-    ship: thisR.ship / tn, aov: thisR.ship > 0 ? thisR.ns / thisR.ship : 0,
+    ship: shipThis / tn, aov: shipThis > 0 ? thisR.ns / shipThis : 0,
     mktPct: thisR.ns > 0 ? (thisR.mkt / thisR.ns) * 100 : 0,
     roas: thisR.meta > 0 ? thisR.scalev / thisR.meta : 0,
     crPct: crThis.created > 0 ? (crThis.shipped / crThis.created) * 100 : 0,
   };
 
   // Last month avg
-  const prevR = computeRange(prev.from, prev.to, productRows, channelRows, shipByDate, metaByDate);
+  const prevR = computeRange(prev.from, prev.to, productRows, channelRows, metaByDate);
   const pn = prevR.activeDays || 1;
   const aPrev = {
     ns: prevR.ns / pn, nam: prevR.nam / pn,
     gpm: prevR.ns > 0 ? (prevR.nam / prevR.ns) * 100 : 0,
-    ship: prevR.ship / pn, aov: prevR.ship > 0 ? prevR.ns / prevR.ship : 0,
+    ship: shipPrev / pn, aov: shipPrev > 0 ? prevR.ns / shipPrev : 0,
     mktPct: prevR.ns > 0 ? (prevR.mkt / prevR.ns) * 100 : 0,
     roas: prevR.meta > 0 ? prevR.scalev / prevR.meta : 0,
     crPct: crPrev.created > 0 ? (crPrev.shipped / crPrev.created) * 100 : 0,
@@ -243,7 +224,7 @@ export async function buildDailyReport(): Promise<string> {
     '',
     `💵 <b>GP After Mkt+Adm:</b> ${fmtRp(ydR.nam)} | ${fmtDelta(ydR.nam, aThis.nam, false)} avg bln ini | ${fmtDelta(ydR.nam, aPrev.nam, false)} avg bln lalu`,
     '',
-    `📦 <b>Shipment:</b> ${fmtNum(ydR.ship)} | ${fmtDelta(ydR.ship, aThis.ship, false)} avg bln ini | ${fmtDelta(ydR.ship, aPrev.ship, false)} avg bln lalu`,
+    `📦 <b>Shipment:</b> ${fmtNum(shipYd)} | ${fmtDelta(shipYd, aThis.ship, false)} avg bln ini | ${fmtDelta(shipYd, aPrev.ship, false)} avg bln lalu`,
     '',
     `🛒 <b>AOV:</b> ${fmtRp(aov)} | ${fmtDelta(aov, aThis.aov, false)} avg bln ini | ${fmtDelta(aov, aPrev.aov, false)} avg bln lalu`,
     '',
