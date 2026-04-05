@@ -253,6 +253,94 @@ export async function recordTransfer(
 }
 
 // ============================================================
+// CONVERT — sachet → FG (or any product → product conversion)
+// ============================================================
+
+export async function recordConversion(
+  sourceProductId: number,
+  sourceBatchId: number | null,
+  sourceQty: number,
+  targetProductId: number,
+  targetQty: number,
+  targetBatchCode?: string,
+  targetExpiredDate?: string | null,
+  notes?: string,
+) {
+  if (sourceQty <= 0 || targetQty <= 0) throw new Error('Quantities must be positive');
+  const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
+
+  // Deduct source
+  if (sourceBatchId) {
+    const { data: batch } = await svc
+      .from('warehouse_batches')
+      .select('current_qty')
+      .eq('id', sourceBatchId)
+      .single();
+    if (batch) {
+      await svc
+        .from('warehouse_batches')
+        .update({ current_qty: Math.max(0, Number(batch.current_qty) - sourceQty) })
+        .eq('id', sourceBatchId);
+    }
+  }
+
+  const refId = `conv-${Date.now()}`;
+
+  // Ledger OUT for source
+  await insertLedgerEntry(svc, {
+    warehouse_product_id: sourceProductId,
+    batch_id: sourceBatchId,
+    movement_type: 'OUT',
+    quantity: -sourceQty,
+    reference_type: 'manual',
+    reference_id: refId,
+    notes: `Konversi keluar: ${sourceQty} unit → produk lain`,
+    created_by: userId,
+  });
+
+  // Create or find target batch
+  let targetBatchId: number | null = null;
+  if (targetBatchCode) {
+    const { data: newBatch } = await svc
+      .from('warehouse_batches')
+      .upsert({
+        warehouse_product_id: targetProductId,
+        batch_code: targetBatchCode,
+        expired_date: targetExpiredDate || null,
+        initial_qty: targetQty,
+        current_qty: targetQty,
+      }, { onConflict: 'warehouse_product_id,batch_code' })
+      .select()
+      .single();
+    if (newBatch) {
+      targetBatchId = newBatch.id;
+      // If upsert hit existing, add to current_qty
+      if (newBatch.initial_qty !== targetQty) {
+        await svc
+          .from('warehouse_batches')
+          .update({ current_qty: Number(newBatch.current_qty) + targetQty })
+          .eq('id', newBatch.id);
+      }
+    }
+  }
+
+  // Ledger IN for target
+  await insertLedgerEntry(svc, {
+    warehouse_product_id: targetProductId,
+    batch_id: targetBatchId,
+    movement_type: 'IN',
+    quantity: targetQty,
+    reference_type: 'manual',
+    reference_id: refId,
+    notes: notes || `Konversi masuk: ${targetQty} unit dari produk lain`,
+    created_by: userId,
+  });
+
+  return { reference_id: refId };
+}
+
+// ============================================================
 // DISPOSE — expired/damaged items
 // ============================================================
 
