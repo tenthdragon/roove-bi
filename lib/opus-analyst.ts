@@ -3,11 +3,11 @@ import Anthropic from '@anthropic-ai/sdk';
 import { TOOL_DEFINITIONS, executeTool } from '@/lib/report-tools';
 
 const MAX_ITERATIONS = 15;
-const MODEL = 'claude-opus-4-20250514';
+const MODEL = 'claude-sonnet-4-20250514';
 
-// Pricing per million tokens (USD) — Opus 4
-const INPUT_PRICE_PER_M = 15;
-const OUTPUT_PRICE_PER_M = 75;
+// Pricing per million tokens (USD) — Sonnet 4
+const INPUT_PRICE_PER_M = 3;
+const OUTPUT_PRICE_PER_M = 15;
 
 const SYSTEM_PROMPT = `You are a senior business analyst for an Indonesian D2C/FMCG company called Roove.
 You are given a monthly performance report. Your job is to:
