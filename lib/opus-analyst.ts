@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { TOOL_DEFINITIONS, executeTool } from '@/lib/report-tools';
 
 const MAX_ITERATIONS = 8;
-const MODEL = 'claude-opus-4-0-20250514';
+const MODEL = 'claude-opus-4-20250514';
 
 // Pricing per million tokens (USD) — Opus 4
 const INPUT_PRICE_PER_M = 15;
