@@ -30,6 +30,15 @@ function prevMonthRange(dateStr: string): { from: string; to: string } {
   return { from: fmt(prevStart), to: fmt(prevEnd) };
 }
 
+/** Convert WIB date range to UTC timestamps */
+function wibRangeToUtc(from: string, to: string): { utcFrom: string; utcTo: string } {
+  const utcFrom = new Date(from + 'T00:00:00+07:00').toISOString();
+  const toDate = new Date(to + 'T00:00:00+07:00');
+  toDate.setDate(toDate.getDate() + 1);
+  const utcTo = toDate.toISOString();
+  return { utcFrom, utcTo };
+}
+
 function fmtRp(n: number): string {
   if (Math.abs(n) >= 1e9) return `Rp ${(n / 1e9).toFixed(1)}B`;
   if (Math.abs(n) >= 1e6) return `Rp ${(n / 1e6).toFixed(1)}M`;
@@ -52,52 +61,67 @@ function fmtDelta(val: number, avg: number, isPp: boolean): string {
 function fmtNum(n: number): string { return n.toLocaleString('id-ID'); }
 
 const SCALEV_ADS_CHANNEL = 'Scalev Ads';
-const MP_PATTERNS = ['marketplace', 'shopee', 'tiktok', 'lazada', 'tokopedia', 'blibli'];
 
-// ── Data fetching ──
+// ── Data fetching (with error logging) ──
 
 async function fetchProductSummary(svc: any, from: string, to: string) {
-  const { data } = await svc.from('summary_daily_product_complete')
+  const { data, error } = await svc.from('summary_daily_product_complete')
     .select('date, net_sales, net_after_mkt, mkt_cost').gte('date', from).lte('date', to).limit(5000);
+  if (error) console.error('[report] fetchProductSummary error:', error);
   return data || [];
 }
 
 async function fetchChannelSummary(svc: any, from: string, to: string) {
-  const { data } = await svc.from('summary_daily_order_channel')
+  const { data, error } = await svc.from('summary_daily_order_channel')
     .select('date, channel, net_sales').gte('date', from).lte('date', to).limit(5000);
+  if (error) console.error('[report] fetchChannelSummary error:', error);
   return data || [];
 }
 
 async function fetchShipmentCounts(svc: any, from: string, to: string) {
-  const { data } = await svc.rpc('get_daily_shipment_counts', { p_from: from, p_to: to });
+  const { data, error } = await svc.rpc('get_daily_shipment_counts', { p_from: from, p_to: to });
+  if (error) console.error('[report] fetchShipmentCounts error:', error);
   const byDate: Record<string, number> = {};
   for (const r of data || []) byDate[r.date] = (byDate[r.date] || 0) + Number(r.order_count);
   return byDate;
 }
 
 async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
-  // Only Facebook Ads (exclude CPAS, TikTok, Shopee, WhatsApp)
-  const { data } = await svc.from('daily_ads_spend')
+  const { data, error } = await svc.from('daily_ads_spend')
     .select('date, spent').gte('date', from).lte('date', to)
     .eq('source', 'Facebook Ads').limit(5000);
+  if (error) console.error('[report] fetchMetaAdsSpend error:', error);
   const byDate: Record<string, number> = {};
   for (const r of data || []) byDate[r.date] = (byDate[r.date] || 0) + Number(r.spent);
   return byDate;
 }
 
 async function fetchCRForRange(svc: any, from: string, to: string): Promise<{ created: number; shipped: number }> {
-  const utcFrom = new Date(from + 'T00:00:00+07:00').toISOString();
-  const utcTo = new Date(new Date(to + 'T00:00:00+07:00').getTime() + 86400_000).toISOString();
+  const { utcFrom, utcTo } = wibRangeToUtc(from, to);
 
-  let cQ = svc.from('scalev_orders').select('id', { count: 'exact', head: true })
-    .gte('pending_time', utcFrom).lt('pending_time', utcTo).neq('status', 'canceled');
-  for (const p of MP_PATTERNS) cQ = cQ.not('store_name', 'ilike', `%${p}%`);
+  // Use or() to combine marketplace exclusions into a single filter
+  // instead of chaining .not() which can cause issues
+  const mpFilter = 'store_name.not.ilike.%marketplace%,store_name.not.ilike.%shopee%,store_name.not.ilike.%tiktok%,store_name.not.ilike.%lazada%,store_name.not.ilike.%tokopedia%,store_name.not.ilike.%blibli%';
 
-  let sQ = svc.from('scalev_orders').select('id', { count: 'exact', head: true })
-    .gte('shipped_time', utcFrom).lt('shipped_time', utcTo).in('status', ['shipped', 'completed']);
-  for (const p of MP_PATTERNS) sQ = sQ.not('store_name', 'ilike', `%${p}%`);
+  const { count: created, error: cErr } = await svc.from('scalev_orders')
+    .select('id', { count: 'exact', head: true })
+    .gte('pending_time', utcFrom).lt('pending_time', utcTo)
+    .neq('status', 'canceled')
+    .not('store_name', 'ilike', '%marketplace%')
+    .not('store_name', 'ilike', '%shopee%')
+    .not('store_name', 'ilike', '%tiktok%');
+  if (cErr) console.error('[report] CR created error:', cErr);
 
-  const [{ count: created }, { count: shipped }] = await Promise.all([cQ, sQ]);
+  const { count: shipped, error: sErr } = await svc.from('scalev_orders')
+    .select('id', { count: 'exact', head: true })
+    .gte('shipped_time', utcFrom).lt('shipped_time', utcTo)
+    .in('status', ['shipped', 'completed'])
+    .not('store_name', 'ilike', '%marketplace%')
+    .not('store_name', 'ilike', '%shopee%')
+    .not('store_name', 'ilike', '%tiktok%');
+  if (sErr) console.error('[report] CR shipped error:', sErr);
+
+  console.log(`[report] CR ${from}→${to}: created=${created}, shipped=${shipped}`);
   return { created: created || 0, shipped: shipped || 0 };
 }
 
@@ -131,6 +155,8 @@ export async function buildDailyReport(): Promise<string> {
   const thisMonthFrom = monthStart(yesterday);
   const prev = prevMonthRange(yesterday);
 
+  console.log(`[report] Building report for yesterday=${yesterday}, thisMonth=${thisMonthFrom}, prevMonth=${prev.from}→${prev.to}`);
+
   // Fetch all data in parallel
   const [productRows, channelRows, shipByDate, metaByDate, crYd, crThis, crPrev] = await Promise.all([
     fetchProductSummary(svc, prev.from, yesterday),
@@ -141,6 +167,9 @@ export async function buildDailyReport(): Promise<string> {
     fetchCRForRange(svc, thisMonthFrom, yesterday),
     fetchCRForRange(svc, prev.from, prev.to),
   ]);
+
+  console.log(`[report] Data fetched: products=${productRows.length}, channels=${channelRows.length}, shipDates=${Object.keys(shipByDate).length}`);
+  console.log(`[report] shipByDate[${yesterday}]=${shipByDate[yesterday] || 0}`);
 
   // Yesterday
   const ydR = computeRange(yesterday, yesterday, productRows, channelRows, shipByDate, metaByDate);
