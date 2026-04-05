@@ -131,25 +131,34 @@ async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
 async function fetchCRForRange(svc: any, from: string, to: string): Promise<{ created: number; shipped: number }> {
   const { utcFrom, utcTo } = wibRangeToUtc(from, to);
 
-  // Total leads = all orders created (draft_time), excluding marketplace
-  const { count: created, error: cErr } = await svc.from('scalev_orders')
+  // Query total, then subtract marketplace (avoids .not() chaining issues on Vercel)
+  const { count: totalCreated, error: cErr1 } = await svc.from('scalev_orders')
+    .select('id', { count: 'exact', head: true })
+    .gte('draft_time', utcFrom).lt('draft_time', utcTo);
+  if (cErr1) console.error('[report] CR totalCreated error:', cErr1);
+
+  const { count: mpCreated, error: cErr2 } = await svc.from('scalev_orders')
     .select('id', { count: 'exact', head: true })
     .gte('draft_time', utcFrom).lt('draft_time', utcTo)
-    .not('store_name', 'ilike', '%marketplace%')
-    .not('store_name', 'ilike', '%shopee%')
-    .not('store_name', 'ilike', '%tiktok%');
-  if (cErr) console.error('[report] CR created error:', cErr);
+    .or('store_name.ilike.%marketplace%,store_name.ilike.%shopee%,store_name.ilike.%tiktok%');
+  if (cErr2) console.error('[report] CR mpCreated error:', cErr2);
 
-  const { count: shipped, error: sErr } = await svc.from('scalev_orders')
+  const { count: totalShipped, error: sErr1 } = await svc.from('scalev_orders')
+    .select('id', { count: 'exact', head: true })
+    .gte('shipped_time', utcFrom).lt('shipped_time', utcTo)
+    .in('status', ['shipped', 'completed']);
+  if (sErr1) console.error('[report] CR totalShipped error:', sErr1);
+
+  const { count: mpShipped, error: sErr2 } = await svc.from('scalev_orders')
     .select('id', { count: 'exact', head: true })
     .gte('shipped_time', utcFrom).lt('shipped_time', utcTo)
     .in('status', ['shipped', 'completed'])
-    .not('store_name', 'ilike', '%marketplace%')
-    .not('store_name', 'ilike', '%shopee%')
-    .not('store_name', 'ilike', '%tiktok%');
-  if (sErr) console.error('[report] CR shipped error:', sErr);
+    .or('store_name.ilike.%marketplace%,store_name.ilike.%shopee%,store_name.ilike.%tiktok%');
+  if (sErr2) console.error('[report] CR mpShipped error:', sErr2);
 
-  return { created: created || 0, shipped: shipped || 0 };
+  const created = (totalCreated || 0) - (mpCreated || 0);
+  const shipped = (totalShipped || 0) - (mpShipped || 0);
+  return { created, shipped };
 }
 
 // ── Compute range totals ──
