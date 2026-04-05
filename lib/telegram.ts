@@ -2,32 +2,47 @@
 
 const TELEGRAM_API = 'https://api.telegram.org';
 
-export async function sendTelegramMessage(text: string): Promise<boolean> {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = process.env.TELEGRAM_CHAT_ID;
+function botUrl(method: string): string {
+  return `${TELEGRAM_API}/bot${process.env.TELEGRAM_BOT_TOKEN}/${method}`;
+}
 
-  if (!token || !chatId) {
+function chatId(): string {
+  return process.env.TELEGRAM_CHAT_ID || '';
+}
+
+export async function sendTelegramMessage(text: string, options?: {
+  replyMarkup?: any;
+}): Promise<boolean> {
+  if (!process.env.TELEGRAM_BOT_TOKEN || !chatId()) {
     console.error('[telegram] TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set');
     return false;
   }
 
-  const url = `${TELEGRAM_API}/bot${token}/sendMessage`;
-  const res = await fetch(url, {
+  const body: any = {
+    chat_id: chatId(),
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  };
+  if (options?.replyMarkup) body.reply_markup = options.replyMarkup;
+
+  const res = await fetch(botUrl('sendMessage'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: 'HTML',
-      disable_web_page_preview: true,
-    }),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    console.error('[telegram] sendMessage failed:', err);
+    console.error('[telegram] sendMessage failed:', await res.text());
     return false;
   }
-
   return true;
+}
+
+export async function answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
+  await fetch(botUrl('answerCallbackQuery'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+  });
 }

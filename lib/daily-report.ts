@@ -238,7 +238,15 @@ export async function buildDailyReport(): Promise<string> {
 //  /monthly — This month MTD vs last month full
 // ════════════════════════════════════════════
 
-export async function buildMonthlyReport(): Promise<string> {
+export interface MonthlyReportResult {
+  message: string;
+  thisMonthFrom: string;
+  thisMonthTo: string;
+  prevMonthFrom: string;
+  prevMonthTo: string;
+}
+
+export async function buildMonthlyReport(): Promise<MonthlyReportResult> {
   const svc = getServiceSupabase();
   const mTo = yesterdayWIB();
   const mFrom = monthStart(mTo);
@@ -281,7 +289,7 @@ export async function buildMonthlyReport(): Promise<string> {
   const thisCr = crThis.created > 0 ? (crThis.shipped / crThis.created) * 100 : 0;
   const prevCr = crPrev.created > 0 ? (crPrev.shipped / crPrev.created) * 100 : 0;
 
-  return [
+  const msg = [
     `📅 <b>Monthly Report — ${monthLabel(mFrom)}</b>`,
     `<i>MTD: ${dateLabel(mFrom)} – ${dateLabel(mTo)} (${mtdDays} days)</i>`,
     `<i>vs ${monthLabel(prev.from)} (${prevDays} days)</i>`,
@@ -317,4 +325,12 @@ export async function buildMonthlyReport(): Promise<string> {
     '',
     `<i>*) same-day proxy</i>`,
   ].join('\n');
+
+  return {
+    message: msg,
+    thisMonthFrom: mFrom,
+    thisMonthTo: mTo,
+    prevMonthFrom: prev.from,
+    prevMonthTo: prev.to,
+  };
 }
