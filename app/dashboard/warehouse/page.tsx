@@ -24,6 +24,7 @@ import {
   recordConversion,
   createBatch,
   getScalevMappings,
+  getScalevFrequencies,
   updateScalevMapping,
   syncScalevProductNames,
   type ConversionSource,
@@ -920,15 +921,24 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [products, setProducts] = useState<any[]>([]);
+  const [freqMap, setFreqMap] = useState<Record<string, number>>({});
   const [editingId, setEditingId] = useState<number | null>(null);
   const [productSearch, setProductSearch] = useState('');
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => { (async () => { try { setProducts(await getProducts()); } catch {} })(); }, []);
+  // Load frequencies separately (can be slow)
+  useEffect(() => { (async () => { try { setFreqMap(await getScalevFrequencies()); } catch {} })(); }, []);
+
+  // Merge frequency into data
+  const dataWithFreq = useMemo(() =>
+    data.map(r => ({ ...r, frequency: freqMap[r.scalev_product_name] || 0 })),
+    [data, freqMap]
+  );
 
   const filtered = useMemo(() => {
-    let result = data;
+    let result = dataWithFreq;
     if (filter === 'mapped') result = result.filter(r => r.warehouse_product_id && !r.is_ignored);
     if (filter === 'unmapped') result = result.filter(r => !r.warehouse_product_id && !r.is_ignored);
     if (filter === 'ignored') result = result.filter(r => r.is_ignored);
@@ -940,11 +950,11 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
   }, [data, filter, search]);
 
   const counts = useMemo(() => ({
-    all: data.length,
-    mapped: data.filter(r => r.warehouse_product_id && !r.is_ignored).length,
-    unmapped: data.filter(r => !r.warehouse_product_id && !r.is_ignored).length,
-    ignored: data.filter(r => r.is_ignored).length,
-  }), [data]);
+    all: dataWithFreq.length,
+    mapped: dataWithFreq.filter(r => r.warehouse_product_id && !r.is_ignored).length,
+    unmapped: dataWithFreq.filter(r => !r.warehouse_product_id && !r.is_ignored).length,
+    ignored: dataWithFreq.filter(r => r.is_ignored).length,
+  }), [dataWithFreq]);
 
   const filteredProducts = useMemo(() => {
     if (!productSearch) return [];
