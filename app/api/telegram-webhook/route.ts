@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildDailyReport } from '@/lib/daily-report';
+import { buildDailyReport, buildMonthlyReport } from '@/lib/daily-report';
 import { sendTelegramMessage } from '@/lib/telegram';
+
+export const maxDuration = 250;
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,7 +13,7 @@ export async function POST(req: NextRequest) {
     const chatId = String(message.chat.id);
     const expectedChatId = process.env.TELEGRAM_CHAT_ID;
     if (expectedChatId && chatId !== expectedChatId) {
-      return NextResponse.json({ ok: true }); // ignore other chats
+      return NextResponse.json({ ok: true });
     }
 
     const command = message.text.trim().toLowerCase();
@@ -20,10 +22,15 @@ export async function POST(req: NextRequest) {
       await sendTelegramMessage('Generating daily report...');
       const report = await buildDailyReport();
       await sendTelegramMessage(report);
+    } else if (command === '/monthly') {
+      await sendTelegramMessage('Generating monthly report...');
+      const report = await buildMonthlyReport();
+      await sendTelegramMessage(report);
     } else if (command === '/help') {
       await sendTelegramMessage(
         '<b>Available commands:</b>\n\n' +
-        '/report — Generate daily report (yesterday)\n' +
+        '/report — Daily report (yesterday vs avg bulan ini)\n' +
+        '/monthly — Monthly report (MTD vs bulan lalu)\n' +
         '/help — Show this help message'
       );
     }
@@ -31,6 +38,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   } catch (err: any) {
     console.error('[telegram-webhook] Error:', err);
-    return NextResponse.json({ ok: true }); // always 200 to avoid Telegram retries
+    return NextResponse.json({ ok: true });
   }
 }

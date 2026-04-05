@@ -1,4 +1,4 @@
-// lib/daily-report.ts — Daily report data & message formatting
+// lib/daily-report.ts — Telegram report builders (daily + monthly)
 import { createClient } from '@supabase/supabase-js';
 
 function getServiceSupabase() {
@@ -11,32 +11,41 @@ function getServiceSupabase() {
 
 // ── Helpers ──
 
-function getYesterdayWIB(): string {
-  const now = new Date();
-  const wib = new Date(now.getTime() + 7 * 3600_000);
-  wib.setDate(wib.getDate() - 1);
-  return `${wib.getFullYear()}-${String(wib.getMonth() + 1).padStart(2, '0')}-${String(wib.getDate()).padStart(2, '0')}`;
+function todayWIB(): string {
+  const wib = new Date(Date.now() + 7 * 3600_000);
+  return fmtDate(wib);
 }
 
-function monthStart(dateStr: string): string {
-  return dateStr.slice(0, 7) + '-01';
+function yesterdayWIB(): string {
+  const wib = new Date(Date.now() + 7 * 3600_000);
+  wib.setDate(wib.getDate() - 1);
+  return fmtDate(wib);
+}
+
+function fmtDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function monthStart(dateStr: string): string { return dateStr.slice(0, 7) + '-01'; }
+
+function monthEnd(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  const end = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+  return fmtDate(end);
 }
 
 function prevMonthRange(dateStr: string): { from: string; to: string } {
   const d = new Date(dateStr + 'T00:00:00');
   const prevEnd = new Date(d.getFullYear(), d.getMonth(), 0);
   const prevStart = new Date(prevEnd.getFullYear(), prevEnd.getMonth(), 1);
-  const fmt = (dt: Date) => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-  return { from: fmt(prevStart), to: fmt(prevEnd) };
+  return { from: fmtDate(prevStart), to: fmtDate(prevEnd) };
 }
 
-/** Convert WIB date range to UTC timestamps */
 function wibRangeToUtc(from: string, to: string): { utcFrom: string; utcTo: string } {
   const utcFrom = new Date(from + 'T00:00:00+07:00').toISOString();
   const toDate = new Date(to + 'T00:00:00+07:00');
   toDate.setDate(toDate.getDate() + 1);
-  const utcTo = toDate.toISOString();
-  return { utcFrom, utcTo };
+  return { utcFrom, utcTo: toDate.toISOString() };
 }
 
 function fmtRp(n: number): string {
@@ -48,21 +57,32 @@ function fmtRp(n: number): string {
 
 function fmtPct(n: number): string { return `${n.toFixed(1)}%`; }
 
-function fmtDelta(val: number, avg: number, isPp: boolean): string {
-  if (avg === 0) return '-';
+function fmtDelta(val: number, ref: number, isPp: boolean): string {
+  if (ref === 0) return '-';
   if (isPp) {
-    const d = val - avg;
+    const d = val - ref;
     return `${d >= 0 ? '+' : ''}${d.toFixed(1)}pp`;
   }
-  const d = ((val - avg) / Math.abs(avg)) * 100;
+  const d = ((val - ref) / Math.abs(ref)) * 100;
   return `${d >= 0 ? '+' : ''}${d.toFixed(1)}%`;
 }
 
 function fmtNum(n: number): string { return n.toLocaleString('id-ID'); }
 
 const SCALEV_ADS_CHANNEL = 'Scalev Ads';
+const MONTHS_ID = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-// ── Data fetching (with error logging) ──
+function dateLabel(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${d.getDate()} ${MONTHS_ID[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+function monthLabel(dateStr: string): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${MONTHS_ID[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+// ── Data fetching ──
 
 async function fetchProductSummary(svc: any, from: string, to: string) {
   const { data, error } = await svc.from('summary_daily_product_complete')
@@ -83,8 +103,7 @@ async function fetchShipmentCount(svc: any, from: string, to: string): Promise<n
   const { count, error } = await svc.from('scalev_orders')
     .select('id', { count: 'exact', head: true })
     .in('status', ['shipped', 'completed'])
-    .gte('shipped_time', utcFrom)
-    .lt('shipped_time', utcTo);
+    .gte('shipped_time', utcFrom).lt('shipped_time', utcTo);
   if (error) console.error('[report] fetchShipmentCount error:', error);
   return count || 0;
 }
@@ -99,12 +118,16 @@ async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
   return byDate;
 }
 
+async function fetchMetaAdsTotal(svc: any, from: string, to: string): Promise<number> {
+  const { data, error } = await svc.from('daily_ads_spend')
+    .select('spent').gte('date', from).lte('date', to)
+    .eq('source', 'Facebook Ads').limit(5000);
+  if (error) console.error('[report] fetchMetaAdsTotal error:', error);
+  return (data || []).reduce((a: number, r: any) => a + Number(r.spent), 0);
+}
+
 async function fetchCRForRange(svc: any, from: string, to: string): Promise<{ created: number; shipped: number }> {
   const { utcFrom, utcTo } = wibRangeToUtc(from, to);
-
-  // Use or() to combine marketplace exclusions into a single filter
-  // instead of chaining .not() which can cause issues
-  const mpFilter = 'store_name.not.ilike.%marketplace%,store_name.not.ilike.%shopee%,store_name.not.ilike.%tiktok%,store_name.not.ilike.%lazada%,store_name.not.ilike.%tokopedia%,store_name.not.ilike.%blibli%';
 
   const { count: created, error: cErr } = await svc.from('scalev_orders')
     .select('id', { count: 'exact', head: true })
@@ -124,13 +147,14 @@ async function fetchCRForRange(svc: any, from: string, to: string): Promise<{ cr
     .not('store_name', 'ilike', '%tiktok%');
   if (sErr) console.error('[report] CR shipped error:', sErr);
 
-  console.log(`[report] CR ${from}→${to}: created=${created}, shipped=${shipped}`);
   return { created: created || 0, shipped: shipped || 0 };
 }
 
 // ── Compute range totals ──
 
-function computeRange(from: string, to: string, productRows: any[], channelRows: any[], metaByDate: Record<string, number>) {
+interface RangeTotals { ns: number; nam: number; mkt: number; meta: number; scalev: number; activeDays: number }
+
+function computeRange(from: string, to: string, productRows: any[], channelRows: any[], metaByDate: Record<string, number>): RangeTotals {
   const dates = [...new Set(productRows.filter(r => r.date >= from && r.date <= to && Number(r.net_sales) > 0).map(r => r.date))].sort();
   const n = dates.length;
   if (!n) return { ns: 0, nam: 0, mkt: 0, meta: 0, scalev: 0, activeDays: 0 };
@@ -148,90 +172,146 @@ function computeRange(from: string, to: string, productRows: any[], channelRows:
   return { ns: tns, nam: tnam, mkt: tmkt, meta: tmeta, scalev: tscalev, activeDays: n };
 }
 
-// ── Main ──
+// ── KPI struct ──
+
+interface KPIs {
+  ns: number; nam: number; gpm: number; ship: number; aov: number;
+  mktPct: number; roas: number; crPct: number; crShipped: number; crCreated: number;
+  activeDays: number;
+}
+
+function deriveKPIs(r: RangeTotals, ship: number, cr: { created: number; shipped: number }): KPIs {
+  return {
+    ns: r.ns, nam: r.nam,
+    gpm: r.ns > 0 ? (r.nam / r.ns) * 100 : 0,
+    ship,
+    aov: ship > 0 ? r.ns / ship : 0,
+    mktPct: r.ns > 0 ? (r.mkt / r.ns) * 100 : 0,
+    roas: r.meta > 0 ? r.scalev / r.meta : 0,
+    crPct: cr.created > 0 ? (cr.shipped / cr.created) * 100 : 0,
+    crShipped: cr.shipped, crCreated: cr.created,
+    activeDays: r.activeDays,
+  };
+}
+
+function avgKPIs(k: KPIs): { ns: number; nam: number; gpm: number; ship: number; aov: number; mktPct: number; roas: number; crPct: number } {
+  const n = k.activeDays || 1;
+  return {
+    ns: k.ns / n, nam: k.nam / n, gpm: k.gpm, ship: k.ship / n, aov: k.aov,
+    mktPct: k.mktPct, roas: k.roas, crPct: k.crPct,
+  };
+}
+
+// ════════════════════════════════════════════
+//  /report — Daily report (yesterday vs avg this month)
+// ════════════════════════════════════════════
 
 export async function buildDailyReport(): Promise<string> {
-  // @ts-ignore — debug info attached to return for troubleshooting
+  // @ts-ignore
   buildDailyReport._debug = {};
   const svc = getServiceSupabase();
-  const yesterday = getYesterdayWIB();
-  const thisMonthFrom = monthStart(yesterday);
-  const prev = prevMonthRange(yesterday);
+  const yesterday = yesterdayWIB();
+  const mFrom = monthStart(yesterday);
 
-  console.log(`[report] Building report for yesterday=${yesterday}, thisMonth=${thisMonthFrom}, prevMonth=${prev.from}→${prev.to}`);
-
-  // Fetch all data in parallel
-  const [productRows, channelRows, metaByDate, shipYd, shipThis, shipPrev, crYd, crThis, crPrev] = await Promise.all([
-    fetchProductSummary(svc, prev.from, yesterday),
-    fetchChannelSummary(svc, prev.from, yesterday),
-    fetchMetaAdsSpend(svc, prev.from, yesterday),
+  const [productRows, channelRows, metaByDate, shipYd, shipThis, crYd, crThis] = await Promise.all([
+    fetchProductSummary(svc, mFrom, yesterday),
+    fetchChannelSummary(svc, mFrom, yesterday),
+    fetchMetaAdsSpend(svc, mFrom, yesterday),
     fetchShipmentCount(svc, yesterday, yesterday),
-    fetchShipmentCount(svc, thisMonthFrom, yesterday),
-    fetchShipmentCount(svc, prev.from, prev.to),
+    fetchShipmentCount(svc, mFrom, yesterday),
     fetchCRForRange(svc, yesterday, yesterday),
-    fetchCRForRange(svc, thisMonthFrom, yesterday),
-    fetchCRForRange(svc, prev.from, prev.to),
+    fetchCRForRange(svc, mFrom, yesterday),
   ]);
 
   // @ts-ignore
-  buildDailyReport._debug = {
-    yesterday, productRows: productRows.length, channelRows: channelRows.length,
-    shipYd, shipThis, shipPrev, crYd, crThis, crPrev,
-  };
+  buildDailyReport._debug = { yesterday, shipYd, shipThis, crYd, crThis };
 
-  // Yesterday
   const ydR = computeRange(yesterday, yesterday, productRows, channelRows, metaByDate);
-  const gpm = ydR.ns > 0 ? (ydR.nam / ydR.ns) * 100 : 0;
-  const aov = shipYd > 0 ? ydR.ns / shipYd : 0;
-  const mktPct = ydR.ns > 0 ? (ydR.mkt / ydR.ns) * 100 : 0;
-  const roas = ydR.meta > 0 ? ydR.scalev / ydR.meta : 0;
-  const crPct = crYd.created > 0 ? (crYd.shipped / crYd.created) * 100 : 0;
+  const yd = deriveKPIs(ydR, shipYd, crYd);
 
-  // This month avg
-  const thisR = computeRange(thisMonthFrom, yesterday, productRows, channelRows, metaByDate);
-  const tn = thisR.activeDays || 1;
-  const aThis = {
-    ns: thisR.ns / tn, nam: thisR.nam / tn,
-    gpm: thisR.ns > 0 ? (thisR.nam / thisR.ns) * 100 : 0,
-    ship: shipThis / tn, aov: shipThis > 0 ? thisR.ns / shipThis : 0,
-    mktPct: thisR.ns > 0 ? (thisR.mkt / thisR.ns) * 100 : 0,
-    roas: thisR.meta > 0 ? thisR.scalev / thisR.meta : 0,
-    crPct: crThis.created > 0 ? (crThis.shipped / crThis.created) * 100 : 0,
-  };
-
-  // Last month avg
-  const prevR = computeRange(prev.from, prev.to, productRows, channelRows, metaByDate);
-  const pn = prevR.activeDays || 1;
-  const aPrev = {
-    ns: prevR.ns / pn, nam: prevR.nam / pn,
-    gpm: prevR.ns > 0 ? (prevR.nam / prevR.ns) * 100 : 0,
-    ship: shipPrev / pn, aov: shipPrev > 0 ? prevR.ns / shipPrev : 0,
-    mktPct: prevR.ns > 0 ? (prevR.mkt / prevR.ns) * 100 : 0,
-    roas: prevR.meta > 0 ? prevR.scalev / prevR.meta : 0,
-    crPct: crPrev.created > 0 ? (crPrev.shipped / crPrev.created) * 100 : 0,
-  };
-
-  const d = new Date(yesterday + 'T00:00:00');
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const label = `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+  const thisR = computeRange(mFrom, yesterday, productRows, channelRows, metaByDate);
+  const avg = avgKPIs(deriveKPIs(thisR, shipThis, crThis));
 
   return [
-    `📊 <b>Daily Report — ${label}</b>`,
+    `📊 <b>Daily Report — ${dateLabel(yesterday)}</b>`,
     '',
-    `💰 <b>Net Sales:</b> ${fmtRp(ydR.ns)} | ${fmtDelta(ydR.ns, aThis.ns, false)} avg bln ini | ${fmtDelta(ydR.ns, aPrev.ns, false)} avg bln lalu`,
+    `💰 <b>Net Sales:</b> ${fmtRp(yd.ns)} | ${fmtDelta(yd.ns, avg.ns, false)} vs avg`,
+    `📈 <b>GP Margin:</b> ${fmtPct(yd.gpm)} | ${fmtDelta(yd.gpm, avg.gpm, true)} vs avg`,
+    `💵 <b>GP After Mkt+Adm:</b> ${fmtRp(yd.nam)} | ${fmtDelta(yd.nam, avg.nam, false)} vs avg`,
+    `📦 <b>Shipment:</b> ${fmtNum(yd.ship)} | ${fmtDelta(yd.ship, avg.ship, false)} vs avg`,
+    `🛒 <b>AOV:</b> ${fmtRp(yd.aov)} | ${fmtDelta(yd.aov, avg.aov, false)} vs avg`,
+    `📣 <b>Mkt Fee %:</b> ${fmtPct(yd.mktPct)} | ${fmtDelta(yd.mktPct, avg.mktPct, true)} vs avg`,
+    `📱 <b>ROAS Meta Ads:</b> ${yd.roas.toFixed(2)}x | ${fmtDelta(yd.roas, avg.roas, false)} vs avg`,
+    `✅ <b>CR Scalev *):</b> ${fmtNum(yd.crShipped)}/${fmtNum(yd.crCreated)} (${fmtPct(yd.crPct)}) | ${fmtDelta(yd.crPct, avg.crPct, true)} vs avg`,
     '',
-    `📈 <b>GP Margin:</b> ${fmtPct(gpm)} | ${fmtDelta(gpm, aThis.gpm, true)} avg bln ini | ${fmtDelta(gpm, aPrev.gpm, true)} avg bln lalu`,
+    `<i>*) same-day proxy | avg = avg active daily ${monthLabel(mFrom)}</i>`,
+  ].join('\n');
+}
+
+// ════════════════════════════════════════════
+//  /monthly — This month MTD vs last month full
+// ════════════════════════════════════════════
+
+export async function buildMonthlyReport(): Promise<string> {
+  const svc = getServiceSupabase();
+  const today = todayWIB();
+  const mFrom = monthStart(today);
+  const mEnd = monthEnd(today);
+  const mTo = yesterdayWIB(); // MTD = up to yesterday
+  const prev = prevMonthRange(today);
+  const prevDaysTotal = new Date(prev.to + 'T00:00:00').getDate(); // total days in prev month
+
+  const [productRows, channelRows, metaByDate, shipThis, shipPrev, crThis, crPrev] = await Promise.all([
+    fetchProductSummary(svc, prev.from, mTo),
+    fetchChannelSummary(svc, prev.from, mTo),
+    fetchMetaAdsSpend(svc, prev.from, mTo),
+    fetchShipmentCount(svc, mFrom, mTo),
+    fetchShipmentCount(svc, prev.from, prev.to),
+    fetchCRForRange(svc, mFrom, mTo),
+    fetchCRForRange(svc, prev.from, prev.to),
+  ]);
+
+  const thisR = computeRange(mFrom, mTo, productRows, channelRows, metaByDate);
+  const thisK = deriveKPIs(thisR, shipThis, crThis);
+  const thisAvg = avgKPIs(thisK);
+
+  const prevR = computeRange(prev.from, prev.to, productRows, channelRows, metaByDate);
+  const prevK = deriveKPIs(prevR, shipPrev, crPrev);
+  const prevAvg = avgKPIs(prevK);
+
+  // Projection: (MTD total / active days) * total days in this month
+  const totalDaysThisMonth = new Date(new Date(mFrom + 'T00:00:00').getFullYear(), new Date(mFrom + 'T00:00:00').getMonth() + 1, 0).getDate();
+  const projNs = thisK.activeDays > 0 ? (thisK.ns / thisK.activeDays) * totalDaysThisMonth : 0;
+  const projNam = thisK.activeDays > 0 ? (thisK.nam / thisK.activeDays) * totalDaysThisMonth : 0;
+
+  return [
+    `📅 <b>Monthly Report — ${monthLabel(mFrom)}</b>`,
+    `<i>MTD: ${dateLabel(mFrom)} s/d ${dateLabel(mTo)} (${thisK.activeDays} active days)</i>`,
     '',
-    `💵 <b>GP After Mkt+Adm:</b> ${fmtRp(ydR.nam)} | ${fmtDelta(ydR.nam, aThis.nam, false)} avg bln ini | ${fmtDelta(ydR.nam, aPrev.nam, false)} avg bln lalu`,
+    `<b>── MTD vs ${monthLabel(prev.from)} (full ${prevK.activeDays} days) ──</b>`,
     '',
-    `📦 <b>Shipment:</b> ${fmtNum(shipYd)} | ${fmtDelta(shipYd, aThis.ship, false)} avg bln ini | ${fmtDelta(shipYd, aPrev.ship, false)} avg bln lalu`,
+    `💰 <b>Net Sales</b>`,
+    `   MTD: ${fmtRp(thisK.ns)} | Prev: ${fmtRp(prevK.ns)}`,
+    `   Avg/day: ${fmtRp(thisAvg.ns)} | ${fmtDelta(thisAvg.ns, prevAvg.ns, false)} vs prev avg`,
+    `   Proyeksi: ${fmtRp(projNs)} (${fmtDelta(projNs, prevK.ns, false)} vs prev full)`,
     '',
-    `🛒 <b>AOV:</b> ${fmtRp(aov)} | ${fmtDelta(aov, aThis.aov, false)} avg bln ini | ${fmtDelta(aov, aPrev.aov, false)} avg bln lalu`,
+    `📈 <b>GP Margin:</b> ${fmtPct(thisK.gpm)} | ${fmtDelta(thisK.gpm, prevK.gpm, true)} vs prev`,
     '',
-    `📣 <b>Mkt Fee %:</b> ${fmtPct(mktPct)} | ${fmtDelta(mktPct, aThis.mktPct, true)} avg bln ini | ${fmtDelta(mktPct, aPrev.mktPct, true)} avg bln lalu`,
+    `💵 <b>GP After Mkt+Adm</b>`,
+    `   MTD: ${fmtRp(thisK.nam)} | Prev: ${fmtRp(prevK.nam)}`,
+    `   Avg/day: ${fmtRp(thisAvg.nam)} | ${fmtDelta(thisAvg.nam, prevAvg.nam, false)} vs prev avg`,
+    `   Proyeksi: ${fmtRp(projNam)} (${fmtDelta(projNam, prevK.nam, false)} vs prev full)`,
     '',
-    `📱 <b>ROAS Meta Ads:</b> ${roas.toFixed(2)}x | ${fmtDelta(roas, aThis.roas, false)} avg bln ini | ${fmtDelta(roas, aPrev.roas, false)} avg bln lalu`,
+    `📦 <b>Shipment</b>`,
+    `   MTD: ${fmtNum(thisK.ship)} | Prev: ${fmtNum(prevK.ship)}`,
+    `   Avg/day: ${fmtNum(Math.round(thisAvg.ship))} | ${fmtDelta(thisAvg.ship, prevAvg.ship, false)} vs prev avg`,
     '',
-    `✅ <b>CR Scalev *):</b> ${fmtNum(crYd.shipped)}/${fmtNum(crYd.created)} (${fmtPct(crPct)}) | ${fmtDelta(crPct, aThis.crPct, true)} avg bln ini | ${fmtDelta(crPct, aPrev.crPct, true)} avg bln lalu`,
+    `🛒 <b>AOV:</b> ${fmtRp(thisK.aov)} | ${fmtDelta(thisK.aov, prevK.aov, false)} vs prev`,
+    '',
+    `📣 <b>Mkt Fee %:</b> ${fmtPct(thisK.mktPct)} | ${fmtDelta(thisK.mktPct, prevK.mktPct, true)} vs prev`,
+    '',
+    `📱 <b>ROAS Meta Ads:</b> ${thisK.roas.toFixed(2)}x | ${fmtDelta(thisK.roas, prevK.roas, false)} vs prev`,
+    '',
+    `✅ <b>CR Scalev *):</b> ${fmtNum(thisK.crShipped)}/${fmtNum(thisK.crCreated)} (${fmtPct(thisK.crPct)}) | ${fmtDelta(thisK.crPct, prevK.crPct, true)} vs prev`,
   ].join('\n');
 }
