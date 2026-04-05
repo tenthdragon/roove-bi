@@ -85,7 +85,6 @@ const MOVEMENT_LABELS: Record<string, { label: string; color: string }> = {
 const CATEGORY_COLORS: Record<string, string> = {
   'fg': '#60a5fa',
   'sachet': '#f59e0b',
-  'kemasan': '#a78bfa',
   'bonus': '#34d399',
   'packaging': '#fb923c',
   'other': '#94a3b8',

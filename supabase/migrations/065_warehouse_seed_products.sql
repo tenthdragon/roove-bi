@@ -89,7 +89,7 @@ INSERT INTO warehouse_products (name, category, unit, price_list, entity, wareho
   ('DRHYUN HIGH FIBER 30 SC', 'fg', 'box', 295000, 'RTI', 'BTN', ARRAY['Dr Hyun High Fiber - 30 Sc','Drhyun High Fiber - 30 Sc','Dr Hyun','DrHyun']),
   ('Sachet DRHYUN', 'sachet', 'pcs', 0, 'RTI', 'BTN', ARRAY[]::TEXT[]),
   ('Sachet DRHYUN - FG', 'sachet', 'pcs', 2800, 'RTI', 'BTN', ARRAY[]::TEXT[]),
-  ('KEMASAN CUBE DR.HYUN 30 SC', 'kemasan', 'pcs', 9000, 'RTI', 'BTN', ARRAY[]::TEXT[])
+  ('KEMASAN CUBE DR.HYUN 30 SC', 'packaging', 'pcs', 9000, 'RTI', 'BTN', ARRAY[]::TEXT[])
 ON CONFLICT (name, entity, warehouse) DO NOTHING;
 
 -- ────────────────────────────────────────────────────────────
