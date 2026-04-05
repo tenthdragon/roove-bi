@@ -2,12 +2,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { TOOL_DEFINITIONS, executeTool } from '@/lib/report-tools';
 
-const MODEL = 'claude-opus-4-20250514';
-const MAX_FOLLOWUP = 3; // max additional tool iterations after initial analysis
+const MODEL = 'claude-sonnet-4-20250514';
+const MAX_FOLLOWUP = 3;
 
-// Pricing per million tokens (USD) — Opus 4
-const INPUT_PRICE_PER_M = 15;
-const OUTPUT_PRICE_PER_M = 75;
+// Pricing per million tokens (USD) — Sonnet 4
+const INPUT_PRICE_PER_M = 3;
+const OUTPUT_PRICE_PER_M = 15;
 
 const PREFETCH_TOOLS = [
   'daily_trend',
