@@ -255,15 +255,21 @@ export async function buildMonthlyReport(): Promise<MonthlyReportResult> {
   const prevDays = calendarDays(prev.from, prev.to);
   const totalDaysThisMonth = daysInMonth(mFrom);
 
-  const [productRows, channelRows, metaByDate, shipThis, shipPrev, crThis, crPrev] = await Promise.all([
+  // Fetch summary data first (lightweight)
+  const [productRows, channelRows, metaByDate] = await Promise.all([
     fetchProductSummary(svc, prev.from, mTo),
     fetchChannelSummary(svc, prev.from, mTo),
     fetchMetaAdsSpend(svc, prev.from, mTo),
+  ]);
+
+  // Fetch counts separately to avoid concurrent connection limits
+  const [shipThis, shipPrev] = await Promise.all([
     fetchShipmentCount(svc, mFrom, mTo),
     fetchShipmentCount(svc, prev.from, prev.to),
-    fetchCRForRange(svc, mFrom, mTo),
-    fetchCRForRange(svc, prev.from, prev.to),
   ]);
+  // CR queries each do 2 internal parallel calls — run sequentially to avoid connection limits
+  const crThis = await fetchCRForRange(svc, mFrom, mTo);
+  const crPrev = await fetchCRForRange(svc, prev.from, prev.to);
 
   const thisR = computeRange(mFrom, mTo, productRows, channelRows, metaByDate);
   const prevR = computeRange(prev.from, prev.to, productRows, channelRows, metaByDate);
