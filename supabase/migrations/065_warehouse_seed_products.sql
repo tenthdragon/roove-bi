@@ -133,45 +133,16 @@ INSERT INTO warehouse_products (name, category, unit, price_list, entity, wareho
 ON CONFLICT (name, entity, warehouse) DO NOTHING;
 
 -- ────────────────────────────────────────────────────────────
--- VEMININE / VEMININCE line
+-- VEMININE / VEMININCE — MOVED TO JHN (see migration 069, 070)
 -- ────────────────────────────────────────────────────────────
-INSERT INTO warehouse_products (name, category, unit, price_list, entity, warehouse, scalev_product_names) VALUES
-  ('VEMININE PRIME SERUM', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Veminine Prime Serum']),
-  ('VEMININCE CUSION B', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Veminince Cushion B','Veminince Cusion B']),
-  ('VEMININCE CUSION L', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Veminince Cushion L','Veminince Cusion L']),
-  ('VEMININCE DAILY WEAR', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Veminince Daily Wear'])
-ON CONFLICT (name, entity, warehouse) DO NOTHING;
 
 -- ────────────────────────────────────────────────────────────
--- PARFUM lines (Haram Series, Arabian, Aisha, Adele, Ariana, Arum)
+-- PARFUM lines — MOVED TO JHN (see migration 069, 070)
+-- Kept commented for reference of original RTI seed.
 -- ────────────────────────────────────────────────────────────
-INSERT INTO warehouse_products (name, category, unit, price_list, entity, warehouse, scalev_product_names) VALUES
-  ('HARAM SERIES 3 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Haram Series - 3ml','Haram Series 3']),
-  ('HARAM SERIES 10 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Haram Series - 10ml','Haram Series 10']),
-  ('HARAM SERIES 30 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Haram Series - 30ml','Haram Series 30']),
-  ('ARABIAN MEMORIES 3 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Arabian Memories - 3ml','Arabian Memories 3']),
-  ('ARABIAN MEMORIES 30 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Arabian Memories - 30ml','Arabian Memories 30']),
-  ('ARABIAN SEA 3 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Arabian Sea - 3ml','Arabian Sea 3']),
-  ('ARABIAN SEA 30 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Arabian Sea - 30ml','Arabian Sea 30']),
-  ('AISHA SECRET 3 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Aisha Secret - 3ml','Aisha Secret 3']),
-  ('AISHA SECRET 30 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Aisha Secret - 30ml','Aisha Secret 30']),
-  ('ADELE SECRET 3 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Adele Secret - 3ml','Adele Secret 3']),
-  ('ADELE SECRET 30 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Adele Secret - 30ml','Adele Secret 30']),
-  ('ARIANA SECRET 3 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Ariana Secret - 3ml','Ariana Secret 3']),
-  ('ARIANA SECRET 30 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Ariana Secret - 30ml','Ariana Secret 30']),
-  ('ARUM SECRET 3 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Arum Secret - 3ml','Arum Secret 3']),
-  ('ARUM SECRET 30 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Arum Secret - 30ml','Arum Secret 30']),
-  ('DISCOVERY SET', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Discovery Set','Discovery'])
-ON CONFLICT (name, entity, warehouse) DO NOTHING;
-
--- ────────────────────────────────────────────────────────────
--- OSGARD, GLOBITE
--- ────────────────────────────────────────────────────────────
-INSERT INTO warehouse_products (name, category, unit, price_list, entity, warehouse, scalev_product_names) VALUES
-  ('OSGARD 60 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Osgard - 60ml','Osgard - 60','Osgard 60']),
-  ('OSGARD 100 ML', 'fg', 'pcs', 0, 'RTI', 'BTN', ARRAY['Osgard - 100ml','Osgard - 100','Osgard 100']),
-  ('GLOBITE 24 BUTIR', 'fg', 'box', 0, 'RTI', 'BTN', ARRAY['Globite - 24','Globite 24'])
-ON CONFLICT (name, entity, warehouse) DO NOTHING;
+-- All parfum, veminine, discovery, osgard, globite products removed from RTI.
+-- Parfum/Veminine → JHN (migrations 069, 070)
+-- Osgard/Globite → RLB (migration 066)
 
 -- ────────────────────────────────────────────────────────────
 -- BONUS items (from Kartu Stock + product_mapping)
