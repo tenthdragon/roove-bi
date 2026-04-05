@@ -2,8 +2,12 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { TOOL_DEFINITIONS, executeTool } from '@/lib/report-tools';
 
-const MAX_ITERATIONS = 8; // prevent infinite loops
+const MAX_ITERATIONS = 8;
 const MODEL = 'claude-opus-4-6';
+
+// Pricing per million tokens (USD) — Opus 4
+const INPUT_PRICE_PER_M = 15;
+const OUTPUT_PRICE_PER_M = 75;
 
 const SYSTEM_PROMPT = `You are a senior business analyst for an Indonesian D2C/FMCG company called Roove.
 You are given a monthly performance report. Your job is to:
@@ -24,7 +28,16 @@ IMPORTANT RULES:
 
 When using tools, the "from" and "to" parameters must be in YYYY-MM-DD format.`;
 
-export async function analyzeMonthlyReport(reportText: string, thisMonthFrom: string, thisMonthTo: string, prevMonthFrom: string, prevMonthTo: string): Promise<string> {
+export interface AnalysisResult {
+  text: string;
+  inputTokens: number;
+  outputTokens: number;
+  costUsd: number;
+  iterations: number;
+  toolCalls: string[];
+}
+
+export async function analyzeMonthlyReport(reportText: string, thisMonthFrom: string, thisMonthTo: string, prevMonthFrom: string, prevMonthTo: string): Promise<AnalysisResult> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
   const userMessage = `Here is the monthly report:\n\n${reportText}\n\nCurrent month range: ${thisMonthFrom} to ${thisMonthTo}\nPrevious month range: ${prevMonthFrom} to ${prevMonthTo}\n\nPlease analyze this report. Use the tools to dig deeper into the data and find the root causes behind the numbers. Focus on what's most actionable.`;
@@ -34,6 +47,9 @@ export async function analyzeMonthlyReport(reportText: string, thisMonthFrom: st
   ];
 
   let iteration = 0;
+  let totalInput = 0;
+  let totalOutput = 0;
+  const toolCalls: string[] = [];
 
   while (iteration < MAX_ITERATIONS) {
     iteration++;
@@ -47,16 +63,17 @@ export async function analyzeMonthlyReport(reportText: string, thisMonthFrom: st
       messages,
     });
 
-    // Check if Opus wants to use tools
+    totalInput += response.usage.input_tokens;
+    totalOutput += response.usage.output_tokens;
+
     if (response.stop_reason === 'tool_use') {
-      // Add assistant's response (with tool_use blocks)
       messages.push({ role: 'assistant', content: response.content });
 
-      // Execute all tool calls
       const toolResults: Anthropic.ToolResultBlockParam[] = [];
       for (const block of response.content) {
         if (block.type === 'tool_use') {
           console.log(`[opus-analyst] Tool call: ${block.name}(${JSON.stringify(block.input)})`);
+          toolCalls.push(block.name);
           const result = await executeTool(block.name, block.input as any);
           toolResults.push({
             type: 'tool_result',
@@ -66,16 +83,18 @@ export async function analyzeMonthlyReport(reportText: string, thisMonthFrom: st
         }
       }
 
-      // Add tool results
       messages.push({ role: 'user', content: toolResults });
     } else {
-      // Opus is done — extract final text
       const textBlocks = response.content.filter(b => b.type === 'text');
       const finalText = textBlocks.map(b => (b as Anthropic.TextBlock).text).join('\n');
-      console.log(`[opus-analyst] Done after ${iteration} iterations`);
-      return finalText;
+      console.log(`[opus-analyst] Done after ${iteration} iterations, input=${totalInput}, output=${totalOutput}`);
+
+      const costUsd = (totalInput / 1_000_000) * INPUT_PRICE_PER_M + (totalOutput / 1_000_000) * OUTPUT_PRICE_PER_M;
+
+      return { text: finalText, inputTokens: totalInput, outputTokens: totalOutput, costUsd, iterations: iteration, toolCalls };
     }
   }
 
-  return 'Analisis tidak dapat diselesaikan — terlalu banyak iterasi.';
+  const costUsd = (totalInput / 1_000_000) * INPUT_PRICE_PER_M + (totalOutput / 1_000_000) * OUTPUT_PRICE_PER_M;
+  return { text: 'Analisis tidak dapat diselesaikan — terlalu banyak iterasi.', inputTokens: totalInput, outputTokens: totalOutput, costUsd, iterations: iteration, toolCalls };
 }

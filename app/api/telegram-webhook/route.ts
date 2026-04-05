@@ -25,8 +25,9 @@ export async function POST(req: NextRequest) {
         // Get the report text from the original message
         const reportText = cb.message?.text || '';
 
-        const analysis = await analyzeMonthlyReport(reportText, thisFrom, thisTo, prevFrom, prevTo);
-        await sendTelegramMessage(`🧠 <b>Opus Analysis</b>\n\n${analysis}`);
+        const result = await analyzeMonthlyReport(reportText, thisFrom, thisTo, prevFrom, prevTo);
+        const costLine = `\n\n<i>📊 ${result.iterations} iterations · ${result.toolCalls.length} tool calls · ${result.inputTokens.toLocaleString()} in + ${result.outputTokens.toLocaleString()} out · $${result.costUsd.toFixed(3)}</i>`;
+        await sendTelegramMessage(`🧠 <b>Opus Analysis</b>\n\n${result.text}${costLine}`);
       }
 
       return NextResponse.json({ ok: true });
