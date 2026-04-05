@@ -713,3 +713,67 @@ export async function getPurchaseOrders(filters?: {
   if (error) throw error;
   return data || [];
 }
+
+// ============================================================
+// SCALEV PRODUCT MAPPING
+// ============================================================
+
+export async function getScalevMappings(filter?: 'all' | 'mapped' | 'unmapped' | 'ignored') {
+  const svc = createServiceSupabase();
+  let query = svc
+    .from('warehouse_scalev_mapping')
+    .select(`
+      *,
+      warehouse_products(id, name, category, entity, warehouse)
+    `);
+
+  if (filter === 'mapped') query = query.not('warehouse_product_id', 'is', null).eq('is_ignored', false);
+  if (filter === 'unmapped') query = query.is('warehouse_product_id', null).eq('is_ignored', false);
+  if (filter === 'ignored') query = query.eq('is_ignored', true);
+
+  const { data, error } = await query.order('scalev_product_name');
+  if (error) throw error;
+
+  // Get frequency counts
+  const { data: freqData } = await svc.rpc('warehouse_scalev_mapping_frequencies');
+
+  const freqMap: Record<string, number> = {};
+  if (freqData) {
+    for (const r of freqData) {
+      freqMap[r.product_name] = r.cnt;
+    }
+  }
+
+  return (data || []).map(r => ({
+    ...r,
+    frequency: freqMap[r.scalev_product_name] || 0,
+  }));
+}
+
+export async function updateScalevMapping(
+  id: number,
+  warehouseProductId: number | null,
+  multiplier?: number,
+  isIgnored?: boolean,
+  notes?: string,
+) {
+  const svc = createServiceSupabase();
+  const update: Record<string, any> = {};
+  if (warehouseProductId !== undefined) update.warehouse_product_id = warehouseProductId;
+  if (multiplier !== undefined) update.deduct_qty_multiplier = multiplier;
+  if (isIgnored !== undefined) update.is_ignored = isIgnored;
+  if (notes !== undefined) update.notes = notes;
+
+  const { error } = await svc
+    .from('warehouse_scalev_mapping')
+    .update(update)
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export async function syncScalevProductNames() {
+  const svc = createServiceSupabase();
+  // Insert any new product_names not yet in mapping table
+  const { error } = await svc.rpc('warehouse_sync_scalev_names');
+  if (error) throw error;
+}

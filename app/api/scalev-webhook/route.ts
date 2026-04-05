@@ -809,22 +809,44 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
             for (const line of orderLines) {
               if (!line.product_name || !line.quantity || line.quantity <= 0) continue;
 
-              // Lookup warehouse product filtered by mapped entity + warehouse
-              const { data: whProducts } = await svc
-                .rpc('warehouse_find_product_for_deduction', {
-                  p_scalev_name: line.product_name,
-                  p_entity: mapping.deduct_entity,
-                  p_warehouse: mapping.deduct_warehouse,
-                });
+              // 1. Check warehouse_scalev_mapping table first
+              const { data: scalevMapping } = await svc
+                .from('warehouse_scalev_mapping')
+                .select('warehouse_product_id, deduct_qty_multiplier, is_ignored')
+                .eq('scalev_product_name', line.product_name)
+                .maybeSingle();
 
-              if (whProducts && whProducts.length > 0) {
+              // If explicitly ignored, skip
+              if (scalevMapping?.is_ignored) { skipped++; continue; }
+
+              let targetProductId: number | null = null;
+              let deductQty = line.quantity;
+
+              if (scalevMapping?.warehouse_product_id) {
+                // Use mapping table
+                targetProductId = scalevMapping.warehouse_product_id;
+                deductQty = line.quantity * (scalevMapping.deduct_qty_multiplier || 1);
+              } else {
+                // Fallback: lookup by scalev_product_names array filtered by entity
+                const { data: whProducts } = await svc
+                  .rpc('warehouse_find_product_for_deduction', {
+                    p_scalev_name: line.product_name,
+                    p_entity: mapping.deduct_entity,
+                    p_warehouse: mapping.deduct_warehouse,
+                  });
+                if (whProducts && whProducts.length > 0) {
+                  targetProductId = whProducts[0].id;
+                }
+              }
+
+              if (targetProductId) {
                 const { error: deductErr } = await svc
                   .rpc('warehouse_deduct_fifo', {
-                    p_product_id: whProducts[0].id,
-                    p_quantity: line.quantity,
+                    p_product_id: targetProductId,
+                    p_quantity: deductQty,
                     p_reference_type: 'scalev_order',
                     p_reference_id: orderId,
-                    p_notes: `Auto: ${line.product_name} x${line.quantity} [${businessCode}→${mapping.deduct_entity}]`,
+                    p_notes: `Auto: ${line.product_name} x${deductQty} [${businessCode}→${mapping.deduct_entity}]`,
                   });
                 if (deductErr) {
                   console.warn(`[scalev-webhook][${businessCode}] warehouse deduct error for ${line.product_name}:`, deductErr.message);
