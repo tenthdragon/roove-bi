@@ -353,13 +353,15 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
 
   const warehouses = useMemo(() => {
     const whs = new Set<string>();
-    data.forEach(r => r.warehouse && whs.add(r.warehouse));
+    data.forEach(r => {
+      if (r.warehouse && r.entity) whs.add(`${r.warehouse} - ${r.entity}`);
+    });
     return Array.from(whs).sort();
   }, [data]);
 
   const filtered = useMemo(() => {
     let result = data;
-    if (warehouseFilter !== 'all') result = result.filter(r => r.warehouse === warehouseFilter);
+    if (warehouseFilter !== 'all') result = result.filter(r => `${r.warehouse} - ${r.entity}` === warehouseFilter);
     if (categoryFilter !== 'all') result = result.filter(r => r.category === categoryFilter);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -421,8 +423,8 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['No', 'Produk', 'Kategori', 'Gudang', 'Entity', 'Stock', 'Satuan', 'Harga', 'Nilai', 'Status'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Gudang', 'Entity', 'Satuan', 'Status'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              {['No', 'Produk', 'Kategori', 'Gudang', 'Stock', 'Satuan', 'Harga', 'Nilai', 'Status'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Gudang', 'Satuan', 'Status'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -434,8 +436,9 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
                 <td style={{ padding: '6px 10px' }}>
                   <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `${CATEGORY_COLORS[r.category]}20` : 'var(--bg-deep)', color: CATEGORY_COLORS[r.category] || 'var(--text-secondary)' }}>{r.category}</span>
                 </td>
-                <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>{r.warehouse}</td>
-                <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{r.entity}</td>
+                <td style={{ padding: '6px 10px', fontSize: 11 }}>
+                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text)' }}>{r.warehouse} - {r.entity}</span>
+                </td>
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: Number(r.current_stock) < 0 ? 'var(--red)' : 'var(--text)' }}>
                   {Number(r.current_stock).toLocaleString('id-ID')}
                 </td>
@@ -452,13 +455,13 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={10} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada data stock. Tambahkan batch dan catat movement untuk melihat saldo.</td></tr>
+              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada data stock. Tambahkan batch dan catat movement untuk melihat saldo.</td></tr>
             )}
           </tbody>
           {filtered.length > 0 && (
             <tfoot>
               <tr style={{ borderTop: '2px solid var(--border)' }}>
-                <td colSpan={5} style={{ padding: '8px 10px', fontWeight: 700, color: 'var(--text)' }}>Total</td>
+                <td colSpan={4} style={{ padding: '8px 10px', fontWeight: 700, color: 'var(--text)' }}>Total</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{totalStock.toLocaleString('id-ID')}</td>
                 <td /><td />
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{fmtRupiah(totalValue)}</td>
