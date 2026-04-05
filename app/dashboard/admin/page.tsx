@@ -832,7 +832,7 @@ export default function AdminPage() {
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: 'var(--bg)' }}>
-                      {['Business', 'Kode', 'Deduct dari Entity', 'Gudang', 'Status', 'Catatan'].map(h => (
+                      {['Business', 'Kode', 'Deduct dari Gudang', 'Status', 'Catatan'].map(h => (
                         <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
                       ))}
                     </tr>
@@ -844,25 +844,19 @@ export default function AdminPage() {
                         <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{m.business_code}</td>
                         <td style={{ padding: '10px 12px' }}>
                           <select
-                            value={m.deduct_entity}
-                            onChange={(e) => handleWhMappingChange(m.id, 'deduct_entity', e.target.value)}
+                            value={`${m.deduct_warehouse} - ${m.deduct_entity}`}
+                            onChange={(e) => {
+                              const [wh, ent] = e.target.value.split(' - ');
+                              handleWhMappingChange(m.id, 'deduct_warehouse', wh);
+                              handleWhMappingChange(m.id, 'deduct_entity', ent);
+                            }}
                             disabled={whMappingSaving}
                             style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontWeight: 600, cursor: whMappingSaving ? 'not-allowed' : 'pointer' }}
                           >
-                            <option value="RTI">RTI</option>
-                            <option value="RLB">RLB</option>
-                            <option value="RLT">RLT</option>
-                            <option value="JHN">JHN</option>
-                          </select>
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <select
-                            value={m.deduct_warehouse}
-                            onChange={(e) => handleWhMappingChange(m.id, 'deduct_warehouse', e.target.value)}
-                            disabled={whMappingSaving}
-                            style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, cursor: whMappingSaving ? 'not-allowed' : 'pointer' }}
-                          >
-                            <option value="BTN">BTN</option>
+                            <option value="BTN - RTI">BTN - RTI</option>
+                            <option value="BTN - RLB">BTN - RLB</option>
+                            <option value="BTN - RLT">BTN - RLT</option>
+                            <option value="BTN - JHN">BTN - JHN</option>
                           </select>
                         </td>
                         <td style={{ padding: '10px 12px' }}>
