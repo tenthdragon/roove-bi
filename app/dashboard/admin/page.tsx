@@ -76,6 +76,12 @@ export default function AdminPage() {
   const [bizTaxSaving, setBizTaxSaving] = useState(false);
   const [bizTaxMsg, setBizTaxMsg] = useState(null);
 
+  // Business → Warehouse Mapping states
+  const [whMappingData, setWhMappingData] = useState([]);
+  const [whMappingLoading, setWhMappingLoading] = useState(false);
+  const [whMappingSaving, setWhMappingSaving] = useState(false);
+  const [whMappingMsg, setWhMappingMsg] = useState(null);
+
   // User management states
   const [users, setUsers] = useState([]);
   const [inviteEmail, setInviteEmail] = useState('');
@@ -193,6 +199,41 @@ export default function AdminPage() {
     }
   }, [supabase]);
 
+  // Business → Warehouse Mapping
+  const loadWhMapping = useCallback(async () => {
+    setWhMappingLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('warehouse_business_mapping')
+        .select('*, scalev_webhook_businesses!inner(business_name)')
+        .order('business_code');
+      if (error) throw error;
+      setWhMappingData(data || []);
+    } catch (err) {
+      console.error('Failed to load warehouse mapping:', err);
+    } finally {
+      setWhMappingLoading(false);
+    }
+  }, [supabase]);
+
+  const handleWhMappingChange = async (id, field, value) => {
+    setWhMappingSaving(true);
+    setWhMappingMsg(null);
+    try {
+      const { error } = await supabase
+        .from('warehouse_business_mapping')
+        .update({ [field]: value })
+        .eq('id', id);
+      if (error) throw error;
+      setWhMappingMsg({ type: 'success', text: 'Mapping updated' });
+      await loadWhMapping();
+    } catch (err) {
+      setWhMappingMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
+    } finally {
+      setWhMappingSaving(false);
+    }
+  };
+
   const handleBizTaxChange = async (bizId, newTaxRateName) => {
     setBizTaxSaving(true);
     setBizTaxMsg(null);
@@ -217,6 +258,7 @@ export default function AdminPage() {
       if (taxRates.length === 0) loadTaxRates();
       if (overheadData.length === 0) loadOverhead();
       if (bizTaxData.length === 0) loadBizTax();
+      if (whMappingData.length === 0) loadWhMapping();
     }
   }, [activeTab]);
 
@@ -754,6 +796,82 @@ export default function AdminPage() {
                             <option value="NONE">Non-PKP</option>
                           </select>
                         </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Business → Warehouse Mapping */}
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Business → Gudang Mapping</div>
+            <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
+              Mapping bisnis ScaleV ke entity gudang yang stoknya berkurang saat order shipped. Contoh: RTI = marketing, tapi shipment dari gudang RLB.
+            </div>
+
+            {whMappingMsg && (
+              <div style={{
+                marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
+                background: whMappingMsg.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+                color: whMappingMsg.type === 'success' ? 'var(--green)' : 'var(--red)'
+              }}>
+                {whMappingMsg.type === 'success' ? '\u2705' : '\u274c'} {whMappingMsg.text}
+              </div>
+            )}
+
+            {whMappingLoading ? (
+              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
+              </div>
+            ) : whMappingData.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>Belum ada mapping. Jalankan migration 067 terlebih dahulu.</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead>
+                    <tr style={{ background: 'var(--bg)' }}>
+                      {['Business', 'Kode', 'Deduct dari Entity', 'Gudang', 'Status', 'Catatan'].map(h => (
+                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {whMappingData.map((m) => (
+                      <tr key={m.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text)' }}>{m.scalev_webhook_businesses?.business_name || m.business_code}</td>
+                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{m.business_code}</td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <select
+                            value={m.deduct_entity}
+                            onChange={(e) => handleWhMappingChange(m.id, 'deduct_entity', e.target.value)}
+                            disabled={whMappingSaving}
+                            style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontWeight: 600, cursor: whMappingSaving ? 'not-allowed' : 'pointer' }}
+                          >
+                            <option value="RTI">RTI</option>
+                            <option value="RLB">RLB</option>
+                            <option value="RLT">RLT</option>
+                            <option value="JHN">JHN</option>
+                          </select>
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <select
+                            value={m.deduct_warehouse}
+                            onChange={(e) => handleWhMappingChange(m.id, 'deduct_warehouse', e.target.value)}
+                            disabled={whMappingSaving}
+                            style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, cursor: whMappingSaving ? 'not-allowed' : 'pointer' }}
+                          >
+                            <option value="BTN">BTN</option>
+                          </select>
+                        </td>
+                        <td style={{ padding: '10px 12px' }}>
+                          <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: m.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: m.is_active ? 'var(--green)' : 'var(--red)', cursor: 'pointer' }}
+                            onClick={() => handleWhMappingChange(m.id, 'is_active', !m.is_active)}>
+                            {m.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: 11 }}>{m.notes || '-'}</td>
                       </tr>
                     ))}
                   </tbody>

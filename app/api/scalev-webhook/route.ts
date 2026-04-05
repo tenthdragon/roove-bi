@@ -776,54 +776,71 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     }
 
     // ── Warehouse auto-deduct: FIFO stock reduction on shipped/completed ──
+    // Uses warehouse_business_mapping to resolve which entity's stock to deduct
     try {
-      const { data: orderLines } = await svc
-        .from('scalev_order_lines')
-        .select('product_name, quantity')
-        .eq('scalev_order_id', existing.id);
+      // Resolve deduction target from business → entity mapping
+      const { data: mapping } = await svc
+        .from('warehouse_business_mapping')
+        .select('deduct_entity, deduct_warehouse')
+        .eq('business_code', businessCode)
+        .eq('is_active', true)
+        .maybeSingle();
 
-      if (orderLines && orderLines.length > 0) {
-        // Check if we already deducted for this order (idempotency)
-        const { data: existingDeductions } = await svc
-          .from('warehouse_stock_ledger')
-          .select('id')
-          .eq('reference_type', 'scalev_order')
-          .eq('reference_id', orderId)
-          .limit(1);
+      if (!mapping) {
+        console.log(`[scalev-webhook][${businessCode}] warehouse: no mapping found, skipping deduction`);
+      } else {
+        const { data: orderLines } = await svc
+          .from('scalev_order_lines')
+          .select('product_name, quantity')
+          .eq('scalev_order_id', existing.id);
 
-        if (!existingDeductions || existingDeductions.length === 0) {
-          let deducted = 0;
-          let skipped = 0;
-          for (const line of orderLines) {
-            if (!line.product_name || !line.quantity || line.quantity <= 0) continue;
+        if (orderLines && orderLines.length > 0) {
+          // Check if we already deducted for this order (idempotency)
+          const { data: existingDeductions } = await svc
+            .from('warehouse_stock_ledger')
+            .select('id')
+            .eq('reference_type', 'scalev_order')
+            .eq('reference_id', orderId)
+            .limit(1);
 
-            // Lookup warehouse product by ScaleV product_name
-            const { data: whProducts } = await svc
-              .rpc('warehouse_find_product_by_scalev_name', { p_scalev_name: line.product_name });
+          if (!existingDeductions || existingDeductions.length === 0) {
+            let deducted = 0;
+            let skipped = 0;
+            for (const line of orderLines) {
+              if (!line.product_name || !line.quantity || line.quantity <= 0) continue;
 
-            if (whProducts && whProducts.length > 0) {
-              const { error: deductErr } = await svc
-                .rpc('warehouse_deduct_fifo', {
-                  p_product_id: whProducts[0].id,
-                  p_quantity: line.quantity,
-                  p_reference_type: 'scalev_order',
-                  p_reference_id: orderId,
-                  p_notes: `Auto: ${line.product_name} x${line.quantity} [${businessCode}]`,
+              // Lookup warehouse product filtered by mapped entity + warehouse
+              const { data: whProducts } = await svc
+                .rpc('warehouse_find_product_for_deduction', {
+                  p_scalev_name: line.product_name,
+                  p_entity: mapping.deduct_entity,
+                  p_warehouse: mapping.deduct_warehouse,
                 });
-              if (deductErr) {
-                console.warn(`[scalev-webhook][${businessCode}] warehouse deduct error for ${line.product_name}:`, deductErr.message);
+
+              if (whProducts && whProducts.length > 0) {
+                const { error: deductErr } = await svc
+                  .rpc('warehouse_deduct_fifo', {
+                    p_product_id: whProducts[0].id,
+                    p_quantity: line.quantity,
+                    p_reference_type: 'scalev_order',
+                    p_reference_id: orderId,
+                    p_notes: `Auto: ${line.product_name} x${line.quantity} [${businessCode}→${mapping.deduct_entity}]`,
+                  });
+                if (deductErr) {
+                  console.warn(`[scalev-webhook][${businessCode}] warehouse deduct error for ${line.product_name}:`, deductErr.message);
+                } else {
+                  deducted++;
+                }
               } else {
-                deducted++;
+                skipped++; // unmapped product
               }
-            } else {
-              skipped++; // unmapped product
             }
+            if (deducted > 0) {
+              console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} deducted ${deducted} products from ${mapping.deduct_entity}/${mapping.deduct_warehouse}, skipped ${skipped} unmapped`);
+            }
+          } else {
+            console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} already deducted, skipping`);
           }
-          if (deducted > 0) {
-            console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} deducted ${deducted} products, skipped ${skipped} unmapped`);
-          }
-        } else {
-          console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} already deducted, skipping`);
         }
       }
     } catch (whErr: any) {
