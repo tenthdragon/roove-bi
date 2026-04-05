@@ -928,8 +928,38 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
   const [syncing, setSyncing] = useState(false);
 
   useEffect(() => { (async () => { try { setProducts(await getProducts()); } catch {} })(); }, []);
-  // Load frequencies separately (can be slow)
   useEffect(() => { (async () => { try { setFreqMap(await getScalevFrequencies()); } catch {} })(); }, []);
+
+  // Auto-suggest: find best matching warehouse product for unmapped items
+  const getSuggestion = (scalevName: string) => {
+    if (!products.length) return null;
+    const sn = scalevName.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    const snWords = sn.split(' ');
+
+    let bestMatch: any = null;
+    let bestScore = 0;
+
+    for (const p of products) {
+      const pn = p.name.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+      const pnWords = pn.split(' ');
+
+      // Count matching words
+      let matches = 0;
+      for (const sw of snWords) {
+        if (sw.length < 2) continue;
+        for (const pw of pnWords) {
+          if (pw.includes(sw) || sw.includes(pw)) { matches++; break; }
+        }
+      }
+
+      const score = matches / Math.max(snWords.length, pnWords.length);
+      if (score > bestScore && score >= 0.3) {
+        bestScore = score;
+        bestMatch = { ...p, score };
+      }
+    }
+    return bestMatch;
+  };
 
   // Merge frequency into data
   const dataWithFreq = useMemo(() =>
@@ -1074,9 +1104,20 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
                         </button>
                       </div>
                     ) : (
-                      <span style={{ color: wp ? 'var(--text)' : 'var(--text-muted)', fontSize: 12 }}>
-                        {wp ? `${wp.name} [${wp.warehouse}-${wp.entity}]` : r.is_ignored ? '-' : 'Belum dimapping'}
-                      </span>
+                      (() => {
+                        if (wp) return <span style={{ color: 'var(--text)', fontSize: 12 }}>{wp.name} [{wp.warehouse}-{wp.entity}]</span>;
+                        if (r.is_ignored) return <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>-</span>;
+                        const suggestion = getSuggestion(r.scalev_product_name);
+                        return suggestion ? (
+                          <button onClick={() => handleMap(r.id, suggestion.id)} disabled={saving}
+                            style={{ padding: '4px 10px', borderRadius: 6, border: '1px dashed #8b5cf6', background: 'rgba(139,92,246,0.08)', color: '#c4b5fd', fontSize: 11, cursor: 'pointer', textAlign: 'left', width: '100%' }}>
+                            <span style={{ fontSize: 9, color: 'var(--dim)', display: 'block', marginBottom: 2 }}>Suggestion ({Math.round(suggestion.score * 100)}%)</span>
+                            {suggestion.name} <span style={{ color: 'var(--dim)' }}>[{suggestion.warehouse}-{suggestion.entity}]</span>
+                          </button>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Belum dimapping</span>
+                        );
+                      })()
                     )}
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--text-secondary)' }}>
