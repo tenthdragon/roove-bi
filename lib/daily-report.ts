@@ -237,7 +237,7 @@ export async function buildDailyReport(): Promise<string> {
     '',
     `💰 <b>Net Sales:</b> ${fmtRp(yd.ns)} | ${fmtDelta(yd.ns, avg.ns, false)} vs avg`,
     `📈 <b>GP Margin:</b> ${fmtPct(yd.gpm)} | ${fmtDelta(yd.gpm, avg.gpm, true)} vs avg`,
-    `💵 <b>GP After Mkt+Adm:</b> ${fmtRp(yd.nam)} | ${fmtDelta(yd.nam, avg.nam, false)} vs avg`,
+    `💵 <b>GP AMA:</b> ${fmtRp(yd.nam)} | ${fmtDelta(yd.nam, avg.nam, false)} vs avg`,
     `📦 <b>Shipment:</b> ${fmtNum(yd.ship)} | ${fmtDelta(yd.ship, avg.ship, false)} vs avg`,
     `🛒 <b>AOV:</b> ${fmtRp(yd.aov)} | ${fmtDelta(yd.aov, avg.aov, false)} vs avg`,
     `📣 <b>Mkt Fee %:</b> ${fmtPct(yd.mktPct)} | ${fmtDelta(yd.mktPct, avg.mktPct, true)} vs avg`,
