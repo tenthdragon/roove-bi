@@ -3,11 +3,11 @@ import Anthropic from '@anthropic-ai/sdk';
 import { TOOL_DEFINITIONS, executeTool } from '@/lib/report-tools';
 
 const MAX_ITERATIONS = 8;
-const MODEL = 'claude-haiku-4-5-20250414';
+const MODEL = 'claude-haiku-4-5-20251001';
 
-// Pricing per million tokens (USD) — Haiku
-const INPUT_PRICE_PER_M = 0.80;
-const OUTPUT_PRICE_PER_M = 4;
+// Pricing per million tokens (USD) — Haiku 4.5
+const INPUT_PRICE_PER_M = 1;
+const OUTPUT_PRICE_PER_M = 5;
 
 const SYSTEM_PROMPT = `You are a senior business analyst for an Indonesian D2C/FMCG company called Roove.
 You are given a monthly performance report. Your job is to:
