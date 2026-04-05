@@ -2,7 +2,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { TOOL_DEFINITIONS, executeTool } from '@/lib/report-tools';
 
-const MAX_ITERATIONS = 8;
+const MAX_ITERATIONS = 15;
 const MODEL = 'claude-opus-4-20250514';
 
 // Pricing per million tokens (USD) — Opus 4
@@ -21,6 +21,7 @@ IMPORTANT RULES:
 - Always query data to support your claims — never speculate without evidence
 - Compare this month vs last month to find meaningful changes
 - Focus on the TOP 3 most impactful insights
+- Be efficient with tool calls — call multiple tools in a single turn when possible, and limit to max 3-4 tool calls total before concluding
 - Write in Bahasa Indonesia
 - Be concise — max 3-4 paragraphs for the final analysis
 - Use numbers and percentages to support your points
