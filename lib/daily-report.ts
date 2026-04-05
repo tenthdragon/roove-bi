@@ -79,10 +79,28 @@ async function fetchChannelSummary(svc: any, from: string, to: string) {
 }
 
 async function fetchShipmentCounts(svc: any, from: string, to: string) {
-  const { data, error } = await svc.rpc('get_daily_shipment_counts', { p_from: from, p_to: to });
+  // Use summary_daily_order_channel which already has aggregated data,
+  // instead of RPC which may timeout on large date ranges.
+  // COUNT DISTINCT orders per day isn't available here, so we use
+  // scalev_orders count grouped by shipped_date instead.
+  const { utcFrom, utcTo } = wibRangeToUtc(from, to);
+  const { data, error } = await svc.from('scalev_orders')
+    .select('shipped_time')
+    .in('status', ['shipped', 'completed'])
+    .gte('shipped_time', utcFrom)
+    .lt('shipped_time', utcTo)
+    .not('shipped_time', 'is', null)
+    .limit(50000);
   if (error) console.error('[report] fetchShipmentCounts error:', error);
+
   const byDate: Record<string, number> = {};
-  for (const r of data || []) byDate[r.date] = (byDate[r.date] || 0) + Number(r.order_count);
+  for (const r of data || []) {
+    if (!r.shipped_time) continue;
+    const dt = new Date(r.shipped_time);
+    const wib = new Date(dt.getTime() + 7 * 3600_000);
+    const key = `${wib.getFullYear()}-${String(wib.getMonth() + 1).padStart(2, '0')}-${String(wib.getDate()).padStart(2, '0')}`;
+    byDate[key] = (byDate[key] || 0) + 1;
+  }
   return byDate;
 }
 
@@ -106,7 +124,7 @@ async function fetchCRForRange(svc: any, from: string, to: string): Promise<{ cr
   const { count: created, error: cErr } = await svc.from('scalev_orders')
     .select('id', { count: 'exact', head: true })
     .gte('pending_time', utcFrom).lt('pending_time', utcTo)
-    .neq('status', 'canceled')
+    .in('status', ['pending', 'draft', 'confirmed', 'paid', 'in_process', 'ready', 'shipped', 'completed', 'rts'])
     .not('store_name', 'ilike', '%marketplace%')
     .not('store_name', 'ilike', '%shopee%')
     .not('store_name', 'ilike', '%tiktok%');
