@@ -16,6 +16,11 @@ import {
   getStockByBatch,
   getLedgerHistory,
   getProducts,
+  getBatches,
+  recordStockIn,
+  recordStockOut,
+  recordDispose,
+  createBatch,
 } from '@/lib/warehouse-ledger-actions';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
@@ -149,6 +154,8 @@ export default function WarehousePage() {
   const [expandedSO, setExpandedSO] = useState<string | null>(null);
   const [ledgerTypeFilter, setLedgerTypeFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const refreshData = () => setRefreshKey(k => k + 1);
 
   // Load available periods on mount
   useEffect(() => {
@@ -202,7 +209,7 @@ export default function WarehousePage() {
         console.error('Failed to load data:', e);
       }
     })();
-  }, [activeTab, selectedMonth, selectedYear, loading]);
+  }, [activeTab, selectedMonth, selectedYear, loading, refreshKey]);
 
   // Categories for filter
   const categories = useMemo(() => {
@@ -314,7 +321,7 @@ export default function WarehousePage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
+      {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} />}
       {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
       {activeTab === 'ringkasan' && <RingkasanTab data={filteredSummary} categories={categories} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
@@ -329,10 +336,14 @@ export default function WarehousePage() {
 // STOCK BALANCE TAB (NEW)
 // ============================================================
 
-function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, setCategoryFilter }: {
+function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, setCategoryFilter, onRefresh }: {
   data: any[]; searchQuery: string; setSearchQuery: (v: string) => void;
   categoryFilter: string; setCategoryFilter: (v: string) => void;
+  onRefresh: () => void;
 }) {
+  const [showModal, setShowModal] = useState(false);
+  const [modalMode, setModalMode] = useState<'in' | 'out' | 'dispose'>('in');
+
   const categories = useMemo(() => {
     const cats = new Set<string>();
     data.forEach(r => r.category && cats.add(r.category));
@@ -363,30 +374,34 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
         <KPICard label="Perlu Reorder" value={String(needsReorder)} color={needsReorder > 0 ? 'var(--red)' : 'var(--green)'} />
       </div>
 
-      {/* Filters */}
+      {/* Action buttons + Filters */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        <input
-          type="text"
-          placeholder="Cari produk..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{
-            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
-            padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', flex: 1, minWidth: 200,
-          }}
-        />
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          style={{
-            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
-            padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none',
-          }}
-        >
+        <button onClick={() => { setModalMode('in'); setShowModal(true); }}
+          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--green)', color: '#fff' }}>
+          + Stock Masuk
+        </button>
+        <button onClick={() => { setModalMode('out'); setShowModal(true); }}
+          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#f97316', color: '#fff' }}>
+          - Stock Keluar
+        </button>
+        <button onClick={() => { setModalMode('dispose'); setShowModal(true); }}
+          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--red)', color: '#fff' }}>
+          Dispose
+        </button>
+        <div style={{ flex: 1 }} />
+        <input type="text" placeholder="Cari produk..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', minWidth: 200 }} />
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' }}>
           <option value="all">Semua Kategori</option>
           {categories.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
+
+      {/* Stock Movement Modal */}
+      {showModal && (
+        <StockMovementModal mode={modalMode} onClose={() => setShowModal(false)} onSuccess={() => { setShowModal(false); onRefresh(); }} />
+      )}
 
       {/* Table */}
       <div style={{ overflowX: 'auto' }}>
@@ -430,14 +445,9 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
             <tfoot>
               <tr style={{ borderTop: '2px solid var(--border)' }}>
                 <td colSpan={4} style={{ padding: '8px 10px', fontWeight: 700, color: 'var(--text)' }}>Total</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
-                  {totalStock.toLocaleString('id-ID')}
-                </td>
-                <td />
-                <td />
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
-                  {fmtRupiah(totalValue)}
-                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{totalStock.toLocaleString('id-ID')}</td>
+                <td /><td />
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{fmtRupiah(totalValue)}</td>
                 <td />
               </tr>
             </tfoot>
@@ -445,6 +455,189 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
         </table>
       </div>
     </>
+  );
+}
+
+// ============================================================
+// STOCK MOVEMENT MODAL
+// ============================================================
+
+const inputStyle = {
+  background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+  padding: '8px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', width: '100%',
+};
+
+const labelStyle = { fontSize: 12, fontWeight: 600, color: 'var(--dim)', marginBottom: 4, display: 'block' };
+
+function StockMovementModal({ mode, onClose, onSuccess }: {
+  mode: 'in' | 'out' | 'dispose'; onClose: () => void; onSuccess: () => void;
+}) {
+  const [products, setProducts] = useState<any[]>([]);
+  const [batches, setBatchList] = useState<any[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState('');
+  const [selectedBatch, setSelectedBatch] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [notes, setNotes] = useState('');
+  // New batch fields (stock IN only)
+  const [newBatch, setNewBatch] = useState(false);
+  const [batchCode, setBatchCode] = useState('');
+  const [expiredDate, setExpiredDate] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const modeConfig = {
+    in: { title: 'Stock Masuk', color: 'var(--green)', label: 'Masuk' },
+    out: { title: 'Stock Keluar', color: '#f97316', label: 'Keluar' },
+    dispose: { title: 'Dispose Stock', color: 'var(--red)', label: 'Dispose' },
+  };
+  const cfg = modeConfig[mode];
+
+  // Load products
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await getProducts();
+        setProducts(data);
+      } catch (e) { console.error(e); }
+    })();
+  }, []);
+
+  // Load batches when product selected
+  useEffect(() => {
+    if (!selectedProduct) { setBatchList([]); return; }
+    (async () => {
+      try {
+        const data = await getBatches(Number(selectedProduct));
+        setBatchList(data);
+      } catch (e) { console.error(e); }
+    })();
+  }, [selectedProduct]);
+
+  const handleSubmit = async () => {
+    setError('');
+    setSuccess('');
+    const qty = Number(quantity);
+    const pid = Number(selectedProduct);
+    if (!pid) { setError('Pilih produk'); return; }
+    if (!qty || qty <= 0) { setError('Quantity harus > 0'); return; }
+
+    setSubmitting(true);
+    try {
+      if (mode === 'in') {
+        let batchId: number | null = null;
+        if (newBatch) {
+          if (!batchCode.trim()) { setError('Kode batch wajib diisi'); setSubmitting(false); return; }
+          const batch = await createBatch(pid, batchCode.trim(), expiredDate || null, qty);
+          batchId = batch.id;
+          setSuccess(`Stock masuk: ${qty} unit (batch baru: ${batchCode})`);
+        } else {
+          batchId = selectedBatch ? Number(selectedBatch) : null;
+          await recordStockIn(pid, batchId, qty, 'manual', undefined, notes || undefined);
+          setSuccess(`Stock masuk: ${qty} unit`);
+        }
+      } else if (mode === 'out') {
+        const batchId = selectedBatch ? Number(selectedBatch) : null;
+        await recordStockOut(pid, batchId, qty, 'manual', undefined, notes || undefined);
+        setSuccess(`Stock keluar: ${qty} unit`);
+      } else if (mode === 'dispose') {
+        const batchId = selectedBatch ? Number(selectedBatch) : null;
+        await recordDispose(pid, batchId, qty, notes || undefined);
+        setSuccess(`Dispose: ${qty} unit`);
+      }
+
+      setTimeout(onSuccess, 800);
+    } catch (e: any) {
+      setError(e.message || 'Gagal menyimpan');
+    }
+    setSubmitting(false);
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}>
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: cfg.color }}>{cfg.title}</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--dim)', fontSize: 18, cursor: 'pointer', padding: 4 }}>&#10005;</button>
+        </div>
+
+        {/* Product select */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Produk *</label>
+          <select value={selectedProduct} onChange={(e) => { setSelectedProduct(e.target.value); setSelectedBatch(''); }}
+            style={inputStyle}>
+            <option value="">-- Pilih Produk --</option>
+            {products.map(p => (
+              <option key={p.id} value={p.id}>{p.name} ({p.category})</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Batch select or new batch */}
+        {mode === 'in' && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <label style={{ ...labelStyle, margin: 0 }}>Batch</label>
+              <button onClick={() => setNewBatch(!newBatch)}
+                style={{ padding: '2px 8px', borderRadius: 5, border: '1px solid var(--border)', background: newBatch ? 'var(--accent)' : 'transparent', color: newBatch ? '#fff' : 'var(--dim)', fontSize: 10, cursor: 'pointer', fontWeight: 600 }}>
+                {newBatch ? 'Batch Baru' : 'Batch Existing'}
+              </button>
+            </div>
+            {newBatch ? (
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input type="text" placeholder="Kode batch (e.g. 20/03/26)" value={batchCode} onChange={(e) => setBatchCode(e.target.value)} style={{ ...inputStyle, flex: 2 }} />
+                <input type="date" placeholder="Expired date" value={expiredDate} onChange={(e) => setExpiredDate(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+              </div>
+            ) : (
+              <select value={selectedBatch} onChange={(e) => setSelectedBatch(e.target.value)} style={inputStyle}>
+                <option value="">-- Tanpa Batch --</option>
+                {batches.map(b => (
+                  <option key={b.id} value={b.id}>{b.batch_code} (qty: {b.current_qty}{b.expired_date ? `, exp: ${b.expired_date}` : ''})</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
+
+        {(mode === 'out' || mode === 'dispose') && batches.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelStyle}>Batch</label>
+            <select value={selectedBatch} onChange={(e) => setSelectedBatch(e.target.value)} style={inputStyle}>
+              <option value="">-- Tanpa Batch (FIFO) --</option>
+              {batches.map(b => (
+                <option key={b.id} value={b.id}>{b.batch_code} (qty: {b.current_qty}{b.expired_date ? `, exp: ${b.expired_date}` : ''})</option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Quantity */}
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Quantity *</label>
+          <input type="number" min="1" placeholder="Jumlah" value={quantity} onChange={(e) => setQuantity(e.target.value)} style={inputStyle} />
+        </div>
+
+        {/* Notes */}
+        {!newBatch && (
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelStyle}>Catatan</label>
+            <input type="text" placeholder="Opsional" value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
+          </div>
+        )}
+
+        {/* Error / Success */}
+        {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: '#fca5a5', fontSize: 12, marginBottom: 12 }}>{error}</div>}
+        {success && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.1)', color: '#6ee7b7', fontSize: 12, marginBottom: 12 }}>{success}</div>}
+
+        {/* Submit */}
+        <button onClick={handleSubmit} disabled={submitting}
+          style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: cfg.color, color: '#fff', opacity: submitting ? 0.7 : 1 }}>
+          {submitting ? 'Menyimpan...' : `Simpan ${cfg.label}`}
+        </button>
+      </div>
+    </div>
   );
 }
 
