@@ -15,19 +15,22 @@ export async function POST(req: NextRequest) {
       const data = cb.data || '';
 
       if (data.startsWith('analyze:')) {
-        await answerCallbackQuery(cb.id, 'Analyzing with Opus...');
-        // Parse params: analyze:thisFrom:thisTo:prevFrom:prevTo
+        await answerCallbackQuery(cb.id, 'Starting analysis...');
         const parts = data.split(':');
         const [, thisFrom, thisTo, prevFrom, prevTo] = parts;
 
-        await sendTelegramMessage('🧠 <b>Opus sedang menganalisis data...</b>\n<i>Ini mungkin memakan waktu 30-60 detik.</i>');
+        await sendTelegramMessage('🧠 <b>Opus sedang menganalisis data...</b>\n<i>Querying database & building insights (30-90 detik)</i>');
 
-        // Get the report text from the original message
-        const reportText = cb.message?.text || '';
-
-        const result = await analyzeMonthlyReport(reportText, thisFrom, thisTo, prevFrom, prevTo);
-        const costLine = `\n\n<i>📊 ${result.iterations} iterations · ${result.toolCalls.length} tool calls · ${result.inputTokens.toLocaleString()} in + ${result.outputTokens.toLocaleString()} out · $${result.costUsd.toFixed(3)}</i>`;
-        await sendTelegramMessage(`🧠 <b>Opus Analysis</b>\n\n${result.text}${costLine}`);
+        try {
+          const reportText = cb.message?.text || '';
+          const result = await analyzeMonthlyReport(reportText, thisFrom, thisTo, prevFrom, prevTo);
+          const costLine = `\n\n<i>📊 ${result.iterations} iterations · ${result.toolCalls.length} tool calls · ${result.inputTokens.toLocaleString()} in + ${result.outputTokens.toLocaleString()} out · $${result.costUsd.toFixed(3)}</i>`;
+          await sendTelegramMessage(`🧠 <b>Opus Analysis</b>\n\n${result.text}${costLine}`);
+        } catch (err: any) {
+          console.error('[telegram-webhook] Opus error:', err);
+          const errMsg = err?.message || 'Unknown error';
+          await sendTelegramMessage(`❌ <b>Analysis failed</b>\n\n<code>${errMsg.slice(0, 200)}</code>\n\n<i>Coba lagi dengan /monthly lalu tekan tombol Analyze.</i>`);
+        }
       }
 
       return NextResponse.json({ ok: true });
@@ -54,7 +57,6 @@ export async function POST(req: NextRequest) {
       await sendTelegramMessage('Generating monthly report...');
       const result = await buildMonthlyReport();
 
-      // Send report with inline "Analyze" button
       const callbackData = `analyze:${result.thisMonthFrom}:${result.thisMonthTo}:${result.prevMonthFrom}:${result.prevMonthTo}`;
       await sendTelegramMessage(result.message, {
         replyMarkup: {
