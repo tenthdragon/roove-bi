@@ -81,6 +81,9 @@ INSERT INTO warehouse_products (name, category, unit, price_list, entity, wareho
   ('Kardus Besar 1 (32x22x11)', 'packaging', 'pcs', 2250, 'RLB', 'BTN', ARRAY[]::TEXT[]),
   ('Kardus Besar 2 (32x27x26)', 'packaging', 'pcs', 8100, 'RLB', 'BTN', ARRAY[]::TEXT[]),
   ('Kardus Besar 3 (60x40x30)', 'packaging', 'pcs', 14000, 'RLB', 'BTN', ARRAY[]::TEXT[]),
+  ('Kardus Kecil Bekas (20x15x10)', 'packaging', 'pcs', 0, 'RLB', 'BTN', ARRAY[]::TEXT[]),
+  ('Kardus Sedang Bekas (22x20x11)', 'packaging', 'pcs', 0, 'RLB', 'BTN', ARRAY[]::TEXT[]),
+  ('Kardus Besar 1 Bekas (32x22x11)', 'packaging', 'pcs', 0, 'RLB', 'BTN', ARRAY[]::TEXT[]),
   ('Brosur Roove (Non Hijab A5)', 'packaging', 'pcs', 500, 'RLB', 'BTN', ARRAY['Brosur Roove']),
   ('Brosur Pluve', 'packaging', 'pcs', 0, 'RLB', 'BTN', ARRAY[]::TEXT[]),
   ('Sticker Klaim', 'packaging', 'pcs', 200, 'RLB', 'BTN', ARRAY[]::TEXT[]),
@@ -221,6 +224,9 @@ SELECT _seed_stock('Brosur Roove (Non Hijab A5)', 'RLB', 'BTN', 'APR-2026', NULL
 SELECT _seed_stock('Brosur Pluve', 'RLB', 'BTN', 'APR-2026', NULL, 4739);
 SELECT _seed_stock('Sticker Klaim', 'RLB', 'BTN', 'APR-2026', NULL, 113062);
 SELECT _seed_stock('Card Free 20sc', 'RLB', 'BTN', 'APR-2026', NULL, 60928);
+SELECT _seed_stock('Kardus Kecil Bekas (20x15x10)', 'RLB', 'BTN', 'APR-2026', NULL, 1381);
+SELECT _seed_stock('Kardus Sedang Bekas (22x20x11)', 'RLB', 'BTN', 'APR-2026', NULL, 212);
+SELECT _seed_stock('Kardus Besar 1 Bekas (32x22x11)', 'RLB', 'BTN', 'APR-2026', NULL, 96);
 
 -- ── JHN BTN (April 2026) ──
 SELECT _seed_stock('VEMININE PRIME Serum', 'JHN', 'BTN', 'APR-2026', '2026-06-01', 460);
@@ -260,6 +266,7 @@ DROP FUNCTION _seed_stock;
 -- ============================================================
 -- SELECT entity, COUNT(*) as products FROM warehouse_products GROUP BY entity ORDER BY entity;
 -- Expected: JHN=31, RLB=54, RLT=4, RTI=14 (total=103)
+-- Note: RLB has 3 "Bekas" kardus variants (recycled boxes from Excel duplicates)
 --
 -- SELECT entity, COUNT(*) as batches, SUM(current_qty) as total_stock
 -- FROM warehouse_batches wb
