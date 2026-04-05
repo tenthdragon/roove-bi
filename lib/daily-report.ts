@@ -184,15 +184,22 @@ export async function buildDailyReport(): Promise<string> {
   const mFrom = monthStart(yd);
   const days = calendarDays(mFrom, yd); // calendar days in MTD
 
-  const [productRows, channelRows, metaByDate, shipYd, shipMtd, crYd, crMtd] = await Promise.all([
+  // Batch 1: summary tables (lightweight)
+  const [productRows, channelRows, metaByDate] = await Promise.all([
     fetchProductSummary(svc, mFrom, yd),
     fetchChannelSummary(svc, mFrom, yd),
     fetchMetaAdsSpend(svc, mFrom, yd),
+  ]);
+
+  // Batch 2: shipment counts
+  const [shipYd, shipMtd] = await Promise.all([
     fetchShipmentCount(svc, yd, yd),
     fetchShipmentCount(svc, mFrom, yd),
-    fetchCRForRange(svc, yd, yd),
-    fetchCRForRange(svc, mFrom, yd),
   ]);
+
+  // Batch 3: CR counts (each does 2 internal queries — run sequentially)
+  const crYd = await fetchCRForRange(svc, yd, yd);
+  const crMtd = await fetchCRForRange(svc, mFrom, yd);
 
   // @ts-ignore
   buildDailyReport._debug = { yesterday: yd, days, shipYd, shipMtd, crYd, crMtd };
