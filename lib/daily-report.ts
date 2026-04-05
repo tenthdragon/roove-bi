@@ -129,36 +129,10 @@ async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
 }
 
 async function fetchCRForRange(svc: any, from: string, to: string): Promise<{ created: number; shipped: number }> {
-  const { utcFrom, utcTo } = wibRangeToUtc(from, to);
-
-  // Query total, then subtract marketplace (avoids .not() chaining issues on Vercel)
-  const { count: totalCreated, error: cErr1 } = await svc.from('scalev_orders')
-    .select('id', { count: 'exact', head: true })
-    .gte('draft_time', utcFrom).lt('draft_time', utcTo);
-  if (cErr1) console.error('[report] CR totalCreated error:', cErr1);
-
-  const { count: mpCreated, error: cErr2 } = await svc.from('scalev_orders')
-    .select('id', { count: 'exact', head: true })
-    .gte('draft_time', utcFrom).lt('draft_time', utcTo)
-    .or('store_name.ilike.%marketplace%,store_name.ilike.%shopee%,store_name.ilike.%tiktok%');
-  if (cErr2) console.error('[report] CR mpCreated error:', cErr2);
-
-  const { count: totalShipped, error: sErr1 } = await svc.from('scalev_orders')
-    .select('id', { count: 'exact', head: true })
-    .gte('shipped_time', utcFrom).lt('shipped_time', utcTo)
-    .in('status', ['shipped', 'completed']);
-  if (sErr1) console.error('[report] CR totalShipped error:', sErr1);
-
-  const { count: mpShipped, error: sErr2 } = await svc.from('scalev_orders')
-    .select('id', { count: 'exact', head: true })
-    .gte('shipped_time', utcFrom).lt('shipped_time', utcTo)
-    .in('status', ['shipped', 'completed'])
-    .or('store_name.ilike.%marketplace%,store_name.ilike.%shopee%,store_name.ilike.%tiktok%');
-  if (sErr2) console.error('[report] CR mpShipped error:', sErr2);
-
-  const created = (totalCreated || 0) - (mpCreated || 0);
-  const shipped = (totalShipped || 0) - (mpShipped || 0);
-  return { created, shipped };
+  const { data, error } = await svc.rpc('get_cr_counts', { p_from: from, p_to: to });
+  if (error) console.error('[report] CR RPC error:', error);
+  const row = data?.[0] || {};
+  return { created: Number(row.total_leads || 0), shipped: Number(row.total_shipped || 0) };
 }
 
 // ── Compute range totals ──
