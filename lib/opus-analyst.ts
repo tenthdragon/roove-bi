@@ -32,6 +32,7 @@ FORMATTING (CRITICAL):
 - Do NOT use markdown headers (#, ##), bullet asterisks, or any markdown syntax
 - Use plain dashes (-) or emoji for bullet points
 - Keep it clean and readable on a phone screen
+- IMPORTANT: After each section title/header, always add an empty line before the content
 
 When using tools, the "from" and "to" parameters must be in YYYY-MM-DD format.`;
 
@@ -51,7 +52,9 @@ function sanitizeForTelegram(text: string): string {
     // Code blocks: ```...``` → remove
     .replace(/```[\s\S]*?```/g, '')
     // Inline code: `text` → text
-    .replace(/`([^`]+)`/g, '$1');
+    .replace(/`([^`]+)`/g, '$1')
+    // Ensure spacing after section headers (lines starting with emoji + bold title)
+    .replace(/(^[^\n]*<\/b>)\n(?!\n)/gm, '$1\n\n');
 }
 
 export interface AnalysisResult {
