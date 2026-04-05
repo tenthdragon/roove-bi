@@ -150,6 +150,8 @@ function computeRange(from: string, to: string, productRows: any[], channelRows:
 // ── Main ──
 
 export async function buildDailyReport(): Promise<string> {
+  // @ts-ignore — debug info attached to return for troubleshooting
+  buildDailyReport._debug = {};
   const svc = getServiceSupabase();
   const yesterday = getYesterdayWIB();
   const thisMonthFrom = monthStart(yesterday);
@@ -168,8 +170,15 @@ export async function buildDailyReport(): Promise<string> {
     fetchCRForRange(svc, prev.from, prev.to),
   ]);
 
-  console.log(`[report] Data fetched: products=${productRows.length}, channels=${channelRows.length}, shipDates=${Object.keys(shipByDate).length}`);
-  console.log(`[report] shipByDate[${yesterday}]=${shipByDate[yesterday] || 0}`);
+  // @ts-ignore
+  buildDailyReport._debug = {
+    yesterday,
+    productRows: productRows.length,
+    channelRows: channelRows.length,
+    shipDates: Object.keys(shipByDate),
+    shipYesterday: shipByDate[yesterday] || 0,
+    crYd, crThis, crPrev,
+  };
 
   // Yesterday
   const ydR = computeRange(yesterday, yesterday, productRows, channelRows, shipByDate, metaByDate);

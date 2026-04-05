@@ -10,15 +10,16 @@ export async function GET(req: NextRequest) {
   const wibStr = `${wib.getFullYear()}-${String(wib.getMonth() + 1).padStart(2, '0')}-${String(wib.getDate()).padStart(2, '0')} ${String(wib.getHours()).padStart(2, '0')}:${String(wib.getMinutes()).padStart(2, '0')}`;
 
   try {
-    console.log(`[telegram-report] Triggered at ${wibStr} WIB (${now.toISOString()} UTC)`);
     const message = await buildDailyReport();
-    const sent = await sendTelegramMessage(message);
+    // @ts-ignore — debug data from buildDailyReport
+    const debug = (buildDailyReport as any)._debug || {};
 
-    if (!sent) {
-      return NextResponse.json({ ok: false, error: 'Failed to send Telegram message', serverTime: wibStr }, { status: 500 });
+    const isDebug = req.nextUrl.searchParams.get('debug') === '1';
+    if (!isDebug) {
+      const sent = await sendTelegramMessage(message);
+      if (!sent) return NextResponse.json({ ok: false, error: 'Failed to send', serverTime: wibStr }, { status: 500 });
     }
-
-    return NextResponse.json({ ok: true, serverTime: wibStr, message });
+    return NextResponse.json({ ok: true, serverTime: wibStr, debug, message });
   } catch (err: any) {
     console.error('[telegram-report] Error:', err);
     return NextResponse.json({ ok: false, error: err.message, serverTime: wibStr }, { status: 500 });
