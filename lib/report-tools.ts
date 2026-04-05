@@ -96,7 +96,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'closing_rate_by_brand',
-    description: 'Get closing rate (created orders vs shipped orders) per brand for non-marketplace (Scalev) channels. Shows how many orders created vs shipped per brand. Use to compare operational efficiency across brands.',
+    description: 'Get closing rate (total leads vs shipped orders) per brand for non-marketplace (Scalev) channels. Total leads = orders created (draft_time). Shipped = orders with shipped_time and status shipped/completed. Use to compare operational efficiency across brands.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -285,12 +285,10 @@ async function topProducts(svc: any, from: string, to: string) {
 async function closingRateByBrand(svc: any, from: string, to: string) {
   const { utcFrom, utcTo } = wibToUtc(from, to);
 
-  // Get all non-marketplace orders in range with their primary brand
-  // Created = pending_time in range, Shipped = shipped_time in range
+  // Total leads = all orders created (draft_time), excluding marketplace
   const { data: createdOrders } = await svc.from('scalev_orders')
     .select('id, store_name')
-    .gte('pending_time', utcFrom).lt('pending_time', utcTo)
-    .in('status', ['pending', 'draft', 'confirmed', 'paid', 'in_process', 'ready', 'shipped', 'completed', 'rts'])
+    .gte('draft_time', utcFrom).lt('draft_time', utcTo)
     .not('store_name', 'ilike', '%marketplace%')
     .not('store_name', 'ilike', '%shopee%')
     .not('store_name', 'ilike', '%tiktok%')

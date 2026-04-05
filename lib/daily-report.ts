@@ -131,10 +131,10 @@ async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
 async function fetchCRForRange(svc: any, from: string, to: string): Promise<{ created: number; shipped: number }> {
   const { utcFrom, utcTo } = wibRangeToUtc(from, to);
 
+  // Total leads = all orders created (draft_time), excluding marketplace
   const { count: created, error: cErr } = await svc.from('scalev_orders')
     .select('id', { count: 'exact', head: true })
-    .gte('pending_time', utcFrom).lt('pending_time', utcTo)
-    .in('status', ['pending', 'draft', 'confirmed', 'paid', 'in_process', 'ready', 'shipped', 'completed', 'rts'])
+    .gte('draft_time', utcFrom).lt('draft_time', utcTo)
     .not('store_name', 'ilike', '%marketplace%')
     .not('store_name', 'ilike', '%shopee%')
     .not('store_name', 'ilike', '%tiktok%');
