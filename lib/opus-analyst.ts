@@ -34,6 +34,11 @@ FORMATTING (CRITICAL):
 - Keep it clean and readable on a phone screen
 - IMPORTANT: After each section title/header, always add an empty line before the content
 
+BUSINESS CONTEXT:
+- Meta Ads is a demand creation channel. Customers often discover via Meta but purchase on marketplaces (Shopee, TikTok Shop). Do NOT assume Meta revenue = Meta-attributed sales.
+- Not all brands have ad spend. Check ads_spend_by_source before attributing growth to ads. Orders with zero-spend brands are likely organic/marketplace-driven.
+- Marketplace orders are manually inputted by ops into Scalev, so their draft_time ≈ shipped_time. Their CR is artificially ~100% and does NOT reflect real lead-to-close conversion.
+
 When using tools, the "from" and "to" parameters must be in YYYY-MM-DD format.`;
 
 /** Convert any remaining markdown to Telegram HTML */
