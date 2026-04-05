@@ -25,6 +25,7 @@ import {
   createBatch,
   getScalevMappings,
   getScalevFrequencies,
+  getScalevPriceTiers,
   updateScalevMapping,
   syncScalevProductNames,
   type ConversionSource,
@@ -927,8 +928,11 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
 
+  const [priceTiers, setPriceTiers] = useState<Record<string, { price: number; count: number }[]>>({});
+
   useEffect(() => { (async () => { try { setProducts(await getProducts()); } catch {} })(); }, []);
   useEffect(() => { (async () => { try { setFreqMap(await getScalevFrequencies()); } catch {} })(); }, []);
+  useEffect(() => { (async () => { try { setPriceTiers(await getScalevPriceTiers()); } catch {} })(); }, []);
 
   // Auto-suggest: find best matching warehouse product for unmapped items
   const getSuggestion = (scalevName: string) => {
@@ -1062,8 +1066,8 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['ScaleV Product Name', 'Frek', 'Mapped To', 'Qty', 'Status', 'Action'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: ['ScaleV Product Name', 'Mapped To', 'Status', 'Action'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              {['ScaleV Product Name', 'Frek', 'Harga/unit', 'Mapped To', 'Qty', 'Status', 'Action'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['ScaleV Product Name', 'Mapped To', 'Harga/unit', 'Status', 'Action'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -1078,6 +1082,14 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: 11 }}>
                     {(r.frequency || 0).toLocaleString('id-ID')}
+                  </td>
+                  <td style={{ padding: '6px 10px', fontSize: 10 }}>
+                    {(priceTiers[r.scalev_product_name] || []).slice(0, 3).map((t, i) => (
+                      <div key={i} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{Math.round(t.price).toLocaleString('id-ID')}</span>
+                        <span style={{ color: 'var(--dim)' }}> ({t.count.toLocaleString('id-ID')}x)</span>
+                      </div>
+                    ))}
                   </td>
                   <td style={{ padding: '6px 10px', minWidth: 250 }}>
                     {isEditing ? (
@@ -1158,7 +1170,7 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Tidak ada data mapping</td></tr>
+              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Tidak ada data mapping</td></tr>
             )}
           </tbody>
         </table>

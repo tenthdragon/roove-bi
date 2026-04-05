@@ -752,6 +752,23 @@ export async function getScalevFrequencies(): Promise<Record<string, number>> {
   }
 }
 
+export async function getScalevPriceTiers(): Promise<Record<string, { price: number; count: number }[]>> {
+  const svc = createServiceSupabase();
+  try {
+    const { data } = await svc.rpc('warehouse_scalev_price_tiers');
+    const map: Record<string, { price: number; count: number }[]> = {};
+    if (data) {
+      for (const r of data) {
+        if (!map[r.product_name]) map[r.product_name] = [];
+        map[r.product_name].push({ price: r.price_tier, count: r.cnt });
+      }
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
 export async function updateScalevMapping(
   id: number,
   warehouseProductId: number | null,
