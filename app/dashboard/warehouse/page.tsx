@@ -411,7 +411,7 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
         {canWarehouseOps && <button onClick={() => { setModalMode('out'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#f97316', color: '#fff' }}>
           Stock Keluar
-        </button>
+        </button>}
         {canWarehouseOps && <button onClick={() => { setModalMode('dispose'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--red)', color: '#fff' }}>
           Dispose
