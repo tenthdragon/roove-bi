@@ -663,6 +663,8 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
   const [sources, setSources] = useState<{ productId: number; productName: string; quantity: string }[]>([]);
   // Target
   const [targetProduct, setTargetProduct] = useState('');
+  const [targetSearch, setTargetSearch] = useState('');
+  const [targetName, setTargetName] = useState('');
   const [targetQty, setTargetQty] = useState('');
   const [targetBatchCode, setTargetBatchCode] = useState('');
   const [targetExpiredDate, setTargetExpiredDate] = useState('');
@@ -678,6 +680,18 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     const q = search.toLowerCase();
     return products.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
   }, [products, search]);
+
+  const filteredTargetProducts = useMemo(() => {
+    if (!targetSearch) return [];
+    const q = targetSearch.toLowerCase();
+    return products.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+  }, [products, targetSearch]);
+
+  const selectTarget = (p: any) => {
+    setTargetProduct(String(p.id));
+    setTargetName(`${p.name} [${p.warehouse}-${p.entity}]`);
+    setTargetSearch('');
+  };
 
   const addSource = (p: any) => {
     if (sources.find(s => s.productId === p.id)) return;
@@ -775,10 +789,28 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
         </div>
         <div style={{ marginBottom: 14 }}>
           <label style={labelStyle}>Produk Tujuan *</label>
-          <select value={targetProduct} onChange={(e) => setTargetProduct(e.target.value)} style={inputStyle}>
-            <option value="">-- Pilih Produk --</option>
-            {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.category}) [{p.warehouse}-{p.entity}]</option>)}
-          </select>
+          {targetProduct ? (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <div style={{ flex: 1, padding: '8px 12px', background: 'var(--bg-deep)', borderRadius: 8, fontSize: 12, color: 'var(--text)', fontWeight: 500 }}>{targetName}</div>
+              <button onClick={() => { setTargetProduct(''); setTargetName(''); }}
+                style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}>&#10005;</button>
+            </div>
+          ) : (
+            <>
+              <input type="text" placeholder="Cari produk tujuan..." value={targetSearch} onChange={(e) => setTargetSearch(e.target.value)} style={inputStyle} />
+              {targetSearch && (
+                <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginTop: 4 }}>
+                  {filteredTargetProducts.slice(0, 20).map(p => (
+                    <div key={p.id} onClick={() => selectTarget(p)}
+                      style={{ padding: '6px 10px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--bg-deep)' }}>
+                      <span style={{ color: 'var(--text)' }}>{p.name} <span style={{ color: 'var(--dim)', fontSize: 10 }}>({p.category}) [{p.warehouse}-{p.entity}]</span></span>
+                    </div>
+                  ))}
+                  {filteredTargetProducts.length === 0 && <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Tidak ditemukan</div>}
+                </div>
+              )}
+            </>
+          )}
         </div>
         <div style={{ marginBottom: 14 }}>
           <label style={labelStyle}>Qty Hasil *</label>
