@@ -734,14 +734,17 @@ export async function getScalevMappings(filter?: 'all' | 'mapped' | 'unmapped' |
   const { data, error } = await query.order('scalev_product_name');
   if (error) throw error;
 
-  // Get frequency counts
-  const { data: freqData } = await svc.rpc('warehouse_scalev_mapping_frequencies');
-
-  const freqMap: Record<string, number> = {};
-  if (freqData) {
-    for (const r of freqData) {
-      freqMap[r.product_name] = r.cnt;
+  // Get frequency counts (non-blocking — if slow/fails, show 0)
+  let freqMap: Record<string, number> = {};
+  try {
+    const { data: freqData } = await svc.rpc('warehouse_scalev_mapping_frequencies');
+    if (freqData) {
+      for (const r of freqData) {
+        freqMap[r.product_name] = r.cnt;
+      }
     }
+  } catch {
+    // Frequency RPC may timeout on large datasets — continue without
   }
 
   return (data || []).map(r => ({
