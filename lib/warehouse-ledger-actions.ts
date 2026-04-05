@@ -256,48 +256,57 @@ export async function recordTransfer(
 // CONVERT — sachet → FG (or any product → product conversion)
 // ============================================================
 
+export interface ConversionSource {
+  productId: number;
+  batchId?: number | null;
+  quantity: number;
+}
+
 export async function recordConversion(
-  sourceProductId: number,
-  sourceBatchId: number | null,
-  sourceQty: number,
+  sources: ConversionSource[],
   targetProductId: number,
   targetQty: number,
   targetBatchCode?: string,
   targetExpiredDate?: string | null,
   notes?: string,
 ) {
-  if (sourceQty <= 0 || targetQty <= 0) throw new Error('Quantities must be positive');
-  const svc = createServiceSupabase();
-  const userId = await getCurrentUserId();
-
-  // Deduct source
-  if (sourceBatchId) {
-    const { data: batch } = await svc
-      .from('warehouse_batches')
-      .select('current_qty')
-      .eq('id', sourceBatchId)
-      .single();
-    if (batch) {
-      await svc
-        .from('warehouse_batches')
-        .update({ current_qty: Math.max(0, Number(batch.current_qty) - sourceQty) })
-        .eq('id', sourceBatchId);
-    }
+  if (sources.length === 0) throw new Error('At least one source required');
+  if (targetQty <= 0) throw new Error('Target quantity must be positive');
+  for (const s of sources) {
+    if (s.quantity <= 0) throw new Error('Source quantities must be positive');
   }
 
+  const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
   const refId = `conv-${Date.now()}`;
 
-  // Ledger OUT for source
-  await insertLedgerEntry(svc, {
-    warehouse_product_id: sourceProductId,
-    batch_id: sourceBatchId,
-    movement_type: 'OUT',
-    quantity: -sourceQty,
-    reference_type: 'manual',
-    reference_id: refId,
-    notes: `Konversi keluar: ${sourceQty} unit → produk lain`,
-    created_by: userId,
-  });
+  // Deduct each source
+  for (const src of sources) {
+    if (src.batchId) {
+      const { data: batch } = await svc
+        .from('warehouse_batches')
+        .select('current_qty')
+        .eq('id', src.batchId)
+        .single();
+      if (batch) {
+        await svc
+          .from('warehouse_batches')
+          .update({ current_qty: Math.max(0, Number(batch.current_qty) - src.quantity) })
+          .eq('id', src.batchId);
+      }
+    }
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: src.productId,
+      batch_id: src.batchId || null,
+      movement_type: 'OUT',
+      quantity: -src.quantity,
+      reference_type: 'manual',
+      reference_id: refId,
+      notes: `Konversi keluar: ${src.quantity} unit`,
+      created_by: userId,
+    });
+  }
 
   // Create or find target batch
   let targetBatchId: number | null = null;
@@ -315,7 +324,6 @@ export async function recordConversion(
       .single();
     if (newBatch) {
       targetBatchId = newBatch.id;
-      // If upsert hit existing, add to current_qty
       if (newBatch.initial_qty !== targetQty) {
         await svc
           .from('warehouse_batches')

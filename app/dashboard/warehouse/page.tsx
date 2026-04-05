@@ -23,6 +23,7 @@ import {
   recordTransfer,
   recordConversion,
   createBatch,
+  type ConversionSource,
 } from '@/lib/warehouse-ledger-actions';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
@@ -498,6 +499,15 @@ const labelStyle = { fontSize: 12, fontWeight: 600, color: 'var(--dim)', marginB
 function StockMovementModal({ mode, onClose, onSuccess }: {
   mode: 'in' | 'out' | 'transfer' | 'convert' | 'dispose'; onClose: () => void; onSuccess: () => void;
 }) {
+  if (mode === 'convert') return <ConvertModal onClose={onClose} onSuccess={onSuccess} />;
+  return <SimpleMovementModal mode={mode} onClose={onClose} onSuccess={onSuccess} />;
+}
+
+// ── Simple modal for IN/OUT/TRANSFER/DISPOSE ──
+
+function SimpleMovementModal({ mode, onClose, onSuccess }: {
+  mode: 'in' | 'out' | 'transfer' | 'dispose'; onClose: () => void; onSuccess: () => void;
+}) {
   const [products, setProducts] = useState<any[]>([]);
   const [batches, setBatchList] = useState<any[]>([]);
   const [selectedProduct, setSelectedProduct] = useState('');
@@ -507,62 +517,40 @@ function StockMovementModal({ mode, onClose, onSuccess }: {
   const [newBatch, setNewBatch] = useState(false);
   const [batchCode, setBatchCode] = useState('');
   const [expiredDate, setExpiredDate] = useState('');
-  // Transfer fields
   const [targetEntity, setTargetEntity] = useState('');
-  // Convert fields
-  const [targetProduct, setTargetProduct] = useState('');
-  const [targetQty, setTargetQty] = useState('');
-  const [targetBatchCode, setTargetBatchCode] = useState('');
-  const [targetExpiredDate, setTargetExpiredDate] = useState('');
-  // State
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const modeConfig: Record<string, { title: string; color: string; label: string; desc: string }> = {
+  const cfgMap: Record<string, { title: string; color: string; label: string; desc: string }> = {
     in: { title: 'Stock Masuk', color: 'var(--green)', label: 'Masuk', desc: 'Barang masuk dari vendor, produksi, atau RTS' },
     out: { title: 'Stock Keluar', color: '#f97316', label: 'Keluar', desc: 'Barang keluar (sample, retur, lain-lain)' },
     transfer: { title: 'Transfer Antar Entity', color: '#06b6d4', label: 'Transfer', desc: 'Pindahkan stock ke entity lain di gudang yang sama' },
-    convert: { title: 'Konversi Produk', color: '#8b5cf6', label: 'Konversi', desc: 'Ubah sachet mentah menjadi finished goods, atau sebaliknya' },
     dispose: { title: 'Dispose Stock', color: 'var(--red)', label: 'Dispose', desc: 'Buang barang expired atau rusak' },
   };
-  const cfg = modeConfig[mode];
+  const cfg = cfgMap[mode];
 
-  // Load products
-  useEffect(() => {
-    (async () => {
-      try { setProducts(await getProducts()); } catch (e) { console.error(e); }
-    })();
-  }, []);
-
-  // Load batches when product selected
+  useEffect(() => { (async () => { try { setProducts(await getProducts()); } catch {} })(); }, []);
   useEffect(() => {
     if (!selectedProduct) { setBatchList([]); return; }
-    (async () => {
-      try { setBatchList(await getBatches(Number(selectedProduct))); } catch (e) { console.error(e); }
-    })();
+    (async () => { try { setBatchList(await getBatches(Number(selectedProduct))); } catch {} })();
   }, [selectedProduct]);
 
-  // Derive source entity from selected product
   const sourceProduct = products.find(p => String(p.id) === selectedProduct);
-  const sourceEntity = sourceProduct?.entity || '';
-  const sourceWarehouse = sourceProduct?.warehouse || 'BTN';
-  const entities = ['RTI', 'RLB', 'RLT', 'JHN'].filter(e => e !== sourceEntity);
+  const entities = ['RTI', 'RLB', 'RLT', 'JHN'].filter(e => e !== sourceProduct?.entity);
 
   const handleSubmit = async () => {
     setError(''); setSuccess('');
-    const qty = Number(quantity);
-    const pid = Number(selectedProduct);
+    const qty = Number(quantity); const pid = Number(selectedProduct);
     if (!pid) { setError('Pilih produk'); return; }
     if (!qty || qty <= 0) { setError('Quantity harus > 0'); return; }
-
     setSubmitting(true);
     try {
       if (mode === 'in') {
         if (newBatch) {
           if (!batchCode.trim()) { setError('Kode batch wajib diisi'); setSubmitting(false); return; }
           await createBatch(pid, batchCode.trim(), expiredDate || null, qty);
-          setSuccess(`Stock masuk: ${qty} unit (batch baru: ${batchCode})`);
+          setSuccess(`Stock masuk: ${qty} unit (batch: ${batchCode})`);
         } else {
           await recordStockIn(pid, selectedBatch ? Number(selectedBatch) : null, qty, 'manual', undefined, notes || undefined);
           setSuccess(`Stock masuk: ${qty} unit`);
@@ -572,23 +560,14 @@ function StockMovementModal({ mode, onClose, onSuccess }: {
         setSuccess(`Stock keluar: ${qty} unit`);
       } else if (mode === 'transfer') {
         if (!targetEntity) { setError('Pilih entity tujuan'); setSubmitting(false); return; }
-        await recordTransfer(pid, selectedBatch ? Number(selectedBatch) : null, qty, sourceEntity, targetEntity, sourceWarehouse, sourceWarehouse, notes || undefined);
+        await recordTransfer(pid, selectedBatch ? Number(selectedBatch) : null, qty, sourceProduct.entity, targetEntity, sourceProduct.warehouse, sourceProduct.warehouse, notes || undefined);
         setSuccess(`Transfer: ${qty} unit → ${targetEntity}`);
-      } else if (mode === 'convert') {
-        const tpid = Number(targetProduct);
-        const tqty = Number(targetQty);
-        if (!tpid) { setError('Pilih produk tujuan'); setSubmitting(false); return; }
-        if (!tqty || tqty <= 0) { setError('Qty tujuan harus > 0'); setSubmitting(false); return; }
-        await recordConversion(pid, selectedBatch ? Number(selectedBatch) : null, qty, tpid, tqty, targetBatchCode || undefined, targetExpiredDate || null, notes || undefined);
-        setSuccess(`Konversi: ${qty} unit → ${tqty} unit`);
       } else if (mode === 'dispose') {
         await recordDispose(pid, selectedBatch ? Number(selectedBatch) : null, qty, notes || undefined);
         setSuccess(`Dispose: ${qty} unit`);
       }
       setTimeout(onSuccess, 800);
-    } catch (e: any) {
-      setError(e.message || 'Gagal menyimpan');
-    }
+    } catch (e: any) { setError(e.message || 'Gagal menyimpan'); }
     setSubmitting(false);
   };
 
@@ -602,19 +581,14 @@ function StockMovementModal({ mode, onClose, onSuccess }: {
         </div>
         <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>{cfg.desc}</div>
 
-        {/* Source product */}
         <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>{mode === 'convert' ? 'Produk Asal *' : 'Produk *'}</label>
-          <select value={selectedProduct} onChange={(e) => { setSelectedProduct(e.target.value); setSelectedBatch(''); }}
-            style={inputStyle}>
+          <label style={labelStyle}>Produk *</label>
+          <select value={selectedProduct} onChange={(e) => { setSelectedProduct(e.target.value); setSelectedBatch(''); }} style={inputStyle}>
             <option value="">-- Pilih Produk --</option>
-            {products.map(p => (
-              <option key={p.id} value={p.id}>{p.name} ({p.category}) [{p.warehouse}-{p.entity}]</option>
-            ))}
+            {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.category}) [{p.warehouse}-{p.entity}]</option>)}
           </select>
         </div>
 
-        {/* Batch — stock IN: new or existing */}
         {mode === 'in' && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
@@ -638,10 +612,9 @@ function StockMovementModal({ mode, onClose, onSuccess }: {
           </div>
         )}
 
-        {/* Batch — out/dispose/transfer/convert: select existing */}
-        {['out', 'dispose', 'transfer', 'convert'].includes(mode) && batches.length > 0 && (
+        {['out', 'dispose', 'transfer'].includes(mode) && batches.length > 0 && (
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Batch Asal</label>
+            <label style={labelStyle}>Batch</label>
             <select value={selectedBatch} onChange={(e) => setSelectedBatch(e.target.value)} style={inputStyle}>
               <option value="">-- Tanpa Batch (FIFO) --</option>
               {batches.map(b => <option key={b.id} value={b.id}>{b.batch_code} (qty: {b.current_qty}{b.expired_date ? `, exp: ${b.expired_date}` : ''})</option>)}
@@ -649,56 +622,21 @@ function StockMovementModal({ mode, onClose, onSuccess }: {
           </div>
         )}
 
-        {/* Quantity */}
         <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>{mode === 'convert' ? 'Qty Asal *' : 'Quantity *'}</label>
+          <label style={labelStyle}>Quantity *</label>
           <input type="number" min="1" placeholder="Jumlah" value={quantity} onChange={(e) => setQuantity(e.target.value)} style={inputStyle} />
         </div>
 
-        {/* Transfer: entity tujuan */}
         {mode === 'transfer' && (
           <div style={{ marginBottom: 14 }}>
             <label style={labelStyle}>Entity Tujuan *</label>
             <select value={targetEntity} onChange={(e) => setTargetEntity(e.target.value)} style={inputStyle}>
               <option value="">-- Pilih Entity --</option>
-              {entities.map(e => <option key={e} value={e}>{sourceWarehouse} - {e}</option>)}
+              {entities.map(e => <option key={e} value={e}>{sourceProduct?.warehouse || 'BTN'} - {e}</option>)}
             </select>
           </div>
         )}
 
-        {/* Convert: target product + qty */}
-        {mode === 'convert' && (
-          <>
-            <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0', paddingTop: 14 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>Hasil Konversi</div>
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Produk Tujuan *</label>
-              <select value={targetProduct} onChange={(e) => setTargetProduct(e.target.value)} style={inputStyle}>
-                <option value="">-- Pilih Produk --</option>
-                {products.filter(p => String(p.id) !== selectedProduct).map(p => (
-                  <option key={p.id} value={p.id}>{p.name} ({p.category}) [{p.warehouse}-{p.entity}]</option>
-                ))}
-              </select>
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Qty Tujuan *</label>
-              <input type="number" min="1" placeholder="Jumlah hasil" value={targetQty} onChange={(e) => setTargetQty(e.target.value)} style={inputStyle} />
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-              <div style={{ flex: 2 }}>
-                <label style={labelStyle}>Batch Tujuan</label>
-                <input type="text" placeholder="Kode batch (opsional)" value={targetBatchCode} onChange={(e) => setTargetBatchCode(e.target.value)} style={inputStyle} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label style={labelStyle}>Expired</label>
-                <input type="date" value={targetExpiredDate} onChange={(e) => setTargetExpiredDate(e.target.value)} style={inputStyle} />
-              </div>
-            </div>
-          </>
-        )}
-
-        {/* Notes */}
         <div style={{ marginBottom: 14 }}>
           <label style={labelStyle}>Catatan</label>
           <input type="text" placeholder="Opsional" value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
@@ -710,6 +648,164 @@ function StockMovementModal({ mode, onClose, onSuccess }: {
         <button onClick={handleSubmit} disabled={submitting}
           style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: cfg.color, color: '#fff', opacity: submitting ? 0.7 : 1 }}>
           {submitting ? 'Menyimpan...' : `Simpan ${cfg.label}`}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Konversi modal: multi-source → single target ──
+
+function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [products, setProducts] = useState<any[]>([]);
+  const [search, setSearch] = useState('');
+  // Sources: list of { productId, productName, quantity }
+  const [sources, setSources] = useState<{ productId: number; productName: string; quantity: string }[]>([]);
+  // Target
+  const [targetProduct, setTargetProduct] = useState('');
+  const [targetQty, setTargetQty] = useState('');
+  const [targetBatchCode, setTargetBatchCode] = useState('');
+  const [targetExpiredDate, setTargetExpiredDate] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => { (async () => { try { setProducts(await getProducts()); } catch {} })(); }, []);
+
+  const filteredProducts = useMemo(() => {
+    if (!search) return products;
+    const q = search.toLowerCase();
+    return products.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+  }, [products, search]);
+
+  const addSource = (p: any) => {
+    if (sources.find(s => s.productId === p.id)) return;
+    setSources([...sources, { productId: p.id, productName: `${p.name} [${p.warehouse}-${p.entity}]`, quantity: '' }]);
+  };
+
+  const removeSource = (pid: number) => {
+    setSources(sources.filter(s => s.productId !== pid));
+  };
+
+  const updateSourceQty = (pid: number, qty: string) => {
+    setSources(sources.map(s => s.productId === pid ? { ...s, quantity: qty } : s));
+  };
+
+  const handleSubmit = async () => {
+    setError(''); setSuccess('');
+    if (sources.length === 0) { setError('Tambahkan minimal 1 produk asal'); return; }
+    const tpid = Number(targetProduct);
+    const tqty = Number(targetQty);
+    if (!tpid) { setError('Pilih produk tujuan'); return; }
+    if (!tqty || tqty <= 0) { setError('Qty tujuan harus > 0'); return; }
+
+    const convSources: ConversionSource[] = [];
+    for (const s of sources) {
+      const qty = Number(s.quantity);
+      if (!qty || qty <= 0) { setError(`Qty untuk ${s.productName} harus > 0`); return; }
+      convSources.push({ productId: s.productId, quantity: qty });
+    }
+
+    setSubmitting(true);
+    try {
+      await recordConversion(convSources, tpid, tqty, targetBatchCode || undefined, targetExpiredDate || null, notes || undefined);
+      setSuccess(`Konversi berhasil: ${sources.length} bahan → ${tqty} unit`);
+      setTimeout(onSuccess, 800);
+    } catch (e: any) { setError(e.message || 'Gagal menyimpan'); }
+    setSubmitting(false);
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#8b5cf6' }}>Konversi Produk</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--dim)', fontSize: 18, cursor: 'pointer', padding: 4 }}>&#10005;</button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Gabungkan beberapa bahan menjadi 1 produk (e.g. sachet + kemasan → box FG)</div>
+
+        {/* ── Source: search + add ── */}
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Bahan Asal</div>
+        <input type="text" placeholder="Cari produk bahan..." value={search} onChange={(e) => setSearch(e.target.value)}
+          style={{ ...inputStyle, marginBottom: 8 }} />
+
+        {/* Search results */}
+        {search && (
+          <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 10 }}>
+            {filteredProducts.slice(0, 20).map(p => {
+              const isAdded = sources.some(s => s.productId === p.id);
+              return (
+                <div key={p.id} onClick={() => !isAdded && addSource(p)}
+                  style={{ padding: '6px 10px', fontSize: 12, cursor: isAdded ? 'default' : 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                    borderBottom: '1px solid var(--bg-deep)', background: isAdded ? 'var(--bg-deep)' : 'transparent', opacity: isAdded ? 0.5 : 1 }}>
+                  <span style={{ color: 'var(--text)' }}>{p.name} <span style={{ color: 'var(--dim)', fontSize: 10 }}>({p.category}) [{p.warehouse}-{p.entity}]</span></span>
+                  {isAdded ? <span style={{ fontSize: 10, color: 'var(--dim)' }}>Sudah ditambahkan</span> : <span style={{ fontSize: 10, color: '#8b5cf6' }}>+ Tambah</span>}
+                </div>
+              );
+            })}
+            {filteredProducts.length === 0 && <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Tidak ditemukan</div>}
+          </div>
+        )}
+
+        {/* Added sources with qty */}
+        {sources.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            {sources.map(s => (
+              <div key={s.productId} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                <button onClick={() => removeSource(s.productId)}
+                  style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}>&#10005;</button>
+                <div style={{ flex: 1, fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.productName}</div>
+                <input type="number" min="1" placeholder="Qty" value={s.quantity} onChange={(e) => updateSourceQty(s.productId, e.target.value)}
+                  style={{ ...inputStyle, width: 80, flex: 'none', textAlign: 'right' }} />
+              </div>
+            ))}
+          </div>
+        )}
+        {sources.length === 0 && !search && (
+          <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12, background: 'var(--bg-deep)', borderRadius: 8, marginBottom: 14 }}>
+            Ketik di search untuk menambahkan bahan
+          </div>
+        )}
+
+        {/* ── Target ── */}
+        <div style={{ borderTop: '1px solid var(--border)', margin: '12px 0', paddingTop: 14 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>Hasil Konversi</div>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Produk Tujuan *</label>
+          <select value={targetProduct} onChange={(e) => setTargetProduct(e.target.value)} style={inputStyle}>
+            <option value="">-- Pilih Produk --</option>
+            {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.category}) [{p.warehouse}-{p.entity}]</option>)}
+          </select>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Qty Hasil *</label>
+          <input type="number" min="1" placeholder="Jumlah hasil" value={targetQty} onChange={(e) => setTargetQty(e.target.value)} style={inputStyle} />
+        </div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+          <div style={{ flex: 2 }}>
+            <label style={labelStyle}>Batch Tujuan</label>
+            <input type="text" placeholder="Kode batch (opsional)" value={targetBatchCode} onChange={(e) => setTargetBatchCode(e.target.value)} style={inputStyle} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={labelStyle}>Expired</label>
+            <input type="date" value={targetExpiredDate} onChange={(e) => setTargetExpiredDate(e.target.value)} style={inputStyle} />
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Catatan</label>
+          <input type="text" placeholder="Opsional" value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
+        </div>
+
+        {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: '#fca5a5', fontSize: 12, marginBottom: 12 }}>{error}</div>}
+        {success && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.1)', color: '#6ee7b7', fontSize: 12, marginBottom: 12 }}>{success}</div>}
+
+        <button onClick={handleSubmit} disabled={submitting}
+          style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: '#8b5cf6', color: '#fff', opacity: submitting ? 0.7 : 1 }}>
+          {submitting ? 'Menyimpan...' : 'Simpan Konversi'}
         </button>
       </div>
     </div>
