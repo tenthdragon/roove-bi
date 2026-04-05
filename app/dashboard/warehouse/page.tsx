@@ -343,6 +343,7 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
 }) {
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'in' | 'out' | 'dispose'>('in');
+  const [warehouseFilter, setWarehouseFilter] = useState('all');
 
   const categories = useMemo(() => {
     const cats = new Set<string>();
@@ -350,15 +351,22 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
     return Array.from(cats).sort();
   }, [data]);
 
+  const warehouses = useMemo(() => {
+    const whs = new Set<string>();
+    data.forEach(r => r.warehouse && whs.add(r.warehouse));
+    return Array.from(whs).sort();
+  }, [data]);
+
   const filtered = useMemo(() => {
     let result = data;
+    if (warehouseFilter !== 'all') result = result.filter(r => r.warehouse === warehouseFilter);
     if (categoryFilter !== 'all') result = result.filter(r => r.category === categoryFilter);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter(r => r.product_name?.toLowerCase().includes(q));
     }
     return result;
-  }, [data, categoryFilter, searchQuery]);
+  }, [data, categoryFilter, searchQuery, warehouseFilter]);
 
   const totalStock = filtered.reduce((s, r) => s + Number(r.current_stock || 0), 0);
   const totalValue = filtered.reduce((s, r) => s + Number(r.stock_value || 0), 0);
@@ -391,6 +399,11 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
         <div style={{ flex: 1 }} />
         <input type="text" placeholder="Cari produk..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', minWidth: 200 }} />
+        <select value={warehouseFilter} onChange={(e) => setWarehouseFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' }}>
+          <option value="all">Semua Gudang</option>
+          {warehouses.map(w => <option key={w} value={w}>{w}</option>)}
+        </select>
         <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' }}>
           <option value="all">Semua Kategori</option>
@@ -408,8 +421,8 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['No', 'Produk', 'Kategori', 'Entity', 'Stock', 'Satuan', 'Harga', 'Nilai', 'Status'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Entity', 'Satuan', 'Status'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              {['No', 'Produk', 'Kategori', 'Gudang', 'Entity', 'Stock', 'Satuan', 'Harga', 'Nilai', 'Status'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Gudang', 'Entity', 'Satuan', 'Status'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -421,6 +434,7 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
                 <td style={{ padding: '6px 10px' }}>
                   <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `${CATEGORY_COLORS[r.category]}20` : 'var(--bg-deep)', color: CATEGORY_COLORS[r.category] || 'var(--text-secondary)' }}>{r.category}</span>
                 </td>
+                <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, fontWeight: 600 }}>{r.warehouse}</td>
                 <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{r.entity}</td>
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: Number(r.current_stock) < 0 ? 'var(--red)' : 'var(--text)' }}>
                   {Number(r.current_stock).toLocaleString('id-ID')}
@@ -438,13 +452,13 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada data stock. Tambahkan batch dan catat movement untuk melihat saldo.</td></tr>
+              <tr><td colSpan={10} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada data stock. Tambahkan batch dan catat movement untuk melihat saldo.</td></tr>
             )}
           </tbody>
           {filtered.length > 0 && (
             <tfoot>
               <tr style={{ borderTop: '2px solid var(--border)' }}>
-                <td colSpan={4} style={{ padding: '8px 10px', fontWeight: 700, color: 'var(--text)' }}>Total</td>
+                <td colSpan={5} style={{ padding: '8px 10px', fontWeight: 700, color: 'var(--text)' }}>Total</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{totalStock.toLocaleString('id-ID')}</td>
                 <td /><td />
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{fmtRupiah(totalValue)}</td>
@@ -695,7 +709,7 @@ function LedgerTab({ data, typeFilter, setTypeFilter }: {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Waktu', 'Produk', 'Tipe', 'Qty', 'Saldo', 'Batch', 'Referensi', 'Catatan'].map(h => (
+              {['Waktu', 'Produk', 'Tipe', 'Qty', 'Saldo', 'Batch', 'Referensi', 'Oleh', 'Catatan'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Tipe', 'Batch', 'Referensi', 'Catatan'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -729,6 +743,9 @@ function LedgerTab({ data, typeFilter, setTypeFilter }: {
                   <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
                     {r.reference_type ? `${r.reference_type}${r.reference_id ? ` #${r.reference_id}` : ''}` : '-'}
                   </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    {r.profiles?.full_name || r.profiles?.email || (r.created_by ? '...' : 'System')}
+                  </td>
                   <td style={{ padding: '6px 10px', color: 'var(--text-muted)', fontSize: 11, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {r.notes || '-'}
                   </td>
@@ -736,7 +753,7 @@ function LedgerTab({ data, typeFilter, setTypeFilter }: {
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada movement tercatat</td></tr>
+              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada movement tercatat</td></tr>
             )}
           </tbody>
         </table>

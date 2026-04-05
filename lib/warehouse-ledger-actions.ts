@@ -1,7 +1,21 @@
 // lib/warehouse-ledger-actions.ts
 'use server';
 
-import { createServiceSupabase } from './supabase-server';
+import { createServiceSupabase, createServerSupabase } from './supabase-server';
+
+// ============================================================
+// AUTH HELPER
+// ============================================================
+
+async function getCurrentUserId(): Promise<string | null> {
+  try {
+    const supabase = createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    return user?.id || null;
+  } catch {
+    return null;
+  }
+}
 
 // ============================================================
 // TYPES
@@ -63,14 +77,10 @@ export async function recordStockIn(
 ) {
   if (quantity <= 0) throw new Error('Stock IN quantity must be positive');
   const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
 
   // Update batch qty if batch specified
   if (batchId) {
-    const { error } = await svc
-      .from('warehouse_batches')
-      .update({ current_qty: svc.rpc ? undefined : undefined })
-      .eq('id', batchId);
-    // Use raw SQL increment via RPC or manual update
     const { data: batch } = await svc
       .from('warehouse_batches')
       .select('current_qty')
@@ -88,10 +98,11 @@ export async function recordStockIn(
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'IN',
-    quantity: quantity, // positive
+    quantity: quantity,
     reference_type: referenceType,
     reference_id: referenceId,
     notes,
+    created_by: userId,
   });
 }
 
@@ -109,6 +120,7 @@ export async function recordStockOut(
 ) {
   if (quantity <= 0) throw new Error('Stock OUT quantity must be positive');
   const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
 
   // Update batch qty
   if (batchId) {
@@ -129,10 +141,11 @@ export async function recordStockOut(
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'OUT',
-    quantity: -quantity, // negative
+    quantity: -quantity,
     reference_type: referenceType,
     reference_id: referenceId,
     notes,
+    created_by: userId,
   });
 }
 
@@ -147,6 +160,7 @@ export async function recordStockAdjust(
   notes?: string,
 ) {
   const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
 
   if (batchId) {
     const { data: batch } = await svc
@@ -167,6 +181,7 @@ export async function recordStockAdjust(
     batch_id: batchId,
     movement_type: 'ADJUST',
     quantity: adjustmentQty,
+    created_by: userId,
     reference_type: 'opname',
     notes,
   });
@@ -188,6 +203,7 @@ export async function recordTransfer(
 ) {
   if (quantity <= 0) throw new Error('Transfer quantity must be positive');
   const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
 
   // Create transfer record
   const { data: transfer, error: tErr } = await svc
@@ -230,6 +246,7 @@ export async function recordTransfer(
     reference_type: 'transfer',
     reference_id: String(transfer.id),
     notes: `Transfer to ${toEntity} (${toWarehouse})`,
+    created_by: userId,
   });
 
   return transfer;
@@ -247,6 +264,7 @@ export async function recordDispose(
 ) {
   if (quantity <= 0) throw new Error('Dispose quantity must be positive');
   const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
 
   if (batchId) {
     const { data: batch } = await svc
@@ -269,6 +287,7 @@ export async function recordDispose(
     quantity: -quantity,
     reference_type: 'dispose',
     notes: reason,
+    created_by: userId,
   });
 }
 
@@ -283,6 +302,7 @@ export async function createBatch(
   initialQty: number = 0,
 ) {
   const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
   const { data, error } = await svc
     .from('warehouse_batches')
     .insert({
@@ -304,6 +324,7 @@ export async function createBatch(
       movement_type: 'IN',
       quantity: initialQty,
       reference_type: 'manual',
+      created_by: userId,
       notes: `Initial stock for batch ${batchCode}`,
     });
   }
@@ -365,7 +386,8 @@ export async function getLedgerHistory(filters?: {
     .select(`
       *,
       warehouse_products!inner(name, category, entity),
-      warehouse_batches(batch_code, expired_date)
+      warehouse_batches(batch_code, expired_date),
+      profiles:created_by(full_name, email)
     `);
 
   if (filters?.productId) query = query.eq('warehouse_product_id', filters.productId);
