@@ -1,0 +1,520 @@
+// lib/warehouse-ledger-actions.ts
+'use server';
+
+import { createServiceSupabase } from './supabase-server';
+
+// ============================================================
+// TYPES
+// ============================================================
+
+export type MovementType = 'IN' | 'OUT' | 'ADJUST' | 'TRANSFER_IN' | 'TRANSFER_OUT' | 'DISPOSE';
+export type ReferenceType = 'scalev_order' | 'manual' | 'purchase_order' | 'transfer' | 'dispose' | 'opname' | 'rts';
+
+export interface LedgerEntry {
+  warehouse_product_id: number;
+  batch_id?: number | null;
+  movement_type: MovementType;
+  quantity: number;
+  reference_type: ReferenceType;
+  reference_id?: string | null;
+  notes?: string | null;
+  created_by?: string | null;
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+async function getCurrentBalance(svc: ReturnType<typeof createServiceSupabase>, productId: number): Promise<number> {
+  const { data, error } = await svc
+    .from('warehouse_stock_ledger')
+    .select('quantity')
+    .eq('warehouse_product_id', productId);
+  if (error) throw error;
+  return (data || []).reduce((sum, r) => sum + Number(r.quantity), 0);
+}
+
+async function insertLedgerEntry(svc: ReturnType<typeof createServiceSupabase>, entry: LedgerEntry) {
+  const runningBalance = await getCurrentBalance(svc, entry.warehouse_product_id) + entry.quantity;
+
+  const { data, error } = await svc
+    .from('warehouse_stock_ledger')
+    .insert({
+      ...entry,
+      running_balance: runningBalance,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// ============================================================
+// STOCK IN — vendor delivery, RTS, production received
+// ============================================================
+
+export async function recordStockIn(
+  productId: number,
+  batchId: number | null,
+  quantity: number,
+  referenceType: ReferenceType = 'manual',
+  referenceId?: string,
+  notes?: string,
+) {
+  if (quantity <= 0) throw new Error('Stock IN quantity must be positive');
+  const svc = createServiceSupabase();
+
+  // Update batch qty if batch specified
+  if (batchId) {
+    const { error } = await svc
+      .from('warehouse_batches')
+      .update({ current_qty: svc.rpc ? undefined : undefined })
+      .eq('id', batchId);
+    // Use raw SQL increment via RPC or manual update
+    const { data: batch } = await svc
+      .from('warehouse_batches')
+      .select('current_qty')
+      .eq('id', batchId)
+      .single();
+    if (batch) {
+      await svc
+        .from('warehouse_batches')
+        .update({ current_qty: Number(batch.current_qty) + quantity })
+        .eq('id', batchId);
+    }
+  }
+
+  return insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'IN',
+    quantity: quantity, // positive
+    reference_type: referenceType,
+    reference_id: referenceId,
+    notes,
+  });
+}
+
+// ============================================================
+// STOCK OUT — manual outbound (non-ScaleV)
+// ============================================================
+
+export async function recordStockOut(
+  productId: number,
+  batchId: number | null,
+  quantity: number,
+  referenceType: ReferenceType = 'manual',
+  referenceId?: string,
+  notes?: string,
+) {
+  if (quantity <= 0) throw new Error('Stock OUT quantity must be positive');
+  const svc = createServiceSupabase();
+
+  // Update batch qty
+  if (batchId) {
+    const { data: batch } = await svc
+      .from('warehouse_batches')
+      .select('current_qty')
+      .eq('id', batchId)
+      .single();
+    if (batch) {
+      await svc
+        .from('warehouse_batches')
+        .update({ current_qty: Math.max(0, Number(batch.current_qty) - quantity) })
+        .eq('id', batchId);
+    }
+  }
+
+  return insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'OUT',
+    quantity: -quantity, // negative
+    reference_type: referenceType,
+    reference_id: referenceId,
+    notes,
+  });
+}
+
+// ============================================================
+// STOCK ADJUST — stock opname correction
+// ============================================================
+
+export async function recordStockAdjust(
+  productId: number,
+  batchId: number | null,
+  adjustmentQty: number, // positive = surplus, negative = deficit
+  notes?: string,
+) {
+  const svc = createServiceSupabase();
+
+  if (batchId) {
+    const { data: batch } = await svc
+      .from('warehouse_batches')
+      .select('current_qty')
+      .eq('id', batchId)
+      .single();
+    if (batch) {
+      await svc
+        .from('warehouse_batches')
+        .update({ current_qty: Math.max(0, Number(batch.current_qty) + adjustmentQty) })
+        .eq('id', batchId);
+    }
+  }
+
+  return insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'ADJUST',
+    quantity: adjustmentQty,
+    reference_type: 'opname',
+    notes,
+  });
+}
+
+// ============================================================
+// TRANSFER — inter-company/warehouse
+// ============================================================
+
+export async function recordTransfer(
+  productId: number,
+  batchId: number | null,
+  quantity: number,
+  fromEntity: string,
+  toEntity: string,
+  fromWarehouse: string = 'BTN',
+  toWarehouse: string = 'BTN',
+  notes?: string,
+) {
+  if (quantity <= 0) throw new Error('Transfer quantity must be positive');
+  const svc = createServiceSupabase();
+
+  // Create transfer record
+  const { data: transfer, error: tErr } = await svc
+    .from('warehouse_transfers')
+    .insert({
+      from_entity: fromEntity,
+      to_entity: toEntity,
+      from_warehouse: fromWarehouse,
+      to_warehouse: toWarehouse,
+      warehouse_product_id: productId,
+      batch_id: batchId,
+      quantity,
+      notes,
+    })
+    .select()
+    .single();
+  if (tErr) throw tErr;
+
+  // Update batch qty (deduct from source)
+  if (batchId) {
+    const { data: batch } = await svc
+      .from('warehouse_batches')
+      .select('current_qty')
+      .eq('id', batchId)
+      .single();
+    if (batch) {
+      await svc
+        .from('warehouse_batches')
+        .update({ current_qty: Math.max(0, Number(batch.current_qty) - quantity) })
+        .eq('id', batchId);
+    }
+  }
+
+  // Ledger: OUT from source
+  await insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'TRANSFER_OUT',
+    quantity: -quantity,
+    reference_type: 'transfer',
+    reference_id: String(transfer.id),
+    notes: `Transfer to ${toEntity} (${toWarehouse})`,
+  });
+
+  return transfer;
+}
+
+// ============================================================
+// DISPOSE — expired/damaged items
+// ============================================================
+
+export async function recordDispose(
+  productId: number,
+  batchId: number | null,
+  quantity: number,
+  reason?: string,
+) {
+  if (quantity <= 0) throw new Error('Dispose quantity must be positive');
+  const svc = createServiceSupabase();
+
+  if (batchId) {
+    const { data: batch } = await svc
+      .from('warehouse_batches')
+      .select('current_qty')
+      .eq('id', batchId)
+      .single();
+    if (batch) {
+      await svc
+        .from('warehouse_batches')
+        .update({ current_qty: Math.max(0, Number(batch.current_qty) - quantity) })
+        .eq('id', batchId);
+    }
+  }
+
+  return insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'DISPOSE',
+    quantity: -quantity,
+    reference_type: 'dispose',
+    notes: reason,
+  });
+}
+
+// ============================================================
+// BATCH MANAGEMENT
+// ============================================================
+
+export async function createBatch(
+  productId: number,
+  batchCode: string,
+  expiredDate: string | null,
+  initialQty: number = 0,
+) {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('warehouse_batches')
+    .insert({
+      warehouse_product_id: productId,
+      batch_code: batchCode,
+      expired_date: expiredDate,
+      initial_qty: initialQty,
+      current_qty: initialQty,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+
+  // If initial qty > 0, create ledger entry
+  if (initialQty > 0) {
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: productId,
+      batch_id: data.id,
+      movement_type: 'IN',
+      quantity: initialQty,
+      reference_type: 'manual',
+      notes: `Initial stock for batch ${batchCode}`,
+    });
+  }
+
+  return data;
+}
+
+// ============================================================
+// QUERIES
+// ============================================================
+
+export async function getProducts(filters?: {
+  category?: string;
+  entity?: string;
+  warehouse?: string;
+  activeOnly?: boolean;
+}) {
+  const svc = createServiceSupabase();
+  let query = svc.from('warehouse_products').select('*');
+
+  if (filters?.category) query = query.eq('category', filters.category);
+  if (filters?.entity) query = query.eq('entity', filters.entity);
+  if (filters?.warehouse) query = query.eq('warehouse', filters.warehouse);
+  if (filters?.activeOnly !== false) query = query.eq('is_active', true);
+
+  const { data, error } = await query.order('category').order('name');
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getStockBalance(productId?: number) {
+  const svc = createServiceSupabase();
+  let query = svc.from('v_warehouse_stock_balance').select('*');
+  if (productId) query = query.eq('product_id', productId);
+  const { data, error } = await query.order('category').order('product_name');
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getStockByBatch(productId?: number) {
+  const svc = createServiceSupabase();
+  let query = svc.from('v_warehouse_batch_stock').select('*');
+  if (productId) query = query.eq('product_id', productId);
+  const { data, error } = await query.order('expired_date', { ascending: true, nullsFirst: false });
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getLedgerHistory(filters?: {
+  productId?: number;
+  movementType?: MovementType;
+  dateFrom?: string;
+  dateTo?: string;
+  limit?: number;
+}) {
+  const svc = createServiceSupabase();
+  let query = svc
+    .from('warehouse_stock_ledger')
+    .select(`
+      *,
+      warehouse_products!inner(name, category, entity),
+      warehouse_batches(batch_code, expired_date)
+    `);
+
+  if (filters?.productId) query = query.eq('warehouse_product_id', filters.productId);
+  if (filters?.movementType) query = query.eq('movement_type', filters.movementType);
+  if (filters?.dateFrom) query = query.gte('created_at', filters.dateFrom);
+  if (filters?.dateTo) query = query.lte('created_at', filters.dateTo);
+
+  const { data, error } = await query
+    .order('created_at', { ascending: false })
+    .limit(filters?.limit || 100);
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getBatches(productId: number) {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('warehouse_batches')
+    .select('*')
+    .eq('warehouse_product_id', productId)
+    .eq('is_active', true)
+    .order('expired_date', { ascending: true, nullsFirst: false });
+  if (error) throw error;
+  return data || [];
+}
+
+// ============================================================
+// SCALEV FIFO DEDUCTION (called from webhook)
+// ============================================================
+
+export async function deductStockFifo(
+  scalevProductName: string,
+  quantity: number,
+  scalevOrderId: string,
+) {
+  const svc = createServiceSupabase();
+
+  // Lookup warehouse product by ScaleV name
+  const { data: products, error: lookupErr } = await svc
+    .rpc('warehouse_find_product_by_scalev_name', { p_scalev_name: scalevProductName });
+  if (lookupErr) throw lookupErr;
+  if (!products || products.length === 0) return null; // unmapped product, skip
+
+  const product = products[0];
+
+  // Call FIFO deduction function
+  const { data, error } = await svc
+    .rpc('warehouse_deduct_fifo', {
+      p_product_id: product.id,
+      p_quantity: quantity,
+      p_reference_type: 'scalev_order',
+      p_reference_id: scalevOrderId,
+      p_notes: `Auto-deduct: ${scalevProductName} x${quantity}`,
+    });
+  if (error) throw error;
+  return { product: product.name, deductions: data };
+}
+
+// ============================================================
+// PURCHASE ORDERS
+// ============================================================
+
+export async function createPurchaseOrder(
+  productId: number,
+  quantityRequested: number,
+  vendor?: string,
+  poDate?: string,
+  expectedDate?: string,
+  notes?: string,
+) {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('warehouse_purchase_orders')
+    .insert({
+      warehouse_product_id: productId,
+      quantity_requested: quantityRequested,
+      vendor,
+      po_date: poDate || new Date().toISOString().slice(0, 10),
+      expected_date: expectedDate,
+      notes,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function receivePurchaseOrder(
+  poId: number,
+  quantityReceived: number,
+  batchId?: number,
+  notes?: string,
+) {
+  const svc = createServiceSupabase();
+
+  // Get PO details
+  const { data: po, error: poErr } = await svc
+    .from('warehouse_purchase_orders')
+    .select('*')
+    .eq('id', poId)
+    .single();
+  if (poErr) throw poErr;
+
+  const newReceived = Number(po.quantity_received) + quantityReceived;
+  const isComplete = newReceived >= Number(po.quantity_requested);
+
+  // Update PO
+  await svc
+    .from('warehouse_purchase_orders')
+    .update({
+      quantity_received: newReceived,
+      received_date: new Date().toISOString().slice(0, 10),
+      status: isComplete ? 'completed' : 'partial',
+      notes: notes ? `${po.notes || ''}\n${notes}`.trim() : po.notes,
+    })
+    .eq('id', poId);
+
+  // Record stock IN
+  await recordStockIn(
+    po.warehouse_product_id,
+    batchId || null,
+    quantityReceived,
+    'purchase_order',
+    String(poId),
+    `PO #${poId} received: ${quantityReceived} units`,
+  );
+
+  return { po_id: poId, quantity_received: newReceived, status: isComplete ? 'completed' : 'partial' };
+}
+
+export async function getPurchaseOrders(filters?: {
+  productId?: number;
+  status?: string;
+  limit?: number;
+}) {
+  const svc = createServiceSupabase();
+  let query = svc
+    .from('warehouse_purchase_orders')
+    .select(`
+      *,
+      warehouse_products!inner(name, category, entity)
+    `);
+
+  if (filters?.productId) query = query.eq('warehouse_product_id', filters.productId);
+  if (filters?.status) query = query.eq('status', filters.status);
+
+  const { data, error } = await query
+    .order('po_date', { ascending: false })
+    .limit(filters?.limit || 50);
+  if (error) throw error;
+  return data || [];
+}

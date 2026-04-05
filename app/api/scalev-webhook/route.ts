@@ -775,6 +775,62 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
       console.warn(`[scalev-webhook][${businessCode}] status_changed: re-enrich failed for ${orderId}:`, enrichErr.message);
     }
 
+    // ── Warehouse auto-deduct: FIFO stock reduction on shipped/completed ──
+    try {
+      const { data: orderLines } = await svc
+        .from('scalev_order_lines')
+        .select('product_name, quantity')
+        .eq('scalev_order_id', existing.id);
+
+      if (orderLines && orderLines.length > 0) {
+        // Check if we already deducted for this order (idempotency)
+        const { data: existingDeductions } = await svc
+          .from('warehouse_stock_ledger')
+          .select('id')
+          .eq('reference_type', 'scalev_order')
+          .eq('reference_id', orderId)
+          .limit(1);
+
+        if (!existingDeductions || existingDeductions.length === 0) {
+          let deducted = 0;
+          let skipped = 0;
+          for (const line of orderLines) {
+            if (!line.product_name || !line.quantity || line.quantity <= 0) continue;
+
+            // Lookup warehouse product by ScaleV product_name
+            const { data: whProducts } = await svc
+              .rpc('warehouse_find_product_by_scalev_name', { p_scalev_name: line.product_name });
+
+            if (whProducts && whProducts.length > 0) {
+              const { error: deductErr } = await svc
+                .rpc('warehouse_deduct_fifo', {
+                  p_product_id: whProducts[0].id,
+                  p_quantity: line.quantity,
+                  p_reference_type: 'scalev_order',
+                  p_reference_id: orderId,
+                  p_notes: `Auto: ${line.product_name} x${line.quantity} [${businessCode}]`,
+                });
+              if (deductErr) {
+                console.warn(`[scalev-webhook][${businessCode}] warehouse deduct error for ${line.product_name}:`, deductErr.message);
+              } else {
+                deducted++;
+              }
+            } else {
+              skipped++; // unmapped product
+            }
+          }
+          if (deducted > 0) {
+            console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} deducted ${deducted} products, skipped ${skipped} unmapped`);
+          }
+        } else {
+          console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} already deducted, skipping`);
+        }
+      }
+    } catch (whErr: any) {
+      // Non-fatal: warehouse deduction failure should not block order status update
+      console.warn(`[scalev-webhook][${businessCode}] warehouse deduct failed for ${orderId}:`, whErr.message);
+    }
+
   }
 
   return NextResponse.json({

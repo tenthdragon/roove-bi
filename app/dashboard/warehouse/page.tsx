@@ -11,6 +11,12 @@ import {
   getWarehouseExpiring,
   getWarehouseAvailablePeriods,
 } from '@/lib/warehouse-actions';
+import {
+  getStockBalance,
+  getStockByBatch,
+  getLedgerHistory,
+  getProducts,
+} from '@/lib/warehouse-ledger-actions';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
 
@@ -51,13 +57,34 @@ interface ExpiringProduct {
 // ── Constants ──
 
 const SUB_TABS = [
-  { id: 'ringkasan', label: 'Ringkasan' },
-  { id: 'harian', label: 'Harian' },
+  { id: 'stock', label: 'Saldo Stock' },
+  { id: 'ledger', label: 'Movement Log' },
+  { id: 'batch', label: 'Batch & Expiry' },
+  { id: 'ringkasan', label: 'Ringkasan (Lama)' },
+  { id: 'harian', label: 'Harian (Lama)' },
   { id: 'stock-opname', label: 'Stock Opname' },
   { id: 'expired', label: 'Expired Monitor' },
 ];
 
 const ID_MONTHS = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+const MOVEMENT_LABELS: Record<string, { label: string; color: string }> = {
+  'IN': { label: 'Masuk', color: 'var(--green)' },
+  'OUT': { label: 'Keluar', color: '#f97316' },
+  'ADJUST': { label: 'Adjust', color: '#8b5cf6' },
+  'TRANSFER_IN': { label: 'Transfer In', color: '#06b6d4' },
+  'TRANSFER_OUT': { label: 'Transfer Out', color: '#ec4899' },
+  'DISPOSE': { label: 'Dispose', color: 'var(--red)' },
+};
+
+const CATEGORY_COLORS: Record<string, string> = {
+  'fg': '#60a5fa',
+  'sachet': '#f59e0b',
+  'kemasan': '#a78bfa',
+  'bonus': '#34d399',
+  'packaging': '#fb923c',
+  'other': '#94a3b8',
+};
 
 // ── Helpers ──
 
@@ -69,6 +96,10 @@ function shortDateID(d: string) {
 function fullDateID(d: string) {
   const dt = new Date(d + 'T00:00:00');
   return dt.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function fmtDateTime(d: string) {
+  return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 // ── KPI Card ──
@@ -92,25 +123,32 @@ function KPICard({ label, value, color = 'var(--accent)', sub }: { label: string
 // ============================================================
 
 export default function WarehousePage() {
-  const [activeTab, setActiveTab] = useState('ringkasan');
+  const [activeTab, setActiveTab] = useState('stock');
   const [loading, setLoading] = useState(true);
 
-  // Period selector
+  // Period selector (for legacy tabs)
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [availablePeriods, setAvailablePeriods] = useState<{ period_month: number; period_year: number }[]>([]);
 
-  // Data
+  // Legacy data
   const [summaryData, setSummaryData] = useState<StockSummary[]>([]);
   const [dailyData, setDailyData] = useState<DailyStock[]>([]);
   const [soData, setSOData] = useState<SORow[]>([]);
   const [soSummary, setSOSummary] = useState<SOSummary[]>([]);
   const [expiringData, setExpiringData] = useState<ExpiringProduct[]>([]);
 
+  // New ledger data
+  const [stockBalance, setStockBalance] = useState<any[]>([]);
+  const [batchStock, setBatchStock] = useState<any[]>([]);
+  const [ledgerHistory, setLedgerHistory] = useState<any[]>([]);
+
   // Filters
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [expiryFilter, setExpiryFilter] = useState('all');
   const [expandedSO, setExpandedSO] = useState<string | null>(null);
+  const [ledgerTypeFilter, setLedgerTypeFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Load available periods on mount
   useEffect(() => {
@@ -134,7 +172,16 @@ export default function WarehousePage() {
     if (loading) return;
     (async () => {
       try {
-        if (activeTab === 'ringkasan') {
+        if (activeTab === 'stock') {
+          const data = await getStockBalance();
+          setStockBalance(data);
+        } else if (activeTab === 'ledger') {
+          const data = await getLedgerHistory({ limit: 200 });
+          setLedgerHistory(data);
+        } else if (activeTab === 'batch') {
+          const data = await getStockByBatch();
+          setBatchStock(data);
+        } else if (activeTab === 'ringkasan') {
           const data = await getWarehouseSummary(selectedMonth, selectedYear);
           setSummaryData(data);
         } else if (activeTab === 'harian') {
@@ -162,8 +209,9 @@ export default function WarehousePage() {
     const cats = new Set<string>();
     summaryData.forEach(r => r.category && cats.add(r.category));
     dailyData.forEach(r => r.category && cats.add(r.category));
+    stockBalance.forEach(r => r.category && cats.add(r.category));
     return Array.from(cats).sort();
-  }, [summaryData, dailyData]);
+  }, [summaryData, dailyData, stockBalance]);
 
   // Filtered data
   const filteredSummary = useMemo(() =>
@@ -195,6 +243,8 @@ export default function WarehousePage() {
     });
     return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
   }, [filteredDaily]);
+
+  const isLegacyTab = ['ringkasan', 'harian'].includes(activeTab);
 
   if (loading) {
     return (
@@ -231,29 +281,12 @@ export default function WarehousePage() {
     </select>
   );
 
-  // ── Category filter component ──
-  const CategoryFilter = () => (
-    <select
-      value={categoryFilter}
-      onChange={(e) => setCategoryFilter(e.target.value)}
-      style={{
-        background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
-        padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none',
-      }}
-    >
-      <option value="all">Semua Kategori</option>
-      {categories.map(c => (
-        <option key={c} value={c}>{c}</option>
-      ))}
-    </select>
-  );
-
   return (
     <div className="fade-in">
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Gudang</h2>
-        <PeriodSelector />
+        {isLegacyTab && <PeriodSelector />}
       </div>
 
       {/* Sub-tab navigation */}
@@ -281,6 +314,9 @@ export default function WarehousePage() {
       </div>
 
       {/* Tab content */}
+      {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
+      {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} />}
+      {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
       {activeTab === 'ringkasan' && <RingkasanTab data={filteredSummary} categories={categories} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
       {activeTab === 'harian' && <HarianTab data={filteredDaily} chartData={dailyChartData} categories={categories} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
       {activeTab === 'stock-opname' && <StockOpnameTab soData={soData} soSummary={soSummary} expandedSO={expandedSO} setExpandedSO={setExpandedSO} />}
@@ -290,30 +326,55 @@ export default function WarehousePage() {
 }
 
 // ============================================================
-// RINGKASAN TAB
+// STOCK BALANCE TAB (NEW)
 // ============================================================
 
-function RingkasanTab({ data, categories, categoryFilter, setCategoryFilter }: {
-  data: StockSummary[]; categories: string[];
+function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, setCategoryFilter }: {
+  data: any[]; searchQuery: string; setSearchQuery: (v: string) => void;
   categoryFilter: string; setCategoryFilter: (v: string) => void;
 }) {
-  const totalValue = data.reduce((s, r) => s + r.sub_total_value, 0);
-  const totalIn = data.reduce((s, r) => s + r.total_in, 0);
-  const totalOut = data.reduce((s, r) => s + r.total_out, 0);
-  const productCount = data.length;
+  const categories = useMemo(() => {
+    const cats = new Set<string>();
+    data.forEach(r => r.category && cats.add(r.category));
+    return Array.from(cats).sort();
+  }, [data]);
+
+  const filtered = useMemo(() => {
+    let result = data;
+    if (categoryFilter !== 'all') result = result.filter(r => r.category === categoryFilter);
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(r => r.product_name?.toLowerCase().includes(q));
+    }
+    return result;
+  }, [data, categoryFilter, searchQuery]);
+
+  const totalStock = filtered.reduce((s, r) => s + Number(r.current_stock || 0), 0);
+  const totalValue = filtered.reduce((s, r) => s + Number(r.stock_value || 0), 0);
+  const needsReorder = filtered.filter(r => r.needs_reorder).length;
+  const productCount = filtered.length;
 
   return (
     <>
-      {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <KPICard label="Total Nilai Stock" value={fmtRupiah(totalValue)} color="var(--accent)" />
-        <KPICard label="Jumlah Produk" value={String(productCount)} color="#8b5cf6" />
-        <KPICard label="Total Masuk" value={fmtCompact(totalIn)} color="var(--green)" />
-        <KPICard label="Total Keluar" value={fmtCompact(totalOut)} color="#f97316" />
+        <KPICard label="Total Produk" value={String(productCount)} color="#8b5cf6" />
+        <KPICard label="Total Stock" value={fmtCompact(totalStock)} color="var(--accent)" />
+        <KPICard label="Nilai Stock" value={fmtRupiah(totalValue)} color="var(--green)" />
+        <KPICard label="Perlu Reorder" value={String(needsReorder)} color={needsReorder > 0 ? 'var(--red)' : 'var(--green)'} />
       </div>
 
-      {/* Category filter */}
-      <div style={{ marginBottom: 12 }}>
+      {/* Filters */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <input
+          type="text"
+          placeholder="Cari produk..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{
+            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+            padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', flex: 1, minWidth: 200,
+          }}
+        />
         <select
           value={categoryFilter}
           onChange={(e) => setCategoryFilter(e.target.value)}
@@ -327,7 +388,297 @@ function RingkasanTab({ data, categories, categoryFilter, setCategoryFilter }: {
         </select>
       </div>
 
-      {/* Summary table */}
+      {/* Table */}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              {['No', 'Produk', 'Kategori', 'Entity', 'Stock', 'Satuan', 'Harga', 'Nilai', 'Status'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Entity', 'Satuan', 'Status'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((r, i) => (
+              <tr key={r.product_id} style={{ borderBottom: '1px solid var(--bg-deep)', background: r.needs_reorder ? 'rgba(239,68,68,0.05)' : 'transparent' }}>
+                <td style={{ padding: '6px 10px', textAlign: 'right', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{i + 1}</td>
+                <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
+                <td style={{ padding: '6px 10px' }}>
+                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `${CATEGORY_COLORS[r.category]}20` : 'var(--bg-deep)', color: CATEGORY_COLORS[r.category] || 'var(--text-secondary)' }}>{r.category}</span>
+                </td>
+                <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{r.entity}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: Number(r.current_stock) < 0 ? 'var(--red)' : 'var(--text)' }}>
+                  {Number(r.current_stock).toLocaleString('id-ID')}
+                </td>
+                <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{r.unit}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{r.price_list > 0 ? fmtRupiah(r.price_list) : '-'}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{r.stock_value > 0 ? fmtRupiah(r.stock_value) : '-'}</td>
+                <td style={{ padding: '6px 10px' }}>
+                  {r.needs_reorder ? (
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-red-bg)', color: '#fca5a5' }}>Reorder</span>
+                  ) : (
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-green-bg)', color: '#6ee7b7' }}>OK</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {filtered.length === 0 && (
+              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada data stock. Tambahkan batch dan catat movement untuk melihat saldo.</td></tr>
+            )}
+          </tbody>
+          {filtered.length > 0 && (
+            <tfoot>
+              <tr style={{ borderTop: '2px solid var(--border)' }}>
+                <td colSpan={4} style={{ padding: '8px 10px', fontWeight: 700, color: 'var(--text)' }}>Total</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
+                  {totalStock.toLocaleString('id-ID')}
+                </td>
+                <td />
+                <td />
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
+                  {fmtRupiah(totalValue)}
+                </td>
+                <td />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+// LEDGER (MOVEMENT LOG) TAB (NEW)
+// ============================================================
+
+function LedgerTab({ data, typeFilter, setTypeFilter }: {
+  data: any[]; typeFilter: string; setTypeFilter: (v: string) => void;
+}) {
+  const filtered = useMemo(() => {
+    if (typeFilter === 'all') return data;
+    return data.filter(r => r.movement_type === typeFilter);
+  }, [data, typeFilter]);
+
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    data.forEach(r => {
+      counts[r.movement_type] = (counts[r.movement_type] || 0) + 1;
+    });
+    return counts;
+  }, [data]);
+
+  return (
+    <>
+      {/* Type filter chips */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+        <button
+          onClick={() => setTypeFilter('all')}
+          style={{
+            padding: '4px 12px', borderRadius: 6, border: `1px solid ${typeFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`,
+            background: typeFilter === 'all' ? 'var(--accent)' : 'transparent',
+            color: typeFilter === 'all' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600,
+          }}
+        >
+          Semua ({data.length})
+        </button>
+        {Object.entries(MOVEMENT_LABELS).map(([key, cfg]) => (
+          <button
+            key={key}
+            onClick={() => setTypeFilter(typeFilter === key ? 'all' : key)}
+            style={{
+              padding: '4px 12px', borderRadius: 6, border: `1px solid ${typeFilter === key ? cfg.color : 'var(--border)'}`,
+              background: typeFilter === key ? `${cfg.color}20` : 'transparent',
+              color: typeFilter === key ? cfg.color : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600,
+            }}
+          >
+            {cfg.label} ({typeCounts[key] || 0})
+          </button>
+        ))}
+      </div>
+
+      {/* Table */}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              {['Waktu', 'Produk', 'Tipe', 'Qty', 'Saldo', 'Batch', 'Referensi', 'Catatan'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Tipe', 'Batch', 'Referensi', 'Catatan'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(r => {
+              const moveCfg = MOVEMENT_LABELS[r.movement_type] || { label: r.movement_type, color: 'var(--text)' };
+              const qty = Number(r.quantity);
+              return (
+                <tr key={r.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    {fmtDateTime(r.created_at)}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                    {r.warehouse_products?.name || '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px' }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${moveCfg.color}20`, color: moveCfg.color }}>
+                      {moveCfg.label}
+                    </span>
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: qty > 0 ? 'var(--green)' : qty < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                    {qty > 0 ? '+' : ''}{qty.toLocaleString('id-ID')}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>
+                    {Number(r.running_balance).toLocaleString('id-ID')}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>
+                    {r.warehouse_batches?.batch_code || '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    {r.reference_type ? `${r.reference_type}${r.reference_id ? ` #${r.reference_id}` : ''}` : '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-muted)', fontSize: 11, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {r.notes || '-'}
+                  </td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada movement tercatat</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+// BATCH & EXPIRY TAB (NEW)
+// ============================================================
+
+function BatchTab({ data, searchQuery, setSearchQuery }: {
+  data: any[]; searchQuery: string; setSearchQuery: (v: string) => void;
+}) {
+  const filtered = useMemo(() => {
+    if (!searchQuery) return data;
+    const q = searchQuery.toLowerCase();
+    return data.filter(r => r.product_name?.toLowerCase().includes(q) || r.batch_code?.toLowerCase().includes(q));
+  }, [data, searchQuery]);
+
+  const statusConfig: Record<string, { bg: string; color: string; label: string }> = {
+    expired: { bg: 'var(--badge-red-bg)', color: '#fca5a5', label: 'Expired' },
+    critical: { bg: 'var(--badge-yellow-bg)', color: '#fcd34d', label: 'Critical' },
+    warning: { bg: '#713f12', color: '#fde68a', label: 'Warning' },
+    safe: { bg: 'var(--badge-green-bg)', color: '#6ee7b7', label: 'Aman' },
+    no_expiry: { bg: 'var(--bg-deep)', color: 'var(--text-secondary)', label: 'No Expiry' },
+  };
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = { expired: 0, critical: 0, warning: 0, safe: 0, no_expiry: 0 };
+    data.forEach(r => { counts[r.expiry_status] = (counts[r.expiry_status] || 0) + 1; });
+    return counts;
+  }, [data]);
+
+  return (
+    <>
+      {/* Status overview */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        {Object.entries(statusConfig).map(([key, cfg]) => (
+          <KPICard key={key} label={cfg.label} value={String(statusCounts[key] || 0)} color={cfg.color} />
+        ))}
+      </div>
+
+      {/* Search */}
+      <div style={{ marginBottom: 12 }}>
+        <input
+          type="text"
+          placeholder="Cari produk atau batch..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          style={{
+            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
+            padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', width: '100%', maxWidth: 400,
+          }}
+        />
+      </div>
+
+      {/* Table */}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              {['Produk', 'Kategori', 'Batch', 'Qty', 'Expired Date', 'Sisa Hari', 'Status'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Batch', 'Status'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(r => {
+              const cfg = statusConfig[r.expiry_status] || statusConfig.safe;
+              return (
+                <tr key={r.batch_id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                  <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
+                  <td style={{ padding: '6px 10px' }}>
+                    <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `${CATEGORY_COLORS[r.category]}20` : 'var(--bg-deep)', color: CATEGORY_COLORS[r.category] || 'var(--text-secondary)' }}>{r.category}</span>
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 11 }}>{r.batch_code}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: 'var(--text)' }}>
+                    {Number(r.current_qty).toLocaleString('id-ID')}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>
+                    {r.expired_date ? fullDateID(r.expired_date) : '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: cfg.color }}>
+                    {r.days_remaining != null ? r.days_remaining : '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px' }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: cfg.bg, color: cfg.color }}>
+                      {cfg.label}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada batch tercatat. Buat batch dan catat stock IN untuk melihat data.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+// RINGKASAN TAB (LEGACY)
+// ============================================================
+
+function RingkasanTab({ data, categories, categoryFilter, setCategoryFilter }: {
+  data: StockSummary[]; categories: string[];
+  categoryFilter: string; setCategoryFilter: (v: string) => void;
+}) {
+  const totalValue = data.reduce((s, r) => s + r.sub_total_value, 0);
+  const totalIn = data.reduce((s, r) => s + r.total_in, 0);
+  const totalOut = data.reduce((s, r) => s + r.total_out, 0);
+  const productCount = data.length;
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <KPICard label="Total Nilai Stock" value={fmtRupiah(totalValue)} color="var(--accent)" />
+        <KPICard label="Jumlah Produk" value={String(productCount)} color="#8b5cf6" />
+        <KPICard label="Total Masuk" value={fmtCompact(totalIn)} color="var(--green)" />
+        <KPICard label="Total Keluar" value={fmtCompact(totalOut)} color="#f97316" />
+      </div>
+
+      <div style={{ marginBottom: 12 }}>
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' }}>
+          <option value="all">Semua Kategori</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+      </div>
+
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
@@ -349,9 +700,7 @@ function RingkasanTab({ data, categories, categoryFilter, setCategoryFilter }: {
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--green)' }}>{r.total_in.toLocaleString('id-ID')}</td>
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: '#f97316' }}>{r.total_out.toLocaleString('id-ID')}</td>
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)', fontWeight: 600 }}>{r.last_day_stock.toLocaleString('id-ID')}</td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', color: 'var(--text-secondary)', fontSize: 11 }}>
-                  {r.expired_date ? shortDateID(r.expired_date) : '-'}
-                </td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', color: 'var(--text-secondary)', fontSize: 11 }}>{r.expired_date ? shortDateID(r.expired_date) : '-'}</td>
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{fmtRupiah(r.price_list)}</td>
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{fmtRupiah(r.sub_total_value)}</td>
               </tr>
@@ -364,23 +713,12 @@ function RingkasanTab({ data, categories, categoryFilter, setCategoryFilter }: {
             <tfoot>
               <tr style={{ borderTop: '2px solid var(--border)' }}>
                 <td colSpan={3} style={{ padding: '8px 10px', fontWeight: 700, color: 'var(--text)' }}>Total</td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
-                  {data.reduce((s, r) => s + r.first_day_stock, 0).toLocaleString('id-ID')}
-                </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--green)' }}>
-                  {totalIn.toLocaleString('id-ID')}
-                </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f97316' }}>
-                  {totalOut.toLocaleString('id-ID')}
-                </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
-                  {data.reduce((s, r) => s + r.last_day_stock, 0).toLocaleString('id-ID')}
-                </td>
-                <td />
-                <td />
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
-                  {fmtRupiah(totalValue)}
-                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{data.reduce((s, r) => s + r.first_day_stock, 0).toLocaleString('id-ID')}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--green)' }}>{totalIn.toLocaleString('id-ID')}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f97316' }}>{totalOut.toLocaleString('id-ID')}</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{data.reduce((s, r) => s + r.last_day_stock, 0).toLocaleString('id-ID')}</td>
+                <td /><td />
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{fmtRupiah(totalValue)}</td>
               </tr>
             </tfoot>
           )}
@@ -391,7 +729,7 @@ function RingkasanTab({ data, categories, categoryFilter, setCategoryFilter }: {
 }
 
 // ============================================================
-// HARIAN TAB
+// HARIAN TAB (LEGACY)
 // ============================================================
 
 function HarianTab({ data, chartData, categories, categoryFilter, setCategoryFilter }: {
@@ -404,29 +742,20 @@ function HarianTab({ data, chartData, categories, categoryFilter, setCategoryFil
 
   return (
     <>
-      {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
         <KPICard label="Total Masuk (Bulan)" value={fmtCompact(totalIn)} color="var(--green)" />
         <KPICard label="Total Keluar (Bulan)" value={fmtCompact(totalOut)} color="#f97316" />
         <KPICard label="Net Change" value={(netChange >= 0 ? '+' : '') + fmtCompact(netChange)} color={netChange >= 0 ? 'var(--green)' : 'var(--red)'} />
       </div>
 
-      {/* Category filter */}
       <div style={{ marginBottom: 12 }}>
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          style={{
-            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
-            padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none',
-          }}
-        >
+        <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' }}>
           <option value="all">Semua Kategori</option>
           {categories.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
 
-      {/* Chart */}
       {chartData.length > 0 && (
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 12 }}>Pergerakan Stock Harian</div>
@@ -435,11 +764,7 @@ function HarianTab({ data, chartData, categories, categoryFilter, setCategoryFil
               <CartesianGrid strokeDasharray="3 3" stroke="#1a2744" />
               <XAxis dataKey="date" tickFormatter={(d) => shortDateID(d)} tick={{ fill: '#64748b', fontSize: 11 }} axisLine={{ stroke: '#1a2744' }} />
               <YAxis tick={{ fill: '#64748b', fontSize: 11 }} axisLine={{ stroke: '#1a2744' }} tickFormatter={(v) => fmtCompact(v)} />
-              <Tooltip
-                contentStyle={{ background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }}
-                labelFormatter={(d) => fullDateID(d)}
-                formatter={(v: number, name: string) => [v.toLocaleString('id-ID'), name === 'in' ? 'Masuk' : 'Keluar']}
-              />
+              <Tooltip contentStyle={{ background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} labelFormatter={(d) => fullDateID(d)} formatter={(v: number, name: string) => [v.toLocaleString('id-ID'), name === 'in' ? 'Masuk' : 'Keluar']} />
               <Legend formatter={(v) => v === 'in' ? 'Masuk' : 'Keluar'} />
               <Bar dataKey="in" fill="#10b981" radius={[4, 4, 0, 0]} />
               <Bar dataKey="out" fill="#f97316" radius={[4, 4, 0, 0]} />
@@ -448,13 +773,12 @@ function HarianTab({ data, chartData, categories, categoryFilter, setCategoryFil
         </div>
       )}
 
-      {/* Daily detail table */}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
               {['Tanggal', 'Produk', 'Kategori', 'Masuk (IN)', 'Keluar (OUT)'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Produk' || h === 'Kategori' || h === 'Tanggal' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Tanggal'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -485,7 +809,7 @@ function HarianTab({ data, chartData, categories, categoryFilter, setCategoryFil
 }
 
 // ============================================================
-// STOCK OPNAME TAB
+// STOCK OPNAME TAB (LEGACY)
 // ============================================================
 
 function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
@@ -498,14 +822,12 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
 
   return (
     <>
-      {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
         <KPICard label="Total SO Events" value={String(totalEvents)} color="var(--accent)" />
         <KPICard label="Item dengan Selisih" value={String(totalItemsWithSelisih)} color="var(--yellow)" />
         <KPICard label="Total |Selisih|" value={fmtCompact(totalAbsSelisih)} color="var(--red)" />
       </div>
 
-      {/* SO event cards */}
       {soSummary.length === 0 ? (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>Belum ada data stock opname</div>
       ) : (
@@ -518,15 +840,8 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
 
             return (
               <div key={key} style={{ background: 'var(--card)', border: `1px solid ${hasSelisih ? '#92400e' : 'var(--border)'}`, borderRadius: 12, overflow: 'hidden' }}>
-                {/* Header */}
-                <button
-                  onClick={() => setExpandedSO(isExpanded ? null : key)}
-                  style={{
-                    width: '100%', padding: '12px 16px', border: 'none', cursor: 'pointer',
-                    background: 'transparent', display: 'flex', justifyContent: 'space-between',
-                    alignItems: 'center', flexWrap: 'wrap', gap: 8,
-                  }}
-                >
+                <button onClick={() => setExpandedSO(isExpanded ? null : key)}
+                  style={{ width: '100%', padding: '12px 16px', border: 'none', cursor: 'pointer', background: 'transparent', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                     <span style={{ color: 'var(--text)', fontSize: 13, fontWeight: 600 }}>{so.opname_label}</span>
                     <span style={{ color: 'var(--dim)', fontSize: 11 }}>{fullDateID(so.opname_date)}</span>
@@ -534,27 +849,19 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{so.item_count} item</span>
                     {hasSelisih && (
-                      <span style={{
-                        padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                        background: 'var(--badge-red-bg)', color: '#fca5a5',
-                      }}>
-                        {so.items_with_selisih} selisih
-                      </span>
+                      <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-red-bg)', color: '#fca5a5' }}>{so.items_with_selisih} selisih</span>
                     )}
-                    <span style={{ color: 'var(--dim)', fontSize: 14, transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>
-                      &#9660;
-                    </span>
+                    <span style={{ color: 'var(--dim)', fontSize: 14, transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>&#9660;</span>
                   </div>
                 </button>
 
-                {/* Expanded detail */}
                 {isExpanded && (
                   <div style={{ borderTop: '1px solid var(--border)', padding: '0 16px 12px' }}>
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginTop: 8 }}>
                       <thead>
                         <tr style={{ borderBottom: '1px solid var(--border)' }}>
                           {['Produk', 'Kategori', 'Sebelum SO', 'Sesudah SO', 'Selisih'].map(h => (
-                            <th key={h} style={{ padding: '6px 8px', textAlign: h === 'Produk' || h === 'Kategori' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                            <th key={h} style={{ padding: '6px 8px', textAlign: ['Produk', 'Kategori'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
                           ))}
                         </tr>
                       </thead>
@@ -567,10 +874,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
                             </td>
                             <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{d.sebelum_so.toLocaleString('id-ID')}</td>
                             <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{d.sesudah_so.toLocaleString('id-ID')}</td>
-                            <td style={{
-                              padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600,
-                              color: d.selisih > 0 ? 'var(--green)' : d.selisih < 0 ? 'var(--red)' : 'var(--text-muted)',
-                            }}>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: d.selisih > 0 ? 'var(--green)' : d.selisih < 0 ? 'var(--red)' : 'var(--text-muted)' }}>
                               {d.selisih > 0 ? '+' : ''}{d.selisih.toLocaleString('id-ID')}
                             </td>
                           </tr>
@@ -589,7 +893,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
 }
 
 // ============================================================
-// EXPIRED MONITOR TAB
+// EXPIRED MONITOR TAB (LEGACY)
 // ============================================================
 
 function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
@@ -614,47 +918,34 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
 
   return (
     <>
-      {/* Status overview cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
         {Object.entries(statusConfig).map(([key, cfg]) => (
-          <button
-            key={key}
-            onClick={() => setExpiryFilter(expiryFilter === key ? 'all' : key)}
+          <button key={key} onClick={() => setExpiryFilter(expiryFilter === key ? 'all' : key)}
             style={{
               background: 'var(--card)', border: `1px solid ${expiryFilter === key ? cfg.border : 'var(--border)'}`,
               borderRadius: 12, padding: 16, flex: 1, minWidth: 130, cursor: 'pointer',
               borderTop: `3px solid ${cfg.color}`,
-              opacity: expiryFilter !== 'all' && expiryFilter !== key ? 0.5 : 1,
-              transition: 'opacity 0.2s',
-            }}
-          >
+              opacity: expiryFilter !== 'all' && expiryFilter !== key ? 0.5 : 1, transition: 'opacity 0.2s',
+            }}>
             <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', textAlign: 'left' }}>{cfg.label}</div>
             <div style={{ fontSize: 24, fontWeight: 700, color: cfg.color, fontFamily: 'monospace', textAlign: 'left' }}>{statusCounts[key as keyof typeof statusCounts]}</div>
           </button>
         ))}
       </div>
 
-      {/* Reset filter */}
       {expiryFilter !== 'all' && (
-        <button
-          onClick={() => setExpiryFilter('all')}
-          style={{
-            padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border)',
-            background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer',
-            marginBottom: 12, fontWeight: 600,
-          }}
-        >
+        <button onClick={() => setExpiryFilter('all')}
+          style={{ padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer', marginBottom: 12, fontWeight: 600 }}>
           Reset Filter
         </button>
       )}
 
-      {/* Products table */}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
               {['Produk', 'Kategori', 'Expired Date', 'Sisa Hari', 'Stok', 'Nilai', 'Status'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Produk' || h === 'Kategori' || h === 'Status' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Status'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -668,18 +959,11 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
                     <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text-secondary)' }}>{r.category}</span>
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{fullDateID(r.expired_date)}</td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: cfg.color }}>
-                    {r.days_remaining}
-                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: cfg.color }}>{r.days_remaining}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{r.last_day_stock.toLocaleString('id-ID')}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{fmtRupiah(r.sub_total_value)}</td>
                   <td style={{ padding: '6px 10px' }}>
-                    <span style={{
-                      padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                      background: cfg.bg, color: cfg.color,
-                    }}>
-                      {cfg.label}
-                    </span>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: cfg.bg, color: cfg.color }}>{cfg.label}</span>
                   </td>
                 </tr>
               );
