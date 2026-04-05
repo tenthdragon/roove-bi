@@ -658,10 +658,9 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
 
 function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [products, setProducts] = useState<any[]>([]);
+  const [selectedEntity, setSelectedEntity] = useState('');
   const [search, setSearch] = useState('');
-  // Sources: list of { productId, productName, quantity }
   const [sources, setSources] = useState<{ productId: number; productName: string; quantity: string }[]>([]);
-  // Target
   const [targetProduct, setTargetProduct] = useState('');
   const [targetSearch, setTargetSearch] = useState('');
   const [targetName, setTargetName] = useState('');
@@ -675,40 +674,64 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
 
   useEffect(() => { (async () => { try { setProducts(await getProducts()); } catch {} })(); }, []);
 
-  const filteredProducts = useMemo(() => {
-    if (!search) return products;
-    const q = search.toLowerCase();
-    return products.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
-  }, [products, search]);
+  // Available entities from products
+  const entities = useMemo(() => {
+    const set = new Set<string>();
+    products.forEach(p => { if (p.entity && p.warehouse) set.add(`${p.warehouse} - ${p.entity}`); });
+    return Array.from(set).sort();
+  }, [products]);
 
-  const filteredTargetProducts = useMemo(() => {
+  // Products filtered by selected entity
+  const entityProducts = useMemo(() => {
+    if (!selectedEntity) return [];
+    const [wh, ent] = selectedEntity.split(' - ');
+    return products.filter(p => p.warehouse === wh && p.entity === ent);
+  }, [products, selectedEntity]);
+
+  // Source search within entity
+  const filteredSource = useMemo(() => {
+    if (!search) return entityProducts;
+    const q = search.toLowerCase();
+    return entityProducts.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+  }, [entityProducts, search]);
+
+  // Target search within entity
+  const filteredTarget = useMemo(() => {
     if (!targetSearch) return [];
     const q = targetSearch.toLowerCase();
-    return products.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
-  }, [products, targetSearch]);
-
-  const selectTarget = (p: any) => {
-    setTargetProduct(String(p.id));
-    setTargetName(`${p.name} [${p.warehouse}-${p.entity}]`);
-    setTargetSearch('');
-  };
+    return entityProducts.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+  }, [entityProducts, targetSearch]);
 
   const addSource = (p: any) => {
     if (sources.find(s => s.productId === p.id)) return;
-    setSources([...sources, { productId: p.id, productName: `${p.name} [${p.warehouse}-${p.entity}]`, quantity: '' }]);
+    setSources([...sources, { productId: p.id, productName: p.name, quantity: '' }]);
+  };
+  const removeSource = (pid: number) => setSources(sources.filter(s => s.productId !== pid));
+  const updateSourceQty = (pid: number, qty: string) => setSources(sources.map(s => s.productId === pid ? { ...s, quantity: qty } : s));
+
+  const selectTarget = (p: any) => {
+    setTargetProduct(String(p.id));
+    setTargetName(p.name);
+    setTargetSearch('');
   };
 
-  const removeSource = (pid: number) => {
-    setSources(sources.filter(s => s.productId !== pid));
+  // Reset sources/target when entity changes
+  const handleEntityChange = (val: string) => {
+    setSelectedEntity(val);
+    setSources([]);
+    setTargetProduct('');
+    setTargetName('');
+    setSearch('');
+    setTargetSearch('');
   };
 
-  const updateSourceQty = (pid: number, qty: string) => {
-    setSources(sources.map(s => s.productId === pid ? { ...s, quantity: qty } : s));
-  };
+  // Summary text
+  const summaryReady = sources.length > 0 && sources.every(s => Number(s.quantity) > 0) && targetProduct && Number(targetQty) > 0;
 
   const handleSubmit = async () => {
     setError(''); setSuccess('');
-    if (sources.length === 0) { setError('Tambahkan minimal 1 produk asal'); return; }
+    if (!selectedEntity) { setError('Pilih gudang/entity'); return; }
+    if (sources.length === 0) { setError('Tambahkan minimal 1 bahan asal'); return; }
     const tpid = Number(targetProduct);
     const tqty = Number(targetQty);
     if (!tpid) { setError('Pilih produk tujuan'); return; }
@@ -724,7 +747,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     setSubmitting(true);
     try {
       await recordConversion(convSources, tpid, tqty, targetBatchCode || undefined, targetExpiredDate || null, notes || undefined);
-      setSuccess(`Konversi berhasil: ${sources.length} bahan → ${tqty} unit`);
+      setSuccess('Konversi berhasil!');
       setTimeout(onSuccess, 800);
     } catch (e: any) { setError(e.message || 'Gagal menyimpan'); }
     setSubmitting(false);
@@ -738,105 +761,133 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#8b5cf6' }}>Konversi Produk</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--dim)', fontSize: 18, cursor: 'pointer', padding: 4 }}>&#10005;</button>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Gabungkan beberapa bahan menjadi 1 produk (e.g. sachet + kemasan → box FG)</div>
+        <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Gabungkan bahan menjadi 1 produk di dalam gudang yang sama</div>
 
-        {/* ── Source: search + add ── */}
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Bahan Asal</div>
-        <input type="text" placeholder="Cari produk bahan..." value={search} onChange={(e) => setSearch(e.target.value)}
-          style={{ ...inputStyle, marginBottom: 8 }} />
+        {/* ── Entity selector ── */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={labelStyle}>Gudang *</label>
+          <select value={selectedEntity} onChange={(e) => handleEntityChange(e.target.value)} style={inputStyle}>
+            <option value="">-- Pilih Gudang --</option>
+            {entities.map(e => <option key={e} value={e}>{e}</option>)}
+          </select>
+        </div>
 
-        {/* Search results */}
-        {search && (
-          <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 10 }}>
-            {filteredProducts.slice(0, 20).map(p => {
-              const isAdded = sources.some(s => s.productId === p.id);
-              return (
-                <div key={p.id} onClick={() => !isAdded && addSource(p)}
-                  style={{ padding: '6px 10px', fontSize: 12, cursor: isAdded ? 'default' : 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                    borderBottom: '1px solid var(--bg-deep)', background: isAdded ? 'var(--bg-deep)' : 'transparent', opacity: isAdded ? 0.5 : 1 }}>
-                  <span style={{ color: 'var(--text)' }}>{p.name} <span style={{ color: 'var(--dim)', fontSize: 10 }}>({p.category}) [{p.warehouse}-{p.entity}]</span></span>
-                  {isAdded ? <span style={{ fontSize: 10, color: 'var(--dim)' }}>Sudah ditambahkan</span> : <span style={{ fontSize: 10, color: '#8b5cf6' }}>+ Tambah</span>}
+        {selectedEntity && (
+          <>
+            {/* ── Source: search + add ── */}
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Bahan Asal</div>
+            <input type="text" placeholder="Cari produk bahan..." value={search} onChange={(e) => setSearch(e.target.value)}
+              style={{ ...inputStyle, marginBottom: 8 }} />
+
+            {search && (
+              <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 10 }}>
+                {filteredSource.slice(0, 20).map(p => {
+                  const isAdded = sources.some(s => s.productId === p.id);
+                  return (
+                    <div key={p.id} onClick={() => !isAdded && addSource(p)}
+                      style={{ padding: '6px 10px', fontSize: 12, cursor: isAdded ? 'default' : 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        borderBottom: '1px solid var(--bg-deep)', background: isAdded ? 'var(--bg-deep)' : 'transparent', opacity: isAdded ? 0.5 : 1 }}>
+                      <span style={{ color: 'var(--text)' }}>{p.name} <span style={{ color: 'var(--dim)', fontSize: 10 }}>({p.category})</span></span>
+                      {isAdded ? <span style={{ fontSize: 10, color: 'var(--dim)' }}>Ditambahkan</span> : <span style={{ fontSize: 10, color: '#8b5cf6' }}>+ Tambah</span>}
+                    </div>
+                  );
+                })}
+                {filteredSource.length === 0 && <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Tidak ditemukan</div>}
+              </div>
+            )}
+
+            {sources.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                {sources.map(s => (
+                  <div key={s.productId} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+                    <button onClick={() => removeSource(s.productId)}
+                      style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}>&#10005;</button>
+                    <div style={{ flex: 1, fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.productName}</div>
+                    <input type="number" min="1" placeholder="Qty" value={s.quantity} onChange={(e) => updateSourceQty(s.productId, e.target.value)}
+                      style={{ ...inputStyle, width: 80, flex: 'none', textAlign: 'right' }} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {sources.length === 0 && !search && (
+              <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12, background: 'var(--bg-deep)', borderRadius: 8, marginBottom: 14 }}>
+                Ketik di search untuk menambahkan bahan
+              </div>
+            )}
+
+            {/* ── Target ── */}
+            <div style={{ borderTop: '1px solid var(--border)', margin: '12px 0', paddingTop: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>Hasil Konversi</div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Produk Tujuan *</label>
+              {targetProduct ? (
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <div style={{ flex: 1, padding: '8px 12px', background: 'var(--bg-deep)', borderRadius: 8, fontSize: 12, color: 'var(--text)', fontWeight: 500 }}>{targetName}</div>
+                  <button onClick={() => { setTargetProduct(''); setTargetName(''); }}
+                    style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}>&#10005;</button>
                 </div>
-              );
-            })}
-            {filteredProducts.length === 0 && <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Tidak ditemukan</div>}
-          </div>
+              ) : (
+                <>
+                  <input type="text" placeholder="Cari produk tujuan..." value={targetSearch} onChange={(e) => setTargetSearch(e.target.value)} style={inputStyle} />
+                  {targetSearch && (
+                    <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginTop: 4 }}>
+                      {filteredTarget.slice(0, 20).map(p => (
+                        <div key={p.id} onClick={() => selectTarget(p)}
+                          style={{ padding: '6px 10px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--bg-deep)' }}>
+                          <span style={{ color: 'var(--text)' }}>{p.name} <span style={{ color: 'var(--dim)', fontSize: 10 }}>({p.category})</span></span>
+                        </div>
+                      ))}
+                      {filteredTarget.length === 0 && <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Tidak ditemukan</div>}
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Qty Hasil *</label>
+              <input type="number" min="1" placeholder="Jumlah hasil" value={targetQty} onChange={(e) => setTargetQty(e.target.value)} style={inputStyle} />
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+              <div style={{ flex: 2 }}>
+                <label style={labelStyle}>Batch Tujuan</label>
+                <input type="text" placeholder="Kode batch (opsional)" value={targetBatchCode} onChange={(e) => setTargetBatchCode(e.target.value)} style={inputStyle} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={labelStyle}>Expired</label>
+                <input type="date" value={targetExpiredDate} onChange={(e) => setTargetExpiredDate(e.target.value)} style={inputStyle} />
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Catatan</label>
+              <input type="text" placeholder="Opsional" value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
+            </div>
+          </>
         )}
 
-        {/* Added sources with qty */}
-        {sources.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
+        {/* ── Summary ── */}
+        {summaryReady && (
+          <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--bg-deep)', border: '1px solid var(--border)', marginBottom: 14, fontSize: 12 }}>
+            <div style={{ fontWeight: 700, color: '#8b5cf6', marginBottom: 6 }}>Ringkasan Konversi</div>
             {sources.map(s => (
-              <div key={s.productId} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                <button onClick={() => removeSource(s.productId)}
-                  style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}>&#10005;</button>
-                <div style={{ flex: 1, fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.productName}</div>
-                <input type="number" min="1" placeholder="Qty" value={s.quantity} onChange={(e) => updateSourceQty(s.productId, e.target.value)}
-                  style={{ ...inputStyle, width: 80, flex: 'none', textAlign: 'right' }} />
+              <div key={s.productId} style={{ color: '#f97316', marginBottom: 2 }}>
+                - {s.productName} <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>x{Number(s.quantity).toLocaleString('id-ID')}</span>
               </div>
             ))}
-          </div>
-        )}
-        {sources.length === 0 && !search && (
-          <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12, background: 'var(--bg-deep)', borderRadius: 8, marginBottom: 14 }}>
-            Ketik di search untuk menambahkan bahan
-          </div>
-        )}
-
-        {/* ── Target ── */}
-        <div style={{ borderTop: '1px solid var(--border)', margin: '12px 0', paddingTop: 14 }}>
-          <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>Hasil Konversi</div>
-        </div>
-        <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Produk Tujuan *</label>
-          {targetProduct ? (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <div style={{ flex: 1, padding: '8px 12px', background: 'var(--bg-deep)', borderRadius: 8, fontSize: 12, color: 'var(--text)', fontWeight: 500 }}>{targetName}</div>
-              <button onClick={() => { setTargetProduct(''); setTargetName(''); }}
-                style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}>&#10005;</button>
+            <div style={{ color: 'var(--dim)', margin: '4px 0' }}>menjadi</div>
+            <div style={{ color: 'var(--green)', fontWeight: 600 }}>
+              + {targetName} <span style={{ fontFamily: 'monospace' }}>x{Number(targetQty).toLocaleString('id-ID')}</span>
             </div>
-          ) : (
-            <>
-              <input type="text" placeholder="Cari produk tujuan..." value={targetSearch} onChange={(e) => setTargetSearch(e.target.value)} style={inputStyle} />
-              {targetSearch && (
-                <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginTop: 4 }}>
-                  {filteredTargetProducts.slice(0, 20).map(p => (
-                    <div key={p.id} onClick={() => selectTarget(p)}
-                      style={{ padding: '6px 10px', fontSize: 12, cursor: 'pointer', borderBottom: '1px solid var(--bg-deep)' }}>
-                      <span style={{ color: 'var(--text)' }}>{p.name} <span style={{ color: 'var(--dim)', fontSize: 10 }}>({p.category}) [{p.warehouse}-{p.entity}]</span></span>
-                    </div>
-                  ))}
-                  {filteredTargetProducts.length === 0 && <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Tidak ditemukan</div>}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-        <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Qty Hasil *</label>
-          <input type="number" min="1" placeholder="Jumlah hasil" value={targetQty} onChange={(e) => setTargetQty(e.target.value)} style={inputStyle} />
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          <div style={{ flex: 2 }}>
-            <label style={labelStyle}>Batch Tujuan</label>
-            <input type="text" placeholder="Kode batch (opsional)" value={targetBatchCode} onChange={(e) => setTargetBatchCode(e.target.value)} style={inputStyle} />
+            <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 4 }}>di gudang {selectedEntity}</div>
           </div>
-          <div style={{ flex: 1 }}>
-            <label style={labelStyle}>Expired</label>
-            <input type="date" value={targetExpiredDate} onChange={(e) => setTargetExpiredDate(e.target.value)} style={inputStyle} />
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Catatan</label>
-          <input type="text" placeholder="Opsional" value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
-        </div>
+        )}
 
         {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: '#fca5a5', fontSize: 12, marginBottom: 12 }}>{error}</div>}
         {success && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.1)', color: '#6ee7b7', fontSize: 12, marginBottom: 12 }}>{success}</div>}
 
-        <button onClick={handleSubmit} disabled={submitting}
-          style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: '#8b5cf6', color: '#fff', opacity: submitting ? 0.7 : 1 }}>
+        <button onClick={handleSubmit} disabled={submitting || !selectedEntity}
+          style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting || !selectedEntity ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700, background: '#8b5cf6', color: '#fff', opacity: submitting || !selectedEntity ? 0.5 : 1 }}>
           {submitting ? 'Menyimpan...' : 'Simpan Konversi'}
         </button>
       </div>
