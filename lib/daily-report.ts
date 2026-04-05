@@ -57,14 +57,21 @@ function fmtRp(n: number): string {
 
 function fmtPct(n: number): string { return `${n.toFixed(1)}%`; }
 
-function fmtDelta(val: number, ref: number, isPp: boolean): string {
+function fmtDelta(val: number, ref: number, isPp: boolean, invertColor: boolean = false): string {
   if (ref === 0) return '-';
+  let d: number;
+  let suffix: string;
   if (isPp) {
-    const d = val - ref;
-    return `${d >= 0 ? '+' : ''}${d.toFixed(1)}pp`;
+    d = val - ref;
+    suffix = 'pp';
+  } else {
+    d = ((val - ref) / Math.abs(ref)) * 100;
+    suffix = '%';
   }
-  const d = ((val - ref) / Math.abs(ref)) * 100;
-  return `${d >= 0 ? '+' : ''}${d.toFixed(1)}%`;
+  // invertColor: for cost metrics (Mkt Fee %), up = bad (red), down = good (green)
+  const isPositive = invertColor ? d <= 0 : d >= 0;
+  const arrow = d === 0 ? '▸' : isPositive ? '🟢' : '🔴';
+  return `${arrow} ${d >= 0 ? '+' : ''}${d.toFixed(1)}${suffix}`;
 }
 
 function fmtNum(n: number): string { return n.toLocaleString('id-ID'); }
@@ -240,7 +247,7 @@ export async function buildDailyReport(): Promise<string> {
     `💵 <b>GP AMA:</b> ${fmtRp(yd.nam)} | ${fmtDelta(yd.nam, avg.nam, false)} vs avg`,
     `📦 <b>Shipment:</b> ${fmtNum(yd.ship)} | ${fmtDelta(yd.ship, avg.ship, false)} vs avg`,
     `🛒 <b>AOV:</b> ${fmtRp(yd.aov)} | ${fmtDelta(yd.aov, avg.aov, false)} vs avg`,
-    `📣 <b>Mkt Fee %:</b> ${fmtPct(yd.mktPct)} | ${fmtDelta(yd.mktPct, avg.mktPct, true)} vs avg`,
+    `📣 <b>Mkt Fee %:</b> ${fmtPct(yd.mktPct)} | ${fmtDelta(yd.mktPct, avg.mktPct, true, true)} vs avg`,
     `📱 <b>ROAS Meta Ads:</b> ${yd.roas.toFixed(2)}x | ${fmtDelta(yd.roas, avg.roas, false)} vs avg`,
     `✅ <b>CR Scalev *):</b> ${fmtNum(yd.crShipped)}/${fmtNum(yd.crCreated)} (${fmtPct(yd.crPct)}) | ${fmtDelta(yd.crPct, avg.crPct, true)} vs avg`,
     '',
@@ -308,7 +315,7 @@ export async function buildMonthlyReport(): Promise<string> {
     '',
     `🛒 <b>AOV:</b> ${fmtRp(thisK.aov)} | ${fmtDelta(thisK.aov, prevK.aov, false)} vs prev`,
     '',
-    `📣 <b>Mkt Fee %:</b> ${fmtPct(thisK.mktPct)} | ${fmtDelta(thisK.mktPct, prevK.mktPct, true)} vs prev`,
+    `📣 <b>Mkt Fee %:</b> ${fmtPct(thisK.mktPct)} | ${fmtDelta(thisK.mktPct, prevK.mktPct, true, true)} vs prev`,
     '',
     `📱 <b>ROAS Meta Ads:</b> ${thisK.roas.toFixed(2)}x | ${fmtDelta(thisK.roas, prevK.roas, false)} vs prev`,
     '',
