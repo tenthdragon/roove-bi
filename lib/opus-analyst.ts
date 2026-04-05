@@ -24,9 +24,35 @@ IMPORTANT RULES:
 - Write in Bahasa Indonesia
 - Be concise — max 3-4 paragraphs for the final analysis
 - Use numbers and percentages to support your points
-- Format output in plain text suitable for Telegram (no markdown headers, use emoji sparingly)
+
+FORMATTING (CRITICAL):
+- Output is rendered in Telegram which uses HTML, NOT Markdown
+- Use <b>bold</b> for emphasis (NOT **bold** or __bold__)
+- Use <i>italic</i> for secondary info (NOT *italic* or _italic_)
+- Do NOT use markdown headers (#, ##), bullet asterisks, or any markdown syntax
+- Use plain dashes (-) or emoji for bullet points
+- Keep it clean and readable on a phone screen
 
 When using tools, the "from" and "to" parameters must be in YYYY-MM-DD format.`;
+
+/** Convert any remaining markdown to Telegram HTML */
+function sanitizeForTelegram(text: string): string {
+  return text
+    // Bold: **text** or __text__ → <b>text</b>
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/__(.+?)__/g, '<b>$1</b>')
+    // Italic: *text* or _text_ → <i>text</i> (but not inside HTML tags)
+    .replace(/(?<![<\/\w])\*([^*\n]+?)\*(?![>])/g, '<i>$1</i>')
+    .replace(/(?<![<\/\w])_([^_\n]+?)_(?![>])/g, '<i>$1</i>')
+    // Headers: ### text → <b>text</b>
+    .replace(/^#{1,3}\s+(.+)$/gm, '<b>$1</b>')
+    // Bullet: * text → - text
+    .replace(/^\* /gm, '- ')
+    // Code blocks: ```...``` → remove
+    .replace(/```[\s\S]*?```/g, '')
+    // Inline code: `text` → text
+    .replace(/`([^`]+)`/g, '$1');
+}
 
 export interface AnalysisResult {
   text: string;
@@ -86,7 +112,8 @@ export async function analyzeMonthlyReport(reportText: string, thisMonthFrom: st
       messages.push({ role: 'user', content: toolResults });
     } else {
       const textBlocks = response.content.filter(b => b.type === 'text');
-      const finalText = textBlocks.map(b => (b as Anthropic.TextBlock).text).join('\n');
+      const rawText = textBlocks.map(b => (b as Anthropic.TextBlock).text).join('\n');
+      const finalText = sanitizeForTelegram(rawText);
       console.log(`[opus-analyst] Done after ${iteration} iterations, input=${totalInput}, output=${totalOutput}`);
 
       const costUsd = (totalInput / 1_000_000) * INPUT_PRICE_PER_M + (totalOutput / 1_000_000) * OUTPUT_PRICE_PER_M;
