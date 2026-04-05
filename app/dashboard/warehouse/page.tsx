@@ -26,6 +26,7 @@ import {
   type ConversionSource,
 } from '@/lib/warehouse-ledger-actions';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
+import { getCurrentProfile } from '@/lib/actions';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
 
 // ── Types ──
@@ -132,6 +133,7 @@ function KPICard({ label, value, color = 'var(--accent)', sub }: { label: string
 export default function WarehousePage() {
   const [activeTab, setActiveTab] = useState('stock');
   const [loading, setLoading] = useState(true);
+  const [userRole, setUserRole] = useState<string>('');
 
   // Period selector (for legacy tabs)
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -159,10 +161,12 @@ export default function WarehousePage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const refreshData = () => setRefreshKey(k => k + 1);
 
-  // Load available periods on mount
+  // Load profile + available periods on mount
   useEffect(() => {
     (async () => {
       try {
+        const profile = await getCurrentProfile();
+        if (profile) setUserRole(profile.role);
         const periods = await getWarehouseAvailablePeriods();
         setAvailablePeriods(periods);
         if (periods.length > 0) {
@@ -170,7 +174,7 @@ export default function WarehousePage() {
           setSelectedYear(periods[0].period_year);
         }
       } catch (e) {
-        console.error('Failed to load periods:', e);
+        console.error('Failed to load:', e);
       }
       setLoading(false);
     })();
@@ -323,7 +327,7 @@ export default function WarehousePage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} />}
+      {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} userRole={userRole} />}
       {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
       {activeTab === 'ringkasan' && <RingkasanTab data={filteredSummary} categories={categories} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
@@ -338,13 +342,17 @@ export default function WarehousePage() {
 // STOCK BALANCE TAB (NEW)
 // ============================================================
 
-function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, setCategoryFilter, onRefresh }: {
+function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, setCategoryFilter, onRefresh, userRole }: {
   data: any[]; searchQuery: string; setSearchQuery: (v: string) => void;
   categoryFilter: string; setCategoryFilter: (v: string) => void;
-  onRefresh: () => void;
+  onRefresh: () => void; userRole: string;
 }) {
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'in' | 'out' | 'transfer' | 'convert' | 'dispose'>('in');
+
+  // Role-based button visibility
+  const canStockIn = !['warehouse_manager'].includes(userRole);
+  const canWarehouseOps = !['ppic'].includes(userRole); // transfer, convert, out, dispose
   const [warehouseFilter, setWarehouseFilter] = useState('all');
 
   const categories = useMemo(() => {
@@ -388,26 +396,26 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
 
       {/* Action buttons + Filters */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        <button onClick={() => { setModalMode('in'); setShowModal(true); }}
+        {canStockIn && <button onClick={() => { setModalMode('in'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--green)', color: '#fff' }}>
           + Stock Masuk
-        </button>
-        <button onClick={() => { setModalMode('transfer'); setShowModal(true); }}
+        </button>}
+        {canWarehouseOps && <button onClick={() => { setModalMode('transfer'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#06b6d4', color: '#fff' }}>
           Transfer
-        </button>
-        <button onClick={() => { setModalMode('convert'); setShowModal(true); }}
+        </button>}
+        {canWarehouseOps && <button onClick={() => { setModalMode('convert'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#8b5cf6', color: '#fff' }}>
           Konversi
-        </button>
-        <button onClick={() => { setModalMode('out'); setShowModal(true); }}
+        </button>}
+        {canWarehouseOps && <button onClick={() => { setModalMode('out'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#f97316', color: '#fff' }}>
           Stock Keluar
         </button>
-        <button onClick={() => { setModalMode('dispose'); setShowModal(true); }}
+        {canWarehouseOps && <button onClick={() => { setModalMode('dispose'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--red)', color: '#fff' }}>
           Dispose
-        </button>
+        </button>}
         <div style={{ flex: 1 }} />
         <input type="text" placeholder="Cari produk..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', minWidth: 200 }} />

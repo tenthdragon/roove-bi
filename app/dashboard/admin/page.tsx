@@ -466,6 +466,9 @@ export default function AdminPage() {
       case 'sales_manager': return { text: 'Sales Manager', bg: 'var(--accent-subtle)', color: '#c084fc' };
       case 'pending': return { text: 'Menunggu Approval', bg: 'var(--badge-red-bg)', color: 'var(--red)' };
       case 'staff': return { text: 'Staff', bg: 'var(--accent-subtle)', color: '#38bdf8' };
+      case 'direktur_operasional': return { text: 'Direktur Ops', bg: 'var(--badge-green-bg)', color: '#34d399' };
+      case 'warehouse_manager': return { text: 'WH Manager', bg: 'var(--accent-subtle)', color: '#06b6d4' };
+      case 'ppic': return { text: 'PPIC', bg: 'var(--badge-yellow-bg)', color: '#f59e0b' };
       default: return { text: r, bg: 'var(--border)', color: 'var(--dim)' };
     }
   };
@@ -1324,6 +1327,9 @@ export default function AdminPage() {
                 >
                   <option value="admin">Admin</option>
                   <option value="finance">Finance</option>
+                  <option value="direktur_operasional">Direktur Operasional</option>
+                  <option value="warehouse_manager">Warehouse Manager</option>
+                  <option value="ppic">PPIC</option>
                   <option value="brand_manager">Brand Manager</option>
                   <option value="sales_manager">Sales Manager</option>
                   <option value="staff">Staff</option>
@@ -1355,9 +1361,9 @@ export default function AdminPage() {
 
           {/* Role Legend */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 10 }}>
-            {['owner', 'admin', 'finance', 'staff', 'brand_manager', 'sales_manager', 'pending'].map(r => {
+            {['owner', 'admin', 'finance', 'direktur_operasional', 'warehouse_manager', 'ppic', 'staff', 'brand_manager', 'sales_manager', 'pending'].map(r => {
               const rl = roleLabel(r);
-              const desc = r === 'owner' ? 'akses penuh' : r === 'admin' ? 'read-only' : r === 'finance' ? 'sync/upload' : r === 'brand_manager' ? 'marketing' : r === 'sales_manager' ? 'channel' : r === 'staff' ? 'staff' : 'pending';
+              const desc = r === 'owner' ? 'akses penuh' : r === 'admin' ? 'read-only' : r === 'finance' ? 'sync/upload' : r === 'direktur_operasional' ? 'semua + notif gudang' : r === 'warehouse_manager' ? 'gudang ops' : r === 'ppic' ? 'stock masuk' : r === 'brand_manager' ? 'marketing' : r === 'sales_manager' ? 'channel' : r === 'staff' ? 'admin only' : 'pending';
               return (
                 <span key={r} style={{ padding: '2px 8px', borderRadius: 5, background: rl.bg, color: rl.color, fontWeight: 600 }}>
                   {rl.text} — {desc}
@@ -1402,10 +1408,28 @@ export default function AdminPage() {
                           <option value="staff">Staff</option>
                           <option value="admin">Admin</option>
                           <option value="finance">Finance</option>
+                          <option value="direktur_operasional">Direktur Operasional</option>
+                          <option value="warehouse_manager">Warehouse Manager</option>
+                          <option value="ppic">PPIC</option>
                           <option value="brand_manager">Brand Manager</option>
                           <option value="sales_manager">Sales Manager</option>
                           <option value="pending">Revoke Access</option>
                         </select>
+                      )}
+                      {/* Telegram Chat ID */}
+                      {u.role === 'direktur_operasional' && (
+                        <input
+                          type="text"
+                          placeholder="Telegram Chat ID"
+                          defaultValue={u.telegram_chat_id || ''}
+                          onBlur={async (e) => {
+                            const val = e.target.value.trim();
+                            try {
+                              await supabase.from('profiles').update({ telegram_chat_id: val || null }).eq('id', u.id);
+                            } catch {}
+                          }}
+                          style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, width: 140 }}
+                        />
                       )}
                     </div>
                   )}

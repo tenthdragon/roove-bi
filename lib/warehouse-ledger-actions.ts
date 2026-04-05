@@ -2,6 +2,7 @@
 'use server';
 
 import { createServiceSupabase, createServerSupabase } from './supabase-server';
+import { sendTelegramToChat } from './telegram';
 
 // ============================================================
 // AUTH HELPER
@@ -15,6 +16,51 @@ async function getCurrentUserId(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+async function getCurrentUserName(): Promise<string> {
+  try {
+    const supabase = createServerSupabase();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return 'System';
+    const svc = createServiceSupabase();
+    const { data } = await svc.from('profiles').select('full_name, email').eq('id', user.id).single();
+    return data?.full_name || data?.email || 'Unknown';
+  } catch {
+    return 'System';
+  }
+}
+
+// ============================================================
+// TELEGRAM NOTIFICATION (fire-and-forget)
+// ============================================================
+
+async function notifyDirekturs(message: string) {
+  try {
+    const svc = createServiceSupabase();
+    const { data: direkturs } = await svc
+      .from('profiles')
+      .select('telegram_chat_id')
+      .eq('role', 'direktur_operasional')
+      .not('telegram_chat_id', 'is', null);
+
+    if (direkturs && direkturs.length > 0) {
+      await Promise.allSettled(
+        direkturs.map(d => sendTelegramToChat(d.telegram_chat_id, message))
+      );
+    }
+  } catch (e) {
+    console.warn('[warehouse] telegram notify failed:', e);
+  }
+}
+
+function formatNotification(type: string, productName: string, qty: number, gudang: string, userName: string, extra?: string): string {
+  const icon = type === 'Stock Masuk' ? '\u{1F4E6}' : type === 'Transfer' ? '\u{1F500}' : type === 'Dispose' ? '\u{1F5D1}' : '\u{1F4E4}';
+  const time = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  let msg = `${icon} <b>${type}</b>\nProduk: ${productName}\nQty: ${qty > 0 ? '+' : ''}${qty.toLocaleString('id-ID')}\n`;
+  if (extra) msg += `${extra}\n`;
+  msg += `Oleh: ${userName}\nWaktu: ${time}`;
+  return msg;
 }
 
 // ============================================================
@@ -94,7 +140,7 @@ export async function recordStockIn(
     }
   }
 
-  return insertLedgerEntry(svc, {
+  const result = await insertLedgerEntry(svc, {
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'IN',
@@ -104,6 +150,15 @@ export async function recordStockIn(
     notes,
     created_by: userId,
   });
+
+  // Notify direktur (fire-and-forget)
+  const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
+  if (prod) {
+    const userName = await getCurrentUserName();
+    notifyDirekturs(formatNotification('Stock Masuk', prod.name, quantity, `${prod.warehouse} - ${prod.entity}`, userName));
+  }
+
+  return result;
 }
 
 // ============================================================
@@ -137,7 +192,7 @@ export async function recordStockOut(
     }
   }
 
-  return insertLedgerEntry(svc, {
+  const result = await insertLedgerEntry(svc, {
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'OUT',
@@ -147,6 +202,14 @@ export async function recordStockOut(
     notes,
     created_by: userId,
   });
+
+  const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
+  if (prod) {
+    const userName = await getCurrentUserName();
+    notifyDirekturs(formatNotification('Stock Keluar', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName));
+  }
+
+  return result;
 }
 
 // ============================================================
@@ -248,6 +311,12 @@ export async function recordTransfer(
     notes: `Transfer to ${toEntity} (${toWarehouse})`,
     created_by: userId,
   });
+
+  const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
+  if (prod) {
+    const userName = await getCurrentUserName();
+    notifyDirekturs(formatNotification('Transfer', prod.name, quantity, `${fromEntity} → ${toEntity}`, userName, `Dari: ${fromWarehouse} - ${fromEntity}\nKe: ${toWarehouse} - ${toEntity}`));
+  }
 
   return transfer;
 }
@@ -376,7 +445,7 @@ export async function recordDispose(
     }
   }
 
-  return insertLedgerEntry(svc, {
+  const result = await insertLedgerEntry(svc, {
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'DISPOSE',
@@ -385,6 +454,14 @@ export async function recordDispose(
     notes: reason,
     created_by: userId,
   });
+
+  const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
+  if (prod) {
+    const userName = await getCurrentUserName();
+    notifyDirekturs(formatNotification('Dispose', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName, reason ? `Alasan: ${reason}` : undefined));
+  }
+
+  return result;
 }
 
 // ============================================================

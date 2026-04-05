@@ -19,7 +19,10 @@ function getCurrentTab(path) {
 function getAllowedTabs(prof) {
   if (!prof) return [];
   if (prof.role === 'staff') {
-    return ['admin', 'warehouse'];
+    return ['admin'];
+  }
+  if (prof.role === 'warehouse_manager' || prof.role === 'ppic') {
+    return ['warehouse'];
   }
   if (prof.role === 'brand_manager') {
     return prof.allowed_tabs && prof.allowed_tabs.length > 0 ? prof.allowed_tabs : ['marketing'];
@@ -27,7 +30,7 @@ function getAllowedTabs(prof) {
   if (prof.role === 'sales_manager') {
     return ['channels', 'waba-management'];
   }
-  return null;
+  return null; // owner, admin, finance, direktur_operasional, manager → all tabs
 }
 
 function RefreshViewsButton() {

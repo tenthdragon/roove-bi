@@ -2,7 +2,7 @@
 // Types
 // ============================================================
 
-export type UserRole = 'owner' | 'admin' | 'finance' | 'brand_manager' | 'sales_manager' | 'staff' | 'pending';
+export type UserRole = 'owner' | 'admin' | 'finance' | 'brand_manager' | 'sales_manager' | 'staff' | 'direktur_operasional' | 'warehouse_manager' | 'ppic' | 'pending';
 
 export interface Profile {
   id: string;
@@ -183,7 +183,9 @@ export type TabId = string;
 // Check if user can access a tab
 export function canAccessTab(profile: Profile, tabId: string): boolean {
   if (profile.role === 'pending') return false;
-  if (profile.role === 'owner' || profile.role === 'admin' || profile.role === 'finance') return true;
+  if (profile.role === 'owner' || profile.role === 'admin' || profile.role === 'finance' || profile.role === 'direktur_operasional') return true;
+  if (profile.role === 'warehouse_manager' || profile.role === 'ppic') return tabId === 'warehouse';
+  if (profile.role === 'staff') return tabId === 'admin';
   if (tabId === 'admin') return false;
   if (profile.allowed_tabs.length === 0) return true;
   return profile.allowed_tabs.includes(tabId);
