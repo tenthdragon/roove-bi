@@ -241,17 +241,18 @@ export async function buildDailyReport(): Promise<string> {
 
   return [
     `📊 <b>Daily Report — ${dateLabel(yesterday)}</b>`,
+    `<i>vs avg active daily ${monthLabel(mFrom)}</i>`,
     '',
-    `💰 <b>Net Sales:</b> ${fmtRp(yd.ns)} | ${fmtDelta(yd.ns, avg.ns, false)} vs avg`,
-    `📈 <b>GP Margin:</b> ${fmtPct(yd.gpm)} | ${fmtDelta(yd.gpm, avg.gpm, true)} vs avg`,
-    `💵 <b>GP AMA:</b> ${fmtRp(yd.nam)} | ${fmtDelta(yd.nam, avg.nam, false)} vs avg`,
-    `📦 <b>Shipment:</b> ${fmtNum(yd.ship)} | ${fmtDelta(yd.ship, avg.ship, false)} vs avg`,
-    `🛒 <b>AOV:</b> ${fmtRp(yd.aov)} | ${fmtDelta(yd.aov, avg.aov, false)} vs avg`,
-    `📣 <b>Mkt Fee %:</b> ${fmtPct(yd.mktPct)} | ${fmtDelta(yd.mktPct, avg.mktPct, true, true)} vs avg`,
-    `📱 <b>ROAS Meta Ads:</b> ${yd.roas.toFixed(2)}x | ${fmtDelta(yd.roas, avg.roas, false)} vs avg`,
-    `✅ <b>CR Scalev *):</b> ${fmtNum(yd.crShipped)}/${fmtNum(yd.crCreated)} (${fmtPct(yd.crPct)}) | ${fmtDelta(yd.crPct, avg.crPct, true)} vs avg`,
+    `💰 <b>Net Sales:</b> ${fmtRp(yd.ns)} ${fmtDelta(yd.ns, avg.ns, false)}`,
+    `📈 <b>GP Margin:</b> ${fmtPct(yd.gpm)} ${fmtDelta(yd.gpm, avg.gpm, true)}`,
+    `💵 <b>GP AMA:</b> ${fmtRp(yd.nam)} ${fmtDelta(yd.nam, avg.nam, false)}`,
+    `📦 <b>Shipment:</b> ${fmtNum(yd.ship)} ${fmtDelta(yd.ship, avg.ship, false)}`,
+    `🛒 <b>AOV:</b> ${fmtRp(yd.aov)} ${fmtDelta(yd.aov, avg.aov, false)}`,
+    `📣 <b>Mkt Fee %:</b> ${fmtPct(yd.mktPct)} ${fmtDelta(yd.mktPct, avg.mktPct, true, true)}`,
+    `📱 <b>ROAS Meta:</b> ${yd.roas.toFixed(2)}x ${fmtDelta(yd.roas, avg.roas, false)}`,
+    `✅ <b>CR Scalev *):</b> ${fmtNum(yd.crShipped)}/${fmtNum(yd.crCreated)} (${fmtPct(yd.crPct)}) ${fmtDelta(yd.crPct, avg.crPct, true)}`,
     '',
-    `<i>*) same-day proxy | avg = avg active daily ${monthLabel(mFrom)}</i>`,
+    `<i>*) same-day proxy</i>`,
   ].join('\n');
 }
 
