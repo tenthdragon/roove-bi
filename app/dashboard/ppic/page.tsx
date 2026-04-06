@@ -762,13 +762,13 @@ function DemandTab() {
         <div style={{ flex: 1 }} />
         <button onClick={handleInit} disabled={initializing}
           style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: initializing ? 0.6 : 1 }}>
-          {initializing ? 'Menghitung...' : 'Inisialisasi dari ScaleV'}
+          {initializing ? 'Menghitung...' : 'Inisialisasi dari Scalev'}
         </button>
       </div>
 
       {loading ? <div style={{ color: 'var(--dim)', padding: 40, textAlign: 'center' }}>Memuat...</div> : plans.length === 0 ? (
         <div style={{ color: 'var(--dim)', padding: 40, textAlign: 'center', background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)' }}>
-          Belum ada data demand planning untuk {ID_MONTHS[month]} {year}. Klik "Inisialisasi dari ScaleV" untuk menghitung otomatis.
+          Belum ada data demand planning untuk {ID_MONTHS[month]} {year}. Klik "Inisialisasi dari Scalev" untuk menghitung otomatis.
         </div>
       ) : viewMode === 'weekly' ? (
         /* ── WEEKLY VIEW ── */

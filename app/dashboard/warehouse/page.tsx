@@ -15,6 +15,7 @@ import {
   getStockBalance,
   getStockByBatch,
   getLedgerHistory,
+  getDailyMovementSummary,
   getProducts,
   getBatches,
   recordStockIn,
@@ -70,13 +71,13 @@ interface ExpiringProduct {
 
 const SUB_TABS = [
   { id: 'stock', label: 'Saldo Stock' },
-  { id: 'ledger', label: 'Movement Log' },
+  { id: 'daily-summary', label: 'Daily Summary' },
   { id: 'batch', label: 'Batch & Expiry' },
-  // Mapping ScaleV moved to Warehouse Settings
-  { id: 'ringkasan', label: 'Ringkasan (Lama)' },
-  { id: 'harian', label: 'Harian (Lama)' },
   { id: 'stock-opname', label: 'Stock Opname' },
   { id: 'expired', label: 'Expired Monitor' },
+  { id: 'ringkasan', label: 'Ringkasan (Lama)' },
+  { id: 'harian', label: 'Harian (Lama)' },
+  { id: 'ledger', label: 'Movement Log' },
 ];
 
 const ID_MONTHS = ['', 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
@@ -156,12 +157,19 @@ export default function WarehousePage() {
   const [batchStock, setBatchStock] = useState<any[]>([]);
   const [ledgerHistory, setLedgerHistory] = useState<any[]>([]);
   const [mappingData, setMappingData] = useState<any[]>([]);
+  const [dailySummary, setDailySummary] = useState<any[]>([]);
+  const [dailySummaryDate, setDailySummaryDate] = useState(() => {
+    const now = new Date();
+    const wib = new Date(now.getTime() + (7 * 60 - now.getTimezoneOffset()) * 60000);
+    return wib.toISOString().slice(0, 10);
+  });
 
   // Filters
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [expiryFilter, setExpiryFilter] = useState('all');
   const [expandedSO, setExpandedSO] = useState<string | null>(null);
   const [ledgerTypeFilter, setLedgerTypeFilter] = useState('all');
+  const [ledgerSearch, setLedgerSearch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const refreshData = () => setRefreshKey(k => k + 1);
@@ -193,8 +201,11 @@ export default function WarehousePage() {
         if (activeTab === 'stock') {
           const data = await getStockBalance();
           setStockBalance(data);
+        } else if (activeTab === 'daily-summary') {
+          const data = await getDailyMovementSummary(dailySummaryDate);
+          setDailySummary(data);
         } else if (activeTab === 'ledger') {
-          const data = await getLedgerHistory({ limit: 200 });
+          const data = await getLedgerHistory({ limit: 500 });
           setLedgerHistory(data);
         } else if (activeTab === 'batch') {
           const data = await getStockByBatch();
@@ -223,7 +234,7 @@ export default function WarehousePage() {
         console.error('Failed to load data:', e);
       }
     })();
-  }, [activeTab, selectedMonth, selectedYear, loading, refreshKey]);
+  }, [activeTab, selectedMonth, selectedYear, loading, refreshKey, dailySummaryDate]);
 
   // Categories for filter
   const categories = useMemo(() => {
@@ -336,7 +347,8 @@ export default function WarehousePage() {
 
       {/* Tab content */}
       {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} userRole={userRole} />}
-      {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} />}
+      {activeTab === 'daily-summary' && <DailySummaryTab data={dailySummary} date={dailySummaryDate} setDate={setDailySummaryDate} />}
+      {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} search={ledgerSearch} setSearch={setLedgerSearch} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
       {activeTab === 'mapping' && <MappingTab data={mappingData} onRefresh={refreshData} />}
       {activeTab === 'ringkasan' && <RingkasanTab data={filteredSummary} categories={categories} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
@@ -1163,7 +1175,7 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
     <>
       {/* KPI */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <KPICard label="Total Produk ScaleV" value={String(counts.all)} color="var(--accent)" />
+        <KPICard label="Total Produk Scalev" value={String(counts.all)} color="var(--accent)" />
         <KPICard label="Mapped" value={String(counts.mapped)} color="var(--green)" />
         <KPICard label="Unmapped" value={String(counts.unmapped)} color={counts.unmapped > 0 ? 'var(--red)' : 'var(--green)'} />
         <KPICard label="Ignored" value={String(counts.ignored)} color="var(--dim)" />
@@ -1178,7 +1190,7 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
           </button>
         ))}
         <div style={{ flex: 1 }} />
-        <input type="text" placeholder="Cari nama ScaleV..." value={search} onChange={(e) => setSearch(e.target.value)}
+        <input type="text" placeholder="Cari nama Scalev..." value={search} onChange={(e) => setSearch(e.target.value)}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', minWidth: 200 }} />
         <button onClick={handleSync} disabled={syncing}
           style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', cursor: syncing ? 'wait' : 'pointer', fontSize: 12, fontWeight: 600, background: 'transparent', color: 'var(--dim)' }}>
@@ -1191,8 +1203,8 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['ScaleV Product Name', 'Frek', 'Harga/unit', 'Mapped To', 'Qty', 'Status', 'Action'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: ['ScaleV Product Name', 'Mapped To', 'Harga/unit', 'Status', 'Action'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              {['Scalev Product Name', 'Frek', 'Harga/unit', 'Mapped To', 'Qty', 'Status', 'Action'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['Scalev Product Name', 'Mapped To', 'Harga/unit', 'Status', 'Action'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -1308,13 +1320,138 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
 // LEDGER (MOVEMENT LOG) TAB (NEW)
 // ============================================================
 
-function LedgerTab({ data, typeFilter, setTypeFilter }: {
+// ============================================================
+// DAILY SUMMARY TAB
+// ============================================================
+function DailySummaryTab({ data, date, setDate }: {
+  data: any[]; date: string; setDate: (v: string) => void;
+}) {
+  const [entityFilter, setEntityFilter] = useState('all');
+
+  const entities = useMemo(() => {
+    const set = new Set<string>();
+    data.forEach(r => set.add(r.entity));
+    return Array.from(set).sort();
+  }, [data]);
+
+  const filtered = useMemo(() => {
+    if (entityFilter === 'all') return data;
+    return data.filter(r => r.entity === entityFilter);
+  }, [data, entityFilter]);
+
+  const totals = useMemo(() => {
+    return filtered.reduce((acc, r) => ({
+      total_in: acc.total_in + r.total_in,
+      total_out: acc.total_out + r.total_out,
+      total_adjust: acc.total_adjust + r.total_adjust,
+      net_change: acc.net_change + r.net_change,
+    }), { total_in: 0, total_out: 0, total_adjust: 0, net_change: 0 });
+  }, [filtered]);
+
+  return (
+    <>
+      {/* Controls */}
+      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input type="date" value={date} onChange={e => setDate(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }} />
+        <button onClick={() => setEntityFilter('all')}
+          style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === 'all' ? 'var(--accent)' : 'transparent', color: entityFilter === 'all' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+          Semua ({data.length})
+        </button>
+        {entities.map(e => (
+          <button key={e} onClick={() => setEntityFilter(entityFilter === e ? 'all' : e)}
+            style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === e ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === e ? 'var(--accent)' : 'transparent', color: entityFilter === e ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+            {e} ({data.filter(r => r.entity === e).length})
+          </button>
+        ))}
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)' }}>
+          Tidak ada pergerakan barang pada {date}
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                {['Produk', 'Entity', 'Kategori', 'IN', 'OUT', 'Adjust', 'Net'].map(h => (
+                  <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Entity', 'Kategori'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(r => (
+                <tr key={r.product_id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                  <td style={{ padding: '6px 10px', fontWeight: 500 }}>{r.product_name}</td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{r.entity}</td>
+                  <td style={{ padding: '6px 10px' }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${CATEGORY_COLORS[r.category] || '#94a3b8'}20`, color: CATEGORY_COLORS[r.category] || '#94a3b8' }}>
+                      {r.category}
+                    </span>
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_in > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
+                    {r.total_in > 0 ? `+${r.total_in.toLocaleString('id-ID')}` : '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_out < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                    {r.total_out < 0 ? r.total_out.toLocaleString('id-ID') : '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_adjust !== 0 ? '#8b5cf6' : 'var(--text-muted)' }}>
+                    {r.total_adjust !== 0 ? (r.total_adjust > 0 ? '+' : '') + r.total_adjust.toLocaleString('id-ID') : '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: r.net_change > 0 ? 'var(--green)' : r.net_change < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                    {r.net_change > 0 ? '+' : ''}{r.net_change.toLocaleString('id-ID')}
+                  </td>
+                </tr>
+              ))}
+              {/* Totals row */}
+              <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg)' }}>
+                <td colSpan={3} style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL ({filtered.length} produk)</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--green)' }}>
+                  {totals.total_in > 0 ? `+${totals.total_in.toLocaleString('id-ID')}` : '-'}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f97316' }}>
+                  {totals.total_out < 0 ? totals.total_out.toLocaleString('id-ID') : '-'}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#8b5cf6' }}>
+                  {totals.total_adjust !== 0 ? (totals.total_adjust > 0 ? '+' : '') + totals.total_adjust.toLocaleString('id-ID') : '-'}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totals.net_change > 0 ? 'var(--green)' : totals.net_change < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                  {totals.net_change > 0 ? '+' : ''}{totals.net_change.toLocaleString('id-ID')}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
+  );
+}
+
+// ============================================================
+// MOVEMENT LOG TAB
+// ============================================================
+function LedgerTab({ data, typeFilter, setTypeFilter, search, setSearch }: {
   data: any[]; typeFilter: string; setTypeFilter: (v: string) => void;
+  search: string; setSearch: (v: string) => void;
 }) {
   const filtered = useMemo(() => {
-    if (typeFilter === 'all') return data;
-    return data.filter(r => r.movement_type === typeFilter);
-  }, [data, typeFilter]);
+    let result = data;
+    if (typeFilter !== 'all') {
+      result = result.filter(r => r.movement_type === typeFilter);
+    }
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(r =>
+        (r.reference_id || '').toLowerCase().includes(q) ||
+        (r.notes || '').toLowerCase().includes(q) ||
+        (r.warehouse_products?.name || '').toLowerCase().includes(q) ||
+        (r.profiles?.full_name || '').toLowerCase().includes(q) ||
+        (r.profiles?.email || '').toLowerCase().includes(q)
+      );
+    }
+    return result;
+  }, [data, typeFilter, search]);
 
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -1326,8 +1463,10 @@ function LedgerTab({ data, typeFilter, setTypeFilter }: {
 
   return (
     <>
-      {/* Type filter chips */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
+      {/* Search + Type filter chips */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input type="text" placeholder="Cari order ID, produk, user, catatan..." value={search} onChange={e => setSearch(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 12, outline: 'none', minWidth: 260 }} />
         <button
           onClick={() => setTypeFilter('all')}
           style={{
@@ -1351,6 +1490,7 @@ function LedgerTab({ data, typeFilter, setTypeFilter }: {
             {cfg.label} ({typeCounts[key] || 0})
           </button>
         ))}
+        {search && <span style={{ fontSize: 11, color: 'var(--dim)' }}>{filtered.length} hasil</span>}
       </div>
 
       {/* Table */}
@@ -1402,7 +1542,9 @@ function LedgerTab({ data, typeFilter, setTypeFilter }: {
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada movement tercatat</td></tr>
+              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                {search ? `Tidak ditemukan hasil untuk "${search}"` : 'Belum ada movement tercatat'}
+              </td></tr>
             )}
           </tbody>
         </table>

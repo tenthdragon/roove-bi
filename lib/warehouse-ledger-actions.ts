@@ -697,6 +697,60 @@ export async function getLedgerHistory(filters?: {
   return data || [];
 }
 
+export async function getDailyMovementSummary(date: string) {
+  const svc = createServiceSupabase();
+  const dayStart = `${date}T00:00:00+07:00`;
+  const dayEnd = `${date}T23:59:59.999+07:00`;
+
+  const { data, error } = await svc
+    .from('warehouse_stock_ledger')
+    .select(`
+      warehouse_product_id,
+      movement_type,
+      quantity,
+      warehouse_products!inner(name, category, entity)
+    `)
+    .gte('created_at', dayStart)
+    .lte('created_at', dayEnd);
+
+  if (error) throw error;
+  if (!data || data.length === 0) return [];
+
+  // Aggregate by product
+  const byProduct = new Map<number, {
+    product_name: string; category: string; entity: string;
+    total_in: number; total_out: number; total_adjust: number;
+  }>();
+
+  for (const r of data) {
+    const pid = r.warehouse_product_id;
+    if (!byProduct.has(pid)) {
+      const wp = r.warehouse_products as any;
+      byProduct.set(pid, {
+        product_name: wp?.name || '-',
+        category: wp?.category || '-',
+        entity: wp?.entity || '-',
+        total_in: 0, total_out: 0, total_adjust: 0,
+      });
+    }
+    const row = byProduct.get(pid)!;
+    const qty = Number(r.quantity);
+    if (r.movement_type === 'IN' || r.movement_type === 'TRANSFER_IN') {
+      row.total_in += qty;
+    } else if (r.movement_type === 'OUT' || r.movement_type === 'TRANSFER_OUT' || r.movement_type === 'DISPOSE') {
+      row.total_out += qty;
+    } else if (r.movement_type === 'ADJUST') {
+      row.total_adjust += qty;
+    }
+  }
+
+  return Array.from(byProduct.entries()).map(([id, v]) => ({
+    product_id: id,
+    ...v,
+    net_change: v.total_in + v.total_out + v.total_adjust,
+  })).sort((a, b) => a.entity.localeCompare(b.entity) || a.product_name.localeCompare(b.product_name));
+}
+
 export async function getBatches(productId: number) {
   const svc = createServiceSupabase();
   const { data, error } = await svc

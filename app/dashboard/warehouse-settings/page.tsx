@@ -30,7 +30,7 @@ const SUB_TABS = [
   { id: 'vendors', label: 'Vendor' },
   { id: 'products', label: 'Master Produk' },
   { id: 'warehouses', label: 'Active Warehouse' },
-  { id: 'mapping', label: 'Mapping ScaleV' },
+  { id: 'mapping', label: 'Mapping Scalev' },
 ];
 
 const CATEGORIES = ['fg', 'sachet', 'packaging', 'bonus', 'other'];
@@ -573,7 +573,7 @@ function ActiveWarehouseTab() {
       {/* Business → Warehouse Mapping */}
       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Business → Gudang Mapping</div>
       <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
-        Mapping bisnis ScaleV ke entity gudang yang stoknya berkurang saat order shipped.
+        Mapping bisnis Scalev ke entity gudang yang stoknya berkurang saat order shipped.
       </div>
 
       <div style={{ overflowX: 'auto' }}>
@@ -726,8 +726,8 @@ function MappingTabInline({ data, onRefresh }: { data: any[]; onRefresh: () => v
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['ScaleV Name', 'Frek', 'Harga/unit', 'Mapped To', 'Status', 'Aksi'].map(h => (
-                <th key={h} style={{ padding: '6px 8px', textAlign: ['ScaleV Name', 'Mapped To', 'Harga/unit', 'Status', 'Aksi'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              {['Scalev Name', 'Frek', 'Harga/unit', 'Mapped To', 'Status', 'Aksi'].map(h => (
+                <th key={h} style={{ padding: '6px 8px', textAlign: ['Scalev Name', 'Mapped To', 'Harga/unit', 'Status', 'Aksi'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>

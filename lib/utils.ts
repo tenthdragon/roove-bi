@@ -174,7 +174,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'customers',      label: 'Customer Analysis',  icon: 'Users' },
   { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers' },
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign' },
-  { id: 'warehouse',      label: 'Gudang',             icon: 'Warehouse' },
+  { id: 'warehouse',      label: 'Warehouse',          icon: 'Warehouse' },
   { id: 'warehouse-settings', label: 'Warehouse Settings', icon: 'Wrench' },
   { id: 'ppic',           label: 'PPIC',               icon: 'ClipboardList' },
   { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true },
