@@ -373,13 +373,28 @@ export async function initDemandPlans(month: number, year: number) {
   const { data: demandData, error: demandErr } = await svc.rpc('ppic_monthly_demand', { p_months: 6 });
   if (demandErr) throw demandErr;
 
-  // Calculate average monthly demand per product
-  const productDemand = new Map<number, { total: number; months: number }>();
+  // Calculate weighted average monthly demand per product
+  // Weight: most recent month = 6, oldest = 1 (linear decay)
+  // Sort months per product from oldest to newest, assign weights 1..N
+  const productMonths = new Map<number, { yr: number; mn: number; qty: number }[]>();
   for (const row of (demandData || [])) {
-    const existing = productDemand.get(row.warehouse_product_id) || { total: 0, months: 0 };
-    existing.total += Number(row.total_qty);
-    existing.months += 1;
-    productDemand.set(row.warehouse_product_id, existing);
+    const pid = row.warehouse_product_id;
+    if (!productMonths.has(pid)) productMonths.set(pid, []);
+    productMonths.get(pid)!.push({ yr: row.yr, mn: row.mn, qty: Number(row.total_qty) });
+  }
+
+  const productDemand = new Map<number, number>();
+  for (const [pid, months] of productMonths.entries()) {
+    // Sort oldest first
+    months.sort((a, b) => a.yr !== b.yr ? a.yr - b.yr : a.mn - b.mn);
+    let weightedTotal = 0;
+    let totalWeight = 0;
+    months.forEach((m, i) => {
+      const weight = i + 1; // 1 for oldest, N for newest
+      weightedTotal += m.qty * weight;
+      totalWeight += weight;
+    });
+    productDemand.set(pid, totalWeight > 0 ? Math.round(weightedTotal / totalWeight) : 0);
   }
 
   // Get actual_in from ledger (warehouse movements)
@@ -412,14 +427,11 @@ export async function initDemandPlans(month: number, year: number) {
 
   // Upsert demand plans
   const rows = (products || []).map(p => {
-    const demand = productDemand.get(p.id);
-    const avgMonthly = demand ? Math.round(demand.total / demand.months) : 0;
-
     return {
       warehouse_product_id: p.id,
       month,
       year,
-      auto_demand: avgMonthly,
+      auto_demand: productDemand.get(p.id) || 0,
       actual_in: actualInMap.get(p.id) || 0,
       actual_out: actualOutMap.get(p.id) || 0,
     };
