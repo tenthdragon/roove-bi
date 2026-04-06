@@ -1339,20 +1339,49 @@ export async function getDeductionLog(date: string) {
     (orders || []).forEach(o => bizMap.set(o.order_id, o.business_code));
   }
 
-  return data.map(d => {
-    // Parse scalev product name from notes: "Auto: {name} x{qty} [...]" or "Backfill: {name} x{qty} [...]"
+  // Aggregate by scalev_product + warehouse_product + entity
+  const grouped = new Map<string, {
+    scalev_product: string; warehouse_product: string; entity: string;
+    total_qty: number; order_count: number;
+    order_ids: Set<string>; business_codes: Set<string>;
+  }>();
+
+  for (const d of data) {
     const notesMatch = (d.notes || '').match(/(?:Auto|Backfill): (.+?) x[\d.]+/);
     const wp = d.warehouse_products as any;
-    return {
-      order_id: d.reference_id,
-      business_code: bizMap.get(d.reference_id) || '-',
-      scalev_product: notesMatch ? notesMatch[1] : d.notes || '-',
-      warehouse_product: wp?.name || '-',
-      quantity: Math.abs(Number(d.quantity)),
-      entity: wp?.entity || '-',
-      created_at: d.created_at,
-    };
-  });
+    const scalevProduct = notesMatch ? notesMatch[1] : d.notes || '-';
+    const warehouseProduct = wp?.name || '-';
+    const entity = wp?.entity || '-';
+    const key = `${scalevProduct}||${warehouseProduct}||${entity}`;
+
+    if (!grouped.has(key)) {
+      grouped.set(key, {
+        scalev_product: scalevProduct,
+        warehouse_product: warehouseProduct,
+        entity,
+        total_qty: 0,
+        order_count: 0,
+        order_ids: new Set(),
+        business_codes: new Set(),
+      });
+    }
+    const row = grouped.get(key)!;
+    row.total_qty += Math.abs(Number(d.quantity));
+    row.order_ids.add(d.reference_id);
+    const biz = bizMap.get(d.reference_id);
+    if (biz) row.business_codes.add(biz);
+  }
+
+  return Array.from(grouped.values())
+    .map(g => ({
+      scalev_product: g.scalev_product,
+      warehouse_product: g.warehouse_product,
+      entity: g.entity,
+      total_qty: g.total_qty,
+      order_count: g.order_ids.size,
+      business_codes: Array.from(g.business_codes).join(', '),
+    }))
+    .sort((a, b) => b.total_qty - a.total_qty);
 }
 
 // ============================================================
