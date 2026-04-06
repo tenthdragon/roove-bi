@@ -1,4 +1,6 @@
 -- Migration 081: Add price_list to v_warehouse_batch_stock view for Nilai column
+-- DROP required because adding a column in the middle changes column order
+DROP VIEW IF EXISTS v_warehouse_batch_stock;
 CREATE OR REPLACE VIEW v_warehouse_batch_stock AS
 SELECT
   wb.id AS batch_id,
