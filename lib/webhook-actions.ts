@@ -123,6 +123,18 @@ export async function saveWebhookBusiness(input: {
       if (error.code === '23505') throw new Error(`Business code "${code}" sudah digunakan`);
       throw error;
     }
+
+    // Auto-create warehouse mapping with default entity (first 3 chars of code)
+    const defaultEntity = code.slice(0, 3);
+    await svc
+      .from('warehouse_business_mapping')
+      .upsert({
+        business_code: code,
+        deduct_entity: defaultEntity,
+        deduct_warehouse: 'BTN',
+        is_active: true,
+        notes: 'Auto-created',
+      }, { onConflict: 'business_code', ignoreDuplicates: true });
   }
 
   return { success: true };

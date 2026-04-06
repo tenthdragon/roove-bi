@@ -177,6 +177,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'warehouse',      label: 'Warehouse',          icon: 'Warehouse' },
   { id: 'warehouse-settings', label: 'Warehouse Settings', icon: 'Wrench' },
   { id: 'ppic',           label: 'PPIC',               icon: 'ClipboardList' },
+  { id: 'business-settings', label: 'Business Settings', icon: 'Building2', ownerOnly: true },
   { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true },
 ];
 

@@ -21,8 +21,7 @@ const TABS = [
   { id: 'meta', label: 'Meta Ads' },
   { id: 'financial', label: 'Financial' },
   { id: 'warehouse', label: 'Warehouse' },
-  // Brands moved to Warehouse Settings
-  { id: 'connection', label: 'Connection' },
+  // Connection + PKP moved to Business Settings
   { id: 'sync', label: 'Sync' },
   { id: 'data_ref', label: 'Data Reference' },
   { id: 'users', label: 'Users' },
@@ -584,12 +583,7 @@ export default function AdminPage() {
         <WarehouseSheetManager />
       )}
 
-      {/* Brands moved to Warehouse Settings */}
-
-      {/* ═══ TAB: SCALEV API ═══ */}
-      {activeTab === 'connection' && (
-        <ConnectionManager />
-      )}
+      {/* Connection + PKP moved to Business Settings */}
 
       {/* ═══ TAB: SYNC ═══ */}
       {activeTab === 'sync' && (
@@ -742,69 +736,7 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* Company PKP Status */}
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Company PKP Status</div>
-            <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
-              Status Pengusaha Kena Pajak (PKP) per perusahaan. Jika PKP, maka PPN sesuai rate di Tax Rates akan diterapkan.
-            </div>
-
-            {bizTaxMsg && (
-              <div style={{
-                marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
-                background: bizTaxMsg.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
-                color: bizTaxMsg.type === 'success' ? 'var(--green)' : 'var(--red)'
-              }}>
-                {bizTaxMsg.type === 'success' ? '\u2705' : '\u274c'} {bizTaxMsg.text}
-              </div>
-            )}
-
-            {bizTaxLoading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
-                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
-              </div>
-            ) : bizTaxData.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>Belum ada data bisnis</div>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ background: 'var(--bg)' }}>
-                      {['Perusahaan', 'Kode', 'Status', 'PKP'].map(h => (
-                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {bizTaxData.map((b) => (
-                      <tr key={b.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text)' }}>{b.business_name}</td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{b.business_code}</td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: b.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: b.is_active ? 'var(--green)' : 'var(--red)' }}>
-                            {b.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <select
-                            value={b.tax_rate_name || 'PPN'}
-                            onChange={(e) => handleBizTaxChange(b.id, e.target.value)}
-                            disabled={bizTaxSaving}
-                            style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, cursor: bizTaxSaving ? 'not-allowed' : 'pointer' }}
-                          >
-                            <option value="PPN">PKP</option>
-                            <option value="NONE">Non-PKP</option>
-                          </select>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          {/* Business → Warehouse Mapping moved to Warehouse Settings */}
+          {/* Company PKP + Warehouse Mapping moved to Business Settings */}
 
           {/* Tax Rates (PPN) */}
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>

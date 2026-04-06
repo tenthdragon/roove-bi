@@ -996,6 +996,19 @@ export async function updateWarehouseBusinessMapping(id: number, field: string, 
   if (error) throw error;
 }
 
+export async function createWarehouseBusinessMapping(businessCode: string, deductEntity: string, deductWarehouse = 'BTN') {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('warehouse_business_mapping')
+    .upsert({
+      business_code: businessCode,
+      deduct_entity: deductEntity,
+      deduct_warehouse: deductWarehouse,
+      is_active: true,
+    }, { onConflict: 'business_code', ignoreDuplicates: true });
+  if (error) throw error;
+}
+
 // ============================================================
 // VENDORS
 // ============================================================

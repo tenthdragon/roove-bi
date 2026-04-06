@@ -570,47 +570,7 @@ function ActiveWarehouseTab() {
         ))}
       </div>
 
-      {/* Business → Warehouse Mapping */}
-      <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Business → Gudang Mapping</div>
-      <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
-        Mapping bisnis Scalev ke entity gudang yang stoknya berkurang saat order shipped.
-      </div>
-
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead>
-            <tr style={{ background: 'var(--bg)' }}>
-              {['Business', 'Kode', 'Deduct dari Gudang', 'Status', 'Catatan'].map(h => (
-                <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {mappings.map(m => (
-              <tr key={m.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text)' }}>{m.scalev_webhook_businesses?.business_name || m.business_code}</td>
-                <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{m.business_code}</td>
-                <td style={{ padding: '10px 12px' }}>
-                  <select
-                    value={`${m.deduct_warehouse} - ${m.deduct_entity}`}
-                    onChange={e => { const [wh, ent] = e.target.value.split(' - '); handleMappingChange(m.id, 'deduct_warehouse', wh); handleMappingChange(m.id, 'deduct_entity', ent); }}
-                    disabled={saving}
-                    style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontWeight: 600 }}>
-                    {Object.keys(warehouseCounts).map(w => <option key={w} value={w}>{w}</option>)}
-                  </select>
-                </td>
-                <td style={{ padding: '10px 12px' }}>
-                  <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: m.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: m.is_active ? 'var(--green)' : 'var(--red)', cursor: 'pointer' }}
-                    onClick={() => handleMappingChange(m.id, 'is_active', !m.is_active)}>
-                    {m.is_active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: 11 }}>{m.notes || '-'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {/* Business → Warehouse Mapping moved to Business Settings */}
     </>
   );
 }
