@@ -48,7 +48,7 @@ export async function addBrand(name: string, sheetName: string): Promise<{ succe
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-  if (profile?.role !== 'owner') throw new Error('Only owners can manage brands');
+  if (profile?.role !== 'owner' && profile?.role !== 'direktur_operasional') throw new Error('Only owners and direktur operasional can manage brands');
 
   const svc = createServiceSupabase();
 
@@ -93,7 +93,7 @@ export async function updateBrandKeywords(brandId: number, keywords: string): Pr
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-  if (profile?.role !== 'owner') throw new Error('Only owners can manage brands');
+  if (profile?.role !== 'owner' && profile?.role !== 'direktur_operasional') throw new Error('Only owners and direktur operasional can manage brands');
 
   const svc = createServiceSupabase();
   const { error } = await svc
@@ -111,7 +111,7 @@ export async function toggleBrand(brandId: number, isActive: boolean): Promise<v
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-  if (profile?.role !== 'owner') throw new Error('Only owners can manage brands');
+  if (profile?.role !== 'owner' && profile?.role !== 'direktur_operasional') throw new Error('Only owners and direktur operasional can manage brands');
 
   const svc = createServiceSupabase();
   const { error } = await svc
@@ -129,7 +129,7 @@ export async function deleteBrandPermanently(brandId: number): Promise<{ success
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error('Not authenticated');
   const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-  if (profile?.role !== 'owner') throw new Error('Only owners can manage brands');
+  if (profile?.role !== 'owner' && profile?.role !== 'direktur_operasional') throw new Error('Only owners and direktur operasional can manage brands');
 
   const svc = createServiceSupabase();
 

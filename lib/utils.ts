@@ -175,6 +175,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers' },
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign' },
   { id: 'warehouse',      label: 'Gudang',             icon: 'Warehouse' },
+  { id: 'warehouse-settings', label: 'Warehouse Settings', icon: 'Wrench' },
   { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true },
 ];
 
@@ -183,6 +184,7 @@ export type TabId = string;
 // Check if user can access a tab
 export function canAccessTab(profile: Profile, tabId: string): boolean {
   if (profile.role === 'pending') return false;
+  if (tabId === 'warehouse-settings') return profile.role === 'owner' || profile.role === 'direktur_operasional';
   if (profile.role === 'owner' || profile.role === 'admin' || profile.role === 'finance' || profile.role === 'direktur_operasional') return true;
   if (profile.role === 'warehouse_manager' || profile.role === 'ppic') return tabId === 'warehouse';
   if (profile.role === 'staff') return tabId === 'admin';

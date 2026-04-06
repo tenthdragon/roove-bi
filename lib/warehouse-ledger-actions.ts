@@ -509,6 +509,60 @@ export async function createBatch(
 // QUERIES
 // ============================================================
 
+export async function getProductsFull(filters?: {
+  category?: string;
+  entity?: string;
+  warehouse?: string;
+  brand_id?: number;
+  includeInactive?: boolean;
+}) {
+  const svc = createServiceSupabase();
+  let query = svc.from('warehouse_products').select('*, brands(id, name)');
+
+  if (filters?.category) query = query.eq('category', filters.category);
+  if (filters?.entity) query = query.eq('entity', filters.entity);
+  if (filters?.warehouse) query = query.eq('warehouse', filters.warehouse);
+  if (filters?.brand_id) query = query.eq('brand_id', filters.brand_id);
+  if (!filters?.includeInactive) query = query.eq('is_active', true);
+
+  const { data, error } = await query.order('entity').order('category').order('name');
+  if (error) throw error;
+  return data || [];
+}
+
+export async function createProduct(product: {
+  name: string; category: string; unit: string; entity: string; warehouse: string;
+  price_list?: number; hpp?: number; vendor?: string; brand_id?: number;
+  reorder_threshold?: number; scalev_product_names?: string[];
+}) {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('warehouse_products')
+    .insert({ ...product, is_active: true })
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateProduct(id: number, updates: Record<string, any>) {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('warehouse_products')
+    .update(updates)
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export async function deactivateProduct(id: number) {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('warehouse_products')
+    .update({ is_active: false })
+    .eq('id', id);
+  if (error) throw error;
+}
+
 export async function getProducts(filters?: {
   category?: string;
   entity?: string;

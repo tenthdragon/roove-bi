@@ -74,7 +74,7 @@ const SUB_TABS = [
   { id: 'stock', label: 'Saldo Stock' },
   { id: 'ledger', label: 'Movement Log' },
   { id: 'batch', label: 'Batch & Expiry' },
-  { id: 'mapping', label: 'Mapping ScaleV' },
+  // Mapping ScaleV moved to Warehouse Settings
   { id: 'ringkasan', label: 'Ringkasan (Lama)' },
   { id: 'harian', label: 'Harian (Lama)' },
   { id: 'stock-opname', label: 'Stock Opname' },
