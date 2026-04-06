@@ -16,6 +16,7 @@ import {
   getStockByBatch,
   getLedgerHistory,
   getDailyMovementSummary,
+  backfillWarehouseDeductions,
   getProducts,
   getBatches,
   recordStockIn,
@@ -347,7 +348,7 @@ export default function WarehousePage() {
 
       {/* Tab content */}
       {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} userRole={userRole} />}
-      {activeTab === 'daily-summary' && <DailySummaryTab data={dailySummary} date={dailySummaryDate} setDate={setDailySummaryDate} />}
+      {activeTab === 'daily-summary' && <DailySummaryTab data={dailySummary} date={dailySummaryDate} setDate={setDailySummaryDate} onRefresh={refreshData} />}
       {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} search={ledgerSearch} setSearch={setLedgerSearch} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
       {activeTab === 'mapping' && <MappingTab data={mappingData} onRefresh={refreshData} />}
@@ -1323,10 +1324,12 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
 // ============================================================
 // DAILY SUMMARY TAB
 // ============================================================
-function DailySummaryTab({ data, date, setDate }: {
-  data: any[]; date: string; setDate: (v: string) => void;
+function DailySummaryTab({ data, date, setDate, onRefresh }: {
+  data: any[]; date: string; setDate: (v: string) => void; onRefresh: () => void;
 }) {
   const [entityFilter, setEntityFilter] = useState('all');
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<string | null>(null);
 
   const entities = useMemo(() => {
     const set = new Set<string>();
@@ -1352,8 +1355,22 @@ function DailySummaryTab({ data, date, setDate }: {
     <>
       {/* Controls */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input type="date" value={date} onChange={e => setDate(e.target.value)}
+        <input type="date" value={date} onChange={e => { setDate(e.target.value); setBackfillResult(null); }}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }} />
+        <button onClick={async () => {
+            setBackfilling(true); setBackfillResult(null);
+            try {
+              const r = await backfillWarehouseDeductions(date);
+              setBackfillResult(`Selesai: ${r.checked} order dicek, ${r.deducted} produk dideduct, ${r.skipped} dilewati`);
+              onRefresh();
+            } catch (err: any) { setBackfillResult(`Error: ${err.message}`); }
+            setBackfilling(false);
+          }} disabled={backfilling}
+          style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', cursor: backfilling ? 'wait' : 'pointer', fontSize: 11, fontWeight: 600, background: 'transparent', color: '#f59e0b', opacity: backfilling ? 0.6 : 1 }}>
+          {backfilling ? 'Processing...' : 'Backfill Deductions'}
+        </button>
+        {backfillResult && <span style={{ fontSize: 11, color: backfillResult.startsWith('Error') ? 'var(--red)' : 'var(--green)' }}>{backfillResult}</span>}
+        <div style={{ flex: 1 }} />
         <button onClick={() => setEntityFilter('all')}
           style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === 'all' ? 'var(--accent)' : 'transparent', color: entityFilter === 'all' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
           Semua ({data.length})

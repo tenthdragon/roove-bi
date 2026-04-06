@@ -1009,6 +1009,103 @@ export async function createWarehouseBusinessMapping(businessCode: string, deduc
   if (error) throw error;
 }
 
+// ── Backfill warehouse deductions for shipped orders missing deductions ──
+export async function backfillWarehouseDeductions(date: string) {
+  const svc = createServiceSupabase();
+  const dayStart = `${date}T00:00:00+07:00`;
+  const dayEnd = `${date}T23:59:59.999+07:00`;
+
+  // Find shipped/completed orders for the date
+  const { data: orders, error: ordErr } = await svc
+    .from('scalev_orders')
+    .select('id, order_id, business_code')
+    .in('status', ['shipped', 'completed'])
+    .gte('shipped_time', dayStart)
+    .lt('shipped_time', dayEnd);
+  if (ordErr) throw ordErr;
+  if (!orders || orders.length === 0) return { checked: 0, deducted: 0, skipped: 0 };
+
+  let totalDeducted = 0;
+  let totalSkipped = 0;
+  let checked = 0;
+
+  for (const order of orders) {
+    // Check if already deducted (idempotency)
+    const { data: existing } = await svc
+      .from('warehouse_stock_ledger')
+      .select('id')
+      .eq('reference_type', 'scalev_order')
+      .eq('reference_id', order.order_id)
+      .limit(1);
+    if (existing && existing.length > 0) continue;
+    checked++;
+
+    // Get warehouse mapping for this business
+    const { data: mapping } = await svc
+      .from('warehouse_business_mapping')
+      .select('deduct_entity, deduct_warehouse')
+      .eq('business_code', order.business_code)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (!mapping) continue;
+
+    // Get order lines
+    const { data: lines } = await svc
+      .from('scalev_order_lines')
+      .select('product_name, quantity')
+      .eq('scalev_order_id', order.id);
+    if (!lines || lines.length === 0) continue;
+
+    for (const line of lines) {
+      if (!line.product_name || !line.quantity || line.quantity <= 0) continue;
+
+      // 1. Check warehouse_scalev_mapping
+      const { data: scalevMapping } = await svc
+        .from('warehouse_scalev_mapping')
+        .select('warehouse_product_id, deduct_qty_multiplier, is_ignored')
+        .eq('scalev_product_name', line.product_name)
+        .maybeSingle();
+
+      if (scalevMapping?.is_ignored) { totalSkipped++; continue; }
+
+      let targetProductId: number | null = null;
+      let deductQty = line.quantity;
+
+      if (scalevMapping?.warehouse_product_id) {
+        targetProductId = scalevMapping.warehouse_product_id;
+        deductQty = line.quantity * (scalevMapping.deduct_qty_multiplier || 1);
+      } else {
+        // Fallback: lookup by scalev_product_names
+        const { data: whProducts } = await svc
+          .rpc('warehouse_find_product_for_deduction', {
+            p_scalev_name: line.product_name,
+            p_entity: mapping.deduct_entity,
+            p_warehouse: mapping.deduct_warehouse,
+          });
+        if (whProducts && whProducts.length > 0) {
+          targetProductId = whProducts[0].id;
+        }
+      }
+
+      if (targetProductId) {
+        const { error: deductErr } = await svc
+          .rpc('warehouse_deduct_fifo', {
+            p_product_id: targetProductId,
+            p_quantity: deductQty,
+            p_reference_type: 'scalev_order',
+            p_reference_id: order.order_id,
+            p_notes: `Backfill: ${line.product_name} x${deductQty} [${order.business_code}→${mapping.deduct_entity}]`,
+          });
+        if (!deductErr) totalDeducted++;
+      } else {
+        totalSkipped++;
+      }
+    }
+  }
+
+  return { checked, deducted: totalDeducted, skipped: totalSkipped };
+}
+
 // ============================================================
 // VENDORS
 // ============================================================
