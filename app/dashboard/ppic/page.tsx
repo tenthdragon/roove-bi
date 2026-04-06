@@ -11,6 +11,7 @@ import {
   cancelPurchaseOrder,
   receivePOItems,
   getDemandPlans,
+  getWeeklyDemandData,
   initDemandPlans,
   updateDemandPlan,
   getITOData,
@@ -650,14 +651,16 @@ function PODetailModal({ poId, onClose }: { poId: number; onClose: () => void })
 }
 
 // ============================================================
-// DEMAND TAB
+// DEMAND TAB — Weekly (default) + Monthly view with pace
 // ============================================================
 
 function DemandTab() {
   const now = new Date();
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [year, setYear] = useState(now.getFullYear());
+  const [viewMode, setViewMode] = useState<'weekly' | 'monthly'>('weekly');
   const [plans, setPlans] = useState<any[]>([]);
+  const [weeklyData, setWeeklyData] = useState<Record<number, any>>({});
   const [loading, setLoading] = useState(true);
   const [initializing, setInitializing] = useState(false);
   const [entityFilter, setEntityFilter] = useState('all');
@@ -665,10 +668,21 @@ function DemandTab() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
 
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const isCurrentMonth = month === now.getMonth() + 1 && year === now.getFullYear();
+  const dayOfMonth = isCurrentMonth ? Math.min(now.getDate(), daysInMonth) : daysInMonth;
+  const currentWeek = dayOfMonth <= 7 ? 1 : dayOfMonth <= 14 ? 2 : dayOfMonth <= 21 ? 3 : 4;
+  const weekDays = [7, 7, 7, daysInMonth - 21]; // days per week
+
   const loadData = async () => {
     setLoading(true);
     try {
-      setPlans(await getDemandPlans(month, year));
+      const [p, w] = await Promise.all([
+        getDemandPlans(month, year),
+        getWeeklyDemandData(month, year),
+      ]);
+      setPlans(p);
+      setWeeklyData(w);
     } catch (e) { console.error(e); }
     setLoading(false);
   };
@@ -703,22 +717,45 @@ function DemandTab() {
     return result;
   }, [plans, entityFilter, searchQuery]);
 
+  const getEffective = (plan: any) => plan.manual_demand !== null ? Number(plan.manual_demand) : Number(plan.auto_demand);
+
+  const getWeeklyTarget = (effective: number, weekNum: number) => {
+    // Proportional: target per week based on days in that week
+    return Math.round(effective * weekDays[weekNum - 1] / daysInMonth);
+  };
+
+  const getStatusColor = (actual: number, target: number, threshold = 0.15) => {
+    if (target <= 0) return 'var(--dim)';
+    const ratio = actual / target;
+    if (ratio >= (1 - threshold)) return 'var(--green)';
+    if (ratio >= (1 - threshold * 2)) return '#f59e0b';
+    return 'var(--red)';
+  };
+
+  const selectStyle = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' };
+  const toggleBtnStyle = (active: boolean) => ({
+    padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none', borderRadius: 6,
+    background: active ? 'var(--accent)' : 'var(--bg)',
+    color: active ? '#fff' : 'var(--dim)',
+  });
+
   return (
     <>
       {/* Controls */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select value={month} onChange={e => setMonth(Number(e.target.value))}
-          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }}>
+        <div style={{ display: 'flex', gap: 2, background: 'var(--bg)', borderRadius: 8, padding: 2, border: '1px solid var(--border)' }}>
+          <button onClick={() => setViewMode('weekly')} style={toggleBtnStyle(viewMode === 'weekly')}>Mingguan</button>
+          <button onClick={() => setViewMode('monthly')} style={toggleBtnStyle(viewMode === 'monthly')}>Bulanan</button>
+        </div>
+        <select value={month} onChange={e => setMonth(Number(e.target.value))} style={selectStyle}>
           {ID_MONTHS.slice(1).map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
         </select>
-        <select value={year} onChange={e => setYear(Number(e.target.value))}
-          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }}>
+        <select value={year} onChange={e => setYear(Number(e.target.value))} style={selectStyle}>
           {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
         </select>
         <input placeholder="Cari produk..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, minWidth: 180 }} />
-        <select value={entityFilter} onChange={e => setEntityFilter(e.target.value)}
-          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }}>
+          style={{ ...selectStyle, minWidth: 180 }} />
+        <select value={entityFilter} onChange={e => setEntityFilter(e.target.value)} style={selectStyle}>
           <option value="all">Semua Entity</option>
           {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
         </select>
@@ -733,23 +770,106 @@ function DemandTab() {
         <div style={{ color: 'var(--dim)', padding: 40, textAlign: 'center', background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)' }}>
           Belum ada data demand planning untuk {ID_MONTHS[month]} {year}. Klik "Inisialisasi dari ScaleV" untuk menghitung otomatis.
         </div>
+      ) : viewMode === 'weekly' ? (
+        /* ── WEEKLY VIEW ── */
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10, position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>PRODUK</th>
+                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10 }}>ENTITY</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--dim)', fontSize: 10 }}>TARGET/BLN</th>
+                {[1, 2, 3, 4].map(w => (
+                  <th key={w} colSpan={2} style={{
+                    padding: '8px 10px', textAlign: 'center', fontWeight: 600, fontSize: 10,
+                    color: isCurrentMonth && w === currentWeek ? 'var(--accent)' : 'var(--dim)',
+                    borderLeft: '1px solid var(--border)',
+                  }}>
+                    W{w} ({w < 4 ? `${(w - 1) * 7 + 1}-${w * 7}` : `22-${daysInMonth}`})
+                    {isCurrentMonth && w === currentWeek && ' *'}
+                  </th>
+                ))}
+              </tr>
+              <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                <th style={{ position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }} />
+                <th />
+                <th />
+                {[1, 2, 3, 4].map(w => (
+                  <>
+                    <th key={`${w}t`} style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 600, color: 'var(--dim)', fontSize: 9, borderLeft: '1px solid var(--border)' }}>TARGET</th>
+                    <th key={`${w}a`} style={{ padding: '4px 6px', textAlign: 'right', fontWeight: 600, color: 'var(--dim)', fontSize: 9 }}>ACTUAL</th>
+                  </>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(plan => {
+                const effective = getEffective(plan);
+                const pid = plan.warehouse_product_id;
+                const wd = weeklyData[pid] || {};
+
+                return (
+                  <tr key={plan.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 10px', fontWeight: 600, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>{plan.warehouse_products?.name}</td>
+                    <td style={{ padding: '6px 10px', fontSize: 11 }}>{plan.warehouse_products?.entity}</td>
+                    <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{fmtNum(effective)}</td>
+                    {[1, 2, 3, 4].map(w => {
+                      const target = getWeeklyTarget(effective, w);
+                      const actual = Number(wd[`w${w}_out`] || 0);
+                      const weekPassed = isCurrentMonth ? w < currentWeek : true;
+                      const weekCurrent = isCurrentMonth && w === currentWeek;
+                      // For current week, prorate target
+                      const daysInWeek = weekDays[w - 1];
+                      const daysElapsedInWeek = weekCurrent ? Math.max(1, dayOfMonth - (w === 1 ? 0 : w === 2 ? 7 : w === 3 ? 14 : 21)) : daysInWeek;
+                      const proratedTarget = weekCurrent ? Math.round(target * daysElapsedInWeek / daysInWeek) : target;
+                      const isFuture = isCurrentMonth && w > currentWeek;
+                      const color = isFuture ? 'var(--dim)' : getStatusColor(actual, proratedTarget);
+
+                      return (
+                        <>
+                          <td key={`${w}t`} style={{ padding: '6px 6px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--dim)', fontSize: 11, borderLeft: '1px solid var(--border)' }}>
+                            {fmtNum(target)}
+                          </td>
+                          <td key={`${w}a`} style={{ padding: '6px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600, color }}>
+                            {isFuture ? '-' : fmtNum(actual)}
+                          </td>
+                        </>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div style={{ padding: '8px 12px', fontSize: 10, color: 'var(--dim)', borderTop: '1px solid var(--border)' }}>
+            * Minggu berjalan. Target di-prorate sesuai hari yang sudah lewat. Hijau = on pace (&ge;85%), Kuning = behind (70-85%), Merah = far behind (&lt;70%).
+          </div>
+        </div>
       ) : (
+        /* ── MONTHLY VIEW with Pace ── */
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['No', 'Produk', 'Entity', 'Kategori', 'Auto Demand', 'Manual Override', 'Effective', 'Actual In', 'Actual Out', 'Variance'].map(h => (
-                  <th key={h} style={{ padding: '8px 10px', textAlign: h === 'No' ? 'center' : 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
+                {['No', 'Produk', 'Entity', 'Kategori', 'Demand', 'Override', 'Effective', 'Actual In', 'Actual Out', 'Prorated Target', 'Variance', 'Projected', 'Pace'].map(h => (
+                  <th key={h} style={{ padding: '8px 10px', textAlign: ['No'].includes(h) ? 'center' : 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.map((plan, idx) => {
-                const effective = plan.manual_demand !== null ? Number(plan.manual_demand) : Number(plan.auto_demand);
+                const effective = getEffective(plan);
                 const actualOut = Number(plan.actual_out);
-                const variance = effective - actualOut;
-                const variancePct = effective > 0 ? Math.round(Math.abs(variance) / effective * 100) : 0;
-                const varianceColor = variancePct <= 10 ? 'var(--green)' : variancePct <= 30 ? '#f59e0b' : 'var(--red)';
+                // Prorated: what we expect to have sold by now
+                const proratedTarget = Math.round(effective * dayOfMonth / daysInMonth);
+                const variance = proratedTarget - actualOut;
+                const variancePct = proratedTarget > 0 ? Math.round(Math.abs(variance) / proratedTarget * 100) : 0;
+                const varianceColor = variancePct <= 15 ? 'var(--green)' : variancePct <= 30 ? '#f59e0b' : 'var(--red)';
+                // Projected month-end
+                const projected = dayOfMonth > 0 ? Math.round(actualOut / dayOfMonth * daysInMonth) : 0;
+                const projectedPct = effective > 0 ? Math.round(projected / effective * 100) : 0;
+                const paceColor = projectedPct >= 85 ? 'var(--green)' : projectedPct >= 70 ? '#f59e0b' : 'var(--red)';
+                const paceLabel = projectedPct >= 85 ? 'On Track' : projectedPct >= 70 ? 'Behind' : 'Far Behind';
 
                 return (
                   <tr key={plan.id} style={{ borderBottom: '1px solid var(--border)' }}>
@@ -775,15 +895,25 @@ function DemandTab() {
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{fmtNum(effective)}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--green)' }}>{fmtNum(Number(plan.actual_in))}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtNum(actualOut)}</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--dim)' }}>{fmtNum(proratedTarget)}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: varianceColor, fontWeight: 600 }}>
                       {variance > 0 ? '+' : ''}{fmtNum(variance)}
                       <span style={{ fontSize: 10, marginLeft: 4 }}>({variancePct}%)</span>
+                    </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtNum(projected)}</td>
+                    <td style={{ padding: '8px 10px' }}>
+                      <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, background: paceColor, color: '#fff' }}>
+                        {paceLabel}
+                      </span>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          <div style={{ padding: '8px 12px', fontSize: 10, color: 'var(--dim)', borderTop: '1px solid var(--border)' }}>
+            Prorated Target = Effective &times; ({dayOfMonth}/{daysInMonth} hari). Projected = Actual Out &times; ({daysInMonth}/{dayOfMonth}). Pace: On Track &ge;85%, Behind 70-85%, Far Behind &lt;70%.
+          </div>
         </div>
       )}
     </>

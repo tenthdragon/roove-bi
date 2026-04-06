@@ -277,6 +277,56 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
 // DEMAND PLANNING
 // ============================================================
 
+export async function getWeeklyDemandData(month: number, year: number) {
+  const svc = createServiceSupabase();
+
+  // Build week boundaries: W1=1-7, W2=8-14, W3=15-21, W4=22-end
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const weeks = [
+    { week: 1, from: `${year}-${String(month).padStart(2, '0')}-01`, to: `${year}-${String(month).padStart(2, '0')}-07` },
+    { week: 2, from: `${year}-${String(month).padStart(2, '0')}-08`, to: `${year}-${String(month).padStart(2, '0')}-14` },
+    { week: 3, from: `${year}-${String(month).padStart(2, '0')}-15`, to: `${year}-${String(month).padStart(2, '0')}-21` },
+    { week: 4, from: `${year}-${String(month).padStart(2, '0')}-22`, to: `${year}-${String(month).padStart(2, '0')}-${daysInMonth}` },
+  ];
+
+  // Query ledger for the entire month, then bucket client-side
+  const monthStart = `${year}-${String(month).padStart(2, '0')}-01T00:00:00+07:00`;
+  const monthEnd = `${year}-${String(month).padStart(2, '0')}-${daysInMonth}T23:59:59+07:00`;
+
+  const { data, error } = await svc
+    .from('warehouse_stock_ledger')
+    .select('warehouse_product_id, movement_type, quantity, created_at')
+    .gte('created_at', monthStart)
+    .lte('created_at', monthEnd);
+  if (error) throw error;
+
+  // Bucket into weeks per product
+  const result = new Map<number, { w1_in: number; w1_out: number; w2_in: number; w2_out: number; w3_in: number; w3_out: number; w4_in: number; w4_out: number }>();
+
+  for (const row of (data || [])) {
+    const pid = row.warehouse_product_id;
+    if (!result.has(pid)) {
+      result.set(pid, { w1_in: 0, w1_out: 0, w2_in: 0, w2_out: 0, w3_in: 0, w3_out: 0, w4_in: 0, w4_out: 0 });
+    }
+    const entry = result.get(pid)!;
+
+    // Determine day of month (in WIB)
+    const d = new Date(row.created_at);
+    const wibDate = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+    const day = wibDate.getUTCDate();
+    const weekNum = day <= 7 ? 1 : day <= 14 ? 2 : day <= 21 ? 3 : 4;
+
+    const isOut = ['OUT', 'DISPOSE', 'TRANSFER_OUT'].includes(row.movement_type);
+    const isIn = row.movement_type === 'IN';
+    const qty = Math.abs(Number(row.quantity));
+
+    if (isIn) (entry as any)[`w${weekNum}_in`] += qty;
+    if (isOut) (entry as any)[`w${weekNum}_out`] += qty;
+  }
+
+  return Object.fromEntries(result);
+}
+
 export async function getDemandPlans(month: number, year: number) {
   const svc = createServiceSupabase();
   const { data, error } = await svc
