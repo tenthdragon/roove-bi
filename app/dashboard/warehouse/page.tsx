@@ -77,7 +77,6 @@ const SUB_TABS = [
   { id: 'stock', label: 'Saldo Stock' },
   { id: 'batch', label: 'Batch & Expiry' },
   { id: 'stock-opname', label: 'Stock Opname' },
-  { id: 'expired', label: 'Expired Monitor' },
   { id: 'ringkasan', label: 'Ringkasan (Lama)' },
   { id: 'harian', label: 'Harian (Lama)' },
   { id: 'ledger', label: 'Movement Log' },
@@ -365,7 +364,7 @@ export default function WarehousePage() {
       {activeTab === 'ringkasan' && <RingkasanTab data={filteredSummary} categories={categories} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
       {activeTab === 'harian' && <HarianTab data={filteredDaily} chartData={dailyChartData} categories={categories} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
       {activeTab === 'stock-opname' && <StockOpnameTab soData={soData} soSummary={soSummary} expandedSO={expandedSO} setExpandedSO={setExpandedSO} />}
-      {activeTab === 'expired' && <ExpiredTab data={filteredExpiring} expiryFilter={expiryFilter} setExpiryFilter={setExpiryFilter} allData={expiringData} />}
+      {/* Expired Monitor merged into Batch & Expiry tab */}
     </div>
   );
 }
@@ -1704,11 +1703,33 @@ function LedgerTab({ data, typeFilter, setTypeFilter, search, setSearch }: {
 function BatchTab({ data, searchQuery, setSearchQuery }: {
   data: any[]; searchQuery: string; setSearchQuery: (v: string) => void;
 }) {
+  const [sortCol, setSortCol] = useState<string>('days_remaining');
+  const [sortAsc, setSortAsc] = useState(true);
+
+  const handleSort = (col: string) => {
+    if (sortCol === col) setSortAsc(!sortAsc);
+    else { setSortCol(col); setSortAsc(true); }
+  };
+
   const filtered = useMemo(() => {
-    if (!searchQuery) return data;
-    const q = searchQuery.toLowerCase();
-    return data.filter(r => r.product_name?.toLowerCase().includes(q) || r.batch_code?.toLowerCase().includes(q));
-  }, [data, searchQuery]);
+    let result = data;
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(r => r.product_name?.toLowerCase().includes(q) || r.batch_code?.toLowerCase().includes(q));
+    }
+    // Sort
+    const dir = sortAsc ? 1 : -1;
+    result = [...result].sort((a, b) => {
+      let av = sortCol === 'nilai' ? Number(a.current_qty) * Number(a.price_list || 0) : a[sortCol];
+      let bv = sortCol === 'nilai' ? Number(b.current_qty) * Number(b.price_list || 0) : b[sortCol];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string') return av.localeCompare(bv) * dir;
+      return (Number(av) - Number(bv)) * dir;
+    });
+    return result;
+  }, [data, searchQuery, sortCol, sortAsc]);
 
   const statusConfig: Record<string, { bg: string; color: string; label: string }> = {
     expired: { bg: 'var(--badge-red-bg)', color: '#fca5a5', label: 'Expired' },
@@ -1724,6 +1745,17 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
     return counts;
   }, [data]);
 
+  const columns = [
+    { key: 'product_name', label: 'Produk', align: 'left' },
+    { key: 'category', label: 'Kategori', align: 'left' },
+    { key: 'batch_code', label: 'Batch', align: 'left' },
+    { key: 'current_qty', label: 'Qty', align: 'right' },
+    { key: 'nilai', label: 'Nilai', align: 'right' },
+    { key: 'expired_date', label: 'Expired', align: 'right' },
+    { key: 'days_remaining', label: 'Sisa Hari', align: 'right' },
+    { key: 'expiry_status', label: 'Status', align: 'left' },
+  ];
+
   return (
     <>
       {/* Status overview */}
@@ -1735,16 +1767,8 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
 
       {/* Search */}
       <div style={{ marginBottom: 12 }}>
-        <input
-          type="text"
-          placeholder="Cari produk atau batch..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          style={{
-            background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8,
-            padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', width: '100%', maxWidth: 400,
-          }}
-        />
+        <input type="text" placeholder="Cari produk atau batch..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', width: '100%', maxWidth: 400 }} />
       </div>
 
       {/* Table */}
@@ -1752,14 +1776,18 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Produk', 'Kategori', 'Batch', 'Qty', 'Expired Date', 'Sisa Hari', 'Status'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Batch', 'Status'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              {columns.map(c => (
+                <th key={c.key} onClick={() => handleSort(c.key)}
+                  style={{ padding: '8px 10px', textAlign: c.align as any, color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>
+                  {c.label} {sortCol === c.key ? (sortAsc ? '▲' : '▼') : ''}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtered.map(r => {
               const cfg = statusConfig[r.expiry_status] || statusConfig.safe;
+              const nilai = Number(r.current_qty) * Number(r.price_list || 0);
               return (
                 <tr key={r.batch_id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                   <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
@@ -1769,6 +1797,9 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
                   <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 11 }}>{r.batch_code}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: 'var(--text)' }}>
                     {Number(r.current_qty).toLocaleString('id-ID')}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--text-secondary)' }}>
+                    {nilai > 0 ? fmtRupiah(nilai) : '-'}
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>
                     {r.expired_date ? fullDateID(r.expired_date) : '-'}
@@ -1785,7 +1816,7 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada batch tercatat. Buat batch dan catat stock IN untuk melihat data.</td></tr>
+              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada batch tercatat. Buat batch dan catat stock IN untuk melihat data.</td></tr>
             )}
           </tbody>
         </table>
