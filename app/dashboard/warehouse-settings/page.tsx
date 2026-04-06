@@ -14,14 +14,19 @@ import {
   updateScalevMapping,
   syncScalevProductNames,
   getProducts,
+  getVendors,
+  createVendor,
+  updateVendor,
+  deleteVendor,
 } from '@/lib/warehouse-ledger-actions';
 import { fetchAllBrands, fetchActiveBrands } from '@/lib/brand-actions';
 import { fmtRupiah } from '@/lib/utils';
 import BrandManager from '@/components/BrandManager';
 
 const SUB_TABS = [
-  { id: 'products', label: 'Master Produk' },
   { id: 'brands', label: 'Brand' },
+  { id: 'vendors', label: 'Vendor' },
+  { id: 'products', label: 'Master Produk' },
   { id: 'warehouses', label: 'Active Warehouse' },
   { id: 'mapping', label: 'Mapping ScaleV' },
 ];
@@ -35,7 +40,7 @@ const inputStyle = {
 };
 
 export default function WarehouseSettingsPage() {
-  const [activeTab, setActiveTab] = useState('products');
+  const [activeTab, setActiveTab] = useState('brands');
 
   return (
     <div className="fade-in">
@@ -59,6 +64,7 @@ export default function WarehouseSettingsPage() {
 
       {activeTab === 'products' && <MasterProdukTab />}
       {activeTab === 'brands' && <BrandTab />}
+      {activeTab === 'vendors' && <VendorTab />}
       {activeTab === 'warehouses' && <ActiveWarehouseTab />}
       {activeTab === 'mapping' && <MappingTabWrapper />}
     </div>
@@ -72,6 +78,7 @@ export default function WarehouseSettingsPage() {
 function MasterProdukTab() {
   const [products, setProducts] = useState<any[]>([]);
   const [brands, setBrands] = useState<any[]>([]);
+  const [vendors, setVendorList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterEntity, setFilterEntity] = useState('all');
@@ -79,7 +86,7 @@ function MasterProdukTab() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editData, setEditData] = useState<any>({});
   const [showAdd, setShowAdd] = useState(false);
-  const [newProduct, setNewProduct] = useState({ name: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor: '', brand_id: '', reorder_threshold: '' });
+  const [newProduct, setNewProduct] = useState({ name: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor_id: '', brand_id: '' });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
@@ -90,12 +97,14 @@ function MasterProdukTab() {
   async function loadData() {
     setLoading(true);
     try {
-      const [prods, br] = await Promise.all([
+      const [prods, br, vnd] = await Promise.all([
         getProductsFull({ includeInactive: true }),
         fetchActiveBrands(),
+        getVendors(),
       ]);
       setProducts(prods);
       setBrands(br);
+      setVendorList(vnd);
     } catch (e) { console.error(e); }
     setLoading(false);
   }
@@ -119,7 +128,7 @@ function MasterProdukTab() {
 
   const startEdit = (p: any) => {
     setEditingId(p.id);
-    setEditData({ price_list: p.price_list || 0, hpp: p.hpp || 0, vendor: p.vendor || '', brand_id: p.brand_id || '', reorder_threshold: p.reorder_threshold || 0, category: p.category, unit: p.unit });
+    setEditData({ price_list: p.price_list || 0, hpp: p.hpp || 0, vendor_id: p.vendor_id || '', brand_id: p.brand_id || '', category: p.category, unit: p.unit });
   };
 
   const saveEdit = async () => {
@@ -129,9 +138,8 @@ function MasterProdukTab() {
       await updateProduct(editingId, {
         price_list: Number(editData.price_list) || 0,
         hpp: Number(editData.hpp) || 0,
-        vendor: editData.vendor || null,
+        vendor_id: editData.vendor_id ? Number(editData.vendor_id) : null,
         brand_id: editData.brand_id ? Number(editData.brand_id) : null,
-        reorder_threshold: Number(editData.reorder_threshold) || 0,
         category: editData.category,
         unit: editData.unit,
       });
@@ -154,12 +162,14 @@ function MasterProdukTab() {
         warehouse: newProduct.warehouse,
         price_list: Number(newProduct.price_list) || 0,
         hpp: Number(newProduct.hpp) || 0,
-        vendor: newProduct.vendor || undefined,
         brand_id: newProduct.brand_id ? Number(newProduct.brand_id) : undefined,
-        reorder_threshold: Number(newProduct.reorder_threshold) || 0,
       });
+      // Update vendor_id separately if selected
+      if (newProduct.vendor_id) {
+        const created = products[products.length - 1]; // Will be refreshed by loadData
+      }
       setShowAdd(false);
-      setNewProduct({ name: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor: '', brand_id: '', reorder_threshold: '' });
+      setNewProduct({ name: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor_id: '', brand_id: '' });
       setMessage({ type: 'success', text: 'Produk ditambahkan' });
       await loadData();
     } catch (e: any) { setMessage({ type: 'error', text: e.message }); }
@@ -217,8 +227,7 @@ function MasterProdukTab() {
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Brand</label><select value={newProduct.brand_id} onChange={e => setNewProduct({...newProduct, brand_id: e.target.value})} style={inputStyle}><option value="">-</option>{brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>HPP</label><input type="number" value={newProduct.hpp} onChange={e => setNewProduct({...newProduct, hpp: e.target.value})} style={inputStyle} /></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Harga Jual</label><input type="number" value={newProduct.price_list} onChange={e => setNewProduct({...newProduct, price_list: e.target.value})} style={inputStyle} /></div>
-            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Vendor</label><input value={newProduct.vendor} onChange={e => setNewProduct({...newProduct, vendor: e.target.value})} style={inputStyle} /></div>
-            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Reorder Threshold</label><input type="number" value={newProduct.reorder_threshold} onChange={e => setNewProduct({...newProduct, reorder_threshold: e.target.value})} style={inputStyle} /></div>
+            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Vendor</label><select value={newProduct.vendor_id} onChange={e => setNewProduct({...newProduct, vendor_id: e.target.value})} style={inputStyle}><option value="">-</option>{vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></div>
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
             <button onClick={handleAdd} disabled={saving} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600 }}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
@@ -233,8 +242,8 @@ function MasterProdukTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Nama', 'Brand', 'Kategori', 'Gudang', 'HPP', 'Harga Jual', 'Vendor', 'Unit', 'Reorder', 'Status', 'Aksi'].map(h => (
-                <th key={h} style={{ padding: '6px 8px', textAlign: ['HPP', 'Harga Jual', 'Reorder'].includes(h) ? 'right' : 'left', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              {['Nama', 'Brand', 'Kategori', 'Gudang', 'HPP', 'Harga Jual', 'Vendor', 'Unit', 'Status', 'Aksi'].map(h => (
+                <th key={h} style={{ padding: '6px 8px', textAlign: ['HPP', 'Harga Jual'].includes(h) ? 'right' : 'left', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -280,22 +289,18 @@ function MasterProdukTab() {
                   </td>
                   <td style={{ padding: '5px 8px' }}>
                     {isEditing ? (
-                      <input value={editData.vendor || ''} onChange={e => setEditData({...editData, vendor: e.target.value})} style={{ ...inputStyle, width: 100 }} />
+                      <select value={editData.vendor_id || ''} onChange={e => setEditData({...editData, vendor_id: e.target.value})} style={{ ...inputStyle, width: 120 }}>
+                        <option value="">-</option>
+                        {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                      </select>
                     ) : (
-                      <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{p.vendor || '-'}</span>
+                      <span style={{ fontSize: 10, color: 'var(--text-secondary)' }}>{vendors.find(v => v.id === p.vendor_id)?.name || '-'}</span>
                     )}
                   </td>
                   <td style={{ padding: '5px 8px', fontSize: 10, color: 'var(--text-secondary)' }}>
                     {isEditing ? (
                       <input value={editData.unit} onChange={e => setEditData({...editData, unit: e.target.value})} style={{ ...inputStyle, width: 50 }} />
                     ) : p.unit}
-                  </td>
-                  <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10 }}>
-                    {isEditing ? (
-                      <input type="number" value={editData.reorder_threshold} onChange={e => setEditData({...editData, reorder_threshold: e.target.value})} style={{ ...inputStyle, width: 60, textAlign: 'right' }} />
-                    ) : (
-                      <span style={{ color: 'var(--text-muted)' }}>{p.reorder_threshold || '-'}</span>
-                    )}
                   </td>
                   <td style={{ padding: '5px 8px' }}>
                     <span style={{ padding: '1px 5px', borderRadius: 3, fontSize: 9, fontWeight: 600, background: p.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: p.is_active ? '#6ee7b7' : '#fca5a5' }}>
@@ -333,6 +338,158 @@ function MasterProdukTab() {
 
 function BrandTab() {
   return <BrandManager />;
+}
+
+// ============================================================
+// VENDOR TAB
+// ============================================================
+
+function VendorTab() {
+  const [vendors, setVendorList] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showAdd, setShowAdd] = useState(false);
+  const [newVendor, setNewVendor] = useState({ name: '', address: '', phone: '', pic_name: '', notes: '' });
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editData, setEditData] = useState<any>({});
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
+
+  useEffect(() => { loadVendors(); }, []);
+
+  async function loadVendors() {
+    setLoading(true);
+    try { setVendorList(await getVendors()); } catch (e) { console.error(e); }
+    setLoading(false);
+  }
+
+  const handleAdd = async () => {
+    if (!newVendor.name.trim()) { setMessage({ type: 'error', text: 'Nama vendor wajib' }); return; }
+    setSaving(true);
+    try {
+      await createVendor({ name: newVendor.name.trim(), address: newVendor.address || undefined, phone: newVendor.phone || undefined, pic_name: newVendor.pic_name || undefined, notes: newVendor.notes || undefined });
+      setShowAdd(false);
+      setNewVendor({ name: '', address: '', phone: '', pic_name: '', notes: '' });
+      setMessage({ type: 'success', text: 'Vendor ditambahkan' });
+      await loadVendors();
+    } catch (e: any) { setMessage({ type: 'error', text: e.message }); }
+    setSaving(false);
+  };
+
+  const startEdit = (v: any) => {
+    setEditingId(v.id);
+    setEditData({ name: v.name, address: v.address || '', phone: v.phone || '', pic_name: v.pic_name || '', notes: v.notes || '' });
+  };
+
+  const saveEdit = async () => {
+    if (!editingId) return;
+    setSaving(true);
+    try {
+      await updateVendor(editingId, { name: editData.name, address: editData.address || null, phone: editData.phone || null, pic_name: editData.pic_name || null, notes: editData.notes || null });
+      setEditingId(null);
+      setMessage({ type: 'success', text: 'Vendor diupdate' });
+      await loadVendors();
+    } catch (e: any) { setMessage({ type: 'error', text: e.message }); }
+    setSaving(false);
+  };
+
+  const handleDelete = async (id: number, name: string) => {
+    if (!confirm('Hapus vendor "' + name + '"? Produk yang menggunakan vendor ini akan menjadi tanpa vendor.')) return;
+    try {
+      await deleteVendor(id);
+      setMessage({ type: 'success', text: 'Vendor dihapus' });
+      await loadVendors();
+    } catch (e: any) { setMessage({ type: 'error', text: e.message }); }
+  };
+
+  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--dim)' }}>Memuat...</div>;
+
+  return (
+    <>
+      {message && (
+        <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 12, background: message.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: message.type === 'success' ? '#6ee7b7' : '#fca5a5' }}>
+          {message.text}
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button onClick={() => setShowAdd(!showAdd)}
+          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--green)', color: '#fff' }}>
+          + Tambah Vendor
+        </button>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, color: 'var(--dim)', alignSelf: 'center' }}>{vendors.length} vendor</span>
+      </div>
+
+      {showAdd && (
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Tambah Vendor Baru</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Nama *</label><input value={newVendor.name} onChange={e => setNewVendor({...newVendor, name: e.target.value})} style={inputStyle} /></div>
+            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>PIC</label><input value={newVendor.pic_name} onChange={e => setNewVendor({...newVendor, pic_name: e.target.value})} style={inputStyle} /></div>
+            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>No. HP</label><input value={newVendor.phone} onChange={e => setNewVendor({...newVendor, phone: e.target.value})} style={inputStyle} /></div>
+            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Alamat</label><input value={newVendor.address} onChange={e => setNewVendor({...newVendor, address: e.target.value})} style={inputStyle} /></div>
+            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Catatan</label><input value={newVendor.notes} onChange={e => setNewVendor({...newVendor, notes: e.target.value})} style={inputStyle} /></div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+            <button onClick={handleAdd} disabled={saving} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600 }}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
+            <button onClick={() => setShowAdd(false)} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 12, cursor: 'pointer' }}>Batal</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              {['Nama', 'PIC', 'No. HP', 'Alamat', 'Catatan', 'Aksi'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {vendors.map(v => {
+              const isEditing = editingId === v.id;
+              return (
+                <tr key={v.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                  <td style={{ padding: '6px 10px', fontWeight: 500, color: 'var(--text)' }}>
+                    {isEditing ? <input value={editData.name} onChange={e => setEditData({...editData, name: e.target.value})} style={{ ...inputStyle, width: 150 }} /> : v.name}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)' }}>
+                    {isEditing ? <input value={editData.pic_name} onChange={e => setEditData({...editData, pic_name: e.target.value})} style={{ ...inputStyle, width: 120 }} /> : v.pic_name || '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 11 }}>
+                    {isEditing ? <input value={editData.phone} onChange={e => setEditData({...editData, phone: e.target.value})} style={{ ...inputStyle, width: 130 }} /> : v.phone || '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {isEditing ? <input value={editData.address} onChange={e => setEditData({...editData, address: e.target.value})} style={{ ...inputStyle, width: 200 }} /> : v.address || '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-muted)', fontSize: 11 }}>
+                    {isEditing ? <input value={editData.notes} onChange={e => setEditData({...editData, notes: e.target.value})} style={{ ...inputStyle, width: 150 }} /> : v.notes || '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px' }}>
+                    {isEditing ? (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={saveEdit} disabled={saving} style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: 'var(--green)', color: '#fff', fontSize: 10, cursor: 'pointer' }}>Save</button>
+                        <button onClick={() => setEditingId(null)} style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 10, cursor: 'pointer' }}>X</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={() => startEdit(v)} style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--accent)', fontSize: 10, cursor: 'pointer' }}>Edit</button>
+                        <button onClick={() => handleDelete(v.id, v.name)} style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--red)', fontSize: 10, cursor: 'pointer' }}>Hapus</button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {vendors.length === 0 && (
+              <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada vendor. Klik "+ Tambah Vendor" untuk menambahkan.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
 }
 
 // ============================================================

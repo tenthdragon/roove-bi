@@ -517,7 +517,7 @@ export async function getProductsFull(filters?: {
   includeInactive?: boolean;
 }) {
   const svc = createServiceSupabase();
-  let query = svc.from('warehouse_products').select('*, brands(id, name)');
+  let query = svc.from('warehouse_products').select('*, brands(id, name), warehouse_vendors(id, name)');
 
   if (filters?.category) query = query.eq('category', filters.category);
   if (filters?.entity) query = query.eq('entity', filters.entity);
@@ -848,5 +848,48 @@ export async function syncScalevProductNames() {
   const svc = createServiceSupabase();
   // Insert any new product_names not yet in mapping table
   const { error } = await svc.rpc('warehouse_sync_scalev_names');
+  if (error) throw error;
+}
+
+// ============================================================
+// VENDORS
+// ============================================================
+
+export async function getVendors() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('warehouse_vendors')
+    .select('*')
+    .order('name');
+  if (error) throw error;
+  return data || [];
+}
+
+export async function createVendor(vendor: { name: string; address?: string; phone?: string; pic_name?: string; notes?: string }) {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('warehouse_vendors')
+    .insert(vendor)
+    .select()
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function updateVendor(id: number, updates: Record<string, any>) {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('warehouse_vendors')
+    .update(updates)
+    .eq('id', id);
+  if (error) throw error;
+}
+
+export async function deleteVendor(id: number) {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('warehouse_vendors')
+    .delete()
+    .eq('id', id);
   if (error) throw error;
 }
