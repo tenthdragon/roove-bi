@@ -279,49 +279,73 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
 
 export async function getWeeklyDemandData(month: number, year: number) {
   const svc = createServiceSupabase();
-
-  // Build week boundaries: W1=1-7, W2=8-14, W3=15-21, W4=22-end
   const daysInMonth = new Date(year, month, 0).getDate();
-  const weeks = [
-    { week: 1, from: `${year}-${String(month).padStart(2, '0')}-01`, to: `${year}-${String(month).padStart(2, '0')}-07` },
-    { week: 2, from: `${year}-${String(month).padStart(2, '0')}-08`, to: `${year}-${String(month).padStart(2, '0')}-14` },
-    { week: 3, from: `${year}-${String(month).padStart(2, '0')}-15`, to: `${year}-${String(month).padStart(2, '0')}-21` },
-    { week: 4, from: `${year}-${String(month).padStart(2, '0')}-22`, to: `${year}-${String(month).padStart(2, '0')}-${daysInMonth}` },
-  ];
+  const mm = String(month).padStart(2, '0');
 
-  // Query ledger for the entire month, then bucket client-side
-  const monthStart = `${year}-${String(month).padStart(2, '0')}-01T00:00:00+07:00`;
-  const monthEnd = `${year}-${String(month).padStart(2, '0')}-${daysInMonth}T23:59:59+07:00`;
+  // Query ScaleV sales (shipped orders) for the month, joined via mapping
+  const monthStart = `${year}-${mm}-01T00:00:00+07:00`;
+  const monthEnd = `${year}-${mm}-${daysInMonth}T23:59:59+07:00`;
 
-  const { data, error } = await svc
-    .from('warehouse_stock_ledger')
-    .select('warehouse_product_id, movement_type, quantity, created_at')
-    .gte('created_at', monthStart)
-    .lte('created_at', monthEnd);
-  if (error) throw error;
+  // Get shipped orders in this month
+  const { data: orders, error: ordErr } = await svc
+    .from('scalev_orders')
+    .select('id, shipped_time')
+    .in('status', ['shipped', 'completed'])
+    .gte('shipped_time', monthStart)
+    .lte('shipped_time', monthEnd);
+  if (ordErr) throw ordErr;
+  if (!orders || orders.length === 0) return {};
 
-  // Bucket into weeks per product
-  const result = new Map<number, { w1_in: number; w1_out: number; w2_in: number; w2_out: number; w3_in: number; w3_out: number; w4_in: number; w4_out: number }>();
-
-  for (const row of (data || [])) {
-    const pid = row.warehouse_product_id;
-    if (!result.has(pid)) {
-      result.set(pid, { w1_in: 0, w1_out: 0, w2_in: 0, w2_out: 0, w3_in: 0, w3_out: 0, w4_in: 0, w4_out: 0 });
-    }
-    const entry = result.get(pid)!;
-
-    // Determine day of month (in WIB)
-    const d = new Date(row.created_at);
+  // Build order ID → shipped day map
+  const orderDayMap = new Map<number, number>();
+  for (const o of orders) {
+    const d = new Date(o.shipped_time);
     const wibDate = new Date(d.getTime() + 7 * 60 * 60 * 1000);
-    const day = wibDate.getUTCDate();
+    orderDayMap.set(o.id, wibDate.getUTCDate());
+  }
+
+  // Get order lines for these orders (batch to avoid query size limits)
+  const orderIds = orders.map(o => o.id);
+  const allLines: any[] = [];
+  for (let i = 0; i < orderIds.length; i += 500) {
+    const batch = orderIds.slice(i, i + 500);
+    const { data: lines } = await svc
+      .from('scalev_order_lines')
+      .select('scalev_order_id, product_name, quantity')
+      .in('scalev_order_id', batch);
+    if (lines) allLines.push(...lines);
+  }
+
+  // Get mapping: scalev_product_name → warehouse_product_id + multiplier
+  const { data: mappings } = await svc
+    .from('warehouse_scalev_mapping')
+    .select('scalev_product_name, warehouse_product_id, deduct_qty_multiplier')
+    .not('warehouse_product_id', 'is', null)
+    .eq('is_ignored', false);
+
+  const mappingMap = new Map<string, { pid: number; mult: number }>();
+  for (const m of (mappings || [])) {
+    mappingMap.set(m.scalev_product_name, { pid: m.warehouse_product_id, mult: Number(m.deduct_qty_multiplier) || 1 });
+  }
+
+  // Bucket sales into weeks per warehouse product
+  const result = new Map<number, { w1_out: number; w2_out: number; w3_out: number; w4_out: number }>();
+
+  for (const line of allLines) {
+    const mapping = mappingMap.get(line.product_name);
+    if (!mapping) continue;
+
+    const day = orderDayMap.get(line.scalev_order_id);
+    if (!day) continue;
+
     const weekNum = day <= 7 ? 1 : day <= 14 ? 2 : day <= 21 ? 3 : 4;
+    const qty = Number(line.quantity) * mapping.mult;
 
-    const isOut = ['OUT', 'DISPOSE', 'TRANSFER_OUT'].includes(row.movement_type);
-    const isIn = row.movement_type === 'IN';
-    const qty = Math.abs(Number(row.quantity));
-
-    if (isIn) (entry as any)[`w${weekNum}_in`] += qty;
-    if (isOut) (entry as any)[`w${weekNum}_out`] += qty;
+    if (!result.has(mapping.pid)) {
+      result.set(mapping.pid, { w1_out: 0, w2_out: 0, w3_out: 0, w4_out: 0 });
+    }
+    const entry = result.get(mapping.pid)!;
+    (entry as any)[`w${weekNum}_out`] += qty;
   }
 
   return Object.fromEntries(result);
@@ -358,17 +382,25 @@ export async function initDemandPlans(month: number, year: number) {
     productDemand.set(row.warehouse_product_id, existing);
   }
 
-  // Get actual movements for the target month
+  // Get actual_in from ledger (warehouse movements)
   const { data: movData, error: movErr } = await svc.rpc('ppic_monthly_movements', { p_months: 12 });
   if (movErr) throw movErr;
 
-  const actualMap = new Map<number, { in: number; out: number }>();
+  const actualInMap = new Map<number, number>();
   for (const row of (movData || [])) {
     if (row.yr === year && row.mn === month) {
-      actualMap.set(row.warehouse_product_id, {
-        in: Number(row.total_in),
-        out: Number(row.total_out),
-      });
+      actualInMap.set(row.warehouse_product_id, Number(row.total_in));
+    }
+  }
+
+  // Get actual_out from ScaleV sales (shipped orders) — same source as auto_demand
+  const { data: salesData, error: salesErr } = await svc.rpc('ppic_monthly_demand', { p_months: 12 });
+  if (salesErr) throw salesErr;
+
+  const actualOutMap = new Map<number, number>();
+  for (const row of (salesData || [])) {
+    if (row.yr === year && row.mn === month) {
+      actualOutMap.set(row.warehouse_product_id, Number(row.total_qty));
     }
   }
 
@@ -382,15 +414,14 @@ export async function initDemandPlans(month: number, year: number) {
   const rows = (products || []).map(p => {
     const demand = productDemand.get(p.id);
     const avgMonthly = demand ? Math.round(demand.total / demand.months) : 0;
-    const actual = actualMap.get(p.id);
 
     return {
       warehouse_product_id: p.id,
       month,
       year,
       auto_demand: avgMonthly,
-      actual_in: actual?.in || 0,
-      actual_out: actual?.out || 0,
+      actual_in: actualInMap.get(p.id) || 0,
+      actual_out: actualOutMap.get(p.id) || 0,
     };
   });
 
