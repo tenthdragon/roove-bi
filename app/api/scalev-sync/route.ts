@@ -253,6 +253,10 @@ export async function POST(req: NextRequest) {
             .single();
           scalevId = rawRow?.raw_data?.id;
         }
+        // Fallback: use order_id if it looks like a ScaleV format (alphanumeric, <20 chars)
+        if (!scalevId && dbOrder.order_id && dbOrder.order_id.length < 20 && /[A-Z]/.test(dbOrder.order_id)) {
+          scalevId = dbOrder.order_id;
+        }
         if (!scalevId) {
           details.push({ order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code, error: 'No Scalev ID available' });
           erroredCount++;
