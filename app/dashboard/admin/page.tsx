@@ -21,7 +21,7 @@ const TABS = [
   { id: 'meta', label: 'Meta Ads' },
   { id: 'financial', label: 'Financial' },
   { id: 'warehouse', label: 'Warehouse' },
-  { id: 'brands', label: 'Brands' },
+  // Brands moved to Warehouse Settings
   { id: 'connection', label: 'Connection' },
   { id: 'sync', label: 'Sync' },
   { id: 'data_ref', label: 'Data Reference' },
@@ -476,7 +476,7 @@ export default function AdminPage() {
   // Filter tabs based on role
   const visibleTabs = TABS.filter(t => {
     if (t.id === 'users' && profile?.role !== 'owner') return false;
-    if (t.id === 'brands' && profile?.role !== 'owner') return false;
+    // Brands tab moved to Warehouse Settings
     if (t.id === 'data_ref' && profile?.role !== 'owner') return false;
     return true;
   });
@@ -584,10 +584,7 @@ export default function AdminPage() {
         <WarehouseSheetManager />
       )}
 
-      {/* ═══ TAB: BRANDS ═══ */}
-      {activeTab === 'brands' && (
-        <BrandManager />
-      )}
+      {/* Brands moved to Warehouse Settings */}
 
       {/* ═══ TAB: SCALEV API ═══ */}
       {activeTab === 'connection' && (
@@ -807,75 +804,7 @@ export default function AdminPage() {
             )}
           </div>
 
-          {/* Business → Warehouse Mapping */}
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Business → Gudang Mapping</div>
-            <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
-              Mapping bisnis ScaleV ke entity gudang yang stoknya berkurang saat order shipped. Contoh: RTI = marketing, tapi shipment dari gudang RLB.
-            </div>
-
-            {whMappingMsg && (
-              <div style={{
-                marginBottom: 12, padding: 10, borderRadius: 6, fontSize: 12,
-                background: whMappingMsg.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
-                color: whMappingMsg.type === 'success' ? 'var(--green)' : 'var(--red)'
-              }}>
-                {whMappingMsg.type === 'success' ? '\u2705' : '\u274c'} {whMappingMsg.text}
-              </div>
-            )}
-
-            {whMappingLoading ? (
-              <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
-                <div className="spinner" style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
-              </div>
-            ) : whMappingData.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>Belum ada mapping. Jalankan migration 067 terlebih dahulu.</div>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                  <thead>
-                    <tr style={{ background: 'var(--bg)' }}>
-                      {['Business', 'Kode', 'Deduct dari Gudang', 'Status', 'Catatan'].map(h => (
-                        <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {whMappingData.map((m) => (
-                      <tr key={m.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text)' }}>{m.scalev_webhook_businesses?.business_name || m.business_code}</td>
-                        <td style={{ padding: '10px 12px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{m.business_code}</td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <select
-                            value={`${m.deduct_warehouse} - ${m.deduct_entity}`}
-                            onChange={(e) => {
-                              const [wh, ent] = e.target.value.split(' - ');
-                              handleWhMappingChange(m.id, 'deduct_warehouse', wh);
-                              handleWhMappingChange(m.id, 'deduct_entity', ent);
-                            }}
-                            disabled={whMappingSaving}
-                            style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontWeight: 600, cursor: whMappingSaving ? 'not-allowed' : 'pointer' }}
-                          >
-                            <option value="BTN - RTI">BTN - RTI</option>
-                            <option value="BTN - RLB">BTN - RLB</option>
-                            <option value="BTN - RLT">BTN - RLT</option>
-                            <option value="BTN - JHN">BTN - JHN</option>
-                          </select>
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: m.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: m.is_active ? 'var(--green)' : 'var(--red)', cursor: 'pointer' }}
-                            onClick={() => handleWhMappingChange(m.id, 'is_active', !m.is_active)}>
-                            {m.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-muted)', fontSize: 11 }}>{m.notes || '-'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
+          {/* Business → Warehouse Mapping moved to Warehouse Settings */}
 
           {/* Tax Rates (PPN) */}
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
