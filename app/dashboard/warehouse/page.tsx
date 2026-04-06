@@ -73,8 +73,8 @@ interface ExpiringProduct {
 // ── Constants ──
 
 const SUB_TABS = [
-  { id: 'stock', label: 'Saldo Stock' },
   { id: 'daily-summary', label: 'Daily Summary' },
+  { id: 'stock', label: 'Saldo Stock' },
   { id: 'batch', label: 'Batch & Expiry' },
   { id: 'stock-opname', label: 'Stock Opname' },
   { id: 'expired', label: 'Expired Monitor' },
@@ -139,7 +139,7 @@ function KPICard({ label, value, color = 'var(--accent)', sub }: { label: string
 // ============================================================
 
 export default function WarehousePage() {
-  const [activeTab, setActiveTab] = useState('stock');
+  const [activeTab, setActiveTab] = useState('daily-summary');
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string>('');
 
@@ -1511,38 +1511,59 @@ function DailySummaryTab({ data, alerts, deductLog, date, setDate, onRefresh }: 
         </div>
       )}
 
-      {/* ── Deduction Log (grouped) ── */}
+      {/* ── Deduction Summary (grouped by entity blocks) ── */}
       <div style={{ marginTop: 20 }}>
         <button onClick={() => setShowDeductLog(!showDeductLog)}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--dim)', fontSize: 12, fontWeight: 600 }}>
           <span style={{ transform: showDeductLog ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', fontSize: 10 }}>&#9660;</span>
-          Deduction Log ({deductLog.length} produk)
+          Deduction Summary ({deductLog.length} produk)
         </button>
-        {showDeductLog && deductLog.length > 0 && (
-          <div style={{ overflowX: 'auto', marginTop: 10 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['Scalev Product', 'Warehouse Product', 'Entity', 'Business', 'Total Qty', 'Orders'].map(h => (
-                    <th key={h} style={{ padding: '6px 8px', textAlign: ['Total Qty', 'Orders'].includes(h) ? 'right' : 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {deductLog.map((d, i) => (
-                  <tr key={i} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                    <td style={{ padding: '5px 8px', fontSize: 11, color: 'var(--text-secondary)' }}>{d.scalev_product}</td>
-                    <td style={{ padding: '5px 8px', fontSize: 11, fontWeight: 600, color: d.scalev_product !== d.warehouse_product ? '#f59e0b' : 'var(--text)' }}>{d.warehouse_product}</td>
-                    <td style={{ padding: '5px 8px', fontSize: 10, color: 'var(--text-secondary)' }}>{d.entity}</td>
-                    <td style={{ padding: '5px 8px', fontFamily: 'monospace', fontSize: 10 }}>{d.business_codes}</td>
-                    <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{d.total_qty.toLocaleString('id-ID')}</td>
-                    <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--dim)', fontSize: 11 }}>{d.order_count}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {showDeductLog && deductLog.length > 0 && (() => {
+          // Group by entity
+          const byEntity = new Map<string, typeof deductLog>();
+          deductLog.forEach(d => {
+            if (!byEntity.has(d.entity)) byEntity.set(d.entity, []);
+            byEntity.get(d.entity)!.push(d);
+          });
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 10 }}>
+              {Array.from(byEntity.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([entity, rows]) => {
+                const totalQty = rows.reduce((s, r) => s + r.total_qty, 0);
+                const totalOrders = rows.reduce((s, r) => s + r.order_count, 0);
+                return (
+                  <div key={entity} style={{ background: 'var(--bg)', borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                    <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>{entity}</span>
+                      <span style={{ fontSize: 11, color: 'var(--dim)' }}>{rows.length} produk &middot; {totalQty.toLocaleString('id-ID')} unit &middot; {totalOrders} orders</span>
+                    </div>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                            {['Scalev Product', 'Warehouse Product', 'Business', 'Total Qty', 'Orders'].map(h => (
+                              <th key={h} style={{ padding: '6px 10px', textAlign: ['Total Qty', 'Orders'].includes(h) ? 'right' : 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((d, i) => (
+                            <tr key={i} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                              <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-secondary)' }}>{d.scalev_product}</td>
+                              <td style={{ padding: '5px 10px', fontSize: 11, fontWeight: 600, color: d.scalev_product !== d.warehouse_product ? '#f59e0b' : 'var(--text)' }}>{d.warehouse_product}</td>
+                              <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: 10 }}>{d.business_codes}</td>
+                              <td style={{ padding: '5px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{d.total_qty.toLocaleString('id-ID')}</td>
+                              <td style={{ padding: '5px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--dim)', fontSize: 11 }}>{d.order_count}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
         {showDeductLog && deductLog.length === 0 && (
           <div style={{ marginTop: 10, fontSize: 12, color: 'var(--dim)' }}>Tidak ada deduction tercatat untuk tanggal ini.</div>
         )}
