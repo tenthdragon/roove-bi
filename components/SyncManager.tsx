@@ -51,6 +51,12 @@ export default function SyncManager() {
   const [repairSyncing, setRepairSyncing] = useState(false);
   const [repairResult, setRepairResult] = useState<any>(null);
 
+  // Repair by order IDs
+  const [repairOrderIds, setRepairOrderIds] = useState('');
+  const [repairByIdSyncing, setRepairByIdSyncing] = useState(false);
+  const [repairByIdResult, setRepairByIdResult] = useState<any>(null);
+  const [repairByIdProgress, setRepairByIdProgress] = useState({ current: 0, total: 0 });
+
 
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -160,6 +166,50 @@ export default function SyncManager() {
     } finally {
       setRepairSyncing(false);
     }
+  }
+
+  async function handleRepairByIds() {
+    const ids = repairOrderIds
+      .split(/[\n,;]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    if (ids.length === 0) { setMessage({ type: 'error', text: 'Masukkan minimal 1 Order ID' }); return; }
+
+    setRepairByIdSyncing(true);
+    setRepairByIdResult(null);
+    setMessage(null);
+    setRepairByIdProgress({ current: 0, total: ids.length });
+
+    const results: any[] = [];
+    const BATCH = 10;
+
+    for (let i = 0; i < ids.length; i += BATCH) {
+      const batch = ids.slice(i, i + BATCH);
+      setRepairByIdProgress({ current: Math.min(i + BATCH, ids.length), total: ids.length });
+      try {
+        const res = await fetch('/api/scalev-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: 'order_id', order_ids: batch }),
+        });
+        const ct = res.headers.get('content-type') || '';
+        if (!ct.includes('application/json')) {
+          results.push(...batch.map(id => ({ order_id: id, error: `Server error ${res.status}` })));
+          continue;
+        }
+        const data = await res.json();
+        if (data.details) results.push(...data.details);
+        else results.push(...batch.map(id => ({ order_id: id, error: data.error || 'Unknown' })));
+      } catch (err: any) {
+        results.push(...batch.map(id => ({ order_id: id, error: err.message })));
+      }
+      if (i + BATCH < ids.length) await new Promise(r => setTimeout(r, 500));
+    }
+
+    const updated = results.filter(r => !r.error && r.action !== 'no_change').length;
+    setRepairByIdResult({ details: results, orders_updated: updated });
+    setMessage({ type: 'success', text: `Selesai: ${updated}/${ids.length} order diperbaiki` });
+    setRepairByIdSyncing(false);
   }
 
   const pill = (active: boolean) => ({
@@ -374,6 +424,73 @@ export default function SyncManager() {
               >
                 {repairSyncing ? 'Memperbaiki...' : 'Mulai Perbaikan'}
               </button>
+            </div>
+
+            {/* Repair by Order IDs */}
+            <div style={{ marginTop: 24, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+              <p style={{ fontSize: 12, color: 'var(--dim)', margin: '0 0 12px' }}>
+                Atau perbaiki order spesifik berdasarkan daftar Order ID (satu per baris atau pisahkan dengan koma).
+              </p>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'end' }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4, display: 'block' }}>Order IDs</label>
+                  <textarea
+                    value={repairOrderIds}
+                    onChange={e => setRepairOrderIds(e.target.value)}
+                    placeholder={"260126HDIGETQ\n260128FXUQOZD\n260131JVTJMUO"}
+                    rows={5}
+                    style={{
+                      padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)',
+                      background: 'var(--bg)', color: 'var(--text)', fontSize: 12, fontFamily: 'monospace',
+                      width: '100%', resize: 'vertical',
+                    }}
+                  />
+                </div>
+                <button
+                  onClick={handleRepairByIds}
+                  disabled={repairByIdSyncing || !configured}
+                  style={{
+                    padding: '8px 20px', borderRadius: 6, border: 'none',
+                    cursor: repairByIdSyncing || !configured ? 'not-allowed' : 'pointer',
+                    background: repairByIdSyncing ? 'var(--bg-deep)' : '#047857',
+                    color: '#fff', fontSize: 13, fontWeight: 600,
+                    opacity: repairByIdSyncing || !configured ? 0.5 : 1,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {repairByIdSyncing ? `Memperbaiki ${repairByIdProgress.current}/${repairByIdProgress.total}...` : 'Perbaiki Order'}
+                </button>
+              </div>
+
+              {repairByIdResult && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 13, color: 'var(--text)', marginBottom: 8 }}>
+                    {repairByIdResult.orders_updated} dari {repairByIdResult.details.length} order diperbaiki
+                  </div>
+                  {repairByIdResult.details.length > 0 && (
+                    <div style={{ maxHeight: 300, overflowY: 'auto' }}>
+                      <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                        <thead>
+                          <tr style={{ color: 'var(--dim)', textAlign: 'left' }}>
+                            <th style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Order ID</th>
+                            <th style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Business</th>
+                            <th style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Detail</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {repairByIdResult.details.map((d: any, i: number) => (
+                            <tr key={i} style={{ color: d.error ? '#fca5a5' : 'var(--text-secondary)' }}>
+                              <td style={{ ...cellStyle, fontFamily: 'monospace' }}>{d.order_id}</td>
+                              <td style={cellStyle}>{d.business_code || '-'}</td>
+                              <td style={cellStyle}>{d.error || d.action || `${d.old_status} → ${d.new_status}`}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
 
             {repairResult && (
