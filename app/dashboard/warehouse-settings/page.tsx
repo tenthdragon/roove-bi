@@ -18,6 +18,8 @@ import {
   createVendor,
   updateVendor,
   deleteVendor,
+  getWarehouseBusinessMappings,
+  updateWarehouseBusinessMapping,
 } from '@/lib/warehouse-ledger-actions';
 import { fetchAllBrands, fetchActiveBrands } from '@/lib/brand-actions';
 import { fmtRupiah } from '@/lib/utils';
@@ -503,24 +505,20 @@ function ActiveWarehouseTab() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const [prods, maps] = await Promise.all([
-          getProductsFull(),
-          fetch('/api/warehouse-settings/mappings').then(r => r.ok ? r.json() : []).catch(() => []),
-        ]);
-        setProducts(prods);
+  useEffect(() => { loadAll(); }, []);
 
-        // Load business mapping from supabase directly
-        const { createClient } = await import('@supabase/supabase-js');
-        const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
-        const { data } = await sb.from('warehouse_business_mapping').select('*, scalev_webhook_businesses!inner(business_name)').order('business_code');
-        setMappings(data || []);
-      } catch (e) { console.error(e); }
-      setLoading(false);
-    })();
-  }, []);
+  async function loadAll() {
+    setLoading(true);
+    try {
+      const [prods, maps] = await Promise.all([
+        getProductsFull(),
+        getWarehouseBusinessMappings(),
+      ]);
+      setProducts(prods);
+      setMappings(maps);
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  }
 
   // Count products per warehouse-entity
   const warehouseCounts = useMemo(() => {
@@ -541,13 +539,9 @@ function ActiveWarehouseTab() {
   const handleMappingChange = async (id: number, field: string, value: any) => {
     setSaving(true);
     try {
-      const { createClient } = await import('@supabase/supabase-js');
-      const sb = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
-      await sb.from('warehouse_business_mapping').update({ [field]: value }).eq('id', id);
+      await updateWarehouseBusinessMapping(id, field, value);
       setMessage({ type: 'success', text: 'Mapping updated' });
-      // Reload
-      const { data } = await sb.from('warehouse_business_mapping').select('*, scalev_webhook_businesses!inner(business_name)').order('business_code');
-      setMappings(data || []);
+      setMappings(await getWarehouseBusinessMappings());
     } catch (e: any) { setMessage({ type: 'error', text: e.message }); }
     setSaving(false);
   };

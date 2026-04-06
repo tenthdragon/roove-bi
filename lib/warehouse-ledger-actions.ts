@@ -852,6 +852,29 @@ export async function syncScalevProductNames() {
 }
 
 // ============================================================
+// WAREHOUSE BUSINESS MAPPING
+// ============================================================
+
+export async function getWarehouseBusinessMappings() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('warehouse_business_mapping')
+    .select('*, scalev_webhook_businesses!inner(business_name)')
+    .order('business_code');
+  if (error) throw error;
+  return data || [];
+}
+
+export async function updateWarehouseBusinessMapping(id: number, field: string, value: any) {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('warehouse_business_mapping')
+    .update({ [field]: value })
+    .eq('id', id);
+  if (error) throw error;
+}
+
+// ============================================================
 // VENDORS
 // ============================================================
 
