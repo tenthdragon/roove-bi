@@ -286,34 +286,51 @@ export async function getWeeklyDemandData(month: number, year: number) {
   const monthStart = `${year}-${mm}-01T00:00:00+07:00`;
   const monthEnd = `${year}-${mm}-${daysInMonth}T23:59:59+07:00`;
 
-  // Get shipped orders in this month
-  const { data: orders, error: ordErr } = await svc
-    .from('scalev_orders')
-    .select('id, shipped_time')
-    .in('status', ['shipped', 'completed'])
-    .gte('shipped_time', monthStart)
-    .lte('shipped_time', monthEnd);
-  if (ordErr) throw ordErr;
-  if (!orders || orders.length === 0) return {};
+  // Get ALL shipped orders in this month (paginated to avoid 1000 row limit)
+  const allOrders: any[] = [];
+  let offset = 0;
+  const PAGE = 1000;
+  while (true) {
+    const { data, error: ordErr } = await svc
+      .from('scalev_orders')
+      .select('id, shipped_time')
+      .in('status', ['shipped', 'completed'])
+      .gte('shipped_time', monthStart)
+      .lte('shipped_time', monthEnd)
+      .range(offset, offset + PAGE - 1);
+    if (ordErr) throw ordErr;
+    if (!data || data.length === 0) break;
+    allOrders.push(...data);
+    if (data.length < PAGE) break;
+    offset += PAGE;
+  }
+  if (allOrders.length === 0) return {};
 
   // Build order ID → shipped day map
   const orderDayMap = new Map<number, number>();
-  for (const o of orders) {
+  for (const o of allOrders) {
     const d = new Date(o.shipped_time);
     const wibDate = new Date(d.getTime() + 7 * 60 * 60 * 1000);
     orderDayMap.set(o.id, wibDate.getUTCDate());
   }
 
-  // Get order lines for these orders (batch to avoid query size limits)
-  const orderIds = orders.map(o => o.id);
+  // Get order lines (paginated per batch of order IDs)
+  const orderIds = allOrders.map(o => o.id);
   const allLines: any[] = [];
   for (let i = 0; i < orderIds.length; i += 500) {
     const batch = orderIds.slice(i, i + 500);
-    const { data: lines } = await svc
-      .from('scalev_order_lines')
-      .select('scalev_order_id, product_name, quantity')
-      .in('scalev_order_id', batch);
-    if (lines) allLines.push(...lines);
+    let lineOffset = 0;
+    while (true) {
+      const { data: lines } = await svc
+        .from('scalev_order_lines')
+        .select('scalev_order_id, product_name, quantity')
+        .in('scalev_order_id', batch)
+        .range(lineOffset, lineOffset + PAGE - 1);
+      if (!lines || lines.length === 0) break;
+      allLines.push(...lines);
+      if (lines.length < PAGE) break;
+      lineOffset += PAGE;
+    }
   }
 
   // Get mapping: scalev_product_name → warehouse_product_id + multiplier
