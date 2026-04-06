@@ -177,19 +177,37 @@ export async function recordStockOut(
   const svc = createServiceSupabase();
   const userId = await getCurrentUserId();
 
-  // Update batch qty
-  if (batchId) {
-    const { data: batch } = await svc
-      .from('warehouse_batches')
-      .select('current_qty')
-      .eq('id', batchId)
-      .single();
-    if (batch) {
-      await svc
-        .from('warehouse_batches')
-        .update({ current_qty: Math.max(0, Number(batch.current_qty) - quantity) })
-        .eq('id', batchId);
+  // If no batch specified, use FIFO deduction
+  if (!batchId) {
+    const { data, error } = await svc
+      .rpc('warehouse_deduct_fifo', {
+        p_product_id: productId,
+        p_quantity: quantity,
+        p_reference_type: referenceType || 'manual',
+        p_reference_id: referenceId || null,
+        p_notes: notes || 'Manual stock out (FIFO)',
+      });
+    if (error) throw error;
+
+    const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
+    if (prod) {
+      const userName = await getCurrentUserName();
+      notifyDirekturs(formatNotification('Stock Keluar', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName));
     }
+    return data;
+  }
+
+  // Specific batch deduction
+  const { data: batch } = await svc
+    .from('warehouse_batches')
+    .select('current_qty')
+    .eq('id', batchId)
+    .single();
+  if (batch) {
+    await svc
+      .from('warehouse_batches')
+      .update({ current_qty: Math.max(0, Number(batch.current_qty) - quantity) })
+      .eq('id', batchId);
   }
 
   const result = await insertLedgerEntry(svc, {
@@ -207,6 +225,56 @@ export async function recordStockOut(
   if (prod) {
     const userName = await getCurrentUserName();
     notifyDirekturs(formatNotification('Stock Keluar', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName));
+  }
+
+  return result;
+}
+
+// ============================================================
+// STOCK IN RTS — returned items back to inventory
+// ============================================================
+
+export async function recordStockRTS(
+  productId: number,
+  batchId: number,
+  quantity: number,
+  resiNumber: string,
+  notes?: string,
+) {
+  if (quantity <= 0) throw new Error('RTS quantity must be positive');
+  if (!resiNumber?.trim()) throw new Error('Nomor resi wajib diisi untuk RTS');
+  if (!batchId) throw new Error('Batch wajib dipilih untuk RTS');
+  const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
+
+  // Add back to batch qty
+  const { data: batch } = await svc
+    .from('warehouse_batches')
+    .select('current_qty')
+    .eq('id', batchId)
+    .single();
+  if (batch) {
+    await svc
+      .from('warehouse_batches')
+      .update({ current_qty: Number(batch.current_qty) + quantity })
+      .eq('id', batchId);
+  }
+
+  const result = await insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'IN',
+    quantity: quantity,
+    reference_type: 'rts',
+    reference_id: resiNumber.trim(),
+    notes: notes ? `RTS: ${notes}` : `RTS resi: ${resiNumber.trim()}`,
+    created_by: userId,
+  });
+
+  const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
+  if (prod) {
+    const userName = await getCurrentUserName();
+    notifyDirekturs(formatNotification('Stock Masuk (RTS)', prod.name, quantity, `${prod.warehouse} - ${prod.entity}`, userName, `Resi: ${resiNumber.trim()}`));
   }
 
   return result;

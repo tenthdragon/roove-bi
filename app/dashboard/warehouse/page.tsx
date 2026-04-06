@@ -19,15 +19,13 @@ import {
   getBatches,
   recordStockIn,
   recordStockOut,
+  recordStockRTS,
   recordDispose,
   recordTransfer,
   recordConversion,
   createBatch,
-  getScalevMappings,
-  getScalevFrequencies,
-  getScalevPriceTiers,
-  updateScalevMapping,
-  syncScalevProductNames,
+  getPurchaseOrders,
+  receivePurchaseOrder,
   type ConversionSource,
 } from '@/lib/warehouse-ledger-actions';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
@@ -529,27 +527,47 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
 }) {
   const [products, setProducts] = useState<any[]>([]);
   const [batches, setBatchList] = useState<any[]>([]);
+  const [pos, setPos] = useState<any[]>([]);
   const [selectedProduct, setSelectedProduct] = useState('');
   const [selectedBatch, setSelectedBatch] = useState('');
   const [quantity, setQuantity] = useState('');
   const [notes, setNotes] = useState('');
-  const [newBatch, setNewBatch] = useState(false);
   const [batchCode, setBatchCode] = useState('');
   const [expiredDate, setExpiredDate] = useState('');
   const [targetEntity, setTargetEntity] = useState('');
+  // Stock Masuk specific
+  const [inType, setInType] = useState<'new' | 'rts' | null>(null);
+  const [selectedPO, setSelectedPO] = useState('');
+  const [resiNumber, setResiNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   const cfgMap: Record<string, { title: string; color: string; label: string; desc: string }> = {
-    in: { title: 'Stock Masuk', color: 'var(--green)', label: 'Masuk', desc: 'Barang masuk dari vendor, produksi, atau RTS' },
-    out: { title: 'Stock Keluar', color: '#f97316', label: 'Keluar', desc: 'Barang keluar (sample, retur, lain-lain)' },
+    in: { title: 'Stock Masuk', color: 'var(--green)', label: 'Masuk', desc: '' },
+    out: { title: 'Stock Keluar', color: '#f97316', label: 'Keluar', desc: 'Barang keluar (sample, lain-lain). FIFO otomatis jika tidak pilih batch.' },
     transfer: { title: 'Transfer Antar Entity', color: '#06b6d4', label: 'Transfer', desc: 'Pindahkan stock ke entity lain di gudang yang sama' },
     dispose: { title: 'Dispose Stock', color: 'var(--red)', label: 'Dispose', desc: 'Buang barang expired atau rusak' },
   };
   const cfg = cfgMap[mode];
 
-  useEffect(() => { (async () => { try { setProducts(await getProducts()); } catch {} })(); }, []);
+  useEffect(() => {
+    (async () => {
+      try {
+        const [prods, poList] = await Promise.all([
+          getProducts(),
+          mode === 'in' ? getPurchaseOrders({ status: 'submitted' }) : Promise.resolve([]),
+        ]);
+        setProducts(prods);
+        // Also get partial POs
+        if (mode === 'in') {
+          const partialPOs = await getPurchaseOrders({ status: 'partial' });
+          setPos([...poList, ...partialPOs]);
+        }
+      } catch {}
+    })();
+  }, []);
+
   useEffect(() => {
     if (!selectedProduct) { setBatchList([]); return; }
     (async () => { try { setBatchList(await getBatches(Number(selectedProduct))); } catch {} })();
@@ -557,26 +575,53 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
 
   const sourceProduct = products.find(p => String(p.id) === selectedProduct);
   const entities = ['RTI', 'RLB', 'RLT', 'JHN'].filter(e => e !== sourceProduct?.entity);
+  const needsExpiry = sourceProduct && ['fg', 'sachet'].includes(sourceProduct.category);
+
+  // When PO selected, auto-fill product
+  const handlePOSelect = (poId: string) => {
+    setSelectedPO(poId);
+    if (poId) {
+      const po = pos.find(p => String(p.id) === poId);
+      if (po) {
+        setSelectedProduct(String(po.warehouse_product_id));
+        const remaining = po.quantity_requested - po.quantity_received;
+        setQuantity(String(remaining > 0 ? remaining : po.quantity_requested));
+      }
+    }
+  };
 
   const handleSubmit = async () => {
     setError(''); setSuccess('');
     const qty = Number(quantity); const pid = Number(selectedProduct);
     if (!pid) { setError('Pilih produk'); return; }
     if (!qty || qty <= 0) { setError('Quantity harus > 0'); return; }
+
     setSubmitting(true);
     try {
-      if (mode === 'in') {
-        if (newBatch) {
-          if (!batchCode.trim()) { setError('Kode batch wajib diisi'); setSubmitting(false); return; }
+      if (mode === 'in' && inType === 'new') {
+        // Barang Baru — batch wajib
+        if (!batchCode.trim()) { setError('Kode batch wajib diisi'); setSubmitting(false); return; }
+        if (needsExpiry && !expiredDate) { setError('Expired date wajib untuk produk FG/sachet'); setSubmitting(false); return; }
+
+        if (selectedPO) {
+          // Link to PO
+          await receivePurchaseOrder(Number(selectedPO), qty, undefined, notes || undefined);
+          // Also create batch
+          await createBatch(pid, batchCode.trim(), expiredDate || null, qty);
+          setSuccess(`Stock masuk: ${qty} unit (PO #${selectedPO}, batch: ${batchCode})`);
+        } else {
           await createBatch(pid, batchCode.trim(), expiredDate || null, qty);
           setSuccess(`Stock masuk: ${qty} unit (batch: ${batchCode})`);
-        } else {
-          await recordStockIn(pid, selectedBatch ? Number(selectedBatch) : null, qty, 'manual', undefined, notes || undefined);
-          setSuccess(`Stock masuk: ${qty} unit`);
         }
+      } else if (mode === 'in' && inType === 'rts') {
+        // RTS — batch existing wajib, resi wajib
+        if (!selectedBatch) { setError('Pilih batch untuk RTS'); setSubmitting(false); return; }
+        if (!resiNumber.trim()) { setError('Nomor resi wajib untuk RTS'); setSubmitting(false); return; }
+        await recordStockRTS(pid, Number(selectedBatch), qty, resiNumber.trim(), notes || undefined);
+        setSuccess(`RTS: ${qty} unit kembali ke batch`);
       } else if (mode === 'out') {
         await recordStockOut(pid, selectedBatch ? Number(selectedBatch) : null, qty, 'manual', undefined, notes || undefined);
-        setSuccess(`Stock keluar: ${qty} unit`);
+        setSuccess(`Stock keluar: ${qty} unit${selectedBatch ? '' : ' (FIFO)'}`);
       } else if (mode === 'transfer') {
         if (!targetEntity) { setError('Pilih entity tujuan'); setSubmitting(false); return; }
         await recordTransfer(pid, selectedBatch ? Number(selectedBatch) : null, qty, sourceProduct.entity, targetEntity, sourceProduct.warehouse, sourceProduct.warehouse, notes || undefined);
@@ -598,76 +643,133 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: cfg.color }}>{cfg.title}</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--dim)', fontSize: 18, cursor: 'pointer', padding: 4 }}>&#10005;</button>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>{cfg.desc}</div>
 
-        <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Produk *</label>
-          <select value={selectedProduct} onChange={(e) => { setSelectedProduct(e.target.value); setSelectedBatch(''); }} style={inputStyle}>
-            <option value="">-- Pilih Produk --</option>
-            {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.category}) [{p.warehouse}-{p.entity}]</option>)}
-          </select>
-        </div>
-
-        {mode === 'in' && (
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-              <label style={{ ...labelStyle, margin: 0 }}>Batch</label>
-              <button onClick={() => setNewBatch(!newBatch)}
-                style={{ padding: '2px 8px', borderRadius: 5, border: '1px solid var(--border)', background: newBatch ? 'var(--accent)' : 'transparent', color: newBatch ? '#fff' : 'var(--dim)', fontSize: 10, cursor: 'pointer', fontWeight: 600 }}>
-                {newBatch ? 'Batch Baru' : 'Batch Existing'}
+        {/* Stock Masuk: pilih tipe dulu */}
+        {mode === 'in' && !inType && (
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Pilih tipe barang masuk</div>
+            <div style={{ display: 'flex', gap: 12 }}>
+              <button onClick={() => setInType('new')}
+                style={{ flex: 1, padding: '16px 12px', borderRadius: 12, border: '2px solid var(--border)', background: 'transparent', cursor: 'pointer', textAlign: 'center' }}>
+                <div style={{ fontSize: 20, marginBottom: 4 }}>📦</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Barang Baru</div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>Dari vendor / produksi</div>
+              </button>
+              <button onClick={() => setInType('rts')}
+                style={{ flex: 1, padding: '16px 12px', borderRadius: 12, border: '2px solid var(--border)', background: 'transparent', cursor: 'pointer', textAlign: 'center' }}>
+                <div style={{ fontSize: 20, marginBottom: 4 }}>↩️</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>RTS (Retur)</div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>Paket gagal kirim kembali</div>
               </button>
             </div>
-            {newBatch ? (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input type="text" placeholder="Kode batch" value={batchCode} onChange={(e) => setBatchCode(e.target.value)} style={{ ...inputStyle, flex: 2 }} />
-                <input type="date" value={expiredDate} onChange={(e) => setExpiredDate(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+          </div>
+        )}
+
+        {/* Show form after type selected (or for non-in modes) */}
+        {(mode !== 'in' || inType) && (
+          <>
+            {mode === 'in' && inType && (
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>
+                {inType === 'new' ? 'Barang baru dari vendor/produksi — batch wajib' : 'Retur marketplace — pilih batch existing'}
+                <button onClick={() => setInType(null)} style={{ marginLeft: 8, fontSize: 10, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Ubah tipe</button>
               </div>
-            ) : (
-              <select value={selectedBatch} onChange={(e) => setSelectedBatch(e.target.value)} style={inputStyle}>
-                <option value="">-- Tanpa Batch --</option>
-                {batches.map(b => <option key={b.id} value={b.id}>{b.batch_code} (qty: {b.current_qty}{b.expired_date ? `, exp: ${b.expired_date}` : ''})</option>)}
-              </select>
             )}
-          </div>
+            {mode !== 'in' && cfg.desc && <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>{cfg.desc}</div>}
+
+            {/* PO Reference (Barang Baru only) */}
+            {mode === 'in' && inType === 'new' && pos.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <label style={labelStyle}>PO Reference (opsional)</label>
+                <select value={selectedPO} onChange={(e) => handlePOSelect(e.target.value)} style={inputStyle}>
+                  <option value="">-- Tanpa PO --</option>
+                  {pos.map(po => (
+                    <option key={po.id} value={po.id}>
+                      PO #{po.id} — {po.warehouse_products?.name} ({po.quantity_received}/{po.quantity_requested}) [{po.status}]
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Produk */}
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Produk *</label>
+              <select value={selectedProduct} onChange={(e) => { setSelectedProduct(e.target.value); setSelectedBatch(''); }} style={inputStyle}>
+                <option value="">-- Pilih Produk --</option>
+                {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.category}) [{p.warehouse}-{p.entity}]</option>)}
+              </select>
+            </div>
+
+            {/* Barang Baru: batch code + expired (wajib) */}
+            {mode === 'in' && inType === 'new' && (
+              <div style={{ marginBottom: 14 }}>
+                <label style={labelStyle}>Batch Code * (dari label produsen)</label>
+                <input type="text" placeholder="e.g. LOT-20260301" value={batchCode} onChange={(e) => setBatchCode(e.target.value)} style={{ ...inputStyle, marginBottom: 8 }} />
+                <label style={labelStyle}>Expired Date {needsExpiry ? '*' : '(opsional)'}</label>
+                <input type="date" value={expiredDate} onChange={(e) => setExpiredDate(e.target.value)} style={inputStyle} />
+              </div>
+            )}
+
+            {/* RTS: batch existing + resi */}
+            {mode === 'in' && inType === 'rts' && (
+              <>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={labelStyle}>Batch * (barang kembali ke batch mana)</label>
+                  <select value={selectedBatch} onChange={(e) => setSelectedBatch(e.target.value)} style={inputStyle}>
+                    <option value="">-- Pilih Batch --</option>
+                    {batches.map(b => <option key={b.id} value={b.id}>{b.batch_code} (qty: {b.current_qty}{b.expired_date ? `, exp: ${b.expired_date}` : ''})</option>)}
+                  </select>
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <label style={labelStyle}>Nomor Resi / Order ID *</label>
+                  <input type="text" placeholder="e.g. SPXID061515489801" value={resiNumber} onChange={(e) => setResiNumber(e.target.value)} style={inputStyle} />
+                </div>
+              </>
+            )}
+
+            {/* Out/Dispose/Transfer: batch selector */}
+            {['out', 'dispose', 'transfer'].includes(mode) && batches.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <label style={labelStyle}>Batch {mode === 'out' ? '(kosongkan untuk FIFO otomatis)' : ''}</label>
+                <select value={selectedBatch} onChange={(e) => setSelectedBatch(e.target.value)} style={inputStyle}>
+                  <option value="">{mode === 'out' ? '-- FIFO (batch terlama duluan) --' : '-- Tanpa Batch --'}</option>
+                  {batches.map(b => <option key={b.id} value={b.id}>{b.batch_code} (qty: {b.current_qty}{b.expired_date ? `, exp: ${b.expired_date}` : ''})</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Quantity */}
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Quantity *</label>
+              <input type="number" min="1" placeholder="Jumlah" value={quantity} onChange={(e) => setQuantity(e.target.value)} style={inputStyle} />
+            </div>
+
+            {/* Transfer: entity tujuan */}
+            {mode === 'transfer' && (
+              <div style={{ marginBottom: 14 }}>
+                <label style={labelStyle}>Entity Tujuan *</label>
+                <select value={targetEntity} onChange={(e) => setTargetEntity(e.target.value)} style={inputStyle}>
+                  <option value="">-- Pilih Entity --</option>
+                  {entities.map(e => <option key={e} value={e}>{sourceProduct?.warehouse || 'BTN'} - {e}</option>)}
+                </select>
+              </div>
+            )}
+
+            {/* Notes */}
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Catatan</label>
+              <input type="text" placeholder="Opsional" value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
+            </div>
+
+            {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: '#fca5a5', fontSize: 12, marginBottom: 12 }}>{error}</div>}
+            {success && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.1)', color: '#6ee7b7', fontSize: 12, marginBottom: 12 }}>{success}</div>}
+
+            <button onClick={handleSubmit} disabled={submitting}
+              style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: cfg.color, color: '#fff', opacity: submitting ? 0.7 : 1 }}>
+              {submitting ? 'Menyimpan...' : `Simpan ${cfg.label}`}
+            </button>
+          </>
         )}
-
-        {['out', 'dispose', 'transfer'].includes(mode) && batches.length > 0 && (
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Batch</label>
-            <select value={selectedBatch} onChange={(e) => setSelectedBatch(e.target.value)} style={inputStyle}>
-              <option value="">-- Tanpa Batch (FIFO) --</option>
-              {batches.map(b => <option key={b.id} value={b.id}>{b.batch_code} (qty: {b.current_qty}{b.expired_date ? `, exp: ${b.expired_date}` : ''})</option>)}
-            </select>
-          </div>
-        )}
-
-        <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Quantity *</label>
-          <input type="number" min="1" placeholder="Jumlah" value={quantity} onChange={(e) => setQuantity(e.target.value)} style={inputStyle} />
-        </div>
-
-        {mode === 'transfer' && (
-          <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Entity Tujuan *</label>
-            <select value={targetEntity} onChange={(e) => setTargetEntity(e.target.value)} style={inputStyle}>
-              <option value="">-- Pilih Entity --</option>
-              {entities.map(e => <option key={e} value={e}>{sourceProduct?.warehouse || 'BTN'} - {e}</option>)}
-            </select>
-          </div>
-        )}
-
-        <div style={{ marginBottom: 14 }}>
-          <label style={labelStyle}>Catatan</label>
-          <input type="text" placeholder="Opsional" value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
-        </div>
-
-        {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: '#fca5a5', fontSize: 12, marginBottom: 12 }}>{error}</div>}
-        {success && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.1)', color: '#6ee7b7', fontSize: 12, marginBottom: 12 }}>{success}</div>}
-
-        <button onClick={handleSubmit} disabled={submitting}
-          style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: cfg.color, color: '#fff', opacity: submitting ? 0.7 : 1 }}>
-          {submitting ? 'Menyimpan...' : `Simpan ${cfg.label}`}
-        </button>
       </div>
     </div>
   );
