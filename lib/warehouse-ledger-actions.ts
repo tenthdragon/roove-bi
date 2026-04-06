@@ -1106,6 +1106,255 @@ export async function backfillWarehouseDeductions(date: string) {
   return { checked, deducted: totalDeducted, skipped: totalSkipped };
 }
 
+// ── Get shipped orders that have NO warehouse deduction for a date ──
+export async function getUndeductedOrders(date: string) {
+  const svc = createServiceSupabase();
+  const dayStart = `${date}T00:00:00+07:00`;
+  const dayEnd = `${date}T23:59:59.999+07:00`;
+
+  // All shipped orders for the date
+  const { data: orders, error } = await svc
+    .from('scalev_orders')
+    .select('id, order_id, business_code')
+    .in('status', ['shipped', 'completed'])
+    .gte('shipped_time', dayStart)
+    .lt('shipped_time', dayEnd);
+  if (error) throw error;
+  if (!orders || orders.length === 0) return [];
+
+  // Get all existing deductions for these order IDs in one query
+  const orderIds = orders.map(o => o.order_id);
+  const deductedSet = new Set<string>();
+  const chunkSize = 200;
+  for (let i = 0; i < orderIds.length; i += chunkSize) {
+    const chunk = orderIds.slice(i, i + chunkSize);
+    const { data: ledgerRows } = await svc
+      .from('warehouse_stock_ledger')
+      .select('reference_id')
+      .eq('reference_type', 'scalev_order')
+      .in('reference_id', chunk);
+    (ledgerRows || []).forEach(r => deductedSet.add(r.reference_id));
+  }
+
+  // Filter to undeducted orders only
+  const undeducted = orders.filter(o => !deductedSet.has(o.order_id));
+  if (undeducted.length === 0) return [];
+
+  // Load all business mappings + scalev mappings for diagnosis
+  const { data: bizMappings } = await svc
+    .from('warehouse_business_mapping')
+    .select('business_code, deduct_entity, deduct_warehouse, is_active');
+  const bizMap = new Map((bizMappings || []).map(m => [m.business_code, m]));
+
+  const results: any[] = [];
+
+  for (const order of undeducted) {
+    // Get order lines
+    const { data: lines } = await svc
+      .from('scalev_order_lines')
+      .select('product_name, quantity')
+      .eq('scalev_order_id', order.id);
+
+    const productLines = (lines || []).filter(l => l.product_name && l.quantity > 0)
+      .map(l => ({ product_name: l.product_name, quantity: l.quantity }));
+
+    // Diagnose problem
+    const mapping = bizMap.get(order.business_code);
+    if (!mapping || !mapping.is_active) {
+      results.push({
+        order_id: order.order_id,
+        business_code: order.business_code,
+        product_lines: productLines,
+        problem: 'no_business_mapping',
+        problem_detail: `Business ${order.business_code} tidak punya warehouse mapping`,
+      });
+      continue;
+    }
+
+    // Check each product line for mapping
+    const unmappedProducts: string[] = [];
+    for (const line of productLines) {
+      const { data: scalevMapping } = await svc
+        .from('warehouse_scalev_mapping')
+        .select('warehouse_product_id, is_ignored')
+        .eq('scalev_product_name', line.product_name)
+        .maybeSingle();
+      if (scalevMapping?.is_ignored) continue;
+      if (scalevMapping?.warehouse_product_id) continue;
+
+      // Fallback lookup
+      const { data: whProducts } = await svc
+        .rpc('warehouse_find_product_for_deduction', {
+          p_scalev_name: line.product_name,
+          p_entity: mapping.deduct_entity,
+          p_warehouse: mapping.deduct_warehouse,
+        });
+      if (!whProducts || whProducts.length === 0) {
+        unmappedProducts.push(line.product_name);
+      }
+    }
+
+    if (unmappedProducts.length > 0) {
+      results.push({
+        order_id: order.order_id,
+        business_code: order.business_code,
+        product_lines: productLines,
+        problem: 'no_product_mapping',
+        problem_detail: `Produk tidak ditemukan di gudang ${mapping.deduct_entity}: ${unmappedProducts.join(', ')}`,
+      });
+    } else {
+      results.push({
+        order_id: order.order_id,
+        business_code: order.business_code,
+        product_lines: productLines,
+        problem: 'unknown',
+        problem_detail: 'Mapping tersedia tapi deduction belum berjalan',
+      });
+    }
+  }
+
+  return results;
+}
+
+// ── Backfill a single order's warehouse deduction ──
+export async function backfillSingleOrder(orderId: string) {
+  const svc = createServiceSupabase();
+
+  // Get order
+  const { data: order, error: ordErr } = await svc
+    .from('scalev_orders')
+    .select('id, order_id, business_code')
+    .eq('order_id', orderId)
+    .single();
+  if (ordErr || !order) throw new Error(`Order ${orderId} tidak ditemukan`);
+
+  // Idempotency check
+  const { data: existing } = await svc
+    .from('warehouse_stock_ledger')
+    .select('id')
+    .eq('reference_type', 'scalev_order')
+    .eq('reference_id', orderId)
+    .limit(1);
+  if (existing && existing.length > 0) return { deducted: 0, skipped: 0, message: 'Sudah pernah dideduct' };
+
+  // Get mapping
+  const { data: mapping } = await svc
+    .from('warehouse_business_mapping')
+    .select('deduct_entity, deduct_warehouse')
+    .eq('business_code', order.business_code)
+    .eq('is_active', true)
+    .maybeSingle();
+  if (!mapping) throw new Error(`Warehouse mapping untuk ${order.business_code} belum ada atau inactive`);
+
+  // Get order lines
+  const { data: lines } = await svc
+    .from('scalev_order_lines')
+    .select('product_name, quantity')
+    .eq('scalev_order_id', order.id);
+  if (!lines || lines.length === 0) return { deducted: 0, skipped: 0, message: 'Tidak ada order lines' };
+
+  let deducted = 0;
+  let skipped = 0;
+
+  for (const line of lines) {
+    if (!line.product_name || !line.quantity || line.quantity <= 0) continue;
+
+    const { data: scalevMapping } = await svc
+      .from('warehouse_scalev_mapping')
+      .select('warehouse_product_id, deduct_qty_multiplier, is_ignored')
+      .eq('scalev_product_name', line.product_name)
+      .maybeSingle();
+
+    if (scalevMapping?.is_ignored) { skipped++; continue; }
+
+    let targetProductId: number | null = null;
+    let deductQty = line.quantity;
+
+    if (scalevMapping?.warehouse_product_id) {
+      targetProductId = scalevMapping.warehouse_product_id;
+      deductQty = line.quantity * (scalevMapping.deduct_qty_multiplier || 1);
+    } else {
+      const { data: whProducts } = await svc
+        .rpc('warehouse_find_product_for_deduction', {
+          p_scalev_name: line.product_name,
+          p_entity: mapping.deduct_entity,
+          p_warehouse: mapping.deduct_warehouse,
+        });
+      if (whProducts && whProducts.length > 0) {
+        targetProductId = whProducts[0].id;
+      }
+    }
+
+    if (targetProductId) {
+      const { error: deductErr } = await svc
+        .rpc('warehouse_deduct_fifo', {
+          p_product_id: targetProductId,
+          p_quantity: deductQty,
+          p_reference_type: 'scalev_order',
+          p_reference_id: orderId,
+          p_notes: `Backfill: ${line.product_name} x${deductQty} [${order.business_code}→${mapping.deduct_entity}]`,
+        });
+      if (!deductErr) deducted++;
+    } else {
+      skipped++;
+    }
+  }
+
+  return { deducted, skipped };
+}
+
+// ── Get deduction log for a date (side-by-side scalev vs warehouse product) ──
+export async function getDeductionLog(date: string) {
+  const svc = createServiceSupabase();
+  const dayStart = `${date}T00:00:00+07:00`;
+  const dayEnd = `${date}T23:59:59.999+07:00`;
+
+  const { data, error } = await svc
+    .from('warehouse_stock_ledger')
+    .select(`
+      reference_id,
+      quantity,
+      notes,
+      created_at,
+      warehouse_products!inner(name, entity)
+    `)
+    .eq('reference_type', 'scalev_order')
+    .eq('movement_type', 'OUT')
+    .gte('created_at', dayStart)
+    .lt('created_at', dayEnd)
+    .order('created_at', { ascending: false });
+
+  if (error) throw error;
+  if (!data || data.length === 0) return [];
+
+  // Get business_code for each order_id
+  const orderIds = [...new Set(data.map(d => d.reference_id))];
+  const bizMap = new Map<string, string>();
+  for (let i = 0; i < orderIds.length; i += 200) {
+    const chunk = orderIds.slice(i, i + 200);
+    const { data: orders } = await svc
+      .from('scalev_orders')
+      .select('order_id, business_code')
+      .in('order_id', chunk);
+    (orders || []).forEach(o => bizMap.set(o.order_id, o.business_code));
+  }
+
+  return data.map(d => {
+    // Parse scalev product name from notes: "Auto: {name} x{qty} [...]" or "Backfill: {name} x{qty} [...]"
+    const notesMatch = (d.notes || '').match(/(?:Auto|Backfill): (.+?) x[\d.]+/);
+    const wp = d.warehouse_products as any;
+    return {
+      order_id: d.reference_id,
+      business_code: bizMap.get(d.reference_id) || '-',
+      scalev_product: notesMatch ? notesMatch[1] : d.notes || '-',
+      warehouse_product: wp?.name || '-',
+      quantity: Math.abs(Number(d.quantity)),
+      entity: wp?.entity || '-',
+      created_at: d.created_at,
+    };
+  });
+}
+
 // ============================================================
 // VENDORS
 // ============================================================

@@ -16,7 +16,9 @@ import {
   getStockByBatch,
   getLedgerHistory,
   getDailyMovementSummary,
-  backfillWarehouseDeductions,
+  getUndeductedOrders,
+  backfillSingleOrder,
+  getDeductionLog,
   getProducts,
   getBatches,
   recordStockIn,
@@ -159,6 +161,8 @@ export default function WarehousePage() {
   const [ledgerHistory, setLedgerHistory] = useState<any[]>([]);
   const [mappingData, setMappingData] = useState<any[]>([]);
   const [dailySummary, setDailySummary] = useState<any[]>([]);
+  const [deductionAlerts, setDeductionAlerts] = useState<any[]>([]);
+  const [deductionLog, setDeductionLog] = useState<any[]>([]);
   const [dailySummaryDate, setDailySummaryDate] = useState(() => {
     const now = new Date();
     const wib = new Date(now.getTime() + (7 * 60 - now.getTimezoneOffset()) * 60000);
@@ -203,8 +207,14 @@ export default function WarehousePage() {
           const data = await getStockBalance();
           setStockBalance(data);
         } else if (activeTab === 'daily-summary') {
-          const data = await getDailyMovementSummary(dailySummaryDate);
-          setDailySummary(data);
+          const [summaryData, alertsData, logData] = await Promise.all([
+            getDailyMovementSummary(dailySummaryDate),
+            getUndeductedOrders(dailySummaryDate),
+            getDeductionLog(dailySummaryDate),
+          ]);
+          setDailySummary(summaryData);
+          setDeductionAlerts(alertsData);
+          setDeductionLog(logData);
         } else if (activeTab === 'ledger') {
           const data = await getLedgerHistory({ limit: 500 });
           setLedgerHistory(data);
@@ -348,7 +358,7 @@ export default function WarehousePage() {
 
       {/* Tab content */}
       {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} userRole={userRole} />}
-      {activeTab === 'daily-summary' && <DailySummaryTab data={dailySummary} date={dailySummaryDate} setDate={setDailySummaryDate} onRefresh={refreshData} />}
+      {activeTab === 'daily-summary' && <DailySummaryTab data={dailySummary} alerts={deductionAlerts} deductLog={deductionLog} date={dailySummaryDate} setDate={setDailySummaryDate} onRefresh={refreshData} />}
       {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} search={ledgerSearch} setSearch={setLedgerSearch} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
       {activeTab === 'mapping' && <MappingTab data={mappingData} onRefresh={refreshData} />}
@@ -1324,12 +1334,13 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
 // ============================================================
 // DAILY SUMMARY TAB
 // ============================================================
-function DailySummaryTab({ data, date, setDate, onRefresh }: {
-  data: any[]; date: string; setDate: (v: string) => void; onRefresh: () => void;
+function DailySummaryTab({ data, alerts, deductLog, date, setDate, onRefresh }: {
+  data: any[]; alerts: any[]; deductLog: any[]; date: string; setDate: (v: string) => void; onRefresh: () => void;
 }) {
   const [entityFilter, setEntityFilter] = useState('all');
-  const [backfilling, setBackfilling] = useState(false);
-  const [backfillResult, setBackfillResult] = useState<string | null>(null);
+  const [syncingOrder, setSyncingOrder] = useState<string | null>(null);
+  const [syncResults, setSyncResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
+  const [showDeductLog, setShowDeductLog] = useState(false);
 
   const entities = useMemo(() => {
     const set = new Set<string>();
@@ -1355,21 +1366,8 @@ function DailySummaryTab({ data, date, setDate, onRefresh }: {
     <>
       {/* Controls */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-        <input type="date" value={date} onChange={e => { setDate(e.target.value); setBackfillResult(null); }}
+        <input type="date" value={date} onChange={e => { setDate(e.target.value); setSyncResults({}); }}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }} />
-        <button onClick={async () => {
-            setBackfilling(true); setBackfillResult(null);
-            try {
-              const r = await backfillWarehouseDeductions(date);
-              setBackfillResult(`Selesai: ${r.checked} order dicek, ${r.deducted} produk dideduct, ${r.skipped} dilewati`);
-              onRefresh();
-            } catch (err: any) { setBackfillResult(`Error: ${err.message}`); }
-            setBackfilling(false);
-          }} disabled={backfilling}
-          style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', cursor: backfilling ? 'wait' : 'pointer', fontSize: 11, fontWeight: 600, background: 'transparent', color: '#f59e0b', opacity: backfilling ? 0.6 : 1 }}>
-          {backfilling ? 'Processing...' : 'Backfill Deductions'}
-        </button>
-        {backfillResult && <span style={{ fontSize: 11, color: backfillResult.startsWith('Error') ? 'var(--red)' : 'var(--green)' }}>{backfillResult}</span>}
         <div style={{ flex: 1 }} />
         <button onClick={() => setEntityFilter('all')}
           style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === 'all' ? 'var(--accent)' : 'transparent', color: entityFilter === 'all' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
@@ -1441,6 +1439,114 @@ function DailySummaryTab({ data, date, setDate, onRefresh }: {
           </table>
         </div>
       )}
+
+      {/* ── Deduction Alerts ── */}
+      {alerts.length > 0 && (
+        <div style={{ marginTop: 20, background: 'var(--card)', border: '1px solid #f59e0b40', borderRadius: 12, padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', marginBottom: 10 }}>
+            {alerts.length} order belum mendeduct gudang
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {['Order ID', 'Business', 'Produk', 'Masalah', 'Aksi'].map(h => (
+                    <th key={h} style={{ padding: '6px 10px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {alerts.map(a => {
+                  const result = syncResults[a.order_id];
+                  if (result?.ok) return null; // hide successfully synced
+                  const problemColors = {
+                    no_business_mapping: { bg: 'var(--badge-red-bg)', color: 'var(--red)', label: 'No Mapping' },
+                    no_product_mapping: { bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)', label: 'Produk?' },
+                    unknown: { bg: 'var(--accent-subtle)', color: '#818cf8', label: 'Belum Sync' },
+                  };
+                  const pc = problemColors[a.problem] || problemColors.unknown;
+                  return (
+                    <tr key={a.order_id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                      <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>{a.order_id}</td>
+                      <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 11 }}>{a.business_code}</td>
+                      <td style={{ padding: '6px 10px', fontSize: 11, color: 'var(--text-secondary)', maxWidth: 200 }}>
+                        {a.product_lines.map(p => `${p.product_name} x${p.quantity}`).join(', ')}
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: pc.bg, color: pc.color }}>{pc.label}</span>
+                        <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{a.problem_detail}</div>
+                      </td>
+                      <td style={{ padding: '6px 10px' }}>
+                        {result && !result.ok ? (
+                          <span style={{ fontSize: 10, color: 'var(--red)' }}>{result.msg}</span>
+                        ) : (
+                          <button
+                            onClick={async () => {
+                              setSyncingOrder(a.order_id);
+                              try {
+                                const r = await backfillSingleOrder(a.order_id);
+                                if (r.deducted > 0) {
+                                  setSyncResults(prev => ({ ...prev, [a.order_id]: { ok: true, msg: `${r.deducted} dideduct` } }));
+                                  onRefresh();
+                                } else {
+                                  setSyncResults(prev => ({ ...prev, [a.order_id]: { ok: false, msg: r.message || `0 dideduct, ${r.skipped} dilewati` } }));
+                                }
+                              } catch (err: any) {
+                                setSyncResults(prev => ({ ...prev, [a.order_id]: { ok: false, msg: err.message } }));
+                              }
+                              setSyncingOrder(null);
+                            }}
+                            disabled={syncingOrder === a.order_id}
+                            style={{ padding: '3px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--accent)', fontSize: 11, cursor: syncingOrder === a.order_id ? 'wait' : 'pointer', fontWeight: 600, opacity: syncingOrder === a.order_id ? 0.5 : 1 }}>
+                            {syncingOrder === a.order_id ? '...' : 'Sync'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Deduction Log ── */}
+      <div style={{ marginTop: 20 }}>
+        <button onClick={() => setShowDeductLog(!showDeductLog)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--dim)', fontSize: 12, fontWeight: 600 }}>
+          <span style={{ transform: showDeductLog ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', fontSize: 10 }}>&#9660;</span>
+          Deduction Log ({deductLog.length} entries)
+        </button>
+        {showDeductLog && deductLog.length > 0 && (
+          <div style={{ overflowX: 'auto', marginTop: 10 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {['Order ID', 'Business', 'Scalev Product', 'Warehouse Product', 'Qty', 'Entity'].map(h => (
+                    <th key={h} style={{ padding: '6px 8px', textAlign: ['Qty'].includes(h) ? 'right' : 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {deductLog.map((d, i) => (
+                  <tr key={i} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                    <td style={{ padding: '5px 8px', fontFamily: 'monospace', fontSize: 10 }}>{d.order_id}</td>
+                    <td style={{ padding: '5px 8px', fontFamily: 'monospace', fontSize: 10 }}>{d.business_code}</td>
+                    <td style={{ padding: '5px 8px', fontSize: 10, color: 'var(--text-secondary)' }}>{d.scalev_product}</td>
+                    <td style={{ padding: '5px 8px', fontSize: 10, fontWeight: 600, color: d.scalev_product !== d.warehouse_product ? '#f59e0b' : 'var(--text)' }}>{d.warehouse_product}</td>
+                    <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{d.quantity}</td>
+                    <td style={{ padding: '5px 8px', fontSize: 10, color: 'var(--text-secondary)' }}>{d.entity}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {showDeductLog && deductLog.length === 0 && (
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--dim)' }}>Tidak ada deduction tercatat untuk tanggal ini.</div>
+        )}
+      </div>
     </>
   );
 }
