@@ -24,10 +24,10 @@ import {
   recordTransfer,
   recordConversion,
   createBatch,
-  getPurchaseOrders,
-  receivePurchaseOrder,
+  // PO functions moved to ppic-actions (legacy import removed)
   type ConversionSource,
 } from '@/lib/warehouse-ledger-actions';
+import { getPurchaseOrders as getPOs, receivePOItems } from '@/lib/ppic-actions';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { getCurrentProfile } from '@/lib/actions';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
@@ -554,15 +554,33 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
   useEffect(() => {
     (async () => {
       try {
-        const [prods, poList] = await Promise.all([
-          getProducts(),
-          mode === 'in' ? getPurchaseOrders({ status: 'submitted' }) : Promise.resolve([]),
-        ]);
+        const prods = await getProducts();
         setProducts(prods);
-        // Also get partial POs
         if (mode === 'in') {
-          const partialPOs = await getPurchaseOrders({ status: 'partial' });
-          setPos([...poList, ...partialPOs]);
+          // Load POs with submitted/partial status and flatten items
+          const [submitted, partial] = await Promise.all([
+            getPOs({ status: 'submitted' }),
+            getPOs({ status: 'partial' }),
+          ]);
+          // Flatten to PO items with remaining qty > 0
+          const allPOs = [...submitted, ...partial];
+          const poItems = allPOs.flatMap(po =>
+            (po.warehouse_po_items || [])
+              .filter((item: any) => Number(item.quantity_requested) - Number(item.quantity_received) > 0)
+              .map((item: any) => ({
+                id: `${po.id}-${item.id}`,
+                po_id: po.id,
+                po_item_id: item.id,
+                po_number: po.po_number,
+                vendor_name: po.warehouse_vendors?.name,
+                warehouse_product_id: item.warehouse_product_id,
+                product_name: item.warehouse_products?.name,
+                quantity_requested: Number(item.quantity_requested),
+                quantity_received: Number(item.quantity_received),
+                remaining: Number(item.quantity_requested) - Number(item.quantity_received),
+              }))
+          );
+          setPos(poItems);
         }
       } catch {}
     })();
@@ -577,15 +595,14 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
   const entities = ['RTI', 'RLB', 'RLT', 'JHN'].filter(e => e !== sourceProduct?.entity);
   const needsExpiry = sourceProduct && ['fg', 'sachet'].includes(sourceProduct.category);
 
-  // When PO selected, auto-fill product
-  const handlePOSelect = (poId: string) => {
-    setSelectedPO(poId);
-    if (poId) {
-      const po = pos.find(p => String(p.id) === poId);
-      if (po) {
-        setSelectedProduct(String(po.warehouse_product_id));
-        const remaining = po.quantity_requested - po.quantity_received;
-        setQuantity(String(remaining > 0 ? remaining : po.quantity_requested));
+  // When PO item selected, auto-fill product and qty
+  const handlePOSelect = (poItemKey: string) => {
+    setSelectedPO(poItemKey);
+    if (poItemKey) {
+      const poItem = pos.find(p => p.id === poItemKey);
+      if (poItem) {
+        setSelectedProduct(String(poItem.warehouse_product_id));
+        setQuantity(String(poItem.remaining));
       }
     }
   };
@@ -604,11 +621,17 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
         if (needsExpiry && !expiredDate) { setError('Expired date wajib untuk produk FG/sachet'); setSubmitting(false); return; }
 
         if (selectedPO) {
-          // Link to PO
-          await receivePurchaseOrder(Number(selectedPO), qty, undefined, notes || undefined);
-          // Also create batch
-          await createBatch(pid, batchCode.trim(), expiredDate || null, qty);
-          setSuccess(`Stock masuk: ${qty} unit (PO #${selectedPO}, batch: ${batchCode})`);
+          // Link to PO — use new multi-item PO system
+          const poItem = pos.find(p => p.id === selectedPO);
+          if (poItem) {
+            await receivePOItems(poItem.po_id, [{
+              poItemId: poItem.po_item_id,
+              quantityReceived: qty,
+              batchCode: batchCode.trim(),
+              expiredDate: expiredDate || null,
+            }]);
+            setSuccess(`Stock masuk: ${qty} unit (${poItem.po_number}, batch: ${batchCode})`);
+          }
         } else {
           await createBatch(pid, batchCode.trim(), expiredDate || null, qty);
           setSuccess(`Stock masuk: ${qty} unit (batch: ${batchCode})`);
@@ -684,7 +707,7 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
                   <option value="">-- Tanpa PO --</option>
                   {pos.map(po => (
                     <option key={po.id} value={po.id}>
-                      PO #{po.id} — {po.warehouse_products?.name} ({po.quantity_received}/{po.quantity_requested}) [{po.status}]
+                      {po.po_number} — {po.product_name} (sisa: {po.remaining}) [{po.vendor_name}]
                     </option>
                   ))}
                 </select>

@@ -176,6 +176,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign' },
   { id: 'warehouse',      label: 'Gudang',             icon: 'Warehouse' },
   { id: 'warehouse-settings', label: 'Warehouse Settings', icon: 'Wrench' },
+  { id: 'ppic',           label: 'PPIC',               icon: 'ClipboardList' },
   { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true },
 ];
 
@@ -186,6 +187,7 @@ export function canAccessTab(profile: Profile, tabId: string): boolean {
   if (profile.role === 'pending') return false;
   if (tabId === 'warehouse-settings') return profile.role === 'owner' || profile.role === 'direktur_operasional';
   if (profile.role === 'owner' || profile.role === 'admin' || profile.role === 'finance' || profile.role === 'direktur_operasional') return true;
+  if (tabId === 'ppic') return ['owner', 'admin', 'direktur_operasional', 'ppic'].includes(profile.role);
   if (profile.role === 'warehouse_manager' || profile.role === 'ppic') return tabId === 'warehouse';
   if (profile.role === 'staff') return tabId === 'admin';
   if (tabId === 'admin') return false;

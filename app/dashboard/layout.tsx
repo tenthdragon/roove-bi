@@ -21,8 +21,11 @@ function getAllowedTabs(prof) {
   if (prof.role === 'staff') {
     return ['admin'];
   }
-  if (prof.role === 'warehouse_manager' || prof.role === 'ppic') {
+  if (prof.role === 'warehouse_manager') {
     return ['warehouse'];
+  }
+  if (prof.role === 'ppic') {
+    return ['warehouse', 'ppic'];
   }
   if (prof.role === 'brand_manager') {
     return prof.allowed_tabs && prof.allowed_tabs.length > 0 ? prof.allowed_tabs : ['marketing'];
