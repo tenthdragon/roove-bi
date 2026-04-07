@@ -796,6 +796,41 @@ export async function deductStockFifo(
 }
 
 // ============================================================
+// ORDER REVERSAL (for deleted/canceled orders)
+// ============================================================
+
+export async function reverseWarehouseDeductions(orderId: string): Promise<number> {
+  const svc = createServiceSupabase();
+
+  // Check if there are any OUT entries to reverse
+  const { data: existing } = await svc
+    .from('warehouse_stock_ledger')
+    .select('id')
+    .eq('reference_type', 'scalev_order')
+    .eq('reference_id', orderId)
+    .eq('movement_type', 'OUT')
+    .limit(1);
+
+  if (!existing || existing.length === 0) return 0;
+
+  // Check if already reversed (avoid double reversal)
+  const { data: reversals } = await svc
+    .from('warehouse_stock_ledger')
+    .select('id')
+    .eq('reference_type', 'scalev_order')
+    .eq('reference_id', orderId)
+    .eq('movement_type', 'IN')
+    .like('notes', 'Reversal:%')
+    .limit(1);
+
+  if (reversals && reversals.length > 0) return 0;
+
+  const { data, error } = await svc.rpc('warehouse_reverse_order', { p_order_id: orderId });
+  if (error) throw error;
+  return data as number;
+}
+
+// ============================================================
 // PURCHASE ORDERS
 // ============================================================
 

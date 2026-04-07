@@ -6,6 +6,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { fetchOrderDetail, deriveChannelFromStoreType, guessStoreType, lookupProductType, clearProductMappingCache, type StoreType } from '@/lib/scalev-api';
+import { reverseWarehouseDeductions } from '@/lib/warehouse-ledger-actions';
 
 
 export const maxDuration = 120;
@@ -438,12 +439,23 @@ async function processOrder(
     await enrichLineItems(svc, dbOrder.id, dbOrder.order_id, apiOrder, storeTypeMap, bizId, taxRateName, taxRatesMap, channelOverrideMap);
   }
 
+  // For deleted/canceled: reverse warehouse deductions if any
+  let reversedCount = 0;
+  if (newStatus === 'deleted' || newStatus === 'canceled') {
+    try {
+      reversedCount = await reverseWarehouseDeductions(dbOrder.order_id);
+    } catch (e: any) {
+      console.error(`[Sync] Failed to reverse warehouse for ${dbOrder.order_id}:`, e.message);
+    }
+  }
+
   details.push({
     order_id: dbOrder.order_id,
     store_name: dbOrder.store_name,
     business_code: dbOrder.business_code,
     old_status: dbOrder.status,
     new_status: newStatus,
+    ...(reversedCount > 0 && { warehouse_reversed: reversedCount }),
   });
 
   return 'updated';

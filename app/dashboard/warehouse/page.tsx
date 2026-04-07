@@ -164,8 +164,7 @@ export default function WarehousePage() {
   const [deductionLog, setDeductionLog] = useState<{ rows: any[]; totalUniqueOrders: number }>({ rows: [], totalUniqueOrders: 0 });
   const [dailySummaryDate, setDailySummaryDate] = useState(() => {
     const now = new Date();
-    const wib = new Date(now.getTime() + (7 * 60 - now.getTimezoneOffset()) * 60000);
-    return wib.toISOString().slice(0, 10);
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
   });
 
   // Filters
