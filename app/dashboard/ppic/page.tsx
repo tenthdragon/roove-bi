@@ -353,8 +353,8 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
   const lblStyle = { display: 'block' as const, fontSize: 13, color: 'var(--dim)', marginBottom: 6 };
 
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-      <div style={{ background: 'var(--card)', borderRadius: 16, border: '1px solid var(--border)', padding: '28px 32px 24px', width: '100%', maxWidth: 600, maxHeight: '90vh', overflow: 'auto', boxSizing: 'border-box' }}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '2rem', overflowY: 'auto' }}>
+      <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '28px 32px 24px', width: '100%', maxWidth: 600, boxSizing: 'border-box' }}>
 
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
@@ -407,7 +407,7 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
           </div>
 
           {items.map((item, idx) => (
-            <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 130px 24px', gap: 10, marginBottom: 10, alignItems: 'center' }}>
+            <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 120px 28px', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
               <div style={{ position: 'relative' }}>
                 <input
                   type="text"
@@ -439,9 +439,8 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
                 style={{ ...fieldStyle, textAlign: 'right' }} />
               <input type="number" placeholder="Harga/unit" value={item.unitPrice || ''} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} min={0}
                 style={{ ...fieldStyle, textAlign: 'right' }} />
-              {items.length > 1 ? (
-                <button onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 16, padding: 0 }}>&times;</button>
-              ) : <div />}
+              <button onClick={() => removeItem(idx)} disabled={items.length <= 1}
+                style={{ background: 'none', border: 'none', color: items.length > 1 ? 'var(--red)' : 'transparent', cursor: items.length > 1 ? 'pointer' : 'default', fontSize: 14, padding: '8px 0', lineHeight: 1 }}>&times;</button>
             </div>
           ))}
 
