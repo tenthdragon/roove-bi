@@ -1227,6 +1227,7 @@ function ROPTab() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editField, setEditField] = useState<string>('');
   const [editValue, setEditValue] = useState('');
+  const [hideZeroDemand, setHideZeroDemand] = useState(true);
 
   const loadData = async () => {
     setLoading(true);
@@ -1243,8 +1244,9 @@ function ROPTab() {
       const q = searchQuery.toLowerCase();
       result = result.filter(p => p.product_name?.toLowerCase().includes(q));
     }
+    if (hideZeroDemand) result = result.filter(p => Number(p.avg_daily) > 0);
     return result;
-  }, [data, entityFilter, searchQuery]);
+  }, [data, entityFilter, searchQuery, hideZeroDemand]);
 
   const kpi = useMemo(() => {
     const critical = data.filter(d => d.status === 'critical').length;
@@ -1297,6 +1299,9 @@ function ROPTab() {
           <option value="all">Semua Entity</option>
           {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--dim)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={hideZeroDemand} onChange={e => setHideZeroDemand(e.target.checked)} /> Sembunyikan demand = 0
+        </label>
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 12 }}>
