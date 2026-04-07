@@ -161,7 +161,7 @@ export default function WarehousePage() {
   const [mappingData, setMappingData] = useState<any[]>([]);
   const [dailySummary, setDailySummary] = useState<any[]>([]);
   const [deductionAlerts, setDeductionAlerts] = useState<any[]>([]);
-  const [deductionLog, setDeductionLog] = useState<any[]>([]);
+  const [deductionLog, setDeductionLog] = useState<{ rows: any[]; totalUniqueOrders: number }>({ rows: [], totalUniqueOrders: 0 });
   const [dailySummaryDate, setDailySummaryDate] = useState(() => {
     const now = new Date();
     const wib = new Date(now.getTime() + (7 * 60 - now.getTimezoneOffset()) * 60000);
@@ -357,7 +357,7 @@ export default function WarehousePage() {
 
       {/* Tab content */}
       {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} userRole={userRole} />}
-      {activeTab === 'daily-summary' && <DailySummaryTab data={dailySummary} alerts={deductionAlerts} deductLog={deductionLog} date={dailySummaryDate} setDate={setDailySummaryDate} onRefresh={refreshData} />}
+      {activeTab === 'daily-summary' && <DailySummaryTab data={dailySummary} alerts={deductionAlerts} deductLog={deductionLog.rows} totalDeductedOrders={deductionLog.totalUniqueOrders} date={dailySummaryDate} setDate={setDailySummaryDate} onRefresh={refreshData} />}
       {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} search={ledgerSearch} setSearch={setLedgerSearch} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
       {activeTab === 'mapping' && <MappingTab data={mappingData} onRefresh={refreshData} />}
@@ -1333,8 +1333,8 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
 // ============================================================
 // DAILY SUMMARY TAB
 // ============================================================
-function DailySummaryTab({ data, alerts, deductLog, date, setDate, onRefresh }: {
-  data: any[]; alerts: any[]; deductLog: any[]; date: string; setDate: (v: string) => void; onRefresh: () => void;
+function DailySummaryTab({ data, alerts, deductLog, totalDeductedOrders, date, setDate, onRefresh }: {
+  data: any[]; alerts: any[]; deductLog: any[]; totalDeductedOrders: number; date: string; setDate: (v: string) => void; onRefresh: () => void;
 }) {
   const [entityFilter, setEntityFilter] = useState('all');
   const [syncingOrder, setSyncingOrder] = useState<string | null>(null);
@@ -1515,7 +1515,7 @@ function DailySummaryTab({ data, alerts, deductLog, date, setDate, onRefresh }: 
         <button onClick={() => setShowDeductLog(!showDeductLog)}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--dim)', fontSize: 12, fontWeight: 600 }}>
           <span style={{ transform: showDeductLog ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', fontSize: 10 }}>&#9660;</span>
-          Deduction Summary ({deductLog.length} produk)
+          Deduction Summary ({totalDeductedOrders} orders, {deductLog.length} produk)
         </button>
         {showDeductLog && deductLog.length > 0 && (() => {
           // Group by entity

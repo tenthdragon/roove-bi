@@ -1347,6 +1347,7 @@ export async function getDeductionLog(date: string) {
     total_qty: number; order_count: number;
     order_ids: Set<string>; business_codes: Set<string>;
   }>();
+  const allOrderIds = new Set<string>();
 
   for (const d of data) {
     const notesMatch = (d.notes || '').match(/(?:Auto|Backfill): (.+?) x[\d.]+/);
@@ -1370,11 +1371,12 @@ export async function getDeductionLog(date: string) {
     const row = grouped.get(key)!;
     row.total_qty += Math.abs(Number(d.quantity));
     row.order_ids.add(d.reference_id);
+    allOrderIds.add(d.reference_id);
     const biz = bizMap.get(d.reference_id);
     if (biz) row.business_codes.add(biz);
   }
 
-  return Array.from(grouped.values())
+  const rows = Array.from(grouped.values())
     .map(g => ({
       scalev_product: g.scalev_product,
       warehouse_product: g.warehouse_product,
@@ -1384,6 +1386,8 @@ export async function getDeductionLog(date: string) {
       business_codes: Array.from(g.business_codes).join(', '),
     }))
     .sort((a, b) => b.total_qty - a.total_qty);
+
+  return { rows, totalUniqueOrders: allOrderIds.size };
 }
 
 // ============================================================
