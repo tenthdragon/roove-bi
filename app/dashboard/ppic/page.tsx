@@ -349,59 +349,65 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
     setSubmitting(false);
   };
 
+  const fieldStyle = { width: '100%', boxSizing: 'border-box' as const, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' };
+  const lblStyle = { display: 'block' as const, fontSize: 13, color: 'var(--dim)', marginBottom: 6 };
+
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ background: 'var(--card)', borderRadius: 16, padding: 24, width: '95%', maxWidth: 680, maxHeight: '90vh', overflow: 'auto', border: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>Buat Purchase Order</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--dim)' }}>&times;</button>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+      <div style={{ background: 'var(--card)', borderRadius: 16, border: '1px solid var(--border)', padding: '28px 32px 24px', width: '100%', maxWidth: 600, maxHeight: '90vh', overflow: 'auto', boxSizing: 'border-box' }}>
+
+        {/* Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>Buat Purchase Order</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--dim)', padding: 0, lineHeight: 1 }}>&times;</button>
         </div>
 
-        {/* PO Header */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+        {/* Vendor + Entity */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
           <div>
-            <label style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Vendor *</label>
-            <select value={vendorId || ''} onChange={e => setVendorId(Number(e.target.value))}
-              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13 }}>
+            <label style={lblStyle}>Vendor <span style={{ color: 'var(--red)' }}>*</span></label>
+            <select value={vendorId || ''} onChange={e => setVendorId(Number(e.target.value))} style={fieldStyle}>
               <option value="">-- Pilih Vendor --</option>
               {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
             </select>
           </div>
           <div>
-            <label style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Entity *</label>
-            <select value={entity} onChange={e => setEntity(e.target.value)}
-              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13 }}>
+            <label style={lblStyle}>Entity <span style={{ color: 'var(--red)' }}>*</span></label>
+            <select value={entity} onChange={e => setEntity(e.target.value)} style={fieldStyle}>
               {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
             </select>
           </div>
+        </div>
+
+        {/* Dates */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
           <div>
-            <label style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Tanggal PO</label>
-            <input type="date" value={poDate} onChange={e => setPODate(e.target.value)}
-              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13 }} />
+            <label style={lblStyle}>Tanggal PO</label>
+            <input type="date" value={poDate} onChange={e => setPODate(e.target.value)} style={fieldStyle} />
           </div>
           <div>
-            <label style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Exp. Delivery</label>
-            <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)}
-              style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13 }} />
+            <label style={lblStyle}>Exp. Delivery</label>
+            <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} style={fieldStyle} />
           </div>
         </div>
 
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 600, display: 'block', marginBottom: 4 }}>Catatan</label>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
-            style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13, resize: 'vertical' }} />
+        {/* Notes */}
+        <div style={{ marginBottom: 20 }}>
+          <label style={lblStyle}>Catatan</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Tambahkan catatan..."
+            style={{ ...fieldStyle, resize: 'vertical', minHeight: 72 }} />
         </div>
 
-        {/* Items */}
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Item PO</label>
+        {/* Divider + Items */}
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Item PO</span>
             <button onClick={addItem}
-              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 12px', fontSize: 12, cursor: 'pointer' }}>+ Tambah</button>
+              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>+ Tambah</button>
           </div>
 
           {items.map((item, idx) => (
-            <div key={idx} style={{ display: 'grid', gridTemplateColumns: '3fr 80px 120px 24px', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+            <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 100px 130px 24px', gap: 10, marginBottom: 10, alignItems: 'center' }}>
               <div style={{ position: 'relative' }}>
                 <input
                   type="text"
@@ -409,33 +415,33 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
                   value={item.productId ? (entityProducts.find(p => p.id === item.productId)?.name || item.search) : item.search}
                   onChange={e => { updateItem(idx, 'search', e.target.value); updateItem(idx, 'productId', null); }}
                   onFocus={() => updateItem(idx, 'search', item.search || '')}
-                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12 }} />
+                  style={fieldStyle} />
                 {!item.productId && item.search !== undefined && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, maxHeight: 180, overflow: 'auto', marginTop: 2 }}>
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, maxHeight: 180, overflow: 'auto', marginTop: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
                     {entityProducts
                       .filter(p => !item.search || p.name.toLowerCase().includes(item.search.toLowerCase()))
                       .slice(0, 20)
                       .map(p => (
                         <div key={p.id} onClick={() => { updateItem(idx, 'productId', p.id); updateItem(idx, 'search', p.name); }}
-                          style={{ padding: '6px 10px', fontSize: 12, cursor: 'pointer', color: 'var(--text)', borderBottom: '1px solid var(--bg-deep)' }}
+                          style={{ padding: '8px 12px', fontSize: 13, cursor: 'pointer', color: 'var(--text)', borderBottom: '1px solid var(--bg-deep)' }}
                           onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
                           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                          {p.name} <span style={{ color: 'var(--dim)', fontSize: 10 }}>({p.category})</span>
+                          {p.name} <span style={{ color: 'var(--dim)', fontSize: 11 }}>({p.category})</span>
                         </div>
                       ))}
                     {entityProducts.filter(p => !item.search || p.name.toLowerCase().includes(item.search.toLowerCase())).length === 0 && (
-                      <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--dim)' }}>Tidak ditemukan</div>
+                      <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--dim)' }}>Tidak ditemukan</div>
                     )}
                   </div>
                 )}
               </div>
               <input type="number" placeholder="Qty" value={item.qty || ''} onChange={e => updateItem(idx, 'qty', Number(e.target.value))} min={1}
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12, textAlign: 'right' }} />
+                style={{ ...fieldStyle, textAlign: 'right' }} />
               <input type="number" placeholder="Harga/unit" value={item.unitPrice || ''} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} min={0}
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12, textAlign: 'right' }} />
-              {items.length > 1 && (
-                <button onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 16 }}>&times;</button>
-              )}
+                style={{ ...fieldStyle, textAlign: 'right' }} />
+              {items.length > 1 ? (
+                <button onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 16, padding: 0 }}>&times;</button>
+              ) : <div />}
             </div>
           ))}
 
@@ -448,10 +454,11 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
 
         {error && <div style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12, padding: '8px 12px', background: 'rgba(239,68,68,0.1)', borderRadius: 8 }}>{error}</div>}
 
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-          <button onClick={onClose} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 20px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}>Batal</button>
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
+          <button onClick={onClose} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 20px', fontSize: 14, cursor: 'pointer', color: 'var(--text)' }}>Batal</button>
           <button onClick={handleSubmit} disabled={submitting}
-            style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: submitting ? 0.6 : 1 }}>
+            style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 14, fontWeight: 500, cursor: 'pointer', opacity: submitting ? 0.6 : 1 }}>
             {submitting ? 'Menyimpan...' : 'Simpan Draft'}
           </button>
         </div>
