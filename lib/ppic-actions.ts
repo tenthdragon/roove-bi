@@ -3,6 +3,7 @@
 
 import { createServiceSupabase, createServerSupabase } from './supabase-server';
 import { recordStockIn, createBatch } from './warehouse-ledger-actions';
+import { sendTelegramToChat } from './telegram';
 
 // ============================================================
 // AUTH HELPER (same pattern as warehouse-ledger-actions)
@@ -35,11 +36,13 @@ export interface CreatePOParams {
   poDate?: string;
   expectedDate?: string;
   notes?: string;
+  shippingCost?: number;
+  otherCost?: number;
   items: POItem[];
 }
 
 export async function createPurchaseOrder(params: CreatePOParams) {
-  const { vendorId, entity, poDate, expectedDate, notes, items } = params;
+  const { vendorId, entity, poDate, expectedDate, notes, shippingCost, otherCost, items } = params;
   if (!items || items.length === 0) throw new Error('PO harus memiliki minimal 1 item');
 
   const svc = createServiceSupabase();
@@ -56,6 +59,8 @@ export async function createPurchaseOrder(params: CreatePOParams) {
       expected_date: expectedDate || null,
       status: 'draft',
       notes: notes || null,
+      shipping_cost: shippingCost || 0,
+      other_cost: otherCost || 0,
       created_by: userId,
     })
     .select('id, po_number')
@@ -132,12 +137,17 @@ export async function getPurchaseOrderDetail(poId: number) {
       warehouse_po_items(
         id, warehouse_product_id, quantity_requested, quantity_received, unit_price, notes,
         warehouse_products(id, name, category, entity, unit, hpp)
-      ),
-      profiles!warehouse_purchase_orders_created_by_fkey(full_name, email)
+      )
     `)
     .eq('id', poId)
     .single();
   if (error) throw error;
+
+  // Fetch creator profile separately (avoids FK constraint name dependency)
+  if (data?.created_by) {
+    const { data: profile } = await svc.from('profiles').select('full_name, email').eq('id', data.created_by).single();
+    (data as any).profiles = profile;
+  }
   return data;
 }
 
@@ -166,7 +176,70 @@ export async function submitPurchaseOrder(poId: number) {
     .select()
     .single();
   if (error) throw error;
+
+  // Send Telegram notification to Dir Ops (fire-and-forget)
+  notifyPOSubmitted(svc, poId).catch(e => console.warn('[ppic] telegram PO notify failed:', e));
+
   return data;
+}
+
+// ── Telegram notification for PO submission ──
+async function notifyPOSubmitted(svc: any, poId: number) {
+  // Fetch full PO data
+  const { data: po } = await svc
+    .from('warehouse_purchase_orders')
+    .select(`
+      *, warehouse_vendors(name),
+      warehouse_po_items(warehouse_product_id, quantity_requested, unit_price, warehouse_products(id, name))
+    `)
+    .eq('id', poId)
+    .single();
+  if (!po) return;
+
+  // Fetch stock balance + avg daily demand for DOI
+  const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('product_id, current_stock');
+  const stockMap = new Map((stockData || []).map((s: any) => [s.product_id, Number(s.current_stock)]));
+
+  const { data: demandData } = await svc.rpc('ppic_avg_daily_demand', { p_days: 90 });
+  const demandMap = new Map((demandData || []).map((d: any) => [d.warehouse_product_id, Number(d.avg_daily)]));
+
+  const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID');
+  const poDate = po.po_date ? new Date(po.po_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+  const expDate = po.expected_date ? new Date(po.expected_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
+
+  let itemsText = '';
+  let itemsTotal = 0;
+  (po.warehouse_po_items || []).forEach((item: any, i: number) => {
+    const name = item.warehouse_products?.name || '-';
+    const qty = Number(item.quantity_requested);
+    const price = Number(item.unit_price);
+    const subtotal = qty * price;
+    itemsTotal += subtotal;
+    const productId = item.warehouse_product_id;
+    const stock = stockMap.get(productId) || 0;
+    const avgDaily = demandMap.get(productId) || 0;
+    const doi = avgDaily > 0 ? `~${Math.round(stock / avgDaily)} hari` : '-';
+    itemsText += `\n${i + 1}. <b>${name}</b>\n   Qty: ${qty} | Harga: ${fmtRp(price)} | Subtotal: ${fmtRp(subtotal)}\n   Stok saat ini: ${stock.toLocaleString('id-ID')} | DOI: ${doi}\n`;
+  });
+
+  const shippingCost = Number(po.shipping_cost || 0);
+  const otherCost = Number(po.other_cost || 0);
+  const grandTotal = itemsTotal + shippingCost + otherCost;
+
+  const msg = `\u{1F4CB} <b>Purchase Order Submitted</b>\n\nNo PO: <b>${po.po_number}</b>\nVendor: ${po.warehouse_vendors?.name || '-'}\nTanggal PO: ${poDate}\nGudang: ${po.entity}\nExp. Delivery: ${expDate}\n${itemsText}\nOngkir: ${fmtRp(shippingCost)}\nBiaya Lain: ${fmtRp(otherCost)}\n<b>Total: ${fmtRp(grandTotal)}</b>`;
+
+  // Send to all direktur_operasional
+  const { data: direkturs } = await svc
+    .from('profiles')
+    .select('telegram_chat_id')
+    .eq('role', 'direktur_operasional')
+    .not('telegram_chat_id', 'is', null);
+
+  if (direkturs && direkturs.length > 0) {
+    await Promise.allSettled(
+      direkturs.map((d: any) => sendTelegramToChat(d.telegram_chat_id, msg))
+    );
+  }
 }
 
 export async function cancelPurchaseOrder(poId: number) {

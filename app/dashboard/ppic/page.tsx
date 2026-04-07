@@ -281,7 +281,7 @@ function POTab() {
       {/* Modals */}
       {showCreateModal && <CreatePOModal onClose={() => setShowCreateModal(false)} onSuccess={() => { setShowCreateModal(false); refresh(); }} />}
       {showReceiveModal && <ReceivePOModal poId={showReceiveModal} onClose={() => setShowReceiveModal(null)} onSuccess={() => { setShowReceiveModal(null); refresh(); }} />}
-      {showDetailModal && <PODetailModal poId={showDetailModal} onClose={() => setShowDetailModal(null)} />}
+      {showDetailModal && <PODetailModal poId={showDetailModal} onClose={() => setShowDetailModal(null)} onRefresh={refresh} onEdit={(id) => { setShowDetailModal(null); setShowCreateModal(true); /* TODO: edit mode */ }} />}
     </>
   );
 }
@@ -296,6 +296,8 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
   const [poDate, setPODate] = useState(new Date().toISOString().slice(0, 10));
   const [expectedDate, setExpectedDate] = useState('');
   const [notes, setNotes] = useState('');
+  const [shippingCost, setShippingCost] = useState(0);
+  const [otherCost, setOtherCost] = useState(0);
   const [items, setItems] = useState<{ productId: number | null; qty: number; unitPrice: number; search: string }[]>([{ productId: null, qty: 1, unitPrice: 0, search: '' }]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -320,7 +322,8 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
     setItems(newItems);
   };
 
-  const totalValue = items.reduce((sum, i) => sum + (i.qty * i.unitPrice), 0);
+  const itemsTotal = items.reduce((sum, i) => sum + (i.qty * i.unitPrice), 0);
+  const totalValue = itemsTotal + shippingCost + otherCost;
 
   const handleSubmit = async () => {
     setError('');
@@ -336,6 +339,8 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
         poDate,
         expectedDate: expectedDate || undefined,
         notes: notes || undefined,
+        shippingCost: shippingCost || 0,
+        otherCost: otherCost || 0,
         items: validItems.map(i => ({
           warehouseProductId: i.productId!,
           quantityRequested: i.qty,
@@ -349,31 +354,32 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
     setSubmitting(false);
   };
 
-  const fieldStyle = { width: '100%', boxSizing: 'border-box' as const, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' };
-  const lblStyle = { display: 'block' as const, fontSize: 13, color: 'var(--dim)', marginBottom: 6 };
+  const fld = { width: '100%', boxSizing: 'border-box' as const, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' };
+  const lbl = { display: 'block' as const, fontSize: 13, color: 'var(--dim)', marginBottom: 6 };
+  const itemGrid = { display: 'grid', gridTemplateColumns: '1fr 80px 110px 24px', gap: 8, alignItems: 'center', padding: '8px 0', borderBottom: '1px solid var(--bg-deep)' } as const;
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: '2rem', overflowY: 'auto' }}>
-      <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '28px 32px 24px', width: '100%', maxWidth: 600, boxSizing: 'border-box' }}>
+      <div style={{ background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)', padding: '28px 32px 24px', width: '100%', maxWidth: 600, boxSizing: 'border-box', margin: 'auto 0' }}>
 
         {/* Header */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>Buat Purchase Order</h3>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--dim)', padding: 0, lineHeight: 1 }}>&times;</button>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 500, color: 'var(--text)' }}>Buat Purchase Order</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: 'var(--dim)', padding: 0 }}>&#10005;</button>
         </div>
 
         {/* Vendor + Entity */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
           <div>
-            <label style={lblStyle}>Vendor <span style={{ color: 'var(--red)' }}>*</span></label>
-            <select value={vendorId || ''} onChange={e => setVendorId(Number(e.target.value))} style={fieldStyle}>
+            <label style={lbl}>Vendor <span style={{ color: 'var(--red)' }}>*</span></label>
+            <select value={vendorId || ''} onChange={e => setVendorId(Number(e.target.value))} style={fld}>
               <option value="">-- Pilih Vendor --</option>
               {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
             </select>
           </div>
           <div>
-            <label style={lblStyle}>Entity <span style={{ color: 'var(--red)' }}>*</span></label>
-            <select value={entity} onChange={e => setEntity(e.target.value)} style={fieldStyle}>
+            <label style={lbl}>Entity <span style={{ color: 'var(--red)' }}>*</span></label>
+            <select value={entity} onChange={e => setEntity(e.target.value)} style={fld}>
               {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
             </select>
           </div>
@@ -382,82 +388,120 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
         {/* Dates */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
           <div>
-            <label style={lblStyle}>Tanggal PO</label>
-            <input type="date" value={poDate} onChange={e => setPODate(e.target.value)} style={fieldStyle} />
+            <label style={lbl}>Tanggal PO</label>
+            <input type="date" value={poDate} onChange={e => setPODate(e.target.value)} style={fld} />
           </div>
           <div>
-            <label style={lblStyle}>Exp. Delivery</label>
-            <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} style={fieldStyle} />
+            <label style={lbl}>Exp. Delivery</label>
+            <input type="date" value={expectedDate} onChange={e => setExpectedDate(e.target.value)} style={fld} />
           </div>
         </div>
 
         {/* Notes */}
         <div style={{ marginBottom: 20 }}>
-          <label style={lblStyle}>Catatan</label>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Tambahkan catatan..."
-            style={{ ...fieldStyle, resize: 'vertical', minHeight: 72 }} />
+          <label style={lbl}>Catatan</label>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Tambahkan catatan..."
+            style={{ ...fld, height: 64, resize: 'none' as const }} />
         </div>
 
         {/* Divider + Items */}
-        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 16, marginBottom: 16 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Item PO</span>
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>Item PO</span>
             <button onClick={addItem}
-              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '7px 14px', fontSize: 13, cursor: 'pointer', fontWeight: 500 }}>+ Tambah</button>
+              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 13, cursor: 'pointer' }}>+ Tambah</button>
           </div>
 
+          {/* Column headers */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px 110px 24px', gap: 8, marginBottom: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Produk</span>
+            <span style={{ fontSize: 11, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'right' }}>Qty</span>
+            <span style={{ fontSize: 11, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.04em', textAlign: 'right' }}>Harga/unit</span>
+            <span />
+          </div>
+
+          {/* Item rows */}
           {items.map((item, idx) => (
-            <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 90px 120px 28px', gap: 8, marginBottom: 8, alignItems: 'flex-start' }}>
+            <div key={idx} style={{ ...itemGrid, borderBottom: idx < items.length - 1 ? '1px solid var(--bg-deep)' : 'none' }}>
               <div style={{ position: 'relative' }}>
                 <input
                   type="text"
                   placeholder="Cari produk..."
                   value={item.productId ? (entityProducts.find(p => p.id === item.productId)?.name || item.search) : item.search}
                   onChange={e => { updateItem(idx, 'search', e.target.value); updateItem(idx, 'productId', null); }}
-                  onFocus={() => updateItem(idx, 'search', item.search || '')}
-                  style={fieldStyle} />
-                {!item.productId && item.search !== undefined && (
-                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, maxHeight: 180, overflow: 'auto', marginTop: 2, boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
+                  onBlur={() => setTimeout(() => { if (!items[idx]?.productId) updateItem(idx, 'search', items[idx]?.search || ''); }, 150)}
+                  style={{ ...fld, fontSize: 13 }} />
+                {!item.productId && item.search.length > 0 && (
+                  <div style={{ position: 'fixed', zIndex: 9999, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, maxHeight: 180, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.15)', width: 'var(--dropdown-w, 300px)' }}
+                    ref={el => {
+                      if (el) {
+                        const input = el.parentElement?.querySelector('input');
+                        if (input) {
+                          const rect = input.getBoundingClientRect();
+                          el.style.left = rect.left + 'px';
+                          el.style.top = (rect.bottom + 4) + 'px';
+                          el.style.width = rect.width + 'px';
+                        }
+                      }
+                    }}>
                     {entityProducts
                       .filter(p => !item.search || p.name.toLowerCase().includes(item.search.toLowerCase()))
                       .slice(0, 20)
                       .map(p => (
-                        <div key={p.id} onClick={() => { updateItem(idx, 'productId', p.id); updateItem(idx, 'search', p.name); }}
-                          style={{ padding: '8px 12px', fontSize: 13, cursor: 'pointer', color: 'var(--text)', borderBottom: '1px solid var(--bg-deep)' }}
+                        <div key={p.id}
+                          onMouseDown={e => { e.preventDefault(); updateItem(idx, 'productId', p.id); updateItem(idx, 'search', p.name); if (p.hpp > 0) updateItem(idx, 'unitPrice', Number(p.hpp)); }}
+                          style={{ padding: '9px 12px', fontSize: 13, cursor: 'pointer', color: 'var(--text)', borderBottom: '1px solid var(--bg-deep)' }}
                           onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
                           onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
                           {p.name} <span style={{ color: 'var(--dim)', fontSize: 11 }}>({p.category})</span>
                         </div>
                       ))}
                     {entityProducts.filter(p => !item.search || p.name.toLowerCase().includes(item.search.toLowerCase())).length === 0 && (
-                      <div style={{ padding: '8px 12px', fontSize: 12, color: 'var(--dim)' }}>Tidak ditemukan</div>
+                      <div style={{ padding: '9px 12px', fontSize: 12, color: 'var(--dim)' }}>Tidak ditemukan</div>
                     )}
                   </div>
                 )}
               </div>
-              <input type="number" placeholder="Qty" value={item.qty || ''} onChange={e => updateItem(idx, 'qty', Number(e.target.value))} min={1}
-                style={{ ...fieldStyle, textAlign: 'right' }} />
-              <input type="number" placeholder="Harga/unit" value={item.unitPrice || ''} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} min={0}
-                style={{ ...fieldStyle, textAlign: 'right' }} />
-              <button onClick={() => removeItem(idx)} disabled={items.length <= 1}
-                style={{ background: 'none', border: 'none', color: items.length > 1 ? 'var(--red)' : 'transparent', cursor: items.length > 1 ? 'pointer' : 'default', fontSize: 14, padding: '8px 0', lineHeight: 1 }}>&times;</button>
+              <input type="number" value={item.qty || ''} onChange={e => updateItem(idx, 'qty', Number(e.target.value))} min={1}
+                style={{ ...fld, textAlign: 'right' }} />
+              <input type="number" placeholder="0" value={item.unitPrice || ''} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} min={0}
+                style={{ ...fld, textAlign: 'right' }} />
+              <button onClick={() => removeItem(idx)}
+                style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 13, padding: 0 }}>&#10005;</button>
             </div>
           ))}
 
-          {totalValue > 0 && (
-            <div style={{ textAlign: 'right', fontSize: 13, fontWeight: 700, color: 'var(--text)', marginTop: 8 }}>
-              Total: Rp {fmtNum(totalValue)}
-            </div>
-          )}
         </div>
 
-        {error && <div style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12, padding: '8px 12px', background: 'rgba(239,68,68,0.1)', borderRadius: 8 }}>{error}</div>}
+        {/* Summary: Subtotal + Ongkir + Biaya Lain + Total */}
+        <div style={{ borderTop: '1px solid var(--border)', marginTop: 8, paddingTop: 10 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
+            <span style={{ fontSize: 13, color: 'var(--dim)' }}>Subtotal</span>
+            <span style={{ fontSize: 13, color: 'var(--text)' }}>Rp {fmtNum(itemsTotal)}</span>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
+            <span style={{ fontSize: 13, color: 'var(--dim)' }}>Ongkir</span>
+            <input type="number" value={shippingCost || ''} onChange={e => setShippingCost(Number(e.target.value) || 0)} placeholder="0"
+              style={{ ...fld, width: 130, textAlign: 'right' }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
+            <span style={{ fontSize: 13, color: 'var(--dim)' }}>Biaya Lain</span>
+            <input type="number" value={otherCost || ''} onChange={e => setOtherCost(Number(e.target.value) || 0)} placeholder="0"
+              style={{ ...fld, width: 130, textAlign: 'right' }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 10 }}>
+            <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>Total</span>
+            <span style={{ fontSize: 16, fontWeight: 500, color: 'var(--text)' }}>Rp {fmtNum(totalValue)}</span>
+          </div>
+        </div>
+
+        {error && <div style={{ color: 'var(--red)', fontSize: 13, marginBottom: 12, marginTop: 12, padding: '8px 12px', background: 'rgba(239,68,68,0.1)', borderRadius: 8 }}>{error}</div>}
 
         {/* Actions */}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
-          <button onClick={onClose} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 20px', fontSize: 14, cursor: 'pointer', color: 'var(--text)' }}>Batal</button>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 14, marginTop: 4, borderTop: '1px solid var(--border)' }}>
+          <button onClick={onClose} style={{ padding: '8px 20px', fontSize: 14, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>Batal</button>
           <button onClick={handleSubmit} disabled={submitting}
-            style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 14, fontWeight: 500, cursor: 'pointer', opacity: submitting ? 0.6 : 1 }}>
+            style={{ background: 'var(--accent)', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', opacity: submitting ? 0.6 : 1 }}>
             {submitting ? 'Menyimpan...' : 'Simpan Draft'}
           </button>
         </div>
@@ -639,13 +683,22 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
 
 // ── PO Detail Modal ──
 
-function PODetailModal({ poId, onClose }: { poId: number; onClose: () => void }) {
+function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onClose: () => void; onRefresh: () => void; onEdit?: (id: number) => void }) {
   const [po, setPO] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [actionLoading, setActionLoading] = useState('');
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   useEffect(() => {
     (async () => {
-      try { setPO(await getPurchaseOrderDetail(poId)); } catch (e) { console.error(e); }
+      try {
+        const data = await getPurchaseOrderDetail(poId);
+        setPO(data);
+      } catch (e: any) {
+        console.error(e);
+        setError(typeof e === 'string' ? e : e?.message || JSON.stringify(e) || 'Gagal memuat detail PO');
+      }
       setLoading(false);
     })();
   }, [poId]);
@@ -653,6 +706,15 @@ function PODetailModal({ poId, onClose }: { poId: number; onClose: () => void })
   if (loading) return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
       <div style={{ background: 'var(--card)', borderRadius: 16, padding: 40, color: 'var(--dim)' }}>Memuat...</div>
+    </div>
+  );
+
+  if (error || !po) return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ background: 'var(--card)', borderRadius: 16, padding: 32, maxWidth: 400, textAlign: 'center' }}>
+        <div style={{ color: 'var(--red)', fontSize: 14, marginBottom: 16 }}>{error || 'Data PO tidak ditemukan'}</div>
+        <button onClick={onClose} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 20px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}>Tutup</button>
+      </div>
     </div>
   );
 
@@ -713,7 +775,50 @@ function PODetailModal({ poId, onClose }: { poId: number; onClose: () => void })
           </tfoot>
         </table>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        {/* Actions */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {po?.status === 'draft' && (
+              <>
+                <button onClick={async () => {
+                    setActionLoading('submit');
+                    try { await submitPurchaseOrder(poId); onRefresh(); onClose(); } catch (e: any) { setError(e?.message || 'Gagal submit'); }
+                    setActionLoading('');
+                  }} disabled={!!actionLoading}
+                  style={{ background: 'var(--green)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading === 'submit' ? 0.6 : 1 }}>
+                  {actionLoading === 'submit' ? 'Submitting...' : 'Submit PO'}
+                </button>
+                <button onClick={() => { if (onEdit) onEdit(poId); }}
+                  style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', fontSize: 13, cursor: 'pointer', color: 'var(--text)', fontWeight: 600 }}>
+                  Edit
+                </button>
+              </>
+            )}
+            {['draft', 'submitted'].includes(po?.status) && (
+              confirmCancel ? (
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: 'var(--dim)' }}>Yakin batalkan?</span>
+                  <button onClick={async () => {
+                      setActionLoading('cancel');
+                      try { await cancelPurchaseOrder(poId); onRefresh(); onClose(); } catch (e: any) { setError(e?.message || 'Gagal cancel'); }
+                      setActionLoading('');
+                    }} disabled={!!actionLoading}
+                    style={{ background: 'var(--red)', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                    Ya, Batalkan
+                  </button>
+                  <button onClick={() => setConfirmCancel(false)}
+                    style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', color: 'var(--dim)' }}>
+                    Tidak
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmCancel(true)}
+                  style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 16px', fontSize: 13, cursor: 'pointer', color: 'var(--red)', fontWeight: 600 }}>
+                  Batalkan PO
+                </button>
+              )
+            )}
+          </div>
           <button onClick={onClose} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 20px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}>Tutup</button>
         </div>
       </div>
