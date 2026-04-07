@@ -566,7 +566,7 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
                 <span style={{ fontWeight: 600, fontSize: 13, color: 'var(--text)' }}>{item.productName}</span>
                 <span style={{ fontSize: 11, color: 'var(--dim)', marginLeft: 'auto' }}>Sisa: {fmtNum(item.remaining)}</span>
               </div>
-              {item.checked && item.remaining > 0 && (
+              {item.checked && item.remaining > 0 && (<>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
                   <div>
                     <label style={{ fontSize: 10, color: 'var(--dim)' }}>Qty Diterima *</label>
@@ -585,7 +585,6 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
                       style={{ width: '100%', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)', fontSize: 12 }} />
                   </div>
                 </div>
-                {/* HPP Preview */}
                 {item.unitPrice > 0 && (
                   <div style={{ marginTop: 6, fontSize: 11, color: 'var(--dim)' }}>
                     Harga: Rp {fmtNum(item.unitPrice)}/unit
@@ -593,7 +592,7 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
                     {' → '}<strong style={{ color: 'var(--green)' }}>HPP: Rp {fmtNum(getHppPreview(item))}/unit</strong>
                   </div>
                 )}
-              )}
+              </>)}
             </div>
           ))}
         </div>
