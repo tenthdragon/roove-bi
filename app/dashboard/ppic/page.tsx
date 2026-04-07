@@ -1172,6 +1172,14 @@ function ITOTab() {
     return 'var(--red)';
   };
 
+  const getDOSColor = (dos: number) => {
+    if (dos === 0) return 'var(--dim)';
+    if (dos >= 999) return 'var(--dim)';
+    if (dos > 7) return 'var(--green)';
+    if (dos >= 3) return '#f59e0b';
+    return 'var(--red)';
+  };
+
   return (
     <>
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1208,6 +1216,7 @@ function ITOTab() {
 
       <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 12 }}>
         ITO = (Monthly Out &times; 12) / Current Stock. Hijau &ge;6, Kuning 3-6, Merah &lt;3.
+        <br />Hari Stok = Stock / Avg Out per Hari. Hijau &gt;7, Kuning 3-7, Merah &lt;3.
       </div>
 
       {loading ? <div style={{ color: 'var(--dim)', padding: 40, textAlign: 'center' }}>Memuat...</div> : (
@@ -1218,6 +1227,8 @@ function ITOTab() {
                 <th onClick={() => handleSort('product_name')} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10, position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1, cursor: 'pointer' }}>PRODUK {sortCol === 'product_name' ? (sortAsc ? '▲' : '▼') : ''}</th>
                 <th onClick={() => handleSort('entity')} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10, cursor: 'pointer' }}>ENTITY {sortCol === 'entity' ? (sortAsc ? '▲' : '▼') : ''}</th>
                 <th onClick={() => handleSort('current_stock')} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--dim)', fontSize: 10, cursor: 'pointer' }}>STOCK {sortCol === 'current_stock' ? (sortAsc ? '▲' : '▼') : ''}</th>
+                <th onClick={() => handleSort('avg_out_per_day')} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--dim)', fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>AVG OUT/HARI {sortCol === 'avg_out_per_day' ? (sortAsc ? '▲' : '▼') : ''}</th>
+                <th onClick={() => handleSort('days_of_stock')} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--dim)', fontSize: 10, cursor: 'pointer', whiteSpace: 'nowrap' }}>HARI STOK {sortCol === 'days_of_stock' ? (sortAsc ? '▲' : '▼') : ''}</th>
                 {monthColumns.map(mc => {
                   const [y, m] = mc.split('-');
                   return <th key={mc} style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, color: 'var(--dim)', fontSize: 10, whiteSpace: 'nowrap' }}>{ID_MONTHS[Number(m)].slice(0, 3)} {y.slice(2)}</th>;
@@ -1230,6 +1241,8 @@ function ITOTab() {
                   <td style={{ padding: '6px 10px', fontWeight: 600, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>{prod.product_name}</td>
                   <td style={{ padding: '6px 10px' }}>{prod.entity}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtNum(prod.current_stock)}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{prod.avg_out_per_day > 0 ? prod.avg_out_per_day.toFixed(1) : '-'}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: getDOSColor(prod.days_of_stock) }}>{prod.days_of_stock >= 999 ? '∞' : prod.days_of_stock > 0 ? prod.days_of_stock : '-'}</td>
                   {monthColumns.map(mc => {
                     const [y, m] = mc.split('-');
                     const monthData = prod.months.find((md: any) => md.year === Number(y) && md.month === Number(m));

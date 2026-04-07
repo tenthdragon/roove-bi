@@ -627,20 +627,20 @@ export async function getITOData(months: number = 6, source: 'warehouse' | 'scal
     const currentStock = stockMap.get(prod.id) || 0;
     const hpp = Number(prod.hpp) || 0;
 
-    // Calculate ITO per month: OUT / avg_inventory
-    // For simplicity, ITO = total_out for month (annualized: * 12)
-    const monthlyITO = prod.months.map((m: any) => {
-      // Simple ITO: monthly OUT qty / current stock (if we had begin/end stock per month)
-      // For now: use total_out as monthly turnover indicator
-      return {
-        year: m.year,
-        month: m.month,
-        total_out: m.total_out,
-        total_in: m.total_in,
-        // ITO = (monthly out * 12) / current stock — annualized approximation
-        ito: currentStock > 0 ? Math.round((m.total_out * 12 / currentStock) * 100) / 100 : 0,
-      };
-    });
+    // Calculate ITO per month
+    const monthlyITO = prod.months.map((m: any) => ({
+      year: m.year,
+      month: m.month,
+      total_out: m.total_out,
+      total_in: m.total_in,
+      ito: currentStock > 0 ? Math.round((m.total_out * 12 / currentStock) * 100) / 100 : 0,
+    }));
+
+    // Avg daily out = total out across all months / total days
+    const totalOut = prod.months.reduce((s: number, m: any) => s + Number(m.total_out), 0);
+    const totalDays = prod.months.length * 30; // approximate days
+    const avgOutPerDay = totalDays > 0 ? Math.round((totalOut / totalDays) * 100) / 100 : 0;
+    const daysOfStock = avgOutPerDay > 0 ? Math.round(currentStock / avgOutPerDay) : currentStock > 0 ? 999 : 0;
 
     return {
       product_id: prod.id,
@@ -650,6 +650,8 @@ export async function getITOData(months: number = 6, source: 'warehouse' | 'scal
       unit: prod.unit,
       hpp,
       current_stock: currentStock,
+      avg_out_per_day: avgOutPerDay,
+      days_of_stock: daysOfStock,
       months: monthlyITO,
     };
   });
