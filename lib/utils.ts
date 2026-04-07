@@ -163,20 +163,27 @@ export interface TabDef {
   label: string;
   icon: string;
   ownerOnly?: boolean;
+  children?: TabDef[];
+  group?: string;
 }
 
 export const ALL_TABS: TabDef[] = [
-  { id: 'overview',       label: 'Overview',           icon: 'LayoutDashboard' },
+  // Main Menu
+  { id: 'overview',       label: 'Dashboard',           icon: 'LayoutDashboard', group: 'Main Menu' },
   // { id: 'products',    label: 'Products',           icon: 'Package' },  // Hidden — merged into Overview
-  { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone' },
-  { id: 'channels',       label: 'Sales Channel',      icon: 'Share2' },
-  { id: 'waba-management', label: 'WABA Management',   icon: 'MessageCircle' },
-  { id: 'customers',      label: 'Customer Analysis',  icon: 'Users' },
-  { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers' },
-  { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign' },
-  { id: 'warehouse',      label: 'Warehouse',          icon: 'Warehouse' },
-  { id: 'warehouse-settings', label: 'Warehouse Settings', icon: 'Wrench' },
-  { id: 'ppic',           label: 'PPIC',               icon: 'ClipboardList' },
+  { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone', group: 'Main Menu' },
+  { id: 'channels',       label: 'Sales Channel',      icon: 'Share2', group: 'Main Menu', children: [
+    { id: 'waba-management', label: 'WABA Management',   icon: 'MessageCircle' },
+  ]},
+  { id: 'ppic',           label: 'PPIC',               icon: 'ClipboardList', group: 'Main Menu' },
+  { id: 'warehouse',      label: 'Warehouse',          icon: 'Warehouse', group: 'Main Menu', children: [
+    { id: 'warehouse-settings', label: 'Warehouse Settings', icon: 'Wrench' },
+  ]},
+  // Analysis
+  { id: 'customers',      label: 'Customer Analysis',  icon: 'Users', group: 'Analysis' },
+  { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers', group: 'Analysis' },
+  { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign', group: 'Analysis' },
+  // Ungrouped (bottom)
   { id: 'business-settings', label: 'Business Settings', icon: 'Building2', ownerOnly: true },
   { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true },
 ];

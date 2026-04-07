@@ -254,6 +254,7 @@ export default function DashboardLayout({ children }) {
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
   const overlayRef = useRef(null);
   const router = useRouter();
   const pathname = usePathname();
@@ -316,13 +317,28 @@ export default function DashboardLayout({ children }) {
   const isPending = profile?.role === 'pending';
 
   const visibleTabs = profile
-    ? ALL_TABS.filter(t => {
-        if (isPending) return false;
-        if (t.ownerOnly && profile.role !== 'owner' && profile.role !== 'finance') return false;
+    ? ALL_TABS.map(t => {
+        if (isPending) return null;
+        if (t.ownerOnly && profile.role !== 'owner' && profile.role !== 'finance') return null;
         const allowed = getAllowedTabs(profile);
-        if (allowed !== null) return allowed.includes(t.id);
-        return canAccessTab(profile, t.id);
-      })
+        if (allowed !== null && !allowed.includes(t.id)) {
+          // Even if parent not allowed, check if any children are allowed
+          if (t.children?.some(c => allowed.includes(c.id))) {
+            return { ...t, children: t.children.filter(c => allowed.includes(c.id)) };
+          }
+          return null;
+        }
+        if (!allowed && !canAccessTab(profile, t.id)) return null;
+        // Filter children by access
+        if (t.children) {
+          const visibleChildren = t.children.filter(c => {
+            if (allowed !== null) return allowed.includes(c.id);
+            return canAccessTab(profile, c.id);
+          });
+          return { ...t, children: visibleChildren };
+        }
+        return t;
+      }).filter(Boolean)
     : [];
 
   const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings'].includes(currentTab);
@@ -345,7 +361,7 @@ export default function DashboardLayout({ children }) {
             Akun Anda telah terdaftar. Silakan hubungi Owner untuk mengaktifkan akses dashboard.
           </p>
           <button onClick={handleLogout} style={{ padding:'10px 24px', borderRadius:8, border:'1px solid var(--border)', background:'transparent', color:'var(--dim)', fontSize:13, cursor:'pointer', fontWeight:600 }}>
-            Keluar
+            Logout
           </button>
         </div>
       </div>
@@ -365,45 +381,134 @@ export default function DashboardLayout({ children }) {
 
   // ── Shared sidebar content (used by both desktop and mobile) ──
   function SidebarNav({ isMobile = false }) {
+    // Pre-compute group boundaries
+    const tabsWithGroupInfo = visibleTabs.map((t, idx) => {
+      const prevGroup = idx > 0 ? visibleTabs[idx - 1].group : null;
+      const showGroupHeader = t.group && t.group !== prevGroup;
+      const showSpacer = !t.group && prevGroup;
+      return { ...t, showGroupHeader, showSpacer };
+    });
+
     return (
       <>
         {/* Nav Items */}
         <nav style={{ flex:1, padding:'8px 8px', display:'flex', flexDirection:'column', gap:2 }}>
-          {visibleTabs.map(t => {
+          {tabsWithGroupInfo.map((t, idx) => {
+            const hasChildren = t.children && t.children.length > 0;
             const active = currentTab === t.id;
+            const childActive = hasChildren && t.children.some(c => currentTab === c.id);
+            const isExpanded = expandedMenus[t.id] || childActive;
             const collapsed = !isMobile && sidebarCollapsed;
+
             return (
-              <button
-                key={t.id}
-                onClick={() => navigateTo(t.id)}
-                title={collapsed ? t.label : undefined}
-                style={{
-                  display:'flex',
-                  alignItems:'center',
-                  gap:12,
-                  padding: collapsed ? '10px 0' : '10px 12px',
-                  justifyContent: collapsed ? 'center' : 'flex-start',
-                  borderRadius:8,
-                  border:'none',
-                  cursor:'pointer',
-                  fontSize:14,
-                  fontWeight: active ? 600 : 500,
-                  background: active ? 'var(--sidebar-active)' : 'transparent',
-                  color: active ? 'var(--accent)' : 'var(--text-secondary)',
-                  transition:'all 0.15s ease',
-                  whiteSpace:'nowrap',
-                  width:'100%',
-                }}
-              >
-                <TabIcon id={t.id} size={20} />
-                {(isMobile || !sidebarCollapsed) && <span>{t.label}</span>}
-              </button>
+              <div key={t.id}>
+                {t.showGroupHeader && !collapsed && (
+                  <div style={{
+                    padding: idx === 0 ? '4px 12px 6px' : '16px 12px 6px',
+                    fontSize:11,
+                    fontWeight:600,
+                    textTransform:'uppercase',
+                    letterSpacing:'0.05em',
+                    color:'var(--dim)',
+                  }}>
+                    {t.group}
+                  </div>
+                )}
+                {t.showSpacer && !collapsed && <div style={{ height:16 }} />}
+                <button
+                  onClick={() => {
+                    if (hasChildren && !collapsed) {
+                      // Click navigates to parent AND toggles submenu
+                      navigateTo(t.id);
+                      setExpandedMenus(prev => ({ ...prev, [t.id]: !prev[t.id] && !childActive }));
+                    } else {
+                      navigateTo(t.id);
+                    }
+                  }}
+                  title={collapsed ? t.label : undefined}
+                  style={{
+                    display:'flex',
+                    alignItems:'center',
+                    gap:12,
+                    padding: collapsed ? '10px 0' : '10px 12px',
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    borderRadius:8,
+                    border:'none',
+                    cursor:'pointer',
+                    fontSize:14,
+                    fontWeight: (active || childActive) ? 600 : 500,
+                    background: active ? 'var(--sidebar-active)' : 'transparent',
+                    color: (active || childActive) ? 'var(--accent)' : 'var(--text-secondary)',
+                    transition:'all 0.15s ease',
+                    whiteSpace:'nowrap',
+                    width:'100%',
+                  }}
+                >
+                  <TabIcon id={t.id} size={20} />
+                  {(isMobile || !sidebarCollapsed) && (
+                    <>
+                      <span style={{ flex:1, textAlign:'left' }}>{t.label}</span>
+                      {hasChildren && (
+                        <svg
+                          width="16" height="16" viewBox="0 0 24 24" fill="none"
+                          stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                          style={{
+                            transition:'transform 0.2s ease',
+                            transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                            flexShrink:0,
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setExpandedMenus(prev => ({ ...prev, [t.id]: !isExpanded }));
+                          }}
+                        >
+                          <polyline points="6 9 12 15 18 9"/>
+                        </svg>
+                      )}
+                    </>
+                  )}
+                </button>
+
+                {/* Submenu children */}
+                {hasChildren && isExpanded && !collapsed && (
+                  <div style={{ display:'flex', flexDirection:'column', gap:1, marginTop:2 }}>
+                    {t.children.map(child => {
+                      const childIsActive = currentTab === child.id;
+                      return (
+                        <button
+                          key={child.id}
+                          onClick={() => navigateTo(child.id)}
+                          style={{
+                            display:'flex',
+                            alignItems:'center',
+                            gap:8,
+                            padding:'8px 12px 8px 20px',
+                            borderRadius:6,
+                            border:'none',
+                            cursor:'pointer',
+                            fontSize:13,
+                            fontWeight: childIsActive ? 600 : 400,
+                            background: childIsActive ? 'var(--sidebar-active)' : 'transparent',
+                            color: childIsActive ? 'var(--accent)' : 'var(--text-secondary)',
+                            transition:'all 0.15s ease',
+                            whiteSpace:'nowrap',
+                            width:'100%',
+                          }}
+                        >
+                          <span style={{ color:'var(--dim)', fontSize:14, marginRight:2 }}>↳</span>
+                          <span>{child.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             );
           })}
         </nav>
 
         {/* Logout at bottom */}
-        <div style={{ padding:'12px 8px', borderTop:'1px solid var(--border)' }}>
+        <div style={{ padding:'12px 8px' }}>
           <button
             onClick={handleLogout}
             style={{
@@ -417,7 +522,7 @@ export default function DashboardLayout({ children }) {
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
             </svg>
-            {(isMobile || !sidebarCollapsed) && <span>Keluar</span>}
+            {(isMobile || !sidebarCollapsed) && <span>Logout</span>}
           </button>
         </div>
       </>
@@ -446,7 +551,6 @@ export default function DashboardLayout({ children }) {
           {/* Logo */}
           <div style={{
             padding: sidebarCollapsed ? '16px 0' : '16px 16px',
-            borderBottom:'1px solid var(--border)',
             display:'flex',
             alignItems:'center',
             justifyContent: sidebarCollapsed ? 'center' : 'space-between',
@@ -516,7 +620,6 @@ export default function DashboardLayout({ children }) {
               {/* Mobile sidebar header */}
               <div style={{
                 padding:'16px 16px',
-                borderBottom:'1px solid var(--border)',
                 display:'flex',
                 alignItems:'center',
                 justifyContent:'space-between',
