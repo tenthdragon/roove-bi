@@ -10,6 +10,7 @@ import {
   submitPurchaseOrder,
   cancelPurchaseOrder,
   receivePOItems,
+  savePOCosts,
   getDemandPlans,
   getWeeklyDemandData,
   initDemandPlans,
@@ -444,7 +445,9 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
 function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: () => void; onSuccess: () => void }) {
   const [po, setPO] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState<{ poItemId: number; productName: string; remaining: number; qtyReceived: number; batchCode: string; expiredDate: string; checked: boolean }[]>([]);
+  const [items, setItems] = useState<{ poItemId: number; productName: string; unitPrice: number; qtyRequested: number; remaining: number; qtyReceived: number; batchCode: string; expiredDate: string; checked: boolean }[]>([]);
+  const [shippingCost, setShippingCost] = useState(0);
+  const [otherCost, setOtherCost] = useState(0);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -453,11 +456,15 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
       try {
         const data = await getPurchaseOrderDetail(poId);
         setPO(data);
+        setShippingCost(Number(data.shipping_cost || 0));
+        setOtherCost(Number(data.other_cost || 0));
         setItems((data.warehouse_po_items || []).map((item: any) => {
           const remaining = Number(item.quantity_requested) - Number(item.quantity_received);
           return {
             poItemId: item.id,
             productName: item.warehouse_products?.name || '-',
+            unitPrice: Number(item.unit_price || 0),
+            qtyRequested: Number(item.quantity_requested),
             remaining,
             qtyReceived: remaining,
             batchCode: '',
@@ -469,6 +476,20 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
       setLoading(false);
     })();
   }, [poId]);
+
+  // Calculate HPP preview per item (proportional by value)
+  const totalPoValue = items.reduce((s, i) => s + i.unitPrice * i.qtyRequested, 0);
+  const extraCost = shippingCost + otherCost;
+  const getHppPreview = (item: typeof items[0]) => {
+    if (item.unitPrice <= 0 || item.qtyReceived <= 0) return 0;
+    let cpp = item.unitPrice;
+    if (extraCost > 0 && totalPoValue > 0) {
+      const itemValue = item.unitPrice * item.qtyRequested;
+      const share = itemValue / totalPoValue;
+      cpp += (extraCost * share) / item.qtyReceived;
+    }
+    return Math.round(cpp);
+  };
 
   const handleSubmit = async () => {
     setError('');
@@ -482,6 +503,9 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
 
     setSubmitting(true);
     try {
+      // Save PO-level costs before receiving (server action)
+      await savePOCosts(poId, shippingCost, otherCost);
+
       await receivePOItems(poId, toReceive.map(i => ({
         poItemId: i.poItemId,
         quantityReceived: i.qtyReceived,
@@ -515,8 +539,22 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
           <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: 'var(--dim)' }}>&times;</button>
         </div>
 
-        <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 16 }}>
+        <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 12 }}>
           Vendor: <strong>{po?.warehouse_vendors?.name}</strong> | Entity: <strong>{po?.entity}</strong>
+        </div>
+
+        {/* Landed cost inputs */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16, background: 'var(--bg)', borderRadius: 10, padding: 12, border: '1px solid var(--border)' }}>
+          <div>
+            <label style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 600 }}>Ongkir (seluruh PO)</label>
+            <input type="number" value={shippingCost || ''} onChange={e => setShippingCost(Number(e.target.value) || 0)} placeholder="0"
+              style={{ width: '100%', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)', fontSize: 12, textAlign: 'right' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 600 }}>Biaya Lain (seluruh PO)</label>
+            <input type="number" value={otherCost || ''} onChange={e => setOtherCost(Number(e.target.value) || 0)} placeholder="0"
+              style={{ width: '100%', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)', fontSize: 12, textAlign: 'right' }} />
+          </div>
         </div>
 
         {/* Items */}
@@ -547,6 +585,14 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
                       style={{ width: '100%', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 6, padding: '6px 8px', color: 'var(--text)', fontSize: 12 }} />
                   </div>
                 </div>
+                {/* HPP Preview */}
+                {item.unitPrice > 0 && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: 'var(--dim)' }}>
+                    Harga: Rp {fmtNum(item.unitPrice)}/unit
+                    {extraCost > 0 && <> + biaya Rp {fmtNum(Math.round((extraCost * (item.unitPrice * item.qtyRequested / totalPoValue)) / item.qtyReceived))}/unit</>}
+                    {' → '}<strong style={{ color: 'var(--green)' }}>HPP: Rp {fmtNum(getHppPreview(item))}/unit</strong>
+                  </div>
+                )}
               )}
             </div>
           ))}

@@ -472,7 +472,7 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['No', 'Produk', 'Kategori', 'Gudang', 'Stock', 'Satuan', 'Harga', 'Nilai', 'Status'].map(h => (
+              {['No', 'Produk', 'Kategori', 'Gudang', 'Stock', 'Satuan', 'HPP', 'Nilai', 'Status'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Gudang', 'Satuan', 'Status'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -492,7 +492,7 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
                   {Number(r.current_stock).toLocaleString('id-ID')}
                 </td>
                 <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{r.unit}</td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{r.price_list > 0 ? fmtRupiah(r.price_list) : '-'}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{(r.weighted_hpp || r.hpp || r.price_list) > 0 ? fmtRupiah(r.weighted_hpp || r.hpp || r.price_list) : '-'}</td>
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{r.stock_value > 0 ? fmtRupiah(r.stock_value) : '-'}</td>
                 <td style={{ padding: '6px 10px' }}>
                   {r.needs_reorder ? (
@@ -1720,8 +1720,8 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
     // Sort
     const dir = sortAsc ? 1 : -1;
     result = [...result].sort((a, b) => {
-      let av = sortCol === 'nilai' ? Number(a.current_qty) * Number(a.price_list || 0) : a[sortCol];
-      let bv = sortCol === 'nilai' ? Number(b.current_qty) * Number(b.price_list || 0) : b[sortCol];
+      let av = sortCol === 'nilai' ? Number(a.current_qty) * Number(a.effective_hpp || a.price_list || 0) : a[sortCol];
+      let bv = sortCol === 'nilai' ? Number(b.current_qty) * Number(b.effective_hpp || b.price_list || 0) : b[sortCol];
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
       if (bv == null) return -1;
@@ -1787,7 +1787,7 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
           <tbody>
             {filtered.map(r => {
               const cfg = statusConfig[r.expiry_status] || statusConfig.safe;
-              const nilai = Number(r.current_qty) * Number(r.price_list || 0);
+              const nilai = Number(r.current_qty) * Number(r.effective_hpp || r.price_list || 0);
               return (
                 <tr key={r.batch_id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                   <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>

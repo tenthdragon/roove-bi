@@ -113,6 +113,15 @@ export async function getPurchaseOrders(filters?: {
   return data || [];
 }
 
+export async function savePOCosts(poId: number, shippingCost: number, otherCost: number) {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('warehouse_purchase_orders')
+    .update({ shipping_cost: shippingCost, other_cost: otherCost })
+    .eq('id', poId);
+  if (error) throw error;
+}
+
 export async function getPurchaseOrderDetail(poId: number) {
   const svc = createServiceSupabase();
   const { data, error } = await svc
@@ -197,30 +206,47 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
 
   const svc = createServiceSupabase();
 
-  // Get PO with items
+  // Get PO with items (include unit_price + PO-level costs)
   const { data: po } = await svc
     .from('warehouse_purchase_orders')
     .select(`
-      id, status, po_number,
-      warehouse_po_items(id, warehouse_product_id, quantity_requested, quantity_received)
+      id, status, po_number, shipping_cost, other_cost,
+      warehouse_po_items(id, warehouse_product_id, quantity_requested, quantity_received, unit_price)
     `)
     .eq('id', poId)
     .single();
   if (!po) throw new Error('PO tidak ditemukan');
   if (!['submitted', 'partial'].includes(po.status)) throw new Error('PO harus berstatus submitted atau partial');
 
+  // Calculate proportional extra cost distribution
+  const poExtraCost = Number(po.shipping_cost || 0) + Number(po.other_cost || 0);
+  const poItems = po.warehouse_po_items || [];
+  const totalPoValue = poItems.reduce((s: number, pi: any) =>
+    s + Number(pi.unit_price || 0) * Number(pi.quantity_requested), 0);
+
   const results: any[] = [];
+  const affectedProductIds = new Set<number>();
 
   for (const item of receivedItems) {
     if (item.quantityReceived <= 0) continue;
 
     // Find matching PO item
-    const poItem = (po.warehouse_po_items || []).find((pi: any) => pi.id === item.poItemId);
+    const poItem = poItems.find((pi: any) => pi.id === item.poItemId);
     if (!poItem) throw new Error(`PO item #${item.poItemId} tidak ditemukan`);
 
     const remaining = Number(poItem.quantity_requested) - Number(poItem.quantity_received);
     if (item.quantityReceived > remaining) {
       throw new Error(`Qty melebihi sisa (${remaining}) untuk item #${item.poItemId}`);
+    }
+
+    // Calculate landed cost per unit for this batch
+    const unitPrice = Number(poItem.unit_price || 0);
+    let costPerUnit = unitPrice;
+    if (poExtraCost > 0 && totalPoValue > 0) {
+      const itemValue = unitPrice * Number(poItem.quantity_requested);
+      const itemShare = itemValue / totalPoValue;
+      const itemExtraCost = poExtraCost * itemShare;
+      costPerUnit = unitPrice + itemExtraCost / item.quantityReceived;
     }
 
     // Create batch
@@ -231,6 +257,12 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
       0, // initial qty 0 — we'll use recordStockIn for the ledger entry
     );
 
+    // Set cost_per_unit on batch
+    await svc
+      .from('warehouse_batches')
+      .update({ cost_per_unit: Math.round(costPerUnit * 100) / 100 })
+      .eq('id', batch.id);
+
     // Record stock in (creates ledger entry + updates batch qty)
     await recordStockIn(
       poItem.warehouse_product_id,
@@ -238,7 +270,7 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
       item.quantityReceived,
       'purchase_order',
       String(poId),
-      `PO ${po.po_number} - batch ${item.batchCode}`,
+      `PO ${po.po_number} - batch ${item.batchCode} (HPP: ${Math.round(costPerUnit).toLocaleString()}/unit)`,
     );
 
     // Update PO item received qty
@@ -248,7 +280,13 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
       .update({ quantity_received: newReceived })
       .eq('id', item.poItemId);
 
-    results.push({ poItemId: item.poItemId, batchId: batch.id, received: item.quantityReceived });
+    affectedProductIds.add(poItem.warehouse_product_id);
+    results.push({ poItemId: item.poItemId, batchId: batch.id, received: item.quantityReceived, costPerUnit });
+  }
+
+  // Recalculate weighted avg HPP for each affected product
+  for (const productId of affectedProductIds) {
+    await recalculateProductHpp(svc, productId);
   }
 
   // Check if all items fully received → set PO status
@@ -271,6 +309,33 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
     .eq('id', poId);
 
   return { poId, status: newStatus, items: results };
+}
+
+// Recalculate product-level HPP from weighted average of active batches
+async function recalculateProductHpp(svc: any, productId: number) {
+  const { data: batches } = await svc
+    .from('warehouse_batches')
+    .select('current_qty, cost_per_unit')
+    .eq('warehouse_product_id', productId)
+    .eq('is_active', true)
+    .gt('current_qty', 0);
+
+  if (!batches || batches.length === 0) return;
+
+  const batchesWithCost = batches.filter((b: any) => Number(b.cost_per_unit) > 0);
+  if (batchesWithCost.length === 0) return;
+
+  const totalQty = batchesWithCost.reduce((s: number, b: any) => s + Number(b.current_qty), 0);
+  if (totalQty <= 0) return;
+
+  const weightedSum = batchesWithCost.reduce((s: number, b: any) =>
+    s + Number(b.current_qty) * Number(b.cost_per_unit), 0);
+  const avgHpp = Math.round((weightedSum / totalQty) * 100) / 100;
+
+  await svc
+    .from('warehouse_products')
+    .update({ hpp: avgHpp })
+    .eq('id', productId);
 }
 
 // ============================================================
