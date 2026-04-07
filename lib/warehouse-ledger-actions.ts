@@ -1489,3 +1489,167 @@ export async function deleteVendor(id: number) {
     .eq('id', id);
   if (error) throw error;
 }
+
+// ============================================================
+// STOCK OPNAME — session-based workflow
+// ============================================================
+
+export async function getActiveSOSession() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('warehouse_stock_opname_sessions')
+    .select('*')
+    .in('status', ['counting', 'reviewing'])
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+export async function getSOSessionItems(sessionId: number) {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('warehouse_stock_opname')
+    .select('*')
+    .eq('session_id', sessionId)
+    .order('product_name');
+  if (error) throw error;
+  return data || [];
+}
+
+export async function createStockOpnameSession(
+  entity: string,
+  warehouse: string,
+  label: string,
+  date: string,
+) {
+  const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
+
+  // Create session
+  const { data: session, error: sessErr } = await svc
+    .from('warehouse_stock_opname_sessions')
+    .insert({ entity, warehouse, opname_date: date, opname_label: label, created_by: userId })
+    .select()
+    .single();
+  if (sessErr) throw sessErr;
+
+  // Get all active products for this entity + warehouse
+  const { data: products, error: prodErr } = await svc
+    .from('warehouse_products')
+    .select('id, name, category')
+    .eq('entity', entity)
+    .eq('warehouse', warehouse)
+    .eq('is_active', true)
+    .order('category')
+    .order('name');
+  if (prodErr) throw prodErr;
+
+  // Get current stock balances
+  const { data: balances, error: balErr } = await svc
+    .from('v_warehouse_stock_balance')
+    .select('product_id, current_stock')
+    .eq('entity', entity)
+    .eq('warehouse', warehouse);
+  if (balErr) throw balErr;
+
+  const balMap: Record<number, number> = {};
+  (balances || []).forEach((b: any) => { balMap[b.product_id] = Number(b.current_stock) || 0; });
+
+  // Pre-populate opname rows (blind count — sesudah_so starts null)
+  const rows = (products || []).map(p => ({
+    session_id: session.id,
+    warehouse: warehouse,
+    opname_date: date,
+    opname_label: label,
+    product_name: p.name,
+    category: p.category,
+    warehouse_product_id: p.id,
+    sebelum_so: balMap[p.id] || 0,
+    sesudah_so: null,
+    selisih: 0,
+  }));
+
+  if (rows.length > 0) {
+    const { error: insErr } = await svc.from('warehouse_stock_opname').insert(rows);
+    if (insErr) throw insErr;
+  }
+
+  return session;
+}
+
+export async function saveStockOpnameCounts(
+  sessionId: number,
+  counts: { id: number; sesudah_so: number | null; sebelum_so: number }[],
+) {
+  const svc = createServiceSupabase();
+  for (const c of counts) {
+    const selisih = c.sesudah_so != null ? c.sesudah_so - c.sebelum_so : 0;
+    const { error } = await svc
+      .from('warehouse_stock_opname')
+      .update({ sesudah_so: c.sesudah_so, selisih })
+      .eq('id', c.id)
+      .eq('session_id', sessionId);
+    if (error) throw error;
+  }
+}
+
+export async function submitSOForReview(sessionId: number) {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('warehouse_stock_opname_sessions')
+    .update({ status: 'reviewing' })
+    .eq('id', sessionId);
+  if (error) throw error;
+}
+
+export async function revertSOToCounting(sessionId: number) {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('warehouse_stock_opname_sessions')
+    .update({ status: 'counting' })
+    .eq('id', sessionId);
+  if (error) throw error;
+}
+
+export async function approveStockOpname(sessionId: number) {
+  const svc = createServiceSupabase();
+
+  // Get all items with variance
+  const { data: items, error: itemErr } = await svc
+    .from('warehouse_stock_opname')
+    .select('*')
+    .eq('session_id', sessionId)
+    .neq('selisih', 0);
+  if (itemErr) throw itemErr;
+
+  // Create ADJUST entries for each variance
+  for (const item of (items || [])) {
+    if (!item.warehouse_product_id || item.selisih === 0) continue;
+    await recordStockAdjust(
+      item.warehouse_product_id,
+      null,
+      item.selisih,
+      `Stock Opname: ${item.opname_label} — ${item.product_name} (${item.sebelum_so} → ${item.sesudah_so})`,
+    );
+  }
+
+  // Mark session completed
+  const { error } = await svc
+    .from('warehouse_stock_opname_sessions')
+    .update({ status: 'completed', completed_at: new Date().toISOString() })
+    .eq('id', sessionId);
+  if (error) throw error;
+
+  return (items || []).length;
+}
+
+export async function cancelSOSession(sessionId: number) {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('warehouse_stock_opname_sessions')
+    .update({ status: 'canceled' })
+    .eq('id', sessionId);
+  if (error) throw error;
+}

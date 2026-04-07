@@ -30,6 +30,14 @@ import {
   createBatch,
   // PO functions moved to ppic-actions (legacy import removed)
   type ConversionSource,
+  getActiveSOSession,
+  getSOSessionItems,
+  createStockOpnameSession,
+  saveStockOpnameCounts,
+  submitSOForReview,
+  revertSOToCounting,
+  approveStockOpname,
+  cancelSOSession,
 } from '@/lib/warehouse-ledger-actions';
 import { getPurchaseOrders as getPOs, receivePOItems } from '@/lib/ppic-actions';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
@@ -152,6 +160,8 @@ export default function WarehousePage() {
   const [dailyData, setDailyData] = useState<DailyStock[]>([]);
   const [soData, setSOData] = useState<SORow[]>([]);
   const [soSummary, setSOSummary] = useState<SOSummary[]>([]);
+  const [soSession, setSOSession] = useState<any>(null);
+  const [soSessionItems, setSOSessionItems] = useState<any[]>([]);
   const [expiringData, setExpiringData] = useState<ExpiringProduct[]>([]);
 
   // New ledger data
@@ -229,12 +239,20 @@ export default function WarehousePage() {
           const data = await getWarehouseDailyStock(selectedMonth, selectedYear);
           setDailyData(data);
         } else if (activeTab === 'stock-opname') {
-          const [so, summary] = await Promise.all([
+          const [so, summary, activeSession] = await Promise.all([
             getWarehouseStockOpname(),
             getWarehouseSOSummary(),
+            getActiveSOSession(),
           ]);
           setSOData(so);
           setSOSummary(summary);
+          setSOSession(activeSession);
+          if (activeSession) {
+            const items = await getSOSessionItems(activeSession.id);
+            setSOSessionItems(items);
+          } else {
+            setSOSessionItems([]);
+          }
         } else if (activeTab === 'expired') {
           const data = await getWarehouseExpiring();
           setExpiringData(data);
@@ -362,7 +380,7 @@ export default function WarehousePage() {
       {activeTab === 'mapping' && <MappingTab data={mappingData} onRefresh={refreshData} />}
       {activeTab === 'ringkasan' && <RingkasanTab data={filteredSummary} categories={categories} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
       {activeTab === 'harian' && <HarianTab data={filteredDaily} chartData={dailyChartData} categories={categories} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} />}
-      {activeTab === 'stock-opname' && <StockOpnameTab soData={soData} soSummary={soSummary} expandedSO={expandedSO} setExpandedSO={setExpandedSO} />}
+      {activeTab === 'stock-opname' && <StockOpnameTab soData={soData} soSummary={soSummary} expandedSO={expandedSO} setExpandedSO={setExpandedSO} session={soSession} sessionItems={soSessionItems} onRefresh={refreshData} />}
       {/* Expired Monitor merged into Batch & Expiry tab */}
     </div>
   );
@@ -1986,22 +2004,258 @@ function HarianTab({ data, chartData, categories, categoryFilter, setCategoryFil
 // STOCK OPNAME TAB (LEGACY)
 // ============================================================
 
-function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
+function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session, sessionItems, onRefresh }: {
   soData: SORow[]; soSummary: SOSummary[];
   expandedSO: string | null; setExpandedSO: (v: string | null) => void;
+  session: any; sessionItems: any[]; onRefresh: () => void;
 }) {
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [newEntity, setNewEntity] = useState('RLB');
+  const [newLabel, setNewLabel] = useState('');
+  const [newDate, setNewDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  });
+  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [counts, setCounts] = useState<Record<number, string>>({});
+
+  // Initialize counts from session items
+  useEffect(() => {
+    if (sessionItems.length > 0) {
+      const init: Record<number, string> = {};
+      sessionItems.forEach(item => {
+        if (item.sesudah_so != null) init[item.id] = String(item.sesudah_so);
+      });
+      setCounts(init);
+    }
+  }, [sessionItems]);
+
+  const handleCreate = async () => {
+    if (!newLabel.trim()) return;
+    setCreating(true);
+    try {
+      await createStockOpnameSession(newEntity, 'BTN', newLabel.trim(), newDate);
+      setShowCreateForm(false);
+      setNewLabel('');
+      onRefresh();
+    } catch (e: any) {
+      alert('Gagal membuat SO: ' + e.message);
+    }
+    setCreating(false);
+  };
+
+  const handleSaveCounts = async () => {
+    if (!session) return;
+    setSaving(true);
+    try {
+      const updates = sessionItems.map(item => ({
+        id: item.id,
+        sesudah_so: counts[item.id] !== undefined && counts[item.id] !== '' ? Number(counts[item.id]) : null,
+        sebelum_so: Number(item.sebelum_so),
+      }));
+      await saveStockOpnameCounts(session.id, updates);
+      onRefresh();
+    } catch (e: any) {
+      alert('Gagal menyimpan: ' + e.message);
+    }
+    setSaving(false);
+  };
+
+  const handleSubmitReview = async () => {
+    if (!session) return;
+    await handleSaveCounts();
+    try {
+      await submitSOForReview(session.id);
+      onRefresh();
+    } catch (e: any) {
+      alert('Gagal submit: ' + e.message);
+    }
+  };
+
+  const handleRevertCounting = async () => {
+    if (!session) return;
+    try {
+      await revertSOToCounting(session.id);
+      onRefresh();
+    } catch (e: any) {
+      alert('Gagal: ' + e.message);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!session || !confirm('Approve stock opname ini? Stok akan di-adjust sesuai hasil hitung fisik.')) return;
+    setApproving(true);
+    try {
+      const count = await approveStockOpname(session.id);
+      alert(`Stock opname selesai. ${count} item di-adjust.`);
+      onRefresh();
+    } catch (e: any) {
+      alert('Gagal approve: ' + e.message);
+    }
+    setApproving(false);
+  };
+
+  const handleCancel = async () => {
+    if (!session || !confirm('Batalkan stock opname ini?')) return;
+    try {
+      await cancelSOSession(session.id);
+      onRefresh();
+    } catch (e: any) {
+      alert('Gagal: ' + e.message);
+    }
+  };
+
   const totalEvents = soSummary.length;
   const totalItemsWithSelisih = soSummary.reduce((s, r) => s + r.items_with_selisih, 0);
   const totalAbsSelisih = soSummary.reduce((s, r) => s + r.total_abs_selisih, 0);
 
+  // ── Active session: Counting Phase ──
+  if (session && session.status === 'counting') {
+    return (
+      <div style={{ background: 'var(--card)', border: '1px solid var(--accent)', borderRadius: 12, padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>Blind Count — {session.opname_label}</div>
+            <div style={{ fontSize: 12, color: 'var(--dim)' }}>Entity: {session.entity} | {fullDateID(session.opname_date)}</div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleCancel} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>Batalkan</button>
+            <button onClick={handleSaveCounts} disabled={saving} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>
+              {saving ? 'Menyimpan...' : 'Simpan Draft'}
+            </button>
+            <button onClick={handleSubmitReview} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+              Selesai Hitung →
+            </button>
+          </div>
+        </div>
+        <div style={{ padding: '8px 12px', background: 'var(--bg)', borderRadius: 8, marginBottom: 16, fontSize: 12, color: 'var(--yellow)' }}>
+          Stok sistem sengaja disembunyikan. Masukkan jumlah stok fisik untuk setiap produk.
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid var(--border)' }}>
+              <th style={{ padding: '8px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600 }}>Produk</th>
+              <th style={{ padding: '8px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, width: 80 }}>Kategori</th>
+              <th style={{ padding: '8px', textAlign: 'right', color: 'var(--dim)', fontWeight: 600, width: 120 }}>Stok Fisik</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sessionItems.map(item => (
+              <tr key={item.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td style={{ padding: '6px 8px', fontWeight: 500 }}>{item.product_name}</td>
+                <td style={{ padding: '6px 8px' }}>
+                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: CATEGORY_COLORS[item.category] || 'var(--text-secondary)' }}>{item.category}</span>
+                </td>
+                <td style={{ padding: '4px 8px', textAlign: 'right' }}>
+                  <input
+                    type="number"
+                    value={counts[item.id] ?? ''}
+                    onChange={e => setCounts(prev => ({ ...prev, [item.id]: e.target.value }))}
+                    placeholder="—"
+                    style={{ width: 90, padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)' }}
+                  />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  // ── Active session: Reviewing Phase ──
+  if (session && session.status === 'reviewing') {
+    const itemsWithVariance = sessionItems.filter(i => i.selisih !== 0);
+    return (
+      <div style={{ background: 'var(--card)', border: '1px solid var(--yellow)', borderRadius: 12, padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 700 }}>Review Variance — {session.opname_label}</div>
+            <div style={{ fontSize: 12, color: 'var(--dim)' }}>Entity: {session.entity} | {fullDateID(session.opname_date)} | {itemsWithVariance.length} item berselisih</div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={handleRevertCounting} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>
+              ← Kembali ke Hitung
+            </button>
+            <button onClick={handleApprove} disabled={approving} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: 'none', background: 'var(--green)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+              {approving ? 'Memproses...' : 'Approve & Adjust'}
+            </button>
+          </div>
+        </div>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid var(--border)' }}>
+              {['Produk', 'Kategori', 'Stok Sistem', 'Stok Fisik', 'Selisih'].map(h => (
+                <th key={h} style={{ padding: '8px', textAlign: ['Produk', 'Kategori'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600 }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {sessionItems.map(item => {
+              const sel = Number(item.selisih) || 0;
+              return (
+                <tr key={item.id} style={{ borderBottom: '1px solid var(--border)', background: sel !== 0 ? (sel > 0 ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)') : 'transparent' }}>
+                  <td style={{ padding: '6px 8px', fontWeight: 500 }}>{item.product_name}</td>
+                  <td style={{ padding: '6px 8px' }}>
+                    <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: CATEGORY_COLORS[item.category] || 'var(--text-secondary)' }}>{item.category}</span>
+                  </td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{Number(item.sebelum_so).toLocaleString('id-ID')}</td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{item.sesudah_so != null ? Number(item.sesudah_so).toLocaleString('id-ID') : '—'}</td>
+                  <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: sel > 0 ? 'var(--green)' : sel < 0 ? 'var(--red)' : 'var(--text-muted)' }}>
+                    {sel > 0 ? '+' : ''}{sel.toLocaleString('id-ID')}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
+
+  // ── Default: History + Create Button ──
   return (
     <>
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         <KPICard label="Total SO Events" value={String(totalEvents)} color="var(--accent)" />
         <KPICard label="Item dengan Selisih" value={String(totalItemsWithSelisih)} color="var(--yellow)" />
         <KPICard label="Total |Selisih|" value={fmtCompact(totalAbsSelisih)} color="var(--red)" />
       </div>
 
+      {/* Create new SO */}
+      {!showCreateForm ? (
+        <button onClick={() => setShowCreateForm(true)} style={{ marginBottom: 16, padding: '10px 20px', fontSize: 13, fontWeight: 600, borderRadius: 8, border: '1px dashed var(--accent)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', width: '100%' }}>
+          + Mulai Stock Opname Baru
+        </button>
+      ) : (
+        <div style={{ background: 'var(--card)', border: '1px solid var(--accent)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Buat Stock Opname Baru</div>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>Entity</div>
+              <select value={newEntity} onChange={e => setNewEntity(e.target.value)} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}>
+                {['RLB', 'JHN', 'RLT', 'RTI'].map(e => <option key={e} value={e}>{e}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>Tanggal</div>
+              <input type="date" value={newDate} onChange={e => setNewDate(e.target.value)} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
+            </div>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>Label</div>
+              <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="cth: SO April Minggu 1" style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
+            </div>
+            <button onClick={handleCreate} disabled={creating || !newLabel.trim()} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: 12, opacity: creating || !newLabel.trim() ? 0.5 : 1 }}>
+              {creating ? 'Membuat...' : 'Mulai SO'}
+            </button>
+            <button onClick={() => setShowCreateForm(false)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer', fontSize: 12 }}>Batal</button>
+          </div>
+        </div>
+      )}
+
+      {/* History */}
       {soSummary.length === 0 ? (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>Belum ada data stock opname</div>
       ) : (
@@ -2047,7 +2301,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO }: {
                               <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text-secondary)' }}>{d.category}</span>
                             </td>
                             <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{d.sebelum_so.toLocaleString('id-ID')}</td>
-                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{d.sesudah_so.toLocaleString('id-ID')}</td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{d.sesudah_so != null ? d.sesudah_so.toLocaleString('id-ID') : '—'}</td>
                             <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: d.selisih > 0 ? 'var(--green)' : d.selisih < 0 ? 'var(--red)' : 'var(--text-muted)' }}>
                               {d.selisih > 0 ? '+' : ''}{d.selisih.toLocaleString('id-ID')}
                             </td>
