@@ -843,6 +843,7 @@ function DemandTab() {
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [hideZeroDemand, setHideZeroDemand] = useState(true);
 
   const daysInMonth = new Date(year, month, 0).getDate();
   const isCurrentMonth = month === now.getMonth() + 1 && year === now.getFullYear();
@@ -890,8 +891,14 @@ function DemandTab() {
       const q = searchQuery.toLowerCase();
       result = result.filter(p => p.warehouse_products?.name?.toLowerCase().includes(q));
     }
+    if (hideZeroDemand) {
+      result = result.filter(p => {
+        const effective = p.manual_demand !== null ? Number(p.manual_demand) : Number(p.auto_demand);
+        return effective > 0;
+      });
+    }
     return result;
-  }, [plans, entityFilter, searchQuery]);
+  }, [plans, entityFilter, searchQuery, hideZeroDemand]);
 
   const getEffective = (plan: any) => plan.manual_demand !== null ? Number(plan.manual_demand) : Number(plan.auto_demand);
 
@@ -935,6 +942,9 @@ function DemandTab() {
           <option value="all">Semua Entity</option>
           {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--dim)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={hideZeroDemand} onChange={e => setHideZeroDemand(e.target.checked)} /> Sembunyikan demand = 0
+        </label>
         <div style={{ flex: 1 }} />
         <button onClick={handleInit} disabled={initializing}
           style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: initializing ? 0.6 : 1 }}>
