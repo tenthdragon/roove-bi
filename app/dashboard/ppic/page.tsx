@@ -1217,13 +1217,12 @@ function ITOTab() {
       <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
         <button onClick={() => setSource('warehouse')}
           style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${source === 'warehouse' ? 'var(--accent)' : 'var(--border)'}`, background: source === 'warehouse' ? 'var(--accent)' : 'transparent', color: source === 'warehouse' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
-          Warehouse Ledger
+          Warehouse PoV
         </button>
         <button onClick={() => setSource('scalev')}
           style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${source === 'scalev' ? 'var(--accent)' : 'var(--border)'}`, background: source === 'scalev' ? 'var(--accent)' : 'transparent', color: source === 'scalev' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
-          Scalev Orders (proxy)
+          Scalev PoV
         </button>
-        {source === 'scalev' && <span style={{ fontSize: 11, color: '#f59e0b', alignSelf: 'center' }}>Data dari Scalev shipped orders sebagai proxy</span>}
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 12 }}>
