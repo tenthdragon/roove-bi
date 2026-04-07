@@ -1116,14 +1116,15 @@ function ITOTab() {
   const [months, setMonths] = useState(6);
   const [entityFilter, setEntityFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [source, setSource] = useState<'warehouse' | 'scalev'>('warehouse');
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      try { setData(await getITOData(months)); } catch (e) { console.error(e); }
+      try { setData(await getITOData(months, source)); } catch (e) { console.error(e); }
       setLoading(false);
     })();
-  }, [months]);
+  }, [months, source]);
 
   // Collect all unique month columns
   const monthColumns = useMemo(() => {
@@ -1168,6 +1169,19 @@ function ITOTab() {
           <option value="all">Semua Entity</option>
           {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
         </select>
+      </div>
+
+      {/* Source toggle */}
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+        <button onClick={() => setSource('warehouse')}
+          style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${source === 'warehouse' ? 'var(--accent)' : 'var(--border)'}`, background: source === 'warehouse' ? 'var(--accent)' : 'transparent', color: source === 'warehouse' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+          Warehouse Ledger
+        </button>
+        <button onClick={() => setSource('scalev')}
+          style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${source === 'scalev' ? 'var(--accent)' : 'var(--border)'}`, background: source === 'scalev' ? 'var(--accent)' : 'transparent', color: source === 'scalev' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+          Scalev Orders (proxy)
+        </button>
+        {source === 'scalev' && <span style={{ fontSize: 11, color: '#f59e0b', alignSelf: 'center' }}>Data dari Scalev shipped orders sebagai proxy</span>}
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 12 }}>

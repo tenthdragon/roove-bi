@@ -631,11 +631,12 @@ export async function updateDemandPlan(
 // ITO (Inventory Turn Over)
 // ============================================================
 
-export async function getITOData(months: number = 6) {
+export async function getITOData(months: number = 6, source: 'warehouse' | 'scalev' = 'warehouse') {
   const svc = createServiceSupabase();
 
-  // Get monthly movements
-  const { data: movements, error: movErr } = await svc.rpc('ppic_monthly_movements', { p_months: months });
+  // Get monthly movements (from warehouse ledger or Scalev orders)
+  const rpcName = source === 'scalev' ? 'ppic_monthly_movements_scalev' : 'ppic_monthly_movements';
+  const { data: movements, error: movErr } = await svc.rpc(rpcName, { p_months: months });
   if (movErr) throw movErr;
 
   // Get current stock balance
