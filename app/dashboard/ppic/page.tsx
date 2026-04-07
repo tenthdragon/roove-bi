@@ -1117,6 +1117,7 @@ function ITOTab() {
   const [entityFilter, setEntityFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [source, setSource] = useState<'warehouse' | 'scalev'>('warehouse');
+  const [activeOnly, setActiveOnly] = useState(true);
 
   useEffect(() => {
     (async () => {
@@ -1144,8 +1145,14 @@ function ITOTab() {
       const q = searchQuery.toLowerCase();
       result = result.filter(p => p.product_name?.toLowerCase().includes(q));
     }
+    if (activeOnly) {
+      result = result.filter(p => {
+        const hasMovement = p.months.some((m: any) => m.total_out > 0);
+        return hasMovement || p.current_stock > 0;
+      });
+    }
     return result;
-  }, [data, entityFilter, searchQuery]);
+  }, [data, entityFilter, searchQuery, activeOnly]);
 
   const getITOColor = (ito: number) => {
     if (ito >= 6) return 'var(--green)';
@@ -1169,6 +1176,9 @@ function ITOTab() {
           <option value="all">Semua Entity</option>
           {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--dim)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          <input type="checkbox" checked={activeOnly} onChange={e => setActiveOnly(e.target.checked)} /> Tampilkan produk aktif
+        </label>
       </div>
 
       {/* Source toggle */}
