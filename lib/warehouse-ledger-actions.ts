@@ -1114,16 +1114,24 @@ export async function getUndeductedOrders(date: string) {
   const dayStart = `${date}T00:00:00+07:00`;
   const dayEnd = `${date}T23:59:59.999+07:00`;
 
-  // All shipped orders for the date
-  const { data: orders, error } = await svc
-    .from('scalev_orders')
-    .select('id, order_id, business_code')
-    .in('status', ['shipped', 'completed'])
-    .gte('shipped_time', dayStart)
-    .lt('shipped_time', dayEnd)
-    .limit(5000);
-  if (error) throw error;
-  if (!orders || orders.length === 0) return [];
+  // All shipped orders for the date (paginated)
+  const orders: any[] = [];
+  let ordOffset = 0;
+  while (true) {
+    const { data: page, error: pgErr } = await svc
+      .from('scalev_orders')
+      .select('id, order_id, business_code')
+      .in('status', ['shipped', 'completed'])
+      .gte('shipped_time', dayStart)
+      .lt('shipped_time', dayEnd)
+      .range(ordOffset, ordOffset + 999);
+    if (pgErr) throw pgErr;
+    if (!page || page.length === 0) break;
+    orders.push(...page);
+    if (page.length < 1000) break;
+    ordOffset += 1000;
+  }
+  if (orders.length === 0) return [];
 
   // Get all existing deductions for these order IDs in one query
   const orderIds = orders.map(o => o.order_id);
@@ -1313,24 +1321,35 @@ export async function getDeductionLog(date: string) {
   const dayStart = `${date}T00:00:00+07:00`;
   const dayEnd = `${date}T23:59:59.999+07:00`;
 
-  const { data, error } = await svc
-    .from('warehouse_stock_ledger')
-    .select(`
-      reference_id,
-      quantity,
-      notes,
-      created_at,
-      warehouse_products!inner(name, entity)
-    `)
-    .eq('reference_type', 'scalev_order')
-    .eq('movement_type', 'OUT')
-    .gte('created_at', dayStart)
-    .lt('created_at', dayEnd)
-    .order('created_at', { ascending: false })
-    .limit(10000);
+  // Paginate to avoid Supabase max_rows limit (default 1000)
+  const allData: any[] = [];
+  const PAGE_SIZE = 1000;
+  let offset = 0;
+  while (true) {
+    const { data: page, error: pgErr } = await svc
+      .from('warehouse_stock_ledger')
+      .select(`
+        reference_id,
+        quantity,
+        notes,
+        created_at,
+        warehouse_products!inner(name, entity)
+      `)
+      .eq('reference_type', 'scalev_order')
+      .eq('movement_type', 'OUT')
+      .gte('created_at', dayStart)
+      .lt('created_at', dayEnd)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + PAGE_SIZE - 1);
+    if (pgErr) throw pgErr;
+    if (!page || page.length === 0) break;
+    allData.push(...page);
+    if (page.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  const data = allData;
 
-  if (error) throw error;
-  if (!data || data.length === 0) return [];
+  if (data.length === 0) return { rows: [], totalUniqueOrders: 0 };
 
   // Get business_code for each order_id
   const orderIds = [...new Set(data.map(d => d.reference_id))];
