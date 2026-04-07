@@ -66,13 +66,7 @@ SELECT
      WHERE b.warehouse_product_id = wp.id AND b.is_active = true AND b.current_qty > 0),
     wp.hpp
   ) AS weighted_hpp,
-  COALESCE(SUM(sl.quantity), 0) * COALESCE(
-    (SELECT SUM(b.current_qty * CASE WHEN b.cost_per_unit > 0 THEN b.cost_per_unit ELSE wp.hpp END)
-       / NULLIF(SUM(b.current_qty), 0)
-     FROM warehouse_batches b
-     WHERE b.warehouse_product_id = wp.id AND b.is_active = true AND b.current_qty > 0),
-    wp.hpp
-  ) AS stock_value,
+  COALESCE(SUM(sl.quantity), 0) * wp.price_list AS stock_value,
   CASE
     WHEN wp.reorder_threshold > 0
       AND COALESCE(SUM(sl.quantity), 0) <= wp.reorder_threshold
