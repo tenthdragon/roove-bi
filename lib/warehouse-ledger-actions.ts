@@ -1018,7 +1018,7 @@ export async function backfillWarehouseDeductions(date: string) {
   // Find shipped/completed orders for the date
   const { data: orders, error: ordErr } = await svc
     .from('scalev_orders')
-    .select('id, order_id, business_code')
+    .select('id, order_id, business_code, shipped_time')
     .in('status', ['shipped', 'completed'])
     .gte('shipped_time', dayStart)
     .lt('shipped_time', dayEnd);
@@ -1095,6 +1095,7 @@ export async function backfillWarehouseDeductions(date: string) {
             p_reference_type: 'scalev_order',
             p_reference_id: order.order_id,
             p_notes: `Backfill: ${line.product_name} x${deductQty} [${order.business_code}→${mapping.deduct_entity}]`,
+            p_created_at: order.shipped_time || new Date().toISOString(),
           });
         if (!deductErr) totalDeducted++;
       } else {
@@ -1223,7 +1224,7 @@ export async function backfillSingleOrder(orderId: string) {
   // Get order
   const { data: order, error: ordErr } = await svc
     .from('scalev_orders')
-    .select('id, order_id, business_code')
+    .select('id, order_id, business_code, shipped_time')
     .eq('order_id', orderId)
     .single();
   if (ordErr || !order) throw new Error(`Order ${orderId} tidak ditemukan`);
@@ -1293,6 +1294,7 @@ export async function backfillSingleOrder(orderId: string) {
           p_reference_type: 'scalev_order',
           p_reference_id: orderId,
           p_notes: `Backfill: ${line.product_name} x${deductQty} [${order.business_code}→${mapping.deduct_entity}]`,
+          p_created_at: order.shipped_time || new Date().toISOString(),
         });
       if (!deductErr) deducted++;
     } else {

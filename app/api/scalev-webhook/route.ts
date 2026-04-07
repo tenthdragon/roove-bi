@@ -840,6 +840,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
               }
 
               if (targetProductId) {
+                const deductAt = ts(data.shipped_time) || ts(data.completed_time) || new Date().toISOString();
                 const { error: deductErr } = await svc
                   .rpc('warehouse_deduct_fifo', {
                     p_product_id: targetProductId,
@@ -847,6 +848,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
                     p_reference_type: 'scalev_order',
                     p_reference_id: orderId,
                     p_notes: `Auto: ${line.product_name} x${deductQty} [${businessCode}→${mapping.deduct_entity}]`,
+                    p_created_at: deductAt,
                   });
                 if (deductErr) {
                   console.warn(`[scalev-webhook][${businessCode}] warehouse deduct error for ${line.product_name}:`, deductErr.message);
