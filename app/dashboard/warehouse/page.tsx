@@ -1720,8 +1720,8 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
     // Sort
     const dir = sortAsc ? 1 : -1;
     result = [...result].sort((a, b) => {
-      let av = sortCol === 'nilai' ? Number(a.current_qty) * Number(a.effective_hpp || a.price_list || 0) : a[sortCol];
-      let bv = sortCol === 'nilai' ? Number(b.current_qty) * Number(b.effective_hpp || b.price_list || 0) : b[sortCol];
+      let av = sortCol === 'nilai' ? Number(a.current_qty) * Number(a.price_list || 0) : a[sortCol];
+      let bv = sortCol === 'nilai' ? Number(b.current_qty) * Number(b.price_list || 0) : b[sortCol];
       if (av == null && bv == null) return 0;
       if (av == null) return 1;
       if (bv == null) return -1;
@@ -1787,7 +1787,7 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
           <tbody>
             {filtered.map(r => {
               const cfg = statusConfig[r.expiry_status] || statusConfig.safe;
-              const nilai = Number(r.current_qty) * Number(r.effective_hpp || r.price_list || 0);
+              const nilai = Number(r.current_qty) * Number(r.price_list || 0);
               return (
                 <tr key={r.batch_id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                   <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>

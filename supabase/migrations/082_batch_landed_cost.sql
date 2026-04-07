@@ -26,6 +26,7 @@ SELECT
   wp.entity,
   wp.warehouse,
   CASE WHEN wb.cost_per_unit > 0 THEN wb.cost_per_unit ELSE wp.hpp END AS effective_hpp,
+  wp.price_list,
   CASE
     WHEN wb.expired_date IS NULL THEN 'no_expiry'
     WHEN wb.expired_date < CURRENT_DATE THEN 'expired'
