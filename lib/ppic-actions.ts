@@ -593,7 +593,7 @@ export async function getITOData(months: number = 6, source: 'warehouse' | 'scal
   // Get products with HPP
   const { data: products } = await svc
     .from('warehouse_products')
-    .select('id, name, category, entity, hpp, unit')
+    .select('id, name, category, entity, hpp, price_list, unit')
     .eq('is_active', true)
     .order('name');
 
@@ -626,6 +626,7 @@ export async function getITOData(months: number = 6, source: 'warehouse' | 'scal
   const result = Array.from(productMap.values()).map(prod => {
     const currentStock = stockMap.get(prod.id) || 0;
     const hpp = Number(prod.hpp) || 0;
+    const priceList = Number(prod.price_list) || 0;
 
     // Calculate ITO per month
     const monthlyITO = prod.months.map((m: any) => ({
@@ -649,6 +650,9 @@ export async function getITOData(months: number = 6, source: 'warehouse' | 'scal
       entity: prod.entity,
       unit: prod.unit,
       hpp,
+      price_list: priceList,
+      stock_value_hpp: currentStock * hpp,
+      stock_value_price: currentStock * priceList,
       current_stock: currentStock,
       avg_out_per_day: avgOutPerDay,
       days_of_stock: daysOfStock,

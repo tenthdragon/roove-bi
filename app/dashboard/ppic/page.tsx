@@ -117,7 +117,7 @@ export default function PPICPage() {
 
   return (
     <div style={{ padding: '0 0 40px', position: 'relative' }}>
-      <h2 style={{ margin: '0 0 16px', fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>PPIC</h2>
+      <h2 style={{ margin: '0 0 16px', fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Product Planning &amp; Inventory Control</h2>
 
       {/* Tab bar */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
@@ -1181,6 +1181,13 @@ function ITOTab() {
     return 'var(--red)';
   };
 
+  const totals = useMemo(() => {
+    const totalHPP = filtered.reduce((s: number, p: any) => s + (p.stock_value_hpp || 0), 0);
+    const totalPrice = filtered.reduce((s: number, p: any) => s + (p.stock_value_price || 0), 0);
+    const totalSKU = filtered.length;
+    return { totalHPP, totalPrice, totalSKU };
+  }, [filtered]);
+
   return (
     <>
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1223,6 +1230,23 @@ function ITOTab() {
         ITO = (Monthly Out &times; 12) / Current Stock. Hijau &ge;6, Kuning 3-6, Merah &lt;3.
         <br />Hari Stok = Stock / Avg Out per Hari. Hijau &gt;7, Kuning 3-7, Merah &lt;3.
       </div>
+
+      {!loading && (
+        <div style={{ display: 'flex', gap: 16, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px' }}>
+            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 2 }}>SKU</div>
+            <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: 'var(--text)' }}>{fmtNum(totals.totalSKU)}</div>
+          </div>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px' }}>
+            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 2 }}>Nilai Stok (HPP)</div>
+            <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: 'var(--text)' }}>Rp {fmtNum(Math.round(totals.totalHPP))}</div>
+          </div>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px' }}>
+            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 2 }}>Nilai Stok (Harga Jual)</div>
+            <div style={{ fontSize: 16, fontWeight: 700, fontFamily: 'monospace', color: 'var(--text)' }}>Rp {fmtNum(Math.round(totals.totalPrice))}</div>
+          </div>
+        </div>
+      )}
 
       {loading ? <div style={{ color: 'var(--dim)', padding: 40, textAlign: 'center' }}>Memuat...</div> : (
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'auto' }}>
