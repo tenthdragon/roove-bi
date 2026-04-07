@@ -63,7 +63,7 @@ function KPICard({ label, value, color = 'var(--accent)', sub }: { label: string
   return (
     <div style={{
       background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12,
-      padding: 16, flex: 1, minWidth: 160,
+      padding: '12px 16px', flex: 1, minWidth: 140,
       borderTop: `3px solid ${color}`,
     }}>
       <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5 }}>{label}</div>
@@ -120,14 +120,14 @@ export default function PPICPage() {
       <h2 style={{ margin: '0 0 16px', fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Product Planning &amp; Inventory Control</h2>
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 0, overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
         {SUB_TABS.map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)}
             style={{
               padding: '8px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600,
               background: 'none', border: 'none', color: activeTab === t.id ? 'var(--accent)' : 'var(--dim)',
               borderBottom: activeTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
-              marginBottom: -1,
+              marginBottom: -1, whiteSpace: 'nowrap',
             }}>
             {t.label}
           </button>
@@ -937,7 +937,7 @@ function DemandTab() {
           {[2024, 2025, 2026, 2027].map(y => <option key={y} value={y}>{y}</option>)}
         </select>
         <input placeholder="Cari produk..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-          style={{ ...selectStyle, minWidth: 180 }} />
+          style={{ ...selectStyle, flex: 1, minWidth: 120 }} />
         <select value={entityFilter} onChange={e => setEntityFilter(e.target.value)} style={selectStyle}>
           <option value="all">Semua Entity</option>
           {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
@@ -1198,7 +1198,7 @@ function ITOTab() {
           <option value={12}>12 Bulan</option>
         </select>
         <input placeholder="Cari produk..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, minWidth: 180 }} />
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, flex: 1, minWidth: 120 }} />
         <select value={entityFilter} onChange={e => setEntityFilter(e.target.value)}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }}>
           <option value="all">Semua Entity</option>
@@ -1382,7 +1382,7 @@ function ROPTab() {
           <option value={90}>90 Hari</option>
         </select>
         <input placeholder="Cari produk..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, minWidth: 180 }} />
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, flex: 1, minWidth: 120 }} />
         <select value={entityFilter} onChange={e => setEntityFilter(e.target.value)}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }}>
           <option value="all">Semua Entity</option>
