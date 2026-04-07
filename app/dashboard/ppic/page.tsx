@@ -296,7 +296,7 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
   const [poDate, setPODate] = useState(new Date().toISOString().slice(0, 10));
   const [expectedDate, setExpectedDate] = useState('');
   const [notes, setNotes] = useState('');
-  const [items, setItems] = useState<{ productId: number | null; qty: number; unitPrice: number }[]>([{ productId: null, qty: 1, unitPrice: 0 }]);
+  const [items, setItems] = useState<{ productId: number | null; qty: number; unitPrice: number; search: string }[]>([{ productId: null, qty: 1, unitPrice: 0, search: '' }]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -312,7 +312,7 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
     return products.filter(p => `${p.warehouse}-${p.entity}` === entity || p.entity === entity.replace('BTN-', ''));
   }, [products, entity]);
 
-  const addItem = () => setItems([...items, { productId: null, qty: 1, unitPrice: 0 }]);
+  const addItem = () => setItems([...items, { productId: null, qty: 1, unitPrice: 0, search: '' }]);
   const removeItem = (idx: number) => setItems(items.filter((_, i) => i !== idx));
   const updateItem = (idx: number, field: string, value: any) => {
     const newItems = [...items];
@@ -402,13 +402,33 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
 
           {items.map((item, idx) => (
             <div key={idx} style={{ display: 'grid', gridTemplateColumns: '3fr 80px 120px 24px', gap: 8, marginBottom: 8, alignItems: 'center' }}>
-              <select value={item.productId || ''} onChange={e => updateItem(idx, 'productId', Number(e.target.value))}
-                style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12 }}>
-                <option value="">-- Pilih Produk --</option>
-                {entityProducts.map(p => (
-                  <option key={p.id} value={p.id}>{p.name} ({p.category})</option>
-                ))}
-              </select>
+              <div style={{ position: 'relative' }}>
+                <input
+                  type="text"
+                  placeholder="Cari produk..."
+                  value={item.productId ? (entityProducts.find(p => p.id === item.productId)?.name || item.search) : item.search}
+                  onChange={e => { updateItem(idx, 'search', e.target.value); updateItem(idx, 'productId', null); }}
+                  onFocus={() => updateItem(idx, 'search', item.search || '')}
+                  style={{ width: '100%', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12 }} />
+                {!item.productId && item.search !== undefined && (
+                  <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 10, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8, maxHeight: 180, overflow: 'auto', marginTop: 2 }}>
+                    {entityProducts
+                      .filter(p => !item.search || p.name.toLowerCase().includes(item.search.toLowerCase()))
+                      .slice(0, 20)
+                      .map(p => (
+                        <div key={p.id} onClick={() => { updateItem(idx, 'productId', p.id); updateItem(idx, 'search', p.name); }}
+                          style={{ padding: '6px 10px', fontSize: 12, cursor: 'pointer', color: 'var(--text)', borderBottom: '1px solid var(--bg-deep)' }}
+                          onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg)')}
+                          onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+                          {p.name} <span style={{ color: 'var(--dim)', fontSize: 10 }}>({p.category})</span>
+                        </div>
+                      ))}
+                    {entityProducts.filter(p => !item.search || p.name.toLowerCase().includes(item.search.toLowerCase())).length === 0 && (
+                      <div style={{ padding: '8px 10px', fontSize: 11, color: 'var(--dim)' }}>Tidak ditemukan</div>
+                    )}
+                  </div>
+                )}
+              </div>
               <input type="number" placeholder="Qty" value={item.qty || ''} onChange={e => updateItem(idx, 'qty', Number(e.target.value))} min={1}
                 style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12, textAlign: 'right' }} />
               <input type="number" placeholder="Harga/unit" value={item.unitPrice || ''} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} min={0}
