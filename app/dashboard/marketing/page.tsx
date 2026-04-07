@@ -100,6 +100,7 @@ export default function MarketingPage() {
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [dailyAdSpendOpen, setDailyAdSpendOpen] = useState(false);
+  const [prevRangeAdsData, setPrevRangeAdsData] = useState<any[]>([]);
 
   // ── Fetch data (with cache) ──
   useEffect(() => {
@@ -171,6 +172,29 @@ export default function MarketingPage() {
       setPrevAdsData(adsRows);
       setPrevChannelData(chRows);
     });
+  }, [dateRange, supabase]);
+
+  // ── Fetch same-range previous month ads data (for MoM delta in daily table) ──
+  useEffect(() => {
+    if (!dateRange.from || !dateRange.to) return;
+    const from = new Date(dateRange.from + 'T00:00:00');
+    const to = new Date(dateRange.to + 'T00:00:00');
+    const prevFrom = new Date(from.getFullYear(), from.getMonth() - 1, from.getDate());
+    const prevTo = new Date(to.getFullYear(), to.getMonth() - 1, to.getDate());
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const pf = fmt(prevFrom);
+    const pt = fmt(prevTo);
+
+    const cached = getCached<any[]>('daily_ads_spend_prev_range', pf, pt);
+    if (cached) { setPrevRangeAdsData(cached); return; }
+
+    supabase.from('daily_ads_spend').select('date, source, spent')
+      .gte('date', pf).lte('date', pt)
+      .then(({ data }) => {
+        const rows = data || [];
+        setCache('daily_ads_spend_prev_range', pf, pt, rows);
+        setPrevRangeAdsData(rows);
+      });
   }, [dateRange, supabase]);
 
   // ── KPI calculations ──
@@ -302,6 +326,28 @@ const BRAND_COLORS = useMemo(() => {
 
     return { rows, sources: sortedSources, totals, grandTotal, grandRatio };
   }, [adsData, prodData]);
+
+  // ── Previous month ad spend per platform (MoM delta for daily table) ──
+  const prevAdSpend = useMemo(() => {
+    if (prevRangeAdsData.length === 0) return null;
+    const byPlatform: Record<string, number> = {};
+    let total = 0;
+    prevRangeAdsData.forEach(d => {
+      const platform = normPlatform(d.source);
+      const spent = Math.abs(Number(d.spent || 0));
+      byPlatform[platform] = (byPlatform[platform] || 0) + spent;
+      total += spent;
+    });
+    // Also compute prev revenue for ratio delta (reuse prevChannelData which has full month,
+    // but we filter to same date range by day-of-month)
+    const fromDay = dateRange.from ? new Date(dateRange.from + 'T00:00:00').getDate() : 1;
+    const toDay = dateRange.to ? new Date(dateRange.to + 'T00:00:00').getDate() : 31;
+    const prevRev = prevChannelData
+      .filter(d => { const day = new Date(d.date + 'T00:00:00').getDate(); return day >= fromDay && day <= toDay; })
+      .reduce((sum, d) => sum + (Number(d.net_sales) || 0), 0);
+    const ratio = prevRev > 0 ? (total / prevRev) * 100 : 0;
+    return { byPlatform, total, ratio };
+  }, [prevRangeAdsData, prevChannelData, dateRange]);
 
   // ══════════════════════════════════════════════════════════════════════
   // PLATFORM BREAKDOWN — exclusive Channel ROAS + sub-source breakdown
@@ -562,7 +608,7 @@ const BRAND_COLORS = useMemo(() => {
           >
             <span style={{ fontSize: 13, color: C.dim, transition: 'transform 0.2s', transform: dailyAdSpendOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>&#9654;</span>
             <span style={{ fontSize: 15, fontWeight: 700 }}>Daily Ad Spend</span>
-            <span style={{ fontSize: 12, color: C.dim }}>({dailyTrafficSource.rows.length} hari)</span>
+            <span style={{ fontSize: 12, color: C.dim }}>({dailyTrafficSource.rows.length} days · month-over-month)</span>
           </div>
           {dailyAdSpendOpen && (<div style={{ marginTop: 16 }}>
           <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
@@ -599,15 +645,51 @@ const BRAND_COLORS = useMemo(() => {
                 ))}
                 <tr style={{ borderTop: `2px solid ${C.bdr}` }}>
                   <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 12, position: 'sticky', left: 0, background: C.card, zIndex: 1 }}>TOTAL</td>
-                  {dailyTrafficSource.sources.map(s => (
-                    <td key={s} style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: PLATFORM_COLORS[s] || C.txt }}>
-                      {dailyTrafficSource.totals[s] > 0 ? fmtCompact(dailyTrafficSource.totals[s]) : '—'}
-                    </td>
-                  ))}
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{fmtCompact(dailyTrafficSource.grandTotal)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: dailyTrafficSource.grandRatio > 40 ? 'var(--red)' : dailyTrafficSource.grandRatio > 25 ? 'var(--yellow)' : 'var(--green)' }}>
-                    {dailyTrafficSource.grandRatio.toFixed(1)}%
-                  </td>
+                  {dailyTrafficSource.sources.map(s => {
+                    const cur = dailyTrafficSource.totals[s] || 0;
+                    const prev = prevAdSpend?.byPlatform[s];
+                    const delta = prev && prev > 0 ? ((cur - prev) / prev) * 100 : null;
+                    return (
+                      <td key={s} style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: PLATFORM_COLORS[s] || C.txt }}>
+                        {cur > 0 ? (
+                          <>
+                            <div>{fmtCompact(cur)}</div>
+                            {delta !== null && (
+                              <div style={{ fontSize: 10, marginTop: 2, fontWeight: 400, color: delta <= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                                {delta >= 0 ? '▲' : '▼'} {delta >= 0 ? '+' : ''}{delta.toFixed(1)}%
+                              </div>
+                            )}
+                          </>
+                        ) : '—'}
+                      </td>
+                    );
+                  })}
+                  {(() => {
+                    const grandDelta = prevAdSpend && prevAdSpend.total > 0 ? ((dailyTrafficSource.grandTotal - prevAdSpend.total) / prevAdSpend.total) * 100 : null;
+                    return (
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>
+                        <div>{fmtCompact(dailyTrafficSource.grandTotal)}</div>
+                        {grandDelta !== null && (
+                          <div style={{ fontSize: 10, marginTop: 2, fontWeight: 400, color: grandDelta <= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                            {grandDelta >= 0 ? '▲' : '▼'} {grandDelta >= 0 ? '+' : ''}{grandDelta.toFixed(1)}% vs prev
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })()}
+                  {(() => {
+                    const ratioDelta = prevAdSpend && prevAdSpend.ratio > 0 ? dailyTrafficSource.grandRatio - prevAdSpend.ratio : null;
+                    return (
+                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: dailyTrafficSource.grandRatio > 40 ? 'var(--red)' : dailyTrafficSource.grandRatio > 25 ? 'var(--yellow)' : 'var(--green)' }}>
+                        <div>{dailyTrafficSource.grandRatio.toFixed(1)}%</div>
+                        {ratioDelta !== null && (
+                          <div style={{ fontSize: 10, marginTop: 2, fontWeight: 400, color: ratioDelta <= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                            {ratioDelta >= 0 ? '▲' : '▼'} {ratioDelta >= 0 ? '+' : ''}{ratioDelta.toFixed(1)}pp
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })()}
                 </tr>
               </tbody>
             </table>
