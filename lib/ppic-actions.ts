@@ -716,9 +716,39 @@ export async function getITOData(months: number = 6, source: 'warehouse' | 'scal
 export async function getROPAnalysis(demandDays: number = 90) {
   const svc = createServiceSupabase();
 
-  // Get avg daily demand
-  const { data: demandData, error: demandErr } = await svc.rpc('ppic_avg_daily_demand', { p_days: demandDays });
-  if (demandErr) throw demandErr;
+  // Get avg daily demand from summary table (fast) with fallback to RPC (slow)
+  let demandData: any[] = [];
+  try {
+    // Calculate from incremental summary: sum total_out for recent months / days
+    const { data: summaryData } = await svc
+      .from('summary_scalev_monthly_movements')
+      .select('warehouse_product_id, total_out, yr, mn');
+    if (summaryData && summaryData.length > 0) {
+      const cutoff = new Date(Date.now() - demandDays * 86400000);
+      const cutoffYM = cutoff.getFullYear() * 100 + (cutoff.getMonth() + 1);
+      const byProduct = new Map<number, number>();
+      for (const s of summaryData) {
+        if ((s.yr * 100 + s.mn) >= cutoffYM) {
+          byProduct.set(s.warehouse_product_id, (byProduct.get(s.warehouse_product_id) || 0) + Number(s.total_out));
+        }
+      }
+      // Get product names
+      const { data: products } = await svc.from('warehouse_products').select('id, name, entity, category').eq('is_active', true);
+      demandData = (products || []).filter(p => byProduct.has(p.id)).map(p => ({
+        warehouse_product_id: p.id, product_name: p.name, entity: p.entity, category: p.category,
+        total_qty: byProduct.get(p.id) || 0, num_days: demandDays,
+        avg_daily: Math.round(((byProduct.get(p.id) || 0) / demandDays) * 100) / 100,
+      }));
+    } else {
+      const { data, error } = await svc.rpc('ppic_avg_daily_demand', { p_days: demandDays });
+      if (error) throw error;
+      demandData = data || [];
+    }
+  } catch {
+    const { data, error } = await svc.rpc('ppic_avg_daily_demand', { p_days: demandDays });
+    if (error) throw error;
+    demandData = data || [];
+  }
 
   // Get current stock
   const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('*');

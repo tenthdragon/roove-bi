@@ -90,10 +90,10 @@ function StatusBadge({ status }: { status: string }) {
 // ── Constants ──
 
 const SUB_TABS = [
-  { id: 'po', label: 'Purchase Orders' },
-  { id: 'demand', label: 'Demand Planning' },
   { id: 'ito', label: 'ITO' },
-  { id: 'rop', label: 'ROP Calculator' },
+  { id: 'rop', label: 'Reorder Point' },
+  { id: 'demand', label: 'Demand Planning' },
+  { id: 'po', label: 'Purchase Orders' },
 ];
 
 const ENTITIES = ['BTN-RTI', 'BTN-RLB', 'BTN-JHN', 'BTN-RLT'];
@@ -103,7 +103,7 @@ const ENTITIES = ['BTN-RTI', 'BTN-RLB', 'BTN-JHN', 'BTN-RLT'];
 // ============================================================
 
 export default function PPICPage() {
-  const [activeTab, setActiveTab] = useState('po');
+  const [activeTab, setActiveTab] = useState('ito');
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState('');
 
@@ -1116,8 +1116,11 @@ function ITOTab() {
   const [months, setMonths] = useState(6);
   const [entityFilter, setEntityFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [source, setSource] = useState<'warehouse' | 'scalev'>('warehouse');
+  const [source, setSource] = useState<'warehouse' | 'scalev'>('scalev');
   const [activeOnly, setActiveOnly] = useState(true);
+  const [sortCol, setSortCol] = useState('product_name');
+  const [sortAsc, setSortAsc] = useState(true);
+  const handleSort = (col: string) => { if (sortCol === col) setSortAsc(!sortAsc); else { setSortCol(col); setSortAsc(true); } };
 
   useEffect(() => {
     (async () => {
@@ -1151,8 +1154,17 @@ function ITOTab() {
         return hasMovement || p.current_stock > 0;
       });
     }
+    const dir = sortAsc ? 1 : -1;
+    result = [...result].sort((a, b) => {
+      let av = a[sortCol], bv = b[sortCol];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string') return av.localeCompare(bv) * dir;
+      return (Number(av) - Number(bv)) * dir;
+    });
     return result;
-  }, [data, entityFilter, searchQuery, activeOnly]);
+  }, [data, entityFilter, searchQuery, activeOnly, sortCol, sortAsc]);
 
   const getITOColor = (ito: number) => {
     if (ito >= 6) return 'var(--green)';
@@ -1203,9 +1215,9 @@ function ITOTab() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10, position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>PRODUK</th>
-                <th style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10 }}>ENTITY</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--dim)', fontSize: 10 }}>STOCK</th>
+                <th onClick={() => handleSort('product_name')} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10, position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1, cursor: 'pointer' }}>PRODUK {sortCol === 'product_name' ? (sortAsc ? '▲' : '▼') : ''}</th>
+                <th onClick={() => handleSort('entity')} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10, cursor: 'pointer' }}>ENTITY {sortCol === 'entity' ? (sortAsc ? '▲' : '▼') : ''}</th>
+                <th onClick={() => handleSort('current_stock')} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, color: 'var(--dim)', fontSize: 10, cursor: 'pointer' }}>STOCK {sortCol === 'current_stock' ? (sortAsc ? '▲' : '▼') : ''}</th>
                 {monthColumns.map(mc => {
                   const [y, m] = mc.split('-');
                   return <th key={mc} style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 600, color: 'var(--dim)', fontSize: 10, whiteSpace: 'nowrap' }}>{ID_MONTHS[Number(m)].slice(0, 3)} {y.slice(2)}</th>;
@@ -1252,6 +1264,9 @@ function ROPTab() {
   const [editField, setEditField] = useState<string>('');
   const [editValue, setEditValue] = useState('');
   const [hideZeroDemand, setHideZeroDemand] = useState(true);
+  const [ropSortCol, setRopSortCol] = useState('product_name');
+  const [ropSortAsc, setRopSortAsc] = useState(true);
+  const handleRopSort = (col: string) => { if (ropSortCol === col) setRopSortAsc(!ropSortAsc); else { setRopSortCol(col); setRopSortAsc(true); } };
 
   const loadData = async () => {
     setLoading(true);
@@ -1269,8 +1284,17 @@ function ROPTab() {
       result = result.filter(p => p.product_name?.toLowerCase().includes(q));
     }
     if (hideZeroDemand) result = result.filter(p => Number(p.avg_daily) > 0);
+    const dir = ropSortAsc ? 1 : -1;
+    result = [...result].sort((a, b) => {
+      let av = a[ropSortCol], bv = b[ropSortCol];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      if (typeof av === 'string') return av.localeCompare(bv) * dir;
+      return (Number(av) - Number(bv)) * dir;
+    });
     return result;
-  }, [data, entityFilter, searchQuery, hideZeroDemand]);
+  }, [data, entityFilter, searchQuery, hideZeroDemand, ropSortCol, ropSortAsc]);
 
   const kpi = useMemo(() => {
     const critical = data.filter(d => d.status === 'critical').length;
@@ -1337,8 +1361,22 @@ function ROPTab() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                {['Produk', 'Entity', 'Stock', 'Avg/Day', 'Lead Time', 'Safety Days', 'Safety Qty', 'ROP', 'Days Left', 'Status'].map(h => (
-                  <th key={h} style={{ padding: '8px 10px', textAlign: ['Stock', 'Avg/Day', 'Lead Time', 'Safety Days', 'Safety Qty', 'ROP', 'Days Left'].includes(h) ? 'right' : 'left', fontWeight: 600, color: 'var(--dim)', fontSize: 10, textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
+                {[
+                  { label: 'Produk', key: 'product_name', align: 'left' },
+                  { label: 'Entity', key: 'entity', align: 'left' },
+                  { label: 'Stock', key: 'current_stock', align: 'right' },
+                  { label: 'Avg/Day', key: 'avg_daily', align: 'right' },
+                  { label: 'Lead Time', key: 'lead_time', align: 'right' },
+                  { label: 'Safety Days', key: 'safety_days', align: 'right' },
+                  { label: 'Safety Qty', key: 'safety_stock', align: 'right' },
+                  { label: 'ROP', key: 'rop', align: 'right' },
+                  { label: 'Days Left', key: 'days_of_stock', align: 'right' },
+                  { label: 'Status', key: 'status', align: 'left' },
+                ].map(h => (
+                  <th key={h.key} onClick={() => handleRopSort(h.key)}
+                    style={{ padding: '8px 10px', textAlign: h.align as any, fontWeight: 600, color: 'var(--dim)', fontSize: 10, textTransform: 'uppercase', whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none' }}>
+                    {h.label} {ropSortCol === h.key ? (ropSortAsc ? '▲' : '▼') : ''}
+                  </th>
                 ))}
               </tr>
             </thead>
