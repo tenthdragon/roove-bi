@@ -381,9 +381,17 @@ export default function DashboardLayout({ children }) {
 
   // ── Shared sidebar content (used by both desktop and mobile) ──
   function SidebarNav({ isMobile = false }) {
+    // On mobile, flatten children into top-level items (no submenus)
+    const flatTabs = isMobile
+      ? visibleTabs.flatMap(t => {
+          const parent = { ...t, children: undefined };
+          return t.children?.length ? [parent, ...t.children.map(c => ({ ...c, group: t.group }))] : [parent];
+        })
+      : visibleTabs;
+
     // Pre-compute group boundaries
-    const tabsWithGroupInfo = visibleTabs.map((t, idx) => {
-      const prevGroup = idx > 0 ? visibleTabs[idx - 1].group : null;
+    const tabsWithGroupInfo = flatTabs.map((t, idx) => {
+      const prevGroup = idx > 0 ? flatTabs[idx - 1].group : null;
       const showGroupHeader = t.group && t.group !== prevGroup;
       const showSpacer = !t.group && prevGroup;
       return { ...t, showGroupHeader, showSpacer };
@@ -418,9 +426,10 @@ export default function DashboardLayout({ children }) {
                 <button
                   onClick={() => {
                     if (hasChildren && !collapsed) {
-                      // Click navigates to parent AND toggles submenu
                       navigateTo(t.id);
-                      setExpandedMenus(prev => ({ ...prev, [t.id]: !prev[t.id] && !childActive }));
+                      if (!isMobile) {
+                        setExpandedMenus(prev => ({ ...prev, [t.id]: !prev[t.id] && !childActive }));
+                      }
                     } else {
                       navigateTo(t.id);
                     }
