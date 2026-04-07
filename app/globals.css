@@ -102,6 +102,9 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--dim); }
 
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }
+
 /* ═══ RESPONSIVE NAVIGATION ═══ */
 
 /* Desktop: show sidebar, hide hamburger, hide mobile overlay */
