@@ -141,10 +141,12 @@ export default function ChannelsPage() {
   const adsByPlatform = useMemo(() => {
     const byP = {};
     adsData.forEach(d => {
-      // Filter by selected brand
+      const brand = getAdBrand(d.store);
       if (selectedProduct !== 'all') {
-        const brand = getAdBrand(d.store);
         if (brand !== selectedProduct) return;
+      } else {
+        // Skip ads without brand mapping or inactive brands (consistent with overview)
+        if (!brand || !isActiveBrand(brand)) return;
       }
       const platform = normPlatform(d.source);
       byP[platform] = (byP[platform] || 0) + Math.abs(Number(d.spent || 0));
