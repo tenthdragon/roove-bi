@@ -419,91 +419,39 @@ export async function getWeeklyDemandData(month: number, year: number) {
   const svc = createServiceSupabase();
   const daysInMonth = new Date(year, month, 0).getDate();
   const mm = String(month).padStart(2, '0');
-
-  // Query ScaleV sales (shipped orders) for the month, joined via mapping
   const monthStart = `${year}-${mm}-01T00:00:00+07:00`;
   const monthEnd = `${year}-${mm}-${daysInMonth}T23:59:59+07:00`;
 
-  // Get ALL shipped orders in this month (paginated to avoid 1000 row limit)
-  const allOrders: any[] = [];
-  let offset = 0;
-  const PAGE = 1000;
-  while (true) {
-    const { data, error: ordErr } = await svc
-      .from('scalev_orders')
-      .select('id, shipped_time')
-      .in('status', ['shipped', 'completed'])
-      .gte('shipped_time', monthStart)
-      .lte('shipped_time', monthEnd)
-      .range(offset, offset + PAGE - 1);
-    if (ordErr) throw ordErr;
-    if (!data || data.length === 0) break;
-    allOrders.push(...data);
-    if (data.length < PAGE) break;
-    offset += PAGE;
-  }
-  if (allOrders.length === 0) return {};
+  // Use single RPC to get weekly breakdown (much faster than multiple paginated queries)
+  const { data, error } = await svc.rpc('ppic_weekly_demand_scalev', {
+    p_month_start: monthStart,
+    p_month_end: monthEnd,
+  });
 
-  // Build order ID → shipped day map
-  const orderDayMap = new Map<number, number>();
-  for (const o of allOrders) {
-    const d = new Date(o.shipped_time);
-    const wibDate = new Date(d.getTime() + 7 * 60 * 60 * 1000);
-    orderDayMap.set(o.id, wibDate.getUTCDate());
-  }
-
-  // Get order lines (paginated per batch of order IDs)
-  const orderIds = allOrders.map(o => o.id);
-  const allLines: any[] = [];
-  for (let i = 0; i < orderIds.length; i += 500) {
-    const batch = orderIds.slice(i, i + 500);
-    let lineOffset = 0;
-    while (true) {
-      const { data: lines } = await svc
-        .from('scalev_order_lines')
-        .select('scalev_order_id, product_name, quantity')
-        .in('scalev_order_id', batch)
-        .range(lineOffset, lineOffset + PAGE - 1);
-      if (!lines || lines.length === 0) break;
-      allLines.push(...lines);
-      if (lines.length < PAGE) break;
-      lineOffset += PAGE;
+  if (error) {
+    // Fallback: use summary table for monthly total, split evenly into 4 weeks
+    const { data: summaryData } = await svc
+      .from('summary_scalev_monthly_movements')
+      .select('warehouse_product_id, total_out')
+      .eq('yr', year).eq('mn', month);
+    if (!summaryData || summaryData.length === 0) return {};
+    const result: Record<number, any> = {};
+    for (const s of summaryData) {
+      const weekly = Math.round(Number(s.total_out) / 4);
+      result[s.warehouse_product_id] = { w1_out: weekly, w2_out: weekly, w3_out: weekly, w4_out: weekly };
     }
+    return result;
   }
 
-  // Get mapping: scalev_product_name → warehouse_product_id + multiplier
-  const { data: mappings } = await svc
-    .from('warehouse_scalev_mapping')
-    .select('scalev_product_name, warehouse_product_id, deduct_qty_multiplier')
-    .not('warehouse_product_id', 'is', null)
-    .eq('is_ignored', false);
-
-  const mappingMap = new Map<string, { pid: number; mult: number }>();
-  for (const m of (mappings || [])) {
-    mappingMap.set(m.scalev_product_name, { pid: m.warehouse_product_id, mult: Number(m.deduct_qty_multiplier) || 1 });
-  }
-
-  // Bucket sales into weeks per warehouse product
-  const result = new Map<number, { w1_out: number; w2_out: number; w3_out: number; w4_out: number }>();
-
-  for (const line of allLines) {
-    const mapping = mappingMap.get(line.product_name);
-    if (!mapping) continue;
-
-    const day = orderDayMap.get(line.scalev_order_id);
-    if (!day) continue;
-
-    const weekNum = day <= 7 ? 1 : day <= 14 ? 2 : day <= 21 ? 3 : 4;
-    const qty = Number(line.quantity) * mapping.mult;
-
-    if (!result.has(mapping.pid)) {
-      result.set(mapping.pid, { w1_out: 0, w2_out: 0, w3_out: 0, w4_out: 0 });
+  // Build result from RPC
+  const result: Record<number, any> = {};
+  for (const row of (data || [])) {
+    if (!result[row.warehouse_product_id]) {
+      result[row.warehouse_product_id] = { w1_out: 0, w2_out: 0, w3_out: 0, w4_out: 0 };
     }
-    const entry = result.get(mapping.pid)!;
-    (entry as any)[`w${weekNum}_out`] += qty;
+    (result[row.warehouse_product_id] as any)[`w${row.week_num}_out`] = Number(row.total_out);
   }
-
-  return Object.fromEntries(result);
+  return result;
 }
 
 export async function getDemandPlans(month: number, year: number) {

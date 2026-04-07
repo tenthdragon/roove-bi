@@ -90,7 +90,7 @@ function StatusBadge({ status }: { status: string }) {
 // ── Constants ──
 
 const SUB_TABS = [
-  { id: 'ito', label: 'ITO' },
+  { id: 'ito', label: 'Inventory Turn Over' },
   { id: 'rop', label: 'Reorder Point' },
   { id: 'demand', label: 'Demand Planning' },
   { id: 'po', label: 'Purchase Orders' },
