@@ -1021,7 +1021,8 @@ export async function backfillWarehouseDeductions(date: string) {
     .select('id, order_id, business_code, shipped_time')
     .in('status', ['shipped', 'completed'])
     .gte('shipped_time', dayStart)
-    .lt('shipped_time', dayEnd);
+    .lt('shipped_time', dayEnd)
+    .limit(5000);
   if (ordErr) throw ordErr;
   if (!orders || orders.length === 0) return { checked: 0, deducted: 0, skipped: 0 };
 
@@ -1119,7 +1120,8 @@ export async function getUndeductedOrders(date: string) {
     .select('id, order_id, business_code')
     .in('status', ['shipped', 'completed'])
     .gte('shipped_time', dayStart)
-    .lt('shipped_time', dayEnd);
+    .lt('shipped_time', dayEnd)
+    .limit(5000);
   if (error) throw error;
   if (!orders || orders.length === 0) return [];
 
@@ -1324,7 +1326,8 @@ export async function getDeductionLog(date: string) {
     .eq('movement_type', 'OUT')
     .gte('created_at', dayStart)
     .lt('created_at', dayEnd)
-    .order('created_at', { ascending: false });
+    .order('created_at', { ascending: false })
+    .limit(10000);
 
   if (error) throw error;
   if (!data || data.length === 0) return [];

@@ -1528,12 +1528,11 @@ function DailySummaryTab({ data, alerts, deductLog, totalDeductedOrders, date, s
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14, marginTop: 10 }}>
               {Array.from(byEntity.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([entity, rows]) => {
                 const totalQty = rows.reduce((s, r) => s + r.total_qty, 0);
-                const totalOrders = rows.reduce((s, r) => s + r.order_count, 0);
                 return (
                   <div key={entity} style={{ background: 'var(--bg)', borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden' }}>
                     <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontWeight: 700, fontSize: 13, color: 'var(--text)' }}>{entity}</span>
-                      <span style={{ fontSize: 11, color: 'var(--dim)' }}>{rows.length} produk &middot; {totalQty.toLocaleString('id-ID')} unit &middot; {totalOrders} orders</span>
+                      <span style={{ fontSize: 11, color: 'var(--dim)' }}>{rows.length} produk &middot; {totalQty.toLocaleString('id-ID')} unit</span>
                     </div>
                     <div style={{ overflowX: 'auto' }}>
                       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
