@@ -70,14 +70,16 @@ export default function OverviewPage() {
       .then(({ data }) => setOverheadData(data || []));
   }, [dateRange, supabase]);
 
-  // ── Fetch previous full month data (for delta comparison) ──
+  // ── Fetch previous month data — same relative date range (MoM) ──
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
-    const fromDate = new Date(dateRange.from + 'T00:00:00');
-    const prevMonthEnd = new Date(fromDate.getFullYear(), fromDate.getMonth(), 0);
-    const prevMonthStart = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth(), 1);
-    const prevFrom = `${prevMonthStart.getFullYear()}-${String(prevMonthStart.getMonth() + 1).padStart(2, '0')}-01`;
-    const prevTo = `${prevMonthEnd.getFullYear()}-${String(prevMonthEnd.getMonth() + 1).padStart(2, '0')}-${String(prevMonthEnd.getDate()).padStart(2, '0')}`;
+    const from = new Date(dateRange.from + 'T00:00:00');
+    const to = new Date(dateRange.to + 'T00:00:00');
+    const prevFrom_ = new Date(from.getFullYear(), from.getMonth() - 1, from.getDate());
+    const prevTo_ = new Date(to.getFullYear(), to.getMonth() - 1, to.getDate());
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const prevFrom = fmt(prevFrom_);
+    const prevTo = fmt(prevTo_);
 
     const cachedPrev = getCached('daily_product_summary_prev', prevFrom, prevTo);
     if (cachedPrev) {
@@ -253,17 +255,19 @@ export default function OverviewPage() {
 
   const isOwnerOrAdmin = userRole === 'owner' || userRole === 'admin';
 
-  const KPI = ({ label, val, sub, color='var(--accent)', delta }: { label: string; val: string; sub?: string; color?: string; delta?: { value: number; suffix?: string; higherIsBetter?: boolean } }) => (
+  const DeltaLine = ({ value, suffix, higherIsBetter, label: lbl }: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }) => (
+    <div style={{ fontSize: 10, marginTop: 4, color: ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
+      {value > 0 ? '▲' : '▼'} {value >= 0 ? '+' : ''}{value.toFixed(1)}{suffix || '%'}{lbl ? ` ${lbl}` : ` vs ${prevMonthLabel}`}
+    </div>
+  );
+  const KPI = ({ label, val, sub, color='var(--accent)', delta, delta2 }: { label: string; val: string; sub?: string; color?: string; delta?: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }; delta2?: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string } }) => (
     <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 18px', flex:'1 1 160px', minWidth:150, position:'relative', overflow:'hidden' }}>
       <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:color }} />
       <div style={{ fontSize:11, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6, fontWeight:600 }}>{label}</div>
       <div style={{ fontSize:20, fontWeight:700, fontFamily:'monospace', lineHeight:1.1 }}>{val}</div>
       {sub && <div style={{ fontSize:11, color:'var(--dim)', marginTop:4 }}>{sub}</div>}
-      {delta && delta.value !== 0 && (
-        <div style={{ fontSize: 10, marginTop: 4, color: ((delta.value > 0) === (delta.higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
-          {delta.value > 0 ? '▲' : '▼'} {delta.value >= 0 ? '+' : ''}{delta.value.toFixed(1)}{delta.suffix || '%'} vs {prevMonthLabel}
-        </div>
-      )}
+      {delta && delta.value !== 0 && <DeltaLine {...delta} />}
+      {delta2 && delta2.value !== 0 && <DeltaLine {...delta2} />}
     </div>
   );
 
@@ -300,11 +304,13 @@ export default function OverviewPage() {
         <KPI label="Net Sales" val={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg: ${fmtRupiah(kpi.avg)}/hari`}
           delta={prevKpi && prevKpi.ts > 0 ? { value: ((kpi.ts - prevKpi.ts) / prevKpi.ts) * 100 } : undefined} />
         <KPI label="Gross Profit" val={`Rp ${fmtCompact(kpi.tg)}`} sub={`GP Margin: ${kpi.gpM.toFixed(1)}%`} color="var(--green)"
-          delta={prevKpi && prevKpi.tg > 0 ? { value: kpi.gpM - prevKpi.gpM, suffix: 'pp' } : undefined} />
+          delta={prevKpi && prevKpi.tg > 0 ? { value: ((kpi.tg - prevKpi.tg) / prevKpi.tg) * 100 } : undefined}
+          delta2={prevKpi && prevKpi.gpM > 0 ? { value: kpi.gpM - prevKpi.gpM, suffix: 'pp', label: 'margin' } : undefined} />
         <KPI label="Mkt Cost + MP Fee" val={`Rp ${fmtCompact(kpi.tm)}`} sub={totalMpFee > 0 ? `MP Fee: Rp ${fmtCompact(totalMpFee)} (${mpFeePercent.toFixed(1)}%)` : 'MP Fee: tidak tersedia'} color="var(--yellow)"
           delta={prevKpi && prevKpi.tm > 0 ? { value: ((kpi.tm - prevKpi.tm) / prevKpi.tm) * 100, higherIsBetter: false } : undefined} />
         <KPI label="GP After Mkt + Adm" val={`Rp ${fmtCompact(kpi.tn)}`} sub={`Margin After Mkt: ${kpi.nM.toFixed(1)}%`} color="#06b6d4"
-          delta={prevKpi && prevKpi.nM > 0 ? { value: kpi.nM - prevKpi.nM, suffix: 'pp' } : undefined} />
+          delta={prevKpi && prevKpi.tn > 0 ? { value: ((kpi.tn - prevKpi.tn) / prevKpi.tn) * 100 } : undefined}
+          delta2={prevKpi && prevKpi.nM > 0 ? { value: kpi.nM - prevKpi.nM, suffix: 'pp', label: 'margin' } : undefined} />
       </div>
 
       {/* ── Cash Flow Status (owner/admin) ── */}

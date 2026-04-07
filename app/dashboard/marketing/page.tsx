@@ -346,7 +346,13 @@ const BRAND_COLORS = useMemo(() => {
       .filter(d => { const day = new Date(d.date + 'T00:00:00').getDate(); return day >= fromDay && day <= toDay; })
       .reduce((sum, d) => sum + (Number(d.net_sales) || 0), 0);
     const ratio = prevRev > 0 ? (total / prevRev) * 100 : 0;
-    return { byPlatform, total, ratio };
+    // Compute prev admin fee for effective ROAS
+    const prevAdmin = prevChannelData
+      .filter(d => { const day = new Date(d.date + 'T00:00:00').getDate(); return day >= fromDay && day <= toDay; })
+      .reduce((sum, d) => sum + Math.abs(Number(d.mp_admin_cost) || 0), 0);
+    const roas = total > 0 ? prevRev / total : 0;
+    const effRoas = (total + prevAdmin) > 0 ? prevRev / (total + prevAdmin) : 0;
+    return { byPlatform, total, ratio, revenue: prevRev, roas, effRoas };
   }, [prevRangeAdsData, prevChannelData, dateRange]);
 
   // ══════════════════════════════════════════════════════════════════════
@@ -527,12 +533,19 @@ const BRAND_COLORS = useMemo(() => {
   // ── Styles ──
   const C = { bg: 'var(--bg)', card: 'var(--card)', bdr: 'var(--border)', dim: 'var(--dim)', txt: 'var(--text)' };
 
-  const KPI = ({ label, val, sub, color = 'var(--accent)' }: any) => (
+  const DeltaLine = ({ value, suffix, higherIsBetter, label: lbl }: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }) => (
+    <div style={{ fontSize: 10, marginTop: 4, color: ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
+      {value > 0 ? '▲' : '▼'} {value >= 0 ? '+' : ''}{value.toFixed(1)}{suffix || '%'}{lbl ? ` ${lbl}` : ` vs ${prevMonthLabel}`}
+    </div>
+  );
+  const KPI = ({ label, val, sub, color = 'var(--accent)', delta, delta2 }: any) => (
     <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: color }} />
       <div style={{ fontSize: 11, color: C.dim, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>{val}</div>
       {sub && <div style={{ fontSize: 11, color: C.dim, marginTop: 4 }}>{sub}</div>}
+      {delta && delta.value !== 0 && <DeltaLine {...delta} />}
+      {delta2 && delta2.value !== 0 && <DeltaLine {...delta2} />}
     </div>
   );
 
@@ -556,10 +569,16 @@ const BRAND_COLORS = useMemo(() => {
 
       {/* ── KPI Cards ── */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI label="Total Revenue" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalRevenue / activeDays : 0)}/hari`} color="var(--accent)" />
-        <KPI label="Total Ad Spend" val={`Rp ${fmtCompact(totalSpend)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalSpend / activeDays : 0)}/hari`} color="var(--yellow)" />
-        <KPI label="Mkt Ratio" val={`${totalRatio.toFixed(1)}%`} sub={`Avg: ${avgDailyRatio.toFixed(1)}%/hari`} color={totalRatio > 30 ? 'var(--red)' : totalRatio > 20 ? 'var(--yellow)' : 'var(--green)'} />
-        <KPI label="Eff. ROAS" val={`${(() => { const totalAdmin = platformBreakdown.reduce((s, p) => s + (p.adminFee || 0), 0); const tc = totalSpend + totalAdmin; return tc > 0 ? (totalRevenue / tc).toFixed(1) : '0.0'; })()}x`} sub={`Ads only: ${totalRoas.toFixed(1)}x`} color="#8b5cf6" />
+        <KPI label="Total Revenue" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalRevenue / activeDays : 0)}/hari`} color="var(--accent)"
+          delta={prevAdSpend && prevAdSpend.revenue > 0 ? { value: ((totalRevenue - prevAdSpend.revenue) / prevAdSpend.revenue) * 100 } : undefined} />
+        <KPI label="Total Ad Spend" val={`Rp ${fmtCompact(totalSpend)}`} sub={`Avg: Rp ${fmtCompact(activeDays > 0 ? totalSpend / activeDays : 0)}/hari`} color="var(--yellow)"
+          delta={prevAdSpend && prevAdSpend.total > 0 ? { value: ((totalSpend - prevAdSpend.total) / prevAdSpend.total) * 100, higherIsBetter: false } : undefined} />
+        <KPI label="Mkt Ratio" val={`${totalRatio.toFixed(1)}%`} sub={`Avg: ${avgDailyRatio.toFixed(1)}%/hari`} color={totalRatio > 30 ? 'var(--red)' : totalRatio > 20 ? 'var(--yellow)' : 'var(--green)'}
+          delta={prevAdSpend && prevAdSpend.ratio > 0 ? { value: totalRatio - prevAdSpend.ratio, suffix: 'pp', higherIsBetter: false } : undefined} />
+        {(() => { const totalAdmin = platformBreakdown.reduce((s, p) => s + (p.adminFee || 0), 0); const tc = totalSpend + totalAdmin; const curEffRoas = tc > 0 ? totalRevenue / tc : 0; return (
+        <KPI label="Eff. ROAS" val={`${curEffRoas.toFixed(1)}x`} sub={`Ads only: ${totalRoas.toFixed(1)}x`} color="#8b5cf6"
+          delta={prevAdSpend && prevAdSpend.effRoas > 0 ? { value: ((curEffRoas - prevAdSpend.effRoas) / prevAdSpend.effRoas) * 100 } : undefined} />
+        ); })()}
       </div>
 
       {/* ── Daily Ad Spend & Mkt Ratio Chart ── */}

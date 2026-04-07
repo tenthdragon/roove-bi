@@ -64,6 +64,7 @@ export default function ChannelsPage() {
   const [dailySalesOpen, setDailySalesOpen] = useState(false);
   const [hiddenChannels, setHiddenChannels] = useState<Set<string>>(new Set());
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
+  const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
   const { isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
@@ -134,7 +135,7 @@ export default function ChannelsPage() {
       setPrevChannelData(cached.filter(row => isActiveBrand(row.product)));
     } else {
       supabase.from('daily_channel_data')
-        .select('date, product, channel, net_sales')
+        .select('date, product, channel, net_sales, gross_profit, mp_admin_cost')
         .gte('date', pf).lte('date', pt)
         .then(({ data }) => {
           const rows = data || [];
@@ -142,6 +143,29 @@ export default function ChannelsPage() {
           setPrevChannelData(rows.filter(row => isActiveBrand(row.product)));
         });
     }
+  }, [dateRange, supabase]);
+
+  // ── Fetch previous month's ads data (same relative date range) ──
+  useEffect(() => {
+    if (!dateRange.from || !dateRange.to) return;
+    const from = new Date(dateRange.from + 'T00:00:00');
+    const to = new Date(dateRange.to + 'T00:00:00');
+    const prevFrom = new Date(from.getFullYear(), from.getMonth() - 1, from.getDate());
+    const prevTo = new Date(to.getFullYear(), to.getMonth() - 1, to.getDate());
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const pf = fmt(prevFrom);
+    const pt = fmt(prevTo);
+
+    const cached = getCached<any[]>('daily_ads_spend_prev_ch', pf, pt);
+    if (cached) { setPrevAdsData(cached); return; }
+
+    supabase.from('daily_ads_spend').select('date, source, spent, store')
+      .gte('date', pf).lte('date', pt)
+      .then(({ data }) => {
+        const rows = data || [];
+        setCache('daily_ads_spend_prev_ch', pf, pt, rows);
+        setPrevAdsData(rows);
+      });
   }, [dateRange, supabase]);
 
   // ── Store → Brand lookup ──
@@ -330,17 +354,33 @@ export default function ChannelsPage() {
     return { rows, channelNames: sortedChannels };
   }, [channelData, shipmentCounts, adsData, selectedProduct, storeBrandMap]);
 
-  // ── Previous month revenue for delta comparison (total + per channel) ──
+  // ── Previous month KPIs for delta comparison (total + per channel) ──
   const prevRevenue = useMemo(() => {
     if (prevChannelData.length === 0) return null;
     const filtered = prevChannelData.filter(d => selectedProduct === 'all' || d.product === selectedProduct);
     const total = filtered.reduce((sum, d) => sum + (Number(d.net_sales) || 0), 0);
+    const gp = filtered.reduce((sum, d) => sum + (Number(d.gross_profit) || 0), 0);
+    const mpAdmin = filtered.reduce((sum, d) => sum + Math.abs(Number(d.mp_admin_cost) || 0), 0);
+    // Compute prev ads cost
+    let adsCost = 0;
+    prevAdsData.forEach(d => {
+      if (selectedProduct !== 'all') {
+        const brand = getAdBrand(d.store);
+        if (brand !== selectedProduct) return;
+      } else {
+        const brand = getAdBrand(d.store);
+        if (!brand || !isActiveBrand(brand)) return;
+      }
+      adsCost += Math.abs(Number(d.spent || 0));
+    });
+    const totalCost = mpAdmin + adsCost;
+    const profitAfterAll = gp - totalCost;
     const byChannel: Record<string, number> = {};
     filtered.forEach(d => {
       if (d.channel) byChannel[d.channel] = (byChannel[d.channel] || 0) + (Number(d.net_sales) || 0);
     });
-    return { total, byChannel };
-  }, [prevChannelData, selectedProduct]);
+    return { total, gp, mpAdmin, adsCost, totalCost, profitAfterAll, byChannel };
+  }, [prevChannelData, prevAdsData, selectedProduct, storeBrandMap]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);
@@ -396,12 +436,26 @@ export default function ChannelsPage() {
   }, [channelData, adsData, selectedProduct, storeBrandMap, totalRevenue]);
 
 
-  const KPI = ({ label, val, sub, color = 'var(--accent)' }) => (
+  const prevMonthLabel = useMemo(() => {
+    if (!dateRange.from) return '';
+    const d = new Date(dateRange.from + 'T00:00:00');
+    const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    return prev.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
+  }, [dateRange.from]);
+
+  const DeltaLine = ({ value, suffix, higherIsBetter, label: lbl }: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }) => (
+    <div style={{ fontSize: 10, marginTop: 4, color: ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
+      {value > 0 ? '▲' : '▼'} {value >= 0 ? '+' : ''}{value.toFixed(1)}{suffix || '%'}{lbl ? ` ${lbl}` : ` vs ${prevMonthLabel}`}
+    </div>
+  );
+  const KPI = ({ label, val, sub, color = 'var(--accent)', delta, delta2 }: { label: string; val: string; sub?: string; color?: string; delta?: any; delta2?: any }) => (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: color }} />
       <div style={{ fontSize: 11, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>{val}</div>
       {sub && <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>{sub}</div>}
+      {delta && delta.value !== 0 && <DeltaLine {...delta} />}
+      {delta2 && delta2.value !== 0 && <DeltaLine {...delta2} />}
     </div>
   );
 
@@ -456,7 +510,8 @@ export default function ChannelsPage() {
 
       {/* KPI Cards */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>
-        <KPI label="Net Sales" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.length} active channels`} color="var(--accent)" />
+        <KPI label="Net Sales" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.length} active channels`} color="var(--accent)"
+          delta={prevRevenue && prevRevenue.total > 0 ? { value: ((totalRevenue - prevRevenue.total) / prevRevenue.total) * 100 } : undefined} />
         <KPI
           label="Admin Fee"
           val={`Rp ${fmtCompact(totalMpAdmin)}`}
@@ -470,18 +525,22 @@ export default function ChannelsPage() {
             </span>
           }
           color="#8b5cf6"
+          delta={prevRevenue && prevRevenue.mpAdmin > 0 ? { value: ((totalMpAdmin - prevRevenue.mpAdmin) / prevRevenue.mpAdmin) * 100, higherIsBetter: false } : undefined}
         />
         <KPI
           label="Mkt Cost"
           val={`Rp ${fmtCompact(totalAdsCost)}`}
           sub={`${totalRevenue > 0 ? (totalAdsCost / totalRevenue * 100).toFixed(1) : 0}% of revenue`}
           color="var(--yellow)"
+          delta={prevRevenue && prevRevenue.adsCost > 0 ? { value: ((totalAdsCost - prevRevenue.adsCost) / prevRevenue.adsCost) * 100, higherIsBetter: false } : undefined}
         />
         <KPI
           label="GP After Mkt + Adm"
           val={`Rp ${fmtCompact(totalProfitAfterAll)}`}
           sub={`Margin: ${totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%`}
           color={totalProfitAfterAll >= 0 ? '#06b6d4' : 'var(--red)'}
+          delta={prevRevenue && prevRevenue.profitAfterAll !== 0 ? { value: ((totalProfitAfterAll - prevRevenue.profitAfterAll) / Math.abs(prevRevenue.profitAfterAll)) * 100 } : undefined}
+          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalProfitAfterAll / totalRevenue * 100 : 0) - (prevRevenue.profitAfterAll / prevRevenue.total * 100), suffix: 'pp', label: 'margin' } : undefined}
         />
       </div>
 
