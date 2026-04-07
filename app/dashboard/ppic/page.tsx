@@ -401,18 +401,18 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
           </div>
 
           {items.map((item, idx) => (
-            <div key={idx} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+            <div key={idx} style={{ display: 'grid', gridTemplateColumns: '3fr 80px 120px 24px', gap: 8, marginBottom: 8, alignItems: 'center' }}>
               <select value={item.productId || ''} onChange={e => updateItem(idx, 'productId', Number(e.target.value))}
-                style={{ flex: 3, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12 }}>
+                style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12 }}>
                 <option value="">-- Pilih Produk --</option>
                 {entityProducts.map(p => (
                   <option key={p.id} value={p.id}>{p.name} ({p.category})</option>
                 ))}
               </select>
               <input type="number" placeholder="Qty" value={item.qty || ''} onChange={e => updateItem(idx, 'qty', Number(e.target.value))} min={1}
-                style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12, textAlign: 'right' }} />
-              <input type="number" placeholder="Harga Satuan" value={item.unitPrice || ''} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} min={0}
-                style={{ flex: 1.5, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12, textAlign: 'right' }} />
+                style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12, textAlign: 'right' }} />
+              <input type="number" placeholder="Harga/unit" value={item.unitPrice || ''} onChange={e => updateItem(idx, 'unitPrice', Number(e.target.value))} min={0}
+                style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 10px', color: 'var(--text)', fontSize: 12, textAlign: 'right' }} />
               {items.length > 1 && (
                 <button onClick={() => removeItem(idx)} style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 16 }}>&times;</button>
               )}
