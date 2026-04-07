@@ -63,6 +63,7 @@ export default function ChannelsPage() {
   const [scalevExpanded, setScalevExpanded] = useState(false);
   const [dailySalesOpen, setDailySalesOpen] = useState(false);
   const [hiddenChannels, setHiddenChannels] = useState<Set<string>>(new Set());
+  const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const { isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
@@ -115,6 +116,32 @@ export default function ChannelsPage() {
       setShipmentCounts(scRows.filter(row => isActiveBrand(row.product)));
       setLoading(false);
     });
+  }, [dateRange, supabase]);
+
+  // ── Fetch previous month's channel data (same relative date range) ──
+  useEffect(() => {
+    if (!dateRange.from || !dateRange.to) return;
+    const from = new Date(dateRange.from + 'T00:00:00');
+    const to = new Date(dateRange.to + 'T00:00:00');
+    const prevFrom = new Date(from.getFullYear(), from.getMonth() - 1, from.getDate());
+    const prevTo = new Date(to.getFullYear(), to.getMonth() - 1, to.getDate());
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const pf = fmt(prevFrom);
+    const pt = fmt(prevTo);
+
+    const cached = getCached('daily_channel_data_prev', pf, pt);
+    if (cached) {
+      setPrevChannelData(cached.filter(row => isActiveBrand(row.product)));
+    } else {
+      supabase.from('daily_channel_data')
+        .select('date, product, channel, net_sales')
+        .gte('date', pf).lte('date', pt)
+        .then(({ data }) => {
+          const rows = data || [];
+          setCache('daily_channel_data_prev', pf, pt, rows);
+          setPrevChannelData(rows.filter(row => isActiveBrand(row.product)));
+        });
+    }
   }, [dateRange, supabase]);
 
   // ── Store → Brand lookup ──
@@ -303,6 +330,18 @@ export default function ChannelsPage() {
     return { rows, channelNames: sortedChannels };
   }, [channelData, shipmentCounts, adsData, selectedProduct, storeBrandMap]);
 
+  // ── Previous month revenue for delta comparison (total + per channel) ──
+  const prevRevenue = useMemo(() => {
+    if (prevChannelData.length === 0) return null;
+    const filtered = prevChannelData.filter(d => selectedProduct === 'all' || d.product === selectedProduct);
+    const total = filtered.reduce((sum, d) => sum + (Number(d.net_sales) || 0), 0);
+    const byChannel: Record<string, number> = {};
+    filtered.forEach(d => {
+      if (d.channel) byChannel[d.channel] = (byChannel[d.channel] || 0) + (Number(d.net_sales) || 0);
+    });
+    return { total, byChannel };
+  }, [prevChannelData, selectedProduct]);
+
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);
   const totalMpAdmin = channels.reduce((a, c) => a + c.mpAdmin, 0);
@@ -453,8 +492,8 @@ export default function ChannelsPage() {
           style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}
         >
           <span style={{ fontSize: 13, color: 'var(--dim)', transition: 'transform 0.2s', transform: dailySalesOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>&#9654;</span>
-          <span style={{ fontSize: 15, fontWeight: 700 }}>Daily Sales &amp; Shipments</span>
-          <span style={{ fontSize: 12, color: 'var(--dim)' }}>({dailyCombined.rows.length} hari)</span>
+          <span style={{ fontSize: 15, fontWeight: 700 }}>Active Daily Sales &amp; Shipments</span>
+          <span style={{ fontSize: 12, color: 'var(--dim)' }}>({dailyCombined.rows.length} days · month-over-month)</span>
         </div>
         {dailySalesOpen && dailyCombined.rows.length > 0 ? (<>
           {/* Hide/unhide channel toggles */}
@@ -489,7 +528,7 @@ export default function ChannelsPage() {
             });
             return (
           <div style={{ overflowX: 'auto' }}>
-          <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + visibleChannels.length * 130 + 200), width: '100%' }}>
+          <table style={{ borderCollapse: 'collapse', fontSize: 12, minWidth: Math.max(600, 120 + visibleChannels.length * 130 + 130), width: '100%' }}>
             <thead>
               <tr style={{ borderBottom: '2px solid var(--border)' }}>
                 <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>Date</th>
@@ -497,8 +536,6 @@ export default function ChannelsPage() {
                   <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: CHANNEL_COLORS[ch] || 'var(--dim)' }}>{ch}</th>
                 ))}
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>Total</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--yellow)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Mkt Fee</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--yellow)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>MP Fee</th>
               </tr>
             </thead>
             <tbody>
@@ -526,8 +563,6 @@ export default function ChannelsPage() {
                     <div>{fmtRupiah(rowTotalRevenue)}</div>
                     <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{rowTotalOrders.toLocaleString('id-ID')}</div>
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>{row.adsFee > 0 ? fmtRupiah(row.adsFee) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>{row.mpFee > 0 ? fmtRupiah(row.mpFee) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                 </tr>
                 );
               })}
@@ -537,23 +572,40 @@ export default function ChannelsPage() {
                 {visibleChannels.map(ch => {
                   const chOrders = visibleRows.reduce((sum, r) => sum + (r.channels[ch]?.orders || 0), 0);
                   const chRevenue = visibleRows.reduce((sum, r) => sum + (r.channels[ch]?.revenue || 0), 0);
+                  const prevChRev = prevRevenue?.byChannel[ch];
+                  const chDelta = prevChRev && prevChRev > 0 ? ((chRevenue - prevChRev) / prevChRev) * 100 : null;
                   return (
                     <td key={ch} style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: CHANNEL_COLORS[ch] || 'var(--text)' }}>
                       {chRevenue > 0 ? (
                         <>
                           <div>{fmtRupiah(chRevenue)}</div>
                           {chOrders > 0 && <div style={{ fontSize: 10, fontStyle: 'italic', opacity: 0.7 }}>{chOrders.toLocaleString('id-ID')}</div>}
+                          {chDelta !== null && (
+                            <div style={{ fontSize: 10, marginTop: 2, color: chDelta >= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                              {chDelta >= 0 ? '▲' : '▼'} {chDelta >= 0 ? '+' : ''}{chDelta.toFixed(1)}%
+                            </div>
+                          )}
                         </>
                       ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                   );
                 })}
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>
-                  <div>{fmtRupiah(visibleRows.reduce((sum, r) => sum + visibleChannels.reduce((s, ch) => s + (r.channels[ch]?.revenue || 0), 0), 0))}</div>
-                  <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{visibleRows.reduce((sum, r) => sum + visibleChannels.reduce((s, ch) => s + (r.channels[ch]?.orders || 0), 0), 0).toLocaleString('id-ID')}</div>
-                </td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(visibleRows.reduce((sum, r) => sum + r.adsFee, 0))}</td>
-                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(visibleRows.reduce((sum, r) => sum + r.mpFee, 0))}</td>
+                {(() => {
+                  const grandRevenue = visibleRows.reduce((sum, r) => sum + visibleChannels.reduce((s, ch) => s + (r.channels[ch]?.revenue || 0), 0), 0);
+                  const grandOrders = visibleRows.reduce((sum, r) => sum + visibleChannels.reduce((s, ch) => s + (r.channels[ch]?.orders || 0), 0), 0);
+                  const revDelta = prevRevenue && prevRevenue.total > 0 ? ((grandRevenue - prevRevenue.total) / prevRevenue.total) * 100 : null;
+                  return (
+                    <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>
+                      <div>{fmtRupiah(grandRevenue)}</div>
+                      <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{grandOrders.toLocaleString('id-ID')}</div>
+                      {revDelta !== null && (
+                        <div style={{ fontSize: 10, marginTop: 2, color: revDelta >= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                          {revDelta >= 0 ? '▲' : '▼'} {revDelta >= 0 ? '+' : ''}{revDelta.toFixed(1)}% vs prev
+                        </div>
+                      )}
+                    </td>
+                  );
+                })()}
               </tr>
             </tbody>
           </table>
