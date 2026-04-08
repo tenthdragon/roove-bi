@@ -20,6 +20,25 @@ async function getCurrentUserId(): Promise<string | null> {
 }
 
 // ============================================================
+// TAX / PPN HELPER
+// ============================================================
+
+export async function getCurrentPPNRate(): Promise<number> {
+  const svc = createServiceSupabase();
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await svc
+    .from('tax_rates')
+    .select('rate')
+    .eq('name', 'PPN')
+    .lte('effective_from', today)
+    .order('effective_from', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data?.rate ? Number(data.rate) : 0;
+}
+
+// ============================================================
 // PURCHASE ORDER — CRUD
 // ============================================================
 
@@ -133,7 +152,7 @@ export async function getPurchaseOrderDetail(poId: number) {
     .from('warehouse_purchase_orders')
     .select(`
       *,
-      warehouse_vendors(id, name, pic_name, phone),
+      warehouse_vendors(id, name, pic_name, phone, is_pkp),
       warehouse_po_items(
         id, warehouse_product_id, quantity_requested, quantity_received, unit_price, notes,
         warehouse_products(id, name, category, entity, unit, hpp)
@@ -189,7 +208,7 @@ async function notifyPOSubmitted(svc: any, poId: number) {
   const { data: po } = await svc
     .from('warehouse_purchase_orders')
     .select(`
-      *, warehouse_vendors(name),
+      *, warehouse_vendors(name, is_pkp),
       warehouse_po_items(warehouse_product_id, quantity_requested, unit_price, warehouse_products(id, name))
     `)
     .eq('id', poId)
@@ -224,9 +243,21 @@ async function notifyPOSubmitted(svc: any, poId: number) {
 
   const shippingCost = Number(po.shipping_cost || 0);
   const otherCost = Number(po.other_cost || 0);
-  const grandTotal = itemsTotal + shippingCost + otherCost;
+  const subtotalBeforePPN = itemsTotal + shippingCost + otherCost;
 
-  const msg = `\u{1F4CB} <b>Purchase Order Submitted</b>\n\nNo PO: <b>${po.po_number}</b>\nVendor: ${po.warehouse_vendors?.name || '-'}\nTanggal PO: ${poDate}\nGudang: ${po.entity}\nExp. Delivery: ${expDate}\n${itemsText}\nOngkir: ${fmtRp(shippingCost)}\nBiaya Lain: ${fmtRp(otherCost)}\n<b>Total: ${fmtRp(grandTotal)}</b>`;
+  // Check if vendor is PKP and calculate PPN
+  const isVendorPKP = !!po.warehouse_vendors?.is_pkp;
+  let ppnLine = '';
+  let grandTotal = subtotalBeforePPN;
+  if (isVendorPKP) {
+    const ppnRate = await getCurrentPPNRate();
+    const ppnAmount = Math.round(subtotalBeforePPN * ppnRate / 100);
+    grandTotal = subtotalBeforePPN + ppnAmount;
+    ppnLine = `\nPPN (${ppnRate}%): ${fmtRp(ppnAmount)}`;
+  }
+
+  const vendorLabel = (po.warehouse_vendors?.name || '-') + (isVendorPKP ? ' [PKP]' : '');
+  const msg = `\u{1F4CB} <b>Purchase Order Submitted</b>\n\nNo PO: <b>${po.po_number}</b>\nVendor: ${vendorLabel}\nTanggal PO: ${poDate}\nGudang: ${po.entity}\nExp. Delivery: ${expDate}\n${itemsText}\nOngkir: ${fmtRp(shippingCost)}\nBiaya Lain: ${fmtRp(otherCost)}${ppnLine}\n<b>Total: ${fmtRp(grandTotal)}</b>`;
 
   // Send to all direktur_operasional
   const { data: direkturs } = await svc

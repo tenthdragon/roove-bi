@@ -1461,7 +1461,7 @@ export async function getVendors() {
   return data || [];
 }
 
-export async function createVendor(vendor: { name: string; address?: string; phone?: string; pic_name?: string; notes?: string }) {
+export async function createVendor(vendor: { name: string; address?: string; phone?: string; pic_name?: string; notes?: string; is_pkp?: boolean }) {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_vendors')

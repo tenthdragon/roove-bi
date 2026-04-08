@@ -350,7 +350,7 @@ function VendorTab() {
   const [vendors, setVendorList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [newVendor, setNewVendor] = useState({ name: '', address: '', phone: '', pic_name: '', notes: '' });
+  const [newVendor, setNewVendor] = useState({ name: '', address: '', phone: '', pic_name: '', notes: '', is_pkp: false });
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editData, setEditData] = useState<any>({});
   const [saving, setSaving] = useState(false);
@@ -368,9 +368,9 @@ function VendorTab() {
     if (!newVendor.name.trim()) { setMessage({ type: 'error', text: 'Nama vendor wajib' }); return; }
     setSaving(true);
     try {
-      await createVendor({ name: newVendor.name.trim(), address: newVendor.address || undefined, phone: newVendor.phone || undefined, pic_name: newVendor.pic_name || undefined, notes: newVendor.notes || undefined });
+      await createVendor({ name: newVendor.name.trim(), address: newVendor.address || undefined, phone: newVendor.phone || undefined, pic_name: newVendor.pic_name || undefined, notes: newVendor.notes || undefined, is_pkp: newVendor.is_pkp });
       setShowAdd(false);
-      setNewVendor({ name: '', address: '', phone: '', pic_name: '', notes: '' });
+      setNewVendor({ name: '', address: '', phone: '', pic_name: '', notes: '', is_pkp: false });
       setMessage({ type: 'success', text: 'Vendor ditambahkan' });
       await loadVendors();
     } catch (e: any) { setMessage({ type: 'error', text: e.message }); }
@@ -379,14 +379,14 @@ function VendorTab() {
 
   const startEdit = (v: any) => {
     setEditingId(v.id);
-    setEditData({ name: v.name, address: v.address || '', phone: v.phone || '', pic_name: v.pic_name || '', notes: v.notes || '' });
+    setEditData({ name: v.name, address: v.address || '', phone: v.phone || '', pic_name: v.pic_name || '', notes: v.notes || '', is_pkp: !!v.is_pkp });
   };
 
   const saveEdit = async () => {
     if (!editingId) return;
     setSaving(true);
     try {
-      await updateVendor(editingId, { name: editData.name, address: editData.address || null, phone: editData.phone || null, pic_name: editData.pic_name || null, notes: editData.notes || null });
+      await updateVendor(editingId, { name: editData.name, address: editData.address || null, phone: editData.phone || null, pic_name: editData.pic_name || null, notes: editData.notes || null, is_pkp: !!editData.is_pkp });
       setEditingId(null);
       setMessage({ type: 'success', text: 'Vendor diupdate' });
       await loadVendors();
@@ -432,6 +432,12 @@ function VendorTab() {
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Alamat</label><input value={newVendor.address} onChange={e => setNewVendor({...newVendor, address: e.target.value})} style={inputStyle} /></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Catatan</label><input value={newVendor.notes} onChange={e => setNewVendor({...newVendor, notes: e.target.value})} style={inputStyle} /></div>
           </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+            <label style={{ fontSize: 12, color: 'var(--dim)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+              <input type="checkbox" checked={newVendor.is_pkp} onChange={e => setNewVendor({...newVendor, is_pkp: e.target.checked})} />
+              PKP (Pengusaha Kena Pajak)
+            </label>
+          </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
             <button onClick={handleAdd} disabled={saving} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600 }}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
             <button onClick={() => setShowAdd(false)} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 12, cursor: 'pointer' }}>Batal</button>
@@ -443,7 +449,7 @@ function VendorTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Nama', 'PIC', 'No. HP', 'Alamat', 'Catatan', 'Aksi'].map(h => (
+              {['Nama', 'PKP', 'PIC', 'No. HP', 'Alamat', 'Catatan', 'Aksi'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -455,6 +461,15 @@ function VendorTab() {
                 <tr key={v.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                   <td style={{ padding: '6px 10px', fontWeight: 500, color: 'var(--text)' }}>
                     {isEditing ? <input value={editData.name} onChange={e => setEditData({...editData, name: e.target.value})} style={{ ...inputStyle, width: 150 }} /> : v.name}
+                  </td>
+                  <td style={{ padding: '6px 10px' }}>
+                    {isEditing ? (
+                      <input type="checkbox" checked={!!editData.is_pkp} onChange={e => setEditData({...editData, is_pkp: e.target.checked})} />
+                    ) : (
+                      <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: v.is_pkp ? 'rgba(59,130,246,0.15)' : 'rgba(148,163,184,0.15)', color: v.is_pkp ? '#60a5fa' : '#94a3b8' }}>
+                        {v.is_pkp ? 'PKP' : 'Non-PKP'}
+                      </span>
+                    )}
                   </td>
                   <td style={{ padding: '6px 10px', color: 'var(--text-secondary)' }}>
                     {isEditing ? <input value={editData.pic_name} onChange={e => setEditData({...editData, pic_name: e.target.value})} style={{ ...inputStyle, width: 120 }} /> : v.pic_name || '-'}
@@ -485,7 +500,7 @@ function VendorTab() {
               );
             })}
             {vendors.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada vendor. Klik "+ Tambah Vendor" untuk menambahkan.</td></tr>
+              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada vendor. Klik "+ Tambah Vendor" untuk menambahkan.</td></tr>
             )}
           </tbody>
         </table>

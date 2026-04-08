@@ -19,6 +19,7 @@ import {
   getROPAnalysis,
   updateProductROPConfig,
   getVendors,
+  getCurrentPPNRate,
   type POItem,
 } from '@/lib/ppic-actions';
 import { getProducts } from '@/lib/warehouse-ledger-actions';
@@ -301,12 +302,14 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
   const [items, setItems] = useState<{ productId: number | null; qty: number; unitPrice: number; search: string }[]>([{ productId: null, qty: 1, unitPrice: 0, search: '' }]);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [ppnRate, setPpnRate] = useState(0);
 
   useEffect(() => {
     (async () => {
-      const [v, p] = await Promise.all([getVendors(), getProducts()]);
+      const [v, p, rate] = await Promise.all([getVendors(), getProducts(), getCurrentPPNRate()]);
       setVendors(v);
       setProducts(p);
+      setPpnRate(rate);
     })();
   }, []);
 
@@ -323,7 +326,11 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
   };
 
   const itemsTotal = items.reduce((sum, i) => sum + (i.qty * i.unitPrice), 0);
-  const totalValue = itemsTotal + shippingCost + otherCost;
+  const selectedVendor = vendors.find(v => v.id === vendorId);
+  const isVendorPKP = !!selectedVendor?.is_pkp;
+  const subtotalBeforePPN = itemsTotal + shippingCost + otherCost;
+  const ppnAmount = isVendorPKP ? Math.round(subtotalBeforePPN * ppnRate / 100) : 0;
+  const totalValue = subtotalBeforePPN + ppnAmount;
 
   const handleSubmit = async () => {
     setError('');
@@ -489,6 +496,12 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
             <input type="number" value={otherCost || ''} onChange={e => setOtherCost(Number(e.target.value) || 0)} placeholder="0"
               style={{ ...fld, width: 130, textAlign: 'right' }} />
           </div>
+          {isVendorPKP && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
+              <span style={{ fontSize: 13, color: '#60a5fa' }}>PPN ({ppnRate}%)</span>
+              <span style={{ fontSize: 13, color: '#60a5fa' }}>Rp {fmtNum(ppnAmount)}</span>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 10 }}>
             <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>Total</span>
             <span style={{ fontSize: 16, fontWeight: 500, color: 'var(--text)' }}>Rp {fmtNum(totalValue)}</span>
@@ -689,12 +702,14 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
   const [error, setError] = useState('');
   const [actionLoading, setActionLoading] = useState('');
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [ppnRate, setPpnRate] = useState(0);
 
   useEffect(() => {
     (async () => {
       try {
-        const data = await getPurchaseOrderDetail(poId);
+        const [data, rate] = await Promise.all([getPurchaseOrderDetail(poId), getCurrentPPNRate()]);
         setPO(data);
+        setPpnRate(rate);
       } catch (e: any) {
         console.error(e);
         setError(typeof e === 'string' ? e : e?.message || JSON.stringify(e) || 'Gagal memuat detail PO');
@@ -718,7 +733,10 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
     </div>
   );
 
-  const totalValue = (po?.warehouse_po_items || []).reduce((sum: number, i: any) => sum + (Number(i.quantity_requested) * Number(i.unit_price)), 0);
+  const itemsSubtotal = (po?.warehouse_po_items || []).reduce((sum: number, i: any) => sum + (Number(i.quantity_requested) * Number(i.unit_price)), 0);
+  const isDetailPKP = !!po?.warehouse_vendors?.is_pkp;
+  const detailPPN = isDetailPKP ? Math.round(itemsSubtotal * ppnRate / 100) : 0;
+  const totalValue = itemsSubtotal + detailPPN;
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -730,7 +748,7 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
 
         {/* Header info */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16, fontSize: 13 }}>
-          <div><span style={{ color: 'var(--dim)' }}>Vendor:</span> <strong>{po?.warehouse_vendors?.name}</strong></div>
+          <div><span style={{ color: 'var(--dim)' }}>Vendor:</span> <strong>{po?.warehouse_vendors?.name}</strong>{isDetailPKP && <span style={{ marginLeft: 6, padding: '1px 5px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(59,130,246,0.15)', color: '#60a5fa' }}>PKP</span>}</div>
           <div><span style={{ color: 'var(--dim)' }}>Entity:</span> <strong>{po?.entity}</strong></div>
           <div><span style={{ color: 'var(--dim)' }}>Tanggal PO:</span> {fmtDate(po?.po_date)}</div>
           <div><span style={{ color: 'var(--dim)' }}>Exp. Delivery:</span> {fmtDate(po?.expected_date)}</div>
@@ -768,6 +786,18 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
             })}
           </tbody>
           <tfoot>
+            {isDetailPKP && (
+              <>
+                <tr style={{ borderTop: '1px solid var(--border)' }}>
+                  <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Subtotal:</td>
+                  <td style={{ padding: '8px', textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: 'var(--dim)' }}>Rp {fmtNum(itemsSubtotal)}</td>
+                </tr>
+                <tr>
+                  <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontSize: 12, color: '#60a5fa' }}>PPN ({ppnRate}%):</td>
+                  <td style={{ padding: '8px', textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: '#60a5fa' }}>Rp {fmtNum(detailPPN)}</td>
+                </tr>
+              </>
+            )}
             <tr style={{ borderTop: '2px solid var(--border)' }}>
               <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontWeight: 700, fontSize: 13 }}>Total:</td>
               <td style={{ padding: '8px', textAlign: 'right', fontWeight: 700, fontSize: 13, fontFamily: 'monospace' }}>Rp {fmtNum(totalValue)}</td>
