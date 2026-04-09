@@ -209,76 +209,83 @@ function UploadZone({ onUploaded }: { onUploaded: () => void }) {
   );
 }
 
-// ── Bank Summary Card ─────────────────────────────────────────────────────────
+// ── Business Table (compact) ─────────────────────────────────────────────────
 
-function BankCard({ session, bizName, onDelete }: { session: Session; bizName?: string; onDelete: () => void }) {
-  const netFlow = session.total_credit - session.total_debit;
-  const badge = BANK_BADGES[session.bank] || { bg: 'var(--bg-deep)', text: 'var(--text)' };
+function BizTable({ sessions, bizName, onDelete }: { sessions: Session[]; bizName: string; onDelete: (s: Session) => void }) {
+  const totals = sessions.reduce((acc, s) => ({
+    opening: acc.opening + (s.opening_balance || 0),
+    closing: acc.closing + (s.closing_balance || 0),
+    credit:  acc.credit  + (s.total_credit || 0),
+    debit:   acc.debit   + (s.total_debit  || 0),
+    trx:     acc.trx     + (s.transaction_count || 0),
+  }), { opening: 0, closing: 0, credit: 0, debit: 0, trx: 0 });
+  const netTotal = totals.credit - totals.debit;
+
+  const thStyle: React.CSSProperties = { padding: '6px 10px', fontSize: 10, fontWeight: 600, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap', textAlign: 'right' };
+  const tdStyle: React.CSSProperties = { padding: '5px 10px', fontSize: 12, fontFamily: 'monospace', whiteSpace: 'nowrap', textAlign: 'right' };
 
   return (
-    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: bizName ? (BIZ_COLORS[bizName] || 'var(--accent)') : (BANK_COLORS[session.bank] || 'var(--accent)') }} />
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, overflow: 'hidden', position: 'relative' }}>
+      {/* Color bar */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: BIZ_COLORS[bizName] || 'var(--accent)' }} />
 
-      {/* Header */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            {bizName && (
-              <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: BIZ_COLORS[bizName] || 'var(--accent)', color: '#fff', letterSpacing: '0.04em' }}>
-                {bizName}
-              </span>
-            )}
-            <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: badge.bg, color: badge.text, letterSpacing: '0.04em' }}>
-              {session.bank}
-            </span>
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4, fontFamily: 'monospace' }}>
-            {session.account_no && session.account_no !== 'UNKNOWN' ? session.account_no : '—'} · {session.transaction_count?.toLocaleString('id-ID')} trx
-          </div>
-        </div>
-        <button
-          onClick={onDelete}
-          title="Hapus data ini"
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--dim)', fontSize: 16, lineHeight: 1, padding: 4 }}
-        >×</button>
+      {/* Title */}
+      <div style={{ padding: '12px 14px 6px', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700, background: BIZ_COLORS[bizName] || '#64748b', color: '#fff' }}>{bizName}</span>
+        <span style={{ fontSize: 11, color: 'var(--dim)' }}>{totals.trx.toLocaleString('id-ID')} transaksi</span>
       </div>
 
-      {/* Balance row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-        <div style={{ background: 'var(--bg-deep)', borderRadius: 8, padding: '10px 12px' }}>
-          <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Saldo Awal</div>
-          <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: 'var(--text)' }}>
-            {session.opening_balance !== null ? fmtRp(session.opening_balance) : '—'}
-          </div>
-        </div>
-        <div style={{ background: 'var(--bg-deep)', borderRadius: 8, padding: '10px 12px' }}>
-          <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 3, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Saldo Akhir</div>
-          <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: 'var(--text)' }}>
-            {session.closing_balance !== null ? fmtRp(session.closing_balance) : '—'}
-          </div>
-        </div>
-      </div>
-
-      {/* In / Out / Net */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 9, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Cash Masuk</div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--green)', fontFamily: 'monospace' }}>+{fmtRp(session.total_credit)}</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 9, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Cash Keluar</div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--red)', fontFamily: 'monospace' }}>-{fmtRp(session.total_debit)}</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: 9, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Net Flow</div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: netFlow >= 0 ? 'var(--green)' : 'var(--red)', fontFamily: 'monospace' }}>
-            {netFlow >= 0 ? '+' : ''}{fmtRp(netFlow)}
-          </div>
-        </div>
-      </div>
-
-      <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 10, textAlign: 'right' }}>
-        Upload: {new Date(session.uploaded_at).toLocaleString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              <th style={{ ...thStyle, textAlign: 'left' }}>Bank</th>
+              <th style={{ ...thStyle, textAlign: 'left' }}>Rekening</th>
+              <th style={thStyle}>Saldo Awal</th>
+              <th style={thStyle}>Saldo Akhir</th>
+              <th style={thStyle}>Cash Masuk</th>
+              <th style={thStyle}>Cash Keluar</th>
+              <th style={thStyle}>Net Flow</th>
+              <th style={{ ...thStyle, width: 30 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {sessions.map(s => {
+              const net = s.total_credit - s.total_debit;
+              const badge = BANK_BADGES[s.bank] || { bg: 'var(--bg-deep)', text: 'var(--dim)' };
+              return (
+                <tr key={s.id} style={{ borderBottom: '1px solid rgba(55,65,81,0.2)' }}>
+                  <td style={{ ...tdStyle, textAlign: 'left', fontFamily: 'inherit' }}>
+                    <span style={{ display: 'inline-block', padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: badge.bg, color: badge.text }}>{s.bank}</span>
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: 'left', fontSize: 11, color: 'var(--text-secondary)' }}>
+                    {s.account_no && s.account_no !== 'UNKNOWN' ? s.account_no : '—'}
+                  </td>
+                  <td style={{ ...tdStyle, color: 'var(--text)' }}>{s.opening_balance != null ? fmtRp(s.opening_balance) : '—'}</td>
+                  <td style={{ ...tdStyle, color: 'var(--text)' }}>{s.closing_balance != null ? fmtRp(s.closing_balance) : '—'}</td>
+                  <td style={{ ...tdStyle, color: 'var(--green)' }}>+{fmtRp(s.total_credit)}</td>
+                  <td style={{ ...tdStyle, color: 'var(--red)' }}>-{fmtRp(s.total_debit)}</td>
+                  <td style={{ ...tdStyle, color: net >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>{net >= 0 ? '+' : ''}{fmtRp(net)}</td>
+                  <td style={{ ...tdStyle, textAlign: 'center' }}>
+                    <button onClick={() => onDelete(s)} title="Hapus" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--dim)', fontSize: 13, padding: 2, lineHeight: 1, opacity: 0.6 }}>×</button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {/* Subtotal row */}
+          <tfoot>
+            <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-deep)' }}>
+              <td colSpan={2} style={{ ...tdStyle, textAlign: 'left', fontFamily: 'inherit', fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>TOTAL {bizName}</td>
+              <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--text)' }}>{fmtRp(totals.opening)}</td>
+              <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--text)' }}>{fmtRp(totals.closing)}</td>
+              <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--green)' }}>+{fmtRp(totals.credit)}</td>
+              <td style={{ ...tdStyle, fontWeight: 700, color: 'var(--red)' }}>-{fmtRp(totals.debit)}</td>
+              <td style={{ ...tdStyle, fontWeight: 700, color: netTotal >= 0 ? 'var(--green)' : 'var(--red)' }}>{netTotal >= 0 ? '+' : ''}{fmtRp(netTotal)}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
       </div>
     </div>
   );
@@ -529,9 +536,11 @@ export default function BankCashFlowDashboard() {
 
   // Combined totals
   const combined = sessions.reduce((acc, s) => ({
-    credit: acc.credit + (s.total_credit || 0),
-    debit:  acc.debit  + (s.total_debit  || 0),
-  }), { credit: 0, debit: 0 });
+    credit:  acc.credit  + (s.total_credit    || 0),
+    debit:   acc.debit   + (s.total_debit     || 0),
+    opening: acc.opening + (s.opening_balance || 0),
+    closing: acc.closing + (s.closing_balance || 0),
+  }), { credit: 0, debit: 0, opening: 0, closing: 0 });
 
   // Group sessions by business
   const sessionsByBiz: Record<string, Session[]> = {};
@@ -643,68 +652,54 @@ export default function BankCashFlowDashboard() {
       {!loading && sessions.length > 0 && (
         <>
           {/* Combined summary */}
-          <div style={{ background: 'var(--card)', border: '2px solid var(--accent)', borderRadius: 10, padding: 16, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
-            <div>
-              <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Total Cash Masuk</div>
-              <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'monospace', color: 'var(--green)' }}>+{fmtRp(combined.credit)}</div>
-              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{fmtFull(combined.credit)}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Total Cash Keluar</div>
-              <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'monospace', color: 'var(--red)' }}>-{fmtRp(combined.debit)}</div>
-              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{fmtFull(combined.debit)}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Net Cash Flow</div>
-              <div style={{ fontSize: 24, fontWeight: 800, fontFamily: 'monospace', color: combined.credit - combined.debit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                {combined.credit - combined.debit >= 0 ? '+' : ''}{fmtRp(combined.credit - combined.debit)}
+          <div style={{ background: 'var(--card)', border: '2px solid var(--accent)', borderRadius: 10, padding: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Saldo Awal</div>
+                <div style={{ fontSize: 20, fontWeight: 800, fontFamily: 'monospace', color: 'var(--text)' }}>{fmtRp(combined.opening)}</div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{fmtFull(combined.opening)}</div>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{fmtFull(Math.abs(combined.credit - combined.debit))}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Periode</div>
-              <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{period || '—'}</div>
-              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>
-                {sessions.length} rekening{business ? ` · ${business}` : ''}
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Saldo Akhir</div>
+                <div style={{ fontSize: 20, fontWeight: 800, fontFamily: 'monospace', color: 'var(--text)' }}>{fmtRp(combined.closing)}</div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{fmtFull(combined.closing)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Cash Masuk</div>
+                <div style={{ fontSize: 20, fontWeight: 800, fontFamily: 'monospace', color: 'var(--green)' }}>+{fmtRp(combined.credit)}</div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{fmtFull(combined.credit)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Cash Keluar</div>
+                <div style={{ fontSize: 20, fontWeight: 800, fontFamily: 'monospace', color: 'var(--red)' }}>-{fmtRp(combined.debit)}</div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{fmtFull(combined.debit)}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Net Cash Flow</div>
+                <div style={{ fontSize: 20, fontWeight: 800, fontFamily: 'monospace', color: combined.credit - combined.debit >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {combined.credit - combined.debit >= 0 ? '+' : ''}{fmtRp(combined.credit - combined.debit)}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{fmtFull(Math.abs(combined.credit - combined.debit))}</div>
+              </div>
+              <div>
+                <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Periode</div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{period || '—'}</div>
+                <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>
+                  {sessions.length} rekening{business ? ` · ${business}` : ''}
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Per-business sections with cards */}
-          {bizGroups.map(biz => {
-            const bizSessions = sessionsByBiz[biz];
-            const bizCredit = bizSessions.reduce((s, x) => s + (x.total_credit || 0), 0);
-            const bizDebit  = bizSessions.reduce((s, x) => s + (x.total_debit  || 0), 0);
-            const bizNet = bizCredit - bizDebit;
-
-            return (
-              <div key={biz}>
-                {/* Business header (only show if multiple groups) */}
-                {bizGroups.length > 1 && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-                    <span style={{ display: 'inline-block', padding: '3px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, background: BIZ_COLORS[biz] || '#64748b', color: '#fff' }}>
-                      {biz}
-                    </span>
-                    <span style={{ fontSize: 12, color: 'var(--dim)' }}>
-                      In <span style={{ color: 'var(--green)', fontWeight: 600 }}>+{fmtRp(bizCredit)}</span>
-                      {' · '}Out <span style={{ color: 'var(--red)', fontWeight: 600 }}>-{fmtRp(bizDebit)}</span>
-                      {' · '}Net <span style={{ color: bizNet >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>{bizNet >= 0 ? '+' : ''}{fmtRp(bizNet)}</span>
-                    </span>
-                  </div>
-                )}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: bizGroups.length > 1 ? 16 : 0 }}>
-                  {bizSessions.map(s => (
-                    <BankCard
-                      key={s.id}
-                      session={s}
-                      bizName={bizGroups.length > 1 ? biz : undefined}
-                      onDelete={() => handleDelete(s.bank, s.period_label, s.account_no)}
-                    />
-                  ))}
-                </div>
-              </div>
-            );
-          })}
+          {/* Per-business compact tables */}
+          {bizGroups.map(biz => (
+            <BizTable
+              key={biz}
+              sessions={sessionsByBiz[biz]}
+              bizName={biz}
+              onDelete={(s) => handleDelete(s.bank, s.period_label, s.account_no)}
+            />
+          ))}
 
           {/* Daily chart */}
           {dailyData.length > 0 && <DailyChart data={dailyData} />}
