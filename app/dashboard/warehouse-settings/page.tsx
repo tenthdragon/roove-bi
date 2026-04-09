@@ -24,6 +24,7 @@ import {
 import { fetchAllBrands, fetchActiveBrands } from '@/lib/brand-actions';
 import { fmtRupiah } from '@/lib/utils';
 import BrandManager from '@/components/BrandManager';
+import { usePermissions } from '@/lib/PermissionsContext';
 
 const SUB_TABS = [
   { id: 'brands', label: 'Brand' },
@@ -42,21 +43,26 @@ const inputStyle = {
 };
 
 export default function WarehouseSettingsPage() {
+  const { can } = usePermissions();
+  const visibleTabs = SUB_TABS.filter(t => can(`whs:${t.id}`));
   const [activeTab, setActiveTab] = useState('brands');
+
+  // Auto-switch if current tab is no longer visible
+  const effectiveTab = visibleTabs.find(t => t.id === activeTab)?.id ?? visibleTabs[0]?.id ?? 'brands';
 
   return (
     <div className="fade-in">
       <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Warehouse Settings</h2>
 
       <div style={{ display: 'flex', gap: 2, marginBottom: 20, borderBottom: '1px solid var(--border)', overflowX: 'auto' }}>
-        {SUB_TABS.map(t => (
+        {visibleTabs.map(t => (
           <button key={t.id} onClick={() => setActiveTab(t.id)}
             style={{
               padding: '8px 16px', borderRadius: '8px 8px 0 0', border: 'none',
               cursor: 'pointer', fontSize: 13, fontWeight: 600,
-              background: activeTab === t.id ? 'var(--border)' : 'transparent',
-              color: activeTab === t.id ? '#60a5fa' : 'var(--dim)',
-              borderBottom: activeTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
+              background: effectiveTab === t.id ? 'var(--border)' : 'transparent',
+              color: effectiveTab === t.id ? '#60a5fa' : 'var(--dim)',
+              borderBottom: effectiveTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
               whiteSpace: 'nowrap',
             }}>
             {t.label}
@@ -64,11 +70,11 @@ export default function WarehouseSettingsPage() {
         ))}
       </div>
 
-      {activeTab === 'products' && <MasterProdukTab />}
-      {activeTab === 'brands' && <BrandTab />}
-      {activeTab === 'vendors' && <VendorTab />}
-      {activeTab === 'warehouses' && <ActiveWarehouseTab />}
-      {activeTab === 'mapping' && <MappingTabWrapper />}
+      {effectiveTab === 'products' && <MasterProdukTab />}
+      {effectiveTab === 'brands' && <BrandTab />}
+      {effectiveTab === 'vendors' && <VendorTab />}
+      {effectiveTab === 'warehouses' && <ActiveWarehouseTab />}
+      {effectiveTab === 'mapping' && <MappingTabWrapper />}
     </div>
   );
 }

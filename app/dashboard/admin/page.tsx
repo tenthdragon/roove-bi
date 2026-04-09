@@ -5,6 +5,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { useSupabase } from '@/lib/supabase-browser';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
+import { MATRIX_ROLES, PERMISSION_GROUPS } from '@/lib/utils';
 import { invalidateAll } from '@/lib/dashboard-cache';
 import SheetManager from '@/components/SheetManager';
 import ConnectionManager from '@/components/ConnectionManager';
@@ -25,6 +26,7 @@ const TABS = [
   { id: 'sync', label: 'Sync' },
   { id: 'data_ref', label: 'Data Reference' },
   { id: 'users', label: 'Users' },
+  { id: 'permissions', label: 'Permissions' },
   { id: 'logs', label: 'Logs' },
 ];
 
@@ -446,35 +448,41 @@ export default function AdminPage() {
     }
   };
 
-  if (profile?.role !== 'owner' && profile?.role !== 'finance' && profile?.role !== 'staff') {
+  if (!profile?.role || profile.role === 'pending') {
     return (
       <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>
         <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
         <div style={{ fontSize: 18, fontWeight: 600 }}>Akses Ditolak</div>
-        <div>Hanya Owner dan Finance yang bisa mengakses halaman ini.</div>
+        <div>Anda tidak memiliki akses ke halaman ini.</div>
       </div>
     );
   }
 
   const roleLabel = (r) => {
     switch (r) {
-      case 'owner': return { text: 'Owner', bg: 'var(--accent-subtle)', color: '#818cf8' };
-      case 'admin': return { text: 'Admin', bg: 'var(--badge-green-bg)', color: 'var(--green)' };
-      case 'finance': return { text: 'Finance', bg: 'var(--accent-subtle)', color: '#60a5fa' };
-      case 'brand_manager': return { text: 'Brand Manager', bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)' };
-      case 'sales_manager': return { text: 'Sales Manager', bg: 'var(--accent-subtle)', color: '#c084fc' };
-      case 'pending': return { text: 'Menunggu Approval', bg: 'var(--badge-red-bg)', color: 'var(--red)' };
-      case 'staff': return { text: 'Staff', bg: 'var(--accent-subtle)', color: '#38bdf8' };
-      case 'direktur_operasional': return { text: 'Direktur Ops', bg: 'var(--badge-green-bg)', color: '#34d399' };
-      case 'warehouse_manager': return { text: 'WH Manager', bg: 'var(--accent-subtle)', color: '#06b6d4' };
-      case 'ppic': return { text: 'PPIC', bg: 'var(--badge-yellow-bg)', color: '#f59e0b' };
+      case 'owner':              return { text: 'Owner',             bg: 'var(--accent-subtle)',    color: '#818cf8' };
+      case 'admin':              return { text: 'Admin',             bg: 'var(--badge-green-bg)',   color: 'var(--green)' };
+      case 'direktur_ops':       return { text: 'Direktur Ops',      bg: 'var(--badge-green-bg)',   color: '#34d399' };
+      case 'staf_ops':           return { text: 'Staf Ops',          bg: 'var(--accent-subtle)',    color: '#38bdf8' };
+      case 'direktur_finance':   return { text: 'Direktur Finance',  bg: 'var(--accent-subtle)',    color: '#60a5fa' };
+      case 'staf_finance':       return { text: 'Staf Finance',      bg: 'var(--accent-subtle)',    color: '#93c5fd' };
+      case 'brand_manager':      return { text: 'Brand Manager',     bg: 'var(--badge-yellow-bg)',  color: 'var(--yellow)' };
+      case 'sales_manager':      return { text: 'Sales Manager',     bg: 'var(--accent-subtle)',    color: '#c084fc' };
+      case 'warehouse_manager':  return { text: 'WH Manager',        bg: 'var(--accent-subtle)',    color: '#06b6d4' };
+      case 'ppic_manager':       return { text: 'PPIC Manager',      bg: 'var(--badge-yellow-bg)',  color: '#f59e0b' };
+      case 'pending':            return { text: 'Menunggu Approval', bg: 'var(--badge-red-bg)',     color: 'var(--red)' };
+      // legacy fallbacks
+      case 'finance':            return { text: 'Finance (lama)',    bg: 'var(--accent-subtle)',    color: '#60a5fa' };
+      case 'staff':              return { text: 'Staff (lama)',      bg: 'var(--accent-subtle)',    color: '#38bdf8' };
+      case 'direktur_operasional': return { text: 'Dir. Ops (lama)',  bg: 'var(--badge-green-bg)',  color: '#34d399' };
+      case 'ppic':               return { text: 'PPIC (lama)',       bg: 'var(--badge-yellow-bg)',  color: '#f59e0b' };
       default: return { text: r, bg: 'var(--border)', color: 'var(--dim)' };
     }
   };
 
   // Filter tabs based on role
   const visibleTabs = TABS.filter(t => {
-    if (t.id === 'users' && profile?.role !== 'owner') return false;
+    if ((t.id === 'users' || t.id === 'permissions') && profile?.role !== 'owner') return false;
     // Brands tab moved to Warehouse Settings
     if (t.id === 'data_ref' && profile?.role !== 'owner') return false;
     return true;
@@ -1186,14 +1194,9 @@ export default function AdminPage() {
                   value={inviteRole} onChange={e => setInviteRole(e.target.value)}
                   style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}
                 >
-                  <option value="admin">Admin</option>
-                  <option value="finance">Finance</option>
-                  <option value="direktur_operasional">Direktur Operasional</option>
-                  <option value="warehouse_manager">Warehouse Manager</option>
-                  <option value="ppic">PPIC</option>
-                  <option value="brand_manager">Brand Manager</option>
-                  <option value="sales_manager">Sales Manager</option>
-                  <option value="staff">Staff</option>
+                  {MATRIX_ROLES.map(mr => (
+                    <option key={mr.id} value={mr.id}>{mr.label}</option>
+                  ))}
                 </select>
               </div>
               <button
@@ -1222,9 +1225,20 @@ export default function AdminPage() {
 
           {/* Role Legend */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', fontSize: 10 }}>
-            {['owner', 'admin', 'finance', 'direktur_operasional', 'warehouse_manager', 'ppic', 'staff', 'brand_manager', 'sales_manager', 'pending'].map(r => {
+            {[
+              { r: 'owner',             desc: 'akses penuh' },
+              { r: 'admin',             desc: 'lihat semua, atur via matrix' },
+              { r: 'direktur_ops',      desc: 'operasional + notif gudang' },
+              { r: 'staf_ops',          desc: 'akses via matrix' },
+              { r: 'direktur_finance',  desc: 'finance + laporan' },
+              { r: 'staf_finance',      desc: 'akses via matrix' },
+              { r: 'brand_manager',     desc: 'marketing & brand' },
+              { r: 'sales_manager',     desc: 'channel & sales' },
+              { r: 'warehouse_manager', desc: 'gudang ops' },
+              { r: 'ppic_manager',      desc: 'PPIC & stock masuk' },
+              { r: 'pending',           desc: 'belum disetujui' },
+            ].map(({ r, desc }) => {
               const rl = roleLabel(r);
-              const desc = r === 'owner' ? 'akses penuh' : r === 'admin' ? 'read-only' : r === 'finance' ? 'sync/upload' : r === 'direktur_operasional' ? 'semua + notif gudang' : r === 'warehouse_manager' ? 'gudang ops' : r === 'ppic' ? 'stock masuk' : r === 'brand_manager' ? 'marketing' : r === 'sales_manager' ? 'channel' : r === 'staff' ? 'admin only' : 'pending';
               return (
                 <span key={r} style={{ padding: '2px 8px', borderRadius: 5, background: rl.bg, color: rl.color, fontWeight: 600 }}>
                   {rl.text} — {desc}
@@ -1254,14 +1268,15 @@ export default function AdminPage() {
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       {u.role === 'pending' ? (
                         <>
-                          <button onClick={() => handleRoleChange(u.id, 'staff')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#38bdf8', fontSize: 12, fontWeight: 600 }}>✓ Staff</button>
-                          <button onClick={() => handleRoleChange(u.id, 'admin')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--badge-green-bg)', color: 'var(--green)', fontSize: 12, fontWeight: 600 }}>✓ Admin</button>
-                          <button onClick={() => handleRoleChange(u.id, 'finance')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#60a5fa', fontSize: 12, fontWeight: 600 }}>✓ Finance</button>
-                          <button onClick={() => handleRoleChange(u.id, 'brand_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 12, fontWeight: 600 }}>✓ Brand Manager</button>
-                          <button onClick={() => handleRoleChange(u.id, 'sales_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#c084fc', fontSize: 12, fontWeight: 600 }}>✓ Sales Manager</button>
-                          <button onClick={() => handleRoleChange(u.id, 'warehouse_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#06b6d4', fontSize: 12, fontWeight: 600 }}>✓ WH Manager</button>
-                          <button onClick={() => handleRoleChange(u.id, 'ppic')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#34d399', fontSize: 12, fontWeight: 600 }}>✓ PPIC</button>
-                          <button onClick={() => handleRoleChange(u.id, 'direktur_operasional')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#f97316', fontSize: 12, fontWeight: 600 }}>✓ Direktur Operasional</button>
+                          {MATRIX_ROLES.map(mr => {
+                            const rl = roleLabel(mr.id);
+                            return (
+                              <button key={mr.id} onClick={() => handleRoleChange(u.id, mr.id)}
+                                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: rl.bg, color: rl.color, fontSize: 12, fontWeight: 600 }}>
+                                ✓ {mr.label}
+                              </button>
+                            );
+                          })}
                         </>
                       ) : (
                         <select
@@ -1269,19 +1284,14 @@ export default function AdminPage() {
                           onChange={(e) => handleRoleChange(u.id, e.target.value)}
                           style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}
                         >
-                          <option value="staff">Staff</option>
-                          <option value="admin">Admin</option>
-                          <option value="finance">Finance</option>
-                          <option value="direktur_operasional">Direktur Operasional</option>
-                          <option value="warehouse_manager">Warehouse Manager</option>
-                          <option value="ppic">PPIC</option>
-                          <option value="brand_manager">Brand Manager</option>
-                          <option value="sales_manager">Sales Manager</option>
+                          {MATRIX_ROLES.map(mr => (
+                            <option key={mr.id} value={mr.id}>{mr.label}</option>
+                          ))}
                           <option value="pending">Revoke Access</option>
                         </select>
                       )}
                       {/* Telegram Chat ID */}
-                      {u.role === 'direktur_operasional' && (
+                      {(u.role === 'direktur_ops' || u.role === 'direktur_operasional') && (
                         <input
                           type="text"
                           placeholder="Telegram Chat ID"
@@ -1303,6 +1313,123 @@ export default function AdminPage() {
           </div>
         </div>
       )}
+
+      {activeTab === 'permissions' && profile?.role === 'owner' && (
+        <PermissionsMatrix supabase={supabase} />
+      )}
+    </div>
+  );
+}
+
+// ============================================================
+// Permissions Matrix Component
+// ============================================================
+function PermissionsMatrix({ supabase }) {
+  const [matrix, setMatrix] = useState<Record<string, Set<string>>>({});
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    supabase.from('role_permissions').select('role, permission_key').then(({ data }) => {
+      const m: Record<string, Set<string>> = {};
+      MATRIX_ROLES.forEach(r => { m[r.id] = new Set(); });
+      (data ?? []).forEach((row: any) => {
+        if (!m[row.role]) m[row.role] = new Set();
+        m[row.role].add(row.permission_key);
+      });
+      setMatrix(m);
+    });
+  }, []);
+
+  const toggle = (role: string, key: string) => {
+    setMatrix(prev => {
+      const next = { ...prev, [role]: new Set(prev[role]) };
+      if (next[role].has(key)) next[role].delete(key);
+      else next[role].add(key);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setSaving(true);
+    // Delete all existing, then re-insert checked ones
+    await supabase.from('role_permissions').delete().neq('role', 'owner');
+    const rows: { role: string; permission_key: string }[] = [];
+    MATRIX_ROLES.forEach(r => {
+      matrix[r.id]?.forEach(key => rows.push({ role: r.id, permission_key: key }));
+    });
+    if (rows.length > 0) await supabase.from('role_permissions').insert(rows);
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  };
+
+  const thStyle: React.CSSProperties = {
+    padding: '6px 10px', fontSize: 11, fontWeight: 700, color: 'var(--dim)',
+    textAlign: 'center', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)',
+  };
+  const tdStyle: React.CSSProperties = {
+    padding: '5px 8px', textAlign: 'center', borderBottom: '1px solid var(--border)',
+  };
+  const labelStyle: React.CSSProperties = {
+    padding: '5px 12px', fontSize: 12, color: 'var(--text)', fontWeight: 500,
+    textAlign: 'left', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
+  };
+  const groupHeaderStyle: React.CSSProperties = {
+    padding: '8px 12px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
+    letterSpacing: '0.05em', color: 'var(--dim)', background: 'var(--bg)',
+    borderBottom: '1px solid var(--border)',
+  };
+
+  return (
+    <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+      <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700 }}>Permission Matrix</div>
+          <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 2 }}>Centang untuk memberi akses. Owner selalu punya akses penuh.</div>
+        </div>
+        <button onClick={save} disabled={saving}
+          style={{ padding: '7px 18px', borderRadius: 7, border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
+            background: saved ? 'var(--green)' : 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600 }}>
+          {saving ? 'Menyimpan...' : saved ? '✓ Tersimpan' : 'Simpan'}
+        </button>
+      </div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={{ ...thStyle, textAlign: 'left', minWidth: 180 }}>Fitur / Halaman</th>
+              {MATRIX_ROLES.map(r => (
+                <th key={r.id} style={thStyle}>{r.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {PERMISSION_GROUPS.map(group => (
+              <>
+                <tr key={group.label}>
+                  <td colSpan={MATRIX_ROLES.length + 1} style={groupHeaderStyle}>{group.label}</td>
+                </tr>
+                {group.keys.map(({ key, label }) => (
+                  <tr key={key} style={{ background: 'var(--card)' }}>
+                    <td style={labelStyle}>{label}</td>
+                    {MATRIX_ROLES.map(r => (
+                      <td key={r.id} style={tdStyle}>
+                        <input
+                          type="checkbox"
+                          checked={matrix[r.id]?.has(key) ?? false}
+                          onChange={() => toggle(r.id, key)}
+                          style={{ cursor: 'pointer', width: 15, height: 15 }}
+                        />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

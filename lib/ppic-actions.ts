@@ -259,11 +259,11 @@ async function notifyPOSubmitted(svc: any, poId: number) {
   const vendorLabel = (po.warehouse_vendors?.name || '-') + (isVendorPKP ? ' [PKP]' : '');
   const msg = `\u{1F4CB} <b>Purchase Order Submitted</b>\n\nNo PO: <b>${po.po_number}</b>\nVendor: ${vendorLabel}\nTanggal PO: ${poDate}\nGudang: ${po.entity}\nExp. Delivery: ${expDate}\n${itemsText}\nOngkir: ${fmtRp(shippingCost)}\nBiaya Lain: ${fmtRp(otherCost)}${ppnLine}\n<b>Total: ${fmtRp(grandTotal)}</b>`;
 
-  // Send to all direktur_operasional
+  // Send to all direktur_ops (and legacy direktur_operasional)
   const { data: direkturs } = await svc
     .from('profiles')
     .select('telegram_chat_id')
-    .eq('role', 'direktur_operasional')
+    .in('role', ['direktur_ops', 'direktur_operasional'])
     .not('telegram_chat_id', 'is', null);
 
   if (direkturs && direkturs.length > 0) {

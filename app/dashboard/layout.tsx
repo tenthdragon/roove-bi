@@ -6,6 +6,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSupabase } from '@/lib/supabase-browser';
 import { ALL_TABS, canAccessTab } from '@/lib/utils';
+import { PermissionsProvider, usePermissions } from '@/lib/PermissionsContext';
 import { DateRangeProvider, useDateRange } from '@/lib/DateRangeContext';
 import DateRangePicker from '@/components/DateRangePicker';
 import { ActiveBrandsProvider } from '@/lib/ActiveBrandsContext';
@@ -16,25 +17,7 @@ function getCurrentTab(path) {
   return seg || 'overview';
 }
 
-function getAllowedTabs(prof) {
-  if (!prof) return [];
-  if (prof.role === 'staff') {
-    return ['admin'];
-  }
-  if (prof.role === 'warehouse_manager') {
-    return ['warehouse'];
-  }
-  if (prof.role === 'ppic') {
-    return ['warehouse', 'ppic'];
-  }
-  if (prof.role === 'brand_manager') {
-    return prof.allowed_tabs && prof.allowed_tabs.length > 0 ? prof.allowed_tabs : ['marketing'];
-  }
-  if (prof.role === 'sales_manager') {
-    return ['channels', 'waba-management'];
-  }
-  return null; // owner, admin, finance, direktur_operasional, manager → all tabs
-}
+// getAllowedTabs is now driven by role_permissions — see usePermissions() hook below
 
 function RefreshViewsButton() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
@@ -251,6 +234,7 @@ function HeaderDatePicker() {
 
 export default function DashboardLayout({ children }) {
   const [profile, setProfile] = useState(null);
+  const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -266,7 +250,16 @@ export default function DashboardLayout({ children }) {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/'); return; }
       const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      if (data) setProfile(data);
+      if (data) {
+        setProfile(data);
+        if (data.role !== 'owner') {
+          const { data: perms } = await supabase
+            .from('role_permissions')
+            .select('permission_key')
+            .eq('role', data.role);
+          setPermissions(new Set((perms ?? []).map((r: any) => r.permission_key)));
+        }
+      }
       setLoading(false);
     }
     load();
@@ -289,11 +282,14 @@ export default function DashboardLayout({ children }) {
 
   useEffect(() => {
     if (!profile || loading) return;
-    const allowed = getAllowedTabs(profile);
-    if (allowed !== null && !allowed.includes(currentTab)) {
-      router.replace('/dashboard/' + allowed[0]);
+    if (profile.role === 'pending' || profile.role === 'owner') return;
+    const tabKey = `tab:${currentTab}`;
+    if (!permissions.has(tabKey) && permissions.size > 0) {
+      // Redirect to first accessible tab
+      const first = Array.from(permissions).find(k => k.startsWith('tab:'));
+      if (first) router.replace('/dashboard/' + first.replace('tab:', '').replace('overview', ''));
     }
-  }, [profile, loading, currentTab]);
+  }, [profile, loading, currentTab, permissions]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -306,12 +302,9 @@ export default function DashboardLayout({ children }) {
   };
 
   const goHome = () => {
-    const allowed = getAllowedTabs(profile);
-    if (allowed !== null) {
-      navigateTo(allowed[0]);
-    } else {
-      navigateTo('overview');
-    }
+    if (profile?.role === 'owner') { navigateTo('overview'); return; }
+    const first = Array.from(permissions).find(k => k.startsWith('tab:'));
+    navigateTo(first ? first.replace('tab:', '') : 'overview');
   };
 
   const isPending = profile?.role === 'pending';
@@ -319,22 +312,10 @@ export default function DashboardLayout({ children }) {
   const visibleTabs = profile
     ? ALL_TABS.map(t => {
         if (isPending) return null;
-        if (t.ownerOnly && profile.role !== 'owner' && profile.role !== 'finance') return null;
-        const allowed = getAllowedTabs(profile);
-        if (allowed !== null && !allowed.includes(t.id)) {
-          // Even if parent not allowed, check if any children are allowed
-          if (t.children?.some(c => allowed.includes(c.id))) {
-            return { ...t, children: t.children.filter(c => allowed.includes(c.id)) };
-          }
-          return null;
-        }
-        if (!allowed && !canAccessTab(profile, t.id)) return null;
-        // Filter children by access
+        if (t.ownerOnly && profile.role !== 'owner') return null;
+        if (!canAccessTab(profile.role, t.id, permissions)) return null;
         if (t.children) {
-          const visibleChildren = t.children.filter(c => {
-            if (allowed !== null) return allowed.includes(c.id);
-            return canAccessTab(profile, c.id);
-          });
+          const visibleChildren = t.children.filter(c => canAccessTab(profile.role, c.id, permissions));
           return { ...t, children: visibleChildren };
         }
         return t;
@@ -368,14 +349,6 @@ export default function DashboardLayout({ children }) {
     );
   }
 
-  const bmAllowed = getAllowedTabs(profile);
-  if (bmAllowed !== null && !bmAllowed.includes(currentTab)) {
-    return (
-      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)' }}>
-        <div className="spinner" style={{ width:32, height:32, border:'3px solid var(--border)', borderTop:'3px solid var(--accent)', borderRadius:'50%' }} />
-      </div>
-    );
-  }
 
   const sidebarW = sidebarCollapsed ? 64 : 220;
 
@@ -539,6 +512,7 @@ export default function DashboardLayout({ children }) {
   }
 
   return (
+    <PermissionsProvider role={profile?.role} permissions={permissions}>
     <DateRangeProvider>
       <ActiveBrandsProvider>
       <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex' }}>
@@ -716,6 +690,7 @@ export default function DashboardLayout({ children }) {
       </div>
       </ActiveBrandsProvider>
     </DateRangeProvider>
+    </PermissionsProvider>
   );
 }
 

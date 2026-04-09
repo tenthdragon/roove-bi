@@ -123,8 +123,8 @@ export async function uploadExcelData(formData: FormData) {
     .eq('id', user.id)
     .single();
 
-  if (profile?.role !== 'owner' && profile?.role !== 'finance' && profile?.role !== 'staff')
-    throw new Error('Only owners, finance, and staff users can upload data');
+  if (!['owner', 'direktur_finance', 'staf_finance', 'finance', 'staf_ops', 'staff'].includes(profile?.role))
+    throw new Error('Tidak memiliki akses untuk upload data');
 
   const file = formData.get('file') as File;
   if (!file) throw new Error('No file provided');

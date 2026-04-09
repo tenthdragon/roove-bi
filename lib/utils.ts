@@ -2,7 +2,79 @@
 // Types
 // ============================================================
 
-export type UserRole = 'owner' | 'admin' | 'finance' | 'brand_manager' | 'sales_manager' | 'staff' | 'direktur_operasional' | 'warehouse_manager' | 'ppic' | 'pending';
+export type UserRole =
+  | 'owner'
+  | 'admin'
+  | 'direktur_ops'
+  | 'staf_ops'
+  | 'direktur_finance'
+  | 'staf_finance'
+  | 'brand_manager'
+  | 'sales_manager'
+  | 'warehouse_manager'
+  | 'ppic_manager'
+  | 'pending'
+  // legacy (kept for backwards-compat during migration)
+  | 'finance'
+  | 'staff'
+  | 'direktur_operasional'
+  | 'ppic';
+
+// Roles that appear in the permission matrix (excludes owner + pending)
+export const MATRIX_ROLES: { id: string; label: string }[] = [
+  { id: 'admin',             label: 'Admin' },
+  { id: 'direktur_ops',      label: 'Direktur Ops' },
+  { id: 'staf_ops',          label: 'Staf Ops' },
+  { id: 'direktur_finance',  label: 'Direktur Finance' },
+  { id: 'staf_finance',      label: 'Staf Finance' },
+  { id: 'brand_manager',     label: 'Brand Manager' },
+  { id: 'sales_manager',     label: 'Sales Manager' },
+  { id: 'warehouse_manager', label: 'WH Manager' },
+  { id: 'ppic_manager',      label: 'PPIC Manager' },
+];
+
+// All permission keys grouped for the matrix UI
+export const PERMISSION_GROUPS = [
+  {
+    label: 'Halaman / Tab',
+    keys: [
+      { key: 'tab:overview',           label: 'Dashboard' },
+      { key: 'tab:marketing',          label: 'Marketing Channel' },
+      { key: 'tab:channels',           label: 'Sales Channel' },
+      { key: 'tab:waba-management',    label: '↳ WABA Management' },
+      { key: 'tab:ppic',               label: 'PPIC' },
+      { key: 'tab:warehouse',          label: 'Warehouse' },
+      { key: 'tab:warehouse-settings', label: '↳ Warehouse Settings' },
+      { key: 'tab:pulse',              label: 'Business Pulse' },
+      { key: 'tab:customers',          label: 'Customer Analysis' },
+      { key: 'tab:brand-analysis',     label: 'Brand Analysis' },
+      { key: 'tab:finance',            label: 'Finance Analysis' },
+    ],
+  },
+  {
+    label: 'Warehouse — Aksi',
+    keys: [
+      { key: 'wh:stock_masuk',    label: '+ Stock Masuk' },
+      { key: 'wh:transfer',       label: 'Transfer' },
+      { key: 'wh:stock_keluar',   label: 'Stock Keluar' },
+      { key: 'wh:dispose',        label: 'Dispose' },
+      { key: 'wh:konversi',       label: 'Konversi (WIP)' },
+      { key: 'wh:opname_manage',  label: 'Stock Opname (buat/hitung)' },
+      { key: 'wh:opname_approve', label: 'Stock Opname (approve)' },
+      { key: 'wh:mapping_sync',   label: 'Sync Scalev' },
+    ],
+  },
+  {
+    label: 'Warehouse Settings — Sub-tab',
+    keys: [
+      { key: 'whs:brands',     label: 'Brand' },
+      { key: 'whs:vendors',    label: 'Vendor' },
+      { key: 'whs:products',   label: 'Master Produk' },
+      { key: 'whs:warehouses', label: 'Active Warehouse' },
+      { key: 'whs:mapping',    label: 'Mapping Scalev' },
+    ],
+  },
+];
 
 export interface Profile {
   id: string;
@@ -191,17 +263,13 @@ export const ALL_TABS: TabDef[] = [
 
 export type TabId = string;
 
-// Check if user can access a tab
-export function canAccessTab(profile: Profile, tabId: string): boolean {
-  if (profile.role === 'pending') return false;
-  if (tabId === 'warehouse-settings') return profile.role === 'owner' || profile.role === 'direktur_operasional';
-  if (profile.role === 'owner' || profile.role === 'admin' || profile.role === 'finance' || profile.role === 'direktur_operasional') return true;
-  if (tabId === 'ppic') return ['owner', 'admin', 'direktur_operasional', 'ppic'].includes(profile.role);
-  if (profile.role === 'warehouse_manager' || profile.role === 'ppic') return tabId === 'warehouse';
-  if (profile.role === 'staff') return tabId === 'admin';
-  if (tabId === 'admin') return false;
-  if (profile.allowed_tabs.length === 0) return true;
-  return profile.allowed_tabs.includes(tabId);
+// Check if user can access a tab based on loaded permissions set.
+// Pass the Set<string> loaded from role_permissions table.
+// Owner always returns true.
+export function canAccessTab(role: string, tabId: string, permissions: Set<string>): boolean {
+  if (role === 'pending') return false;
+  if (role === 'owner') return true;
+  return permissions.has(`tab:${tabId}`);
 }
 
 // Check if user can access a product

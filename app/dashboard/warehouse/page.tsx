@@ -38,6 +38,7 @@ import {
 import { getPurchaseOrders as getPOs, receivePOItems } from '@/lib/ppic-actions';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { getCurrentProfile } from '@/lib/actions';
+import { usePermissions } from '@/lib/PermissionsContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
 
 // ── Types ──
@@ -291,12 +292,13 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
   categoryFilter: string; setCategoryFilter: (v: string) => void;
   onRefresh: () => void; userRole: string;
 }) {
+  const { can } = usePermissions();
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'in' | 'out' | 'transfer' | 'convert' | 'dispose'>('in');
 
-  // Role-based button visibility
-  const canStockIn = true;
-  const canWarehouseOps = !['ppic'].includes(userRole); // transfer, convert, out, dispose
+  // Permission-based button visibility
+  const canStockIn = can('wh:stock_masuk');
+  const canWarehouseOps = can('wh:transfer') || can('wh:stock_keluar') || can('wh:dispose');
   const [warehouseFilter, setWarehouseFilter] = useState('all');
 
   const categories = useMemo(() => {
@@ -340,19 +342,19 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
 
       {/* Action buttons + Filters */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        {canStockIn && <button onClick={() => { setModalMode('in'); setShowModal(true); }}
+        {can('wh:stock_masuk') && <button onClick={() => { setModalMode('in'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--green)', color: '#fff' }}>
           + Stock Masuk
         </button>}
-        {canWarehouseOps && <button onClick={() => { setModalMode('transfer'); setShowModal(true); }}
+        {can('wh:transfer') && <button onClick={() => { setModalMode('transfer'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#06b6d4', color: '#fff' }}>
           Transfer
         </button>}
-        {canWarehouseOps && <button onClick={() => { setModalMode('out'); setShowModal(true); }}
+        {can('wh:stock_keluar') && <button onClick={() => { setModalMode('out'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#f97316', color: '#fff' }}>
           Stock Keluar
         </button>}
-        {canWarehouseOps && <button onClick={() => { setModalMode('dispose'); setShowModal(true); }}
+        {can('wh:dispose') && <button onClick={() => { setModalMode('dispose'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--red)', color: '#fff' }}>
           Dispose
         </button>}
@@ -438,11 +440,10 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
 // ============================================================
 
 function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => void; userRole: string }) {
+  const { can } = usePermissions();
   const [showConvert, setShowConvert] = useState(false);
   const [warehouseFilter, setWarehouseFilter] = useState('BTN - RLB');
   const [search, setSearch] = useState('');
-
-  const canWarehouseOps = !['ppic'].includes(userRole);
 
   const wipData = useMemo(() => {
     let result = data.filter(r => r.category === 'wip' || r.category === 'wip_material');
@@ -474,7 +475,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        {canWarehouseOps && (
+        {can('wh:konversi') && (
           <button onClick={() => setShowConvert(true)}
             style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#8b5cf6', color: '#fff' }}>
             + Konversi ke FG
@@ -1089,6 +1090,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
 // ============================================================
 
 function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void }) {
+  const { can } = usePermissions();
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [products, setProducts] = useState<any[]>([]);
@@ -1225,10 +1227,10 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
         <div style={{ flex: 1 }} />
         <input type="text" placeholder="Cari nama Scalev..." value={search} onChange={(e) => setSearch(e.target.value)}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', minWidth: 200 }} />
-        <button onClick={handleSync} disabled={syncing}
+        {can('wh:mapping_sync') && <button onClick={handleSync} disabled={syncing}
           style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', cursor: syncing ? 'wait' : 'pointer', fontSize: 12, fontWeight: 600, background: 'transparent', color: 'var(--dim)' }}>
           {syncing ? 'Syncing...' : 'Sync Baru'}
-        </button>
+        </button>}
       </div>
 
       {/* Table */}
@@ -1856,6 +1858,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
   expandedSO: string | null; setExpandedSO: (v: string | null) => void;
   session: any; sessionItems: any[]; onRefresh: () => void;
 }) {
+  const { can } = usePermissions();
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newEntity, setNewEntity] = useState('RLB');
   const [newLabel, setNewLabel] = useState('');
@@ -1968,13 +1971,13 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
             <div style={{ fontSize: 12, color: 'var(--dim)' }}>Entity: {session.entity} | {fullDateID(session.opname_date)}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={handleCancel} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>Batalkan</button>
-            <button onClick={handleSaveCounts} disabled={saving} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>
+            {can('wh:opname_manage') && <button onClick={handleCancel} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>Batalkan</button>}
+            {can('wh:opname_manage') && <button onClick={handleSaveCounts} disabled={saving} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>
               {saving ? 'Menyimpan...' : 'Simpan Draft'}
-            </button>
-            <button onClick={handleSubmitReview} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+            </button>}
+            {can('wh:opname_manage') && <button onClick={handleSubmitReview} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
               Selesai Hitung →
-            </button>
+            </button>}
           </div>
         </div>
         <div style={{ padding: '8px 12px', background: 'var(--bg)', borderRadius: 8, marginBottom: 16, fontSize: 12, color: 'var(--yellow)' }}>
@@ -2023,12 +2026,12 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
             <div style={{ fontSize: 12, color: 'var(--dim)' }}>Entity: {session.entity} | {fullDateID(session.opname_date)} | {itemsWithVariance.length} item berselisih</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={handleRevertCounting} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>
+            {can('wh:opname_manage') && <button onClick={handleRevertCounting} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>
               ← Kembali ke Hitung
-            </button>
-            <button onClick={handleApprove} disabled={approving} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: 'none', background: 'var(--green)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+            </button>}
+            {can('wh:opname_approve') && <button onClick={handleApprove} disabled={approving} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: 'none', background: 'var(--green)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
               {approving ? 'Memproses...' : 'Approve & Adjust'}
-            </button>
+            </button>}
           </div>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -2072,7 +2075,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
       </div>
 
       {/* Create new SO */}
-      {!showCreateForm ? (
+      {can('wh:opname_manage') && !showCreateForm ? (
         <button onClick={() => setShowCreateForm(true)} style={{ marginBottom: 16, padding: '10px 20px', fontSize: 13, fontWeight: 600, borderRadius: 8, border: '1px dashed var(--accent)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', width: '100%' }}>
           + Mulai Stock Opname Baru
         </button>

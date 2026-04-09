@@ -54,7 +54,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email tidak valid' }, { status: 400 });
     }
 
-    const allowedRoles = ['admin', 'finance', 'brand_manager', 'sales_manager', 'staff'];
+    const allowedRoles = [
+      'admin',
+      'direktur_ops', 'staf_ops',
+      'direktur_finance', 'staf_finance',
+      'brand_manager', 'sales_manager',
+      'warehouse_manager', 'ppic_manager',
+      // legacy
+      'finance', 'staff',
+    ];
     if (!allowedRoles.includes(normalizedRole)) {
       return NextResponse.json({ error: 'Role tidak valid' }, { status: 400 });
     }

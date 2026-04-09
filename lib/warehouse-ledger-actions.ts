@@ -41,7 +41,7 @@ async function notifyDirekturs(message: string) {
     const { data: direkturs } = await svc
       .from('profiles')
       .select('telegram_chat_id')
-      .eq('role', 'direktur_operasional')
+      .in('role', ['direktur_ops', 'direktur_operasional'])
       .not('telegram_chat_id', 'is', null);
 
     if (direkturs && direkturs.length > 0) {
