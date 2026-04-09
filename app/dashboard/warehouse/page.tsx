@@ -295,7 +295,7 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
   const [modalMode, setModalMode] = useState<'in' | 'out' | 'transfer' | 'convert' | 'dispose'>('in');
 
   // Role-based button visibility
-  const canStockIn = !['warehouse_manager'].includes(userRole);
+  const canStockIn = true;
   const canWarehouseOps = !['ppic'].includes(userRole); // transfer, convert, out, dispose
   const [warehouseFilter, setWarehouseFilter] = useState('all');
 
