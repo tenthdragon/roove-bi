@@ -292,7 +292,7 @@ export default function ConnectionManager() {
         <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 10px', background: 'var(--accent-subtle)', borderRadius: 6, marginTop: 10, marginBottom: 14 }}>
           <strong>Webhook URL:</strong>{' '}
           <span style={{ color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono, monospace' }}>
-            https://roove-bi.vercel.app/api/scalev-webhook
+            https://app.roove.info/api/scalev-webhook
           </span>
         </div>
 

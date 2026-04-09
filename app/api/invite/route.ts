@@ -125,7 +125,7 @@ export async function POST(req: NextRequest) {
       type: 'recovery',
       email: normalizedEmail,
       options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://roove-bi.vercel.app'}/reset-password`,
+        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://app.roove.info'}/reset-password`,
       },
     });
 

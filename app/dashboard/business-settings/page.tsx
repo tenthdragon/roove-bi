@@ -309,7 +309,7 @@ export default function BusinessSettingsPage() {
 
       {/* Webhook URL info */}
       <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16, padding: '8px 12px', background: 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)' }}>
-        Webhook URL: <code style={{ color: 'var(--accent)' }}>https://roove-bi.vercel.app/api/scalev-webhook</code>
+        Webhook URL: <code style={{ color: 'var(--accent)' }}>https://app.roove.info/api/scalev-webhook</code>
       </div>
 
       {/* Message */}
