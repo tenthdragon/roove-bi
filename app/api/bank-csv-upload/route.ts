@@ -33,6 +33,14 @@ function getServiceSupabase() {
   );
 }
 
+// ── Strip BOM and normalize line endings ──
+function normalizeText(text: string): string {
+  // Remove BOM (\uFEFF) if present
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  // Normalize Windows line endings
+  return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
 // ── Simple CSV parser (handles quoted fields) ──
 function parseCSVLine(line: string, delimiter = ','): string[] {
   const result: string[] = [];
@@ -95,7 +103,8 @@ function periodLabelFromDate(dateStr: string): string {
 
 // ── BCA Parser ──
 function parseBCA(text: string): ParseResult {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const normalized = normalizeText(text);
+  const lines = normalized.split('\n').map(l => l.trim()).filter(Boolean);
 
   let accountNo = '';
   let periodStart = '';
@@ -106,15 +115,17 @@ function parseBCA(text: string): ParseResult {
   let dataStarted = false;
 
   for (const rawLine of lines) {
-    // Extract account number
-    if (rawLine.includes('No. rekening')) {
-      const m = rawLine.match(/:\s*([\d]+)/);
-      if (m) accountNo = m[1];
+    const rawLower = rawLine.toLowerCase();
+
+    // Extract account number (try multiple patterns)
+    if (rawLower.includes('no. rekening') || rawLower.includes('no.rekening') || rawLower.includes('nomor rekening')) {
+      const m = rawLine.match(/:\s*([\d\s\-]+)/);
+      if (m) accountNo = m[1].replace(/\s+/g, '').trim();
       continue;
     }
     // Extract period
-    if (rawLine.includes('Periode')) {
-      const m = rawLine.match(/(\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}\/\d{2}\/\d{4})/);
+    if (rawLower.includes('periode')) {
+      const m = rawLine.match(/(\d{2}\/\d{2}\/\d{4})\s*[-–]\s*(\d{2}\/\d{2}\/\d{4})/);
       if (m) {
         periodStart = parseDMY(m[1]);
         periodEnd   = parseDMY(m[2]);
@@ -123,29 +134,69 @@ function parseBCA(text: string): ParseResult {
     }
 
     // Summary lines at bottom
-    if (rawLine.startsWith('Saldo Awal')) {
-      const m = rawLine.match(/([\d,]+\.[\d]+)/);
+    if (rawLower.startsWith('saldo awal')) {
+      const m = rawLine.match(/([\d,]+\.?[\d]*)/);
       if (m) openingBalance = parseNum(m[1]);
       continue;
     }
-    if (rawLine.startsWith('Saldo Akhir')) {
-      const m = rawLine.match(/([\d,]+\.[\d]+)/);
+    if (rawLower.startsWith('saldo akhir')) {
+      const m = rawLine.match(/([\d,]+\.?[\d]*)/);
       if (m) closingBalance = parseNum(m[1]);
       continue;
     }
-    if (rawLine.startsWith('Mutasi Debet') || rawLine.startsWith('Mutasi Kredit')) continue;
+    if (rawLower.startsWith('mutasi debet') || rawLower.startsWith('mutasi kredit')) continue;
 
-    // Data header row
-    if (rawLine.includes('Tanggal Transaksi')) { dataStarted = true; continue; }
+    // Data header row — case-insensitive, handles variations
+    if (rawLower.includes('tanggal transaksi') || rawLower.includes('tgl transaksi') || rawLower.includes('tanggal') && rawLower.includes('keterangan')) {
+      dataStarted = true;
+      continue;
+    }
     if (!dataStarted) continue;
 
-    // Each BCA data line is wrapped in outer quotes
-    const inner = stripOuterQuotes(rawLine);
+    // Try to parse: BCA data rows can be outer-quoted or not
+    let inner = rawLine;
+    if (rawLine.startsWith('"') && rawLine.endsWith('"')) {
+      inner = stripOuterQuotes(rawLine);
+    }
     const cols = parseCSVLine(inner, ',');
-    if (cols.length < 5) continue;
 
-    const [dateStr, desc, , amountRaw, balanceRaw] = cols;
-    if (!dateStr || !dateStr.match(/^\d{2}\/\d{2}\/\d{4}$/)) continue;
+    // Find date column: look for DD/MM/YYYY pattern in first few columns
+    let dateStr = '';
+    let dateColIdx = -1;
+    for (let ci = 0; ci < Math.min(cols.length, 3); ci++) {
+      if (cols[ci].match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+        dateStr = cols[ci];
+        dateColIdx = ci;
+        break;
+      }
+    }
+    if (!dateStr) continue;
+
+    // Columns after date: description, (optional kode), amount, balance
+    // dateColIdx, dateColIdx+1 = desc, dateColIdx+2 = kode (optional), then amount, balance
+    // BCA format: Tanggal, Keterangan, No.Rekening/Kode, Debet/Kredit, Saldo
+    const remaining = cols.slice(dateColIdx + 1);
+    if (remaining.length < 3) continue;
+
+    const desc = remaining[0] || '';
+    // Amount might be at index 2 or 3 (skip kode column if present)
+    let amountRaw = '';
+    let balanceRaw = '';
+
+    // Try to find amount (has CR or DB suffix, or is numeric)
+    for (let ri = 1; ri < remaining.length - 1; ri++) {
+      const cell = remaining[ri].trim().toUpperCase();
+      if (cell.endsWith('CR') || cell.endsWith('DB')) {
+        amountRaw  = remaining[ri].trim();
+        balanceRaw = remaining[ri + 1] || '';
+        break;
+      }
+    }
+    // Fallback: second-to-last and last
+    if (!amountRaw && remaining.length >= 2) {
+      amountRaw  = remaining[remaining.length - 2];
+      balanceRaw = remaining[remaining.length - 1];
+    }
 
     const date = parseDMY(dateStr);
     const amountClean = amountRaw.trim();
@@ -160,8 +211,68 @@ function parseBCA(text: string): ParseResult {
       description: desc.trim(),
       credit_amount: isCredit ? amount : 0,
       debit_amount:  isDebit  ? amount : 0,
-      running_balance: balance,
+      running_balance: balance || null,
     });
+  }
+
+  // Fallback: if dataStarted never triggered, scan ALL lines for date pattern
+  if (transactions.length === 0) {
+    for (const rawLine of lines) {
+      let inner = rawLine;
+      if (rawLine.startsWith('"') && rawLine.endsWith('"')) {
+        inner = stripOuterQuotes(rawLine);
+      }
+      const cols = parseCSVLine(inner, ',');
+      let dateStr = '';
+      let dateColIdx = -1;
+      for (let ci = 0; ci < Math.min(cols.length, 3); ci++) {
+        if (cols[ci].match(/^\d{2}\/\d{2}\/\d{4}$/)) {
+          dateStr = cols[ci];
+          dateColIdx = ci;
+          break;
+        }
+      }
+      if (!dateStr) continue;
+
+      const remaining = cols.slice(dateColIdx + 1);
+      if (remaining.length < 3) continue;
+
+      const desc = remaining[0] || '';
+      let amountRaw = '';
+      let balanceRaw = '';
+
+      for (let ri = 1; ri < remaining.length - 1; ri++) {
+        const cell = remaining[ri].trim().toUpperCase();
+        if (cell.endsWith('CR') || cell.endsWith('DB')) {
+          amountRaw  = remaining[ri].trim();
+          balanceRaw = remaining[ri + 1] || '';
+          break;
+        }
+      }
+      if (!amountRaw && remaining.length >= 2) {
+        amountRaw  = remaining[remaining.length - 2];
+        balanceRaw = remaining[remaining.length - 1];
+      }
+
+      const date = parseDMY(dateStr);
+      const amountClean = amountRaw.trim();
+      const isCredit = amountClean.toUpperCase().endsWith('CR');
+      const isDebit  = amountClean.toUpperCase().endsWith('DB');
+      const amount   = parseNum(amountClean.replace(/\s*(CR|DB)$/i, ''));
+      const balance  = parseNum(balanceRaw);
+
+      // Only include if we got either credit or debit amount
+      if (amount > 0 || (parseNum(balanceRaw) > 0)) {
+        transactions.push({
+          transaction_date: date,
+          transaction_time: null,
+          description: desc.trim(),
+          credit_amount: isCredit ? amount : 0,
+          debit_amount:  isDebit  ? amount : 0,
+          running_balance: balance || null,
+        });
+      }
+    }
   }
 
   // Derive period from transactions if not found in header
@@ -185,10 +296,11 @@ function parseBCA(text: string): ParseResult {
 
 // ── BRI Parser ──
 function parseBRI(text: string): ParseResult {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const normalized = normalizeText(text);
+  const lines = normalized.split('\n').map(l => l.trim()).filter(Boolean);
   if (lines.length < 2) throw new Error('File BRI kosong atau tidak valid');
 
-  const headerCols = parseCSVLine(lines[0]).map(h => h.toUpperCase());
+  const headerCols = parseCSVLine(lines[0]).map(h => h.toUpperCase().trim());
   const idxDate    = headerCols.indexOf('TGL_TRAN');
   const idxDesk    = headerCols.indexOf('REMARK_CUSTOM');
   const idxDebet   = headerCols.indexOf('MUTASI_DEBET');
@@ -220,11 +332,6 @@ function parseBRI(text: string): ParseResult {
     const balance = idxSaldo >= 0 ? parseNum(cols[idxSaldo] || '0') : null;
     const desc    = idxDesk >= 0 ? (cols[idxDesk] || '').replace(/"/g, '').trim() : (cols[6] || '').trim();
 
-    // Opening balance from first row
-    if (i === 1 && idxSaldoAw >= 0) {
-      // Will compute from first row's saldo_awal later
-    }
-
     transactions.push({ transaction_date: date, transaction_time: time, description: desc, credit_amount: credit, debit_amount: debit, running_balance: balance });
   }
 
@@ -254,42 +361,78 @@ function parseBRI(text: string): ParseResult {
 
 // ── Mandiri Parser ──
 function parseMandiri(text: string): ParseResult {
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+  const normalized = normalizeText(text);
+  const lines = normalized.split('\n').map(l => l.trim()).filter(Boolean);
   if (lines.length < 2) throw new Error('File Mandiri kosong atau tidak valid');
 
-  // Mandiri uses semicolon delimiter
-  const headerCols = lines[0].split(';').map(h => h.trim().toLowerCase());
-  const idxDate   = headerCols.findIndex(h => h.includes('postdate') || h.includes('date'));
-  const idxRemark = headerCols.findIndex(h => h.includes('remarks') && !h.includes('additional'));
-  const idxCredit = headerCols.findIndex(h => h.includes('credit'));
-  const idxDebit  = headerCols.findIndex(h => h.includes('debit'));
-  const idxBal    = headerCols.findIndex(h => h.includes('balance') || h.includes('close'));
-  const idxAcct   = headerCols.findIndex(h => h.includes('account'));
+  // Detect delimiter: Mandiri usually uses ; but may vary
+  const firstLine = lines[0];
+  const semicolonCount = (firstLine.match(/;/g) || []).length;
+  const commaCount     = (firstLine.match(/,/g) || []).length;
+  const delim = semicolonCount >= commaCount ? ';' : ',';
 
-  if (idxDate < 0 || idxCredit < 0 || idxDebit < 0) throw new Error('Format Mandiri tidak dikenali');
+  // Parse header — normalize: lowercase, trim, remove quotes
+  const rawHeader = firstLine.split(delim).map(h => h.trim().replace(/^"|"$/g, '').toLowerCase().trim());
+
+  // Flexible column matching
+  const findCol = (keywords: string[], excludes: string[] = []): number => {
+    return rawHeader.findIndex(h => {
+      const normalized = h.replace(/\s+/g, '').replace(/_/g, '');
+      const matches = keywords.some(kw => normalized.includes(kw.toLowerCase().replace(/\s+/g, '')));
+      const excluded = excludes.some(ex => normalized.includes(ex.toLowerCase().replace(/\s+/g, '')));
+      return matches && !excluded;
+    });
+  };
+
+  const idxDate   = findCol(['postdate', 'post date', 'tanggal', 'date', 'tgl']);
+  const idxRemark = findCol(['remarks', 'keterangan', 'description', 'ket'], ['additional']);
+  const idxCredit = findCol(['creditamount', 'credit', 'kredit', 'masuk', 'cr']);
+  const idxDebit  = findCol(['debitamount', 'debit', 'debet', 'keluar', 'db']);
+  const idxBal    = findCol(['balance', 'closebalance', 'saldo', 'close']);
+  const idxAcct   = findCol(['account', 'rekening', 'norek']);
+
+  console.log('[Mandiri] header cols:', rawHeader);
+  console.log('[Mandiri] col indices → date:', idxDate, 'remark:', idxRemark, 'credit:', idxCredit, 'debit:', idxDebit, 'bal:', idxBal);
+
+  if (idxDate < 0 || idxCredit < 0 || idxDebit < 0) {
+    throw new Error(`Format Mandiri tidak dikenali. Header: ${rawHeader.slice(0, 8).join(' | ')}`);
+  }
 
   const transactions: ParsedTransaction[] = [];
   let accountNo = '';
 
   for (let i = 1; i < lines.length; i++) {
-    const cols = lines[i].split(';').map(c => c.trim());
-    if (!cols[idxDate]) continue;
+    const cols = lines[i].split(delim).map(c => c.trim().replace(/^"|"$/g, ''));
+    if (cols.length <= idxDate || !cols[idxDate]) continue;
 
-    const rawDate = cols[idxDate];  // "01/04/2026 03:49"
-    const parts   = rawDate.split(' ');
-    const date    = parseDMY(parts[0]);
-    const time    = parts[1] ? parts[1].slice(0, 5) : null;
+    const rawDate = cols[idxDate];
+    // Handles "DD/MM/YYYY HH:MM" and "YYYY-MM-DD HH:MM:SS"
+    let date = '';
+    let time: string | null = null;
+    if (rawDate.match(/^\d{2}\/\d{2}\/\d{4}/)) {
+      const parts = rawDate.split(' ');
+      date = parseDMY(parts[0]);
+      time = parts[1] ? parts[1].slice(0, 5) : null;
+    } else if (rawDate.match(/^\d{4}-\d{2}-\d{2}/)) {
+      const parts = rawDate.split(' ');
+      date = parts[0];
+      time = parts[1] ? parts[1].slice(0, 5) : null;
+    } else {
+      continue;
+    }
 
     if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) continue;
 
-    if (!accountNo && idxAcct >= 0) accountNo = cols[idxAcct].replace(/,/g, '').trim();
+    if (!accountNo && idxAcct >= 0 && cols[idxAcct]) {
+      accountNo = cols[idxAcct].replace(/,/g, '').trim();
+    }
 
     const credit  = parseNum(cols[idxCredit] || '0');
     const debit   = parseNum(cols[idxDebit]  || '0');
     const balance = idxBal >= 0 ? parseNum(cols[idxBal] || '0') : null;
-    const desc    = idxRemark >= 0 ? cols[idxRemark].trim() : '';
+    const desc    = idxRemark >= 0 ? (cols[idxRemark] || '').trim() : '';
 
-    transactions.push({ transaction_date: date, transaction_time: time, description: desc, credit_amount: credit, debit_amount: debit, running_balance: balance });
+    transactions.push({ transaction_date: date, transaction_time: time, description: desc, credit_amount: credit, debit_amount: debit, running_balance: balance || null });
   }
 
   const dates = transactions.map(t => t.transaction_date).sort();
@@ -318,14 +461,19 @@ function parseMandiri(text: string): ParseResult {
 
 // ── Auto-detect bank format from file content ──
 function detectBank(text: string): Bank {
-  const first500 = text.slice(0, 500);
-  if (first500.includes('No. rekening') || first500.includes('Informasi Rekening')) return 'BCA';
-  if (first500.includes('MUTASI_DEBET') || first500.includes('MUTASI_KREDIT')) return 'BRI';
-  if (first500.includes(';') && first500.toLowerCase().includes('credit amount')) return 'MANDIRI';
-  // fallback: count semicolons vs commas
-  const semicolons = (first500.match(/;/g) || []).length;
-  if (semicolons > 5) return 'MANDIRI';
-  if (first500.includes('NOREK') || first500.includes('TGL_TRAN')) return 'BRI';
+  const normalized = normalizeText(text);
+  const first600 = normalized.slice(0, 600).toLowerCase();
+
+  // BCA: has "no. rekening" or "informasi rekening" header
+  if (first600.includes('no. rekening') || first600.includes('no.rekening') || first600.includes('informasi rekening')) return 'BCA';
+  // BRI: has uppercase column names characteristic of BRI export
+  if (normalized.slice(0, 600).includes('MUTASI_DEBET') || normalized.slice(0, 600).includes('MUTASI_KREDIT')) return 'BRI';
+  if (normalized.slice(0, 600).includes('TGL_TRAN') || normalized.slice(0, 600).includes('NOREK')) return 'BRI';
+  // Mandiri: semicolon-delimited with credit/debit/balance columns
+  const semicolons = (first600.match(/;/g) || []).length;
+  if (semicolons > 3) return 'MANDIRI';
+  if (first600.includes('credit') || first600.includes('postdate') || first600.includes('post date')) return 'MANDIRI';
+  // Default BCA
   return 'BCA';
 }
 
