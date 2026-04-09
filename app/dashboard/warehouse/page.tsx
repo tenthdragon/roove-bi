@@ -748,7 +748,17 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  useEffect(() => { (async () => { try { setProducts(await getProducts()); } catch {} })(); }, []);
+  useEffect(() => {
+    (async () => {
+      try {
+        const prods = await getProducts();
+        setProducts(prods);
+        // Default to BTN - RLB if available
+        const hasRlb = prods.some(p => p.warehouse === 'BTN' && p.entity === 'RLB');
+        if (hasRlb) setSelectedEntity('BTN - RLB');
+      } catch {}
+    })();
+  }, []);
 
   // Available entities from products
   const entities = useMemo(() => {
@@ -764,18 +774,19 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     return products.filter(p => p.warehouse === wh && p.entity === ent);
   }, [products, selectedEntity]);
 
-  // Source search within entity
+  // Source search: only wip and wip_material
   const filteredSource = useMemo(() => {
-    if (!search) return entityProducts;
+    const wipProducts = entityProducts.filter(p => p.category === 'wip' || p.category === 'wip_material');
+    if (!search) return wipProducts;
     const q = search.toLowerCase();
-    return entityProducts.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+    return wipProducts.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
   }, [entityProducts, search]);
 
-  // Target search within entity
+  // Target search: only fg
   const filteredTarget = useMemo(() => {
     if (!targetSearch) return [];
     const q = targetSearch.toLowerCase();
-    return entityProducts.filter(p => p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q));
+    return entityProducts.filter(p => p.category === 'fg' && (p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)));
   }, [entityProducts, targetSearch]);
 
   const addSource = (p: any) => {
@@ -852,7 +863,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
           <>
             {/* ── Source: search + add ── */}
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Bahan Asal</div>
-            <input type="text" placeholder="Cari produk bahan..." value={search} onChange={(e) => setSearch(e.target.value)}
+            <input type="text" placeholder="Cari WIP / material..." value={search} onChange={(e) => setSearch(e.target.value)}
               style={{ ...inputStyle, marginBottom: 8 }} />
 
             {search && (
@@ -887,7 +898,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
             )}
             {sources.length === 0 && !search && (
               <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12, background: 'var(--bg-deep)', borderRadius: 8, marginBottom: 14 }}>
-                Ketik di search untuk menambahkan bahan
+                Ketik di search untuk menambahkan bahan WIP / material
               </div>
             )}
 
@@ -905,7 +916,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
                 </div>
               ) : (
                 <>
-                  <input type="text" placeholder="Cari produk tujuan..." value={targetSearch} onChange={(e) => setTargetSearch(e.target.value)} style={inputStyle} />
+                  <input type="text" placeholder="Cari produk FG tujuan..." value={targetSearch} onChange={(e) => setTargetSearch(e.target.value)} style={inputStyle} />
                   {targetSearch && (
                     <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginTop: 4 }}>
                       {filteredTarget.slice(0, 20).map(p => (
