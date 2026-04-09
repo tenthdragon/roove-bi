@@ -795,6 +795,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
   const [products, setProducts] = useState<any[]>([]);
   const [selectedEntity, setSelectedEntity] = useState('');
   const [search, setSearch] = useState('');
+  const [dropdownOpen, setDropdownOpen] = useState(false);
   const [sources, setSources] = useState<{ productId: number; productName: string; quantity: string }[]>([]);
   const [targetProduct, setTargetProduct] = useState('');
   const [targetSearch, setTargetSearch] = useState('');
@@ -920,27 +921,74 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
 
         {selectedEntity && (
           <>
-            {/* ── Source: search + add ── */}
+            {/* ── Source: multi-select dropdown with checkboxes ── */}
             <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Bahan Asal</div>
-            <input type="text" placeholder="Cari WIP / material..." value={search} onChange={(e) => setSearch(e.target.value)}
-              style={{ ...inputStyle, marginBottom: 8 }} />
-
-            {search && (
-              <div style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8, marginBottom: 10 }}>
-                {filteredSource.slice(0, 20).map(p => {
-                  const isAdded = sources.some(s => s.productId === p.id);
-                  return (
-                    <div key={p.id} onClick={() => !isAdded && addSource(p)}
-                      style={{ padding: '6px 10px', fontSize: 12, cursor: isAdded ? 'default' : 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        borderBottom: '1px solid var(--bg-deep)', background: isAdded ? 'var(--bg-deep)' : 'transparent', opacity: isAdded ? 0.5 : 1 }}>
-                      <span style={{ color: 'var(--text)' }}>{p.name} <span style={{ color: 'var(--dim)', fontSize: 10 }}>({p.category})</span></span>
-                      {isAdded ? <span style={{ fontSize: 10, color: 'var(--dim)' }}>Ditambahkan</span> : <span style={{ fontSize: 10, color: '#8b5cf6' }}>+ Tambah</span>}
-                    </div>
-                  );
-                })}
-                {filteredSource.length === 0 && <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Tidak ditemukan</div>}
+            <div style={{ position: 'relative', marginBottom: sources.length > 0 ? 8 : 14 }}>
+              {/* Trigger button */}
+              <div onClick={() => setDropdownOpen(v => !v)}
+                style={{ ...inputStyle, cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  background: dropdownOpen ? 'var(--bg-deep)' : undefined, userSelect: 'none' }}>
+                <span style={{ color: sources.length > 0 ? 'var(--text)' : 'var(--dim)', fontSize: 12 }}>
+                  {sources.length > 0 ? `${sources.length} bahan dipilih` : 'Pilih bahan WIP / material...'}
+                </span>
+                <span style={{ color: 'var(--dim)', fontSize: 10 }}>{dropdownOpen ? '▲' : '▼'}</span>
               </div>
-            )}
+
+              {/* Click-outside overlay */}
+              {dropdownOpen && (
+                <div onClick={() => { setDropdownOpen(false); setSearch(''); }}
+                  style={{ position: 'fixed', inset: 0, zIndex: 49 }} />
+              )}
+
+              {/* Dropdown panel */}
+              {dropdownOpen && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
+                  background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.2)', marginTop: 4 }}>
+                  {/* Search inside dropdown */}
+                  <div style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)' }}>
+                    <input type="text" placeholder="Cari bahan..." value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      autoFocus
+                      style={{ ...inputStyle, margin: 0, fontSize: 12 }} />
+                  </div>
+                  {/* Items list */}
+                  <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                    {filteredSource.length === 0
+                      ? <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12 }}>Tidak ditemukan</div>
+                      : filteredSource.map(p => {
+                          const checked = sources.some(s => s.productId === p.id);
+                          return (
+                            <div key={p.id}
+                              onClick={(e) => { e.stopPropagation(); checked ? removeSource(p.id) : addSource(p); }}
+                              style={{ padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+                                borderBottom: '1px solid var(--bg-deep)',
+                                background: checked ? 'rgba(139,92,246,0.08)' : 'transparent' }}>
+                              <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? '#8b5cf6' : 'var(--border)'}`,
+                                background: checked ? '#8b5cf6' : 'transparent', flexShrink: 0,
+                                display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                {checked && <span style={{ color: '#fff', fontSize: 10, lineHeight: 1 }}>✓</span>}
+                              </div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.name}</div>
+                                <div style={{ fontSize: 10, color: 'var(--dim)' }}>{p.category}</div>
+                              </div>
+                            </div>
+                          );
+                        })
+                    }
+                  </div>
+                  {/* Footer: close */}
+                  <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+                    <button onClick={(e) => { e.stopPropagation(); setDropdownOpen(false); setSearch(''); }}
+                      style={{ background: '#8b5cf6', border: 'none', color: '#fff', borderRadius: 6, padding: '5px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                      Selesai ({sources.length})
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
 
             {sources.length > 0 && (
               <div style={{ marginBottom: 14 }}>
@@ -953,11 +1001,6 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
                       style={{ ...inputStyle, width: 80, flex: 'none', textAlign: 'right' }} />
                   </div>
                 ))}
-              </div>
-            )}
-            {sources.length === 0 && !search && (
-              <div style={{ padding: 12, textAlign: 'center', color: 'var(--dim)', fontSize: 12, background: 'var(--bg-deep)', borderRadius: 8, marginBottom: 14 }}>
-                Ketik di search untuk menambahkan bahan WIP / material
               </div>
             )}
 
