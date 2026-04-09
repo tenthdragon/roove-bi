@@ -2,6 +2,7 @@
 // Parses bank statement CSVs (BCA / BRI / Mandiri) and saves to Supabase
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { classifyTransaction } from '@/lib/transaction-tagger';
 
 type Bank = 'BCA' | 'BRI' | 'MANDIRI';
 
@@ -533,19 +534,24 @@ export async function POST(req: NextRequest) {
     // Delete existing transactions for this session
     await supabase.from('bank_transactions').delete().eq('session_id', sessionId);
 
-    // Batch insert (500 rows at a time)
-    const rows = parsed.transactions.map(t => ({
-      session_id:       sessionId,
-      bank:             parsed.bank,
-      period_label:     parsed.period_label,
-      account_no:       parsed.account_no || 'UNKNOWN',
-      transaction_date: t.transaction_date,
-      transaction_time: t.transaction_time,
-      description:      t.description,
-      credit_amount:    t.credit_amount,
-      debit_amount:     t.debit_amount,
-      running_balance:  t.running_balance,
-    }));
+    // Batch insert (500 rows at a time) — auto-tag each transaction
+    const rows = parsed.transactions.map(t => {
+      const tag = classifyTransaction(t.description, t.credit_amount, t.debit_amount);
+      return {
+        session_id:       sessionId,
+        bank:             parsed.bank,
+        period_label:     parsed.period_label,
+        account_no:       parsed.account_no || 'UNKNOWN',
+        transaction_date: t.transaction_date,
+        transaction_time: t.transaction_time,
+        description:      t.description,
+        credit_amount:    t.credit_amount,
+        debit_amount:     t.debit_amount,
+        running_balance:  t.running_balance,
+        tag,
+        tag_auto:         tag,
+      };
+    });
 
     const BATCH = 500;
     for (let i = 0; i < rows.length; i += BATCH) {

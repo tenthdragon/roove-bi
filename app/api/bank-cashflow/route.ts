@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
   const limit  = Math.min(parseInt(url.searchParams.get('limit') || '100', 10), 500);
   const bankFilter    = url.searchParams.get('bank') || null;
   const typeFilter    = url.searchParams.get('type') || null;
+  const tagFilter     = url.searchParams.get('tag') || null;
   const accountFilter = url.searchParams.get('account') || null;    // single
   const accountsCSV   = url.searchParams.get('accounts') || null;   // comma-separated
   const businessName  = url.searchParams.get('business') || null;   // look up from bank_accounts
@@ -104,7 +105,7 @@ export async function GET(req: NextRequest) {
   // ── 3. Paginated transaction list ──
   let listQuery = supabase
     .from('bank_transactions')
-    .select('transaction_date, transaction_time, bank, account_no, description, credit_amount, debit_amount, running_balance', { count: 'exact' })
+    .select('id, transaction_date, transaction_time, bank, account_no, description, credit_amount, debit_amount, running_balance, tag, tag_auto', { count: 'exact' })
     .eq('period_label', activePeriod)
     .order('transaction_date', { ascending: true })
     .order('transaction_time', { ascending: true })
@@ -114,6 +115,7 @@ export async function GET(req: NextRequest) {
   if (accountNos) listQuery = listQuery.in('account_no', accountNos);
   if (typeFilter === 'CR') listQuery = listQuery.gt('credit_amount', 0);
   if (typeFilter === 'DB') listQuery = listQuery.gt('debit_amount',  0);
+  if (tagFilter) listQuery = listQuery.eq('tag', tagFilter);
 
   const { data: txList, count, error: listErr } = await listQuery;
   if (listErr) return NextResponse.json({ error: listErr.message }, { status: 500 });

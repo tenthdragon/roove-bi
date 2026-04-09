@@ -31,6 +31,7 @@ interface DailyRow {
 }
 
 interface Transaction {
+  id: string;
   transaction_date: string;
   transaction_time: string | null;
   bank: string;
@@ -39,7 +40,27 @@ interface Transaction {
   credit_amount: number;
   debit_amount: number;
   running_balance: number | null;
+  tag: string;
+  tag_auto: string;
 }
+
+// Tag definitions
+const ALL_TAGS = ['customer', 'intercompany', 'operasional', 'biaya_bank', 'marketplace', 'refund', 'auto_debit', 'n/a'] as const;
+const TAG_LABELS: Record<string, string> = {
+  customer: 'Customer', intercompany: 'Intercompany', operasional: 'Operasional',
+  biaya_bank: 'Biaya Bank', marketplace: 'Marketplace', refund: 'Refund',
+  auto_debit: 'Auto Debit', 'n/a': 'N/A',
+};
+const TAG_COLORS: Record<string, { bg: string; text: string }> = {
+  customer:     { bg: '#dcfce7', text: '#166534' },
+  intercompany: { bg: '#dbeafe', text: '#1e40af' },
+  operasional:  { bg: '#fef9c3', text: '#854d0e' },
+  biaya_bank:   { bg: '#f3e8ff', text: '#6b21a8' },
+  marketplace:  { bg: '#cffafe', text: '#155e75' },
+  refund:       { bg: '#ffe4e6', text: '#9f1239' },
+  auto_debit:   { bg: '#fce7f3', text: '#9d174d' },
+  'n/a':        { bg: '#f1f5f9', text: '#64748b' },
+};
 
 interface BankAccount {
   id: string;
@@ -345,6 +366,65 @@ function DailyChart({ data }: { data: DailyRow[] }) {
   );
 }
 
+// ── Tag Pill (clickable with dropdown) ───────────────────────────────────────
+
+function TagPill({ tag, tagAuto, onChangeTag }: { tag: string; tagAuto: string; onChangeTag: (newTag: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const isOverridden = tag !== tagAuto;
+  const colors = TAG_COLORS[tag] || TAG_COLORS['n/a'];
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: 'relative', display: 'inline-block' }}>
+      <button
+        onClick={() => setOpen(o => !o)}
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: 3,
+          padding: '1px 7px', borderRadius: 4, fontSize: 10, fontWeight: 600,
+          background: colors.bg, color: colors.text, border: 'none', cursor: 'pointer',
+          outline: open ? `2px solid ${colors.text}` : 'none',
+        }}
+      >
+        {isOverridden && <span title={`Auto: ${TAG_LABELS[tagAuto] || tagAuto}`} style={{ fontSize: 8, opacity: 0.7 }}>*</span>}
+        {TAG_LABELS[tag] || tag}
+      </button>
+      {open && (
+        <div style={{
+          position: 'absolute', top: '100%', left: 0, marginTop: 4, zIndex: 50,
+          background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.3)', padding: 4, minWidth: 130,
+        }}>
+          {ALL_TAGS.map(t => {
+            const tc = TAG_COLORS[t] || TAG_COLORS['n/a'];
+            return (
+              <button
+                key={t}
+                onClick={() => { onChangeTag(t); setOpen(false); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, width: '100%',
+                  padding: '5px 8px', border: 'none', borderRadius: 4, cursor: 'pointer',
+                  background: tag === t ? 'var(--sidebar-active)' : 'transparent',
+                  fontSize: 11, color: 'var(--text)', textAlign: 'left',
+                }}
+              >
+                <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: tc.bg, border: `1px solid ${tc.text}`, flexShrink: 0 }} />
+                {TAG_LABELS[t]}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Transaction Table ─────────────────────────────────────────────────────────
 
 function TransactionTable({ periodLabel, business, acctMap }: { periodLabel: string; business: string; acctMap: Record<string, string> }) {
@@ -354,13 +434,15 @@ function TransactionTable({ periodLabel, business, acctMap }: { periodLabel: str
   const [loading, setLoading] = useState(false);
   const [bankF, setBankF]     = useState('');
   const [typeF, setTypeF]     = useState('');
+  const [tagF, setTagF]       = useState('');
   const LIMIT = 50;
 
-  const load = useCallback(async (p = 1, b = bankF, t = typeF) => {
+  const load = useCallback(async (p = 1, b = bankF, t = typeF, tg = tagF) => {
     setLoading(true);
     const params = new URLSearchParams({ period: periodLabel, page: String(p), limit: String(LIMIT) });
     if (b) params.set('bank', b);
     if (t) params.set('type', t);
+    if (tg) params.set('tag', tg);
     if (business) params.set('business', business);
     const res  = await fetch(`/api/bank-cashflow?${params}`);
     const data = await res.json();
@@ -368,44 +450,68 @@ function TransactionTable({ periodLabel, business, acctMap }: { periodLabel: str
     setTotal(data.total || 0);
     setPage(p);
     setLoading(false);
-  }, [periodLabel, bankF, typeF, business]);
+  }, [periodLabel, bankF, typeF, tagF, business]);
 
   useEffect(() => { if (periodLabel) load(1); }, [periodLabel, business]);
 
+  async function updateTag(txnId: string, newTag: string) {
+    // Optimistic update
+    setRows(prev => prev.map(r => r.id === txnId ? { ...r, tag: newTag } : r));
+    await fetch('/api/bank-transactions', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: txnId, tag: newTag }),
+    });
+  }
+
   const totalPages = Math.ceil(total / LIMIT);
 
-  const filterBtn = (label: string, active: boolean, onClick: () => void) => (
+  const filterBtn = (label: string, active: boolean, onClick: () => void, color?: string) => (
     <button
       onClick={onClick}
       style={{
-        padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 11, cursor: 'pointer',
-        background: active ? 'var(--accent)' : 'var(--bg-deep)',
+        padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 10, cursor: 'pointer',
+        background: active ? (color || 'var(--accent)') : 'var(--bg-deep)',
         color: active ? '#fff' : 'var(--text-secondary)',
         fontWeight: active ? 700 : 400,
       }}
     >{label}</button>
   );
 
+  const COLS = 8;
+
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+      {/* Filters */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 700 }}>Rincian Transaksi · {total.toLocaleString('id-ID')} baris</div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {filterBtn('Semua Bank', !bankF, () => { setBankF(''); load(1, '', typeF); })}
-          {['BCA', 'BRI', 'MANDIRI'].map(b => filterBtn(b, bankF === b, () => { setBankF(b); load(1, b, typeF); }))}
+        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+          {filterBtn('Semua Bank', !bankF, () => { setBankF(''); load(1, '', typeF, tagF); })}
+          {['BCA', 'BRI', 'MANDIRI'].map(b => filterBtn(b, bankF === b, () => { setBankF(b); load(1, b, typeF, tagF); }))}
           <div style={{ width: 1, background: 'var(--border)', margin: '0 2px' }} />
-          {filterBtn('Semua', !typeF, () => { setTypeF(''); load(1, bankF, ''); })}
-          {filterBtn('Masuk', typeF === 'CR', () => { setTypeF('CR'); load(1, bankF, 'CR'); })}
-          {filterBtn('Keluar', typeF === 'DB', () => { setTypeF('DB'); load(1, bankF, 'DB'); })}
+          {filterBtn('Semua', !typeF, () => { setTypeF(''); load(1, bankF, '', tagF); })}
+          {filterBtn('Masuk', typeF === 'CR', () => { setTypeF('CR'); load(1, bankF, 'CR', tagF); })}
+          {filterBtn('Keluar', typeF === 'DB', () => { setTypeF('DB'); load(1, bankF, 'DB', tagF); })}
         </div>
+      </div>
+
+      {/* Tag filter row */}
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 12 }}>
+        <span style={{ fontSize: 10, color: 'var(--dim)', alignSelf: 'center', marginRight: 2 }}>Tag:</span>
+        {filterBtn('Semua', !tagF, () => { setTagF(''); load(1, bankF, typeF, ''); })}
+        {ALL_TAGS.filter(t => t !== 'n/a').map(t => {
+          const tc = TAG_COLORS[t];
+          return filterBtn(TAG_LABELS[t], tagF === t, () => { setTagF(t); load(1, bankF, typeF, t); }, tc.text);
+        })}
+        {filterBtn('N/A', tagF === 'n/a', () => { setTagF('n/a'); load(1, bankF, typeF, 'n/a'); })}
       </div>
 
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--border)' }}>
-              {['Tgl/Waktu', 'Bisnis', 'Bank', 'Keterangan', 'Cash Masuk', 'Cash Keluar', 'Saldo'].map(h => (
-                <th key={h} style={{ padding: '6px 10px', textAlign: ['Keterangan'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap', ...(['Tgl/Waktu', 'Bisnis', 'Bank', 'Keterangan'].includes(h) ? { textAlign: 'left' } : {}) }}>
+              {['Tgl/Waktu', 'Bisnis', 'Bank', 'Keterangan', 'Tag', 'Cash Masuk', 'Cash Keluar', 'Saldo'].map(h => (
+                <th key={h} style={{ padding: '6px 8px', textAlign: ['Keterangan', 'Tgl/Waktu', 'Bisnis', 'Bank', 'Tag'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap' }}>
                   {h}
                 </th>
               ))}
@@ -413,37 +519,40 @@ function TransactionTable({ periodLabel, business, acctMap }: { periodLabel: str
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={7} style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 11 }}>Memuat…</td></tr>
+              <tr><td colSpan={COLS} style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 11 }}>Memuat…</td></tr>
             )}
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={7} style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 11 }}>Tidak ada transaksi</td></tr>
+              <tr><td colSpan={COLS} style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 11 }}>Tidak ada transaksi</td></tr>
             )}
-            {!loading && rows.map((r, i) => {
+            {!loading && rows.map((r) => {
               const badge = BANK_BADGES[r.bank] || { bg: 'var(--bg-deep)', text: 'var(--dim)' };
               const biz = acctMap[r.account_no] || '';
               return (
-                <tr key={i} style={{ borderBottom: '1px solid rgba(55,65,81,0.3)' }}>
-                  <td style={{ padding: '6px 10px', whiteSpace: 'nowrap', color: 'var(--dim)', fontSize: 11 }}>{fmtTime(r.transaction_date, r.transaction_time)}</td>
-                  <td style={{ padding: '6px 10px' }}>
+                <tr key={r.id} style={{ borderBottom: '1px solid rgba(55,65,81,0.3)' }}>
+                  <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: 'var(--dim)', fontSize: 11 }}>{fmtTime(r.transaction_date, r.transaction_time)}</td>
+                  <td style={{ padding: '5px 8px' }}>
                     {biz ? (
-                      <span style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: BIZ_COLORS[biz] || 'var(--accent)', color: '#fff' }}>{biz}</span>
+                      <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: BIZ_COLORS[biz] || 'var(--accent)', color: '#fff' }}>{biz}</span>
                     ) : (
                       <span style={{ fontSize: 10, color: 'var(--dim)' }}>—</span>
                     )}
                   </td>
-                  <td style={{ padding: '6px 10px' }}>
-                    <span style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: badge.bg, color: badge.text }}>{r.bank}</span>
+                  <td style={{ padding: '5px 8px' }}>
+                    <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: badge.bg, color: badge.text }}>{r.bank}</span>
                   </td>
-                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.description}>
+                  <td style={{ padding: '5px 8px', color: 'var(--text-secondary)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.description}>
                     {r.description || '—'}
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: r.credit_amount > 0 ? 'var(--green)' : 'var(--dim)', fontWeight: r.credit_amount > 0 ? 600 : 400 }}>
+                  <td style={{ padding: '5px 8px' }}>
+                    <TagPill tag={r.tag || 'n/a'} tagAuto={r.tag_auto || 'n/a'} onChangeTag={(t) => updateTag(r.id, t)} />
+                  </td>
+                  <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: r.credit_amount > 0 ? 'var(--green)' : 'var(--dim)', fontWeight: r.credit_amount > 0 ? 600 : 400 }}>
                     {r.credit_amount > 0 ? `+${fmtRp(r.credit_amount)}` : '—'}
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: r.debit_amount > 0 ? 'var(--red)' : 'var(--dim)', fontWeight: r.debit_amount > 0 ? 600 : 400 }}>
+                  <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: r.debit_amount > 0 ? 'var(--red)' : 'var(--dim)', fontWeight: r.debit_amount > 0 ? 600 : 400 }}>
                     {r.debit_amount > 0 ? `-${fmtRp(r.debit_amount)}` : '—'}
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: 11 }}>
+                  <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: 11 }}>
                     {r.running_balance !== null ? fmtRp(r.running_balance) : '—'}
                   </td>
                 </tr>
