@@ -12,18 +12,38 @@ function getServiceSupabase() {
 }
 
 // GET /api/bank-cashflow?period=APRIL+2026
-// GET /api/bank-cashflow?period=APRIL+2026&page=1&limit=50&bank=BCA&type=CR&account=1234567890
+// GET /api/bank-cashflow?period=APRIL+2026&bank=BCA&type=CR&accounts=123,456&business=RTI
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const period = url.searchParams.get('period') || null;
   const page   = parseInt(url.searchParams.get('page') || '1', 10);
   const limit  = Math.min(parseInt(url.searchParams.get('limit') || '100', 10), 500);
   const bankFilter    = url.searchParams.get('bank') || null;
-  const typeFilter    = url.searchParams.get('type') || null; // 'CR' | 'DB' | null
-  const accountFilter = url.searchParams.get('account') || null;
+  const typeFilter    = url.searchParams.get('type') || null;
+  const accountFilter = url.searchParams.get('account') || null;    // single
+  const accountsCSV   = url.searchParams.get('accounts') || null;   // comma-separated
+  const businessName  = url.searchParams.get('business') || null;   // look up from bank_accounts
   const offset = (page - 1) * limit;
 
   const supabase = getServiceSupabase();
+
+  // ── Resolve account filter ──
+  let accountNos: string[] | null = null;
+
+  if (businessName) {
+    // Look up accounts for this business
+    const { data: bizAccounts } = await supabase
+      .from('bank_accounts')
+      .select('account_no')
+      .eq('business_name', businessName)
+      .eq('is_active', true);
+    accountNos = (bizAccounts ?? []).map((a: any) => a.account_no);
+    if (accountNos.length === 0) accountNos = ['__NONE__']; // no match → return empty
+  } else if (accountsCSV) {
+    accountNos = accountsCSV.split(',').map(a => a.trim()).filter(Boolean);
+  } else if (accountFilter) {
+    accountNos = [accountFilter];
+  }
 
   // ── 1. Available periods ──
   const { data: sessions, error: sessErr } = await supabase
@@ -34,24 +54,18 @@ export async function GET(req: NextRequest) {
   if (sessErr) return NextResponse.json({ error: sessErr.message }, { status: 500 });
 
   const allPeriods = [...new Set((sessions ?? []).map((s: any) => s.period_label))];
-
-  // Use requested period or default to the most recent
   const activePeriod = period || allPeriods[0] || null;
 
   if (!activePeriod) {
     return NextResponse.json({
-      periods: [],
-      currentPeriod: null,
-      sessions: [],
-      dailyData: [],
-      transactions: [],
-      total: 0,
-      page,
-      limit,
+      periods: [], currentPeriod: null, sessions: [], dailyData: [],
+      transactions: [], total: 0, page, limit,
     });
   }
 
-  const periodSessions = (sessions ?? []).filter((s: any) => s.period_label === activePeriod);
+  let periodSessions = (sessions ?? []).filter((s: any) => s.period_label === activePeriod);
+  if (accountNos) periodSessions = periodSessions.filter((s: any) => accountNos!.includes(s.account_no));
+  if (bankFilter) periodSessions = periodSessions.filter((s: any) => s.bank === bankFilter);
 
   // ── 2. Daily aggregated data ──
   let dailyQuery = supabase
@@ -61,12 +75,11 @@ export async function GET(req: NextRequest) {
     .order('transaction_date', { ascending: true });
 
   if (bankFilter) dailyQuery = dailyQuery.eq('bank', bankFilter);
-  if (accountFilter) dailyQuery = dailyQuery.eq('account_no', accountFilter);
+  if (accountNos) dailyQuery = dailyQuery.in('account_no', accountNos);
 
   const { data: allTxn, error: txnErr } = await dailyQuery;
   if (txnErr) return NextResponse.json({ error: txnErr.message }, { status: 500 });
 
-  // Group by date → bank
   const dailyMap: Record<string, Record<string, { credit: number; debit: number }>> = {};
   const BANKS = ['BCA', 'BRI', 'MANDIRI'];
   for (const t of (allTxn ?? [])) {
@@ -98,7 +111,7 @@ export async function GET(req: NextRequest) {
     .range(offset, offset + limit - 1);
 
   if (bankFilter) listQuery = listQuery.eq('bank', bankFilter);
-  if (accountFilter) listQuery = listQuery.eq('account_no', accountFilter);
+  if (accountNos) listQuery = listQuery.in('account_no', accountNos);
   if (typeFilter === 'CR') listQuery = listQuery.gt('credit_amount', 0);
   if (typeFilter === 'DB') listQuery = listQuery.gt('debit_amount',  0);
 

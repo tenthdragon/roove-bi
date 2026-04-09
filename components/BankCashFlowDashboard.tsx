@@ -34,10 +34,20 @@ interface Transaction {
   transaction_date: string;
   transaction_time: string | null;
   bank: string;
+  account_no: string;
   description: string;
   credit_amount: number;
   debit_amount: number;
   running_balance: number | null;
+}
+
+interface BankAccount {
+  id: string;
+  bank: string;
+  account_no: string;
+  account_name: string;
+  business_name: string;
+  is_active: boolean;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -57,7 +67,6 @@ function fmtFull(n: number): string {
 }
 
 function shortDate(d: string): string {
-  // "2026-04-01" → "1 Apr"
   const dt = new Date(d + 'T00:00:00');
   return dt.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
 }
@@ -66,8 +75,16 @@ function fmtTime(d: string, t: string | null): string {
   return t ? `${d.slice(8, 10)}/${d.slice(5, 7)} ${t}` : `${d.slice(8, 10)}/${d.slice(5, 7)}`;
 }
 
-const BANK_COLORS = { BCA: '#005BAA', BRI: '#00529B', MANDIRI: '#003087' };
-const BANK_BADGES = { BCA: { bg: '#dbeafe', text: '#1e40af' }, BRI: { bg: '#dcfce7', text: '#166534' }, MANDIRI: { bg: '#fef9c3', text: '#854d0e' } };
+const BANK_COLORS: Record<string, string> = { BCA: '#005BAA', BRI: '#00529B', MANDIRI: '#003087' };
+const BANK_BADGES: Record<string, { bg: string; text: string }> = {
+  BCA: { bg: '#dbeafe', text: '#1e40af' },
+  BRI: { bg: '#dcfce7', text: '#166534' },
+  MANDIRI: { bg: '#fef9c3', text: '#854d0e' },
+};
+
+const BIZ_COLORS: Record<string, string> = {
+  RTI: '#3b82f6', RLT: '#8b5cf6', RLB: '#06b6d4', JHN: '#f97316',
+};
 
 // ── Upload Drop Zone (multi-file queue) ──────────────────────────────────────
 
@@ -80,7 +97,6 @@ function UploadZone({ onUploaded }: { onUploaded: () => void }) {
   const [running, setRunning] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Kick off sequential processing whenever queue has waiting items
   useEffect(() => {
     if (running) return;
     const nextIdx = queue.findIndex(q => q.status === 'waiting');
@@ -92,7 +108,6 @@ function UploadZone({ onUploaded }: { onUploaded: () => void }) {
       const item = queue[idx];
       if (!item) { setRunning(false); return; }
 
-      // Mark as uploading
       setQueue(prev => prev.map((q, i) => i === idx ? { ...q, status: 'uploading', message: 'Menganalisa…' } : q));
 
       const form = new FormData();
@@ -105,18 +120,14 @@ function UploadZone({ onUploaded }: { onUploaded: () => void }) {
         } else {
           const acctShort = data.account_no ? `${data.account_no.slice(-4)}` : '';
           setQueue(prev => prev.map((q, i) => i === idx ? { ...q, status: 'success', message: `${data.bank}${acctShort ? ` ****${acctShort}` : ''} · ${data.period_label} · ${data.inserted} transaksi` } : q));
-          onUploaded(); // refresh dashboard after each success
+          onUploaded();
         }
       } catch (e: any) {
         setQueue(prev => prev.map((q, i) => i === idx ? { ...q, status: 'error', message: e.message || 'Network error' } : q));
       }
 
-      // Move to next waiting item
       setQueue(prev => {
         const nextWaiting = prev.findIndex((q, i) => i > idx && q.status === 'waiting');
-        if (nextWaiting >= 0) {
-          // Trigger next iteration — done via effect re-run after state update
-        }
         return prev;
       });
       setRunning(false);
@@ -138,7 +149,6 @@ function UploadZone({ onUploaded }: { onUploaded: () => void }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      {/* Drop zone */}
       <div
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
@@ -159,7 +169,6 @@ function UploadZone({ onUploaded }: { onUploaded: () => void }) {
         <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 3 }}>Bisa pilih banyak file sekaligus · BCA · BRI · Mandiri terdeteksi otomatis</div>
       </div>
 
-      {/* Queue list */}
       {queue.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           {queue.map((item, i) => (
@@ -179,7 +188,6 @@ function UploadZone({ onUploaded }: { onUploaded: () => void }) {
             </div>
           ))}
 
-          {/* Actions row */}
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
             {allDone && (
               <button onClick={() => setQueue([])} style={{ fontSize: 11, padding: '4px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>
@@ -203,29 +211,29 @@ function UploadZone({ onUploaded }: { onUploaded: () => void }) {
 
 // ── Bank Summary Card ─────────────────────────────────────────────────────────
 
-function BankCard({ session, onDelete }: { session: Session; onDelete: () => void }) {
+function BankCard({ session, bizName, onDelete }: { session: Session; bizName?: string; onDelete: () => void }) {
   const netFlow = session.total_credit - session.total_debit;
   const badge = BANK_BADGES[session.bank] || { bg: 'var(--bg-deep)', text: 'var(--text)' };
 
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16, position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: BANK_COLORS[session.bank] || 'var(--accent)' }} />
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: bizName ? (BIZ_COLORS[bizName] || 'var(--accent)') : (BANK_COLORS[session.bank] || 'var(--accent)') }} />
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {bizName && (
+              <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: BIZ_COLORS[bizName] || 'var(--accent)', color: '#fff', letterSpacing: '0.04em' }}>
+                {bizName}
+              </span>
+            )}
             <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: badge.bg, color: badge.text, letterSpacing: '0.04em' }}>
               {session.bank}
             </span>
-            {session.account_no && session.account_no !== 'UNKNOWN' && (
-              <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                {session.account_no}
-              </span>
-            )}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>
-            {session.transaction_count?.toLocaleString('id-ID')} transaksi
+          <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4, fontFamily: 'monospace' }}>
+            {session.account_no && session.account_no !== 'UNKNOWN' ? session.account_no : '—'} · {session.transaction_count?.toLocaleString('id-ID')} trx
           </div>
         </div>
         <button
@@ -285,9 +293,8 @@ function DailyChart({ data }: { data: DailyRow[] }) {
 
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>Cash Flow Harian (Gabungan 3 Bank)</div>
+      <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 14 }}>Cash Flow Harian</div>
 
-      {/* Legend */}
       <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: 11 }}>
         <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: 'var(--green)', marginRight: 4 }} />Cash Masuk</span>
         <span><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: 'var(--red)', marginRight: 4 }} />Cash Keluar</span>
@@ -300,21 +307,16 @@ function DailyChart({ data }: { data: DailyRow[] }) {
             const outH = (row.total_debit  / maxVal) * 120;
             return (
               <div key={row.date} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, flex: '0 0 44px' }}>
-                {/* Values on top */}
                 {row.total_credit > 0 && (
                   <div style={{ fontSize: 8, color: 'var(--green)', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>{fmtRp(row.total_credit)}</div>
                 )}
-                {/* Bars */}
                 <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 120 }}>
                   <div
                     title={`Masuk: ${fmtFull(row.total_credit)}`}
                     style={{
                       width: 18, borderRadius: '3px 3px 0 0',
                       height: Math.max(inH, row.total_credit > 0 ? 2 : 0),
-                      background: 'var(--green)',
-                      opacity: 0.85,
-                      transition: 'height 0.3s',
-                      alignSelf: 'flex-end',
+                      background: 'var(--green)', opacity: 0.85, transition: 'height 0.3s', alignSelf: 'flex-end',
                     }}
                   />
                   <div
@@ -322,14 +324,10 @@ function DailyChart({ data }: { data: DailyRow[] }) {
                     style={{
                       width: 18, borderRadius: '3px 3px 0 0',
                       height: Math.max(outH, row.total_debit > 0 ? 2 : 0),
-                      background: 'var(--red)',
-                      opacity: 0.75,
-                      transition: 'height 0.3s',
-                      alignSelf: 'flex-end',
+                      background: 'var(--red)', opacity: 0.75, transition: 'height 0.3s', alignSelf: 'flex-end',
                     }}
                   />
                 </div>
-                {/* Date label */}
                 <div style={{ fontSize: 9, color: 'var(--dim)', whiteSpace: 'nowrap', marginTop: 4 }}>{shortDate(row.date)}</div>
               </div>
             );
@@ -342,7 +340,7 @@ function DailyChart({ data }: { data: DailyRow[] }) {
 
 // ── Transaction Table ─────────────────────────────────────────────────────────
 
-function TransactionTable({ periodLabel }: { periodLabel: string }) {
+function TransactionTable({ periodLabel, business, acctMap }: { periodLabel: string; business: string; acctMap: Record<string, string> }) {
   const [rows, setRows]       = useState<Transaction[]>([]);
   const [total, setTotal]     = useState(0);
   const [page, setPage]       = useState(1);
@@ -356,15 +354,16 @@ function TransactionTable({ periodLabel }: { periodLabel: string }) {
     const params = new URLSearchParams({ period: periodLabel, page: String(p), limit: String(LIMIT) });
     if (b) params.set('bank', b);
     if (t) params.set('type', t);
+    if (business) params.set('business', business);
     const res  = await fetch(`/api/bank-cashflow?${params}`);
     const data = await res.json();
     setRows(data.transactions || []);
     setTotal(data.total || 0);
     setPage(p);
     setLoading(false);
-  }, [periodLabel, bankF, typeF]);
+  }, [periodLabel, bankF, typeF, business]);
 
-  useEffect(() => { if (periodLabel) load(1); }, [periodLabel]);
+  useEffect(() => { if (periodLabel) load(1); }, [periodLabel, business]);
 
   const totalPages = Math.ceil(total / LIMIT);
 
@@ -385,11 +384,9 @@ function TransactionTable({ periodLabel }: { periodLabel: string }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontSize: 13, fontWeight: 700 }}>Rincian Transaksi · {total.toLocaleString('id-ID')} baris</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {/* Bank filter */}
           {filterBtn('Semua Bank', !bankF, () => { setBankF(''); load(1, '', typeF); })}
           {['BCA', 'BRI', 'MANDIRI'].map(b => filterBtn(b, bankF === b, () => { setBankF(b); load(1, b, typeF); }))}
           <div style={{ width: 1, background: 'var(--border)', margin: '0 2px' }} />
-          {/* Type filter */}
           {filterBtn('Semua', !typeF, () => { setTypeF(''); load(1, bankF, ''); })}
           {filterBtn('Masuk', typeF === 'CR', () => { setTypeF('CR'); load(1, bankF, 'CR'); })}
           {filterBtn('Keluar', typeF === 'DB', () => { setTypeF('DB'); load(1, bankF, 'DB'); })}
@@ -400,8 +397,8 @@ function TransactionTable({ periodLabel }: { periodLabel: string }) {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--border)' }}>
-              {['Tgl/Waktu', 'Bank', 'Keterangan', 'Cash Masuk', 'Cash Keluar', 'Saldo'].map(h => (
-                <th key={h} style={{ padding: '6px 10px', textAlign: h === 'Keterangan' ? 'left' : 'right', color: 'var(--dim)', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap', ...(h === 'Tgl/Waktu' || h === 'Bank' ? { textAlign: 'left' } : {}) }}>
+              {['Tgl/Waktu', 'Bisnis', 'Bank', 'Keterangan', 'Cash Masuk', 'Cash Keluar', 'Saldo'].map(h => (
+                <th key={h} style={{ padding: '6px 10px', textAlign: ['Keterangan'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', whiteSpace: 'nowrap', ...(['Tgl/Waktu', 'Bisnis', 'Bank', 'Keterangan'].includes(h) ? { textAlign: 'left' } : {}) }}>
                   {h}
                 </th>
               ))}
@@ -409,20 +406,28 @@ function TransactionTable({ periodLabel }: { periodLabel: string }) {
           </thead>
           <tbody>
             {loading && (
-              <tr><td colSpan={6} style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 11 }}>Memuat…</td></tr>
+              <tr><td colSpan={7} style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 11 }}>Memuat…</td></tr>
             )}
             {!loading && rows.length === 0 && (
-              <tr><td colSpan={6} style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 11 }}>Tidak ada transaksi</td></tr>
+              <tr><td colSpan={7} style={{ textAlign: 'center', padding: 20, color: 'var(--dim)', fontSize: 11 }}>Tidak ada transaksi</td></tr>
             )}
             {!loading && rows.map((r, i) => {
               const badge = BANK_BADGES[r.bank] || { bg: 'var(--bg-deep)', text: 'var(--dim)' };
+              const biz = acctMap[r.account_no] || '';
               return (
                 <tr key={i} style={{ borderBottom: '1px solid rgba(55,65,81,0.3)' }}>
                   <td style={{ padding: '6px 10px', whiteSpace: 'nowrap', color: 'var(--dim)', fontSize: 11 }}>{fmtTime(r.transaction_date, r.transaction_time)}</td>
                   <td style={{ padding: '6px 10px' }}>
+                    {biz ? (
+                      <span style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: BIZ_COLORS[biz] || 'var(--accent)', color: '#fff' }}>{biz}</span>
+                    ) : (
+                      <span style={{ fontSize: 10, color: 'var(--dim)' }}>—</span>
+                    )}
+                  </td>
+                  <td style={{ padding: '6px 10px' }}>
                     <span style={{ display: 'inline-block', padding: '1px 7px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: badge.bg, color: badge.text }}>{r.bank}</span>
                   </td>
-                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', maxWidth: 320, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.description}>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.description}>
                     {r.description || '—'}
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: r.credit_amount > 0 ? 'var(--green)' : 'var(--dim)', fontWeight: r.credit_amount > 0 ? 600 : 400 }}>
@@ -441,7 +446,6 @@ function TransactionTable({ periodLabel }: { periodLabel: string }) {
         </table>
       </div>
 
-      {/* Pagination */}
       {totalPages > 1 && (
         <div style={{ display: 'flex', justifyContent: 'center', gap: 6, marginTop: 12 }}>
           <button onClick={() => load(page - 1)} disabled={page <= 1 || loading} style={pgBtn(page <= 1)}>‹ Prev</button>
@@ -467,15 +471,30 @@ export default function BankCashFlowDashboard() {
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState('');
   const [period, setPeriod]       = useState('');
+  const [business, setBusiness]   = useState('');       // '' = all
   const [uploadOpen, setUploadOpen] = useState(false);
-  const [deleting, setDeleting]   = useState('');
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
 
-  const fetchData = useCallback(async (p?: string) => {
+  // account_no → business_name mapping
+  const acctMap: Record<string, string> = {};
+  bankAccounts.forEach(a => { acctMap[a.account_no] = a.business_name; });
+  const businesses = [...new Set(bankAccounts.map(a => a.business_name))].sort();
+
+  // Fetch bank accounts (for mapping)
+  useEffect(() => {
+    fetch('/api/bank-accounts').then(r => r.json()).then(d => {
+      setBankAccounts(d.accounts || []);
+    }).catch(() => {});
+  }, []);
+
+  const fetchData = useCallback(async (p?: string, biz?: string) => {
     setLoading(true);
     setError('');
     try {
       const params = new URLSearchParams({ limit: '0' });
       if (p) params.set('period', p);
+      const activeBiz = biz !== undefined ? biz : business;
+      if (activeBiz) params.set('business', activeBiz);
       const res = await fetch(`/api/bank-cashflow?${params}`);
       const d   = await res.json();
       if (d.error) throw new Error(d.error);
@@ -485,18 +504,22 @@ export default function BankCashFlowDashboard() {
       setError(e.message || 'Gagal memuat data');
     }
     setLoading(false);
-  }, []);
+  }, [business]);
 
   useEffect(() => { fetchData(); }, []);
 
+  function changeBusiness(biz: string) {
+    setBusiness(biz);
+    fetchData(period || undefined, biz);
+  }
+
   async function handleDelete(bank: string, periodLabel: string, accountNo?: string) {
-    const label = accountNo && accountNo !== 'UNKNOWN' ? `${bank} · ${accountNo} · ${periodLabel}` : `${bank} · ${periodLabel}`;
+    const biz = accountNo ? acctMap[accountNo] : '';
+    const label = [biz, bank, accountNo && accountNo !== 'UNKNOWN' ? accountNo : '', periodLabel].filter(Boolean).join(' · ');
     if (!confirm(`Hapus data ${label}?`)) return;
-    setDeleting(`${bank}-${periodLabel}-${accountNo || ''}`);
     let url = `/api/bank-cashflow?bank=${bank}&period=${encodeURIComponent(periodLabel)}`;
     if (accountNo) url += `&account=${encodeURIComponent(accountNo)}`;
     await fetch(url, { method: 'DELETE' });
-    setDeleting('');
     fetchData(period || undefined);
   }
 
@@ -510,8 +533,26 @@ export default function BankCashFlowDashboard() {
     debit:  acc.debit  + (s.total_debit  || 0),
   }), { credit: 0, debit: 0 });
 
-  const uploadedBanks = [...new Set(sessions.map(s => s.bank))];
-  const missingBanks = (['BCA', 'BRI', 'MANDIRI'] as const).filter(b => !uploadedBanks.includes(b));
+  // Group sessions by business
+  const sessionsByBiz: Record<string, Session[]> = {};
+  for (const s of sessions) {
+    const biz = acctMap[s.account_no] || 'Lainnya';
+    if (!sessionsByBiz[biz]) sessionsByBiz[biz] = [];
+    sessionsByBiz[biz].push(s);
+  }
+  const bizGroups = Object.keys(sessionsByBiz).sort();
+
+  const pillBtn = (label: string, active: boolean, onClick: () => void, color?: string) => (
+    <button
+      onClick={onClick}
+      style={{
+        padding: '5px 14px', borderRadius: 999, border: active ? 'none' : '1px solid var(--border)',
+        fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 500, transition: 'all 0.15s',
+        background: active ? (color || 'var(--accent)') : 'transparent',
+        color: active ? '#fff' : 'var(--text-secondary)',
+      }}
+    >{label}</button>
+  );
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -525,7 +566,6 @@ export default function BankCashFlowDashboard() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {/* Period selector */}
           {periods.length > 0 && (
             <select
               value={period}
@@ -554,19 +594,23 @@ export default function BankCashFlowDashboard() {
         </div>
       </div>
 
+      {/* ── Business Filter ── */}
+      {businesses.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 11, color: 'var(--dim)', marginRight: 4, fontWeight: 600 }}>Bisnis:</span>
+          {pillBtn('Semua', !business, () => changeBusiness(''))}
+          {businesses.map(b => pillBtn(b, business === b, () => changeBusiness(b), BIZ_COLORS[b]))}
+        </div>
+      )}
+
       {/* ── Upload Panel ── */}
       {uploadOpen && (
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Upload Mutasi Rekening</div>
           <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 14 }}>
-            Format bank terdeteksi otomatis. Jika file untuk periode yang sudah ada, data lama akan diganti.
+            Format bank terdeteksi otomatis. Rekening akan dipetakan ke bisnis berdasarkan Financial Settings.
           </div>
           <UploadZone onUploaded={() => { fetchData(period || undefined); }} />
-          {missingBanks.length > 0 && (
-            <div style={{ marginTop: 10, fontSize: 11, color: 'var(--yellow)' }}>
-              ⚠ Belum ada data untuk periode ini: {missingBanks.join(', ')}
-            </div>
-          )}
         </div>
       )}
 
@@ -584,7 +628,7 @@ export default function BankCashFlowDashboard() {
       {!loading && !error && sessions.length === 0 && (
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 40, textAlign: 'center' }}>
           <div style={{ fontSize: 40, marginBottom: 12 }}>📂</div>
-          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Belum Ada Data</div>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Belum Ada Data{business ? ` untuk ${business}` : ''}</div>
           <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 16 }}>
             Upload file CSV mutasi rekening dari BCA, BRI, atau Mandiri untuk memulai.
           </div>
@@ -595,7 +639,7 @@ export default function BankCashFlowDashboard() {
         </div>
       )}
 
-      {/* ── Bank Summary Cards + Combined ── */}
+      {/* ── Dashboard Content ── */}
       {!loading && sessions.length > 0 && (
         <>
           {/* Combined summary */}
@@ -620,26 +664,53 @@ export default function BankCashFlowDashboard() {
             <div>
               <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Periode</div>
               <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{period || '—'}</div>
-              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{sessions.length} rekening terupload</div>
+              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>
+                {sessions.length} rekening{business ? ` · ${business}` : ''}
+              </div>
             </div>
           </div>
 
-          {/* Per-bank cards */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>
-            {sessions.map(s => (
-              <BankCard
-                key={s.id}
-                session={s}
-                onDelete={() => handleDelete(s.bank, s.period_label, s.account_no)}
-              />
-            ))}
-          </div>
+          {/* Per-business sections with cards */}
+          {bizGroups.map(biz => {
+            const bizSessions = sessionsByBiz[biz];
+            const bizCredit = bizSessions.reduce((s, x) => s + (x.total_credit || 0), 0);
+            const bizDebit  = bizSessions.reduce((s, x) => s + (x.total_debit  || 0), 0);
+            const bizNet = bizCredit - bizDebit;
+
+            return (
+              <div key={biz}>
+                {/* Business header (only show if multiple groups) */}
+                {bizGroups.length > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                    <span style={{ display: 'inline-block', padding: '3px 12px', borderRadius: 999, fontSize: 12, fontWeight: 700, background: BIZ_COLORS[biz] || '#64748b', color: '#fff' }}>
+                      {biz}
+                    </span>
+                    <span style={{ fontSize: 12, color: 'var(--dim)' }}>
+                      In <span style={{ color: 'var(--green)', fontWeight: 600 }}>+{fmtRp(bizCredit)}</span>
+                      {' · '}Out <span style={{ color: 'var(--red)', fontWeight: 600 }}>-{fmtRp(bizDebit)}</span>
+                      {' · '}Net <span style={{ color: bizNet >= 0 ? 'var(--green)' : 'var(--red)', fontWeight: 600 }}>{bizNet >= 0 ? '+' : ''}{fmtRp(bizNet)}</span>
+                    </span>
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: bizGroups.length > 1 ? 16 : 0 }}>
+                  {bizSessions.map(s => (
+                    <BankCard
+                      key={s.id}
+                      session={s}
+                      bizName={bizGroups.length > 1 ? biz : undefined}
+                      onDelete={() => handleDelete(s.bank, s.period_label, s.account_no)}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
 
           {/* Daily chart */}
           {dailyData.length > 0 && <DailyChart data={dailyData} />}
 
           {/* Transaction table */}
-          <TransactionTable periodLabel={period} />
+          <TransactionTable periodLabel={period} business={business} acctMap={acctMap} />
         </>
       )}
     </div>
