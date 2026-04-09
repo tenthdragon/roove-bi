@@ -11,10 +11,17 @@ ALTER TABLE bank_upload_sessions
 -- 2. Ensure account_no is NOT NULL (backfill blanks first)
 UPDATE bank_upload_sessions SET account_no = 'UNKNOWN' WHERE account_no IS NULL OR account_no = '';
 
--- 3. Add new unique constraint
-ALTER TABLE bank_upload_sessions
-  ADD CONSTRAINT bank_upload_sessions_bank_acct_period_key
-  UNIQUE (bank, account_no, period_label);
+-- 3. Add new unique constraint (skip if already exists)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'bank_upload_sessions_bank_acct_period_key'
+  ) THEN
+    ALTER TABLE bank_upload_sessions
+      ADD CONSTRAINT bank_upload_sessions_bank_acct_period_key
+      UNIQUE (bank, account_no, period_label);
+  END IF;
+END $$;
 
 -- 4. Add account_no column to bank_transactions
 ALTER TABLE bank_transactions ADD COLUMN IF NOT EXISTS account_no TEXT;
