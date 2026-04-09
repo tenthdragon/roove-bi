@@ -180,6 +180,7 @@ export const ALL_TABS: TabDef[] = [
     { id: 'warehouse-settings', label: 'Warehouse Settings', icon: 'Wrench' },
   ]},
   // Analysis
+  { id: 'pulse',           label: 'Business Pulse',     icon: 'Activity', group: 'Analysis' },
   { id: 'customers',      label: 'Customer Analysis',  icon: 'Users', group: 'Analysis' },
   { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers', group: 'Analysis' },
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign', group: 'Analysis' },

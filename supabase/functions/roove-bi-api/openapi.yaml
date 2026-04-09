@@ -1,0 +1,277 @@
+openapi: 3.1.0
+info:
+  title: Roove BI - Customer Analysis
+  description: API untuk analisis customer Roove — overview, cohort retention, LTV, CAC, dan brand analysis.
+  version: 1.0.0
+servers:
+  - url: https://hpsenndhoyzgnnkrhtly.supabase.co/functions/v1/roove-bi-api
+    description: Supabase Edge Function
+
+paths:
+  /customer/overview:
+    get:
+      operationId: getCustomerOverview
+      summary: Get customer KPIs untuk periode tertentu
+      description: Mengembalikan total/new/repeat customers, revenue split, repeat rate, dan AOV.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Tanggal mulai (YYYY-MM-DD)
+        - name: to
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Tanggal akhir (YYYY-MM-DD)
+      responses:
+        "200":
+          description: Customer overview KPIs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period:
+                    type: object
+                    properties:
+                      from: { type: string }
+                      to: { type: string }
+                  total_customers: { type: integer }
+                  new_customers: { type: integer }
+                  repeat_customers: { type: integer }
+                  repeat_rate_pct: { type: number }
+                  total_revenue: { type: number }
+                  new_revenue: { type: number }
+                  repeat_revenue: { type: number }
+                  avg_order_value: { type: number }
+                  new_orders: { type: integer }
+                  repeat_orders: { type: integer }
+
+  /customer/daily:
+    get:
+      operationId: getCustomerDaily
+      summary: Get breakdown harian customer new vs repeat
+      description: Data harian berisi order_count, customer_count, revenue, dan cogs per customer_type dan sales_channel.
+      parameters:
+        - name: from
+          in: query
+          required: true
+          schema: { type: string, format: date }
+        - name: to
+          in: query
+          required: true
+          schema: { type: string, format: date }
+      responses:
+        "200":
+          description: Array of daily rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    date: { type: string }
+                    customer_type: { type: string }
+                    sales_channel: { type: string }
+                    order_count: { type: integer }
+                    customer_count: { type: integer }
+                    revenue: { type: number }
+                    cogs: { type: number }
+
+  /customer/cohort:
+    get:
+      operationId: getCustomerCohort
+      summary: Get data retention cohort bulanan
+      description: Berapa customer dari cohort bulan X yang masih aktif di bulan-bulan berikutnya. Bisa di-breakdown per channel.
+      parameters:
+        - name: by_channel
+          in: query
+          required: false
+          schema: { type: string, enum: ["true", "false"], default: "false" }
+          description: Set "true" untuk breakdown per acquisition channel
+      responses:
+        "200":
+          description: Cohort retention data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    cohort_month: { type: string }
+                    months_since_first: { type: integer }
+                    active_customers: { type: integer }
+                    orders: { type: integer }
+                    revenue: { type: number }
+                    channel_group: { type: string, description: "Only present when by_channel=true" }
+
+  /customer/list:
+    get:
+      operationId: getCustomerList
+      summary: Get daftar customer individual dengan metrics
+      description: Daftar customer beserta total orders, revenue, AOV, first/last order date, dan status repeat.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100, maximum: 500 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+        - name: from
+          in: query
+          schema: { type: string, format: date }
+          description: Filter first_order_date >= tanggal ini
+        - name: to
+          in: query
+          schema: { type: string, format: date }
+          description: Filter first_order_date <= tanggal ini
+        - name: repeat_only
+          in: query
+          schema: { type: string, enum: ["true", "false"], default: "false" }
+          description: Hanya tampilkan repeat customers
+      responses:
+        "200":
+          description: Array of customer records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    customer_phone: { type: string }
+                    first_name: { type: string }
+                    first_channel: { type: string }
+                    total_orders: { type: integer }
+                    total_revenue: { type: number }
+                    avg_order_value: { type: number }
+                    first_order_date: { type: string }
+                    last_order_date: { type: string }
+                    is_repeat: { type: boolean }
+
+  /customer/ltv:
+    get:
+      operationId: getCustomerLTV
+      summary: Get Customer Lifetime Value per acquisition channel
+      description: LTV 90 hari per channel — avg first purchase, repeat value, dan repeat rate. Bisa filter per brand dan include trend bulanan.
+      parameters:
+        - name: brand
+          in: query
+          schema: { type: string }
+          description: Filter by brand (gunakan /customer/brands untuk lihat daftar)
+        - name: trend
+          in: query
+          schema: { type: string, enum: ["true", "false"], default: "false" }
+          description: Include monthly cohort trend
+      responses:
+        "200":
+          description: LTV data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ltv_by_channel:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        channel_group: { type: string }
+                        num_customers: { type: integer }
+                        avg_first_purchase: { type: number }
+                        avg_repeat_value: { type: number }
+                        avg_ltv_90d: { type: number }
+                        repeat_rate: { type: number }
+                  trend_by_cohort:
+                    type: array
+                    nullable: true
+                    items:
+                      type: object
+                  available_brands:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        brand: { type: string }
+                        order_count: { type: integer }
+
+  /customer/cac:
+    get:
+      operationId: getCustomerCAC
+      summary: Get Customer Acquisition Cost per channel
+      description: Total ad spend, jumlah new customers, dan CAC per channel. Bisa include breakdown bulanan.
+      parameters:
+        - name: brand
+          in: query
+          schema: { type: string }
+          description: Filter by brand (untuk monthly breakdown)
+        - name: monthly
+          in: query
+          schema: { type: string, enum: ["true", "false"], default: "false" }
+          description: Include monthly CAC breakdown
+      responses:
+        "200":
+          description: CAC data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cac_by_channel:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        channel_group: { type: string }
+                        total_spend: { type: number }
+                        new_customers: { type: integer }
+                        cac: { type: number }
+                  monthly_cac:
+                    type: array
+                    nullable: true
+                    items:
+                      type: object
+
+  /customer/brand-analysis:
+    get:
+      operationId: getCustomerBrandAnalysis
+      summary: Get multi-brand customer analysis
+      description: Cross-brand overlap matrix, brand journey transitions, bundled orders, dan multi-brand customer stats.
+      responses:
+        "200":
+          description: Brand analysis data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cross_brand_matrix: { type: array, items: { type: object } }
+                  brand_journey_top20: { type: array, items: { type: object } }
+                  recent_bundled_orders: { type: array, items: { type: object } }
+                  multi_brand_stats: { type: array, items: { type: object } }
+                  summary: { type: array, items: { type: object } }
+
+  /customer/brands:
+    get:
+      operationId: getAvailableBrands
+      summary: Get daftar brand yang tersedia
+      description: List semua brand dengan minimal 50 orders. Gunakan value brand ini untuk filter di endpoint LTV dan CAC.
+      responses:
+        "200":
+          description: Array of brands
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    brand: { type: string }
+                    order_count: { type: integer }
