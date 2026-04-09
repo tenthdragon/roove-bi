@@ -20,7 +20,6 @@ import {
   getBatches,
   recordStockIn,
   recordStockOut,
-  recordStockRTS,
   recordDispose,
   recordTransfer,
   recordConversion,
@@ -579,9 +578,8 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
   const [expiredDate, setExpiredDate] = useState('');
   const [targetEntity, setTargetEntity] = useState('');
   // Stock Masuk specific
-  const [inType, setInType] = useState<'new' | 'rts' | null>(null);
+  const [inType] = useState<'new'>('new');
   const [selectedPO, setSelectedPO] = useState('');
-  const [resiNumber, setResiNumber] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -679,12 +677,6 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
           await createBatch(pid, batchCode.trim(), expiredDate || null, qty);
           setSuccess(`Stock masuk: ${qty} unit (batch: ${batchCode})`);
         }
-      } else if (mode === 'in' && inType === 'rts') {
-        // RTS — batch existing wajib, resi wajib
-        if (!selectedBatch) { setError('Pilih batch untuk RTS'); setSubmitting(false); return; }
-        if (!resiNumber.trim()) { setError('Nomor resi wajib untuk RTS'); setSubmitting(false); return; }
-        await recordStockRTS(pid, Number(selectedBatch), qty, resiNumber.trim(), notes || undefined);
-        setSuccess(`RTS: ${qty} unit kembali ke batch`);
       } else if (mode === 'out') {
         await recordStockOut(pid, selectedBatch ? Number(selectedBatch) : null, qty, 'manual', undefined, notes || undefined);
         setSuccess(`Stock keluar: ${qty} unit${selectedBatch ? '' : ' (FIFO)'}`);
@@ -710,36 +702,9 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--dim)', fontSize: 18, cursor: 'pointer', padding: 4 }}>&#10005;</button>
         </div>
 
-        {/* Stock Masuk: pilih tipe dulu */}
-        {mode === 'in' && !inType && (
-          <div>
-            <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Pilih tipe barang masuk</div>
-            <div style={{ display: 'flex', gap: 12 }}>
-              <button onClick={() => setInType('new')}
-                style={{ flex: 1, padding: '16px 12px', borderRadius: 12, border: '2px solid var(--border)', background: 'transparent', cursor: 'pointer', textAlign: 'center' }}>
-                <div style={{ fontSize: 20, marginBottom: 4 }}>📦</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>Barang Baru</div>
-                <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>Dari vendor / produksi</div>
-              </button>
-              <button onClick={() => setInType('rts')}
-                style={{ flex: 1, padding: '16px 12px', borderRadius: 12, border: '2px solid var(--border)', background: 'transparent', cursor: 'pointer', textAlign: 'center' }}>
-                <div style={{ fontSize: 20, marginBottom: 4 }}>↩️</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>RTS (Retur)</div>
-                <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>Paket gagal kirim kembali</div>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Show form after type selected (or for non-in modes) */}
-        {(mode !== 'in' || inType) && (
+        {(
           <>
-            {mode === 'in' && inType && (
-              <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>
-                {inType === 'new' ? 'Barang baru dari vendor/produksi — batch wajib' : 'Retur marketplace — pilih batch existing'}
-                <button onClick={() => setInType(null)} style={{ marginLeft: 8, fontSize: 10, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Ubah tipe</button>
-              </div>
-            )}
+            {mode === 'in' && <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Barang baru dari vendor/produksi — batch wajib</div>}
             {mode !== 'in' && cfg.desc && <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>{cfg.desc}</div>}
 
             {/* PO Reference (Barang Baru only) */}
@@ -774,23 +739,6 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
                 <label style={labelStyle}>Expired Date {needsExpiry ? '*' : '(opsional)'}</label>
                 <input type="date" value={expiredDate} onChange={(e) => setExpiredDate(e.target.value)} style={inputStyle} />
               </div>
-            )}
-
-            {/* RTS: batch existing + resi */}
-            {mode === 'in' && inType === 'rts' && (
-              <>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={labelStyle}>Batch * (barang kembali ke batch mana)</label>
-                  <select value={selectedBatch} onChange={(e) => setSelectedBatch(e.target.value)} style={inputStyle}>
-                    <option value="">-- Pilih Batch --</option>
-                    {batches.map(b => <option key={b.id} value={b.id}>{b.batch_code} (qty: {b.current_qty}{b.expired_date ? `, exp: ${b.expired_date}` : ''})</option>)}
-                  </select>
-                </div>
-                <div style={{ marginBottom: 14 }}>
-                  <label style={labelStyle}>Nomor Resi / Order ID *</label>
-                  <input type="text" placeholder="e.g. SPXID061515489801" value={resiNumber} onChange={(e) => setResiNumber(e.target.value)} style={inputStyle} />
-                </div>
-              </>
             )}
 
             {/* Out/Dispose/Transfer: batch selector */}
