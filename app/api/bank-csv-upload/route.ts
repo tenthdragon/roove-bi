@@ -514,7 +514,7 @@ export async function POST(req: NextRequest) {
         period_label:      parsed.period_label,
         period_start:      parsed.period_start || null,
         period_end:        parsed.period_end   || null,
-        account_no:        parsed.account_no   || null,
+        account_no:        parsed.account_no   || 'UNKNOWN',
         opening_balance:   parsed.opening_balance,
         closing_balance:   parsed.closing_balance,
         total_credit:      totalCredit,
@@ -522,7 +522,7 @@ export async function POST(req: NextRequest) {
         transaction_count: parsed.transactions.length,
         uploaded_at:       new Date().toISOString(),
         uploaded_by:       userId,
-      }, { onConflict: 'bank,period_label' })
+      }, { onConflict: 'bank,account_no,period_label' })
       .select('id')
       .single();
 
@@ -538,6 +538,7 @@ export async function POST(req: NextRequest) {
       session_id:       sessionId,
       bank:             parsed.bank,
       period_label:     parsed.period_label,
+      account_no:       parsed.account_no || 'UNKNOWN',
       transaction_date: t.transaction_date,
       transaction_time: t.transaction_time,
       description:      t.description,
@@ -555,6 +556,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success:       true,
       bank:          parsed.bank,
+      account_no:    parsed.account_no || 'UNKNOWN',
       period_label:  parsed.period_label,
       inserted:      parsed.transactions.length,
       total_credit:  totalCredit,

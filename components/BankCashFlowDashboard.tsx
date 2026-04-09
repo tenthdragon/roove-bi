@@ -103,7 +103,8 @@ function UploadZone({ onUploaded }: { onUploaded: () => void }) {
         if (!res.ok || data.error) {
           setQueue(prev => prev.map((q, i) => i === idx ? { ...q, status: 'error', message: data.error || 'Upload gagal' } : q));
         } else {
-          setQueue(prev => prev.map((q, i) => i === idx ? { ...q, status: 'success', message: `${data.bank} · ${data.period_label} · ${data.inserted} transaksi` } : q));
+          const acctShort = data.account_no ? `${data.account_no.slice(-4)}` : '';
+          setQueue(prev => prev.map((q, i) => i === idx ? { ...q, status: 'success', message: `${data.bank}${acctShort ? ` ****${acctShort}` : ''} · ${data.period_label} · ${data.inserted} transaksi` } : q));
           onUploaded(); // refresh dashboard after each success
         }
       } catch (e: any) {
@@ -213,11 +214,18 @@ function BankCard({ session, onDelete }: { session: Session; onDelete: () => voi
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
         <div>
-          <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: badge.bg, color: badge.text, letterSpacing: '0.04em' }}>
-            {session.bank}
-          </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ display: 'inline-block', padding: '2px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, background: badge.bg, color: badge.text, letterSpacing: '0.04em' }}>
+              {session.bank}
+            </span>
+            {session.account_no && session.account_no !== 'UNKNOWN' && (
+              <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                {session.account_no}
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>
-            {session.account_no || '—'} · {session.transaction_count?.toLocaleString('id-ID')} transaksi
+            {session.transaction_count?.toLocaleString('id-ID')} transaksi
           </div>
         </div>
         <button
@@ -481,10 +489,13 @@ export default function BankCashFlowDashboard() {
 
   useEffect(() => { fetchData(); }, []);
 
-  async function handleDelete(bank: string, periodLabel: string) {
-    if (!confirm(`Hapus data ${bank} · ${periodLabel}?`)) return;
-    setDeleting(`${bank}-${periodLabel}`);
-    await fetch(`/api/bank-cashflow?bank=${bank}&period=${encodeURIComponent(periodLabel)}`, { method: 'DELETE' });
+  async function handleDelete(bank: string, periodLabel: string, accountNo?: string) {
+    const label = accountNo && accountNo !== 'UNKNOWN' ? `${bank} · ${accountNo} · ${periodLabel}` : `${bank} · ${periodLabel}`;
+    if (!confirm(`Hapus data ${label}?`)) return;
+    setDeleting(`${bank}-${periodLabel}-${accountNo || ''}`);
+    let url = `/api/bank-cashflow?bank=${bank}&period=${encodeURIComponent(periodLabel)}`;
+    if (accountNo) url += `&account=${encodeURIComponent(accountNo)}`;
+    await fetch(url, { method: 'DELETE' });
     setDeleting('');
     fetchData(period || undefined);
   }
@@ -499,7 +510,8 @@ export default function BankCashFlowDashboard() {
     debit:  acc.debit  + (s.total_debit  || 0),
   }), { credit: 0, debit: 0 });
 
-  const missingBanks = (['BCA', 'BRI', 'MANDIRI'] as const).filter(b => !sessions.find(s => s.bank === b));
+  const uploadedBanks = [...new Set(sessions.map(s => s.bank))];
+  const missingBanks = (['BCA', 'BRI', 'MANDIRI'] as const).filter(b => !uploadedBanks.includes(b));
 
   return (
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -608,7 +620,7 @@ export default function BankCashFlowDashboard() {
             <div>
               <div style={{ fontSize: 10, color: 'var(--accent)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>Periode</div>
               <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text)' }}>{period || '—'}</div>
-              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{sessions.length} bank terupload</div>
+              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{sessions.length} rekening terupload</div>
             </div>
           </div>
 
@@ -618,7 +630,7 @@ export default function BankCashFlowDashboard() {
               <BankCard
                 key={s.id}
                 session={s}
-                onDelete={() => handleDelete(s.bank, s.period_label)}
+                onDelete={() => handleDelete(s.bank, s.period_label, s.account_no)}
               />
             ))}
           </div>

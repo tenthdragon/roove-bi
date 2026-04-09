@@ -12,14 +12,15 @@ function getServiceSupabase() {
 }
 
 // GET /api/bank-cashflow?period=APRIL+2026
-// GET /api/bank-cashflow?period=APRIL+2026&page=1&limit=50&bank=BCA&type=CR
+// GET /api/bank-cashflow?period=APRIL+2026&page=1&limit=50&bank=BCA&type=CR&account=1234567890
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const period = url.searchParams.get('period') || null;
   const page   = parseInt(url.searchParams.get('page') || '1', 10);
   const limit  = Math.min(parseInt(url.searchParams.get('limit') || '100', 10), 500);
-  const bankFilter = url.searchParams.get('bank') || null;
-  const typeFilter = url.searchParams.get('type') || null; // 'CR' | 'DB' | null
+  const bankFilter    = url.searchParams.get('bank') || null;
+  const typeFilter    = url.searchParams.get('type') || null; // 'CR' | 'DB' | null
+  const accountFilter = url.searchParams.get('account') || null;
   const offset = (page - 1) * limit;
 
   const supabase = getServiceSupabase();
@@ -55,11 +56,12 @@ export async function GET(req: NextRequest) {
   // ── 2. Daily aggregated data ──
   let dailyQuery = supabase
     .from('bank_transactions')
-    .select('transaction_date, bank, credit_amount, debit_amount')
+    .select('transaction_date, bank, account_no, credit_amount, debit_amount')
     .eq('period_label', activePeriod)
     .order('transaction_date', { ascending: true });
 
   if (bankFilter) dailyQuery = dailyQuery.eq('bank', bankFilter);
+  if (accountFilter) dailyQuery = dailyQuery.eq('account_no', accountFilter);
 
   const { data: allTxn, error: txnErr } = await dailyQuery;
   if (txnErr) return NextResponse.json({ error: txnErr.message }, { status: 500 });
@@ -89,13 +91,14 @@ export async function GET(req: NextRequest) {
   // ── 3. Paginated transaction list ──
   let listQuery = supabase
     .from('bank_transactions')
-    .select('transaction_date, transaction_time, bank, description, credit_amount, debit_amount, running_balance', { count: 'exact' })
+    .select('transaction_date, transaction_time, bank, account_no, description, credit_amount, debit_amount, running_balance', { count: 'exact' })
     .eq('period_label', activePeriod)
     .order('transaction_date', { ascending: true })
     .order('transaction_time', { ascending: true })
     .range(offset, offset + limit - 1);
 
   if (bankFilter) listQuery = listQuery.eq('bank', bankFilter);
+  if (accountFilter) listQuery = listQuery.eq('account_no', accountFilter);
   if (typeFilter === 'CR') listQuery = listQuery.gt('credit_amount', 0);
   if (typeFilter === 'DB') listQuery = listQuery.gt('debit_amount',  0);
 
@@ -114,20 +117,25 @@ export async function GET(req: NextRequest) {
   });
 }
 
-// DELETE /api/bank-cashflow?bank=BCA&period=APRIL+2026
+// DELETE /api/bank-cashflow?bank=BCA&period=APRIL+2026&account=1234567890
 export async function DELETE(req: NextRequest) {
   const url = new URL(req.url);
-  const bank   = url.searchParams.get('bank');
-  const period = url.searchParams.get('period');
+  const bank    = url.searchParams.get('bank');
+  const period  = url.searchParams.get('period');
+  const account = url.searchParams.get('account');
   if (!bank || !period) return NextResponse.json({ error: 'bank dan period diperlukan' }, { status: 400 });
 
   const supabase = getServiceSupabase();
-  const { error } = await supabase
+
+  let query = supabase
     .from('bank_upload_sessions')
     .delete()
     .eq('bank', bank)
     .eq('period_label', period);
 
+  if (account) query = query.eq('account_no', account);
+
+  const { error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ success: true });
 }
