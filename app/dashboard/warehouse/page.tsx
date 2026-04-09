@@ -67,6 +67,7 @@ interface ExpiringProduct {
 const SUB_TABS = [
   { id: 'daily-summary', label: 'Daily Summary' },
   { id: 'stock', label: 'Saldo Stock' },
+  { id: 'wip', label: 'Work in Process' },
   { id: 'batch', label: 'Batch & Expiry' },
   { id: 'stock-opname', label: 'Stock Opname' },
   { id: 'ledger', label: 'Movement Log' },
@@ -87,6 +88,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   'bonus': '#34d399',
   'packaging': '#fb923c',
   'other': '#94a3b8',
+  'wip': '#8b5cf6',
+  'wip_material': '#06b6d4',
 };
 
 // ── Helpers ──
@@ -177,7 +180,7 @@ export default function WarehousePage() {
     if (loading) return;
     (async () => {
       try {
-        if (activeTab === 'stock') {
+        if (activeTab === 'stock' || activeTab === 'wip') {
           const data = await getStockBalance();
           setStockBalance(data);
         } else if (activeTab === 'daily-summary') {
@@ -269,6 +272,7 @@ export default function WarehousePage() {
 
       {/* Tab content */}
       {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} userRole={userRole} />}
+      {activeTab === 'wip' && <WipTab data={stockBalance} onRefresh={refreshData} userRole={userRole} />}
       {activeTab === 'daily-summary' && <DailySummaryTab data={dailySummary} alerts={deductionAlerts} deductLog={deductionLog.rows} totalDeductedOrders={deductionLog.totalUniqueOrders} date={dailySummaryDate} setDate={setDailySummaryDate} onRefresh={refreshData} />}
       {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} search={ledgerSearch} setSearch={setLedgerSearch} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
@@ -344,10 +348,6 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
         {canWarehouseOps && <button onClick={() => { setModalMode('transfer'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#06b6d4', color: '#fff' }}>
           Transfer
-        </button>}
-        {canWarehouseOps && <button onClick={() => { setModalMode('convert'); setShowModal(true); }}
-          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#8b5cf6', color: '#fff' }}>
-          Konversi
         </button>}
         {canWarehouseOps && <button onClick={() => { setModalMode('out'); setShowModal(true); }}
           style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#f97316', color: '#fff' }}>
@@ -425,6 +425,117 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
                 <td /><td />
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{fmtRupiah(totalValue)}</td>
                 <td />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+// WORK IN PROCESS TAB
+// ============================================================
+
+function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => void; userRole: string }) {
+  const [showConvert, setShowConvert] = useState(false);
+  const [warehouseFilter, setWarehouseFilter] = useState('BTN - RLB');
+  const [search, setSearch] = useState('');
+
+  const canWarehouseOps = !['ppic'].includes(userRole);
+
+  const wipData = useMemo(() => {
+    let result = data.filter(r => r.category === 'wip' || r.category === 'wip_material');
+    if (warehouseFilter !== 'all') result = result.filter(r => `${r.warehouse} - ${r.entity}` === warehouseFilter);
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(r => r.product_name?.toLowerCase().includes(q));
+    }
+    return result;
+  }, [data, warehouseFilter, search]);
+
+  const warehouses = useMemo(() => {
+    const whs = new Set<string>();
+    data.filter(r => r.category === 'wip' || r.category === 'wip_material')
+      .forEach(r => { if (r.warehouse && r.entity) whs.add(`${r.warehouse} - ${r.entity}`); });
+    return Array.from(whs).sort();
+  }, [data]);
+
+  const totalWip = wipData.filter(r => r.category === 'wip').reduce((s, r) => s + Number(r.current_stock || 0), 0);
+  const totalMaterial = wipData.filter(r => r.category === 'wip_material').reduce((s, r) => s + Number(r.current_stock || 0), 0);
+  const totalValue = wipData.reduce((s, r) => s + Number(r.stock_value || 0), 0);
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <KPICard label="Sachet WIP" value={fmtCompact(totalWip)} color="#8b5cf6" />
+        <KPICard label="Material WIP" value={fmtCompact(totalMaterial)} color="#06b6d4" />
+        <KPICard label="Nilai WIP" value={fmtRupiah(totalValue)} color="var(--green)" />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        {canWarehouseOps && (
+          <button onClick={() => setShowConvert(true)}
+            style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#8b5cf6', color: '#fff' }}>
+            + Konversi ke FG
+          </button>
+        )}
+        <div style={{ flex: 1 }} />
+        <input type="text" placeholder="Cari produk..." value={search} onChange={(e) => setSearch(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', minWidth: 200 }} />
+        <select value={warehouseFilter} onChange={(e) => setWarehouseFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' }}>
+          <option value="all">Semua Gudang</option>
+          {warehouses.map(w => <option key={w} value={w}>{w}</option>)}
+        </select>
+      </div>
+
+      {showConvert && (
+        <ConvertModal onClose={() => setShowConvert(false)} onSuccess={() => { setShowConvert(false); onRefresh(); }} />
+      )}
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              {['No', 'Produk', 'Kategori', 'Gudang', 'Stock', 'Satuan', 'Harga', 'Nilai'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Kategori', 'Gudang', 'Satuan'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {wipData.map((r, i) => (
+              <tr key={r.product_id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                <td style={{ padding: '6px 10px', textAlign: 'right', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{i + 1}</td>
+                <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
+                <td style={{ padding: '6px 10px' }}>
+                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `${CATEGORY_COLORS[r.category]}20` : 'var(--bg-deep)', color: CATEGORY_COLORS[r.category] || 'var(--text-secondary)' }}>{r.category}</span>
+                </td>
+                <td style={{ padding: '6px 10px', fontSize: 11 }}>
+                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text)' }}>{r.warehouse} - {r.entity}</span>
+                </td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: Number(r.current_stock) < 0 ? 'var(--red)' : 'var(--text)' }}>
+                  {Number(r.current_stock).toLocaleString('id-ID')}
+                </td>
+                <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{r.unit}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{r.price_list > 0 ? fmtRupiah(r.price_list) : '-'}</td>
+                <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{r.stock_value > 0 ? fmtRupiah(r.stock_value) : '-'}</td>
+              </tr>
+            ))}
+            {wipData.length === 0 && (
+              <tr><td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada data WIP.</td></tr>
+            )}
+          </tbody>
+          {wipData.length > 0 && (
+            <tfoot>
+              <tr style={{ borderTop: '2px solid var(--border)' }}>
+                <td colSpan={4} style={{ padding: '8px 10px', fontWeight: 700, color: 'var(--text)' }}>Total</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>
+                  {wipData.reduce((s, r) => s + Number(r.current_stock || 0), 0).toLocaleString('id-ID')}
+                </td>
+                <td /><td />
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--text)' }}>{fmtRupiah(totalValue)}</td>
               </tr>
             </tfoot>
           )}
