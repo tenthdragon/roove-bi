@@ -1,7 +1,9 @@
 // app/api/bank-transactions/route.ts
 // PATCH — update transaction tag (manual override)
+// POST  — retag all existing transactions with auto-classifier
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { classifyTransaction } from '@/lib/transaction-tagger';
 
 function getServiceSupabase() {
   return createClient(
@@ -47,4 +49,49 @@ export async function PATCH(req: NextRequest) {
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   return NextResponse.json({ transaction: data });
+}
+
+// POST /api/bank-transactions — retag all untagged (or all) transactions
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const forceAll = body.force === true; // retag even manually-overridden ones
+
+  const supabase = getServiceSupabase();
+
+  // Fetch all transactions (only those not manually overridden, unless force)
+  let query = supabase
+    .from('bank_transactions')
+    .select('id, description, credit_amount, debit_amount, tag, tag_updated_at');
+
+  if (!forceAll) {
+    // Only retag transactions that haven't been manually changed
+    query = query.is('tag_updated_at', null);
+  }
+
+  const { data: txns, error: fetchErr } = await query;
+  if (fetchErr) return NextResponse.json({ error: fetchErr.message }, { status: 500 });
+  if (!txns || txns.length === 0) return NextResponse.json({ updated: 0, message: 'Tidak ada transaksi untuk di-retag' });
+
+  // Classify each and batch update
+  let updated = 0;
+  const BATCH = 100;
+  for (let i = 0; i < txns.length; i += BATCH) {
+    const batch = txns.slice(i, i + BATCH);
+    for (const t of batch) {
+      const newTag = classifyTransaction(
+        t.description || '',
+        parseFloat(t.credit_amount) || 0,
+        parseFloat(t.debit_amount) || 0,
+      );
+      if (newTag !== t.tag) {
+        const { error } = await supabase
+          .from('bank_transactions')
+          .update({ tag: newTag, tag_auto: newTag })
+          .eq('id', t.id);
+        if (!error) updated++;
+      }
+    }
+  }
+
+  return NextResponse.json({ updated, total: txns.length, message: `${updated} transaksi di-retag dari ${txns.length} total` });
 }
