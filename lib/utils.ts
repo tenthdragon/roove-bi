@@ -74,6 +74,18 @@ export const PERMISSION_GROUPS = [
       { key: 'whs:mapping',    label: 'Mapping Scalev' },
     ],
   },
+  {
+    label: 'Admin — Sub-tab',
+    keys: [
+      { key: 'admin:daily',      label: 'Daily Data' },
+      { key: 'admin:meta',       label: 'Meta Ads' },
+      { key: 'admin:financial',  label: 'Financial' },
+      { key: 'admin:warehouse',  label: 'Warehouse (upload)' },
+      { key: 'admin:sync',       label: 'Sync' },
+      { key: 'admin:data_ref',   label: 'Data Reference' },
+      { key: 'admin:logs',       label: 'Logs' },
+    ],
+  },
 ];
 
 export interface Profile {

@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { useSupabase } from '@/lib/supabase-browser';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
 import { MATRIX_ROLES, PERMISSION_GROUPS } from '@/lib/utils';
+import { usePermissions } from '@/lib/PermissionsContext';
 import { invalidateAll } from '@/lib/dashboard-cache';
 import SheetManager from '@/components/SheetManager';
 import ConnectionManager from '@/components/ConnectionManager';
@@ -32,6 +33,7 @@ const TABS = [
 
 export default function AdminPage() {
   const supabase = useSupabase();
+  const { can } = usePermissions();
   const searchParams = useSearchParams();
   const showAdvanced = searchParams.get('advanced') === 'true';
 
@@ -480,12 +482,14 @@ export default function AdminPage() {
     }
   };
 
-  // Filter tabs based on role
+  // Filter tabs based on role + permissions
   const visibleTabs = TABS.filter(t => {
     if ((t.id === 'users' || t.id === 'permissions') && profile?.role !== 'owner') return false;
-    // Brands tab moved to Warehouse Settings
     if (t.id === 'data_ref' && profile?.role !== 'owner') return false;
-    return true;
+    // owner sees all tabs
+    if (profile?.role === 'owner') return true;
+    // other roles: check admin:* permission
+    return can(`admin:${t.id}`);
   });
 
   return (
