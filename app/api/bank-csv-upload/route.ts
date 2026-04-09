@@ -92,6 +92,29 @@ function parseDMY(s: string): string {
   return `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
 }
 
+// "08 April 2026 06:27:31" → { date: "2026-04-08", time: "06:27" }
+const MONTH_EN_ID: Record<string, string> = {
+  january: '01', februari: '02', february: '02', maret: '03', march: '03',
+  april: '04', mei: '05', may: '05', juni: '06', june: '06',
+  juli: '07', july: '07', agustus: '08', august: '08',
+  september: '09', oktober: '10', october: '10',
+  november: '11', desember: '12', december: '12',
+  januari: '01',
+};
+
+function parseLongDate(s: string): { date: string; time: string | null } | null {
+  // "08 April 2026 06:27:31" or "08 April 2026"
+  const m = s.trim().match(/^(\d{1,2})\s+(\w+)\s+(\d{4})(?:\s+(\d{2}:\d{2}(?::\d{2})?))?/i);
+  if (!m) return null;
+  const day = m[1].padStart(2, '0');
+  const monthKey = m[2].toLowerCase();
+  const month = MONTH_EN_ID[monthKey];
+  if (!month) return null;
+  const year = m[3];
+  const time = m[4] ? m[4].slice(0, 5) : null;
+  return { date: `${year}-${month}-${day}`, time };
+}
+
 // Period label from date: "APRIL 2026"
 const MONTH_NAMES = ['', 'JANUARI', 'FEBRUARI', 'MARET', 'APRIL', 'MEI', 'JUNI',
   'JULI', 'AGUSTUS', 'SEPTEMBER', 'OKTOBER', 'NOVEMBER', 'DESEMBER'];
@@ -115,17 +138,19 @@ function parseBCA(text: string): ParseResult {
   let dataStarted = false;
 
   for (const rawLine of lines) {
-    const rawLower = rawLine.toLowerCase();
+    // Strip quotes from metadata lines (April 8 format wraps each line in quotes)
+    const cleanLine = rawLine.replace(/^"(.*)"$/, '$1');
+    const rawLower = cleanLine.toLowerCase();
 
     // Extract account number (try multiple patterns)
     if (rawLower.includes('no. rekening') || rawLower.includes('no.rekening') || rawLower.includes('nomor rekening')) {
-      const m = rawLine.match(/:\s*([\d\s\-]+)/);
+      const m = cleanLine.match(/:\s*([\d\s\-]+)/);
       if (m) accountNo = m[1].replace(/\s+/g, '').trim();
       continue;
     }
     // Extract period
     if (rawLower.includes('periode')) {
-      const m = rawLine.match(/(\d{2}\/\d{2}\/\d{4})\s*[-–]\s*(\d{2}\/\d{2}\/\d{4})/);
+      const m = cleanLine.match(/(\d{2}\/\d{2}\/\d{4})\s*[-–]\s*(\d{2}\/\d{2}\/\d{4})/);
       if (m) {
         periodStart = parseDMY(m[1]);
         periodEnd   = parseDMY(m[2]);
@@ -134,31 +159,38 @@ function parseBCA(text: string): ParseResult {
     }
 
     // Summary lines at bottom
-    if (rawLower.startsWith('saldo awal')) {
-      const m = rawLine.match(/([\d,]+\.?[\d]*)/);
+    if (rawLower.includes('saldo awal')) {
+      const m = cleanLine.match(/([\d,]+\.?[\d]*)/);
       if (m) openingBalance = parseNum(m[1]);
       continue;
     }
-    if (rawLower.startsWith('saldo akhir')) {
-      const m = rawLine.match(/([\d,]+\.?[\d]*)/);
+    if (rawLower.includes('saldo akhir')) {
+      const m = cleanLine.match(/([\d,]+\.?[\d]*)/);
       if (m) closingBalance = parseNum(m[1]);
       continue;
     }
-    if (rawLower.startsWith('mutasi debet') || rawLower.startsWith('mutasi kredit')) continue;
+    if (rawLower.includes('mutasi debet') || rawLower.includes('mutasi kredit')) continue;
 
     // Data header row — case-insensitive, handles variations
-    if (rawLower.includes('tanggal transaksi') || rawLower.includes('tgl transaksi') || rawLower.includes('tanggal') && rawLower.includes('keterangan')) {
+    if (rawLower.includes('tanggal transaksi') || rawLower.includes('tgl transaksi') || (rawLower.includes('tanggal') && rawLower.includes('keterangan'))) {
       dataStarted = true;
       continue;
     }
     if (!dataStarted) continue;
 
-    // Try to parse: BCA data rows can be outer-quoted or not
-    let inner = rawLine;
-    if (rawLine.startsWith('"') && rawLine.endsWith('"')) {
-      inner = stripOuterQuotes(rawLine);
+    // BCA has two CSV flavors:
+    //   Old: entire row wrapped in outer quotes → "01/04/2026,""Desc"",""0000"",""295,000.00 CR"",""303,067,694.37"""
+    //   New: standard CSV with per-field quotes → "08/04/2026","Desc","0000","530,000.00 CR","273,148,411.37"
+    // Detect: old format contains "",""  (doubled-quote comma doubled-quote)
+    const isOldFormat = rawLine.includes('""');
+    let cols: string[];
+    if (isOldFormat) {
+      // Strip outer quotes then parse
+      cols = parseCSVLine(stripOuterQuotes(rawLine), ',');
+    } else {
+      // Standard CSV — parse directly
+      cols = parseCSVLine(rawLine, ',');
     }
-    const cols = parseCSVLine(inner, ',');
 
     // Find date column: look for DD/MM/YYYY pattern in first few columns
     let dateStr = '';
@@ -172,19 +204,16 @@ function parseBCA(text: string): ParseResult {
     }
     if (!dateStr) continue;
 
-    // Columns after date: description, (optional kode), amount, balance
-    // dateColIdx, dateColIdx+1 = desc, dateColIdx+2 = kode (optional), then amount, balance
-    // BCA format: Tanggal, Keterangan, No.Rekening/Kode, Debet/Kredit, Saldo
+    // BCA format: Tanggal, Keterangan, Cabang, Jumlah (with CR/DB), Saldo
     const remaining = cols.slice(dateColIdx + 1);
     if (remaining.length < 3) continue;
 
     const desc = remaining[0] || '';
-    // Amount might be at index 2 or 3 (skip kode column if present)
     let amountRaw = '';
     let balanceRaw = '';
 
-    // Try to find amount (has CR or DB suffix, or is numeric)
-    for (let ri = 1; ri < remaining.length - 1; ri++) {
+    // Find the amount cell (has CR or DB suffix)
+    for (let ri = 1; ri < remaining.length; ri++) {
       const cell = remaining[ri].trim().toUpperCase();
       if (cell.endsWith('CR') || cell.endsWith('DB')) {
         amountRaw  = remaining[ri].trim();
@@ -192,11 +221,8 @@ function parseBCA(text: string): ParseResult {
         break;
       }
     }
-    // Fallback: second-to-last and last
-    if (!amountRaw && remaining.length >= 2) {
-      amountRaw  = remaining[remaining.length - 2];
-      balanceRaw = remaining[remaining.length - 1];
-    }
+
+    if (!amountRaw) continue;
 
     const date = parseDMY(dateStr);
     const amountClean = amountRaw.trim();
@@ -213,66 +239,6 @@ function parseBCA(text: string): ParseResult {
       debit_amount:  isDebit  ? amount : 0,
       running_balance: balance || null,
     });
-  }
-
-  // Fallback: if dataStarted never triggered, scan ALL lines for date pattern
-  if (transactions.length === 0) {
-    for (const rawLine of lines) {
-      let inner = rawLine;
-      if (rawLine.startsWith('"') && rawLine.endsWith('"')) {
-        inner = stripOuterQuotes(rawLine);
-      }
-      const cols = parseCSVLine(inner, ',');
-      let dateStr = '';
-      let dateColIdx = -1;
-      for (let ci = 0; ci < Math.min(cols.length, 3); ci++) {
-        if (cols[ci].match(/^\d{2}\/\d{2}\/\d{4}$/)) {
-          dateStr = cols[ci];
-          dateColIdx = ci;
-          break;
-        }
-      }
-      if (!dateStr) continue;
-
-      const remaining = cols.slice(dateColIdx + 1);
-      if (remaining.length < 3) continue;
-
-      const desc = remaining[0] || '';
-      let amountRaw = '';
-      let balanceRaw = '';
-
-      for (let ri = 1; ri < remaining.length - 1; ri++) {
-        const cell = remaining[ri].trim().toUpperCase();
-        if (cell.endsWith('CR') || cell.endsWith('DB')) {
-          amountRaw  = remaining[ri].trim();
-          balanceRaw = remaining[ri + 1] || '';
-          break;
-        }
-      }
-      if (!amountRaw && remaining.length >= 2) {
-        amountRaw  = remaining[remaining.length - 2];
-        balanceRaw = remaining[remaining.length - 1];
-      }
-
-      const date = parseDMY(dateStr);
-      const amountClean = amountRaw.trim();
-      const isCredit = amountClean.toUpperCase().endsWith('CR');
-      const isDebit  = amountClean.toUpperCase().endsWith('DB');
-      const amount   = parseNum(amountClean.replace(/\s*(CR|DB)$/i, ''));
-      const balance  = parseNum(balanceRaw);
-
-      // Only include if we got either credit or debit amount
-      if (amount > 0 || (parseNum(balanceRaw) > 0)) {
-        transactions.push({
-          transaction_date: date,
-          transaction_time: null,
-          description: desc.trim(),
-          credit_amount: isCredit ? amount : 0,
-          debit_amount:  isDebit  ? amount : 0,
-          running_balance: balance || null,
-        });
-      }
-    }
   }
 
   // Derive period from transactions if not found in header
@@ -406,7 +372,10 @@ function parseMandiri(text: string): ParseResult {
     if (cols.length <= idxDate || !cols[idxDate]) continue;
 
     const rawDate = cols[idxDate];
-    // Handles "DD/MM/YYYY HH:MM" and "YYYY-MM-DD HH:MM:SS"
+    // Handles multiple date formats:
+    //   "DD/MM/YYYY HH:MM"           → parseDMY
+    //   "YYYY-MM-DD HH:MM:SS"        → ISO
+    //   "08 April 2026 06:27:31"     → parseLongDate
     let date = '';
     let time: string | null = null;
     if (rawDate.match(/^\d{2}\/\d{2}\/\d{4}/)) {
@@ -418,7 +387,14 @@ function parseMandiri(text: string): ParseResult {
       date = parts[0];
       time = parts[1] ? parts[1].slice(0, 5) : null;
     } else {
-      continue;
+      // Try "DD Month YYYY HH:MM:SS" format
+      const longParsed = parseLongDate(rawDate);
+      if (longParsed) {
+        date = longParsed.date;
+        time = longParsed.time;
+      } else {
+        continue;
+      }
     }
 
     if (!date.match(/^\d{4}-\d{2}-\d{2}$/)) continue;
@@ -497,7 +473,19 @@ export async function POST(req: NextRequest) {
     else                    parsed = parseMandiri(text);
 
     if (parsed.transactions.length === 0) {
-      return NextResponse.json({ error: 'Tidak ada transaksi yang berhasil dibaca dari file ini' }, { status: 422 });
+      // Return debug info so we can diagnose the issue
+      const normalized = normalizeText(text);
+      const allLines = normalized.split('\n').map(l => l.trim()).filter(Boolean);
+      return NextResponse.json({
+        error: 'Tidak ada transaksi yang berhasil dibaca dari file ini',
+        debug: {
+          detectedBank: bank,
+          totalLines: allLines.length,
+          firstLines: allLines.slice(0, 5).map(l => l.slice(0, 200)),
+          charCode0: text.charCodeAt(0),
+          hasBOM: text.charCodeAt(0) === 0xFEFF,
+        }
+      }, { status: 422 });
     }
 
     // Compute totals
