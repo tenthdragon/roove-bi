@@ -1259,6 +1259,9 @@ export default function AdminPage() {
                           <button onClick={() => handleRoleChange(u.id, 'finance')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#60a5fa', fontSize: 12, fontWeight: 600 }}>✓ Finance</button>
                           <button onClick={() => handleRoleChange(u.id, 'brand_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 12, fontWeight: 600 }}>✓ Brand Manager</button>
                           <button onClick={() => handleRoleChange(u.id, 'sales_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#c084fc', fontSize: 12, fontWeight: 600 }}>✓ Sales Manager</button>
+                          <button onClick={() => handleRoleChange(u.id, 'warehouse_manager')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#06b6d4', fontSize: 12, fontWeight: 600 }}>✓ WH Manager</button>
+                          <button onClick={() => handleRoleChange(u.id, 'ppic')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#34d399', fontSize: 12, fontWeight: 600 }}>✓ PPIC</button>
+                          <button onClick={() => handleRoleChange(u.id, 'direktur_operasional')} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-subtle)', color: '#f97316', fontSize: 12, fontWeight: 600 }}>✓ Direktur Operasional</button>
                         </>
                       ) : (
                         <select
