@@ -69,76 +69,132 @@ function fmtTime(d: string, t: string | null): string {
 const BANK_COLORS = { BCA: '#005BAA', BRI: '#00529B', MANDIRI: '#003087' };
 const BANK_BADGES = { BCA: { bg: '#dbeafe', text: '#1e40af' }, BRI: { bg: '#dcfce7', text: '#166534' }, MANDIRI: { bg: '#fef9c3', text: '#854d0e' } };
 
-// ── Upload Drop Zone ──────────────────────────────────────────────────────────
+// ── Upload Drop Zone (multi-file queue) ──────────────────────────────────────
+
+type FileStatus = 'waiting' | 'uploading' | 'success' | 'error';
+interface FileItem { file: File; status: FileStatus; message: string; }
 
 function UploadZone({ onUploaded }: { onUploaded: () => void }) {
-  const [status, setStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
-  const [message, setMessage] = useState('');
+  const [queue, setQueue]     = useState<FileItem[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  const [running, setRunning] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  async function handleFile(file: File) {
-    setStatus('uploading');
-    setMessage('Menganalisa dan menyimpan...');
-    const form = new FormData();
-    form.append('file', file);
-    try {
-      const res = await fetch('/api/bank-csv-upload', { method: 'POST', body: form });
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        setStatus('error');
-        setMessage(data.error || 'Upload gagal');
-        return;
+  // Kick off sequential processing whenever queue has waiting items
+  useEffect(() => {
+    if (running) return;
+    const nextIdx = queue.findIndex(q => q.status === 'waiting');
+    if (nextIdx < 0) return;
+
+    setRunning(true);
+
+    async function processNext(idx: number) {
+      const item = queue[idx];
+      if (!item) { setRunning(false); return; }
+
+      // Mark as uploading
+      setQueue(prev => prev.map((q, i) => i === idx ? { ...q, status: 'uploading', message: 'Menganalisa…' } : q));
+
+      const form = new FormData();
+      form.append('file', item.file);
+      try {
+        const res  = await fetch('/api/bank-csv-upload', { method: 'POST', body: form });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          setQueue(prev => prev.map((q, i) => i === idx ? { ...q, status: 'error', message: data.error || 'Upload gagal' } : q));
+        } else {
+          setQueue(prev => prev.map((q, i) => i === idx ? { ...q, status: 'success', message: `${data.bank} · ${data.period_label} · ${data.inserted} transaksi` } : q));
+          onUploaded(); // refresh dashboard after each success
+        }
+      } catch (e: any) {
+        setQueue(prev => prev.map((q, i) => i === idx ? { ...q, status: 'error', message: e.message || 'Network error' } : q));
       }
-      setStatus('success');
-      setMessage(`${data.bank} · ${data.period_label} · ${data.inserted} transaksi berhasil disimpan`);
-      setTimeout(() => { setStatus('idle'); setMessage(''); onUploaded(); }, 2500);
-    } catch (e: any) {
-      setStatus('error');
-      setMessage(e.message || 'Network error');
+
+      // Move to next waiting item
+      setQueue(prev => {
+        const nextWaiting = prev.findIndex((q, i) => i > idx && q.status === 'waiting');
+        if (nextWaiting >= 0) {
+          // Trigger next iteration — done via effect re-run after state update
+        }
+        return prev;
+      });
+      setRunning(false);
     }
+
+    processNext(nextIdx);
+  }, [queue, running]);
+
+  function addFiles(files: FileList | File[]) {
+    const newItems: FileItem[] = Array.from(files).map(f => ({ file: f, status: 'waiting', message: '' }));
+    setQueue(prev => [...prev, ...newItems]);
   }
 
-  return (
-    <div
-      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-      onDragLeave={() => setDragOver(false)}
-      onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}
-      onClick={() => status === 'idle' && inputRef.current?.click()}
-      style={{
-        border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
-        borderRadius: 10,
-        padding: '20px 24px',
-        textAlign: 'center',
-        cursor: status === 'idle' ? 'pointer' : 'default',
-        background: dragOver ? 'var(--sidebar-active)' : 'var(--bg-deep)',
-        transition: 'all 0.15s',
-      }}
-    >
-      <input ref={inputRef} type="file" accept=".csv,.txt" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ''; }} />
+  const allDone  = queue.length > 0 && queue.every(q => q.status === 'success' || q.status === 'error');
+  const anyBusy  = queue.some(q => q.status === 'uploading' || q.status === 'waiting');
 
-      {status === 'idle' && (
-        <>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>☁️</div>
-          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Drag & drop atau klik untuk upload</div>
-          <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>Mendukung CSV mutasi BCA · BRI · Mandiri — format otomatis terdeteksi</div>
-        </>
-      )}
-      {status === 'uploading' && (
-        <>
-          <div style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600, marginBottom: 4 }}>Memproses…</div>
-          <div style={{ fontSize: 11, color: 'var(--dim)' }}>{message}</div>
-        </>
-      )}
-      {status === 'success' && (
-        <div style={{ color: 'var(--green)', fontSize: 13, fontWeight: 600 }}>✓ {message}</div>
-      )}
-      {status === 'error' && (
-        <>
-          <div style={{ color: 'var(--red)', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>✗ Upload Gagal</div>
-          <div style={{ fontSize: 11, color: 'var(--dim)' }}>{message}</div>
-          <button onClick={e => { e.stopPropagation(); setStatus('idle'); setMessage(''); }} style={{ marginTop: 8, fontSize: 11, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>Coba Lagi</button>
-        </>
+  const statusIcon = (s: FileStatus) => s === 'success' ? '✓' : s === 'error' ? '✗' : s === 'uploading' ? '⟳' : '○';
+  const statusColor = (s: FileStatus) => s === 'success' ? 'var(--green)' : s === 'error' ? 'var(--red)' : s === 'uploading' ? 'var(--accent)' : 'var(--dim)';
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {/* Drop zone */}
+      <div
+        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={e => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); }}
+        onClick={() => inputRef.current?.click()}
+        style={{
+          border: `2px dashed ${dragOver ? 'var(--accent)' : 'var(--border)'}`,
+          borderRadius: 10, padding: '18px 24px', textAlign: 'center', cursor: 'pointer',
+          background: dragOver ? 'var(--sidebar-active)' : 'var(--bg-deep)', transition: 'all 0.15s',
+        }}
+      >
+        <input
+          ref={inputRef} type="file" accept=".csv,.txt" multiple style={{ display: 'none' }}
+          onChange={e => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ''; }}
+        />
+        <div style={{ fontSize: 26, marginBottom: 6 }}>☁️</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>Drag & drop atau klik untuk upload</div>
+        <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 3 }}>Bisa pilih banyak file sekaligus · BCA · BRI · Mandiri terdeteksi otomatis</div>
+      </div>
+
+      {/* Queue list */}
+      {queue.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {queue.map((item, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px',
+              background: 'var(--bg-deep)', borderRadius: 8,
+              border: `1px solid ${item.status === 'error' ? 'var(--red)' : item.status === 'success' ? 'var(--green)' : 'var(--border)'}`,
+              opacity: item.status === 'waiting' ? 0.6 : 1,
+            }}>
+              <span style={{ color: statusColor(item.status), fontSize: 13, fontWeight: 700, flexShrink: 0, animation: item.status === 'uploading' ? 'spin 1s linear infinite' : 'none', display: 'inline-block' }}>
+                {statusIcon(item.status)}
+              </span>
+              <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.file.name}</span>
+              {item.message && (
+                <span style={{ fontSize: 11, color: statusColor(item.status), flexShrink: 0 }}>{item.message}</span>
+              )}
+            </div>
+          ))}
+
+          {/* Actions row */}
+          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+            {allDone && (
+              <button onClick={() => setQueue([])} style={{ fontSize: 11, padding: '4px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>
+                Bersihkan
+              </button>
+            )}
+            {!anyBusy && queue.some(q => q.status === 'error') && (
+              <button
+                onClick={() => setQueue(prev => prev.map(q => q.status === 'error' ? { ...q, status: 'waiting', message: '' } : q))}
+                style={{ fontSize: 11, padding: '4px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--accent)', cursor: 'pointer' }}
+              >
+                Ulangi yang Gagal
+              </button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -451,9 +507,9 @@ export default function BankCashFlowDashboard() {
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: 0 }}>💳 Cash Flow — Mutasi Bank</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: 0 }}>💳 Cash Flow Mutasi Bank</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>
-            Kompilasi mutasi rekening BCA · BRI · Mandiri · Data persisten di Supabase
+            Kompilasi mutasi rekening BCA · BRI · Mandiri
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
