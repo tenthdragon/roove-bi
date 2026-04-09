@@ -3,6 +3,7 @@
 
 export type TransactionTag =
   | 'customer'
+  | 'supplier'
   | 'intercompany'
   | 'operasional'
   | 'biaya_bank'
@@ -13,6 +14,7 @@ export type TransactionTag =
 
 export const TAG_LABELS: Record<TransactionTag, string> = {
   customer:     'Customer',
+  supplier:     'Supplier',
   intercompany: 'Intercompany',
   operasional:  'Operasional',
   biaya_bank:   'Biaya Bank',
@@ -24,6 +26,7 @@ export const TAG_LABELS: Record<TransactionTag, string> = {
 
 export const TAG_COLORS: Record<TransactionTag, { bg: string; text: string }> = {
   customer:     { bg: '#dcfce7', text: '#166534' },
+  supplier:     { bg: '#fed7aa', text: '#9a3412' },
   intercompany: { bg: '#dbeafe', text: '#1e40af' },
   operasional:  { bg: '#fef9c3', text: '#854d0e' },
   biaya_bank:   { bg: '#f3e8ff', text: '#6b21a8' },
@@ -34,7 +37,7 @@ export const TAG_COLORS: Record<TransactionTag, { bg: string; text: string }> = 
 };
 
 export const ALL_TAGS: TransactionTag[] = [
-  'customer', 'intercompany', 'operasional', 'biaya_bank',
+  'customer', 'supplier', 'intercompany', 'operasional', 'biaya_bank',
   'marketplace', 'refund', 'auto_debit', 'n/a',
 ];
 

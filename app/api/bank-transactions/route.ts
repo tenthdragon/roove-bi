@@ -18,7 +18,7 @@ export async function PATCH(req: NextRequest) {
   const { id, tag } = body;
   if (!id || !tag) return NextResponse.json({ error: 'id dan tag diperlukan' }, { status: 400 });
 
-  const validTags = ['customer', 'intercompany', 'operasional', 'biaya_bank', 'marketplace', 'refund', 'auto_debit', 'n/a'];
+  const validTags = ['customer', 'supplier', 'intercompany', 'operasional', 'biaya_bank', 'marketplace', 'refund', 'auto_debit', 'n/a'];
   if (!validTags.includes(tag)) {
     return NextResponse.json({ error: `Tag tidak valid: ${tag}` }, { status: 400 });
   }

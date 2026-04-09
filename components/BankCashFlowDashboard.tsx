@@ -45,14 +45,15 @@ interface Transaction {
 }
 
 // Tag definitions
-const ALL_TAGS = ['customer', 'intercompany', 'operasional', 'biaya_bank', 'marketplace', 'refund', 'auto_debit', 'n/a'] as const;
+const ALL_TAGS = ['customer', 'supplier', 'intercompany', 'operasional', 'biaya_bank', 'marketplace', 'refund', 'auto_debit', 'n/a'] as const;
 const TAG_LABELS: Record<string, string> = {
-  customer: 'Customer', intercompany: 'Intercompany', operasional: 'Operasional',
-  biaya_bank: 'Biaya Bank', marketplace: 'Marketplace', refund: 'Refund',
-  auto_debit: 'Auto Debit', 'n/a': 'N/A',
+  customer: 'Customer', supplier: 'Supplier', intercompany: 'Intercompany',
+  operasional: 'Operasional', biaya_bank: 'Biaya Bank', marketplace: 'Marketplace',
+  refund: 'Refund', auto_debit: 'Auto Debit', 'n/a': 'N/A',
 };
 const TAG_COLORS: Record<string, { bg: string; text: string }> = {
   customer:     { bg: '#dcfce7', text: '#166534' },
+  supplier:     { bg: '#fed7aa', text: '#9a3412' },
   intercompany: { bg: '#dbeafe', text: '#1e40af' },
   operasional:  { bg: '#fef9c3', text: '#854d0e' },
   biaya_bank:   { bg: '#f3e8ff', text: '#6b21a8' },
