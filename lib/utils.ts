@@ -49,8 +49,9 @@ export const PERMISSION_GROUPS = [
       { key: 'tab:customers',          label: 'Customer Analysis' },
       { key: 'tab:brand-analysis',     label: 'Brand Analysis' },
       { key: 'tab:finance',            label: 'Finance Analysis' },
-      { key: 'tab:financial-report',   label: 'Financial Report' },
+      { key: 'tab:financial-report',    label: 'Financial Report' },
       { key: 'tab:cashflow',           label: '↳ Cash Flow (Bank)' },
+      { key: 'tab:financial-settings', label: '↳ Financial Settings' },
     ],
   },
   {
@@ -262,7 +263,8 @@ export const ALL_TABS: TabDef[] = [
     { id: 'waba-management', label: 'WABA Management',   icon: 'MessageCircle' },
   ]},
   { id: 'financial-report', label: 'Financial Report', icon: 'FileText', group: 'Main Menu', children: [
-    { id: 'cashflow', label: 'Cash Flow', icon: 'Banknote' },
+    { id: 'cashflow',            label: 'Cash Flow',           icon: 'Banknote' },
+    { id: 'financial-settings', label: 'Financial Settings',  icon: 'CreditCard' },
   ]},
   { id: 'ppic',           label: 'PPIC',               icon: 'ClipboardList', group: 'Main Menu' },
   { id: 'warehouse',      label: 'Warehouse',          icon: 'Warehouse', group: 'Main Menu', children: [
