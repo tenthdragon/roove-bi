@@ -10,6 +10,29 @@ import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import ChannelSlaSection from '@/components/ChannelSlaSection';
 import ShipmentStatusSection from '@/components/ShipmentStatusSection';
 
+function formatIsoDate(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function shiftIsoDateByMonthsClamped(value: string, deltaMonths: number): string {
+  const [year, month, day] = value.split('-').map(Number);
+  const totalMonths = year * 12 + (month - 1) + deltaMonths;
+  const targetYear = Math.floor(totalMonths / 12);
+  const targetMonthIndex = ((totalMonths % 12) + 12) % 12;
+  const targetMonth = targetMonthIndex + 1;
+  const targetDay = Math.min(day, getDaysInMonth(targetYear, targetMonth));
+  return formatIsoDate(targetYear, targetMonth, targetDay);
+}
+
+const LEGACY_STORE_BRAND_FALLBACKS: Record<string, string> = {
+  'purvu store': 'Purvu',
+  plume: 'Pluve',
+};
+
 // ── Normalize ad source → platform (same logic as marketing page) ──
 // ── Ads Source → Marketing Platform (sales POV: NO organic spillover) ──
 function normPlatform(source: string): string {
@@ -65,18 +88,13 @@ export default function ChannelsPage() {
   const [hiddenChannels, setHiddenChannels] = useState<Set<string>>(new Set());
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
-  const { activeBrands, error: activeBrandsError, isActiveBrand } = useActiveBrands();
+  const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     const { from, to } = dateRange;
-    const fromDate = new Date(from + 'T00:00:00');
-    const toDate = new Date(to + 'T00:00:00');
-    const prevFrom = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, fromDate.getDate());
-    const prevTo = new Date(toDate.getFullYear(), toDate.getMonth() - 1, toDate.getDate());
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const pf = fmt(prevFrom);
-    const pt = fmt(prevTo);
+    const pf = shiftIsoDateByMonthsClamped(from, -1);
+    const pt = shiftIsoDateByMonthsClamped(to, -1);
 
     const cached = getCached<any>('channels_page_data', from, to, `${pf}|${pt}`);
 
@@ -128,15 +146,66 @@ export default function ChannelsPage() {
   // ── Store → Brand lookup ──
   const storeBrandMap = useMemo(() => {
     const map = {};
-    brandMapping.forEach(r => { map[r.store_pattern?.toLowerCase()] = r.brand; });
+    brandMapping.forEach(r => {
+      if (!r.store_pattern || !r.brand) return;
+      map[r.store_pattern.toLowerCase()] = r.brand;
+    });
     return map;
   }, [brandMapping]);
 
+  const activeBrandMap = useMemo(() => {
+    const map = {};
+    activeBrands.forEach((brand) => {
+      if (!brand) return;
+      map[brand.toLowerCase()] = brand;
+    });
+    return map;
+  }, [activeBrands]);
+
   function getAdBrand(store) {
     if (!store) return null;
-    const key = store.toLowerCase();
-    return storeBrandMap[key] || null;
+    const key = store.trim().toLowerCase();
+    return storeBrandMap[key] || activeBrandMap[key] || LEGACY_STORE_BRAND_FALLBACKS[key] || null;
   }
+
+  const resolvedAdsData = useMemo(() => {
+    return adsData
+      .map((row) => {
+        const brand = getAdBrand(row.store);
+        return { ...row, brand };
+      })
+      .filter((row) => !row.brand || isActiveBrand(row.brand));
+  }, [adsData, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
+
+  const resolvedPrevAdsData = useMemo(() => {
+    return prevAdsData
+      .map((row) => {
+        const brand = getAdBrand(row.store);
+        return { ...row, brand };
+      })
+      .filter((row) => !row.brand || isActiveBrand(row.brand));
+  }, [prevAdsData, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
+
+  const unmappedAdsSummary = useMemo(() => {
+    let total = 0;
+    const byPlatform = {};
+
+    resolvedAdsData.forEach((row) => {
+      if (row.brand) return;
+      const spent = Math.abs(Number(row.spent || 0));
+      if (spent <= 0) return;
+      const platform = normPlatform(row.source);
+      byPlatform[platform] = (byPlatform[platform] || 0) + spent;
+      total += spent;
+    });
+
+    return {
+      total,
+      platforms: Object.entries(byPlatform)
+        .map(([platform, spent]) => ({ platform, spent }))
+        .sort((a, b) => b.spent - a.spent),
+    };
+  }, [resolvedAdsData]);
 
   // Unique products for filter
   const products = useMemo(() => {
@@ -148,19 +217,15 @@ export default function ChannelsPage() {
   // ── Aggregate ads spend by platform, filtered by brand ──
   const adsByPlatform = useMemo(() => {
     const byP = {};
-    adsData.forEach(d => {
-      const brand = getAdBrand(d.store);
+    resolvedAdsData.forEach(d => {
       if (selectedProduct !== 'all') {
-        if (brand !== selectedProduct) return;
-      } else {
-        // Skip ads without brand mapping or inactive brands (consistent with overview)
-        if (!brand || !isActiveBrand(brand)) return;
+        if (d.brand !== selectedProduct) return;
       }
       const platform = normPlatform(d.source);
       byP[platform] = (byP[platform] || 0) + Math.abs(Number(d.spent || 0));
     });
     return byP;
-  }, [adsData, selectedProduct, storeBrandMap, activeBrandsError, isActiveBrand]);
+  }, [resolvedAdsData, selectedProduct]);
 
   // ── Distribute ads to channels (sales POV — strict, no organic spillover) ──
   const adsPerChannel = useMemo(() => {
@@ -275,11 +340,10 @@ export default function ChannelsPage() {
     });
 
     // 3. Aggregate ads spend per date (ensures non-shipping days are included)
-    adsData.forEach(d => {
+    resolvedAdsData.forEach(d => {
       if (!d.date) return;
       if (selectedProduct !== 'all') {
-        const brand = getAdBrand(d.store);
-        if (brand !== selectedProduct) return;
+        if (d.brand !== selectedProduct) return;
       }
       ensureDate(d.date);
       byDate[d.date].adsFee += Math.abs(Number(d.spent) || 0);
@@ -309,7 +373,7 @@ export default function ChannelsPage() {
       });
 
     return { rows, channelNames: sortedChannels };
-  }, [channelData, shipmentCounts, adsData, selectedProduct, storeBrandMap]);
+  }, [channelData, shipmentCounts, resolvedAdsData, selectedProduct]);
 
   // ── Previous month KPIs for delta comparison (total + per channel) ──
   const prevRevenue = useMemo(() => {
@@ -320,13 +384,9 @@ export default function ChannelsPage() {
     const mpAdmin = filtered.reduce((sum, d) => sum + Math.abs(Number(d.mp_admin_cost) || 0), 0);
     // Compute prev ads cost
     let adsCost = 0;
-    prevAdsData.forEach(d => {
+    resolvedPrevAdsData.forEach(d => {
       if (selectedProduct !== 'all') {
-        const brand = getAdBrand(d.store);
-        if (brand !== selectedProduct) return;
-      } else {
-        const brand = getAdBrand(d.store);
-        if (!brand || !isActiveBrand(brand)) return;
+        if (d.brand !== selectedProduct) return;
       }
       adsCost += Math.abs(Number(d.spent || 0));
     });
@@ -337,7 +397,7 @@ export default function ChannelsPage() {
       if (d.channel) byChannel[d.channel] = (byChannel[d.channel] || 0) + (Number(d.net_sales) || 0);
     });
     return { total, gp, mpAdmin, adsCost, totalCost, profitAfterAll, byChannel };
-  }, [prevChannelData, prevAdsData, selectedProduct, storeBrandMap, activeBrandsError, isActiveBrand]);
+  }, [prevChannelData, resolvedPrevAdsData, selectedProduct]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);
@@ -360,13 +420,12 @@ export default function ChannelsPage() {
 
     // Distribute ads cost per product using brand mapping
     const adsByProduct = {};
-    adsData.forEach(d => {
+    resolvedAdsData.forEach(d => {
       if (selectedProduct !== 'all') {
-        const brand = getAdBrand(d.store);
-        if (brand !== selectedProduct) return;
+        if (d.brand !== selectedProduct) return;
       }
-      const brand = getAdBrand(d.store) || 'Unknown';
-      adsByProduct[brand] = (adsByProduct[brand] || 0) + Math.abs(Number(d.spent || 0));
+      if (!d.brand) return;
+      adsByProduct[d.brand] = (adsByProduct[d.brand] || 0) + Math.abs(Number(d.spent || 0));
     });
 
     return Object.entries(byP)
@@ -390,7 +449,7 @@ export default function ChannelsPage() {
       })
       .filter(p => p.revenue > 0)
       .sort((a, b) => b.revenue - a.revenue);
-  }, [channelData, adsData, selectedProduct, storeBrandMap, totalRevenue]);
+  }, [channelData, resolvedAdsData, selectedProduct, totalRevenue]);
 
 
   const prevMonthLabel = useMemo(() => {
@@ -416,7 +475,7 @@ export default function ChannelsPage() {
     </div>
   );
 
-  if (dateLoading || (loading && channelData.length === 0)) {
+  if (dateLoading || activeBrandsLoading || (loading && channelData.length === 0)) {
     return (
       <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>
         <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 12px' }} />
@@ -432,6 +491,18 @@ export default function ChannelsPage() {
         <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Data Sales Channel Gagal Dimuat</div>
           <div style={{ fontSize: 13 }}>{error}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeBrandsError) {
+    return (
+      <div className="fade-in">
+        <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Channel</h2>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Filter Brand Gagal Dimuat</div>
+          <div style={{ fontSize: 13 }}>{activeBrandsError}</div>
         </div>
       </div>
     );
@@ -468,6 +539,26 @@ export default function ChannelsPage() {
           {products.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
       </div>
+
+      {selectedProduct === 'all' && unmappedAdsSummary.total > 0 && (
+        <div style={{
+          background: 'rgba(148, 163, 184, 0.08)',
+          border: '1px solid var(--border)',
+          borderRadius: 12,
+          padding: 14,
+          marginBottom: 16,
+          color: 'var(--dim)',
+          fontSize: 12,
+          lineHeight: 1.6,
+        }}>
+          Sebagian ads spend belum bisa diatribusikan ke brand:
+          {' '}
+          <span style={{ color: 'var(--text)' }}>
+            {unmappedAdsSummary.platforms.map(({ platform, spent }) => `${platform} Rp ${fmtCompact(spent)}`).join(', ')}
+          </span>
+          . Spend ini tetap masuk total `Mkt Cost` dan alokasi channel level, tetapi belum bisa dimasukkan ke product-level attribution sampai mapping store-brand dibenahi.
+        </div>
+      )}
 
       {/* Pre-Feb disclaimer */}
       {dateRange.from < '2026-02-01' && (
@@ -882,15 +973,26 @@ export default function ChannelsPage() {
         </table>
       </div>
 
-      {/* Shipment Status Section */}
-      <div style={{ marginTop: 20 }}>
-        <ShipmentStatusSection from={dateRange.from} to={dateRange.to} />
-      </div>
+      {selectedProduct === 'all' ? (
+        <>
+          {/* Shipment Status Section */}
+          <div style={{ marginTop: 20 }}>
+            <ShipmentStatusSection from={dateRange.from} to={dateRange.to} />
+          </div>
 
-      {/* Order SLA Section */}
-      <div style={{ marginTop: 20 }}>
-        <ChannelSlaSection from={dateRange.from} to={dateRange.to} />
-      </div>
+          {/* Order SLA Section */}
+          <div style={{ marginTop: 20 }}>
+            <ChannelSlaSection from={dateRange.from} to={dateRange.to} />
+          </div>
+        </>
+      ) : (
+        <div style={{ marginTop: 20, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>Shipment Status & Order SLA</div>
+          <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
+            Widget ini sementara hanya ditampilkan untuk `Semua Produk`, karena data shipment dan SLA saat ini belum di-scope per brand. Ini sengaja disembunyikan saat filter brand aktif agar angka di bawah tidak menyesatkan.
+          </div>
+        </div>
+      )}
 
     </div>
   );

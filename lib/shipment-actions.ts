@@ -1,6 +1,7 @@
 // lib/shipment-actions.ts
 'use server';
 
+import { requireDashboardTabAccess } from '@/lib/dashboard-access';
 import { createServiceSupabase } from '@/lib/supabase-server';
 
 export interface ShipmentChannelRow {
@@ -16,6 +17,8 @@ export interface ShipmentChannelRow {
 }
 
 export async function fetchShipmentStatus(from: string, to: string): Promise<ShipmentChannelRow[]> {
+  await requireDashboardTabAccess('channels', 'Sales Channel');
+
   const svc = createServiceSupabase();
 
   // Try RPC first

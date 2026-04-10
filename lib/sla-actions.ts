@@ -1,6 +1,7 @@
 // lib/sla-actions.ts
 'use server';
 
+import { requireDashboardTabAccess } from '@/lib/dashboard-access';
 import { createServiceSupabase } from '@/lib/supabase-server';
 
 export interface SlaRow {
@@ -15,6 +16,8 @@ export interface SlaRow {
 }
 
 export async function fetchChannelSla(from: string, to: string): Promise<SlaRow[]> {
+  await requireDashboardTabAccess('channels', 'Sales Channel');
+
   const svc = createServiceSupabase();
 
   const { data, error } = await svc.rpc('get_channel_sla', {

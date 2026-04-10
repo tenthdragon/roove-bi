@@ -885,7 +885,7 @@ Status legend:
 | Public/auth routes | `app/page.tsx`, `app/register/page.tsx`, `app/forgot-password/page.tsx`, `app/reset-password/page.tsx` | DN | Direview dan dipatch lokal: public auth redirect saat session aktif, email normalization, reset-password recovery handling untuk `code`/`token_hash`/hash session, invite flow/admin UI tidak lagi mengklaim email terkirim padahal hanya generate link. Runtime verification bersama user disarankan |
 | Overview | `app/dashboard/page.tsx`, `lib/overview-actions.ts`, `components/CashFlowSection.tsx` | DN | Direview dan dipatch lokal: previous-range comparison aman untuk month-end, previous-overhead mengikuti seluruh comparison window + proration harian, cash-flow widget dibatasi ke range 1 bulan dari tanggal 1, dan error brand-filter tidak lagi tersamar sebagai empty state. Runtime verification disarankan |
 | Marketing | `app/dashboard/marketing/page.tsx`, `lib/marketing-actions.ts` | DN | Direview dan dipatch lokal: comparison range month-end/custom multi-month kini pakai previous-range yang ter-clamp aman, baseline delta/ROAS previous period memakai window pembanding yang setara, active-brand lookup failure kini tampil sebagai error state, dan ads breakdown kini memakai hybrid brand resolution: baris yang berhasil dimap tetap masuk chart/matrix per-brand, sementara spend yang belum termap tetap masuk total Marketing/traffic-source breakdown dengan warning eksplisit agar source seperti TikTok Ads/WABA MM Cost tidak hilang diam-diam. Runtime verification disarankan |
-| Channels | `app/dashboard/channels/page.tsx`, `lib/channels-actions.ts`, SLA/shipment components | NS |  |
+| Channels | `app/dashboard/channels/page.tsx`, `lib/channels-actions.ts`, SLA/shipment components | DN | Direview dan dipatch lokal: previous-range month-end kini di-clamp aman, all-brand `Mkt Cost` tidak lagi membuang ads spend unmapped, error active-brand kini tampil jelas, widget shipment/SLA disembunyikan saat filter brand aktif agar tidak misleading, dan action SLA/shipment kini ikut enforce akses tab Channels. Runtime verification disarankan |
 | WABA Management | `app/dashboard/waba-management/page.tsx`, WABA API routes | NS |  |
 | Financial Report redirect | `app/dashboard/financial-report/page.tsx` | NS |  |
 | Cashflow | `components/BankCashFlowDashboard.tsx`, bank API routes | NS |  |
@@ -1015,6 +1015,38 @@ Status legend:
 - Next step:
   - lanjut review area `Channels`
   - verifikasi manual untuk range partial-month, range lintas bulan, brand nonaktif, simulasi error query `brands`, pastikan matrix/filter brand tidak lagi menampilkan entity code seperti `RTI`, dan pastikan spend unmapped tetap muncul di total Marketing dengan warning eksplisit
+
+### Review Notes - Channels
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/channels/page.tsx`
+  - `lib/channels-actions.ts`
+  - `components/ChannelSlaSection.tsx`
+  - `components/ShipmentStatusSection.tsx`
+  - `lib/sla-actions.ts`
+  - `lib/shipment-actions.ts`
+  - `supabase/migrations/016_shipment_status_rpc.sql`
+  - `supabase/migrations/017_shipment_status_overdue.sql`
+- Data sources:
+  - `daily_channel_data`
+  - `daily_ads_spend`
+  - `ads_store_brand_mapping`
+  - RPC `get_daily_shipment_counts`
+  - RPC `get_channel_sla`
+  - RPC `get_shipment_status`
+- Findings summary:
+  - previous comparison range masih memakai `Date(..., month - 1, sameDay)` sehingga tanggal akhir bulan bisa rollover ke bulan yang salah
+  - all-brand `Mkt Cost` dan delta previous-period membuang ads spend yang belum punya brand mapping, sehingga angka channel-level bisa understate seperti bug yang sempat muncul di Marketing
+  - saat `ActiveBrandsContext` error, halaman jatuh ke empty-state biasa alih-alih menjelaskan bahwa filter brand gagal dimuat
+  - widget `Shipment Status` dan `Order SLA` hanya mengikuti date range, tidak mengikuti filter brand, sehingga saat user memilih satu produk/brand bagian bawah halaman bisa misleading
+  - action SLA/shipment belum enforce akses tab `Channels` di layer server action
+- Patch status:
+  - patched locally
+  - runtime verification pending
+- Next step:
+  - lanjut review area `WABA Management`
+  - verifikasi manual untuk custom range yang berakhir tanggal 31, all-brand view dengan ads unmapped, simulasi error `brands`, dan pastikan widget shipment/SLA hilang saat filter produk selain `Semua Produk`
 
 Saat mereview satu area, catat minimal format ini:
 
