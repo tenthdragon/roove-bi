@@ -2,10 +2,10 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useSupabase } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
+import { getMarketingPageData } from '@/lib/marketing-actions';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ComposedChart, Line, Cell
@@ -90,112 +90,110 @@ const CHANNEL_COLORS: Record<string, string> = {
 };
 
 export default function MarketingPage() {
-  const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
-  const [prodData, setProdData] = useState<any[]>([]);
+  const [rawProdData, setRawProdData] = useState<any[]>([]);
   const [adsData, setAdsData] = useState<any[]>([]);
   const [channelData, setChannelData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [brandFilter, setBrandFilter] = useState('all');
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [dailyAdSpendOpen, setDailyAdSpendOpen] = useState(false);
   const [prevRangeAdsData, setPrevRangeAdsData] = useState<any[]>([]);
+  const { activeBrands, isActiveBrand } = useActiveBrands();
+
+  const prodData = useMemo(
+    () => rawProdData.filter(d => isActiveBrand(d.product)),
+    [rawProdData, activeBrands]
+  );
+
+  function getComparisonRanges(from: string, to: string) {
+    const fromDate = new Date(from + 'T00:00:00');
+    const toDate = new Date(to + 'T00:00:00');
+
+    const prevMonthEnd = new Date(fromDate.getFullYear(), fromDate.getMonth(), 0);
+    const prevMonthStart = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth(), 1);
+
+    const prevRangeFromDate = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, fromDate.getDate());
+    const prevRangeToDate = new Date(toDate.getFullYear(), toDate.getMonth() - 1, toDate.getDate());
+
+    const fmt = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+    return {
+      prevFullFrom: fmt(prevMonthStart),
+      prevFullTo: fmt(prevMonthEnd),
+      prevRangeFrom: fmt(prevRangeFromDate),
+      prevRangeTo: fmt(prevRangeToDate),
+    };
+  }
 
   // ── Fetch data (with cache) ──
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     const { from, to } = dateRange;
+    const { prevFullFrom, prevFullTo, prevRangeFrom, prevRangeTo } = getComparisonRanges(from, to);
 
-    // Check cache for all 3 tables
     const cachedProd = getCached<any[]>('daily_product_summary_mkt', from, to);
-    const cachedAds  = getCached<any[]>('daily_ads_spend', from, to);
-    const cachedCh   = getCached<any[]>('daily_channel_data_mkt', from, to);
+    const cachedAds = getCached<any[]>('daily_ads_spend', from, to);
+    const cachedCh = getCached<any[]>('daily_channel_data_mkt', from, to);
+    const cachedPrevAds = getCached<any[]>('daily_ads_spend_prev', prevFullFrom, prevFullTo);
+    const cachedPrevCh = getCached<any[]>('daily_channel_data_prev', prevFullFrom, prevFullTo);
+    const cachedPrevRangeAds = getCached<any[]>('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo);
 
-    if (cachedProd && cachedAds && cachedCh) {
-      setProdData(cachedProd.filter(d => isActiveBrand(d.product)));
+    if (cachedProd && cachedAds && cachedCh && cachedPrevAds && cachedPrevCh && cachedPrevRangeAds) {
+      setRawProdData(cachedProd);
       setAdsData(cachedAds);
       setChannelData(cachedCh);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    Promise.all([
-      supabase.from('daily_product_summary').select('date, product, net_sales, mkt_cost')
-        .gte('date', from).lte('date', to),
-      supabase.from('daily_ads_spend').select('date, source, spent, store')
-        .gte('date', from).lte('date', to),
-      supabase.from('daily_channel_data').select('date, channel, product, net_sales, mp_admin_cost')
-        .gte('date', from).lte('date', to),
-    ]).then(([{ data: prod }, { data: ads }, { data: ch }]) => {
-      const prodRows = prod || [];
-      const adsRows = ads || [];
-      const chRows = ch || [];
-      setCache('daily_product_summary_mkt', from, to, prodRows);
-      setCache('daily_ads_spend', from, to, adsRows);
-      setCache('daily_channel_data_mkt', from, to, chRows);
-      setProdData(prodRows.filter(d => isActiveBrand(d.product)));
-      setAdsData(adsRows);
-      setChannelData(chRows);
-      setLoading(false);
-    });
-  }, [dateRange, supabase]);
-
-  // ── Fetch previous full month data (for ROAS delta comparison) ──
-  useEffect(() => {
-    if (!dateRange.from || !dateRange.to) return;
-    const fromDate = new Date(dateRange.from + 'T00:00:00');
-    const prevMonthEnd = new Date(fromDate.getFullYear(), fromDate.getMonth(), 0);
-    const prevMonthStart = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth(), 1);
-    const prevFrom = `${prevMonthStart.getFullYear()}-${String(prevMonthStart.getMonth() + 1).padStart(2, '0')}-01`;
-    const prevTo = `${prevMonthEnd.getFullYear()}-${String(prevMonthEnd.getMonth() + 1).padStart(2, '0')}-${String(prevMonthEnd.getDate()).padStart(2, '0')}`;
-
-    const cachedPrevAds = getCached<any[]>('daily_ads_spend_prev', prevFrom, prevTo);
-    const cachedPrevCh = getCached<any[]>('daily_channel_data_prev', prevFrom, prevTo);
-    if (cachedPrevAds && cachedPrevCh) {
       setPrevAdsData(cachedPrevAds);
       setPrevChannelData(cachedPrevCh);
+      setPrevRangeAdsData(cachedPrevRangeAds);
+      setError('');
+      setLoading(false);
       return;
     }
 
-    Promise.all([
-      supabase.from('daily_ads_spend').select('date, source, spent, store')
-        .gte('date', prevFrom).lte('date', prevTo),
-      supabase.from('daily_channel_data').select('date, channel, product, net_sales, mp_admin_cost')
-        .gte('date', prevFrom).lte('date', prevTo),
-    ]).then(([{ data: ads }, { data: ch }]) => {
-      const adsRows = ads || [];
-      const chRows = ch || [];
-      setCache('daily_ads_spend_prev', prevFrom, prevTo, adsRows);
-      setCache('daily_channel_data_prev', prevFrom, prevTo, chRows);
-      setPrevAdsData(adsRows);
-      setPrevChannelData(chRows);
-    });
-  }, [dateRange, supabase]);
+    let cancelled = false;
+    setLoading(true);
+    setError('');
 
-  // ── Fetch same-range previous month ads data (for MoM delta in daily table) ──
-  useEffect(() => {
-    if (!dateRange.from || !dateRange.to) return;
-    const from = new Date(dateRange.from + 'T00:00:00');
-    const to = new Date(dateRange.to + 'T00:00:00');
-    const prevFrom = new Date(from.getFullYear(), from.getMonth() - 1, from.getDate());
-    const prevTo = new Date(to.getFullYear(), to.getMonth() - 1, to.getDate());
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const pf = fmt(prevFrom);
-    const pt = fmt(prevTo);
+    getMarketingPageData({
+      from,
+      to,
+      prevFullFrom,
+      prevFullTo,
+      prevRangeFrom,
+      prevRangeTo,
+    })
+      .then((data) => {
+        if (cancelled) return;
 
-    const cached = getCached<any[]>('daily_ads_spend_prev_range', pf, pt);
-    if (cached) { setPrevRangeAdsData(cached); return; }
+        setCache('daily_product_summary_mkt', from, to, data.prod);
+        setCache('daily_ads_spend', from, to, data.ads);
+        setCache('daily_channel_data_mkt', from, to, data.channel);
+        setCache('daily_ads_spend_prev', prevFullFrom, prevFullTo, data.prevAds);
+        setCache('daily_channel_data_prev', prevFullFrom, prevFullTo, data.prevChannel);
+        setCache('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo, data.prevRangeAds);
 
-    supabase.from('daily_ads_spend').select('date, source, spent')
-      .gte('date', pf).lte('date', pt)
-      .then(({ data }) => {
-        const rows = data || [];
-        setCache('daily_ads_spend_prev_range', pf, pt, rows);
-        setPrevRangeAdsData(rows);
+        setRawProdData(data.prod);
+        setAdsData(data.ads);
+        setChannelData(data.channel);
+        setPrevAdsData(data.prevAds);
+        setPrevChannelData(data.prevChannel);
+        setPrevRangeAdsData(data.prevRangeAds);
+        setError('');
+        setLoading(false);
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        console.error('[Marketing] load error:', e);
+        setError(e?.message || 'Gagal memuat data marketing.');
+        setLoading(false);
       });
-  }, [dateRange, supabase]);
+
+    return () => { cancelled = true; };
+  }, [dateRange.from, dateRange.to]);
 
   // ── KPI calculations ──
   const { totalRevenue, totalSpend, totalRatio, totalRoas, avgDailyRatio, avgDailyRoas, activeDays } = useMemo(() => {
@@ -270,8 +268,6 @@ export default function MarketingPage() {
     adsData.forEach(d => { const brand = normStore(d.store); if (brand && brand !== 'Other') set.add(brand); });
     return Array.from(set).sort();
   }, [adsData]);
-
-  const { activeBrands, isActiveBrand } = useActiveBrands();
 
 const BRAND_COLORS = useMemo(() => {
   return buildBrandColorMap([...uniqueBrands, ...activeBrands]);
@@ -552,6 +548,14 @@ const BRAND_COLORS = useMemo(() => {
   if (loading || dateLoading) return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 200 }}>
       <div style={{ color: C.dim, fontSize: 14 }}>Memuat data marketing...</div>
+    </div>
+  );
+
+  if (error) return (
+    <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>Data Marketing Gagal Dimuat</div>
+      <div style={{ fontSize: 13, color: C.dim, maxWidth: 560, margin: '0 auto' }}>{error}</div>
     </div>
   );
 

@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
+import { getOverviewFeeData } from '@/lib/overview-actions';
 // Recharts removed — daily trend is now a table
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
@@ -27,10 +28,21 @@ export default function OverviewPage() {
   const [channelData, setChannelData] = useState<any[]>([]);
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
+  const [feeLoading, setFeeLoading] = useState(true);
+  const [feeError, setFeeError] = useState('');
   const { activeBrands, isActiveBrand } = useActiveBrands();
   const [userRole, setUserRole] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showTren, setShowTren] = useState(false);
+
+  function getPrevRange(from: string, to: string) {
+    const fromDate = new Date(from + 'T00:00:00');
+    const toDate = new Date(to + 'T00:00:00');
+    const prevFromDate = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, fromDate.getDate());
+    const prevToDate = new Date(toDate.getFullYear(), toDate.getMonth() - 1, toDate.getDate());
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return { prevFrom: fmt(prevFromDate), prevTo: fmt(prevToDate) };
+  }
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -43,6 +55,7 @@ export default function OverviewPage() {
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
+    const { prevFrom, prevTo } = getPrevRange(dateRange.from, dateRange.to);
     const cached = getCached<any[]>('daily_product_summary', dateRange.from, dateRange.to);
     if (cached) {
       setDailyData(cached.filter(row => isActiveBrand(row.product)));
@@ -72,32 +85,66 @@ export default function OverviewPage() {
       .gte('year_month', fromYM)
       .lte('year_month', toYM)
       .then(({ data }) => setOverheadData(data || []));
-    // Fetch ads spend (same source as marketing page)
+    // Fetch ads / MP fee via server action so role-specific browser query issues
+    // don't silently become 0 in the KPI cards.
     const cachedAds = getCached<any[]>('overview_ads_spend', dateRange.from, dateRange.to);
-    if (cachedAds) { setAdsData(cachedAds); } else {
-      supabase.from('daily_ads_spend').select('date, source, spent, store')
-        .gte('date', dateRange.from).lte('date', dateRange.to)
-        .then(({ data }) => { const rows = data || []; setCache('overview_ads_spend', dateRange.from, dateRange.to, rows); setAdsData(rows); });
-    }
-    // Fetch channel data for MP fee (same source as channels page)
     const cachedCh = getCached<any[]>('overview_channel_data', dateRange.from, dateRange.to);
-    if (cachedCh) { setChannelData(cachedCh); } else {
-      supabase.from('daily_channel_data').select('date, channel, product, mp_admin_cost')
-        .gte('date', dateRange.from).lte('date', dateRange.to)
-        .then(({ data }) => { const rows = data || []; setCache('overview_channel_data', dateRange.from, dateRange.to, rows); setChannelData(rows); });
+    const cachedPrevAds = getCached<any[]>('overview_ads_spend_prev', prevFrom, prevTo);
+    const cachedPrevCh = getCached<any[]>('overview_channel_data_prev', prevFrom, prevTo);
+
+    if (cachedAds && cachedCh && cachedPrevAds && cachedPrevCh) {
+      setAdsData(cachedAds);
+      setChannelData(cachedCh);
+      setPrevAdsData(cachedPrevAds);
+      setPrevChannelData(cachedPrevCh);
+      setFeeError('');
+      setFeeLoading(false);
+      return;
     }
-  }, [dateRange, supabase]);
+
+    let cancelled = false;
+    setFeeLoading(true);
+    setFeeError('');
+
+    getOverviewFeeData({
+      from: dateRange.from,
+      to: dateRange.to,
+      prevFrom,
+      prevTo,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setCache('overview_ads_spend', dateRange.from, dateRange.to, data.ads);
+        setCache('overview_channel_data', dateRange.from, dateRange.to, data.channel);
+        setCache('overview_ads_spend_prev', prevFrom, prevTo, data.prevAds);
+        setCache('overview_channel_data_prev', prevFrom, prevTo, data.prevChannel);
+        setAdsData(data.ads);
+        setChannelData(data.channel);
+        setPrevAdsData(data.prevAds);
+        setPrevChannelData(data.prevChannel);
+        setFeeError('');
+        setFeeLoading(false);
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        console.error('[Overview] fee load error:', e);
+        setFeeError(e?.message || 'Gagal memuat biaya marketing Overview.');
+        setAdsData([]);
+        setChannelData([]);
+        setPrevAdsData([]);
+        setPrevChannelData([]);
+        setFeeLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [dateRange.from, dateRange.to, supabase]);
 
   // ── Fetch previous month data — same relative date range (MoM) ──
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     const from = new Date(dateRange.from + 'T00:00:00');
     const to = new Date(dateRange.to + 'T00:00:00');
-    const prevFrom_ = new Date(from.getFullYear(), from.getMonth() - 1, from.getDate());
-    const prevTo_ = new Date(to.getFullYear(), to.getMonth() - 1, to.getDate());
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const prevFrom = fmt(prevFrom_);
-    const prevTo = fmt(prevTo_);
+    const { prevFrom, prevTo } = getPrevRange(dateRange.from, dateRange.to);
 
     const cachedPrev = getCached('daily_product_summary_prev', prevFrom, prevTo);
     if (cachedPrev) {
@@ -125,21 +172,7 @@ export default function OverviewPage() {
           setPrevOverheadData(rows);
         });
     }
-    // Fetch prev-period ads spend
-    const cachedPrevAds = getCached('overview_ads_spend_prev', prevFrom, prevTo);
-    if (cachedPrevAds) { setPrevAdsData(cachedPrevAds); } else {
-      supabase.from('daily_ads_spend').select('date, source, spent, store')
-        .gte('date', prevFrom).lte('date', prevTo)
-        .then(({ data }) => { const rows = data || []; setCache('overview_ads_spend_prev', prevFrom, prevTo, rows); setPrevAdsData(rows); });
-    }
-    // Fetch prev-period channel data
-    const cachedPrevCh = getCached('overview_channel_data_prev', prevFrom, prevTo);
-    if (cachedPrevCh) { setPrevChannelData(cachedPrevCh); } else {
-      supabase.from('daily_channel_data').select('date, channel, product, mp_admin_cost')
-        .gte('date', prevFrom).lte('date', prevTo)
-        .then(({ data }) => { const rows = data || []; setCache('overview_channel_data_prev', prevFrom, prevTo, rows); setPrevChannelData(rows); });
-    }
-  }, [dateRange, supabase]);
+  }, [dateRange.from, dateRange.to, supabase]);
 
   // Build overhead per-day lookup: date (YYYY-MM-DD) → daily overhead amount
   const overheadPerDay = useMemo(() => {
@@ -304,7 +337,7 @@ export default function OverviewPage() {
     </div>
   );
 
-  if (dateLoading || (loading && dailyData.length === 0)) {
+  if (dateLoading || loading || feeLoading) {
     return (
       <div style={{ textAlign:'center', padding:60, color:'var(--dim)' }}>
         <div className="spinner" style={{ width:32, height:32, border:'3px solid var(--border)', borderTop:'3px solid var(--accent)', borderRadius:'50%', margin:'0 auto 12px' }} />
@@ -332,6 +365,12 @@ export default function OverviewPage() {
         <div><h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2><div style={{ fontSize:12, color:'var(--dim)' }}>{kpi.ad} active days</div></div>
       </div>
 
+      {feeError && (
+        <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:12, color:'#fcd34d' }}>
+          Data biaya marketing gagal dimuat penuh: {feeError}
+        </div>
+      )}
+
       {/* ── KPI Cards — Row 1: Revenue & Profit ── */}
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:12 }}>
         <KPI label="Net Sales" val={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg: ${fmtRupiah(kpi.avg)}/hari`}
@@ -346,9 +385,9 @@ export default function OverviewPage() {
       {/* ── KPI Cards — Row 2: Cost Breakdown ── */}
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
         <KPI label="COGS" val={`Rp ${fmtCompact(kpi.tCogs)}`} sub={`${kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--dim)" />
-        <KPI label="Marketing Fee" val={`Rp ${fmtCompact(kpi.tAds)}`} sub={`${kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--yellow)"
+        <KPI label="Marketing Fee" val={feeError ? '—' : `Rp ${fmtCompact(kpi.tAds)}`} sub={feeError ? 'Data ads tidak tersedia' : `${kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--yellow)"
           delta={prevKpi && prevKpi.tAds > 0 ? { value: ((kpi.tAds - prevKpi.tAds) / prevKpi.tAds) * 100, higherIsBetter: false } : undefined} />
-        <KPI label="MP Fee" val={`Rp ${fmtCompact(kpi.tMp)}`} sub={`${kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--yellow)"
+        <KPI label="MP Fee" val={feeError ? '—' : `Rp ${fmtCompact(kpi.tMp)}`} sub={feeError ? 'Data channel tidak tersedia' : `${kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--yellow)"
           delta={prevKpi && prevKpi.tMp > 0 ? { value: ((kpi.tMp - prevKpi.tMp) / prevKpi.tMp) * 100, higherIsBetter: false } : undefined} />
         {kpi.hasOverhead && <KPI label="Overhead" val={`Rp ${fmtCompact(kpi.tOverhead)}`} sub="estimated" color="#a78bfa" />}
       </div>
