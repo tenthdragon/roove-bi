@@ -23,8 +23,8 @@ async function authenticate(req: NextRequest) {
     .eq('id', user.id)
     .single();
 
-  if (profile?.role !== 'owner' && profile?.role !== 'finance') {
-    return { error: 'Only owners and finance users can access analytics', status: 403 };
+  if (profile?.role !== 'owner' && profile?.role !== 'finance' && profile?.role !== 'sales_manager') {
+    return { error: 'Only owners, finance, and sales managers can access analytics', status: 403 };
   }
   return { user, profile };
 }
@@ -48,40 +48,38 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'start and end date required (YYYY-MM-DD)' }, { status: 400 });
     }
 
-    // Per-template aggregates (90-day view)
-    const { data: summaryData, error: summaryError } = await svc
-      .from('v_waba_template_analytics_90d')
-      .select('*')
-      .in('template_id', templateIds);
-
-    if (summaryError) throw summaryError;
-
-    const byTemplate: Record<string, { sent: number; delivered: number; read: number; clicked: number; replied: number; cost: number }> = {};
-    for (const row of summaryData || []) {
-      byTemplate[row.template_id] = {
-        sent: row.sent || 0,
-        delivered: row.delivered || 0,
-        read: row.read || 0,
-        clicked: row.clicked || 0,
-        replied: row.replied || 0,
-        cost: row.cost || 0,
-      };
-    }
-
-    // Daily breakdown aggregated across templates
-    const { data: dailyData, error: dailyError } = await svc
+    const { data: analyticsRows, error: analyticsError } = await svc
       .from('waba_template_daily_analytics')
-      .select('date, sent, delivered, read, clicked, replied')
+      .select('template_id, date, sent, delivered, read, clicked, replied, cost')
       .in('template_id', templateIds)
       .gte('date', start)
       .lte('date', end)
       .order('date');
 
-    if (dailyError) throw dailyError;
+    if (analyticsError) throw analyticsError;
 
-    // Aggregate by date across all templates
+    const byTemplate: Record<string, { sent: number; delivered: number; read: number; clicked: number; replied: number; cost: number }> = {};
     const dailyMap: Record<string, { date: string; sent: number; delivered: number; read: number; clicked: number; replied: number }> = {};
-    for (const row of dailyData || []) {
+
+    for (const row of analyticsRows || []) {
+      if (!byTemplate[row.template_id]) {
+        byTemplate[row.template_id] = {
+          sent: 0,
+          delivered: 0,
+          read: 0,
+          clicked: 0,
+          replied: 0,
+          cost: 0,
+        };
+      }
+
+      byTemplate[row.template_id].sent += row.sent || 0;
+      byTemplate[row.template_id].delivered += row.delivered || 0;
+      byTemplate[row.template_id].read += row.read || 0;
+      byTemplate[row.template_id].clicked += row.clicked || 0;
+      byTemplate[row.template_id].replied += row.replied || 0;
+      byTemplate[row.template_id].cost += row.cost || 0;
+
       if (!dailyMap[row.date]) {
         dailyMap[row.date] = { date: row.date, sent: 0, delivered: 0, read: 0, clicked: 0, replied: 0 };
       }

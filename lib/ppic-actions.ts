@@ -2,6 +2,7 @@
 'use server';
 
 import { createServiceSupabase, createServerSupabase } from './supabase-server';
+import { requireDashboardTabAccess } from './dashboard-access';
 import { recordStockIn, createBatch } from './warehouse-ledger-actions';
 import { sendTelegramToChat } from './telegram';
 
@@ -19,11 +20,16 @@ async function getCurrentUserId(): Promise<string | null> {
   }
 }
 
+async function requirePPICAccess(label: string = 'PPIC') {
+  await requireDashboardTabAccess('ppic', label);
+}
+
 // ============================================================
 // TAX / PPN HELPER
 // ============================================================
 
 export async function getCurrentPPNRate(): Promise<number> {
+  await requirePPICAccess();
   const svc = createServiceSupabase();
   const today = new Date().toISOString().slice(0, 10);
   const { data, error } = await svc
@@ -61,6 +67,7 @@ export interface CreatePOParams {
 }
 
 export async function createPurchaseOrder(params: CreatePOParams) {
+  await requirePPICAccess('Purchase Orders');
   const { vendorId, entity, poDate, expectedDate, notes, shippingCost, otherCost, items } = params;
   if (!items || items.length === 0) throw new Error('PO harus memiliki minimal 1 item');
 
@@ -112,6 +119,7 @@ export async function getPurchaseOrders(filters?: {
   dateTo?: string;
   limit?: number;
 }) {
+  await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
   let query = svc
     .from('warehouse_purchase_orders')
@@ -138,6 +146,7 @@ export async function getPurchaseOrders(filters?: {
 }
 
 export async function savePOCosts(poId: number, shippingCost: number, otherCost: number) {
+  await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('warehouse_purchase_orders')
@@ -147,6 +156,7 @@ export async function savePOCosts(poId: number, shippingCost: number, otherCost:
 }
 
 export async function getPurchaseOrderDetail(poId: number) {
+  await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_purchase_orders')
@@ -171,6 +181,7 @@ export async function getPurchaseOrderDetail(poId: number) {
 }
 
 export async function submitPurchaseOrder(poId: number) {
+  await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
 
   const { data: po } = await svc
@@ -274,6 +285,7 @@ async function notifyPOSubmitted(svc: any, poId: number) {
 }
 
 export async function cancelPurchaseOrder(poId: number) {
+  await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
 
   const { data: po } = await svc
@@ -306,6 +318,7 @@ export interface ReceiveItem {
 }
 
 export async function receivePOItems(poId: number, receivedItems: ReceiveItem[]) {
+  await requirePPICAccess('Purchase Orders');
   if (!receivedItems || receivedItems.length === 0) throw new Error('Tidak ada item yang diterima');
 
   const svc = createServiceSupabase();
@@ -447,6 +460,7 @@ async function recalculateProductHpp(svc: any, productId: number) {
 // ============================================================
 
 export async function getWeeklyDemandData(month: number, year: number) {
+  await requirePPICAccess('Demand Planning');
   const svc = createServiceSupabase();
   const daysInMonth = new Date(year, month, 0).getDate();
   const mm = String(month).padStart(2, '0');
@@ -486,6 +500,7 @@ export async function getWeeklyDemandData(month: number, year: number) {
 }
 
 export async function getDemandPlans(month: number, year: number) {
+  await requirePPICAccess('Demand Planning');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_demand_plans')
@@ -501,6 +516,7 @@ export async function getDemandPlans(month: number, year: number) {
 }
 
 export async function initDemandPlans(month: number, year: number) {
+  await requirePPICAccess('Demand Planning');
   const svc = createServiceSupabase();
 
   // Get auto demand from ScaleV (last 6 months average)
@@ -590,6 +606,7 @@ export async function updateDemandPlan(
   manualDemand: number | null,
   notes?: string,
 ) {
+  await requirePPICAccess('Demand Planning');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_demand_plans')
@@ -611,6 +628,7 @@ export async function updateDemandPlan(
 // ============================================================
 
 export async function getITOData(months: number = 6, source: 'warehouse' | 'scalev' = 'warehouse') {
+  await requirePPICAccess('Inventory Turn Over');
   const svc = createServiceSupabase();
 
   // Get monthly movements (from warehouse ledger or Scalev orders)
@@ -699,6 +717,7 @@ export async function getITOData(months: number = 6, source: 'warehouse' | 'scal
 // ============================================================
 
 export async function getROPAnalysis(demandDays: number = 90) {
+  await requirePPICAccess('Reorder Point');
   const svc = createServiceSupabase();
 
   // Get avg daily demand from summary table (fast) with fallback to RPC (slow)
@@ -800,6 +819,7 @@ export async function updateProductROPConfig(
   leadTimeDays: number,
   safetyStockDays: number,
 ) {
+  await requirePPICAccess('Reorder Point');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_products')
@@ -816,6 +836,7 @@ export async function updateProductROPConfig(
 // ============================================================
 
 export async function getVendors() {
+  await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_vendors')

@@ -886,11 +886,11 @@ Status legend:
 | Overview | `app/dashboard/page.tsx`, `lib/overview-actions.ts`, `components/CashFlowSection.tsx` | DN | Direview dan dipatch lokal: previous-range comparison aman untuk month-end, previous-overhead mengikuti seluruh comparison window + proration harian, cash-flow widget dibatasi ke range 1 bulan dari tanggal 1, dan error brand-filter tidak lagi tersamar sebagai empty state. Runtime verification disarankan |
 | Marketing | `app/dashboard/marketing/page.tsx`, `lib/marketing-actions.ts` | DN | Direview dan dipatch lokal: comparison range month-end/custom multi-month kini pakai previous-range yang ter-clamp aman, baseline delta/ROAS previous period memakai window pembanding yang setara, active-brand lookup failure kini tampil sebagai error state, dan ads breakdown kini memakai hybrid brand resolution: baris yang berhasil dimap tetap masuk chart/matrix per-brand, sementara spend yang belum termap tetap masuk total Marketing/traffic-source breakdown dengan warning eksplisit agar source seperti TikTok Ads/WABA MM Cost tidak hilang diam-diam. Runtime verification disarankan |
 | Channels | `app/dashboard/channels/page.tsx`, `lib/channels-actions.ts`, SLA/shipment components | DN | Direview dan dipatch lokal: previous-range month-end kini di-clamp aman, all-brand `Mkt Cost` tidak lagi membuang ads spend unmapped, error active-brand kini tampil jelas, widget shipment/SLA disembunyikan saat filter brand aktif agar tidak misleading, dan action SLA/shipment kini ikut enforce akses tab Channels. Runtime verification disarankan |
-| WABA Management | `app/dashboard/waba-management/page.tsx`, WABA API routes | NS |  |
-| Financial Report redirect | `app/dashboard/financial-report/page.tsx` | NS |  |
-| Cashflow | `components/BankCashFlowDashboard.tsx`, bank API routes | NS |  |
-| Financial Settings | `components/FinancialSettingsPage.tsx`, `app/api/bank-accounts/route.ts` | NS |  |
-| PPIC | `app/dashboard/ppic/page.tsx`, `lib/ppic-actions.ts` | NS |  |
+| WABA Management | `app/dashboard/waba-management/page.tsx`, WABA API routes | DN | Direview dan dipatch lokal: template CRUD/list tidak lagi diam-diam memakai WABA aktif pertama jika ada multi-account, analytics template kini mengikuti range request yang benar, sales manager bisa membaca analytics template read-only, dan UI sync kini lebih jujur untuk hasil partial/error. Runtime verification disarankan |
+| Financial Report redirect | `app/dashboard/financial-report/page.tsx` | DN | Direview: redirect sederhana `cashflow -> financial-settings -> dashboard` konsisten dengan model akses child-tab saat ini, tidak perlu patch tambahan |
+| Cashflow | `components/BankCashFlowDashboard.tsx`, bank API routes | DN | Direview dan dipatch lokal: route tag/re-tag transaksi dan snapshot kini tidak lagi terbuka tanpa auth tab Cash Flow, filter bisnis tidak lagi membuang histori rekening nonaktif, dan pergantian bisnis kini memilih periode terbaru yang tersedia untuk bisnis tersebut agar tidak jatuh ke empty-state palsu. Runtime verification disarankan |
+| Financial Settings | `components/FinancialSettingsPage.tsx`, `app/api/bank-accounts/route.ts` | DN | Direview dan dipatch lokal: penghapusan rekening yang sudah punya histori kini diblok agar mapping historis cashflow tidak putus, dan UI Financial Settings sekarang menampilkan error request secara jelas saat load/toggle/delete gagal. Runtime verification disarankan |
+| PPIC | `app/dashboard/ppic/page.tsx`, `lib/ppic-actions.ts` | IP | Review sedang berjalan: server action PPIC sudah dipatch agar tidak bisa dipanggil tanpa akses tab PPIC, tetapi audit logic PO/demand/ITO/ROP masih berlanjut |
 | Warehouse | `app/dashboard/warehouse/page.tsx`, `lib/warehouse-actions.ts`, `lib/warehouse-ledger-actions.ts` | NS |  |
 | Warehouse Settings | `app/dashboard/warehouse-settings/page.tsx`, `lib/brand-actions.ts`, `lib/warehouse-ledger-actions.ts` | NS |  |
 | Business Pulse | `app/dashboard/pulse/page.tsx`, `lib/scalev-actions.ts` | NS |  |
@@ -1047,6 +1047,161 @@ Status legend:
 - Next step:
   - lanjut review area `WABA Management`
   - verifikasi manual untuk custom range yang berakhir tanggal 31, all-brand view dengan ads unmapped, simulasi error `brands`, dan pastikan widget shipment/SLA hilang saat filter produk selain `Semua Produk`
+
+### Review Notes - WABA Management
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/waba-management/page.tsx`
+  - `app/api/waba-templates/route.ts`
+  - `app/api/waba-template-sync/route.ts`
+  - `app/api/waba-template-analytics/route.ts`
+  - `app/api/whatsapp-sync/route.ts`
+  - `lib/meta-whatsapp.ts`
+  - `lib/meta-marketing.ts`
+  - `supabase/migrations/044_waba_integration.sql`
+  - `supabase/migrations/045_waba_template_metrics.sql`
+  - `supabase/migrations/046_waba_template_tags.sql`
+- Data sources:
+  - `waba_accounts`
+  - `waba_templates`
+  - `waba_template_daily_analytics`
+  - `waba_template_sync_log`
+  - `daily_ads_spend`
+- Mutation paths:
+  - create template via `/api/waba-templates` `POST`
+  - delete template via `/api/waba-templates` `DELETE`
+  - update tags via `/api/waba-templates` `PATCH`
+  - sync templates + analytics via `/api/waba-template-sync`
+  - sync WABA spend via `/api/whatsapp-sync`
+- Permission model:
+  - page and template CRUD/list accessible untuk `owner`, `finance`, `sales_manager`
+  - sync template dibatasi ke `owner` dan `finance`
+  - analytics template kini read-only untuk `sales_manager`
+- Findings summary:
+  - route template sebelumnya diam-diam hanya memakai WABA aktif pertama, sehingga list/create/delete bisa salah account jika ada multi-WABA aktif
+  - analytics template sebelumnya mencampur summary 90 hari tetap dengan daily series berbasis range request, sehingga data per-template tidak konsisten saat rentang berubah
+  - UI sync terlalu optimistis karena hasil `partial` dan detail error tidak ditampilkan jelas, sementara timestamp hanya membaca status `success`
+  - sales manager bisa membuka halaman, tetapi analytics fetch dan sync affordance tidak sinkron dengan permission backend sehingga UX membingungkan
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Financial Report redirect`
+  - verifikasi manual untuk multi-account WABA aktif, create/delete template pada account yang dipilih, analytics dengan custom range, dan sync template yang menghasilkan status `partial`
+
+### Review Notes - Financial Report redirect
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/financial-report/page.tsx`
+  - `lib/utils.ts`
+  - `app/dashboard/layout.tsx`
+- Findings summary:
+  - route ini hanya melakukan redirect sederhana dengan precedence `cashflow -> financial-settings -> dashboard`
+  - perilaku tersebut konsisten dengan model child-tab yang sekarang dan tidak menunjukkan bug logic tambahan
+- Patch status:
+  - no patch needed
+- Next step:
+  - lanjut review area `Cashflow`
+
+### Review Notes - Cashflow
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/cashflow/page.tsx`
+  - `components/BankCashFlowDashboard.tsx`
+  - `app/api/bank-cashflow/route.ts`
+  - `app/api/bank-transactions/route.ts`
+  - `app/api/cashflow-snapshot/route.ts`
+  - `app/api/bank-accounts/route.ts`
+  - `lib/cashflow-actions.ts`
+  - `lib/transaction-tagger.ts`
+  - `supabase/migrations/092_bank_cashflow_tables.sql`
+  - `supabase/migrations/093_bank_accounts_table.sql`
+  - `supabase/migrations/095_bank_sessions_multi_account.sql`
+  - `supabase/migrations/097_transaction_tags.sql`
+- Data sources:
+  - `bank_upload_sessions`
+  - `bank_transactions`
+  - `bank_accounts`
+  - `monthly_cashflow_snapshot`
+  - RPC `generate_cashflow_snapshot`
+- Mutation paths:
+  - upload CSV via `/api/bank-csv-upload`
+  - delete imported session via `/api/bank-cashflow` `DELETE`
+  - manual tag override via `/api/bank-transactions` `PATCH`
+  - bulk retag via `/api/bank-transactions` `POST`
+  - generate/read snapshots via `/api/cashflow-snapshot`
+- Findings summary:
+  - route `/api/bank-transactions` sebelumnya tidak punya authz gate, sehingga tag manual dan bulk re-tag bisa dipanggil tanpa verifikasi akses tab Cash Flow
+  - route `/api/cashflow-snapshot` sebelumnya terbuka untuk manual GET/POST tanpa authz; hanya cron path yang dibedakan lewat secret
+  - filter bisnis pada `/api/bank-cashflow` hanya mengambil rekening `is_active = true`, sehingga histori rekening nonaktif bisa hilang dari laporan
+  - saat user mengganti filter bisnis, frontend mempertahankan periode global saat ini; jika bisnis itu tidak punya data pada periode tersebut, halaman jatuh ke empty-state palsu walau periode lain tersedia
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Financial Settings`
+  - verifikasi manual bahwa user tanpa akses Cash Flow ditolak di tag update/snapshot route, bisnis dengan rekening nonaktif tetap menampilkan histori, dan ganti bisnis otomatis pindah ke periode terbaru yang tersedia
+
+### Review Notes - Financial Settings
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/financial-settings/page.tsx`
+  - `components/FinancialSettingsPage.tsx`
+  - `app/api/bank-accounts/route.ts`
+  - `supabase/migrations/093_bank_accounts_table.sql`
+  - `supabase/migrations/096_seed_bank_accounts.sql`
+- Data sources:
+  - `bank_accounts`
+  - `bank_upload_sessions`
+- Mutation paths:
+  - create account via `/api/bank-accounts` `POST`
+  - edit account via `/api/bank-accounts` `PATCH`
+  - activate/deactivate via `/api/bank-accounts` `PATCH`
+  - delete account via `/api/bank-accounts` `DELETE`
+- Findings summary:
+  - rekening yang sudah dipakai pada histori cashflow sebelumnya masih bisa dihapus total, padahal dashboard cashflow memakai `bank_accounts` sebagai mapping `account_no -> business_name`; delete ini berisiko memutus atribusi historis dan menjatuhkan data lama ke grup `Lainnya`
+  - UI Financial Settings sebelumnya tidak menampilkan error request secara jelas saat load, toggle status, atau delete gagal, sehingga admin bisa mengira perubahan sudah berhasil
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `PPIC`
+  - verifikasi manual bahwa rekening berhistori tidak bisa dihapus dan user diarahkan untuk memakai status `Nonaktif`, serta error API muncul jelas di halaman bila request gagal
+
+### Review Notes - PPIC
+
+- Status: `IP`
+- Files read:
+  - `app/dashboard/ppic/page.tsx`
+  - `lib/ppic-actions.ts`
+  - `lib/warehouse-ledger-actions.ts`
+- Data sources reviewed so far:
+  - `warehouse_purchase_orders`
+  - `warehouse_po_items`
+  - `warehouse_demand_plans`
+  - `warehouse_products`
+  - `warehouse_vendors`
+  - `v_warehouse_stock_balance`
+  - RPC `ppic_weekly_demand_scalev`
+  - RPC `ppic_monthly_demand`
+  - RPC `ppic_monthly_movements`
+  - RPC `ppic_avg_daily_demand`
+- Findings summary so far:
+  - exported server actions di `lib/ppic-actions.ts` sebelumnya langsung memakai service Supabase tanpa gate akses `PPIC`, sehingga read/write action seperti create PO, submit/cancel/receive PO, init/update demand plan, dan update ROP config berpotensi dipanggil tanpa verifikasi akses tab
+- Patch status:
+  - access guard patched locally for exposed PPIC server actions
+  - build verification complete via `npm run build`
+  - full logic review masih berjalan
+- Next step:
+  - lanjut audit logic PO receive/cost allocation, demand planning initialization/update, dan ITO/ROP calculation consistency
+  - verifikasi manual bahwa user tanpa akses `PPIC` sekarang ditolak saat memanggil action PO/demand/ROP
 
 Saat mereview satu area, catat minimal format ini:
 

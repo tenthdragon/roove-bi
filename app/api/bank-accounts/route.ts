@@ -104,6 +104,33 @@ export async function DELETE(req: NextRequest) {
     if (!id) return NextResponse.json({ error: 'id diperlukan' }, { status: 400 });
 
     const supabase = getServiceSupabase();
+    const { data: account, error: accountError } = await supabase
+      .from('bank_accounts')
+      .select('bank, account_no')
+      .eq('id', id)
+      .single();
+
+    if (accountError || !account) {
+      return NextResponse.json({ error: 'Rekening tidak ditemukan' }, { status: 404 });
+    }
+
+    const { data: existingSessions, error: sessionError } = await supabase
+      .from('bank_upload_sessions')
+      .select('id')
+      .eq('bank', account.bank)
+      .eq('account_no', account.account_no)
+      .limit(1);
+
+    if (sessionError) {
+      return NextResponse.json({ error: sessionError.message }, { status: 500 });
+    }
+
+    if ((existingSessions || []).length > 0) {
+      return NextResponse.json({
+        error: 'Rekening ini sudah punya histori cash flow. Nonaktifkan saja agar mapping historis tetap aman.',
+      }, { status: 400 });
+    }
+
     const { error } = await supabase.from('bank_accounts').delete().eq('id', id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ success: true });

@@ -1,6 +1,7 @@
 // app/api/cashflow-snapshot/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireDashboardTabAccess } from '@/lib/dashboard-access';
 
 function getServiceSupabase() {
   return createClient(
@@ -30,6 +31,8 @@ export async function POST(req: NextRequest) {
       year = prev.getFullYear();
       triggeredBy = 'cron';
     } else {
+      await requireDashboardTabAccess('cashflow', 'Cash Flow');
+
       // Manual: read from body
       const body = await req.json().catch(() => ({}));
       month = body.month;
@@ -78,13 +81,16 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error('Cashflow snapshot error:', err);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const status = err?.message?.includes('login') ? 401 : err?.message?.includes('Akses') ? 403 : 500;
+    return NextResponse.json({ error: err.message }, { status });
   }
 }
 
 // GET: retrieve snapshots
 export async function GET(req: NextRequest) {
   try {
+    await requireDashboardTabAccess('cashflow', 'Cash Flow');
+
     const svc = getServiceSupabase();
     const url = new URL(req.url);
     const months = parseInt(url.searchParams.get('months') || '6');
@@ -100,6 +106,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ snapshots: data || [] });
   } catch (err: any) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    const status = err?.message?.includes('login') ? 401 : err?.message?.includes('Akses') ? 403 : 500;
+    return NextResponse.json({ error: err.message }, { status });
   }
 }

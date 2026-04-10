@@ -38,8 +38,7 @@ export async function GET(req: NextRequest) {
       const { data: bizAccounts } = await supabase
         .from('bank_accounts')
         .select('account_no')
-        .eq('business_name', businessName)
-        .eq('is_active', true);
+        .eq('business_name', businessName);
       accountNos = (bizAccounts ?? []).map((a: any) => a.account_no);
       if (accountNos.length === 0) accountNos = ['__NONE__'];
     } else if (accountsCSV) {
@@ -55,7 +54,11 @@ export async function GET(req: NextRequest) {
 
     if (sessErr) return NextResponse.json({ error: sessErr.message }, { status: 500 });
 
-    const allPeriods = Array.from(new Set((sessions ?? []).map((s: any) => s.period_label)));
+    let scopedSessions = sessions ?? [];
+    if (accountNos) scopedSessions = scopedSessions.filter((s: any) => accountNos!.includes(s.account_no));
+    if (bankFilter) scopedSessions = scopedSessions.filter((s: any) => s.bank === bankFilter);
+
+    const allPeriods = Array.from(new Set(scopedSessions.map((s: any) => s.period_label)));
     const activePeriod = period || allPeriods[0] || null;
 
     if (!activePeriod) {
@@ -65,9 +68,7 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    let periodSessions = (sessions ?? []).filter((s: any) => s.period_label === activePeriod);
-    if (accountNos) periodSessions = periodSessions.filter((s: any) => accountNos!.includes(s.account_no));
-    if (bankFilter) periodSessions = periodSessions.filter((s: any) => s.bank === bankFilter);
+    const periodSessions = scopedSessions.filter((s: any) => s.period_label === activePeriod);
 
     let dailyQuery = supabase
       .from('bank_transactions')

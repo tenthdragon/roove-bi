@@ -202,11 +202,16 @@ export default function FinancialSettingsPage() {
 
   async function load() {
     setLoading(true); setError('');
-    const res = await fetch('/api/bank-accounts');
-    const d   = await res.json();
-    if (d.error) { setError(d.error); setLoading(false); return; }
-    setAccounts(d.accounts);
-    setLoading(false);
+    try {
+      const res = await fetch('/api/bank-accounts');
+      const d   = await res.json();
+      if (!res.ok || d.error) throw new Error(d.error || 'Gagal memuat rekening');
+      setAccounts(d.accounts);
+    } catch (e: any) {
+      setError(e.message || 'Gagal memuat rekening');
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => { load(); }, []);
@@ -221,6 +226,7 @@ export default function FinancialSettingsPage() {
     });
     const d = await res.json();
     if (d.error) return d.error;
+    setError('');
     setModal(null);
     load();
     return null;
@@ -229,17 +235,29 @@ export default function FinancialSettingsPage() {
   async function handleDelete(id: string, name: string) {
     if (!confirm(`Hapus rekening "${name}"? Aksi ini tidak bisa dibatalkan.`)) return;
     setDeleting(id);
-    await fetch('/api/bank-accounts', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    setError('');
+    const res = await fetch('/api/bank-accounts', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
+    const d = await res.json().catch(() => ({}));
     setDeleting(null);
+    if (!res.ok || d.error) {
+      setError(d.error || 'Gagal menghapus rekening');
+      return;
+    }
     load();
   }
 
   async function toggleActive(acc: BankAccount) {
-    await fetch('/api/bank-accounts', {
+    setError('');
+    const res = await fetch('/api/bank-accounts', {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: acc.id, is_active: !acc.is_active }),
     });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok || d.error) {
+      setError(d.error || 'Gagal memperbarui status rekening');
+      return;
+    }
     load();
   }
 

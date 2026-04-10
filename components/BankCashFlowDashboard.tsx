@@ -627,7 +627,7 @@ export default function BankCashFlowDashboard() {
 
   function changeBusiness(biz: string) {
     setBusiness(biz);
-    fetchData(period || undefined, biz);
+    fetchData(undefined, biz);
   }
 
   async function handleDelete(bank: string, periodLabel: string, accountNo?: string) {
