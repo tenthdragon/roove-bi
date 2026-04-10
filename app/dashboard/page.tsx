@@ -23,6 +23,10 @@ export default function OverviewPage() {
   const [loading, setLoading] = useState(true);
   const [prevDailyData, setPrevDailyData] = useState([]);
   const [prevOverheadData, setPrevOverheadData] = useState([]);
+  const [adsData, setAdsData] = useState<any[]>([]);
+  const [channelData, setChannelData] = useState<any[]>([]);
+  const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
+  const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const { activeBrands, isActiveBrand } = useActiveBrands();
   const [userRole, setUserRole] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -68,6 +72,20 @@ export default function OverviewPage() {
       .gte('year_month', fromYM)
       .lte('year_month', toYM)
       .then(({ data }) => setOverheadData(data || []));
+    // Fetch ads spend (same source as marketing page)
+    const cachedAds = getCached<any[]>('overview_ads_spend', dateRange.from, dateRange.to);
+    if (cachedAds) { setAdsData(cachedAds); } else {
+      supabase.from('daily_ads_spend').select('date, source, spent, store')
+        .gte('date', dateRange.from).lte('date', dateRange.to)
+        .then(({ data }) => { const rows = data || []; setCache('overview_ads_spend', dateRange.from, dateRange.to, rows); setAdsData(rows); });
+    }
+    // Fetch channel data for MP fee (same source as channels page)
+    const cachedCh = getCached<any[]>('overview_channel_data', dateRange.from, dateRange.to);
+    if (cachedCh) { setChannelData(cachedCh); } else {
+      supabase.from('daily_channel_data').select('date, channel, product, mp_admin_cost')
+        .gte('date', dateRange.from).lte('date', dateRange.to)
+        .then(({ data }) => { const rows = data || []; setCache('overview_channel_data', dateRange.from, dateRange.to, rows); setChannelData(rows); });
+    }
   }, [dateRange, supabase]);
 
   // ── Fetch previous month data — same relative date range (MoM) ──
@@ -107,11 +125,21 @@ export default function OverviewPage() {
           setPrevOverheadData(rows);
         });
     }
+    // Fetch prev-period ads spend
+    const cachedPrevAds = getCached('overview_ads_spend_prev', prevFrom, prevTo);
+    if (cachedPrevAds) { setPrevAdsData(cachedPrevAds); } else {
+      supabase.from('daily_ads_spend').select('date, source, spent, store')
+        .gte('date', prevFrom).lte('date', prevTo)
+        .then(({ data }) => { const rows = data || []; setCache('overview_ads_spend_prev', prevFrom, prevTo, rows); setPrevAdsData(rows); });
+    }
+    // Fetch prev-period channel data
+    const cachedPrevCh = getCached('overview_channel_data_prev', prevFrom, prevTo);
+    if (cachedPrevCh) { setPrevChannelData(cachedPrevCh); } else {
+      supabase.from('daily_channel_data').select('date, channel, product, mp_admin_cost')
+        .gte('date', prevFrom).lte('date', prevTo)
+        .then(({ data }) => { const rows = data || []; setCache('overview_channel_data_prev', prevFrom, prevTo, rows); setPrevChannelData(rows); });
+    }
   }, [dateRange, supabase]);
-
-  const totalMpFee = useMemo(() => {
-    return dailyData.reduce((a, d) => a + Math.abs(Number(d.mp_admin_cost) || 0), 0);
-  }, [dailyData]);
 
   // Build overhead per-day lookup: date (YYYY-MM-DD) → daily overhead amount
   const overheadPerDay = useMemo(() => {
@@ -139,42 +167,60 @@ export default function OverviewPage() {
     return map;
   }, [shipmentData, activeBrands]);
 
+  // Build per-day ads spend lookup (from daily_ads_spend — matches marketing page)
+  const adsByDate = useMemo(() => {
+    const map: Record<string, number> = {};
+    adsData.forEach(d => { map[d.date] = (map[d.date] || 0) + Math.abs(Number(d.spent || 0)); });
+    return map;
+  }, [adsData]);
+
+  // Build per-day MP fee lookup (from daily_channel_data — matches channels page)
+  const mpByDate = useMemo(() => {
+    const map: Record<string, number> = {};
+    channelData.forEach(d => {
+      if (!isActiveBrand(d.product)) return;
+      map[d.date] = (map[d.date] || 0) + Math.abs(Number(d.mp_admin_cost) || 0);
+    });
+    return map;
+  }, [channelData, activeBrands]);
+
   const kpi = useMemo(() => {
     // Build all dates in the selected range so days with only overhead/ads still appear
-    const byDate: Record<string, { s:number; g:number; n:number; mp:number }> = {};
+    const byDate: Record<string, { s:number; g:number }> = {};
     if (dateRange.from && dateRange.to) {
       const cur = new Date(dateRange.from + 'T00:00:00');
       const end = new Date(dateRange.to + 'T00:00:00');
       while (cur <= end) {
         const key = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
-        byDate[key] = { s:0, g:0, n:0, mp:0 };
+        byDate[key] = { s:0, g:0 };
         cur.setDate(cur.getDate() + 1);
       }
     }
     dailyData.forEach(d => {
-      if (!byDate[d.date]) return; // skip dates outside selected range
+      if (!byDate[d.date]) return;
       byDate[d.date].s += Number(d.net_sales);
       byDate[d.date].g += Number(d.gross_profit);
-      byDate[d.date].n += Number(d.net_after_mkt);
-      byDate[d.date].mp += Math.abs(Number(d.mp_admin_cost) || 0);
     });
     const dates = Object.keys(byDate).sort();
     const ts = dates.reduce((a,d) => a + byDate[d].s, 0);
     const tg = dates.reduce((a,d) => a + byDate[d].g, 0);
-    const tn = dates.reduce((a,d) => a + byDate[d].n, 0);
-    const tm = tg - tn;
+    const tCogs = ts - tg;
+    // Explicit totals from dedicated tables
+    const tAds = adsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
+    const tMp = channelData.filter(d => isActiveBrand(d.product)).reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost) || 0), 0);
     const ad = dates.filter(d => byDate[d].s > 0).length;
     const hasOverhead = overheadData.length > 0;
+    const tOverheadRaw = dates.reduce((a, d) => a + (overheadPerDay[d] || 0), 0);
+    const tNetProfit = tg - tAds - tMp - tOverheadRaw;
+    const npM = ts > 0 ? tNetProfit / ts * 100 : 0;
     const chart = dates.map(d => {
-      const totalMkt = byDate[d].g - byDate[d].n;
-      const mpFee = byDate[d].mp;
-      const adsFee = totalMkt - mpFee;
+      const adsFee = adsByDate[d] || 0;
+      const mpFee = mpByDate[d] || 0;
       const cogs = byDate[d].s - byDate[d].g;
       const overhead = overheadPerDay[d] || 0;
-      const estNetProfit = byDate[d].n - overhead;
+      const estNetProfit = byDate[d].g - adsFee - mpFee - overhead;
       const gpM = byDate[d].s > 0 ? byDate[d].g / byDate[d].s * 100 : 0;
-      const nM = byDate[d].s > 0 ? byDate[d].n / byDate[d].s * 100 : 0;
-      const npM = byDate[d].s > 0 ? estNetProfit / byDate[d].s * 100 : 0;
+      const npMd = byDate[d].s > 0 ? estNetProfit / byDate[d].s * 100 : 0;
       return {
         date: shortDate(d),
         rawDate: d,
@@ -182,42 +228,30 @@ export default function OverviewPage() {
         'Net Sales': byDate[d].s,
         'Gross Profit': byDate[d].g,
         'COGS': cogs,
-        'GP After Mkt + Adm': byDate[d].n,
         'Mkt Fee': adsFee,
         'MP Fee': mpFee,
         'Overhead': overhead,
-        'Est. Net Profit': estNetProfit,
-        gpM, nM, npM,
+        'Net Profit': estNetProfit,
+        gpM, npM: npMd,
       };
     });
     const tShipment = chart.reduce((a,r) => a + r.shipment, 0);
-    const tMp = dates.reduce((a,d) => a + byDate[d].mp, 0);
-    const tAds = tm - tMp;
-    const tCogs = ts - tg;
-    const tOverhead = chart.reduce((a,r) => a + r['Overhead'], 0);
-    const tNetProfit = tn - tOverhead;
-    const npM = ts > 0 ? tNetProfit / ts * 100 : 0;
-    return { ts, tg, tn, tm, tMp, tAds, tCogs, tOverhead, tNetProfit, tShipment, npM, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0, mR: ts>0?tm/ts*100:0, avg: ad>0?ts/ad:0 };
-  }, [dailyData, overheadPerDay, overheadData, shipPerDay, dateRange]);
+    return { ts, tg, tCogs, tAds, tMp, tOverhead: tOverheadRaw, tNetProfit, tShipment, npM, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, mR: ts>0?(tAds+tMp)/ts*100:0, avg: ad>0?ts/ad:0 };
+  }, [dailyData, adsData, channelData, overheadPerDay, overheadData, shipPerDay, dateRange, adsByDate, mpByDate, activeBrands]);
 
   // ── Previous month KPIs (for delta comparison) ──
   const prevKpi = useMemo(() => {
     if (prevDailyData.length === 0) return null;
-    const byDate = {};
-    prevDailyData.forEach(d => {
-      if (!byDate[d.date]) byDate[d.date] = { s:0, g:0, n:0, mp:0 };
-      byDate[d.date].s += Number(d.net_sales);
-      byDate[d.date].g += Number(d.gross_profit);
-      byDate[d.date].n += Number(d.net_after_mkt);
-      byDate[d.date].mp += Math.abs(Number(d.mp_admin_cost) || 0);
-    });
-    const dates = Object.keys(byDate).sort();
-    const ts = dates.reduce((a,d) => a + byDate[d].s, 0);
-    const tg = dates.reduce((a,d) => a + byDate[d].g, 0);
-    const tn = dates.reduce((a,d) => a + byDate[d].n, 0);
-    const tm = tg - tn;
-    return { ts, tg, tn, tm, gpM: ts>0?tg/ts*100:0, nM: ts>0?tn/ts*100:0 };
-  }, [prevDailyData]);
+    let ts = 0, tg = 0;
+    prevDailyData.forEach(d => { ts += Number(d.net_sales); tg += Number(d.gross_profit); });
+    const tAds = prevAdsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
+    const tMp = prevChannelData.filter(d => isActiveBrand(d.product)).reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost) || 0), 0);
+    // Prev overhead
+    let prevOH = 0;
+    prevOverheadData.forEach(o => { prevOH += Number(o.amount) || 0; });
+    const tNetProfit = tg - tAds - tMp - prevOH;
+    return { ts, tg, tAds, tMp, tNetProfit, gpM: ts>0?tg/ts*100:0, npM: ts>0?tNetProfit/ts*100:0 };
+  }, [prevDailyData, prevAdsData, prevChannelData, prevOverheadData, activeBrands]);
 
   const prevMonthLabel = useMemo(() => {
     if (!dateRange.from) return '';
@@ -245,7 +279,6 @@ export default function OverviewPage() {
   }, [dailyData, kpi.ts]);
 
   const hasPreFebData = dateRange.from < '2026-02-01';
-  const mpFeePercent = kpi.tm > 0 ? (totalMpFee / kpi.tm * 100) : 0;
 
   const cashFlowPeriodStart = useMemo(() => {
     if (!dateRange.from) return null;
@@ -261,7 +294,7 @@ export default function OverviewPage() {
     </div>
   );
   const KPI = ({ label, val, sub, color='var(--accent)', delta, delta2 }: { label: string; val: string; sub?: string; color?: string; delta?: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }; delta2?: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string } }) => (
-    <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 18px', flex:'1 1 160px', minWidth:150, position:'relative', overflow:'hidden' }}>
+    <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 18px', flex:'1 1 160px', minWidth:150, maxWidth:320, position:'relative', overflow:'hidden' }}>
       <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:color }} />
       <div style={{ fontSize:11, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6, fontWeight:600 }}>{label}</div>
       <div style={{ fontSize:20, fontWeight:700, fontFamily:'monospace', lineHeight:1.1 }}>{val}</div>
@@ -299,18 +332,25 @@ export default function OverviewPage() {
         <div><h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2><div style={{ fontSize:12, color:'var(--dim)' }}>{kpi.ad} active days</div></div>
       </div>
 
-      {/* ── KPI Cards ── */}
-      <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
+      {/* ── KPI Cards — Row 1: Revenue & Profit ── */}
+      <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:12 }}>
         <KPI label="Net Sales" val={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg: ${fmtRupiah(kpi.avg)}/hari`}
           delta={prevKpi && prevKpi.ts > 0 ? { value: ((kpi.ts - prevKpi.ts) / prevKpi.ts) * 100 } : undefined} />
         <KPI label="Gross Profit" val={`Rp ${fmtCompact(kpi.tg)}`} sub={`GP Margin: ${kpi.gpM.toFixed(1)}%`} color="var(--green)"
           delta={prevKpi && prevKpi.tg > 0 ? { value: ((kpi.tg - prevKpi.tg) / prevKpi.tg) * 100 } : undefined}
           delta2={prevKpi && prevKpi.gpM > 0 ? { value: kpi.gpM - prevKpi.gpM, suffix: 'pp', label: 'margin' } : undefined} />
-        <KPI label="Mkt Cost + MP Fee" val={`Rp ${fmtCompact(kpi.tm)}`} sub={totalMpFee > 0 ? `MP Fee: Rp ${fmtCompact(totalMpFee)} (${mpFeePercent.toFixed(1)}%)` : 'MP Fee: tidak tersedia'} color="var(--yellow)"
-          delta={prevKpi && prevKpi.tm > 0 ? { value: ((kpi.tm - prevKpi.tm) / prevKpi.tm) * 100, higherIsBetter: false } : undefined} />
-        <KPI label="GP After Mkt + Adm" val={`Rp ${fmtCompact(kpi.tn)}`} sub={`Margin After Mkt: ${kpi.nM.toFixed(1)}%`} color="#06b6d4"
-          delta={prevKpi && prevKpi.tn > 0 ? { value: ((kpi.tn - prevKpi.tn) / prevKpi.tn) * 100 } : undefined}
-          delta2={prevKpi && prevKpi.nM > 0 ? { value: kpi.nM - prevKpi.nM, suffix: 'pp', label: 'margin' } : undefined} />
+        <KPI label="Net Profit" val={`Rp ${fmtCompact(kpi.tNetProfit)}`} sub={`NP Margin: ${kpi.npM.toFixed(1)}%`} color={kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)'}
+          delta={prevKpi && prevKpi.tNetProfit !== 0 ? { value: prevKpi.tNetProfit !== 0 ? ((kpi.tNetProfit - prevKpi.tNetProfit) / Math.abs(prevKpi.tNetProfit)) * 100 : 0 } : undefined}
+          delta2={prevKpi ? { value: kpi.npM - prevKpi.npM, suffix: 'pp', label: 'margin' } : undefined} />
+      </div>
+      {/* ── KPI Cards — Row 2: Cost Breakdown ── */}
+      <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
+        <KPI label="COGS" val={`Rp ${fmtCompact(kpi.tCogs)}`} sub={`${kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--dim)" />
+        <KPI label="Marketing Fee" val={`Rp ${fmtCompact(kpi.tAds)}`} sub={`${kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--yellow)"
+          delta={prevKpi && prevKpi.tAds > 0 ? { value: ((kpi.tAds - prevKpi.tAds) / prevKpi.tAds) * 100, higherIsBetter: false } : undefined} />
+        <KPI label="MP Fee" val={`Rp ${fmtCompact(kpi.tMp)}`} sub={`${kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--yellow)"
+          delta={prevKpi && prevKpi.tMp > 0 ? { value: ((kpi.tMp - prevKpi.tMp) / prevKpi.tMp) * 100, higherIsBetter: false } : undefined} />
+        {kpi.hasOverhead && <KPI label="Overhead" val={`Rp ${fmtCompact(kpi.tOverhead)}`} sub="estimated" color="#a78bfa" />}
       </div>
 
       {/* ── Cash Flow Status (owner/admin) ── */}
@@ -337,18 +377,18 @@ export default function OverviewPage() {
               </button>
             )}
           </div>
-          {showTren && <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? (kpi.hasOverhead ? 1100 : 920) : 820 }}>
+          {showTren && <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? 1100 : 820 }}>
             <thead>
               <tr style={{ borderBottom:'2px solid var(--border)' }}>
                 <th style={{ padding:'8px 10px', textAlign:'left', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>Tanggal</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Shipment</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--accent)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Net Sales</th>
-                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--red)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>COGS</th>}
+                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>COGS</th>}
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--green)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Gross Profit</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--yellow)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Mkt Fee</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--yellow)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>MP Fee</th>
-                <th style={{ padding:'8px 10px', textAlign:'right', color:'#06b6d4', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>GP After Mkt + Adm</th>
-                {kpi.hasOverhead && showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'#a78bfa', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Overhead</th>}
-                {kpi.hasOverhead && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--green)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Est. Net Profit</th>}
+                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'#a78bfa', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Overhead</th>}
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--green)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Net Profit</th>
               </tr>
             </thead>
             <tbody>
@@ -357,12 +397,12 @@ export default function OverviewPage() {
                   <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>{row.date}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--text-secondary)' }}>{row.shipment > 0 ? row.shipment.toLocaleString('id-ID') : '—'}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(row['Net Sales'])}</td>
-                  {showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--red)' }}>{fmtRupiah(row['COGS'])}</td>}
+                  {showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--dim)' }}>{fmtRupiah(row['COGS'])}</td>}
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--green)' }}>{fmtRupiah(row['Gross Profit'])}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(row['Mkt Fee'])}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(row['MP Fee'])}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['GP After Mkt + Adm'] >= 0 ? '#06b6d4' : 'var(--red)' }}>{fmtRupiah(row['GP After Mkt + Adm'])}</td>
-                  {kpi.hasOverhead && showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#a78bfa' }}>{fmtRupiah(row['Overhead'])}</td>}
-                  {kpi.hasOverhead && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['Est. Net Profit'] >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtRupiah(row['Est. Net Profit'])}</td>}
+                  {showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#a78bfa' }}>{fmtRupiah(row['Overhead'])}</td>}
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['Net Profit'] >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtRupiah(row['Net Profit'])}</td>
                 </tr>
               ))}
               {/* TOTAL row with % of net sales */}
@@ -377,10 +417,14 @@ export default function OverviewPage() {
                 </td>
                 {showDetail && (
                   <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                    <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--red)' }}>{fmtRupiah(kpi.tCogs)}</div>
+                    <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--dim)' }}>{fmtRupiah(kpi.tCogs)}</div>
                     <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : 0}%</div>
                   </td>
                 )}
+                <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--green)' }}>{fmtRupiah(kpi.tg)}</div>
+                  <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.gpM.toFixed(1)}%</div>
+                </td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
                   <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(kpi.tAds)}</div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : 0}%</div>
@@ -389,22 +433,16 @@ export default function OverviewPage() {
                   <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(kpi.tMp)}</div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
-                <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tn >= 0 ? '#06b6d4' : 'var(--red)' }}>{fmtRupiah(kpi.tn)}</div>
-                  <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tn / kpi.ts * 100).toFixed(1) : 0}%</div>
-                </td>
-                {kpi.hasOverhead && showDetail && (
+                {showDetail && (
                   <td style={{ padding:'10px 10px', textAlign:'right' }}>
                     <div style={{ fontFamily:'monospace', fontSize:11, color:'#a78bfa' }}>{fmtRupiah(kpi.tOverhead)}</div>
                     <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tOverhead / kpi.ts * 100).toFixed(1) : 0}%</div>
                   </td>
                 )}
-                {kpi.hasOverhead && (
-                  <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                    <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtRupiah(kpi.tNetProfit)}</div>
-                    <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.npM), color: marginColor(kpi.npM) }}>{kpi.npM.toFixed(1)}%</span></div>
-                  </td>
-                )}
+                <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtRupiah(kpi.tNetProfit)}</div>
+                  <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.npM), color: marginColor(kpi.npM) }}>{kpi.npM.toFixed(1)}%</span></div>
+                </td>
               </tr>
             </tbody>
           </table>}
@@ -416,7 +454,7 @@ export default function OverviewPage() {
         <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
         <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth:900 }}>
           <thead><tr style={{ borderBottom:'2px solid var(--border)' }}>
-            {['SKU','Net Sales','%','COGS','Mkt Fee','Admin Fee','GP After Mkt + Adm','Margin After Mkt','Mkt Ratio'].map(h => (
+            {['SKU','Net Sales','%','COGS','Mkt Fee','MP Fee','Net Profit','NP Margin','Mkt Ratio'].map(h => (
               <th key={h} style={{ padding:'8px 10px', textAlign:h==='SKU'?'left':'right', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase', whiteSpace:'nowrap' }}>{h}</th>
             ))}
           </tr></thead>
@@ -443,23 +481,22 @@ export default function OverviewPage() {
             {(() => {
               const tSales = productTable.reduce((a, p) => a + p.sales, 0);
               const tCogs = productTable.reduce((a, p) => a + p.cogs, 0);
-              const tAds = productTable.reduce((a, p) => a + p.adsFee, 0);
-              const tMp = productTable.reduce((a, p) => a + p.mpFee, 0);
-              const tNam = productTable.reduce((a, p) => a + p.nam, 0);
-              const tMc = tAds + tMp;
-              const marginR = tSales > 0 ? tNam / tSales * 100 : 0;
-              const mktR = tSales > 0 ? tMc / tSales * 100 : 0;
+              // Use explicit KPI totals for the TOTAL row
+              const tMc = kpi.tAds + kpi.tMp;
+              const tNp = kpi.tNetProfit;
+              const npMargin = kpi.ts > 0 ? tNp / kpi.ts * 100 : 0;
+              const mktR = kpi.ts > 0 ? tMc / kpi.ts * 100 : 0;
               return (
                 <tr style={{ borderTop:'2px solid var(--border)' }}>
                   <td style={{ padding:'8px 10px', fontWeight:700, fontSize:12 }}>TOTAL</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700 }}>{fmtRupiah(tSales)}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', color:'var(--dim)', fontWeight:700 }}>100%</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'var(--dim)' }}>{fmtRupiah(tCogs)}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'var(--yellow)' }}>{fmtRupiah(tAds)}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'var(--dim)' }}>{fmtRupiah(tMp)}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:tNam>=0?'var(--green)':'var(--red)' }}>{fmtRupiah(tNam)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'var(--yellow)' }}>{fmtRupiah(kpi.tAds)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:'var(--dim)' }}>{fmtRupiah(kpi.tMp)}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, fontWeight:700, color:tNp>=0?'var(--green)':'var(--red)' }}>{fmtRupiah(tNp)}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right' }}>
-                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:marginR>=30?'var(--badge-green-bg)':marginR>=0?'var(--badge-yellow-bg)':'var(--badge-red-bg)', color:marginR>=30?'var(--green)':marginR>=0?'var(--yellow)':'var(--red)' }}>{marginR.toFixed(1)}%</span>
+                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:npMargin>=30?'var(--badge-green-bg)':npMargin>=0?'var(--badge-yellow-bg)':'var(--badge-red-bg)', color:npMargin>=30?'var(--green)':npMargin>=0?'var(--yellow)':'var(--red)' }}>{npMargin.toFixed(1)}%</span>
                   </td>
                   <td style={{ padding:'8px 10px', textAlign:'right' }}>
                     <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:700, background:mktR>40?'var(--badge-red-bg)':mktR>25?'var(--badge-yellow-bg)':'var(--badge-green-bg)', color:mktR>40?'var(--red)':mktR>25?'var(--yellow)':'var(--green)' }}>{mktR.toFixed(1)}%</span>
