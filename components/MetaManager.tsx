@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
+import { invalidateAll } from '@/lib/dashboard-cache';
 
 interface MetaAccount {
   id: number;
@@ -293,7 +294,7 @@ export default function MetaManager() {
         updated_at: new Date().toISOString(),
       }).eq('id', editingId);
       if (error) throw error;
-      setMessage({ type: 'success', text: 'Akun diperbarui' });
+      setMessage({ type: 'success', text: 'Akun diperbarui. Jalankan sync Meta ulang untuk menerapkan mapping baru ke data historis.' });
       setEditingId(null);
       await loadData();
     } catch (err: any) {
@@ -328,6 +329,7 @@ export default function MetaManager() {
           type: data.status === 'failed' ? 'error' : 'success',
           text: data.token_warning ? `${msg}. ⚠️ ${data.token_warning}` : msg,
         });
+        invalidateAll();
         await loadData();
       }
     } catch (err: any) {
@@ -388,7 +390,7 @@ export default function MetaManager() {
         updated_at: new Date().toISOString(),
       }).eq('id', wabaEditingId);
       if (error) throw error;
-      setWabaMessage({ type: 'success', text: 'WABA account diperbarui' });
+      setWabaMessage({ type: 'success', text: 'WABA account diperbarui. Jalankan sync WABA ulang untuk menerapkan brand baru ke data historis.' });
       setWabaEditingId(null);
       await loadData();
     } catch (err: any) {
@@ -420,6 +422,7 @@ export default function MetaManager() {
       } else {
         const msg = `Sync ${data.status}: ${data.accounts_synced}/${data.accounts_total} akun, ${data.rows_inserted} baris data`;
         setWabaMessage({ type: data.status === 'failed' ? 'error' : 'success', text: msg });
+        invalidateAll();
         await loadData();
       }
     } catch (err: any) {
