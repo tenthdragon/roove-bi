@@ -5,8 +5,6 @@ import { createServerSupabase, createServiceSupabase } from './supabase-server';
 interface MarketingPageDataParams {
   from: string;
   to: string;
-  prevFullFrom: string;
-  prevFullTo: string;
   prevRangeFrom: string;
   prevRangeTo: string;
 }
@@ -47,8 +45,6 @@ function unwrap<T>(result: { data: T | null; error: { message: string } | null }
 export async function getMarketingPageData({
   from,
   to,
-  prevFullFrom,
-  prevFullTo,
   prevRangeFrom,
   prevRangeTo,
 }: MarketingPageDataParams) {
@@ -60,9 +56,8 @@ export async function getMarketingPageData({
     prodRes,
     adsRes,
     chRes,
-    prevAdsRes,
-    prevChRes,
     prevRangeAdsRes,
+    prevRangeChRes,
   ] = await Promise.all([
     svc.from('daily_product_summary')
       .select('date, product, net_sales, mkt_cost')
@@ -78,14 +73,10 @@ export async function getMarketingPageData({
       .lte('date', to),
     svc.from('daily_ads_spend')
       .select('date, source, spent, store')
-      .gte('date', prevFullFrom)
-      .lte('date', prevFullTo),
+      .gte('date', prevRangeFrom)
+      .lte('date', prevRangeTo),
     svc.from('daily_channel_data')
       .select('date, channel, product, net_sales, mp_admin_cost')
-      .gte('date', prevFullFrom)
-      .lte('date', prevFullTo),
-    svc.from('daily_ads_spend')
-      .select('date, source, spent')
       .gte('date', prevRangeFrom)
       .lte('date', prevRangeTo),
   ]);
@@ -94,8 +85,7 @@ export async function getMarketingPageData({
     prod: unwrap(prodRes, 'Gagal memuat revenue marketing'),
     ads: unwrap(adsRes, 'Gagal memuat marketing fee'),
     channel: unwrap(chRes, 'Gagal memuat breakdown channel'),
-    prevAds: unwrap(prevAdsRes, 'Gagal memuat ad spend bulan sebelumnya'),
-    prevChannel: unwrap(prevChRes, 'Gagal memuat channel bulan sebelumnya'),
     prevRangeAds: unwrap(prevRangeAdsRes, 'Gagal memuat perbandingan ad spend'),
+    prevRangeChannel: unwrap(prevRangeChRes, 'Gagal memuat perbandingan channel'),
   };
 }

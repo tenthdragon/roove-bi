@@ -20,6 +20,24 @@ function normStore(s: string): string {
   return s;
 }
 
+function formatIsoDate(year: number, month: number, day: number): string {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function getDaysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function shiftIsoDateByMonthsClamped(value: string, deltaMonths: number): string {
+  const [year, month, day] = value.split('-').map(Number);
+  const totalMonths = year * 12 + (month - 1) + deltaMonths;
+  const targetYear = Math.floor(totalMonths / 12);
+  const targetMonthIndex = ((totalMonths % 12) + 12) % 12;
+  const targetMonth = targetMonthIndex + 1;
+  const targetDay = Math.min(day, getDaysInMonth(targetYear, targetMonth));
+  return formatIsoDate(targetYear, targetMonth, targetDay);
+}
+
 // ── Mapping: Ads Source → Marketing Platform ──
 // Marketing POV: ads spend attributed to all sales channels they impact (including organic spillover)
 //
@@ -97,10 +115,9 @@ export default function MarketingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [brandFilter, setBrandFilter] = useState('all');
-  const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
-  const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [dailyAdSpendOpen, setDailyAdSpendOpen] = useState(false);
   const [prevRangeAdsData, setPrevRangeAdsData] = useState<any[]>([]);
+  const [prevRangeChannelData, setPrevRangeChannelData] = useState<any[]>([]);
   const { activeBrands, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
   const prodData = useMemo(
@@ -108,24 +125,30 @@ export default function MarketingPage() {
     [rawProdData, activeBrands, activeBrandsError, isActiveBrand]
   );
 
+  const filteredAdsData = useMemo(
+    () => adsData.filter(d => isActiveBrand(normStore(d.store))),
+    [adsData, activeBrands, activeBrandsError, isActiveBrand]
+  );
+
+  const filteredChannelData = useMemo(
+    () => channelData.filter(d => isActiveBrand(d.product)),
+    [channelData, activeBrands, activeBrandsError, isActiveBrand]
+  );
+
+  const filteredPrevRangeAdsData = useMemo(
+    () => prevRangeAdsData.filter(d => isActiveBrand(normStore(d.store))),
+    [prevRangeAdsData, activeBrands, activeBrandsError, isActiveBrand]
+  );
+
+  const filteredPrevRangeChannelData = useMemo(
+    () => prevRangeChannelData.filter(d => isActiveBrand(d.product)),
+    [prevRangeChannelData, activeBrands, activeBrandsError, isActiveBrand]
+  );
+
   function getComparisonRanges(from: string, to: string) {
-    const fromDate = new Date(from + 'T00:00:00');
-    const toDate = new Date(to + 'T00:00:00');
-
-    const prevMonthEnd = new Date(fromDate.getFullYear(), fromDate.getMonth(), 0);
-    const prevMonthStart = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth(), 1);
-
-    const prevRangeFromDate = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, fromDate.getDate());
-    const prevRangeToDate = new Date(toDate.getFullYear(), toDate.getMonth() - 1, toDate.getDate());
-
-    const fmt = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
     return {
-      prevFullFrom: fmt(prevMonthStart),
-      prevFullTo: fmt(prevMonthEnd),
-      prevRangeFrom: fmt(prevRangeFromDate),
-      prevRangeTo: fmt(prevRangeToDate),
+      prevRangeFrom: shiftIsoDateByMonthsClamped(from, -1),
+      prevRangeTo: shiftIsoDateByMonthsClamped(to, -1),
     };
   }
 
@@ -133,22 +156,20 @@ export default function MarketingPage() {
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     const { from, to } = dateRange;
-    const { prevFullFrom, prevFullTo, prevRangeFrom, prevRangeTo } = getComparisonRanges(from, to);
+    const { prevRangeFrom, prevRangeTo } = getComparisonRanges(from, to);
 
     const cachedProd = getCached<any[]>('daily_product_summary_mkt', from, to);
     const cachedAds = getCached<any[]>('daily_ads_spend', from, to);
     const cachedCh = getCached<any[]>('daily_channel_data_mkt', from, to);
-    const cachedPrevAds = getCached<any[]>('daily_ads_spend_prev', prevFullFrom, prevFullTo);
-    const cachedPrevCh = getCached<any[]>('daily_channel_data_prev', prevFullFrom, prevFullTo);
     const cachedPrevRangeAds = getCached<any[]>('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo);
+    const cachedPrevRangeCh = getCached<any[]>('daily_channel_data_prev_range', prevRangeFrom, prevRangeTo);
 
-    if (cachedProd && cachedAds && cachedCh && cachedPrevAds && cachedPrevCh && cachedPrevRangeAds) {
+    if (cachedProd && cachedAds && cachedCh && cachedPrevRangeAds && cachedPrevRangeCh) {
       setRawProdData(cachedProd);
       setAdsData(cachedAds);
       setChannelData(cachedCh);
-      setPrevAdsData(cachedPrevAds);
-      setPrevChannelData(cachedPrevCh);
       setPrevRangeAdsData(cachedPrevRangeAds);
+      setPrevRangeChannelData(cachedPrevRangeCh);
       setError('');
       setLoading(false);
       return;
@@ -161,8 +182,6 @@ export default function MarketingPage() {
     getMarketingPageData({
       from,
       to,
-      prevFullFrom,
-      prevFullTo,
       prevRangeFrom,
       prevRangeTo,
     })
@@ -172,16 +191,14 @@ export default function MarketingPage() {
         setCache('daily_product_summary_mkt', from, to, data.prod);
         setCache('daily_ads_spend', from, to, data.ads);
         setCache('daily_channel_data_mkt', from, to, data.channel);
-        setCache('daily_ads_spend_prev', prevFullFrom, prevFullTo, data.prevAds);
-        setCache('daily_channel_data_prev', prevFullFrom, prevFullTo, data.prevChannel);
         setCache('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo, data.prevRangeAds);
+        setCache('daily_channel_data_prev_range', prevRangeFrom, prevRangeTo, data.prevRangeChannel);
 
         setRawProdData(data.prod);
         setAdsData(data.ads);
         setChannelData(data.channel);
-        setPrevAdsData(data.prevAds);
-        setPrevChannelData(data.prevChannel);
         setPrevRangeAdsData(data.prevRangeAds);
+        setPrevRangeChannelData(data.prevRangeChannel);
         setError('');
         setLoading(false);
       })
@@ -198,13 +215,13 @@ export default function MarketingPage() {
   // ── KPI calculations ──
   const { totalRevenue, totalSpend, totalRatio, totalRoas, avgDailyRatio, avgDailyRoas, activeDays } = useMemo(() => {
     const rev = prodData.reduce((s, d) => s + Number(d.net_sales || 0), 0);
-    const spend = adsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
+    const spend = filteredAdsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
     const byDate: Record<string, { rev: number; spend: number }> = {};
     prodData.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].rev += Number(d.net_sales || 0);
     });
-    adsData.forEach(d => {
+    filteredAdsData.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].spend += Math.abs(Number(d.spent || 0));
     });
@@ -219,7 +236,7 @@ export default function MarketingPage() {
       avgDailyRoas: dailyRoas.length > 0 ? dailyRoas.reduce((a, b) => a + b, 0) / dailyRoas.length : 0,
       activeDays: days.length,
     };
-  }, [prodData, adsData]);
+  }, [prodData, filteredAdsData]);
 
   // ── Daily chart data ──
   const ratioChartData = useMemo(() => {
@@ -228,7 +245,7 @@ export default function MarketingPage() {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].rev += Number(d.net_sales || 0);
     });
-    adsData.forEach(d => {
+    filteredAdsData.forEach(d => {
       if (!byDate[d.date]) byDate[d.date] = { rev: 0, spend: 0 };
       byDate[d.date].spend += Math.abs(Number(d.spent || 0));
     });
@@ -241,13 +258,13 @@ export default function MarketingPage() {
         'Ad Spend': v.spend,
         'Mkt Ratio %': v.rev > 0 ? parseFloat(((v.spend / v.rev) * 100).toFixed(1)) : 0,
       }));
-  }, [prodData, adsData]);
+  }, [prodData, filteredAdsData]);
 
   // ── Daily Ad Spend by Brand ──
   const dailyBrandData = useMemo(() => {
     const byDate: Record<string, Record<string, number>> = {};
     const brands = new Set<string>();
-    adsData.forEach(d => {
+    filteredAdsData.forEach(d => {
       const date = new Date(d.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
       const brand = normStore(d.store);
       brands.add(brand);
@@ -260,14 +277,14 @@ export default function MarketingPage() {
       return da.getTime() - db.getTime();
     });
     return { data: sortedDates.map(([date, vals]) => ({ date, ...vals })), brands: Array.from(brands).sort() };
-  }, [adsData]);
+  }, [filteredAdsData]);
 
   // ── Unique brands for filter ──
   const uniqueBrands = useMemo(() => {
     const set = new Set<string>();
-    adsData.forEach(d => { const brand = normStore(d.store); if (brand && brand !== 'Other') set.add(brand); });
+    filteredAdsData.forEach(d => { const brand = normStore(d.store); if (brand && brand !== 'Other') set.add(brand); });
     return Array.from(set).sort();
-  }, [adsData]);
+  }, [filteredAdsData]);
 
 const BRAND_COLORS = useMemo(() => {
   return buildBrandColorMap([...uniqueBrands, ...activeBrands]);
@@ -287,7 +304,7 @@ const BRAND_COLORS = useMemo(() => {
       revenueByDate[d.date] = (revenueByDate[d.date] || 0) + Number(d.net_sales || 0);
     });
 
-    adsData.forEach(d => {
+    filteredAdsData.forEach(d => {
       const platform = normPlatform(d.source);
       sources.add(platform);
       if (!byDate[d.date]) byDate[d.date] = {};
@@ -321,41 +338,34 @@ const BRAND_COLORS = useMemo(() => {
     const grandRatio = grandRev > 0 ? (grandTotal / grandRev) * 100 : 0;
 
     return { rows, sources: sortedSources, totals, grandTotal, grandRatio };
-  }, [adsData, prodData]);
+  }, [filteredAdsData, prodData]);
 
   // ── Previous month ad spend per platform (MoM delta for daily table) ──
   const prevAdSpend = useMemo(() => {
-    if (prevRangeAdsData.length === 0) return null;
+    if (filteredPrevRangeAdsData.length === 0) return null;
     const byPlatform: Record<string, number> = {};
     let total = 0;
-    prevRangeAdsData.forEach(d => {
+    filteredPrevRangeAdsData.forEach(d => {
       const platform = normPlatform(d.source);
       const spent = Math.abs(Number(d.spent || 0));
       byPlatform[platform] = (byPlatform[platform] || 0) + spent;
       total += spent;
     });
-    // Also compute prev revenue for ratio delta (reuse prevChannelData which has full month,
-    // but we filter to same date range by day-of-month)
-    const fromDay = dateRange.from ? new Date(dateRange.from + 'T00:00:00').getDate() : 1;
-    const toDay = dateRange.to ? new Date(dateRange.to + 'T00:00:00').getDate() : 31;
-    const prevRev = prevChannelData
-      .filter(d => { const day = new Date(d.date + 'T00:00:00').getDate(); return day >= fromDay && day <= toDay; })
+    const prevRev = filteredPrevRangeChannelData
       .reduce((sum, d) => sum + (Number(d.net_sales) || 0), 0);
     const ratio = prevRev > 0 ? (total / prevRev) * 100 : 0;
-    // Compute prev admin fee for effective ROAS
-    const prevAdmin = prevChannelData
-      .filter(d => { const day = new Date(d.date + 'T00:00:00').getDate(); return day >= fromDay && day <= toDay; })
+    const prevAdmin = filteredPrevRangeChannelData
       .reduce((sum, d) => sum + Math.abs(Number(d.mp_admin_cost) || 0), 0);
     const roas = total > 0 ? prevRev / total : 0;
     const effRoas = (total + prevAdmin) > 0 ? prevRev / (total + prevAdmin) : 0;
     return { byPlatform, total, ratio, revenue: prevRev, roas, effRoas };
-  }, [prevRangeAdsData, prevChannelData, dateRange]);
+  }, [filteredPrevRangeAdsData, filteredPrevRangeChannelData]);
 
   // ══════════════════════════════════════════════════════════════════════
   // PLATFORM BREAKDOWN — exclusive Channel ROAS + sub-source breakdown
   // ══════════════════════════════════════════════════════════════════════
   const platformBreakdown = useMemo(() => {
-    const filteredAds = brandFilter === 'all' ? adsData : adsData.filter(d => normStore(d.store) === brandFilter);
+    const filteredAds = brandFilter === 'all' ? filteredAdsData : filteredAdsData.filter(d => normStore(d.store) === brandFilter);
 
     const byPlatform: Record<string, { total: number; subs: Record<string, number> }> = {};
     filteredAds.forEach(d => {
@@ -368,14 +378,14 @@ const BRAND_COLORS = useMemo(() => {
     });
 
     const channelRev: Record<string, number> = {};
-    channelData.forEach(d => {
+    filteredChannelData.forEach(d => {
       if (brandFilter !== 'all' && d.product !== brandFilter) return;
       const ch = d.channel || 'Other';
       channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
     });
 
     const channelAdminFee: Record<string, number> = {};
-    channelData.forEach(d => {
+    filteredChannelData.forEach(d => {
       if (brandFilter !== 'all' && d.product !== brandFilter) return;
       const ch = d.channel || 'Other';
       channelAdminFee[ch] = (channelAdminFee[ch] || 0) + Math.abs(Number(d.mp_admin_cost || 0));
@@ -435,14 +445,16 @@ const BRAND_COLORS = useMemo(() => {
     }
 
     return result;
-  }, [adsData, channelData, brandFilter]);
+  }, [filteredAdsData, filteredChannelData, brandFilter]);
 
   // ── Previous month ROAS lookup (for delta comparison) ──
   const prevRoasMap = useMemo(() => {
     const map: Record<string, { roas: number; effectiveRoas: number }> = {};
-    if (prevAdsData.length === 0) return map;
+    if (filteredPrevRangeAdsData.length === 0) return map;
 
-    const filteredPrevAds = brandFilter === 'all' ? prevAdsData : prevAdsData.filter(d => normStore(d.store) === brandFilter);
+    const filteredPrevAds = brandFilter === 'all'
+      ? filteredPrevRangeAdsData
+      : filteredPrevRangeAdsData.filter(d => normStore(d.store) === brandFilter);
 
     const byPlatform: Record<string, number> = {};
     filteredPrevAds.forEach(d => {
@@ -452,7 +464,7 @@ const BRAND_COLORS = useMemo(() => {
 
     const channelRev: Record<string, number> = {};
     const channelAdmin: Record<string, number> = {};
-    prevChannelData.forEach(d => {
+    filteredPrevRangeChannelData.forEach(d => {
       if (brandFilter !== 'all' && d.product !== brandFilter) return;
       const ch = d.channel || 'Other';
       channelRev[ch] = (channelRev[ch] || 0) + Number(d.net_sales || 0);
@@ -479,7 +491,7 @@ const BRAND_COLORS = useMemo(() => {
 
     // TOTAL row
     const totalSpendPrev = Object.values(byPlatform).reduce((a, b) => a + b, 0);
-    const totalRevPrev = prevChannelData.reduce((sum, d) => {
+    const totalRevPrev = filteredPrevRangeChannelData.reduce((sum, d) => {
       if (brandFilter !== 'all' && d.product !== brandFilter) return sum;
       return sum + Number(d.net_sales || 0);
     }, 0);
@@ -489,7 +501,7 @@ const BRAND_COLORS = useMemo(() => {
     map['__TOTAL__'] = { roas: totalRoasPrev, effectiveRoas: totalEffRoasPrev };
 
     return map;
-  }, [prevAdsData, prevChannelData, brandFilter]);
+  }, [filteredPrevRangeAdsData, filteredPrevRangeChannelData, brandFilter]);
 
   // ── Delta helpers ──
   const prevMonthLabel = useMemo(() => {
@@ -504,7 +516,7 @@ const BRAND_COLORS = useMemo(() => {
     if (brandFilter !== 'all') return [];
     const matrix: Record<string, Record<string, number>> = {};
     const allPlatforms = new Set<string>();
-    adsData.forEach(d => {
+    filteredAdsData.forEach(d => {
       const brand = normStore(d.store);
       const platform = normPlatform(d.source);
       allPlatforms.add(platform);
@@ -516,15 +528,15 @@ const BRAND_COLORS = useMemo(() => {
       .map(([brand, pd]) => ({ brand, ...pd, _total: Object.values(pd).reduce((a, b) => a + b, 0) }))
       .sort((a, b) => b._total - a._total);
     return { rows, platforms };
-  }, [adsData, brandFilter]);
+  }, [filteredAdsData, brandFilter]);
 
   // ── Filtered total revenue (respects brandFilter, no double counting) ──
   const filteredTotalRevenue = useMemo(() => {
-    return channelData.reduce((sum, d) => {
+    return filteredChannelData.reduce((sum, d) => {
       if (brandFilter !== 'all' && d.product !== brandFilter) return sum;
       return sum + Number(d.net_sales || 0);
     }, 0);
-  }, [channelData, brandFilter]);
+  }, [filteredChannelData, brandFilter]);
 
   // ── Styles ──
   const C = { bg: 'var(--bg)', card: 'var(--card)', bdr: 'var(--border)', dim: 'var(--dim)', txt: 'var(--text)' };
@@ -559,7 +571,15 @@ const BRAND_COLORS = useMemo(() => {
     </div>
   );
 
-  if (adsData.length === 0 && prodData.length === 0) return (
+  if (activeBrandsError) return (
+    <div style={{ textAlign: 'center', padding: '60px 20px' }}>
+      <div style={{ fontSize: 40, marginBottom: 12 }}>⚠️</div>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>Filter Brand Gagal Dimuat</div>
+      <div style={{ fontSize: 13, color: C.dim, maxWidth: 560, margin: '0 auto' }}>{activeBrandsError}</div>
+    </div>
+  );
+
+  if (filteredAdsData.length === 0 && prodData.length === 0) return (
     <div style={{ textAlign: 'center', padding: '60px 20px' }}>
       <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>Belum Ada Data Marketing</div>

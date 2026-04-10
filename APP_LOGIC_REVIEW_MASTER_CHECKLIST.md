@@ -884,7 +884,7 @@ Status legend:
 | Shared shell/auth/cache/access | `app/dashboard/layout.tsx`, `middleware.ts`, `lib/*Context*`, `lib/dashboard-access.ts`, `lib/dashboard-cache.ts` | DN | Direview dan dipatch lokal: fail-open authz/profile/permission, child-tab visibility, refresh meta false-success, date-range WIB/latest-data, active-brand fail-open. Runtime verification masih disarankan |
 | Public/auth routes | `app/page.tsx`, `app/register/page.tsx`, `app/forgot-password/page.tsx`, `app/reset-password/page.tsx` | DN | Direview dan dipatch lokal: public auth redirect saat session aktif, email normalization, reset-password recovery handling untuk `code`/`token_hash`/hash session, invite flow/admin UI tidak lagi mengklaim email terkirim padahal hanya generate link. Runtime verification bersama user disarankan |
 | Overview | `app/dashboard/page.tsx`, `lib/overview-actions.ts`, `components/CashFlowSection.tsx` | DN | Direview dan dipatch lokal: previous-range comparison aman untuk month-end, previous-overhead mengikuti seluruh comparison window + proration harian, cash-flow widget dibatasi ke range 1 bulan dari tanggal 1, dan error brand-filter tidak lagi tersamar sebagai empty state. Runtime verification disarankan |
-| Marketing | `app/dashboard/marketing/page.tsx`, `lib/marketing-actions.ts` | NS |  |
+| Marketing | `app/dashboard/marketing/page.tsx`, `lib/marketing-actions.ts` | DN | Direview dan dipatch lokal: comparison range month-end/custom multi-month kini pakai previous-range yang ter-clamp aman, baseline delta/ROAS previous period memakai window pembanding yang setara, ads/channel metrics konsisten mengikuti active-brand filter, dan active-brand lookup failure kini tampil sebagai error state. Runtime verification disarankan |
 | Channels | `app/dashboard/channels/page.tsx`, `lib/channels-actions.ts`, SLA/shipment components | NS |  |
 | WABA Management | `app/dashboard/waba-management/page.tsx`, WABA API routes | NS |  |
 | Financial Report redirect | `app/dashboard/financial-report/page.tsx` | NS |  |
@@ -992,6 +992,29 @@ Status legend:
 - Next step:
   - lanjut review area `Marketing`
   - verifikasi manual untuk custom range lintas bulan, tanggal 31→bulan sebelumnya, dan simulasi error query `brands`
+
+### Review Notes - Marketing
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/marketing/page.tsx`
+  - `lib/marketing-actions.ts`
+- Data sources:
+  - `daily_product_summary`
+  - `daily_ads_spend`
+  - `daily_channel_data`
+- Findings summary:
+  - comparison range `prevRangeFrom/prevRangeTo` masih memakai `Date(..., month - 1, sameDay)` sehingga tanggal akhir bulan bisa rollover ke bulan yang salah
+  - baseline previous-period untuk KPI/delta rusak pada custom range lintas bulan karena `prevFullFrom/prevFullTo` hanya mengambil satu bulan penuh sebelum `from`, lalu revenue/admin previous period disaring pakai day-of-month saja
+  - delta ROAS pada breakdown traffic-source membandingkan current selected range melawan full previous month, sehingga tidak apples-to-apples untuk range partial/custom
+  - hanya revenue product yang difilter dengan `activeBrands`; ads spend dan admin fee tetap menghitung brand nonaktif sehingga KPI dan breakdown bisa mismatch
+  - saat `ActiveBrandsContext` error, halaman tidak menampilkan error state khusus dan tetap bisa merender metrik spend melawan revenue yang sudah fail-closed
+- Patch status:
+  - patched locally
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Channels`
+  - verifikasi manual untuk range partial-month, range lintas bulan, brand nonaktif, dan simulasi error query `brands`
 
 Saat mereview satu area, catat minimal format ini:
 
