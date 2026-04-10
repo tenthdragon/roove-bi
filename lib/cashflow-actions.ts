@@ -2,6 +2,7 @@
 'use server';
 
 import { createServiceSupabase } from '@/lib/supabase-server';
+import { requireDashboardRoles } from '@/lib/dashboard-access';
 
 /* ── Types ── */
 
@@ -45,6 +46,7 @@ function deriveChannel(platform: string | null, isFb: boolean | null, payMethod:
 /* ── Fetch totals (existing) ── */
 
 export async function fetchLiveCashFlow(periodStart: string): Promise<CashFlowLive> {
+  await requireDashboardRoles(['owner', 'admin'], 'Hanya owner/admin yang bisa mengakses Cash Flow Status.');
   const svc = createServiceSupabase();
   const [y, m] = periodStart.split('-').map(Number);
 
@@ -107,6 +109,7 @@ export async function fetchLiveCashFlow(periodStart: string): Promise<CashFlowLi
 
 // Fetch historical snapshots
 export async function fetchCashFlowSnapshots(limit: number = 6) {
+  await requireDashboardRoles(['owner', 'admin'], 'Hanya owner/admin yang bisa mengakses snapshot cash flow.');
   const svc = createServiceSupabase();
 
   const { data, error } = await svc

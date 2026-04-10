@@ -1,10 +1,10 @@
 // @ts-nocheck
 'use client';
 import React, { useState, useEffect, useMemo } from 'react';
-import { useSupabase } from '@/lib/supabase-browser';
 import { fmtCompact, fmtRupiah, shortDate, CHANNEL_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
+import { getChannelsPageData } from '@/lib/channels-actions';
 // PieChart removed – no longer used on this page
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import ChannelSlaSection from '@/components/ChannelSlaSection';
@@ -52,121 +52,78 @@ for (const [platform, channels] of Object.entries(PLATFORM_CHANNEL_MAP)) {
 }
 
 export default function ChannelsPage() {
-  const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [channelData, setChannelData] = useState([]);
   const [adsData, setAdsData] = useState([]);
   const [brandMapping, setBrandMapping] = useState([]);
   const [shipmentCounts, setShipmentCounts] = useState<{ date: string; product: string; channel: string; order_count: number }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [selectedProduct, setSelectedProduct] = useState('all');
   const [scalevExpanded, setScalevExpanded] = useState(false);
   const [dailySalesOpen, setDailySalesOpen] = useState(false);
   const [hiddenChannels, setHiddenChannels] = useState<Set<string>>(new Set());
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
-  const { isActiveBrand } = useActiveBrands();
+  const { activeBrands, isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     const { from, to } = dateRange;
+    const fromDate = new Date(from + 'T00:00:00');
+    const toDate = new Date(to + 'T00:00:00');
+    const prevFrom = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, fromDate.getDate());
+    const prevTo = new Date(toDate.getFullYear(), toDate.getMonth() - 1, toDate.getDate());
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const pf = fmt(prevFrom);
+    const pt = fmt(prevTo);
 
-    const cachedCh = getCached('daily_channel_data_ch', from, to);
-    const cachedAds = getCached('daily_ads_spend_ch', from, to);
-    const cachedBm = getCached('ads_store_brand_mapping', from, to);
-    const cachedSc = getCached('daily_shipment_counts_ch', from, to);
+    const cached = getCached<any>('channels_page_data', from, to, `${pf}|${pt}`);
 
-    if (cachedCh && cachedAds && cachedBm && cachedSc) {
-      setChannelData(cachedCh.filter(row => isActiveBrand(row.product)));
-      setAdsData(cachedAds);
-      setBrandMapping(cachedBm);
-      setShipmentCounts(cachedSc.filter(row => isActiveBrand(row.product)));
+    if (cached) {
+      setChannelData(cached.channel.filter(row => isActiveBrand(row.product)));
+      setAdsData(cached.ads);
+      setBrandMapping(cached.brandMapping);
+      setShipmentCounts(cached.shipmentCounts.filter(row => isActiveBrand(row.product)));
+      setPrevChannelData(cached.prevChannel.filter(row => isActiveBrand(row.product)));
+      setPrevAdsData(cached.prevAds);
+      setError('');
       setLoading(false);
       return;
     }
 
+    let cancelled = false;
     setLoading(true);
-    Promise.all([
-      supabase.from('daily_channel_data')
-        .select('date, product, channel, net_sales, gross_profit, mp_admin_cost')
-        .gte('date', from).lte('date', to),
-      supabase.from('daily_ads_spend')
-        .select('date, source, spent, store, data_source, impressions, cpm')
-        .gte('date', from).lte('date', to),
-      supabase.from('ads_store_brand_mapping')
-        .select('store_pattern, brand'),
-      supabase.rpc('get_daily_shipment_counts', { p_from: from, p_to: to }),
-    ]).then(([chRes, adsRes, bmRes, scRes]) => {
-      // Log errors so RLS / permission issues surface in console
-      if (chRes.error) console.error('[Channels] daily_channel_data error:', chRes.error);
-      if (adsRes.error) console.error('[Channels] daily_ads_spend error:', adsRes.error);
-      if (bmRes.error) console.error('[Channels] ads_store_brand_mapping error:', bmRes.error);
-      if (scRes.error) console.error('[Channels] get_daily_shipment_counts error:', scRes.error);
+    setError('');
 
-      const chRows = chRes.data || [];
-      const adsRows = adsRes.data || [];
-      const bmRows = bmRes.data || [];
-      const scRows = scRes.data || [];
-      setCache('daily_channel_data_ch', from, to, chRows);
-      setCache('daily_ads_spend_ch', from, to, adsRows);
-      setCache('ads_store_brand_mapping', from, to, bmRows);
-      setCache('daily_shipment_counts_ch', from, to, scRows);
-      setChannelData(chRows.filter(row => isActiveBrand(row.product)));
-      setAdsData(adsRows);
-      setBrandMapping(bmRows);
-      setShipmentCounts(scRows.filter(row => isActiveBrand(row.product)));
-      setLoading(false);
-    });
-  }, [dateRange, supabase]);
-
-  // ── Fetch previous month's channel data (same relative date range) ──
-  useEffect(() => {
-    if (!dateRange.from || !dateRange.to) return;
-    const from = new Date(dateRange.from + 'T00:00:00');
-    const to = new Date(dateRange.to + 'T00:00:00');
-    const prevFrom = new Date(from.getFullYear(), from.getMonth() - 1, from.getDate());
-    const prevTo = new Date(to.getFullYear(), to.getMonth() - 1, to.getDate());
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const pf = fmt(prevFrom);
-    const pt = fmt(prevTo);
-
-    const cached = getCached('daily_channel_data_prev', pf, pt);
-    if (cached) {
-      setPrevChannelData(cached.filter(row => isActiveBrand(row.product)));
-    } else {
-      supabase.from('daily_channel_data')
-        .select('date, product, channel, net_sales, gross_profit, mp_admin_cost')
-        .gte('date', pf).lte('date', pt)
-        .then(({ data }) => {
-          const rows = data || [];
-          setCache('daily_channel_data_prev', pf, pt, rows);
-          setPrevChannelData(rows.filter(row => isActiveBrand(row.product)));
-        });
-    }
-  }, [dateRange, supabase]);
-
-  // ── Fetch previous month's ads data (same relative date range) ──
-  useEffect(() => {
-    if (!dateRange.from || !dateRange.to) return;
-    const from = new Date(dateRange.from + 'T00:00:00');
-    const to = new Date(dateRange.to + 'T00:00:00');
-    const prevFrom = new Date(from.getFullYear(), from.getMonth() - 1, from.getDate());
-    const prevTo = new Date(to.getFullYear(), to.getMonth() - 1, to.getDate());
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    const pf = fmt(prevFrom);
-    const pt = fmt(prevTo);
-
-    const cached = getCached<any[]>('daily_ads_spend_prev_ch', pf, pt);
-    if (cached) { setPrevAdsData(cached); return; }
-
-    supabase.from('daily_ads_spend').select('date, source, spent, store')
-      .gte('date', pf).lte('date', pt)
-      .then(({ data }) => {
-        const rows = data || [];
-        setCache('daily_ads_spend_prev_ch', pf, pt, rows);
-        setPrevAdsData(rows);
+    getChannelsPageData({ from, to, prevFrom: pf, prevTo: pt })
+      .then((data) => {
+        if (cancelled) return;
+        setCache('channels_page_data', from, to, data, `${pf}|${pt}`);
+        setChannelData(data.channel.filter(row => isActiveBrand(row.product)));
+        setAdsData(data.ads);
+        setBrandMapping(data.brandMapping);
+        setShipmentCounts(data.shipmentCounts.filter(row => isActiveBrand(row.product)));
+        setPrevChannelData(data.prevChannel.filter(row => isActiveBrand(row.product)));
+        setPrevAdsData(data.prevAds);
+        setError('');
+        setLoading(false);
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        console.error('[Channels] load error:', e);
+        setChannelData([]);
+        setAdsData([]);
+        setBrandMapping([]);
+        setShipmentCounts([]);
+        setPrevChannelData([]);
+        setPrevAdsData([]);
+        setError(e?.message || 'Gagal memuat data Sales Channel.');
+        setLoading(false);
       });
-  }, [dateRange, supabase]);
+
+    return () => { cancelled = true; };
+  }, [dateRange.from, dateRange.to, activeBrands]);
 
   // ── Store → Brand lookup ──
   const storeBrandMap = useMemo(() => {
@@ -464,6 +421,18 @@ export default function ChannelsPage() {
       <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>
         <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%', margin: '0 auto 12px' }} />
         <div>Memuat data...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="fade-in">
+        <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Channel</h2>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Data Sales Channel Gagal Dimuat</div>
+          <div style={{ fontSize: 13 }}>{error}</div>
+        </div>
       </div>
     );
   }

@@ -2,6 +2,7 @@
 'use server';
 
 import { createServiceSupabase } from './supabase-server';
+import { requireDashboardTabAccess } from './dashboard-access';
 import { parseFinancialReport } from './financial-parser';
 
 // ============================================================
@@ -88,7 +89,7 @@ export async function triggerFinancialSync() {
       // --- UPSERT PL ---
       if (parsed.pl.length > 0) {
         // Delete existing data for months found, then insert
-        const plMonths = [...new Set(parsed.pl.map(r => r.month))];
+        const plMonths = Array.from(new Set(parsed.pl.map(r => r.month)));
         for (const month of plMonths) {
           await svc.from('financial_pl_monthly').delete().eq('month', month);
         }
@@ -113,7 +114,7 @@ export async function triggerFinancialSync() {
 
       // --- UPSERT CF ---
       if (parsed.cf.length > 0) {
-        const cfMonths = [...new Set(parsed.cf.map(r => r.month))];
+        const cfMonths = Array.from(new Set(parsed.cf.map(r => r.month)));
         for (const month of cfMonths) {
           await svc.from('financial_cf_monthly').delete().eq('month', month);
         }
@@ -136,7 +137,7 @@ export async function triggerFinancialSync() {
 
       // --- UPSERT RATIOS ---
       if (parsed.ratios.length > 0) {
-        const ratioMonths = [...new Set(parsed.ratios.map(r => r.month))];
+        const ratioMonths = Array.from(new Set(parsed.ratios.map(r => r.month)));
         for (const month of ratioMonths) {
           await svc.from('financial_ratios_monthly').delete().eq('month', month);
         }
@@ -160,7 +161,7 @@ export async function triggerFinancialSync() {
 
       // --- UPSERT BS ---
       if (parsed.bs.length > 0) {
-        const bsMonths = [...new Set(parsed.bs.map(r => r.month))];
+        const bsMonths = Array.from(new Set(parsed.bs.map(r => r.month)));
         for (const month of bsMonths) {
           await svc.from('financial_bs_monthly').delete().eq('month', month);
         }
@@ -234,6 +235,7 @@ export async function triggerFinancialSync() {
 // ============================================================
 
 export async function getFinancialPLSummary(months?: number) {
+  await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
   let query = svc.from('v_pl_summary').select('*').order('month', { ascending: false });
   if (months) query = query.limit(months);
@@ -243,6 +245,7 @@ export async function getFinancialPLSummary(months?: number) {
 }
 
 export async function getFinancialCFSummary(months?: number) {
+  await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
   let query = svc.from('v_cf_summary').select('*').order('month', { ascending: false });
   if (months) query = query.limit(months);
@@ -252,6 +255,7 @@ export async function getFinancialCFSummary(months?: number) {
 }
 
 export async function getFinancialRatios(months?: number) {
+  await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
   let query = svc.from('financial_ratios_monthly').select('*').order('month', { ascending: false });
   if (months) query = query.limit(months * 12); // ~12 ratios per month
@@ -261,6 +265,7 @@ export async function getFinancialRatios(months?: number) {
 }
 
 export async function getFinancialPLDetail(month: string) {
+  await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('financial_pl_monthly')
@@ -272,6 +277,7 @@ export async function getFinancialPLDetail(month: string) {
 }
 
 export async function getFinancialCFDetail(month: string) {
+  await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('financial_cf_monthly')
@@ -284,6 +290,7 @@ export async function getFinancialCFDetail(month: string) {
 
 // For AI analysis — get comprehensive data
 export async function getFinancialDataForAI(numMonths: number = 3) {
+  await requireDashboardTabAccess('finance', 'Finance Analysis');
   const [pl, cf, ratios, bs] = await Promise.all([
     getFinancialPLSummary(numMonths),
     getFinancialCFSummary(numMonths),
@@ -294,6 +301,7 @@ export async function getFinancialDataForAI(numMonths: number = 3) {
 }
 
 export async function getFinancialBS(months?: number) {
+  await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
   let query = svc
     .from('financial_bs_monthly')

@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
-import { getOverviewFeeData } from '@/lib/overview-actions';
+import { getOverviewCoreData, getOverviewFeeData } from '@/lib/overview-actions';
 // Recharts removed — daily trend is now a table
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
@@ -22,6 +22,7 @@ export default function OverviewPage() {
   const [overheadData, setOverheadData] = useState([]);
   const [shipmentData, setShipmentData] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [prevDailyData, setPrevDailyData] = useState([]);
   const [prevOverheadData, setPrevOverheadData] = useState([]);
   const [adsData, setAdsData] = useState<any[]>([]);
@@ -56,37 +57,58 @@ export default function OverviewPage() {
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     const { prevFrom, prevTo } = getPrevRange(dateRange.from, dateRange.to);
-    const cached = getCached<any[]>('daily_product_summary', dateRange.from, dateRange.to);
+    const cached = getCached<any>('overview_core_data', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
     if (cached) {
-      setDailyData(cached.filter(row => isActiveBrand(row.product)));
+      setDailyData(cached.daily.filter(row => isActiveBrand(row.product)));
+      setShipmentData(cached.shipment || []);
+      setOverheadData(cached.overhead || []);
+      setPrevDailyData(cached.prevDaily.filter(row => isActiveBrand(row.product)));
+      setPrevOverheadData(cached.prevOverhead || []);
+      setLoadError('');
       setLoading(false);
-    } else {
-      setLoading(true);
-      supabase.from('daily_product_summary')
-        .select('*')
-        .gte('date', dateRange.from)
-        .lte('date', dateRange.to)
-        .order('date')
-        .then(({ data: d }) => {
-          const rows = d || [];
-          setCache('daily_product_summary', dateRange.from, dateRange.to, rows);
-          setDailyData(rows.filter(row => isActiveBrand(row.product)));
-          setLoading(false);
-        });
+      return;
     }
-    // Fetch shipment counts
-    supabase.rpc('get_daily_shipment_counts', { p_from: dateRange.from, p_to: dateRange.to })
-      .then(({ data }) => setShipmentData(data || []));
-    // Fetch overhead for months in range
-    const fromYM = dateRange.from.slice(0, 7);
-    const toYM = dateRange.to.slice(0, 7);
-    supabase.from('monthly_overhead')
-      .select('year_month, amount')
-      .gte('year_month', fromYM)
-      .lte('year_month', toYM)
-      .then(({ data }) => setOverheadData(data || []));
-    // Fetch ads / MP fee via server action so role-specific browser query issues
-    // don't silently become 0 in the KPI cards.
+
+    let cancelled = false;
+    setLoading(true);
+    setLoadError('');
+
+    getOverviewCoreData({
+      from: dateRange.from,
+      to: dateRange.to,
+      prevFrom,
+      prevTo,
+    })
+      .then((data) => {
+        if (cancelled) return;
+        setCache('overview_core_data', dateRange.from, dateRange.to, data, `${prevFrom}|${prevTo}`);
+        setDailyData(data.daily.filter(row => isActiveBrand(row.product)));
+        setShipmentData(data.shipment || []);
+        setOverheadData(data.overhead || []);
+        setPrevDailyData(data.prevDaily.filter(row => isActiveBrand(row.product)));
+        setPrevOverheadData(data.prevOverhead || []);
+        setLoadError('');
+        setLoading(false);
+      })
+      .catch((e: any) => {
+        if (cancelled) return;
+        console.error('[Overview] core load error:', e);
+        setLoadError(e?.message || 'Gagal memuat data Overview.');
+        setDailyData([]);
+        setShipmentData([]);
+        setOverheadData([]);
+        setPrevDailyData([]);
+        setPrevOverheadData([]);
+        setLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [dateRange.from, dateRange.to, activeBrands]);
+
+  useEffect(() => {
+    if (!dateRange.from || !dateRange.to) return;
+    const { prevFrom, prevTo } = getPrevRange(dateRange.from, dateRange.to);
+
     const cachedAds = getCached<any[]>('overview_ads_spend', dateRange.from, dateRange.to);
     const cachedCh = getCached<any[]>('overview_channel_data', dateRange.from, dateRange.to);
     const cachedPrevAds = getCached<any[]>('overview_ads_spend_prev', prevFrom, prevTo);
@@ -137,42 +159,7 @@ export default function OverviewPage() {
       });
 
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to, supabase]);
-
-  // ── Fetch previous month data — same relative date range (MoM) ──
-  useEffect(() => {
-    if (!dateRange.from || !dateRange.to) return;
-    const from = new Date(dateRange.from + 'T00:00:00');
-    const to = new Date(dateRange.to + 'T00:00:00');
-    const { prevFrom, prevTo } = getPrevRange(dateRange.from, dateRange.to);
-
-    const cachedPrev = getCached('daily_product_summary_prev', prevFrom, prevTo);
-    if (cachedPrev) {
-      setPrevDailyData(cachedPrev.filter(row => isActiveBrand(row.product)));
-    } else {
-      supabase.from('daily_product_summary').select('*')
-        .gte('date', prevFrom).lte('date', prevTo).order('date')
-        .then(({ data: d }) => {
-          const rows = d || [];
-          setCache('daily_product_summary_prev', prevFrom, prevTo, rows);
-          setPrevDailyData(rows.filter(row => isActiveBrand(row.product)));
-        });
-    }
-    // Fetch prev month overhead
-    const prevYM = prevFrom.slice(0, 7);
-    const cachedOH = getCached('monthly_overhead_prev', prevYM, prevYM);
-    if (cachedOH) {
-      setPrevOverheadData(cachedOH);
-    } else {
-      supabase.from('monthly_overhead').select('year_month, amount')
-        .eq('year_month', prevYM)
-        .then(({ data }) => {
-          const rows = data || [];
-          setCache('monthly_overhead_prev', prevYM, prevYM, rows);
-          setPrevOverheadData(rows);
-        });
-    }
-  }, [dateRange.from, dateRange.to, supabase]);
+  }, [dateRange.from, dateRange.to]);
 
   // Build overhead per-day lookup: date (YYYY-MM-DD) → daily overhead amount
   const overheadPerDay = useMemo(() => {
@@ -342,6 +329,17 @@ export default function OverviewPage() {
       <div style={{ textAlign:'center', padding:60, color:'var(--dim)' }}>
         <div className="spinner" style={{ width:32, height:32, border:'3px solid var(--border)', borderTop:'3px solid var(--accent)', borderRadius:'50%', margin:'0 auto 12px' }} />
         <div>Memuat data...</div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Overview Gagal Dimuat</div>
+          <div style={{ fontSize: 13 }}>{loadError}</div>
+        </div>
       </div>
     );
   }

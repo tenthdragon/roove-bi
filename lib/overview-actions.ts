@@ -1,6 +1,7 @@
 'use server';
 
-import { createServerSupabase, createServiceSupabase } from './supabase-server';
+import { createServiceSupabase } from './supabase-server';
+import { requireDashboardTabAccess } from './dashboard-access';
 
 interface OverviewFeeDataParams {
   from: string;
@@ -9,37 +10,52 @@ interface OverviewFeeDataParams {
   prevTo: string;
 }
 
-async function requireOverviewAccess() {
-  const supabase = createServerSupabase();
-  const { data: { user }, error: userError } = await supabase.auth.getUser();
-  if (userError || !user) throw new Error('Sesi login tidak ditemukan. Silakan login ulang.');
-
-  const { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profileError || !profile || profile.role === 'pending') {
-    throw new Error('Akses dashboard belum aktif untuk akun ini.');
-  }
-
-  if (profile.role === 'owner') return;
-
-  const { data: permission, error: permissionError } = await supabase
-    .from('role_permissions')
-    .select('permission_key')
-    .eq('role', profile.role)
-    .eq('permission_key', 'tab:overview')
-    .maybeSingle();
-
-  if (permissionError) throw new Error('Gagal memverifikasi akses Overview.');
-  if (!permission) throw new Error('Akun ini tidak memiliki akses ke Overview.');
-}
-
 function unwrap<T>(result: { data: T | null; error: { message: string } | null }, label: string): T {
   if (result.error) throw new Error(`${label}: ${result.error.message}`);
   return (result.data ?? ([] as unknown as T));
+}
+
+export async function getOverviewCoreData({
+  from,
+  to,
+  prevFrom,
+  prevTo,
+}: OverviewFeeDataParams) {
+  await requireDashboardTabAccess('overview', 'Overview');
+
+  const svc = createServiceSupabase();
+  const fromYM = from.slice(0, 7);
+  const toYM = to.slice(0, 7);
+  const prevYM = prevFrom.slice(0, 7);
+
+  const [dailyRes, shipmentRes, overheadRes, prevDailyRes, prevOverheadRes] = await Promise.all([
+    svc.from('daily_product_summary')
+      .select('*')
+      .gte('date', from)
+      .lte('date', to)
+      .order('date'),
+    svc.rpc('get_daily_shipment_counts', { p_from: from, p_to: to }),
+    svc.from('monthly_overhead')
+      .select('year_month, amount')
+      .gte('year_month', fromYM)
+      .lte('year_month', toYM),
+    svc.from('daily_product_summary')
+      .select('*')
+      .gte('date', prevFrom)
+      .lte('date', prevTo)
+      .order('date'),
+    svc.from('monthly_overhead')
+      .select('year_month, amount')
+      .eq('year_month', prevYM),
+  ]);
+
+  return {
+    daily: unwrap(dailyRes, 'Gagal memuat data Overview'),
+    shipment: unwrap(shipmentRes, 'Gagal memuat shipment Overview'),
+    overhead: unwrap(overheadRes, 'Gagal memuat overhead Overview'),
+    prevDaily: unwrap(prevDailyRes, 'Gagal memuat data Overview bulan sebelumnya'),
+    prevOverhead: unwrap(prevOverheadRes, 'Gagal memuat overhead Overview bulan sebelumnya'),
+  };
 }
 
 export async function getOverviewFeeData({
@@ -48,7 +64,7 @@ export async function getOverviewFeeData({
   prevFrom,
   prevTo,
 }: OverviewFeeDataParams) {
-  await requireOverviewAccess();
+  await requireDashboardTabAccess('overview', 'Overview');
 
   const svc = createServiceSupabase();
 
