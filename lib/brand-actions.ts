@@ -1,5 +1,10 @@
 'use server';
 
+import {
+  requireAnyDashboardPermissionAccess,
+  requireDashboardPermissionAccess,
+  requireDashboardTabAccess,
+} from './dashboard-access';
 import { createServerSupabase, createServiceSupabase } from './supabase-server';
 
 export interface Brand {
@@ -11,8 +16,19 @@ export interface Brand {
   created_at: string;
 }
 
+async function requireBrandManageAccess(label: string = 'Brand') {
+  await requireDashboardTabAccess('warehouse-settings', label);
+  await requireDashboardPermissionAccess('whs:brands', label);
+}
+
+async function requireBrandReadAccess(label: string = 'Brand') {
+  await requireDashboardTabAccess('warehouse-settings', label);
+  await requireAnyDashboardPermissionAccess(['whs:brands', 'whs:products'], label);
+}
+
 // ── Fetch all brands (active + inactive) ──
 export async function fetchAllBrands(): Promise<Brand[]> {
+  await requireBrandManageAccess('Daftar Brand');
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('brands')
@@ -24,6 +40,7 @@ export async function fetchAllBrands(): Promise<Brand[]> {
 
 // ── Fetch only active brands ──
 export async function fetchActiveBrands(): Promise<Brand[]> {
+  await requireBrandReadAccess('Brand Aktif');
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('brands')
@@ -42,14 +59,7 @@ export async function fetchActiveBrandNames(): Promise<string[]> {
 
 // ── Add a new brand ──
 export async function addBrand(name: string, sheetName: string): Promise<{ success: boolean; error?: string }> {
-  const supabase = createServerSupabase();
-
-  // Verify caller is owner
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-  if (profile?.role !== 'owner' && profile?.role !== 'direktur_ops' && profile?.role !== 'direktur_operasional') throw new Error('Only owners and direktur ops can manage brands');
-
+  await requireBrandManageAccess('Brand');
   const svc = createServiceSupabase();
 
   // Check for case-insensitive duplicate
@@ -88,13 +98,7 @@ export async function addBrand(name: string, sheetName: string): Promise<{ succe
 
 // ── Update brand keywords ──
 export async function updateBrandKeywords(brandId: number, keywords: string): Promise<void> {
-  const supabase = createServerSupabase();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-  if (profile?.role !== 'owner' && profile?.role !== 'direktur_ops' && profile?.role !== 'direktur_operasional') throw new Error('Only owners and direktur ops can manage brands');
-
+  await requireBrandManageAccess('Brand');
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('brands')
@@ -106,13 +110,7 @@ export async function updateBrandKeywords(brandId: number, keywords: string): Pr
 
 // ── Toggle brand active/inactive ──
 export async function toggleBrand(brandId: number, isActive: boolean): Promise<void> {
-  const supabase = createServerSupabase();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-  if (profile?.role !== 'owner' && profile?.role !== 'direktur_ops' && profile?.role !== 'direktur_operasional') throw new Error('Only owners and direktur ops can manage brands');
-
+  await requireBrandManageAccess('Brand');
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('brands')
@@ -124,13 +122,7 @@ export async function toggleBrand(brandId: number, isActive: boolean): Promise<v
 
 // ── Permanently delete brand + all its data ──
 export async function deleteBrandPermanently(brandId: number): Promise<{ success: boolean; deleted: Record<string, number> }> {
-  const supabase = createServerSupabase();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-  const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-  if (profile?.role !== 'owner' && profile?.role !== 'direktur_ops' && profile?.role !== 'direktur_operasional') throw new Error('Only owners and direktur ops can manage brands');
-
+  await requireBrandManageAccess('Brand');
   const svc = createServiceSupabase();
 
   // Get brand name first

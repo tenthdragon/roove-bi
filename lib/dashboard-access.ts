@@ -81,6 +81,35 @@ export async function requireAnyDashboardTabAccess(tabIds: string[], label: stri
   return ctx;
 }
 
+export async function requireDashboardPermissionAccess(permissionKey: string, label?: string): Promise<AccessContext> {
+  const ctx = await getAuthenticatedDashboardProfile();
+  if (ctx.profile.role === 'owner') return ctx;
+
+  const permissionLabel = label || permissionKey;
+  await verifyPermissionKeys(
+    ctx.profile.role,
+    [permissionKey],
+    `Gagal memverifikasi izin ${permissionLabel}.`,
+    `Akun ini tidak memiliki izin ${permissionLabel}.`
+  );
+
+  return ctx;
+}
+
+export async function requireAnyDashboardPermissionAccess(permissionKeys: string[], label: string): Promise<AccessContext> {
+  const ctx = await getAuthenticatedDashboardProfile();
+  if (ctx.profile.role === 'owner') return ctx;
+
+  await verifyPermissionKeys(
+    ctx.profile.role,
+    permissionKeys,
+    `Gagal memverifikasi izin ${label}.`,
+    `Akun ini tidak memiliki izin ${label}.`
+  );
+
+  return ctx;
+}
+
 export async function requireDashboardRoles(roles: string[], denyMessage: string): Promise<AccessContext> {
   const ctx = await getAuthenticatedDashboardProfile();
   if (roles.includes(ctx.profile.role)) return ctx;

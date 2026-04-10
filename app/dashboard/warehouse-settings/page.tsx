@@ -18,10 +18,8 @@ import {
   createVendor,
   updateVendor,
   deleteVendor,
-  getWarehouseBusinessMappings,
-  updateWarehouseBusinessMapping,
 } from '@/lib/warehouse-ledger-actions';
-import { fetchAllBrands, fetchActiveBrands } from '@/lib/brand-actions';
+import { fetchActiveBrands } from '@/lib/brand-actions';
 import { fmtRupiah } from '@/lib/utils';
 import BrandManager from '@/components/BrandManager';
 import { usePermissions } from '@/lib/PermissionsContext';
@@ -49,6 +47,17 @@ export default function WarehouseSettingsPage() {
 
   // Auto-switch if current tab is no longer visible
   const effectiveTab = visibleTabs.find(t => t.id === activeTab)?.id ?? visibleTabs[0]?.id ?? 'brands';
+
+  if (visibleTabs.length === 0) {
+    return (
+      <div className="fade-in">
+        <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Warehouse Settings</h2>
+        <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, color: 'var(--dim)', fontSize: 13 }}>
+          Akun ini belum punya akses ke sub-tab Warehouse Settings.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fade-in">
@@ -170,12 +179,9 @@ function MasterProdukTab() {
         warehouse: newProduct.warehouse,
         price_list: Number(newProduct.price_list) || 0,
         hpp: Number(newProduct.hpp) || 0,
+        vendor_id: newProduct.vendor_id ? Number(newProduct.vendor_id) : null,
         brand_id: newProduct.brand_id ? Number(newProduct.brand_id) : undefined,
       });
-      // Update vendor_id separately if selected
-      if (newProduct.vendor_id) {
-        const created = products[products.length - 1]; // Will be refreshed by loadData
-      }
       setShowAdd(false);
       setNewProduct({ name: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor_id: '', brand_id: '' });
       setMessage({ type: 'success', text: 'Produk ditambahkan' });
@@ -521,22 +527,15 @@ function VendorTab() {
 
 function ActiveWarehouseTab() {
   const [products, setProducts] = useState<any[]>([]);
-  const [mappings, setMappings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
   useEffect(() => { loadAll(); }, []);
 
   async function loadAll() {
     setLoading(true);
     try {
-      const [prods, maps] = await Promise.all([
-        getProductsFull(),
-        getWarehouseBusinessMappings(),
-      ]);
+      const prods = await getProductsFull({ includeInactive: true });
       setProducts(prods);
-      setMappings(maps);
     } catch (e) { console.error(e); }
     setLoading(false);
   }
@@ -557,26 +556,10 @@ function ActiveWarehouseTab() {
     return counts;
   }, [products]);
 
-  const handleMappingChange = async (id: number, field: string, value: any) => {
-    setSaving(true);
-    try {
-      await updateWarehouseBusinessMapping(id, field, value);
-      setMessage({ type: 'success', text: 'Mapping updated' });
-      setMappings(await getWarehouseBusinessMappings());
-    } catch (e: any) { setMessage({ type: 'error', text: e.message }); }
-    setSaving(false);
-  };
-
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--dim)' }}>Memuat...</div>;
 
   return (
     <>
-      {message && (
-        <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 12, background: message.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: message.type === 'success' ? '#6ee7b7' : '#fca5a5' }}>
-          {message.text}
-        </div>
-      )}
-
       {/* Warehouse overview */}
       <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 12 }}>Daftar Gudang</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 12, marginBottom: 24 }}>

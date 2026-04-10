@@ -1361,6 +1361,7 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
 function DailySummaryTab({ data, alerts, deductLog, totalDeductedOrders, date, setDate, onRefresh }: {
   data: any[]; alerts: any[]; deductLog: any[]; totalDeductedOrders: number; date: string; setDate: (v: string) => void; onRefresh: () => void;
 }) {
+  const { can } = usePermissions();
   const [entityFilter, setEntityFilter] = useState('all');
   const [syncingOrder, setSyncingOrder] = useState<string | null>(null);
   const [syncResults, setSyncResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
@@ -1503,6 +1504,8 @@ function DailySummaryTab({ data, alerts, deductLog, totalDeductedOrders, date, s
                       <td style={{ padding: '6px 10px' }}>
                         {result && !result.ok ? (
                           <span style={{ fontSize: 10, color: 'var(--red)' }}>{result.msg}</span>
+                        ) : !can('wh:mapping_sync') ? (
+                          <span style={{ fontSize: 10, color: 'var(--dim)' }}>Read only</span>
                         ) : (
                           <button
                             onClick={async () => {

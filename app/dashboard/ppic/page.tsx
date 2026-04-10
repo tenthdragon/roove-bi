@@ -563,15 +563,15 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
   // Calculate HPP preview per item (proportional by value)
   const totalPoValue = items.reduce((s, i) => s + i.unitPrice * i.qtyRequested, 0);
   const extraCost = shippingCost + otherCost;
+  const getExtraCostPerUnit = (item: typeof items[0]) => {
+    if (item.unitPrice <= 0 || item.qtyRequested <= 0 || extraCost <= 0 || totalPoValue <= 0) return 0;
+    const itemValue = item.unitPrice * item.qtyRequested;
+    const share = itemValue / totalPoValue;
+    return (extraCost * share) / item.qtyRequested;
+  };
   const getHppPreview = (item: typeof items[0]) => {
     if (item.unitPrice <= 0 || item.qtyReceived <= 0) return 0;
-    let cpp = item.unitPrice;
-    if (extraCost > 0 && totalPoValue > 0) {
-      const itemValue = item.unitPrice * item.qtyRequested;
-      const share = itemValue / totalPoValue;
-      cpp += (extraCost * share) / item.qtyReceived;
-    }
-    return Math.round(cpp);
+    return Math.round(item.unitPrice + getExtraCostPerUnit(item));
   };
 
   const handleSubmit = async () => {
@@ -671,7 +671,7 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
                 {item.unitPrice > 0 && (
                   <div style={{ marginTop: 6, fontSize: 11, color: 'var(--dim)' }}>
                     Harga: Rp {fmtNum(item.unitPrice)}/unit
-                    {extraCost > 0 && <> + biaya Rp {fmtNum(Math.round((extraCost * (item.unitPrice * item.qtyRequested / totalPoValue)) / item.qtyReceived))}/unit</>}
+                    {extraCost > 0 && getExtraCostPerUnit(item) > 0 && <> + biaya Rp {fmtNum(Math.round(getExtraCostPerUnit(item)))}/unit</>}
                     {' → '}<strong style={{ color: 'var(--green)' }}>HPP: Rp {fmtNum(getHppPreview(item))}/unit</strong>
                   </div>
                 )}
@@ -734,9 +734,12 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
   );
 
   const itemsSubtotal = (po?.warehouse_po_items || []).reduce((sum: number, i: any) => sum + (Number(i.quantity_requested) * Number(i.unit_price)), 0);
+  const shippingCost = Number(po?.shipping_cost || 0);
+  const otherCost = Number(po?.other_cost || 0);
+  const subtotalBeforePPN = itemsSubtotal + shippingCost + otherCost;
   const isDetailPKP = !!po?.warehouse_vendors?.is_pkp;
-  const detailPPN = isDetailPKP ? Math.round(itemsSubtotal * ppnRate / 100) : 0;
-  const totalValue = itemsSubtotal + detailPPN;
+  const detailPPN = isDetailPKP ? Math.round(subtotalBeforePPN * ppnRate / 100) : 0;
+  const totalValue = subtotalBeforePPN + detailPPN;
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -786,11 +789,23 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
             })}
           </tbody>
           <tfoot>
+            <tr style={{ borderTop: '1px solid var(--border)' }}>
+              <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Subtotal Barang:</td>
+              <td style={{ padding: '8px', textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: 'var(--dim)' }}>Rp {fmtNum(itemsSubtotal)}</td>
+            </tr>
+            <tr>
+              <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Ongkir:</td>
+              <td style={{ padding: '8px', textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: 'var(--dim)' }}>Rp {fmtNum(shippingCost)}</td>
+            </tr>
+            <tr>
+              <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Biaya Lain:</td>
+              <td style={{ padding: '8px', textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: 'var(--dim)' }}>Rp {fmtNum(otherCost)}</td>
+            </tr>
             {isDetailPKP && (
               <>
-                <tr style={{ borderTop: '1px solid var(--border)' }}>
-                  <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Subtotal:</td>
-                  <td style={{ padding: '8px', textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: 'var(--dim)' }}>Rp {fmtNum(itemsSubtotal)}</td>
+                <tr>
+                  <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Subtotal sebelum PPN:</td>
+                  <td style={{ padding: '8px', textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: 'var(--dim)' }}>Rp {fmtNum(subtotalBeforePPN)}</td>
                 </tr>
                 <tr>
                   <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontSize: 12, color: '#60a5fa' }}>PPN ({ppnRate}%):</td>

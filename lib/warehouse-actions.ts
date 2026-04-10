@@ -2,6 +2,7 @@
 'use server';
 
 import { createServiceSupabase } from './supabase-server';
+import { requireDashboardTabAccess } from './dashboard-access';
 import { parseWarehouseSheet } from './warehouse-parser';
 
 // ============================================================
@@ -220,6 +221,7 @@ export async function triggerWarehouseSync() {
 // ============================================================
 
 export async function getWarehouseSummary(month: number, year: number) {
+  await requireDashboardTabAccess('warehouse', 'Summary Gudang');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_stock_summary')
@@ -233,6 +235,7 @@ export async function getWarehouseSummary(month: number, year: number) {
 }
 
 export async function getWarehouseDailyStock(month: number, year: number) {
+  await requireDashboardTabAccess('warehouse', 'Daily Stock Gudang');
   const svc = createServiceSupabase();
   const firstDate = `${year}-${String(month).padStart(2, '0')}-01`;
   const lastDate = `${year}-${String(month).padStart(2, '0')}-31`;
@@ -248,6 +251,7 @@ export async function getWarehouseDailyStock(month: number, year: number) {
 }
 
 export async function getWarehouseStockOpname() {
+  await requireDashboardTabAccess('warehouse', 'Stock Opname');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_stock_opname')
@@ -259,6 +263,7 @@ export async function getWarehouseStockOpname() {
 }
 
 export async function getWarehouseSOSummary() {
+  await requireDashboardTabAccess('warehouse', 'Ringkasan Stock Opname');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('v_warehouse_so_summary')
@@ -269,6 +274,7 @@ export async function getWarehouseSOSummary() {
 }
 
 export async function getWarehouseExpiring() {
+  await requireDashboardTabAccess('warehouse', 'Batch & Expiry');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('v_warehouse_expiring')
@@ -279,6 +285,7 @@ export async function getWarehouseExpiring() {
 }
 
 export async function getWarehouseAvailablePeriods() {
+  await requireDashboardTabAccess('warehouse', 'Periode Gudang');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_stock_summary')

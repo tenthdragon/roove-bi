@@ -890,9 +890,9 @@ Status legend:
 | Financial Report redirect | `app/dashboard/financial-report/page.tsx` | DN | Direview: redirect sederhana `cashflow -> financial-settings -> dashboard` konsisten dengan model akses child-tab saat ini, tidak perlu patch tambahan |
 | Cashflow | `components/BankCashFlowDashboard.tsx`, bank API routes | DN | Direview dan dipatch lokal: route tag/re-tag transaksi dan snapshot kini tidak lagi terbuka tanpa auth tab Cash Flow, filter bisnis tidak lagi membuang histori rekening nonaktif, dan pergantian bisnis kini memilih periode terbaru yang tersedia untuk bisnis tersebut agar tidak jatuh ke empty-state palsu. Runtime verification disarankan |
 | Financial Settings | `components/FinancialSettingsPage.tsx`, `app/api/bank-accounts/route.ts` | DN | Direview dan dipatch lokal: penghapusan rekening yang sudah punya histori kini diblok agar mapping historis cashflow tidak putus, dan UI Financial Settings sekarang menampilkan error request secara jelas saat load/toggle/delete gagal. Runtime verification disarankan |
-| PPIC | `app/dashboard/ppic/page.tsx`, `lib/ppic-actions.ts` | IP | Review sedang berjalan: server action PPIC sudah dipatch agar tidak bisa dipanggil tanpa akses tab PPIC, tetapi audit logic PO/demand/ITO/ROP masih berlanjut |
-| Warehouse | `app/dashboard/warehouse/page.tsx`, `lib/warehouse-actions.ts`, `lib/warehouse-ledger-actions.ts` | NS |  |
-| Warehouse Settings | `app/dashboard/warehouse-settings/page.tsx`, `lib/brand-actions.ts`, `lib/warehouse-ledger-actions.ts` | NS |  |
+| PPIC | `app/dashboard/ppic/page.tsx`, `lib/ppic-actions.ts` | DN | Direview dan dipatch lokal: receive PO kini tidak bisa over-receive via duplicate item request dan landed cost parsial tidak lagi double-count, demand planning sekarang menghitung baseline 6 bulan relatif ke bulan yang dipilih serta me-refresh actual in/out saat load, ROP kembali memakai avg-daily exact window, dan detail PO kini menampilkan ongkir/biaya lain/PPN dengan total yang konsisten. Runtime verification disarankan |
+| Warehouse | `app/dashboard/warehouse/page.tsx`, `lib/warehouse-actions.ts`, `lib/warehouse-ledger-actions.ts` | DN | Direview dan dipatch lokal: transfer antar entity kini menulis `TRANSFER_IN` ke target, batch mutation menolak overdraw alih-alih clamp diam-diam, stock opname kini mewajibkan hitung lengkap + approve idempotent, dan server actions Warehouse sekarang enforce akses tab/permission. Runtime verification disarankan |
+| Warehouse Settings | `app/dashboard/warehouse-settings/page.tsx`, `lib/brand-actions.ts`, `lib/warehouse-ledger-actions.ts` | DN | Direview dan dipatch lokal: server actions kini konsisten mengikuti permission sub-tab `whs:*`, create product tidak lagi membuang `vendor_id`, overview Active Warehouse kembali menghitung total vs active dengan benar, dan page tidak lagi blank saat user tidak punya sub-tab yang terlihat. Runtime verification disarankan |
 | Business Pulse | `app/dashboard/pulse/page.tsx`, `lib/scalev-actions.ts` | NS |  |
 | Customer Analysis | `app/dashboard/customers/page.tsx`, `lib/scalev-actions.ts` | NS |  |
 | Brand Analysis | `app/dashboard/brand-analysis/page.tsx`, `lib/scalev-actions.ts` | NS |  |
@@ -1177,31 +1177,125 @@ Status legend:
 
 ### Review Notes - PPIC
 
-- Status: `IP`
+- Status: `DN`
 - Files read:
   - `app/dashboard/ppic/page.tsx`
   - `lib/ppic-actions.ts`
   - `lib/warehouse-ledger-actions.ts`
-- Data sources reviewed so far:
+  - `supabase/migrations/079_ppic_tables.sql`
+  - `supabase/migrations/082_batch_landed_cost.sql`
+  - `supabase/migrations/086_ito_scalev_cache.sql`
+  - `supabase/migrations/087_weekly_demand_rpc.sql`
+- Data sources:
   - `warehouse_purchase_orders`
   - `warehouse_po_items`
   - `warehouse_demand_plans`
   - `warehouse_products`
   - `warehouse_vendors`
+  - `warehouse_batches`
   - `v_warehouse_stock_balance`
+  - `summary_scalev_monthly_movements`
   - RPC `ppic_weekly_demand_scalev`
   - RPC `ppic_monthly_demand`
   - RPC `ppic_monthly_movements`
   - RPC `ppic_avg_daily_demand`
-- Findings summary so far:
+- Mutation paths:
+  - create PO via `createPurchaseOrder`
+  - submit/cancel PO via `submitPurchaseOrder` / `cancelPurchaseOrder`
+  - receive PO via `savePOCosts` + `receivePOItems`
+  - init/update demand plan via `initDemandPlans` / `updateDemandPlan`
+  - update ROP config via `updateProductROPConfig`
+- Findings summary:
   - exported server actions di `lib/ppic-actions.ts` sebelumnya langsung memakai service Supabase tanpa gate akses `PPIC`, sehingga read/write action seperti create PO, submit/cancel/receive PO, init/update demand plan, dan update ROP config berpotensi dipanggil tanpa verifikasi akses tab
+  - receive PO sebelumnya membagi seluruh share landed cost item dengan `qtyReceived` batch yang sedang diterima; pada penerimaan parsial ini membuat batch awal menyerap biaya ekstra terlalu besar dan bisa double-count saat sisa batch diterima belakangan
+  - `receivePOItems` juga belum mengakumulasi duplicate `poItemId` dalam satu request, sehingga caller non-UI masih bisa over-receive item yang sama lewat multi-line payload dan membuat ledger/batch tidak sinkron dengan `quantity_received`
+  - `initDemandPlans(month, year)` sebelumnya selalu memakai "last 6/12 months from now", bukan relatif ke bulan yang sedang dibuka; akibatnya inisialisasi bulan historis/future memakai baseline demand dan actual bulan yang salah
+  - `getDemandPlans` hanya membaca snapshot `actual_in/actual_out` yang tersimpan saat inisialisasi, sehingga pace bulanan bisa stale sampai user menekan inisialisasi ulang
+  - `getROPAnalysis` sempat memakai `summary_scalev_monthly_movements` per-bulan lalu membagi total itu dengan 30/60/90 hari exact; saat cutoff jatuh di tengah bulan, avg daily jadi bias karena satu bulan penuh ikut dihitung
+  - modal detail PO menghitung total hanya dari subtotal item dan PPN atas subtotal tersebut, padahal create/receive flow memasukkan ongkir + biaya lain ke basis PPN dan grand total
 - Patch status:
-  - access guard patched locally for exposed PPIC server actions
+  - patched locally
   - build verification complete via `npm run build`
-  - full logic review masih berjalan
 - Next step:
-  - lanjut audit logic PO receive/cost allocation, demand planning initialization/update, dan ITO/ROP calculation consistency
-  - verifikasi manual bahwa user tanpa akses `PPIC` sekarang ditolak saat memanggil action PO/demand/ROP
+  - lanjut review area `Warehouse`
+  - verifikasi manual untuk partial receive item yang sama dalam beberapa batch, init demand plan pada bulan lama dan bulan berjalan, angka pace bulanan setelah ada transaksi baru, dan kecocokan total detail PO vs modal create/receive
+
+### Review Notes - Warehouse
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/warehouse/page.tsx`
+  - `lib/warehouse-actions.ts`
+  - `lib/warehouse-ledger-actions.ts`
+  - `lib/dashboard-access.ts`
+- Data sources:
+  - `warehouse_products`
+  - `warehouse_batches`
+  - `warehouse_stock_ledger`
+  - `v_warehouse_stock_balance`
+  - `warehouse_stock_opname_sessions`
+  - `warehouse_stock_opname_items`
+  - `warehouse_daily_stock_summary`
+  - `warehouse_order_deduction_log`
+- Mutation paths:
+  - stock in/out/adjust via `recordStockIn`, `recordStockOut`, `recordStockAdjust`
+  - transfer/konversi/dispose via `recordTransfer`, `recordConversion`, `recordDispose`
+  - daily summary backfill via `backfillSingleOrder`
+  - stock opname lifecycle via `createStockOpnameSession`, `saveStockOpnameCounts`, `submitSOForReview`, `revertSOToCounting`, `approveStockOpname`, `cancelSOSession`
+- Findings summary:
+  - exported server actions di `lib/warehouse-actions.ts` dan `lib/warehouse-ledger-actions.ts` sebelumnya banyak yang langsung memakai service Supabase tanpa guard tab/permission server-side, sehingga direct invoke masih bisa membaca atau memutasi data Warehouse walau UI tab disembunyikan
+  - `recordTransfer` sebelumnya hanya menulis `TRANSFER_OUT` di produk sumber dan tidak pernah menambah saldo produk target; karena saldo gudang dibentuk dari ledger, transfer antar gudang/entity efektif "membakar" stock
+  - pengurangan batch di stock out, transfer, dispose, dan conversion source sebelumnya memakai clamp `Math.max(0, current_qty - quantity)`, sehingga overdraw tidak ditolak dan batch bisa diam-diam tidak sinkron dengan ledger movement
+  - `recordConversion` sebelumnya meng-upsert batch target dengan `current_qty = quantity`, sehingga jika batch target sudah ada maka saldo existing bisa tertimpa alih-alih ditambah
+  - workflow stock opname sebelumnya masih bisa submit sesi dengan item yang belum dihitung (`sesudah_so = null`), approve berulang via direct call, dan membuat lebih dari satu sesi aktif; kombinasi ini berisiko membuat adjustment SO ganda atau variance palsu nol
+  - tab Daily Summary menampilkan kontrol backfill ke semua viewer Warehouse padahal action sinkronisasi order semestinya dibatasi ke permission `wh:mapping_sync`
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Warehouse Settings`
+  - verifikasi manual transfer antar entity/source-target, penolakan overdraw pada batch mutation, submit/approve stock opname saat ada count kosong atau approve ulang, dan penolakan server action untuk user tanpa akses Warehouse / permission spesifik
+
+### Review Notes - Warehouse Settings
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/warehouse-settings/page.tsx`
+  - `components/BrandManager.tsx`
+  - `lib/brand-actions.ts`
+  - `lib/warehouse-ledger-actions.ts`
+  - `app/dashboard/business-settings/page.tsx`
+- Data sources:
+  - `brands`
+  - `warehouse_products`
+  - `warehouse_vendors`
+  - `warehouse_scalev_mapping`
+  - RPC `warehouse_scalev_mapping_frequencies`
+  - RPC `warehouse_scalev_price_tiers`
+  - RPC `warehouse_sync_scalev_names`
+  - `warehouse_business_mapping`
+  - `scalev_webhook_businesses`
+- Mutation paths:
+  - brand manage via `addBrand`, `toggleBrand`, `updateBrandKeywords`, `deleteBrandPermanently`
+  - product manage via `createProduct`, `updateProduct`, `deactivateProduct`
+  - vendor manage via `createVendor`, `updateVendor`, `deleteVendor`
+  - Scalev mapping manage via `updateScalevMapping`, `syncScalevProductNames`
+  - business mapping manage via `createWarehouseBusinessMapping`, `updateWarehouseBusinessMapping`
+- Findings summary:
+  - page `Warehouse Settings` sudah menyembunyikan sub-tab dengan `whs:*`, tetapi banyak server action di `lib/warehouse-ledger-actions.ts` dan `lib/brand-actions.ts` sebelumnya belum memverifikasi permission yang sama; akibatnya user yang hanya punya satu sub-tab masih bisa direct-invoke CRUD sub-tab lain, sementara aksi Brand justru hardcoded ke role owner/direktur ops dan mengabaikan matrix permission saat ini
+  - action mapping Scalev (`getScalevMappings`, `updateScalevMapping`, `syncScalevProductNames`, frequency/price-tier RPC wrapper) serta business mapping (`getWarehouseBusinessMappings`, `updateWarehouseBusinessMapping`, `createWarehouseBusinessMapping`) sebelumnya tidak punya gate server-side sama sekali
+  - form tambah produk sebelumnya menyediakan dropdown vendor, tetapi `handleAdd` tidak pernah mengirim `vendor_id` ke `createProduct`; hasilnya user melihat vendor terpilih di UI namun record produk baru tersimpan tanpa vendor
+  - tab Active Warehouse sebelumnya memanggil `getProductsFull()` tanpa `includeInactive`, tetapi tetap menampilkan metrik `total` vs `active`; karena query hanya memuat produk aktif, kedua angka bisa misleading identik
+  - tab Active Warehouse juga masih mem-fetch business mapping yang sudah dipindah ke `Business Settings`, menambah permukaan akses yang tidak perlu
+  - bila user punya akses route `warehouse-settings` tetapi tidak memiliki sub-tab `whs:*`, halaman sebelumnya jatuh ke state kosong tanpa penjelasan
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Business Pulse`
+  - verifikasi manual akses sub-tab `whs:*` vs direct server-action call, create product dengan vendor terpilih, angka card Active Warehouse saat ada produk inactive, dan flow business mapping dari halaman `Business Settings`
 
 Saat mereview satu area, catat minimal format ini:
 

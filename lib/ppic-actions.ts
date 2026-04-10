@@ -3,7 +3,7 @@
 
 import { createServiceSupabase, createServerSupabase } from './supabase-server';
 import { requireDashboardTabAccess } from './dashboard-access';
-import { recordStockIn, createBatch } from './warehouse-ledger-actions';
+import { createBatchInternal, recordStockInInternal } from './warehouse-ledger-actions';
 import { sendTelegramToChat } from './telegram';
 
 // ============================================================
@@ -22,6 +22,97 @@ async function getCurrentUserId(): Promise<string | null> {
 
 async function requirePPICAccess(label: string = 'PPIC') {
   await requireDashboardTabAccess('ppic', label);
+}
+
+function toYearMonthKey(year: number, month: number) {
+  return year * 100 + month;
+}
+
+function getJakartaCurrentMonthYear() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: 'numeric',
+  }).formatToParts(new Date());
+
+  const year = Number(parts.find(part => part.type === 'year')?.value || new Date().getFullYear());
+  const month = Number(parts.find(part => part.type === 'month')?.value || new Date().getMonth() + 1);
+
+  return { year, month };
+}
+
+function getDemandHistoryWindowMonths(targetMonth: number, targetYear: number, lookbackMonths: number = 6) {
+  const { year: currentYear, month: currentMonth } = getJakartaCurrentMonthYear();
+  const monthDiff = (currentYear - targetYear) * 12 + (currentMonth - targetMonth);
+
+  return Math.max(lookbackMonths + 1, Math.max(monthDiff, 0) + lookbackMonths + 1);
+}
+
+async function getDemandPlanningSnapshot(svc: any, month: number, year: number) {
+  const targetYm = toYearMonthKey(year, month);
+  const historyWindowMonths = getDemandHistoryWindowMonths(month, year, 6);
+
+  const [
+    { data: demandData, error: demandErr },
+    { data: movData, error: movErr },
+  ] = await Promise.all([
+    svc.rpc('ppic_monthly_demand', { p_months: historyWindowMonths }),
+    svc.rpc('ppic_monthly_movements', { p_months: historyWindowMonths }),
+  ]);
+
+  if (demandErr) throw demandErr;
+  if (movErr) throw movErr;
+
+  const demandMonthsByProduct = new Map<number, { ym: number; qty: number }[]>();
+  const actualOutMap = new Map<number, number>();
+
+  for (const row of (demandData || [])) {
+    const productId = Number(row.warehouse_product_id);
+    const ym = toYearMonthKey(Number(row.yr), Number(row.mn));
+    const qty = Number(row.total_qty || 0);
+
+    if (ym === targetYm) {
+      actualOutMap.set(productId, qty);
+    }
+
+    if (ym >= targetYm) {
+      continue;
+    }
+
+    if (!demandMonthsByProduct.has(productId)) {
+      demandMonthsByProduct.set(productId, []);
+    }
+
+    demandMonthsByProduct.get(productId)!.push({ ym, qty });
+  }
+
+  const productDemand = new Map<number, number>();
+
+  for (const [productId, months] of demandMonthsByProduct.entries()) {
+    months.sort((a, b) => a.ym - b.ym);
+    const recentMonths = months.slice(-6);
+
+    let weightedTotal = 0;
+    let totalWeight = 0;
+
+    recentMonths.forEach((entry, index) => {
+      const weight = index + 1;
+      weightedTotal += entry.qty * weight;
+      totalWeight += weight;
+    });
+
+    productDemand.set(productId, totalWeight > 0 ? Math.round(weightedTotal / totalWeight) : 0);
+  }
+
+  const actualInMap = new Map<number, number>();
+
+  for (const row of (movData || [])) {
+    const ym = toYearMonthKey(Number(row.yr), Number(row.mn));
+    if (ym !== targetYm) continue;
+    actualInMap.set(Number(row.warehouse_product_id), Number(row.total_in || 0));
+  }
+
+  return { productDemand, actualInMap, actualOutMap };
 }
 
 // ============================================================
@@ -343,6 +434,7 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
 
   const results: any[] = [];
   const affectedProductIds = new Set<number>();
+  const receivedByPoItem = new Map<number, number>();
 
   for (const item of receivedItems) {
     if (item.quantityReceived <= 0) continue;
@@ -352,7 +444,8 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
     if (!poItem) throw new Error(`PO item #${item.poItemId} tidak ditemukan`);
 
     const remaining = Number(poItem.quantity_requested) - Number(poItem.quantity_received);
-    if (item.quantityReceived > remaining) {
+    const cumulativeReceived = (receivedByPoItem.get(item.poItemId) || 0) + item.quantityReceived;
+    if (cumulativeReceived > remaining) {
       throw new Error(`Qty melebihi sisa (${remaining}) untuk item #${item.poItemId}`);
     }
 
@@ -363,11 +456,11 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
       const itemValue = unitPrice * Number(poItem.quantity_requested);
       const itemShare = itemValue / totalPoValue;
       const itemExtraCost = poExtraCost * itemShare;
-      costPerUnit = unitPrice + itemExtraCost / item.quantityReceived;
+      costPerUnit = unitPrice + itemExtraCost / Number(poItem.quantity_requested);
     }
 
     // Create batch
-    const batch = await createBatch(
+    const batch = await createBatchInternal(
       poItem.warehouse_product_id,
       item.batchCode,
       item.expiredDate || null,
@@ -381,7 +474,7 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
       .eq('id', batch.id);
 
     // Record stock in (creates ledger entry + updates batch qty)
-    await recordStockIn(
+    await recordStockInInternal(
       poItem.warehouse_product_id,
       batch.id,
       item.quantityReceived,
@@ -391,12 +484,14 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
     );
 
     // Update PO item received qty
-    const newReceived = Number(poItem.quantity_received) + item.quantityReceived;
+    const newReceived = Number(poItem.quantity_received) + cumulativeReceived;
     await svc
       .from('warehouse_po_items')
       .update({ quantity_received: newReceived })
       .eq('id', item.poItemId);
 
+    receivedByPoItem.set(item.poItemId, cumulativeReceived);
+    poItem.quantity_received = newReceived;
     affectedProductIds.add(poItem.warehouse_product_id);
     results.push({ poItemId: item.poItemId, batchId: batch.id, received: item.quantityReceived, costPerUnit });
   }
@@ -512,62 +607,20 @@ export async function getDemandPlans(month: number, year: number) {
     .eq('year', year)
     .order('warehouse_product_id');
   if (error) throw error;
-  return data || [];
+
+  const { actualInMap, actualOutMap } = await getDemandPlanningSnapshot(svc, month, year);
+
+  return (data || []).map((plan: any) => ({
+    ...plan,
+    actual_in: actualInMap.get(plan.warehouse_product_id) ?? Number(plan.actual_in || 0),
+    actual_out: actualOutMap.get(plan.warehouse_product_id) ?? Number(plan.actual_out || 0),
+  }));
 }
 
 export async function initDemandPlans(month: number, year: number) {
   await requirePPICAccess('Demand Planning');
   const svc = createServiceSupabase();
-
-  // Get auto demand from ScaleV (last 6 months average)
-  const { data: demandData, error: demandErr } = await svc.rpc('ppic_monthly_demand', { p_months: 6 });
-  if (demandErr) throw demandErr;
-
-  // Calculate weighted average monthly demand per product
-  // Weight: most recent month = 6, oldest = 1 (linear decay)
-  // Sort months per product from oldest to newest, assign weights 1..N
-  const productMonths = new Map<number, { yr: number; mn: number; qty: number }[]>();
-  for (const row of (demandData || [])) {
-    const pid = row.warehouse_product_id;
-    if (!productMonths.has(pid)) productMonths.set(pid, []);
-    productMonths.get(pid)!.push({ yr: row.yr, mn: row.mn, qty: Number(row.total_qty) });
-  }
-
-  const productDemand = new Map<number, number>();
-  for (const [pid, months] of productMonths.entries()) {
-    // Sort oldest first
-    months.sort((a, b) => a.yr !== b.yr ? a.yr - b.yr : a.mn - b.mn);
-    let weightedTotal = 0;
-    let totalWeight = 0;
-    months.forEach((m, i) => {
-      const weight = i + 1; // 1 for oldest, N for newest
-      weightedTotal += m.qty * weight;
-      totalWeight += weight;
-    });
-    productDemand.set(pid, totalWeight > 0 ? Math.round(weightedTotal / totalWeight) : 0);
-  }
-
-  // Get actual_in from ledger (warehouse movements)
-  const { data: movData, error: movErr } = await svc.rpc('ppic_monthly_movements', { p_months: 12 });
-  if (movErr) throw movErr;
-
-  const actualInMap = new Map<number, number>();
-  for (const row of (movData || [])) {
-    if (row.yr === year && row.mn === month) {
-      actualInMap.set(row.warehouse_product_id, Number(row.total_in));
-    }
-  }
-
-  // Get actual_out from ScaleV sales (shipped orders) — same source as auto_demand
-  const { data: salesData, error: salesErr } = await svc.rpc('ppic_monthly_demand', { p_months: 12 });
-  if (salesErr) throw salesErr;
-
-  const actualOutMap = new Map<number, number>();
-  for (const row of (salesData || [])) {
-    if (row.yr === year && row.mn === month) {
-      actualOutMap.set(row.warehouse_product_id, Number(row.total_qty));
-    }
-  }
+  const { productDemand, actualInMap, actualOutMap } = await getDemandPlanningSnapshot(svc, month, year);
 
   // Get all active products
   const { data: products } = await svc
@@ -720,39 +773,9 @@ export async function getROPAnalysis(demandDays: number = 90) {
   await requirePPICAccess('Reorder Point');
   const svc = createServiceSupabase();
 
-  // Get avg daily demand from summary table (fast) with fallback to RPC (slow)
-  let demandData: any[] = [];
-  try {
-    // Calculate from incremental summary: sum total_out for recent months / days
-    const { data: summaryData } = await svc
-      .from('summary_scalev_monthly_movements')
-      .select('warehouse_product_id, total_out, yr, mn');
-    if (summaryData && summaryData.length > 0) {
-      const cutoff = new Date(Date.now() - demandDays * 86400000);
-      const cutoffYM = cutoff.getFullYear() * 100 + (cutoff.getMonth() + 1);
-      const byProduct = new Map<number, number>();
-      for (const s of summaryData) {
-        if ((s.yr * 100 + s.mn) >= cutoffYM) {
-          byProduct.set(s.warehouse_product_id, (byProduct.get(s.warehouse_product_id) || 0) + Number(s.total_out));
-        }
-      }
-      // Get product names
-      const { data: products } = await svc.from('warehouse_products').select('id, name, entity, category').eq('is_active', true);
-      demandData = (products || []).filter(p => byProduct.has(p.id)).map(p => ({
-        warehouse_product_id: p.id, product_name: p.name, entity: p.entity, category: p.category,
-        total_qty: byProduct.get(p.id) || 0, num_days: demandDays,
-        avg_daily: Math.round(((byProduct.get(p.id) || 0) / demandDays) * 100) / 100,
-      }));
-    } else {
-      const { data, error } = await svc.rpc('ppic_avg_daily_demand', { p_days: demandDays });
-      if (error) throw error;
-      demandData = data || [];
-    }
-  } catch {
-    const { data, error } = await svc.rpc('ppic_avg_daily_demand', { p_days: demandDays });
-    if (error) throw error;
-    demandData = data || [];
-  }
+  // Use the exact-day RPC here; monthly summary would overcount full months near the cutoff.
+  const { data: demandData, error: demandErr } = await svc.rpc('ppic_avg_daily_demand', { p_days: demandDays });
+  if (demandErr) throw demandErr;
 
   // Get current stock
   const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('*');
