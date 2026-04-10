@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildDailyReport } from '@/lib/daily-report';
 import { sendTelegramMessage } from '@/lib/telegram';
 
+export const dynamic = 'force-dynamic';
 export const maxDuration = 250;
 
 export async function GET(req: NextRequest) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -44,7 +44,7 @@ function clearRecoveryParamsFromUrl() {
   }
 }
 
-export default function ResetPasswordPage() {
+function ResetPasswordContent() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -328,5 +328,40 @@ export default function ResetPasswordPage() {
         )}
       </div>
     </div>
+  );
+}
+
+function ResetPasswordFallback() {
+  return (
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'linear-gradient(135deg, var(--bg) 0%, #1e1b4b 50%, var(--bg) 100%)',
+      padding: 20,
+    }}>
+      <div style={{
+        background: 'var(--card)',
+        border: '1px solid var(--border)',
+        borderRadius: 16,
+        padding: 40,
+        width: '100%',
+        maxWidth: 400,
+        textAlign: 'center',
+        color: 'var(--dim)',
+        fontSize: 14,
+      }}>
+        Memverifikasi link reset...
+      </div>
+    </div>
+  );
+}
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={<ResetPasswordFallback />}>
+      <ResetPasswordContent />
+    </Suspense>
   );
 }
