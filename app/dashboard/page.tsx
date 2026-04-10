@@ -15,6 +15,61 @@ import CashFlowSection from '@/components/CashFlowSection';
 const marginColor = (v: number) => v >= 30 ? 'var(--green)' : v >= 0 ? 'var(--yellow)' : 'var(--red)';
 const marginBg = (v: number) => v >= 30 ? 'var(--badge-green-bg)' : v >= 0 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)';
 
+function formatIsoDate(year: number, month: number, day: number) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function shiftIsoDateByMonthsClamped(value: string, deltaMonths: number) {
+  const [year, month, day] = value.split('-').map(Number);
+  const totalMonths = year * 12 + (month - 1) + deltaMonths;
+  const targetYear = Math.floor(totalMonths / 12);
+  const targetMonthIndex = ((totalMonths % 12) + 12) % 12;
+  const targetMonth = targetMonthIndex + 1;
+  const targetDay = Math.min(day, getDaysInMonth(targetYear, targetMonth));
+  return formatIsoDate(targetYear, targetMonth, targetDay);
+}
+
+function getDateKeysInRange(from: string, to: string) {
+  if (!from || !to) return [];
+
+  const cursor = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  const keys: string[] = [];
+
+  while (cursor <= end) {
+    keys.push(formatIsoDate(
+      cursor.getUTCFullYear(),
+      cursor.getUTCMonth() + 1,
+      cursor.getUTCDate()
+    ));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  return keys;
+}
+
+function buildOverheadPerDayLookup(rows: Array<{ year_month: string; amount: number | string }>) {
+  const map: Record<string, number> = {};
+
+  rows.forEach((row) => {
+    if (!row?.year_month) return;
+
+    const [year, month] = row.year_month.split('-').map(Number);
+    const days = getDaysInMonth(year, month);
+    const dailyAmount = Number(row.amount || 0) / days;
+
+    for (let day = 1; day <= days; day++) {
+      map[formatIsoDate(year, month, day)] = dailyAmount;
+    }
+  });
+
+  return map;
+}
+
 export default function OverviewPage() {
   const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
@@ -37,13 +92,26 @@ export default function OverviewPage() {
   const [showTren, setShowTren] = useState(false);
 
   function getPrevRange(from: string, to: string) {
-    const fromDate = new Date(from + 'T00:00:00');
-    const toDate = new Date(to + 'T00:00:00');
-    const prevFromDate = new Date(fromDate.getFullYear(), fromDate.getMonth() - 1, fromDate.getDate());
-    const prevToDate = new Date(toDate.getFullYear(), toDate.getMonth() - 1, toDate.getDate());
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    return { prevFrom: fmt(prevFromDate), prevTo: fmt(prevToDate) };
+    return {
+      prevFrom: shiftIsoDateByMonthsClamped(from, -1),
+      prevTo: shiftIsoDateByMonthsClamped(to, -1),
+    };
   }
+
+  const prevRange = useMemo(() => {
+    if (!dateRange.from || !dateRange.to) return null;
+    return getPrevRange(dateRange.from, dateRange.to);
+  }, [dateRange.from, dateRange.to]);
+
+  const rangeDates = useMemo(
+    () => getDateKeysInRange(dateRange.from, dateRange.to),
+    [dateRange.from, dateRange.to]
+  );
+
+  const prevRangeDates = useMemo(
+    () => prevRange ? getDateKeysInRange(prevRange.prevFrom, prevRange.prevTo) : [],
+    [prevRange]
+  );
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -55,8 +123,8 @@ export default function OverviewPage() {
   }, [supabase]);
 
   useEffect(() => {
-    if (!dateRange.from || !dateRange.to) return;
-    const { prevFrom, prevTo } = getPrevRange(dateRange.from, dateRange.to);
+    if (!dateRange.from || !dateRange.to || !prevRange) return;
+    const { prevFrom, prevTo } = prevRange;
     const cached = getCached<any>('overview_core_data', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
     if (cached) {
       setDailyData(cached.daily.filter(row => isActiveBrand(row.product)));
@@ -103,11 +171,11 @@ export default function OverviewPage() {
       });
 
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [dateRange.from, dateRange.to, prevRange, activeBrands, activeBrandsError, isActiveBrand]);
 
   useEffect(() => {
-    if (!dateRange.from || !dateRange.to) return;
-    const { prevFrom, prevTo } = getPrevRange(dateRange.from, dateRange.to);
+    if (!dateRange.from || !dateRange.to || !prevRange) return;
+    const { prevFrom, prevTo } = prevRange;
 
     const cachedAds = getCached<any[]>('overview_ads_spend', dateRange.from, dateRange.to);
     const cachedCh = getCached<any[]>('overview_channel_data', dateRange.from, dateRange.to);
@@ -159,23 +227,16 @@ export default function OverviewPage() {
       });
 
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to]);
+  }, [dateRange.from, dateRange.to, prevRange]);
 
   // Build overhead per-day lookup: date (YYYY-MM-DD) → daily overhead amount
   const overheadPerDay = useMemo(() => {
-    const map = {};
-    overheadData.forEach(o => {
-      const [y, m] = o.year_month.split('-').map(Number);
-      const days = new Date(y, m, 0).getDate();
-      const daily = Number(o.amount) / days;
-      // Pre-compute for each day in the month
-      for (let d = 1; d <= days; d++) {
-        const key = `${o.year_month}-${String(d).padStart(2, '0')}`;
-        map[key] = daily;
-      }
-    });
-    return map;
+    return buildOverheadPerDayLookup(overheadData);
   }, [overheadData]);
+
+  const prevOverheadPerDay = useMemo(() => {
+    return buildOverheadPerDayLookup(prevOverheadData);
+  }, [prevOverheadData]);
 
   // Build shipment-per-day lookup
   const shipPerDay = useMemo(() => {
@@ -207,21 +268,15 @@ export default function OverviewPage() {
   const kpi = useMemo(() => {
     // Build all dates in the selected range so days with only overhead/ads still appear
     const byDate: Record<string, { s:number; g:number }> = {};
-    if (dateRange.from && dateRange.to) {
-      const cur = new Date(dateRange.from + 'T00:00:00');
-      const end = new Date(dateRange.to + 'T00:00:00');
-      while (cur <= end) {
-        const key = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
-        byDate[key] = { s:0, g:0 };
-        cur.setDate(cur.getDate() + 1);
-      }
-    }
+    rangeDates.forEach((dateKey) => {
+      byDate[dateKey] = { s: 0, g: 0 };
+    });
     dailyData.forEach(d => {
       if (!byDate[d.date]) return;
       byDate[d.date].s += Number(d.net_sales);
       byDate[d.date].g += Number(d.gross_profit);
     });
-    const dates = Object.keys(byDate).sort();
+    const dates = rangeDates;
     const ts = dates.reduce((a,d) => a + byDate[d].s, 0);
     const tg = dates.reduce((a,d) => a + byDate[d].g, 0);
     const tCogs = ts - tg;
@@ -257,7 +312,7 @@ export default function OverviewPage() {
     });
     const tShipment = chart.reduce((a,r) => a + r.shipment, 0);
     return { ts, tg, tCogs, tAds, tMp, tOverhead: tOverheadRaw, tNetProfit, tShipment, npM, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, mR: ts>0?(tAds+tMp)/ts*100:0, avg: ad>0?ts/ad:0 };
-  }, [dailyData, adsData, channelData, overheadPerDay, overheadData, shipPerDay, dateRange, adsByDate, mpByDate, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [dailyData, adsData, channelData, overheadPerDay, overheadData, shipPerDay, rangeDates, adsByDate, mpByDate, activeBrands, activeBrandsError, isActiveBrand]);
 
   // ── Previous month KPIs (for delta comparison) ──
   const prevKpi = useMemo(() => {
@@ -266,12 +321,10 @@ export default function OverviewPage() {
     prevDailyData.forEach(d => { ts += Number(d.net_sales); tg += Number(d.gross_profit); });
     const tAds = prevAdsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
     const tMp = prevChannelData.filter(d => isActiveBrand(d.product)).reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost) || 0), 0);
-    // Prev overhead
-    let prevOH = 0;
-    prevOverheadData.forEach(o => { prevOH += Number(o.amount) || 0; });
+    const prevOH = prevRangeDates.reduce((sum, dateKey) => sum + (prevOverheadPerDay[dateKey] || 0), 0);
     const tNetProfit = tg - tAds - tMp - prevOH;
     return { ts, tg, tAds, tMp, tNetProfit, gpM: ts>0?tg/ts*100:0, npM: ts>0?tNetProfit/ts*100:0 };
-  }, [prevDailyData, prevAdsData, prevChannelData, prevOverheadData, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [prevDailyData, prevAdsData, prevChannelData, prevRangeDates, prevOverheadPerDay, activeBrands, activeBrandsError, isActiveBrand]);
 
   const prevMonthLabel = useMemo(() => {
     if (!dateRange.from) return '';
@@ -300,11 +353,16 @@ export default function OverviewPage() {
 
   const hasPreFebData = dateRange.from < '2026-02-01';
 
+  const supportsCashFlowOverview = useMemo(() => {
+    if (!dateRange.from || !dateRange.to) return false;
+    return dateRange.from.slice(0, 7) === dateRange.to.slice(0, 7) && dateRange.from.endsWith('-01');
+  }, [dateRange.from, dateRange.to]);
+
   const cashFlowPeriodStart = useMemo(() => {
-    if (!dateRange.from) return null;
+    if (!supportsCashFlowOverview || !dateRange.from) return null;
     const [y, m] = dateRange.from.split('-');
     return `${y}-${m}-01`;
-  }, [dateRange.from]);
+  }, [dateRange.from, supportsCashFlowOverview]);
 
   const isOwnerOrAdmin = userRole === 'owner' || userRole === 'admin';
 
@@ -339,6 +397,17 @@ export default function OverviewPage() {
         <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Overview Gagal Dimuat</div>
           <div style={{ fontSize: 13 }}>{loadError}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeBrandsError) {
+    return (
+      <div style={{ padding: 24 }}>
+        <div style={{ background: 'rgba(120,53,15,0.12)', border: '1px solid rgba(146,64,14,0.45)', borderRadius: 12, padding: 18, color: '#fcd34d' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Filter Brand Gagal Dimuat</div>
+          <div style={{ fontSize: 13 }}>{activeBrandsError}</div>
         </div>
       </div>
     );
@@ -393,6 +462,11 @@ export default function OverviewPage() {
       {/* ── Cash Flow Status (owner/admin) ── */}
       {isOwnerOrAdmin && cashFlowPeriodStart && (
         <CashFlowSection netSales={kpi.ts} periodStart={cashFlowPeriodStart} />
+      )}
+      {isOwnerOrAdmin && !cashFlowPeriodStart && (
+        <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:12, color:'#fcd34d' }}>
+          Cash Flow Status hanya ditampilkan untuk rentang 1 bulan yang dimulai dari tanggal 1.
+        </div>
       )}
 
       {hasPreFebData && (

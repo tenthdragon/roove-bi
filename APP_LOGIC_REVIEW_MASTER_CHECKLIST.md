@@ -883,7 +883,7 @@ Status legend:
 | --- | --- | --- | --- |
 | Shared shell/auth/cache/access | `app/dashboard/layout.tsx`, `middleware.ts`, `lib/*Context*`, `lib/dashboard-access.ts`, `lib/dashboard-cache.ts` | DN | Direview dan dipatch lokal: fail-open authz/profile/permission, child-tab visibility, refresh meta false-success, date-range WIB/latest-data, active-brand fail-open. Runtime verification masih disarankan |
 | Public/auth routes | `app/page.tsx`, `app/register/page.tsx`, `app/forgot-password/page.tsx`, `app/reset-password/page.tsx` | DN | Direview dan dipatch lokal: public auth redirect saat session aktif, email normalization, reset-password recovery handling untuk `code`/`token_hash`/hash session, invite flow/admin UI tidak lagi mengklaim email terkirim padahal hanya generate link. Runtime verification bersama user disarankan |
-| Overview | `app/dashboard/page.tsx`, `lib/overview-actions.ts`, `components/CashFlowSection.tsx` | NS |  |
+| Overview | `app/dashboard/page.tsx`, `lib/overview-actions.ts`, `components/CashFlowSection.tsx` | DN | Direview dan dipatch lokal: previous-range comparison aman untuk month-end, previous-overhead mengikuti seluruh comparison window + proration harian, cash-flow widget dibatasi ke range 1 bulan dari tanggal 1, dan error brand-filter tidak lagi tersamar sebagai empty state. Runtime verification disarankan |
 | Marketing | `app/dashboard/marketing/page.tsx`, `lib/marketing-actions.ts` | NS |  |
 | Channels | `app/dashboard/channels/page.tsx`, `lib/channels-actions.ts`, SLA/shipment components | NS |  |
 | WABA Management | `app/dashboard/waba-management/page.tsx`, WABA API routes | NS |  |
@@ -963,6 +963,35 @@ Status legend:
 - Next step:
   - lanjut review area `Overview`
   - saat verifikasi runtime, uji login/register/forgot-password dengan email bercampur spasi/huruf besar, uji recovery link biasa, dan uji flow invite + copy link dari admin
+
+### Review Notes - Overview
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/page.tsx`
+  - `lib/overview-actions.ts`
+  - `components/CashFlowSection.tsx`
+  - `lib/cashflow-actions.ts`
+  - `components/DateRangePicker.tsx`
+- Data sources:
+  - `daily_product_summary`
+  - `daily_ads_spend`
+  - `daily_channel_data`
+  - `monthly_overhead`
+  - RPC `get_daily_shipment_counts`
+  - RPC `get_live_cashflow`
+  - RPC `get_live_cashflow_by_channel`
+- Findings summary:
+  - previous-period range dihitung dengan `Date(..., month - 1, sameDay)` sehingga tanggal akhir bulan bisa rollover ke bulan yang salah
+  - previous overhead hanya diambil dari satu `year_month` pertama dan dihitung sebagai full-month amount, padahal current period memakai proration harian dan UI mengizinkan custom multi-month range
+  - widget `Cash Flow Status` selalu mengambil bulan dari `dateRange.from`, tetapi persentasenya dibagi oleh `netSales` seluruh range terpilih sehingga menyesatkan untuk range lintas bulan
+  - ketika `ActiveBrandsContext` error, Overview jatuh ke empty-state "Belum Ada Data" alih-alih menjelaskan bahwa filter brand gagal dimuat
+- Patch status:
+  - patched locally
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Marketing`
+  - verifikasi manual untuk custom range lintas bulan, tanggal 31→bulan sebelumnya, dan simulasi error query `brands`
 
 Saat mereview satu area, catat minimal format ini:
 

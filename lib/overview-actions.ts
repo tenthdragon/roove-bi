@@ -26,7 +26,8 @@ export async function getOverviewCoreData({
   const svc = createServiceSupabase();
   const fromYM = from.slice(0, 7);
   const toYM = to.slice(0, 7);
-  const prevYM = prevFrom.slice(0, 7);
+  const prevFromYM = prevFrom.slice(0, 7);
+  const prevToYM = prevTo.slice(0, 7);
 
   const [dailyRes, shipmentRes, overheadRes, prevDailyRes, prevOverheadRes] = await Promise.all([
     svc.from('daily_product_summary')
@@ -46,7 +47,8 @@ export async function getOverviewCoreData({
       .order('date'),
     svc.from('monthly_overhead')
       .select('year_month, amount')
-      .eq('year_month', prevYM),
+      .gte('year_month', prevFromYM)
+      .lte('year_month', prevToYM),
   ]);
 
   return {
