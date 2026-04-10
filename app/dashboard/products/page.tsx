@@ -14,7 +14,7 @@ export default function ProductsPage() {
   const { dateRange, loading: dateLoading } = useDateRange();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
-  const { activeBrands, isActiveBrand } = useActiveBrands();
+  const { activeBrands, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
@@ -35,7 +35,7 @@ export default function ProductsPage() {
         setData(rows.filter(row => isActiveBrand(row.product)));
         setLoading(false);
       });
-  }, [dateRange, supabase]);
+  }, [dateRange, supabase, activeBrands, activeBrandsError, isActiveBrand]);
 
   const totalSales = useMemo(() => {
     return data.reduce((s, d) => s + Number(d.net_sales), 0);

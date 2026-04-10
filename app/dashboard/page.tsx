@@ -31,7 +31,7 @@ export default function OverviewPage() {
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [feeLoading, setFeeLoading] = useState(true);
   const [feeError, setFeeError] = useState('');
-  const { activeBrands, isActiveBrand } = useActiveBrands();
+  const { activeBrands, error: activeBrandsError, isActiveBrand } = useActiveBrands();
   const [userRole, setUserRole] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showTren, setShowTren] = useState(false);
@@ -103,7 +103,7 @@ export default function OverviewPage() {
       });
 
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to, activeBrands]);
+  }, [dateRange.from, dateRange.to, activeBrands, activeBrandsError, isActiveBrand]);
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
@@ -185,7 +185,7 @@ export default function OverviewPage() {
       map[r.date] = (map[r.date] || 0) + Number(r.order_count);
     });
     return map;
-  }, [shipmentData, activeBrands]);
+  }, [shipmentData, activeBrands, activeBrandsError, isActiveBrand]);
 
   // Build per-day ads spend lookup (from daily_ads_spend — matches marketing page)
   const adsByDate = useMemo(() => {
@@ -202,7 +202,7 @@ export default function OverviewPage() {
       map[d.date] = (map[d.date] || 0) + Math.abs(Number(d.mp_admin_cost) || 0);
     });
     return map;
-  }, [channelData, activeBrands]);
+  }, [channelData, activeBrands, activeBrandsError, isActiveBrand]);
 
   const kpi = useMemo(() => {
     // Build all dates in the selected range so days with only overhead/ads still appear
@@ -257,7 +257,7 @@ export default function OverviewPage() {
     });
     const tShipment = chart.reduce((a,r) => a + r.shipment, 0);
     return { ts, tg, tCogs, tAds, tMp, tOverhead: tOverheadRaw, tNetProfit, tShipment, npM, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, mR: ts>0?(tAds+tMp)/ts*100:0, avg: ad>0?ts/ad:0 };
-  }, [dailyData, adsData, channelData, overheadPerDay, overheadData, shipPerDay, dateRange, adsByDate, mpByDate, activeBrands]);
+  }, [dailyData, adsData, channelData, overheadPerDay, overheadData, shipPerDay, dateRange, adsByDate, mpByDate, activeBrands, activeBrandsError, isActiveBrand]);
 
   // ── Previous month KPIs (for delta comparison) ──
   const prevKpi = useMemo(() => {
@@ -271,7 +271,7 @@ export default function OverviewPage() {
     prevOverheadData.forEach(o => { prevOH += Number(o.amount) || 0; });
     const tNetProfit = tg - tAds - tMp - prevOH;
     return { ts, tg, tAds, tMp, tNetProfit, gpM: ts>0?tg/ts*100:0, npM: ts>0?tNetProfit/ts*100:0 };
-  }, [prevDailyData, prevAdsData, prevChannelData, prevOverheadData, activeBrands]);
+  }, [prevDailyData, prevAdsData, prevChannelData, prevOverheadData, activeBrands, activeBrandsError, isActiveBrand]);
 
   const prevMonthLabel = useMemo(() => {
     if (!dateRange.from) return '';

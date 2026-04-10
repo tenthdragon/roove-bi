@@ -65,7 +65,7 @@ export default function ChannelsPage() {
   const [hiddenChannels, setHiddenChannels] = useState<Set<string>>(new Set());
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
-  const { activeBrands, isActiveBrand } = useActiveBrands();
+  const { activeBrands, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
@@ -123,7 +123,7 @@ export default function ChannelsPage() {
       });
 
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to, activeBrands]);
+  }, [dateRange.from, dateRange.to, activeBrands, activeBrandsError, isActiveBrand]);
 
   // ── Store → Brand lookup ──
   const storeBrandMap = useMemo(() => {
@@ -160,7 +160,7 @@ export default function ChannelsPage() {
       byP[platform] = (byP[platform] || 0) + Math.abs(Number(d.spent || 0));
     });
     return byP;
-  }, [adsData, selectedProduct, storeBrandMap]);
+  }, [adsData, selectedProduct, storeBrandMap, activeBrandsError, isActiveBrand]);
 
   // ── Distribute ads to channels (sales POV — strict, no organic spillover) ──
   const adsPerChannel = useMemo(() => {
@@ -337,7 +337,7 @@ export default function ChannelsPage() {
       if (d.channel) byChannel[d.channel] = (byChannel[d.channel] || 0) + (Number(d.net_sales) || 0);
     });
     return { total, gp, mpAdmin, adsCost, totalCost, profitAfterAll, byChannel };
-  }, [prevChannelData, prevAdsData, selectedProduct, storeBrandMap]);
+  }, [prevChannelData, prevAdsData, selectedProduct, storeBrandMap, activeBrandsError, isActiveBrand]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);

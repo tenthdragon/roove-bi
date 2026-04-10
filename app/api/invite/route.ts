@@ -68,6 +68,8 @@ export async function POST(req: NextRequest) {
     }
 
     const svc = getServiceSupabase();
+    const warnings: string[] = [];
+    const resetRedirectTo = `${process.env.NEXT_PUBLIC_SITE_URL || 'https://app.roove.info'}/reset-password`;
 
     // Check if user already exists in profiles
     const { data: existing } = await svc.from('profiles').select('email').eq('email', normalizedEmail).maybeSingle();
@@ -116,6 +118,7 @@ export async function POST(req: NextRequest) {
         .eq('id', newUser.user.id);
       if (updateError) {
         console.error('[Invite] Update role error:', updateError);
+        warnings.push('Role user belum berhasil di-set otomatis. Cek profil user di admin.');
       }
     } else {
       // Trigger didn't fire — insert profile directly
@@ -125,27 +128,39 @@ export async function POST(req: NextRequest) {
         .upsert({ id: newUser.user.id, email: normalizedEmail, role: normalizedRole });
       if (insertError) {
         console.error('[Invite] Insert profile error:', insertError);
+        warnings.push('Profil user belum berhasil dibuat otomatis. Cek data user di Supabase.');
       }
     }
 
-    // Send password reset email so user can set their own password
-    const { error: resetError } = await svc.auth.admin.generateLink({
+    // Generate a set-password link that the owner can share manually.
+    const { data: resetLinkData, error: resetError } = await svc.auth.admin.generateLink({
       type: 'recovery',
       email: normalizedEmail,
       options: {
-        redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://app.roove.info'}/reset-password`,
+        redirectTo: resetRedirectTo,
       },
     });
 
+    const recoveryLink = resetLinkData?.properties?.action_link || null;
+
     if (resetError) {
       console.error('[Invite] Reset link error:', resetError);
-      // Non-blocking — user was still created
+      warnings.push('Link set password belum berhasil dibuat. User perlu dibuatkan link baru nanti.');
+    } else if (!recoveryLink) {
+      warnings.push('Link set password tidak tersedia untuk dibagikan.');
     }
+
+    const partial = warnings.length > 0;
 
     return NextResponse.json({
       success: true,
-      message: `User ${normalizedEmail} berhasil di-invite sebagai ${normalizedRole}. Mereka perlu reset password untuk login.`,
+      partial,
+      message: partial
+        ? `User ${normalizedEmail} berhasil dibuat sebagai ${normalizedRole}, tetapi masih ada langkah manual yang perlu dicek.`
+        : `User ${normalizedEmail} berhasil dibuat sebagai ${normalizedRole}. Bagikan link set password ke user.`,
       userId: newUser.user.id,
+      recoveryLink,
+      warnings,
     });
 
   } catch (err: any) {

@@ -2,7 +2,47 @@
 
 import { useState, useEffect } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+
+type RecoveryLinkType = 'invite' | 'recovery';
+
+function getRecoveryLinkType(value: string | null): RecoveryLinkType | null {
+  if (value === 'invite' || value === 'recovery') return value;
+  return null;
+}
+
+function clearRecoveryParamsFromUrl() {
+  if (typeof window === 'undefined') return;
+
+  const url = new URL(window.location.href);
+  let changed = false;
+  const queryKeys = ['code', 'token', 'token_hash', 'type', 'error', 'error_code', 'error_description'];
+
+  queryKeys.forEach((key) => {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key);
+      changed = true;
+    }
+  });
+
+  if (url.hash.startsWith('#')) {
+    const hashParams = new URLSearchParams(url.hash.slice(1));
+    const hashKeys = ['access_token', 'refresh_token', 'expires_in', 'expires_at', 'token_type', 'type'];
+
+    hashKeys.forEach((key) => {
+      if (hashParams.has(key)) {
+        hashParams.delete(key);
+        changed = true;
+      }
+    });
+
+    url.hash = hashParams.toString() ? `#${hashParams.toString()}` : '';
+  }
+
+  if (changed) {
+    window.history.replaceState(window.history.state, '', url.toString());
+  }
+}
 
 export default function ResetPasswordPage() {
   const [password, setPassword] = useState('');
@@ -13,39 +53,117 @@ export default function ResetPasswordPage() {
   const [sessionReady, setSessionReady] = useState(false);
   const [sessionError, setSessionError] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = useSupabase();
 
-  // Supabase will automatically exchange the token from the URL hash
-  // when the page loads. We listen for the auth state change.
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event) => {
-        if (event === 'PASSWORD_RECOVERY') {
-          setSessionReady(true);
-        }
-      }
-    );
+    let cancelled = false;
 
-    // Also check if user already has a session (e.g. page reload)
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setSessionReady(true);
+    const queryType = getRecoveryLinkType(searchParams.get('type'));
+    const queryTokenHash = searchParams.get('token_hash') || searchParams.get('token');
+    const queryCode = searchParams.get('code');
+
+    const hashParams = typeof window !== 'undefined' && window.location.hash.startsWith('#')
+      ? new URLSearchParams(window.location.hash.slice(1))
+      : new URLSearchParams();
+    const hashType = getRecoveryLinkType(hashParams.get('type'));
+    const hashAccessToken = hashParams.get('access_token');
+    const hashRefreshToken = hashParams.get('refresh_token');
+    const recoveryType = queryType || hashType;
+
+    const markReady = () => {
+      if (cancelled) return;
+      clearRecoveryParamsFromUrl();
+      setError('');
+      setSessionError(false);
+      setSessionReady(true);
+    };
+
+    const markInvalid = (message?: string) => {
+      if (cancelled) return;
+      setSessionReady(false);
+      setSessionError(true);
+      if (message) setError(message);
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!session) return;
+
+      if (
+        event === 'PASSWORD_RECOVERY' ||
+        ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && (recoveryType === 'invite' || recoveryType === 'recovery'))
+      ) {
+        markReady();
       }
     });
 
-    // Timeout: if no session after 5 seconds, show error
-    const timeout = setTimeout(() => {
-      setSessionReady(prev => {
-        if (!prev) setSessionError(true);
-        return prev;
-      });
-    }, 5000);
+    const init = async () => {
+      try {
+        if (queryCode) {
+          const { data, error: exchangeError } = await supabase.auth.exchangeCodeForSession(queryCode);
+          if (exchangeError) throw exchangeError;
+          if (data.session) {
+            markReady();
+            return;
+          }
+        }
+
+        if (queryTokenHash && recoveryType) {
+          const { data, error: verifyError } = await supabase.auth.verifyOtp({
+            token_hash: queryTokenHash,
+            type: recoveryType,
+          });
+          if (verifyError) throw verifyError;
+          if (data.session) {
+            markReady();
+            return;
+          }
+        }
+
+        if (hashAccessToken && hashRefreshToken) {
+          const { data, error: setSessionError } = await supabase.auth.setSession({
+            access_token: hashAccessToken,
+            refresh_token: hashRefreshToken,
+          });
+          if (setSessionError) throw setSessionError;
+          if (data.session) {
+            markReady();
+            return;
+          }
+        }
+
+        const { data: { session }, error: getSessionError } = await supabase.auth.getSession();
+        if (getSessionError) throw getSessionError;
+        if (session) {
+          markReady();
+          return;
+        }
+
+        markInvalid();
+      } catch (err: any) {
+        console.error('[ResetPasswordPage] Failed to validate recovery link:', err);
+        markInvalid(err.message || 'Link reset password tidak valid atau sudah kedaluwarsa.');
+      }
+    };
+
+    init();
 
     return () => {
+      cancelled = true;
       subscription.unsubscribe();
-      clearTimeout(timeout);
     };
-  }, [supabase]);
+  }, [searchParams, supabase]);
+
+  useEffect(() => {
+    if (!success) return;
+
+    const timeout = window.setTimeout(() => {
+      router.push('/dashboard');
+      router.refresh();
+    }, 2000);
+
+    return () => window.clearTimeout(timeout);
+  }, [router, success]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,12 +185,6 @@ export default function ResetPasswordPage() {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
       setSuccess(true);
-
-      // Redirect to dashboard after 2 seconds
-      setTimeout(() => {
-        router.push('/dashboard');
-        router.refresh();
-      }, 2000);
     } catch (err: any) {
       setError(err.message || 'Gagal mengubah password');
     } finally {
@@ -130,7 +242,7 @@ export default function ResetPasswordPage() {
               background: '#7f1d1d', color: 'var(--red)', fontSize: 14,
               lineHeight: 1.5, marginBottom: 24,
             }}>
-              Link reset password tidak valid atau sudah kedaluwarsa. Silakan minta link baru.
+              {error || 'Link reset/set password tidak valid atau sudah kedaluwarsa. Silakan minta link baru.'}
             </div>
             <a href="/forgot-password" style={{
               display: 'block', textAlign: 'center',

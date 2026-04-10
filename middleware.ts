@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({ request: { headers: request.headers } });
+  const pathname = request.nextUrl.pathname;
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -35,12 +36,12 @@ export async function middleware(request: NextRequest) {
   }
 
   // Redirect to login if not authenticated and trying to access dashboard
-  if (!user && request.nextUrl.pathname.startsWith('/dashboard')) {
+  if (!user && pathname.startsWith('/dashboard')) {
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  // Redirect to dashboard if authenticated and on login page
-  if (user && request.nextUrl.pathname === '/') {
+  // Logged-in users should not land back on public auth entry points.
+  if (user && ['/', '/register', '/forgot-password'].includes(pathname)) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
 

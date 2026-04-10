@@ -22,8 +22,10 @@ export default function RegisterPage() {
     setLoading(true);
     setError('');
 
+    const normalizedEmail = email.trim().toLowerCase();
+
     // Validate domain
-    const domain = email.split('@')[1]?.toLowerCase();
+    const domain = normalizedEmail.split('@')[1]?.toLowerCase();
     if (!ALLOWED_DOMAINS.includes(domain)) {
       setError('Hanya email @roove.co.id yang dapat mendaftar.');
       setLoading(false);
@@ -45,7 +47,7 @@ export default function RegisterPage() {
 
     try {
       const { error: signUpError } = await supabase.auth.signUp({
-        email,
+        email: normalizedEmail,
         password,
         options: {
           data: {

@@ -144,6 +144,13 @@ export interface DateRange {
   to: string;
 }
 
+export interface TimeZoneDateParts {
+  year: string;
+  month: string;
+  day: string;
+  iso: string;
+}
+
 // ============================================================
 // Formatting
 // ============================================================
@@ -168,6 +175,29 @@ export function fmtPct(n: number, decimals = 1): string {
 export function shortDate(d: string): string {
   const p = d.split('-');
   return `${parseInt(p[2])}/${parseInt(p[1])}`;
+}
+
+export function getDatePartsInTimeZone(
+  timeZone: string = 'Asia/Jakarta',
+  date: Date = new Date()
+): TimeZoneDateParts {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const year = parts.find((part) => part.type === 'year')?.value || '1970';
+  const month = parts.find((part) => part.type === 'month')?.value || '01';
+  const day = parts.find((part) => part.type === 'day')?.value || '01';
+
+  return {
+    year,
+    month,
+    day,
+    iso: `${year}-${month}-${day}`,
+  };
 }
 
 // ============================================================
@@ -301,25 +331,19 @@ export function canAccessProduct(profile: Profile, product: string): boolean {
 // Preset date ranges
 export function getPresetRanges() {
   const today = new Date();
-  const yyyy = today.getFullYear();
-  const mm = String(today.getMonth() + 1).padStart(2, '0');
-  const dd = String(today.getDate()).padStart(2, '0');
-  const todayStr = `${yyyy}-${mm}-${dd}`;
+  const { year, month, iso: todayStr } = getDatePartsInTimeZone('Asia/Jakarta', today);
 
   const d7 = new Date(today); d7.setDate(d7.getDate() - 7);
   const d30 = new Date(today); d30.setDate(d30.getDate() - 30);
   const d90 = new Date(today); d90.setDate(d90.getDate() - 90);
 
   const fmtD = (d: Date) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    return getDatePartsInTimeZone('Asia/Jakarta', d).iso;
   };
 
-  const monthStart = `${yyyy}-${mm}-01`;
+  const monthStart = `${year}-${month}-01`;
 
-  const prevMonthEnd = new Date(yyyy, today.getMonth(), 0);
+  const prevMonthEnd = new Date(Number(year), Number(month) - 1, 0);
   const prevMonthStart = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth(), 1);
 
   return [

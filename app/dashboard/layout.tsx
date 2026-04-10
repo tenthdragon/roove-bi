@@ -2,7 +2,7 @@
 // v7 - added brand-analysis tab
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSupabase } from '@/lib/supabase-browser';
 import { ALL_TABS, canAccessTab } from '@/lib/utils';
@@ -15,6 +15,54 @@ import ThemeToggle from '@/components/ThemeToggle';
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
   return seg || 'overview';
+}
+
+function getTabPath(tabId) {
+  return tabId === 'overview' ? '/dashboard' : '/dashboard/' + tabId;
+}
+
+function getOrderedAccessibleTabIds(role, permissions) {
+  const ids: string[] = [];
+
+  for (const tab of ALL_TABS) {
+    if (tab.ownerOnly && role !== 'owner') continue;
+    if (canAccessTab(role, tab.id, permissions)) ids.push(tab.id);
+    if (tab.children) {
+      for (const child of tab.children) {
+        if (canAccessTab(role, child.id, permissions)) ids.push(child.id);
+      }
+    }
+  }
+
+  return ids;
+}
+
+function buildVisibleTabs(role, permissions) {
+  return ALL_TABS.map(tab => {
+    if (tab.ownerOnly && role !== 'owner') return null;
+
+    const parentVisible = canAccessTab(role, tab.id, permissions);
+    const visibleChildren = tab.children?.filter(child => canAccessTab(role, child.id, permissions)) ?? [];
+
+    if (tab.children) {
+      if (!parentVisible && visibleChildren.length === 0) return null;
+      return { ...tab, children: visibleChildren };
+    }
+
+    if (!parentVisible) return null;
+    return tab;
+  }).filter(Boolean);
+}
+
+function findTabLabel(tabs, targetId) {
+  for (const tab of tabs) {
+    if (tab.id === targetId) return tab.label;
+    if (tab.children?.length) {
+      const childLabel = findTabLabel(tab.children, targetId);
+      if (childLabel) return childLabel;
+    }
+  }
+  return null;
 }
 
 // getAllowedTabs is now driven by role_permissions — see usePermissions() hook below
@@ -95,9 +143,13 @@ function RefreshViewsButton() {
           setSteps(s => ({ ...s, meta: 'skipped' }));
           setStepMessages(s => ({ ...s, meta: 'Tidak ada akun aktif' }));
         } else {
-          metaOk = true;
-          setSteps(s => ({ ...s, meta: data.status === 'failed' ? 'error' : 'success' }));
-          setStepMessages(s => ({ ...s, meta: `${accts} akun, ${rows} baris${data.token_warning ? ' ⚠️' : ''}` }));
+          const metaFailed = data.status === 'failed';
+          metaOk = !metaFailed;
+          setSteps(s => ({ ...s, meta: metaFailed ? 'error' : 'success' }));
+          setStepMessages(s => ({
+            ...s,
+            meta: `${accts} akun, ${rows} baris${data.status === 'partial' ? ' (partial)' : ''}${data.token_warning ? ' ⚠️' : ''}`,
+          }));
         }
       } else {
         setSteps(s => ({ ...s, meta: 'error' }));
@@ -236,6 +288,7 @@ export default function DashboardLayout({ children }) {
   const [profile, setProfile] = useState(null);
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
+  const [accessError, setAccessError] = useState('');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
@@ -249,21 +302,38 @@ export default function DashboardLayout({ children }) {
     async function load() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/'); return; }
-      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      if (data) {
-        setProfile(data);
-        if (data.role !== 'owner') {
-          const { data: perms } = await supabase
+      const { data, error: profileError } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+
+      if (profileError || !data) {
+        setAccessError('Profil dashboard tidak ditemukan atau gagal dimuat. Silakan hubungi owner.');
+        setLoading(false);
+        return;
+      }
+
+      setProfile(data);
+      if (data.role !== 'owner') {
+        const { data: perms, error: permsError } = await supabase
             .from('role_permissions')
             .select('permission_key')
             .eq('role', data.role);
-          setPermissions(new Set((perms ?? []).map((r: any) => r.permission_key)));
+
+        if (permsError) {
+          setAccessError('Permission dashboard gagal dimuat. Silakan coba lagi atau hubungi owner.');
+          setLoading(false);
+          return;
         }
+
+        setPermissions(new Set((perms ?? []).map((r: any) => r.permission_key)));
       }
       setLoading(false);
     }
     load();
-  }, []);
+  }, [router, supabase]);
+
+  const accessibleTabIds = useMemo(() => {
+    if (!profile || profile.role === 'pending') return [];
+    return getOrderedAccessibleTabIds(profile.role, permissions);
+  }, [profile, permissions]);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -283,13 +353,11 @@ export default function DashboardLayout({ children }) {
   useEffect(() => {
     if (!profile || loading) return;
     if (profile.role === 'pending' || profile.role === 'owner') return;
-    const tabKey = `tab:${currentTab}`;
-    if (!permissions.has(tabKey) && permissions.size > 0) {
-      // Redirect to first accessible tab
-      const first = Array.from(permissions).find(k => k.startsWith('tab:'));
-      if (first) router.replace('/dashboard/' + first.replace('tab:', '').replace('overview', ''));
+    if (accessibleTabIds.length === 0) return;
+    if (!accessibleTabIds.includes(currentTab)) {
+      router.replace(getTabPath(accessibleTabIds[0]));
     }
-  }, [profile, loading, currentTab, permissions]);
+  }, [profile, loading, currentTab, accessibleTabIds, router]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -297,29 +365,19 @@ export default function DashboardLayout({ children }) {
   };
 
   const navigateTo = (tabId) => {
-    router.push(tabId === 'overview' ? '/dashboard' : '/dashboard/' + tabId);
+    router.push(getTabPath(tabId));
     setMobileMenuOpen(false);
   };
 
   const goHome = () => {
     if (profile?.role === 'owner') { navigateTo('overview'); return; }
-    const first = Array.from(permissions).find(k => k.startsWith('tab:'));
-    navigateTo(first ? first.replace('tab:', '') : 'overview');
+    navigateTo(accessibleTabIds[0] || 'overview');
   };
 
   const isPending = profile?.role === 'pending';
 
-  const visibleTabs = profile
-    ? ALL_TABS.map(t => {
-        if (isPending) return null;
-        if (t.ownerOnly && profile.role !== 'owner') return null;
-        if (!canAccessTab(profile.role, t.id, permissions)) return null;
-        if (t.children) {
-          const visibleChildren = t.children.filter(c => canAccessTab(profile.role, c.id, permissions));
-          return { ...t, children: visibleChildren };
-        }
-        return t;
-      }).filter(Boolean)
+  const visibleTabs = profile && !isPending
+    ? buildVisibleTabs(profile.role, permissions)
     : [];
 
   const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings'].includes(currentTab);
@@ -328,6 +386,23 @@ export default function DashboardLayout({ children }) {
     return (
       <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)' }}>
         <div className="spinner" style={{ width:32, height:32, border:'3px solid var(--border)', borderTop:'3px solid var(--accent)', borderRadius:'50%' }} />
+      </div>
+    );
+  }
+
+  if (accessError || (!isPending && profile?.role !== 'owner' && accessibleTabIds.length === 0)) {
+    return (
+      <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
+        <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16, padding:40, textAlign:'center', maxWidth:460 }}>
+          <div style={{ fontSize:48, marginBottom:16 }}>🔒</div>
+          <h2 style={{ margin:'0 0 8px', fontSize:20, fontWeight:700 }}>Akses Dashboard Tidak Tersedia</h2>
+          <p style={{ margin:'0 0 24px', color:'var(--dim)', fontSize:14, lineHeight:1.6 }}>
+            {accessError || 'Akun ini belum memiliki permission tab dashboard. Silakan hubungi owner untuk mengaktifkan akses.'}
+          </p>
+          <button onClick={handleLogout} style={{ padding:'10px 24px', borderRadius:8, border:'1px solid var(--border)', background:'transparent', color:'var(--dim)', fontSize:13, cursor:'pointer', fontWeight:600 }}>
+            Logout
+          </button>
+        </div>
       </div>
     );
   }
@@ -357,8 +432,12 @@ export default function DashboardLayout({ children }) {
     // On mobile, flatten children into top-level items (no submenus)
     const flatTabs = isMobile
       ? visibleTabs.flatMap(t => {
+          const parentAccessible = canAccessTab(profile.role, t.id, permissions);
           const parent = { ...t, children: undefined };
-          return t.children?.length ? [parent, ...t.children.map(c => ({ ...c, group: t.group }))] : [parent];
+          const children = t.children?.map(c => ({ ...c, group: t.group })) ?? [];
+          return t.children?.length
+            ? (parentAccessible ? [parent, ...children] : children)
+            : [parent];
         })
       : visibleTabs;
 
@@ -376,6 +455,7 @@ export default function DashboardLayout({ children }) {
         <nav style={{ flex:1, padding:'8px 8px', display:'flex', flexDirection:'column', gap:2 }}>
           {tabsWithGroupInfo.map((t, idx) => {
             const hasChildren = t.children && t.children.length > 0;
+            const parentAccessible = canAccessTab(profile.role, t.id, permissions);
             const active = currentTab === t.id;
             const childActive = hasChildren && t.children.some(c => currentTab === c.id);
             const isExpanded = expandedMenus[t.id] || childActive;
@@ -398,12 +478,30 @@ export default function DashboardLayout({ children }) {
                 {t.showSpacer && !collapsed && <div style={{ height:16 }} />}
                 <button
                   onClick={() => {
-                    if (hasChildren && !collapsed) {
-                      navigateTo(t.id);
-                      if (!isMobile) {
-                        setExpandedMenus(prev => ({ ...prev, [t.id]: !prev[t.id] && !childActive }));
+                    if (hasChildren) {
+                      if (collapsed && !isMobile && !parentAccessible) {
+                        setSidebarCollapsed(false);
+                        setExpandedMenus(prev => ({ ...prev, [t.id]: true }));
+                        return;
                       }
-                    } else {
+
+                      if (!collapsed) {
+                        if (parentAccessible) {
+                          navigateTo(t.id);
+                        }
+                        if (!isMobile) {
+                          setExpandedMenus(prev => ({ ...prev, [t.id]: !prev[t.id] && !childActive }));
+                        }
+                        return;
+                      }
+
+                      if (parentAccessible) {
+                        navigateTo(t.id);
+                      }
+                      return;
+                    }
+
+                    if (parentAccessible) {
                       navigateTo(t.id);
                     }
                   }}
@@ -669,7 +767,7 @@ export default function DashboardLayout({ children }) {
                 </svg>
               </button>
               <div style={{ fontSize:14, fontWeight:600, color:'var(--text-secondary)' }}>
-                {visibleTabs.find(t => t.id === currentTab)?.label || 'Dashboard'}
+                {findTabLabel(visibleTabs, currentTab) || 'Dashboard'}
               </div>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>

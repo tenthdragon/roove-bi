@@ -16,10 +16,12 @@ export default function ForgotPasswordPage() {
     setError('');
 
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      const normalizedEmail = email.trim().toLowerCase();
+      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
         redirectTo: `${window.location.origin}/reset-password`,
       });
       if (error) throw error;
+      setEmail(normalizedEmail);
       setSent(true);
     } catch (err: any) {
       setError(err.message || 'Gagal mengirim email reset password');

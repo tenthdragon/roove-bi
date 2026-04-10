@@ -76,7 +76,7 @@ const INSIGHT_BG: Record<InsightType, string> = {
 export default function PulsePage() {
   const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
-  const { isActiveBrand } = useActiveBrands();
+  const { error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
   // ── State: client-side data ──
   const [channelData, setChannelData] = useState<any[]>([]);
@@ -137,7 +137,7 @@ export default function PulsePage() {
     supabase.from('monthly_overhead').select('year_month, amount')
       .gte('year_month', fromYM).lte('year_month', toYM)
       .then(({ data }) => setOverheadData(data || []));
-  }, [dateRange, supabase]);
+  }, [dateRange, supabase, activeBrandsError, isActiveBrand]);
 
   // ── Fetch server action data ──
   useEffect(() => {
@@ -268,7 +268,7 @@ export default function PulsePage() {
     const blendedRoas = totalAds > 0 ? totalRev / totalAds : 0;
     const mktRatio = totalRev > 0 ? (totalAds / totalRev) * 100 : 0;
     return { totalAds, totalRev, blendedRoas, mktRatio };
-  }, [adsData, brandMapping, profMatrix.totalSales]);
+  }, [adsData, brandMapping, profMatrix.totalSales, activeBrandsError, isActiveBrand]);
 
   // ══════════════════════════════════════════════════════════════
   // SECTION 2: Unit Economics (LTV:CAC per Channel)

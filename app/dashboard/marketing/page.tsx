@@ -101,11 +101,11 @@ export default function MarketingPage() {
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [dailyAdSpendOpen, setDailyAdSpendOpen] = useState(false);
   const [prevRangeAdsData, setPrevRangeAdsData] = useState<any[]>([]);
-  const { activeBrands, isActiveBrand } = useActiveBrands();
+  const { activeBrands, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
   const prodData = useMemo(
     () => rawProdData.filter(d => isActiveBrand(d.product)),
-    [rawProdData, activeBrands]
+    [rawProdData, activeBrands, activeBrandsError, isActiveBrand]
   );
 
   function getComparisonRanges(from: string, to: string) {

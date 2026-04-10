@@ -423,7 +423,9 @@ export default function AdminPage() {
   };
 
   const handleInvite = async () => {
-    if (!inviteEmail || !inviteEmail.includes('@')) {
+    const normalizedInviteEmail = inviteEmail.trim().toLowerCase();
+
+    if (!normalizedInviteEmail || !normalizedInviteEmail.includes('@')) {
       setInviteMsg({ type: 'error', text: 'Masukkan email yang valid' });
       return;
     }
@@ -433,13 +435,19 @@ export default function AdminPage() {
       const res = await fetch('/api/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+        body: JSON.stringify({ email: normalizedInviteEmail, role: inviteRole }),
       });
       const data = await res.json();
       if (!res.ok) {
         setInviteMsg({ type: 'error', text: data.error || 'Invite gagal' });
       } else {
-        setInviteMsg({ type: 'success', text: data.message });
+        setInviteMsg({
+          type: data.partial ? 'warning' : 'success',
+          text: data.message,
+          link: data.recoveryLink || null,
+          warnings: Array.isArray(data.warnings) ? data.warnings : [],
+          copyStatus: null,
+        });
         setInviteEmail('');
         await refreshUsers();
       }
@@ -1180,7 +1188,7 @@ export default function AdminPage() {
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
             <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Invite User Baru</div>
             <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
-              Masukkan email dan pilih role. User akan menerima email untuk set password.
+              Masukkan email dan pilih role. Setelah user dibuat, link set password akan disiapkan untuk dibagikan.
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <div style={{ flex: '1 1 200px' }}>
@@ -1219,10 +1227,66 @@ export default function AdminPage() {
             {inviteMsg && (
               <div style={{
                 marginTop: 10, padding: 10, borderRadius: 6, fontSize: 12,
-                background: inviteMsg.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
-                color: inviteMsg.type === 'success' ? 'var(--green)' : 'var(--red)'
+                background: inviteMsg.type === 'success'
+                  ? 'var(--badge-green-bg)'
+                  : inviteMsg.type === 'warning'
+                    ? 'var(--badge-yellow-bg)'
+                    : 'var(--badge-red-bg)',
+                color: inviteMsg.type === 'success'
+                  ? 'var(--green)'
+                  : inviteMsg.type === 'warning'
+                    ? 'var(--badge-yellow-text)'
+                    : 'var(--red)'
               }}>
-                {inviteMsg.type === 'success' ? '✅' : '❌'} {inviteMsg.text}
+                <div>
+                  {inviteMsg.type === 'success' ? '✅' : inviteMsg.type === 'warning' ? '⚠️' : '❌'} {inviteMsg.text}
+                </div>
+                {inviteMsg.warnings?.length > 0 && (
+                  <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
+                    {inviteMsg.warnings.map((warning, idx) => (
+                      <div key={idx}>- {warning}</div>
+                    ))}
+                  </div>
+                )}
+                {inviteMsg.link && (
+                  <div style={{
+                    marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)',
+                    display: 'grid', gap: 8
+                  }}>
+                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>Link set password</div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      <input
+                        readOnly
+                        value={inviteMsg.link}
+                        style={{
+                          flex: '1 1 360px', minWidth: 0, padding: '8px 10px',
+                          borderRadius: 6, border: '1px solid var(--border)',
+                          background: 'var(--bg)', color: 'var(--text)', fontSize: 11
+                        }}
+                      />
+                      <button
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(inviteMsg.link);
+                            setInviteMsg(prev => prev ? { ...prev, copyStatus: 'Link berhasil dicopy.' } : prev);
+                          } catch {
+                            setInviteMsg(prev => prev ? { ...prev, copyStatus: 'Gagal copy otomatis. Silakan copy manual.' } : prev);
+                          }
+                        }}
+                        style={{
+                          padding: '8px 12px', borderRadius: 6, border: 'none',
+                          cursor: 'pointer', background: 'var(--accent)', color: '#fff',
+                          fontSize: 12, fontWeight: 600
+                        }}
+                      >
+                        Copy Link
+                      </button>
+                    </div>
+                    {inviteMsg.copyStatus && (
+                      <div style={{ fontSize: 11, color: 'var(--dim)' }}>{inviteMsg.copyStatus}</div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
