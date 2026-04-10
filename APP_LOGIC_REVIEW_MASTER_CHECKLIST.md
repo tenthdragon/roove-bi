@@ -884,7 +884,7 @@ Status legend:
 | Shared shell/auth/cache/access | `app/dashboard/layout.tsx`, `middleware.ts`, `lib/*Context*`, `lib/dashboard-access.ts`, `lib/dashboard-cache.ts` | DN | Direview dan dipatch lokal: fail-open authz/profile/permission, child-tab visibility, refresh meta false-success, date-range WIB/latest-data, active-brand fail-open. Runtime verification masih disarankan |
 | Public/auth routes | `app/page.tsx`, `app/register/page.tsx`, `app/forgot-password/page.tsx`, `app/reset-password/page.tsx` | DN | Direview dan dipatch lokal: public auth redirect saat session aktif, email normalization, reset-password recovery handling untuk `code`/`token_hash`/hash session, invite flow/admin UI tidak lagi mengklaim email terkirim padahal hanya generate link. Runtime verification bersama user disarankan |
 | Overview | `app/dashboard/page.tsx`, `lib/overview-actions.ts`, `components/CashFlowSection.tsx` | DN | Direview dan dipatch lokal: previous-range comparison aman untuk month-end, previous-overhead mengikuti seluruh comparison window + proration harian, cash-flow widget dibatasi ke range 1 bulan dari tanggal 1, dan error brand-filter tidak lagi tersamar sebagai empty state. Runtime verification disarankan |
-| Marketing | `app/dashboard/marketing/page.tsx`, `lib/marketing-actions.ts` | DN | Direview dan dipatch lokal: comparison range month-end/custom multi-month kini pakai previous-range yang ter-clamp aman, baseline delta/ROAS previous period memakai window pembanding yang setara, ads/channel metrics konsisten mengikuti active-brand filter, active-brand lookup failure kini tampil sebagai error state, dan brand-centric ads breakdown kini memakai `ads_store_brand_mapping` agar entity/store code seperti `RTI` tidak tampil sebagai brand. Runtime verification disarankan |
+| Marketing | `app/dashboard/marketing/page.tsx`, `lib/marketing-actions.ts` | DN | Direview dan dipatch lokal: comparison range month-end/custom multi-month kini pakai previous-range yang ter-clamp aman, baseline delta/ROAS previous period memakai window pembanding yang setara, active-brand lookup failure kini tampil sebagai error state, dan ads breakdown kini memakai hybrid brand resolution: baris yang berhasil dimap tetap masuk chart/matrix per-brand, sementara spend yang belum termap tetap masuk total Marketing/traffic-source breakdown dengan warning eksplisit agar source seperti TikTok Ads/WABA MM Cost tidak hilang diam-diam. Runtime verification disarankan |
 | Channels | `app/dashboard/channels/page.tsx`, `lib/channels-actions.ts`, SLA/shipment components | NS |  |
 | WABA Management | `app/dashboard/waba-management/page.tsx`, WABA API routes | NS |  |
 | Financial Report redirect | `app/dashboard/financial-report/page.tsx` | NS |  |
@@ -1014,7 +1014,7 @@ Status legend:
   - runtime verification pending
 - Next step:
   - lanjut review area `Channels`
-  - verifikasi manual untuk range partial-month, range lintas bulan, brand nonaktif, simulasi error query `brands`, dan pastikan matrix/filter brand tidak lagi menampilkan entity code seperti `RTI`
+  - verifikasi manual untuk range partial-month, range lintas bulan, brand nonaktif, simulasi error query `brands`, pastikan matrix/filter brand tidak lagi menampilkan entity code seperti `RTI`, dan pastikan spend unmapped tetap muncul di total Marketing dengan warning eksplisit
 
 Saat mereview satu area, catat minimal format ini:
 
