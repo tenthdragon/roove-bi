@@ -1,7 +1,7 @@
 // components/MetaManager.tsx
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 
 interface MetaAccount {
@@ -46,7 +46,12 @@ interface WabaAccount {
   is_active: boolean;
 }
 
-// Store mapping per selected account for bulk add
+interface AdsStoreBrandMapping {
+  store_pattern: string;
+  brand: string;
+}
+
+// Brand mapping per selected account for bulk add
 interface SelectedAccountMapping {
   account_id: string;
   name: string;
@@ -99,7 +104,7 @@ export default function MetaManager() {
   const [wabaEditForm, setWabaEditForm] = useState({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
 
   // Dropdown options loaded from DB
-  const [storeOptions, setStoreOptions] = useState<string[]>([]);
+  const [brandMappings, setBrandMappings] = useState<AdsStoreBrandMapping[]>([]);
   const [sourceOptions] = useState<string[]>([
     'Facebook Ads', 'Facebook CPAS', 'Google Ads', 'TikTok Ads', 'Shopee', 'Lazada',
     'BliBli', 'Tokopedia', 'SnackVideo Ads', 'Organik', 'Reseller',
@@ -120,18 +125,46 @@ export default function MetaManager() {
     default_source: 'Facebook Ads', default_advertiser: 'Meta Team',
   });
 
+  const brandOptions = useMemo<{ value: string; label: string }[]>(() => {
+    const brandCounts: Record<string, number> = {};
+    brandMappings.forEach(mapping => {
+      const brand = mapping.brand?.trim() || mapping.store_pattern?.trim() || '';
+      if (!brand) return;
+      brandCounts[brand] = (brandCounts[brand] || 0) + 1;
+    });
+
+    return brandMappings
+      .map(mapping => {
+        const value = mapping.store_pattern?.trim() || '';
+        const brand = mapping.brand?.trim() || value;
+        if (!value) return null;
+        const needsDisambiguation = (brandCounts[brand] || 0) > 1 && value.toLowerCase() !== brand.toLowerCase();
+        return {
+          value,
+          label: needsDisambiguation ? `${brand} (${value})` : brand,
+        };
+      })
+      .filter((option): option is { value: string; label: string } => Boolean(option))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [brandMappings]);
+
+  const getBrandDisplay = useCallback((storeValue: string) => {
+    if (!storeValue) return '—';
+    return brandOptions.find(option => option.value === storeValue)?.label || storeValue;
+  }, [brandOptions]);
+
   const loadData = useCallback(async () => {
     try {
       const [{ data: accs }, { data: logs }, { data: stores }, { data: wAbas }, { data: wLogs }] = await Promise.all([
         supabase.from('meta_ad_accounts').select('*').order('account_name'),
         supabase.from('meta_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
-        supabase.from('ads_store_brand_mapping').select('store_pattern').order('store_pattern'),
+        supabase.from('ads_store_brand_mapping').select('store_pattern, brand').order('brand').order('store_pattern'),
         supabase.from('waba_accounts').select('*').order('waba_name'),
         supabase.from('waba_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
       ]);
       setAccounts(accs || []);
       setRecentLogs(logs || []);
-      setStoreOptions((stores || []).map((s: any) => s.store_pattern));
+      setBrandMappings(stores || []);
       setWabaAccounts(wAbas || []);
       setWabaLogs(wLogs || []);
     } catch (err: any) {
@@ -182,7 +215,7 @@ export default function MetaManager() {
     });
   };
 
-  // ── Update store mapping for a selected account ──
+  // ── Update brand mapping for a selected account ──
   const updateMapping = (accountId: string, field: string, value: string) => {
     setSelectedMappings(prev => {
       const next = new Map(prev);
@@ -198,13 +231,13 @@ export default function MetaManager() {
   const handleBulkSave = async () => {
     const toSave = Array.from(selectedMappings.values()).filter(m => m.store.trim());
     if (toSave.length === 0) {
-      setMessage({ type: 'error', text: 'Pilih minimal 1 akun dan isi Store mapping-nya' });
+      setMessage({ type: 'error', text: 'Pilih minimal 1 akun dan isi Brand mapping-nya' });
       return;
     }
 
     const missing = Array.from(selectedMappings.values()).filter(m => !m.store.trim());
     if (missing.length > 0) {
-      setMessage({ type: 'error', text: `${missing.length} akun belum diisi Store mapping-nya` });
+      setMessage({ type: 'error', text: `${missing.length} akun belum diisi Brand mapping-nya` });
       return;
     }
 
@@ -248,7 +281,7 @@ export default function MetaManager() {
 
   const handleEditSave = async () => {
     if (!editForm.store.trim()) {
-      setMessage({ type: 'error', text: 'Store wajib diisi' });
+      setMessage({ type: 'error', text: 'Brand wajib diisi' });
       return;
     }
     try {
@@ -307,7 +340,7 @@ export default function MetaManager() {
   // ── WABA handlers ──
   const handleWabaSave = async () => {
     if (!wabaForm.waba_id.trim() || !wabaForm.waba_name.trim() || !wabaForm.store.trim()) {
-      setWabaMessage({ type: 'error', text: 'WABA ID, Nama, dan Store wajib diisi' });
+      setWabaMessage({ type: 'error', text: 'WABA ID, Nama, dan Brand wajib diisi' });
       return;
     }
     setSavingWaba(true);
@@ -343,7 +376,7 @@ export default function MetaManager() {
 
   const handleWabaEditSave = async () => {
     if (!wabaEditForm.store.trim()) {
-      setWabaMessage({ type: 'error', text: 'Store wajib diisi' });
+      setWabaMessage({ type: 'error', text: 'Brand wajib diisi' });
       return;
     }
     try {
@@ -582,16 +615,16 @@ export default function MetaManager() {
                         display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8,
                       }}>
                         <div>
-                          <label style={labelStyle}>Store (wajib)</label>
+                          <label style={labelStyle}>Brand (wajib)</label>
                           <select
                             value={mapping.store}
                             onChange={e => updateMapping(acc.account_id, 'store', e.target.value)}
                             style={{ ...inputStyle, padding: '6px 10px', fontSize: 12 }}
                             onClick={e => e.stopPropagation()}
                           >
-                            <option value="">— Pilih Store —</option>
-                            {storeOptions.map(s => (
-                              <option key={s} value={s}>{s}</option>
+                            <option value="">— Pilih Brand —</option>
+                            {brandOptions.map(option => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
                           </select>
                         </div>
@@ -662,7 +695,7 @@ export default function MetaManager() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
               <thead>
                 <tr style={{ background: 'var(--bg)' }}>
-                  {['Status', 'Account ID', 'Nama Akun', 'Store', 'Source', 'Advertiser', 'Aksi'].map(h => (
+                  {['Status', 'Account ID', 'Nama Akun', 'Brand', 'Source', 'Advertiser', 'Aksi'].map(h => (
                     <th key={h} style={{
                       padding: '10px 12px', textAlign: 'left', color: 'var(--dim)',
                       fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
@@ -687,9 +720,9 @@ export default function MetaManager() {
                         <td style={{ padding: '8px 6px' }}>
                           <select value={editForm.store} onChange={e => setEditForm(f => ({ ...f, store: e.target.value }))}
                             style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}>
-                            <option value="">— Pilih —</option>
-                            {storeOptions.map(s => (
-                              <option key={s} value={s}>{s}</option>
+                            <option value="">— Pilih Brand —</option>
+                            {brandOptions.map(option => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
                           </select>
                         </td>
@@ -734,7 +767,7 @@ export default function MetaManager() {
                           {acc.account_id}
                         </td>
                         <td style={{ padding: '10px 12px', color: 'var(--text)', fontWeight: 600 }}>{acc.account_name}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.store}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{getBrandDisplay(acc.store)}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_source}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_advertiser}</td>
                         <td style={{ padding: '10px 12px' }}>
@@ -926,15 +959,15 @@ export default function MetaManager() {
                 />
               </div>
               <div>
-                <label style={labelStyle}>Store (wajib)</label>
+                <label style={labelStyle}>Brand (wajib)</label>
                 <select
                   value={wabaForm.store}
                   onChange={e => setWabaForm(f => ({ ...f, store: e.target.value }))}
                   style={inputStyle}
                 >
-                  <option value="">— Pilih Store —</option>
-                  {storeOptions.map(s => (
-                    <option key={s} value={s}>{s}</option>
+                  <option value="">— Pilih Brand —</option>
+                  {brandOptions.map(option => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
                 </select>
               </div>
@@ -981,7 +1014,7 @@ export default function MetaManager() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 600 }}>
               <thead>
                 <tr style={{ background: 'var(--bg)' }}>
-                  {['Status', 'WABA ID', 'Nama', 'Store', 'Source', 'Advertiser', 'Aksi'].map(h => (
+                  {['Status', 'WABA ID', 'Nama', 'Brand', 'Source', 'Advertiser', 'Aksi'].map(h => (
                     <th key={h} style={{
                       padding: '10px 12px', textAlign: 'left', color: 'var(--dim)',
                       fontWeight: 600, fontSize: 10, textTransform: 'uppercase',
@@ -1005,9 +1038,9 @@ export default function MetaManager() {
                         <td style={{ padding: '8px 6px' }}>
                           <select value={wabaEditForm.store} onChange={e => setWabaEditForm(f => ({ ...f, store: e.target.value }))}
                             style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}>
-                            <option value="">— Pilih —</option>
-                            {storeOptions.map(s => (
-                              <option key={s} value={s}>{s}</option>
+                            <option value="">— Pilih Brand —</option>
+                            {brandOptions.map(option => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
                           </select>
                         </td>
@@ -1047,7 +1080,7 @@ export default function MetaManager() {
                           {acc.waba_id}
                         </td>
                         <td style={{ padding: '10px 12px', color: 'var(--text)', fontWeight: 600 }}>{acc.waba_name}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.store}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{getBrandDisplay(acc.store)}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_source}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_advertiser}</td>
                         <td style={{ padding: '10px 12px' }}>

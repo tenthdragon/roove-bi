@@ -56,6 +56,7 @@ export async function getMarketingPageData({
     prodRes,
     adsRes,
     chRes,
+    mappingRes,
     prevRangeAdsRes,
     prevRangeChRes,
   ] = await Promise.all([
@@ -71,6 +72,8 @@ export async function getMarketingPageData({
       .select('date, channel, product, net_sales, mp_admin_cost')
       .gte('date', from)
       .lte('date', to),
+    svc.from('ads_store_brand_mapping')
+      .select('store_pattern, brand'),
     svc.from('daily_ads_spend')
       .select('date, source, spent, store')
       .gte('date', prevRangeFrom)
@@ -85,6 +88,7 @@ export async function getMarketingPageData({
     prod: unwrap(prodRes, 'Gagal memuat revenue marketing'),
     ads: unwrap(adsRes, 'Gagal memuat marketing fee'),
     channel: unwrap(chRes, 'Gagal memuat breakdown channel'),
+    brandMapping: unwrap(mappingRes, 'Gagal memuat mapping brand iklan'),
     prevRangeAds: unwrap(prevRangeAdsRes, 'Gagal memuat perbandingan ad spend'),
     prevRangeChannel: unwrap(prevRangeChRes, 'Gagal memuat perbandingan channel'),
   };

@@ -13,13 +13,6 @@ import {
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { buildBrandColorMap } from '@/lib/utils';
 
-// ── Normalize store name ──
-function normStore(s: string): string {
-  if (!s) return 'Other';
-  if (s === 'Purvu Store') return 'Purvu';
-  return s;
-}
-
 function formatIsoDate(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
 }
@@ -112,6 +105,7 @@ export default function MarketingPage() {
   const [rawProdData, setRawProdData] = useState<any[]>([]);
   const [adsData, setAdsData] = useState<any[]>([]);
   const [channelData, setChannelData] = useState<any[]>([]);
+  const [brandMapping, setBrandMapping] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [brandFilter, setBrandFilter] = useState('all');
@@ -120,25 +114,47 @@ export default function MarketingPage() {
   const [prevRangeChannelData, setPrevRangeChannelData] = useState<any[]>([]);
   const { activeBrands, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
+  const storeBrandMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    brandMapping.forEach(row => {
+      if (!row.store_pattern || !row.brand) return;
+      map[row.store_pattern.toLowerCase()] = row.brand;
+    });
+    return map;
+  }, [brandMapping]);
+
+  const getAdBrand = (store: string) => {
+    if (!store) return null;
+    return storeBrandMap[store.toLowerCase()] || null;
+  };
+
   const prodData = useMemo(
     () => rawProdData.filter(d => isActiveBrand(d.product)),
     [rawProdData, activeBrands, activeBrandsError, isActiveBrand]
   );
 
-  const filteredAdsData = useMemo(
-    () => adsData.filter(d => isActiveBrand(normStore(d.store))),
-    [adsData, activeBrands, activeBrandsError, isActiveBrand]
-  );
+  const filteredAdsData = useMemo(() => {
+    return adsData
+      .map(d => {
+        const brand = getAdBrand(d.store);
+        return brand ? { ...d, brand } : null;
+      })
+      .filter(d => d && isActiveBrand(d.brand));
+  }, [adsData, storeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
 
   const filteredChannelData = useMemo(
     () => channelData.filter(d => isActiveBrand(d.product)),
     [channelData, activeBrands, activeBrandsError, isActiveBrand]
   );
 
-  const filteredPrevRangeAdsData = useMemo(
-    () => prevRangeAdsData.filter(d => isActiveBrand(normStore(d.store))),
-    [prevRangeAdsData, activeBrands, activeBrandsError, isActiveBrand]
-  );
+  const filteredPrevRangeAdsData = useMemo(() => {
+    return prevRangeAdsData
+      .map(d => {
+        const brand = getAdBrand(d.store);
+        return brand ? { ...d, brand } : null;
+      })
+      .filter(d => d && isActiveBrand(d.brand));
+  }, [prevRangeAdsData, storeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
 
   const filteredPrevRangeChannelData = useMemo(
     () => prevRangeChannelData.filter(d => isActiveBrand(d.product)),
@@ -161,13 +177,15 @@ export default function MarketingPage() {
     const cachedProd = getCached<any[]>('daily_product_summary_mkt', from, to);
     const cachedAds = getCached<any[]>('daily_ads_spend', from, to);
     const cachedCh = getCached<any[]>('daily_channel_data_mkt', from, to);
+    const cachedBrandMapping = getCached<any[]>('ads_store_brand_mapping_mkt', 'all', 'all');
     const cachedPrevRangeAds = getCached<any[]>('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo);
     const cachedPrevRangeCh = getCached<any[]>('daily_channel_data_prev_range', prevRangeFrom, prevRangeTo);
 
-    if (cachedProd && cachedAds && cachedCh && cachedPrevRangeAds && cachedPrevRangeCh) {
+    if (cachedProd && cachedAds && cachedCh && cachedBrandMapping && cachedPrevRangeAds && cachedPrevRangeCh) {
       setRawProdData(cachedProd);
       setAdsData(cachedAds);
       setChannelData(cachedCh);
+      setBrandMapping(cachedBrandMapping);
       setPrevRangeAdsData(cachedPrevRangeAds);
       setPrevRangeChannelData(cachedPrevRangeCh);
       setError('');
@@ -191,12 +209,14 @@ export default function MarketingPage() {
         setCache('daily_product_summary_mkt', from, to, data.prod);
         setCache('daily_ads_spend', from, to, data.ads);
         setCache('daily_channel_data_mkt', from, to, data.channel);
+        setCache('ads_store_brand_mapping_mkt', 'all', 'all', data.brandMapping);
         setCache('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo, data.prevRangeAds);
         setCache('daily_channel_data_prev_range', prevRangeFrom, prevRangeTo, data.prevRangeChannel);
 
         setRawProdData(data.prod);
         setAdsData(data.ads);
         setChannelData(data.channel);
+        setBrandMapping(data.brandMapping);
         setPrevRangeAdsData(data.prevRangeAds);
         setPrevRangeChannelData(data.prevRangeChannel);
         setError('');
@@ -266,7 +286,7 @@ export default function MarketingPage() {
     const brands = new Set<string>();
     filteredAdsData.forEach(d => {
       const date = new Date(d.date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
-      const brand = normStore(d.store);
+      const brand = d.brand;
       brands.add(brand);
       if (!byDate[date]) byDate[date] = {};
       byDate[date][brand] = (byDate[date][brand] || 0) + Math.abs(Number(d.spent || 0));
@@ -282,7 +302,7 @@ export default function MarketingPage() {
   // ── Unique brands for filter ──
   const uniqueBrands = useMemo(() => {
     const set = new Set<string>();
-    filteredAdsData.forEach(d => { const brand = normStore(d.store); if (brand && brand !== 'Other') set.add(brand); });
+    filteredAdsData.forEach(d => { if (d.brand) set.add(d.brand); });
     return Array.from(set).sort();
   }, [filteredAdsData]);
 
@@ -365,7 +385,7 @@ const BRAND_COLORS = useMemo(() => {
   // PLATFORM BREAKDOWN — exclusive Channel ROAS + sub-source breakdown
   // ══════════════════════════════════════════════════════════════════════
   const platformBreakdown = useMemo(() => {
-    const filteredAds = brandFilter === 'all' ? filteredAdsData : filteredAdsData.filter(d => normStore(d.store) === brandFilter);
+    const filteredAds = brandFilter === 'all' ? filteredAdsData : filteredAdsData.filter(d => d.brand === brandFilter);
 
     const byPlatform: Record<string, { total: number; subs: Record<string, number> }> = {};
     filteredAds.forEach(d => {
@@ -454,7 +474,7 @@ const BRAND_COLORS = useMemo(() => {
 
     const filteredPrevAds = brandFilter === 'all'
       ? filteredPrevRangeAdsData
-      : filteredPrevRangeAdsData.filter(d => normStore(d.store) === brandFilter);
+      : filteredPrevRangeAdsData.filter(d => d.brand === brandFilter);
 
     const byPlatform: Record<string, number> = {};
     filteredPrevAds.forEach(d => {
@@ -517,7 +537,7 @@ const BRAND_COLORS = useMemo(() => {
     const matrix: Record<string, Record<string, number>> = {};
     const allPlatforms = new Set<string>();
     filteredAdsData.forEach(d => {
-      const brand = normStore(d.store);
+      const brand = d.brand;
       const platform = normPlatform(d.source);
       allPlatforms.add(platform);
       if (!matrix[brand]) matrix[brand] = {};
