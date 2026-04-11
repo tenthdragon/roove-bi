@@ -3,11 +3,11 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
-import { fmtCompact, fmtRupiah, fmtPct, CHANNEL_COLORS } from '@/lib/utils';
+import { fmtCompact, fmtPct, CHANNEL_COLORS } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
-import { fetchCustomerKPIs, fetchChannelLtv90d, fetchChannelCac } from '@/lib/scalev-actions';
+import { fetchCustomerKPIs, fetchChannelLtv90d, fetchMonthlyCac } from '@/lib/scalev-actions';
 import { getStockBalance } from '@/lib/warehouse-ledger-actions';
 
 // ── Margin color helpers (same as overview) ──
@@ -73,10 +73,28 @@ const INSIGHT_BG: Record<InsightType, string> = {
   opportunity: 'var(--badge-green-bg)',
 };
 
+function formatIsoDate(year: number, month: number, day: number) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function shiftIsoDateByMonthsClamped(value: string, deltaMonths: number) {
+  const [year, month, day] = value.split('-').map(Number);
+  const totalMonths = year * 12 + (month - 1) + deltaMonths;
+  const targetYear = Math.floor(totalMonths / 12);
+  const targetMonthIndex = ((totalMonths % 12) + 12) % 12;
+  const targetMonth = targetMonthIndex + 1;
+  const targetDay = Math.min(day, getDaysInMonth(targetYear, targetMonth));
+  return formatIsoDate(targetYear, targetMonth, targetDay);
+}
+
 export default function PulsePage() {
   const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
-  const { error: activeBrandsError, isActiveBrand } = useActiveBrands();
+  const { loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
   // ── State: client-side data ──
   const [channelData, setChannelData] = useState<any[]>([]);
@@ -84,6 +102,7 @@ export default function PulsePage() {
   const [brandMapping, setBrandMapping] = useState<any[]>([]);
   const [overheadData, setOverheadData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
 
   // ── State: server actions ──
   const [customerKpis, setCustomerKpis] = useState<any>(null);
@@ -91,77 +110,166 @@ export default function PulsePage() {
   const [ltvData, setLtvData] = useState<any[]>([]);
   const [cacData, setCacData] = useState<any[]>([]);
   const [stockData, setStockData] = useState<any[]>([]);
+  const [analyticsWarning, setAnalyticsWarning] = useState('');
+  const [inventoryWarning, setInventoryWarning] = useState('');
 
   // ── Fetch client-side data ──
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     const { from, to } = dateRange;
+    let cancelled = false;
 
-    const cachedCh = getCached('pulse_channel', from, to);
-    const cachedAds = getCached('pulse_ads', from, to);
-    const cachedBm = getCached('pulse_bm', from, to);
+    const loadCoreData = async () => {
+      const cachedCh = getCached<any[]>('pulse_channel', from, to);
+      const cachedAds = getCached<any[]>('pulse_ads', from, to);
+      const cachedBm = getCached<any[]>('pulse_bm', from, to);
+      const cachedOverhead = getCached<any[]>('pulse_overhead', from, to);
 
-    if (cachedCh && cachedAds && cachedBm) {
-      setChannelData(cachedCh.filter(r => isActiveBrand(r.product)));
-      setAdsData(cachedAds);
-      setBrandMapping(cachedBm);
-      setLoading(false);
-    } else {
+      if (cachedCh && cachedAds && cachedBm && cachedOverhead) {
+        if (cancelled) return;
+        setChannelData(cachedCh.filter((row) => isActiveBrand(row.product)));
+        setAdsData(cachedAds);
+        setBrandMapping(cachedBm);
+        setOverheadData(cachedOverhead);
+        setLoadError('');
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
-      Promise.all([
-        supabase.from('daily_channel_data')
-          .select('date, product, channel, net_sales, gross_profit, mp_admin_cost')
-          .gte('date', from).lte('date', to),
-        supabase.from('daily_ads_spend')
-          .select('date, source, spent, store')
-          .gte('date', from).lte('date', to),
-        supabase.from('ads_store_brand_mapping')
-          .select('store_pattern, brand'),
-      ]).then(([chRes, adsRes, bmRes]) => {
+      setLoadError('');
+
+      try {
+        const fromYM = from.slice(0, 7);
+        const toYM = to.slice(0, 7);
+        const [chRes, adsRes, bmRes, overheadRes] = await Promise.all([
+          supabase.from('daily_channel_data')
+            .select('date, product, channel, net_sales, gross_profit, mp_admin_cost')
+            .gte('date', from)
+            .lte('date', to),
+          supabase.from('daily_ads_spend')
+            .select('date, source, spent, store')
+            .gte('date', from)
+            .lte('date', to),
+          supabase.from('ads_store_brand_mapping')
+            .select('store_pattern, brand'),
+          supabase.from('monthly_overhead')
+            .select('year_month, amount')
+            .gte('year_month', fromYM)
+            .lte('year_month', toYM),
+        ]);
+
+        if (cancelled) return;
+        if (chRes.error) throw new Error(`Gagal memuat data channel Business Pulse: ${chRes.error.message}`);
+        if (adsRes.error) throw new Error(`Gagal memuat ads spend Business Pulse: ${adsRes.error.message}`);
+        if (bmRes.error) throw new Error(`Gagal memuat mapping brand iklan: ${bmRes.error.message}`);
+        if (overheadRes.error) throw new Error(`Gagal memuat data overhead Business Pulse: ${overheadRes.error.message}`);
+
         const ch = chRes.data || [];
         const ads = adsRes.data || [];
         const bm = bmRes.data || [];
+        const overhead = overheadRes.data || [];
+
         setCache('pulse_channel', from, to, ch);
         setCache('pulse_ads', from, to, ads);
         setCache('pulse_bm', from, to, bm);
-        setChannelData(ch.filter(r => isActiveBrand(r.product)));
+        setCache('pulse_overhead', from, to, overhead);
+
+        setChannelData(ch.filter((row) => isActiveBrand(row.product)));
         setAdsData(ads);
         setBrandMapping(bm);
+        setOverheadData(overhead);
+        setLoadError('');
         setLoading(false);
-      });
-    }
+      } catch (err: any) {
+        if (cancelled) return;
+        console.error('[Business Pulse] core load error:', err);
+        setLoadError(err?.message || 'Gagal memuat data Business Pulse.');
+        setChannelData([]);
+        setAdsData([]);
+        setBrandMapping([]);
+        setOverheadData([]);
+        setLoading(false);
+      }
+    };
 
-    // Overhead
-    const fromYM = from.slice(0, 7);
-    const toYM = to.slice(0, 7);
-    supabase.from('monthly_overhead').select('year_month, amount')
-      .gte('year_month', fromYM).lte('year_month', toYM)
-      .then(({ data }) => setOverheadData(data || []));
-  }, [dateRange, supabase, activeBrandsError, isActiveBrand]);
+    loadCoreData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dateRange.from, dateRange.to, supabase, activeBrandsError, isActiveBrand]);
 
   // ── Fetch server action data ──
   useEffect(() => {
     if (!dateRange.from || !dateRange.to) return;
     const { from, to } = dateRange;
+    const prevFrom = shiftIsoDateByMonthsClamped(from, -1);
+    const prevTo = shiftIsoDateByMonthsClamped(to, -1);
+    let cancelled = false;
 
-    // Customer KPIs for current + previous period
-    fetchCustomerKPIs(from, to).then(setCustomerKpis).catch(() => {});
+    setAnalyticsWarning('');
+    setInventoryWarning('');
 
-    // Previous month KPIs
-    const fD = new Date(from + 'T00:00:00');
-    const tD = new Date(to + 'T00:00:00');
-    const prevFrom = new Date(fD.getFullYear(), fD.getMonth() - 1, fD.getDate());
-    const prevTo = new Date(tD.getFullYear(), tD.getMonth() - 1, tD.getDate());
-    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    fetchCustomerKPIs(fmt(prevFrom), fmt(prevTo)).then(setPrevCustomerKpis).catch(() => {});
+    const loadAnalytics = async () => {
+      const [currentKpiRes, prevKpiRes, ltvRes, cacRes, stockRes] = await Promise.allSettled([
+        fetchCustomerKPIs(from, to),
+        fetchCustomerKPIs(prevFrom, prevTo),
+        fetchChannelLtv90d(),
+        fetchMonthlyCac(),
+        getStockBalance(),
+      ]);
 
-    // LTV & CAC
-    fetchChannelLtv90d().then(setLtvData).catch(() => {});
-    fetchChannelCac().then(setCacData).catch(() => {});
+      if (cancelled) return;
 
-    // Stock balance
-    getStockBalance().then(setStockData).catch(() => {});
-  }, [dateRange]);
+      const analyticsIssues: string[] = [];
+
+      if (currentKpiRes.status === 'fulfilled') {
+        setCustomerKpis(currentKpiRes.value);
+      } else {
+        setCustomerKpis(null);
+        analyticsIssues.push(currentKpiRes.reason?.message || 'KPI customer gagal dimuat.');
+      }
+
+      if (prevKpiRes.status === 'fulfilled') {
+        setPrevCustomerKpis(prevKpiRes.value);
+      } else {
+        setPrevCustomerKpis(null);
+        analyticsIssues.push(prevKpiRes.reason?.message || 'KPI customer periode pembanding gagal dimuat.');
+      }
+
+      if (ltvRes.status === 'fulfilled') {
+        setLtvData(ltvRes.value);
+      } else {
+        setLtvData([]);
+        analyticsIssues.push(ltvRes.reason?.message || 'LTV channel gagal dimuat.');
+      }
+
+      if (cacRes.status === 'fulfilled') {
+        setCacData(cacRes.value);
+      } else {
+        setCacData([]);
+        analyticsIssues.push(cacRes.reason?.message || 'CAC channel gagal dimuat.');
+      }
+
+      if (stockRes.status === 'fulfilled') {
+        setStockData(stockRes.value);
+      } else {
+        setStockData([]);
+        setInventoryWarning(stockRes.reason?.message || 'Data stock gudang belum bisa dimuat.');
+      }
+
+      if (analyticsIssues.length > 0) {
+        setAnalyticsWarning(analyticsIssues.join(' '));
+      }
+    };
+
+    loadAnalytics();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dateRange.from, dateRange.to]);
 
   // ── Store → Brand lookup ──
   const storeBrandMap = useMemo(() => {
@@ -170,10 +278,34 @@ export default function PulsePage() {
     return map;
   }, [brandMapping]);
 
-  const getAdBrand = (store: string) => {
-    if (!store) return null;
-    return storeBrandMap[store.toLowerCase()] || null;
-  };
+  const resolvedAdsData = useMemo(() => {
+    return adsData
+      .map((row) => {
+        const brand = row.store ? storeBrandMap[row.store.toLowerCase()] || null : null;
+        return { ...row, brand };
+      })
+      .filter((row) => !row.brand || isActiveBrand(row.brand));
+  }, [adsData, storeBrandMap, activeBrandsError, isActiveBrand]);
+
+  const unmappedAdsSummary = useMemo(() => {
+    const byPlatform: Record<string, number> = {};
+    let total = 0;
+
+    resolvedAdsData.forEach((row) => {
+      if (row.brand) return;
+      const spent = Math.abs(Number(row.spent || 0));
+      if (spent <= 0) return;
+      const platform = normPlatform(row.source);
+      byPlatform[platform] = (byPlatform[platform] || 0) + spent;
+      total += spent;
+    });
+
+    const platforms = Object.entries(byPlatform)
+      .map(([platform, spent]) => ({ platform, spent }))
+      .sort((a, b) => b.spent - a.spent);
+
+    return { total, platforms };
+  }, [resolvedAdsData]);
 
   // ══════════════════════════════════════════════════════════════
   // SECTION 1: Profitability Matrix (Brand x Channel)
@@ -251,24 +383,19 @@ export default function PulsePage() {
     });
 
     return { brands, channels, matrix, top3, bottom3, totalSales };
-  }, [channelData, adsData, brandMapping, overheadData]);
+  }, [channelData, overheadData, dateRange.from, dateRange.to]);
 
   // ══════════════════════════════════════════════════════════════
   // MARKETING INVESTMENT EFFICIENCY (blended — not per channel)
   // Marketing = demand generation across ALL channels (Byron Sharp)
   // ══════════════════════════════════════════════════════════════
   const mktEfficiency = useMemo(() => {
-    let totalAds = 0;
-    adsData.forEach(r => {
-      const brand = getAdBrand(r.store);
-      if (!brand || !isActiveBrand(brand)) return;
-      totalAds += Number(r.spent) || 0;
-    });
+    const totalAds = resolvedAdsData.reduce((sum, row) => sum + Math.abs(Number(row.spent) || 0), 0);
     const totalRev = profMatrix.totalSales;
     const blendedRoas = totalAds > 0 ? totalRev / totalAds : 0;
     const mktRatio = totalRev > 0 ? (totalAds / totalRev) * 100 : 0;
     return { totalAds, totalRev, blendedRoas, mktRatio };
-  }, [adsData, brandMapping, profMatrix.totalSales, activeBrandsError, isActiveBrand]);
+  }, [resolvedAdsData, profMatrix.totalSales]);
 
   // ══════════════════════════════════════════════════════════════
   // SECTION 2: Unit Economics (LTV:CAC per Channel)
@@ -289,14 +416,15 @@ export default function PulsePage() {
       const ltv = Number(r.avg_ltv_90d) || 0;
       const cac = cacMap[r.channel_group] || 0;
       const ratio = cac > 0 ? ltv / cac : ltv > 0 ? 99 : 0;
+      const customers = Number(r.num_customers ?? r.customer_count) || 0;
       return {
         channel: r.channel_group,
         ltv,
         cac,
         ratio,
-        customers: Number(r.customer_count) || 0,
+        customers,
       };
-    }).filter(r => r.customers > 0).sort((a, b) => b.ratio - a.ratio);
+    }).filter(r => r.channel !== 'Global' && r.customers > 0).sort((a, b) => b.ratio - a.ratio);
   }, [ltvData, cacData]);
 
   // ══════════════════════════════════════════════════════════════
@@ -324,8 +452,9 @@ export default function PulsePage() {
     const repeatDelta = repeatRate - prevRepeatRate;
     const newRev = customerKpis?.newRevenue || 0;
     const repeatRev = customerKpis?.repeatRevenue || 0;
+    const unidentifiedRev = customerKpis?.unidentifiedRevenue || 0;
 
-    return { dtcSales, mpSales, dtcPct, mpPct, dtcMargin, mpMargin, total, repeatRate, prevRepeatRate, repeatDelta, newRev, repeatRev };
+    return { dtcSales, mpSales, dtcPct, mpPct, dtcMargin, mpMargin, total, repeatRate, prevRepeatRate, repeatDelta, newRev, repeatRev, unidentifiedRev };
   }, [channelData, customerKpis, prevCustomerKpis]);
 
   // ══════════════════════════════════════════════════════════════
@@ -387,6 +516,22 @@ export default function PulsePage() {
   const overheadPct = useMemo(() => {
     return profMatrix.totalSales > 0 ? (proratedOverhead / profMatrix.totalSales) * 100 : 0;
   }, [proratedOverhead, profMatrix.totalSales]);
+
+  const pageNotices = useMemo(() => {
+    const notices: string[] = [];
+
+    if (unmappedAdsSummary.total > 0) {
+      const topPlatforms = unmappedAdsSummary.platforms.slice(0, 2).map((item) => item.platform).join(', ');
+      notices.push(
+        `${fmtCompact(unmappedAdsSummary.total)} ads spend belum punya mapping brand${topPlatforms ? ` (${topPlatforms})` : ''}. Blended ROAS dan marketing ratio sudah memasukkan spend ini agar tidak terlalu optimistis.`
+      );
+    }
+
+    if (analyticsWarning) notices.push(analyticsWarning);
+    if (inventoryWarning) notices.push(inventoryWarning);
+
+    return notices;
+  }, [unmappedAdsSummary, analyticsWarning, inventoryWarning]);
 
   // ══════════════════════════════════════════════════════════════
   // SECTION 5: Action Radar — Auto-Generated Insights
@@ -476,7 +621,7 @@ export default function PulsePage() {
     if (revQuality.prevRepeatRate > 0 && revQuality.repeatDelta < -3) {
       list.push({
         type: 'problem',
-        message: `Repeat rate turun dari ${fmtPct(revQuality.prevRepeatRate)} ke ${fmtPct(revQuality.repeatRate)} MoM — masalah retensi`,
+        message: `Repeat rate turun dari ${fmtPct(revQuality.prevRepeatRate)} ke ${fmtPct(revQuality.repeatRate)} vs periode pembanding — masalah retensi`,
         impact: Math.abs(revQuality.repeatDelta / 100) * revQuality.total,
         section: 'revenue_quality',
       });
@@ -530,14 +675,64 @@ export default function PulsePage() {
   // RENDER
   // ══════════════════════════════════════════════════════════════
 
-  if (dateLoading || loading) {
+  if (dateLoading || loading || activeBrandsLoading) {
     return <div style={{ padding: 32, textAlign: 'center', color: 'var(--dim)' }}>Loading Business Pulse...</div>;
+  }
+
+  if (loadError) {
+    return (
+      <div className="fade-in" style={{ maxWidth: 1200 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16, color: 'var(--text)' }}>Business Pulse</h2>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Data Business Pulse Gagal Dimuat</div>
+          <div style={{ fontSize: 13 }}>{loadError}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (activeBrandsError) {
+    return (
+      <div className="fade-in" style={{ maxWidth: 1200 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16, color: 'var(--text)' }}>Business Pulse</h2>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Filter Brand Gagal Dimuat</div>
+          <div style={{ fontSize: 13 }}>{activeBrandsError}</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (channelData.length === 0 && resolvedAdsData.length === 0) {
+    return (
+      <div className="fade-in" style={{ maxWidth: 1200 }}>
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16, color: 'var(--text)' }}>Business Pulse</h2>
+        <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>📈</div>
+          <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Belum Ada Data untuk Periode Ini</div>
+          <div style={{ fontSize: 13 }}>Coba pilih rentang tanggal lain atau pastikan data channel dan marketing sudah tersinkron.</div>
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="fade-in" style={{ maxWidth: 1200 }}>
       <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 2, color: 'var(--text)' }}>Business Pulse</h2>
       <p style={{ ...dimText, marginBottom: 20 }}>Sintesis strategis lintas seluruh domain — inti problem & opportunity</p>
+
+      {pageNotices.length > 0 && (
+        <div style={{ ...card, borderLeft: '3px solid var(--yellow)', padding: 16 }}>
+          <div style={{ ...sectionTitle, marginBottom: 8 }}>Catatan Data</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {pageNotices.map((notice, index) => (
+              <div key={index} style={{ fontSize: 12, color: 'var(--text)' }}>
+                {notice}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── ACTION RADAR (top — most important) ── */}
       {insights.length > 0 && (
@@ -800,7 +995,7 @@ export default function PulsePage() {
               </div>
               {prevCustomerKpis && (
                 <div style={{ fontSize: 11, color: revQuality.repeatDelta >= 0 ? 'var(--green)' : 'var(--red)', marginTop: 2 }}>
-                  {revQuality.repeatDelta >= 0 ? '+' : ''}{fmtPct(revQuality.repeatDelta)} MoM
+                  {revQuality.repeatDelta >= 0 ? '+' : ''}{fmtPct(revQuality.repeatDelta)} vs periode pembanding
                 </div>
               )}
             </div>
@@ -809,6 +1004,9 @@ export default function PulsePage() {
               <div style={{ fontSize: 12, color: 'var(--text)' }}>
                 <div>New: <strong>{fmtCompact(revQuality.newRev)}</strong></div>
                 <div>Repeat: <strong style={{ color: 'var(--green)' }}>{fmtCompact(revQuality.repeatRev)}</strong></div>
+                {revQuality.unidentifiedRev > 0 && (
+                  <div>Unidentified: <strong style={{ color: 'var(--dim)' }}>{fmtCompact(revQuality.unidentifiedRev)}</strong></div>
+                )}
               </div>
             </div>
           </div>
@@ -823,7 +1021,9 @@ export default function PulsePage() {
           {/* Days of Inventory */}
           <div>
             <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>Days of Inventory (estimasi)</div>
-            {inventoryDays.length === 0 ? (
+            {inventoryWarning ? (
+              <div style={dimText}>{inventoryWarning}</div>
+            ) : inventoryDays.length === 0 ? (
               <div style={dimText}>Data warehouse belum tersedia</div>
             ) : (
               inventoryDays.slice(0, 8).map(inv => {

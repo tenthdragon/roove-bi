@@ -893,7 +893,7 @@ Status legend:
 | PPIC | `app/dashboard/ppic/page.tsx`, `lib/ppic-actions.ts` | DN | Direview dan dipatch lokal: receive PO kini tidak bisa over-receive via duplicate item request dan landed cost parsial tidak lagi double-count, demand planning sekarang menghitung baseline 6 bulan relatif ke bulan yang dipilih serta me-refresh actual in/out saat load, ROP kembali memakai avg-daily exact window, dan detail PO kini menampilkan ongkir/biaya lain/PPN dengan total yang konsisten. Runtime verification disarankan |
 | Warehouse | `app/dashboard/warehouse/page.tsx`, `lib/warehouse-actions.ts`, `lib/warehouse-ledger-actions.ts` | DN | Direview dan dipatch lokal: transfer antar entity kini menulis `TRANSFER_IN` ke target, batch mutation menolak overdraw alih-alih clamp diam-diam, stock opname kini mewajibkan hitung lengkap + approve idempotent, dan server actions Warehouse sekarang enforce akses tab/permission. Runtime verification disarankan |
 | Warehouse Settings | `app/dashboard/warehouse-settings/page.tsx`, `lib/brand-actions.ts`, `lib/warehouse-ledger-actions.ts` | DN | Direview dan dipatch lokal: server actions kini konsisten mengikuti permission sub-tab `whs:*`, create product tidak lagi membuang `vendor_id`, overview Active Warehouse kembali menghitung total vs active dengan benar, dan page tidak lagi blank saat user tidak punya sub-tab yang terlihat. Runtime verification disarankan |
-| Business Pulse | `app/dashboard/pulse/page.tsx`, `lib/scalev-actions.ts` | NS |  |
+| Business Pulse | `app/dashboard/pulse/page.tsx`, `lib/scalev-actions.ts` | DN | Direview dan dipatch lokal: previous-range repeat KPI kini di-clamp aman, core load tidak lagi fail-silent saat query channel/ads/mapping gagal, blended ROAS kini tetap memasukkan ads spend unmapped dengan warning eksplisit, unit-economics kini memakai monthly CAC + field LTV yang benar, KPI customer tidak lagi menghitung `unidentified` sebagai repeat, dan server actions analytics kini enforce akses tab `pulse/customers`. Runtime verification disarankan |
 | Customer Analysis | `app/dashboard/customers/page.tsx`, `lib/scalev-actions.ts` | NS |  |
 | Brand Analysis | `app/dashboard/brand-analysis/page.tsx`, `lib/scalev-actions.ts` | NS |  |
 | Finance Analysis | `app/dashboard/finance/page.tsx`, `lib/financial-actions.ts`, `app/api/financial-analysis/route.ts` | NS |  |
@@ -1296,6 +1296,45 @@ Status legend:
 - Next step:
   - lanjut review area `Business Pulse`
   - verifikasi manual akses sub-tab `whs:*` vs direct server-action call, create product dengan vendor terpilih, angka card Active Warehouse saat ada produk inactive, dan flow business mapping dari halaman `Business Settings`
+
+### Review Notes - Business Pulse
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/pulse/page.tsx`
+  - `lib/scalev-actions.ts`
+  - `lib/warehouse-ledger-actions.ts`
+  - `supabase/migrations/042_persist_customer_identifier.sql`
+  - `supabase/migrations/052_cohort_by_channel.sql`
+  - `supabase/migrations/054_cac_per_channel.sql`
+  - `supabase/migrations/057_ltv_summary_table.sql`
+  - `supabase/migrations/058_monthly_cac.sql`
+- Data sources:
+  - `daily_channel_data`
+  - `daily_ads_spend`
+  - `ads_store_brand_mapping`
+  - `monthly_overhead`
+  - `v_daily_customer_type`
+  - RPC `get_channel_ltv_90d`
+  - RPC `get_monthly_cac`
+  - `v_warehouse_stock_balance`
+- Mutation paths:
+  - tidak ada mutation langsung di halaman; freshness bergantung pada sync Scalev, upload ads, dan mutasi ledger Warehouse
+- Findings summary:
+  - load data inti di halaman sebelumnya menelan error Supabase untuk `daily_channel_data`, `daily_ads_spend`, `ads_store_brand_mapping`, dan `monthly_overhead`, lalu jatuh ke array kosong; akibatnya Business Pulse bisa terlihat "aman/kosong" padahal query inti gagal
+  - previous comparison untuk repeat KPI sebelumnya memakai `new Date(year, month - 1, sameDay)` tanpa clamp, sehingga range yang berakhir tanggal 29/30/31 bisa rollover ke bulan yang salah dan delta repeat rate menjadi bias
+  - blended ads spend sebelumnya membuang semua row ads yang belum punya mapping brand; ini membuat blended ROAS terlalu optimistis dan marketing ratio terlalu rendah, sama seperti bug yang sempat muncul di Marketing/Channels
+  - section `Unit Economics Health` sebelumnya membaca `customer_count` padahal RPC LTV mengembalikan `num_customers`, dan source CAC yang dipakai masih `get_channel_cac()` legacy yang hardcoded `store = 'Roove'`; kombinasi ini bisa mengosongkan tabel atau membiasakan CAC ke satu store saja
+  - `fetchCustomerKPIs()` sebelumnya menghitung semua row non-`new` dari `v_daily_customer_type` sebagai repeat, sehingga bucket `unidentified` ikut menggelembungkan repeat customer, repeat revenue, dan repeat rate di Business Pulse
+  - server actions analytics di `lib/scalev-actions.ts` yang dipakai Pulse/Customers sebelumnya belum memverifikasi akses tab server-side, sehingga direct invoke masih bisa membaca analytics pelanggan tanpa guard `tab:pulse`/`tab:customers`
+  - kegagalan load analytics customer atau data stock gudang sebelumnya ditelan diam-diam; user Pulse tanpa akses Warehouse hanya melihat empty state "data belum tersedia" alih-alih warning parsial bahwa section inventory tidak bisa dimuat
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Customer Analysis`
+  - verifikasi manual repeat rate saat ada order `unidentified`, custom range yang berakhir tanggal 29/30/31, ads spend unmapped pada blended ROAS, role yang punya `pulse` tapi tidak punya `warehouse`, dan direct invoke server action analytics tanpa akses `pulse/customers`
 
 Saat mereview satu area, catat minimal format ini:
 

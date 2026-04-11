@@ -2,6 +2,11 @@
 'use server';
 
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-server';
+import { requireAnyDashboardTabAccess } from '@/lib/dashboard-access';
+
+async function requireCustomerAnalyticsAccess(label: string) {
+  await requireAnyDashboardTabAccess(['pulse', 'customers'], label);
+}
 
 // ── Get Scalev integration status ──
 export async function getScalevStatus() {
@@ -184,6 +189,7 @@ export async function fetchScalevChannelSummary(from: string, to: string) {
 
 // ── Get daily new vs repeat customer data ──
 export async function fetchCustomerTypeDaily(from: string, to: string) {
+  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('v_daily_customer_type')
@@ -196,6 +202,7 @@ export async function fetchCustomerTypeDaily(from: string, to: string) {
 }
 
 export async function fetchCustomerCohort(limit: number = 100, from?: string, to?: string) {
+  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
   let query = svc
     .from('v_customer_cohort')
@@ -214,63 +221,81 @@ export async function fetchCustomerCohort(limit: number = 100, from?: string, to
 
 // ── Get overall customer KPIs ──
 export async function fetchCustomerKPIs(from: string, to: string) {
+  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
 
-  const { data: dailyData } = await svc
+  const { data: dailyData, error } = await svc
     .from('v_daily_customer_type')
     .select('*')
     .gte('date', from)
     .lte('date', to);
+
+  if (error) throw error;
 
   if (!dailyData || dailyData.length === 0) {
     return {
       totalCustomers: 0,
       newCustomers: 0,
       repeatCustomers: 0,
+      unidentifiedCustomers: 0,
       repeatRate: 0,
       newRevenue: 0,
       repeatRevenue: 0,
+      unidentifiedRevenue: 0,
       avgOrderValue: 0,
       newOrders: 0,
       repeatOrders: 0,
+      unidentifiedOrders: 0,
+      totalRevenue: 0,
+      totalOrders: 0,
     };
   }
 
-  let newCustomers = 0, repeatCustomers = 0;
-  let newRevenue = 0, repeatRevenue = 0;
-  let newOrders = 0, repeatOrders = 0;
+  let newCustomers = 0, repeatCustomers = 0, unidentifiedCustomers = 0;
+  let newRevenue = 0, repeatRevenue = 0, unidentifiedRevenue = 0;
+  let newOrders = 0, repeatOrders = 0, unidentifiedOrders = 0;
 
   for (const row of dailyData) {
     if (row.customer_type === 'new') {
       newCustomers += row.customer_count || 0;
       newRevenue += Number(row.revenue) || 0;
       newOrders += row.order_count || 0;
-    } else {
+    } else if (row.customer_type === 'ro' || row.customer_type === 'repeat') {
       repeatCustomers += row.customer_count || 0;
       repeatRevenue += Number(row.revenue) || 0;
       repeatOrders += row.order_count || 0;
+    } else if (row.customer_type === 'unidentified') {
+      unidentifiedCustomers += row.customer_count || 0;
+      unidentifiedRevenue += Number(row.revenue) || 0;
+      unidentifiedOrders += row.order_count || 0;
     }
   }
 
   const totalCustomers = newCustomers + repeatCustomers;
-  const totalOrders = newOrders + repeatOrders;
-  const totalRevenue = newRevenue + repeatRevenue;
+  const totalOrders = newOrders + repeatOrders + unidentifiedOrders;
+  const totalRevenue = newRevenue + repeatRevenue + unidentifiedRevenue;
 
   return {
     totalCustomers,
     newCustomers,
     repeatCustomers,
+    unidentifiedCustomers,
     repeatRate: totalCustomers > 0 ? (repeatCustomers / totalCustomers) * 100 : 0,
     newRevenue,
     repeatRevenue,
+    unidentifiedRevenue,
     avgOrderValue: totalOrders > 0 ? totalRevenue / totalOrders : 0,
     newOrders,
     repeatOrders,
+    unidentifiedOrders,
+    totalRevenue,
+    totalOrders,
   };
 }
 
 // ── Get monthly cohort data ──
 export async function fetchMonthlyCohort() {
+  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('v_monthly_cohort')
@@ -282,6 +307,7 @@ export async function fetchMonthlyCohort() {
 
 // ── Get monthly cohort data per channel group ──
 export async function fetchMonthlyCohortByChannel() {
+  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('v_monthly_cohort_channel')
@@ -294,6 +320,7 @@ export async function fetchMonthlyCohortByChannel() {
 
 // ── Get per-channel LTV 90-day for Roove brand ──
 export async function fetchChannelLtv90d(brand?: string | null) {
+  await requireCustomerAnalyticsAccess('LTV Customer Analytics');
   const svc = createServiceSupabase();
   const { data, error } = await svc.rpc('get_channel_ltv_90d', {
     brand_filter: brand || null,
@@ -304,6 +331,7 @@ export async function fetchChannelLtv90d(brand?: string | null) {
 
 // ── Get conservative CAC per channel ──
 export async function fetchChannelCac() {
+  await requireCustomerAnalyticsAccess('CAC Customer Analytics');
   const svc = createServiceSupabase();
   const { data, error } = await svc.rpc('get_channel_cac');
   if (error) throw error;
@@ -312,6 +340,7 @@ export async function fetchChannelCac() {
 
 // ── Get LTV 90d trend per cohort month per channel ──
 export async function fetchLtvTrend(brand?: string | null) {
+  await requireCustomerAnalyticsAccess('LTV Customer Analytics');
   const svc = createServiceSupabase();
   const { data, error } = await svc.rpc('get_ltv_trend_by_cohort', {
     brand_filter: brand || null,
@@ -322,6 +351,7 @@ export async function fetchLtvTrend(brand?: string | null) {
 
 // ── Get available brands for selector ──
 export async function fetchAvailableBrands() {
+  await requireCustomerAnalyticsAccess('Brand Customer Analytics');
   const svc = createServiceSupabase();
   const { data, error } = await svc.rpc('get_available_brands');
   if (error) throw error;
@@ -330,6 +360,7 @@ export async function fetchAvailableBrands() {
 
 // ── Get monthly CAC per channel ──
 export async function fetchMonthlyCac(brand?: string | null) {
+  await requireCustomerAnalyticsAccess('CAC Customer Analytics');
   const svc = createServiceSupabase();
   const { data, error } = await svc.rpc('get_monthly_cac', {
     brand_filter: brand || null,
@@ -340,6 +371,7 @@ export async function fetchMonthlyCac(brand?: string | null) {
 
 // ── Get RTS and Canceled order stats with platform breakdown ──
 export async function fetchRtsCancelStats(from?: string, to?: string) {
+  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
 
   // Get total shipped+completed for percentage denominator
