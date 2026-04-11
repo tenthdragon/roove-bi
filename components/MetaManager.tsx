@@ -2,7 +2,15 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useSupabase } from '@/lib/supabase-browser';
+import {
+  getMetaAdminSnapshot,
+  saveMetaAccounts,
+  saveWabaAccount,
+  setMetaAccountActive,
+  setWabaAccountActive,
+  updateMetaAccount,
+  updateWabaAccount,
+} from '@/lib/admin-actions';
 import { invalidateAll } from '@/lib/dashboard-cache';
 
 interface MetaAccount {
@@ -74,8 +82,6 @@ const ACCOUNT_STATUS_LABELS: Record<number, string> = {
 };
 
 export default function MetaManager() {
-  const supabase = useSupabase();
-
   const [accounts, setAccounts] = useState<MetaAccount[]>([]);
   const [recentLogs, setRecentLogs] = useState<SyncLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -156,24 +162,20 @@ export default function MetaManager() {
 
   const loadData = useCallback(async () => {
     try {
-      const [{ data: accs }, { data: logs }, { data: stores }, { data: wAbas }, { data: wLogs }] = await Promise.all([
-        supabase.from('meta_ad_accounts').select('*').order('account_name'),
-        supabase.from('meta_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
-        supabase.from('ads_store_brand_mapping').select('store_pattern, brand').order('brand').order('store_pattern'),
-        supabase.from('waba_accounts').select('*').order('waba_name'),
-        supabase.from('waba_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
-      ]);
-      setAccounts(accs || []);
-      setRecentLogs(logs || []);
-      setBrandMappings(stores || []);
-      setWabaAccounts(wAbas || []);
-      setWabaLogs(wLogs || []);
+      const snapshot = await getMetaAdminSnapshot();
+      setAccounts(snapshot.accounts || []);
+      setRecentLogs(snapshot.recentLogs || []);
+      setBrandMappings(snapshot.brandMappings || []);
+      setWabaAccounts(snapshot.wabaAccounts || []);
+      setWabaLogs(snapshot.wabaLogs || []);
     } catch (err: any) {
       console.error('Failed to load Meta data:', err);
+      setMessage({ type: 'error', text: err.message || 'Gagal memuat konfigurasi Meta' });
+      setWabaMessage({ type: 'error', text: err.message || 'Gagal memuat konfigurasi WABA' });
     } finally {
       setLoading(false);
     }
-  }, [supabase]);
+  }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -253,10 +255,7 @@ export default function MetaManager() {
         default_advertiser: m.default_advertiser.trim() || 'Meta Team',
       }));
 
-      const { error } = await supabase.from('meta_ad_accounts').upsert(rows, {
-        onConflict: 'account_id',
-      });
-      if (error) throw error;
+      await saveMetaAccounts(rows);
 
       setMessage({ type: 'success', text: `${rows.length} akun berhasil disimpan` });
       setSelectedMappings(new Map());
@@ -286,14 +285,12 @@ export default function MetaManager() {
       return;
     }
     try {
-      const { error } = await supabase.from('meta_ad_accounts').update({
+      await updateMetaAccount(editingId!, {
         account_name: editForm.account_name.trim(),
         store: editForm.store.trim(),
         default_source: editForm.default_source.trim(),
         default_advertiser: editForm.default_advertiser.trim(),
-        updated_at: new Date().toISOString(),
-      }).eq('id', editingId);
-      if (error) throw error;
+      });
       setMessage({ type: 'success', text: 'Akun diperbarui. Jalankan sync Meta ulang untuk menerapkan mapping baru ke data historis.' });
       setEditingId(null);
       await loadData();
@@ -304,10 +301,7 @@ export default function MetaManager() {
 
   const handleToggleActive = async (acc: MetaAccount) => {
     try {
-      const { error } = await supabase.from('meta_ad_accounts').update({
-        is_active: !acc.is_active, updated_at: new Date().toISOString(),
-      }).eq('id', acc.id);
-      if (error) throw error;
+      await setMetaAccountActive(acc.id, !acc.is_active);
       await loadData();
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
@@ -348,14 +342,13 @@ export default function MetaManager() {
     setSavingWaba(true);
     setWabaMessage(null);
     try {
-      const { error } = await supabase.from('waba_accounts').upsert({
+      await saveWabaAccount({
         waba_id: wabaForm.waba_id.trim(),
         waba_name: wabaForm.waba_name.trim(),
         store: wabaForm.store.trim(),
         default_source: wabaForm.default_source.trim() || 'WhatsApp Marketing',
         default_advertiser: wabaForm.default_advertiser.trim() || 'WhatsApp Team',
-      }, { onConflict: 'waba_id' });
-      if (error) throw error;
+      });
       setWabaMessage({ type: 'success', text: 'WABA account berhasil disimpan' });
       setShowWabaForm(false);
       setWabaForm({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
@@ -382,14 +375,12 @@ export default function MetaManager() {
       return;
     }
     try {
-      const { error } = await supabase.from('waba_accounts').update({
+      await updateWabaAccount(wabaEditingId!, {
         waba_name: wabaEditForm.waba_name.trim(),
         store: wabaEditForm.store.trim(),
         default_source: wabaEditForm.default_source.trim(),
         default_advertiser: wabaEditForm.default_advertiser.trim(),
-        updated_at: new Date().toISOString(),
-      }).eq('id', wabaEditingId);
-      if (error) throw error;
+      });
       setWabaMessage({ type: 'success', text: 'WABA account diperbarui. Jalankan sync WABA ulang untuk menerapkan brand baru ke data historis.' });
       setWabaEditingId(null);
       await loadData();
@@ -400,10 +391,7 @@ export default function MetaManager() {
 
   const handleWabaToggleActive = async (acc: WabaAccount) => {
     try {
-      const { error } = await supabase.from('waba_accounts').update({
-        is_active: !acc.is_active, updated_at: new Date().toISOString(),
-      }).eq('id', acc.id);
-      if (error) throw error;
+      await setWabaAccountActive(acc.id, !acc.is_active);
       await loadData();
     } catch (err: any) {
       setWabaMessage({ type: 'error', text: err.message });

@@ -72,7 +72,7 @@ export default function WarehouseSheetManager() {
 
   async function handleToggle(id: string, current: boolean) {
     try {
-      await toggleWarehouseConnection(id, current);
+      await toggleWarehouseConnection(id, !current);
       await loadConnections();
     } catch (e: any) {
       setMessage('Error: ' + e.message);

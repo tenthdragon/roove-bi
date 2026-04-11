@@ -1,6 +1,8 @@
 // app/api/csv-upload/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { createServerSupabase } from '@/lib/supabase-server';
 
 
 function getServiceSupabase() {
@@ -206,6 +208,19 @@ function isLikelyCsv(file: File): boolean {
 
 export async function POST(req: NextRequest) {
   try {
+    try {
+      await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
+    } catch (err: any) {
+      const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
+      return NextResponse.json({ error: err.message }, { status });
+    }
+
+    const authSupabase = createServerSupabase();
+    const {
+      data: { user },
+    } = await authSupabase.auth.getUser();
+    const uploadedBy = user?.email || null;
+
     const formData = await req.formData();
     const file = formData.get('file') as File;
     if (!file) {
@@ -230,9 +245,9 @@ export async function POST(req: NextRequest) {
     const { format, delimiter, headers } = detectFormat(lines[0]);
 
     if (format === 'ops') {
-      return handleOpsUpload(lines, headers, delimiter, formData, file);
+      return handleOpsUpload(lines, headers, delimiter, formData, file, uploadedBy);
     } else {
-      return handleScalevUpload(lines, headers, delimiter, formData, file);
+      return handleScalevUpload(lines, headers, delimiter, formData, file, uploadedBy);
     }
   } catch (err: any) {
     console.error('CSV upload error:', err);
@@ -248,7 +263,8 @@ async function handleOpsUpload(
   headers: string[],
   delimiter: string,
   formData: FormData,
-  file: File
+  file: File,
+  uploadedBy: string | null
 ) {
   const svc = getServiceSupabase();
 
@@ -586,7 +602,6 @@ async function handleOpsUpload(
   }
 
   // ── Log ──
-  const uploadedBy = formData.get('uploaded_by') as string || null;
   const filename = formData.get('filename') as string || file.name;
   await svc.from('scalev_sync_log').insert({
     status: stats.errors.length > 0 ? 'partial' : 'success',
@@ -627,7 +642,8 @@ async function handleScalevUpload(
   headers: string[],
   delimiter: string,
   formData: FormData,
-  file: File
+  file: File,
+  uploadedBy: string | null
 ) {
   const svc = getServiceSupabase();
 
@@ -976,7 +992,6 @@ async function handleScalevUpload(
   }
 
   // ── Log ──
-  const uploadedBy = formData.get('uploaded_by') as string || null;
   const filename = formData.get('filename') as string || file.name;
   await svc.from('scalev_sync_log').insert({
     status: stats.errors.length > 0 ? 'partial' : 'success',

@@ -5,6 +5,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { fetchOrderDetail, deriveChannelFromStoreType, guessStoreType, lookupProductType, clearProductMappingCache, type StoreType } from '@/lib/scalev-api';
 import { reverseWarehouseDeductions } from '@/lib/warehouse-ledger-actions';
 
@@ -32,33 +33,17 @@ export async function POST(req: NextRequest) {
   const startTime = Date.now();
 
   try {
-    // ── Auth: cron or owner/finance ──
+    // ── Auth: cron or admin sync permission ──
     const authHeader = req.headers.get('authorization');
     const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
 
     if (!isCron) {
-      let user: any = null;
       try {
-        const { createServerSupabase } = await import('@/lib/supabase-server');
-        const supabase = createServerSupabase();
-        const { data } = await supabase.auth.getUser();
-        user = data?.user;
+        await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
       } catch (authErr: any) {
         console.error('[scalev-sync] Auth error:', authErr.message);
-        return NextResponse.json({ error: 'Sesi kedaluwarsa, silakan refresh halaman' }, { status: 401 });
-      }
-      if (!user) {
-        return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-      }
-      const svcAuth = getServiceSupabase();
-      const { data: profile } = await svcAuth
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      if (profile?.role !== 'owner' && profile?.role !== 'finance') {
-        return NextResponse.json({ error: 'Only owners and finance users can sync' }, { status: 403 });
+        const status = /sesi|login/i.test(authErr.message || '') ? 401 : 403;
+        return NextResponse.json({ error: authErr.message }, { status });
       }
     }
 

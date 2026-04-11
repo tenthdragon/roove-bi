@@ -69,7 +69,7 @@ export default function FinancialSheetManager() {
 
   async function handleToggle(id: string, current: boolean) {
     try {
-      await toggleFinancialConnection(id, current);
+      await toggleFinancialConnection(id, !current);
       await loadConnections();
     } catch (e: any) {
       setMessage('Error: ' + e.message);

@@ -1,9 +1,16 @@
 'use server';
 
-import { createServerSupabase, createServiceSupabase } from './supabase-server';
+import { createServiceSupabase } from './supabase-server';
+import { requireDashboardPermissionAccess } from './dashboard-access';
 import { testSheetConnection } from './google-sheets';
 
+async function requireDailyAdminAccess(label: string) {
+  await requireDashboardPermissionAccess('admin:daily', label);
+}
+
 export async function fetchSheetConnections() {
+  await requireDailyAdminAccess('Admin Daily Data');
+
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('sheet_connections')
@@ -14,18 +21,7 @@ export async function fetchSheetConnections() {
 }
 
 export async function addSheetConnection(spreadsheetId: string, label: string) {
-  const supabase = createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profile?.role !== 'owner' && profile?.role !== 'finance')
-    throw new Error('Only owners and finance users can manage sheet connections');
+  const { profile } = await requireDailyAdminAccess('Admin Daily Data');
 
   const test = await testSheetConnection(spreadsheetId);
   if (!test.success) {
@@ -39,7 +35,7 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
       spreadsheet_id: spreadsheetId,
       label,
       is_active: true,
-      created_by: user.id,
+      created_by: profile.id,
     })
     .select()
     .single();
@@ -49,18 +45,7 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
 }
 
 export async function removeSheetConnection(connectionId: string) {
-  const supabase = createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profile?.role !== 'owner' && profile?.role !== 'finance')
-    throw new Error('Only owners and finance users can manage sheet connections');
+  await requireDailyAdminAccess('Admin Daily Data');
 
   const svc = createServiceSupabase();
   const { error } = await svc
@@ -72,18 +57,7 @@ export async function removeSheetConnection(connectionId: string) {
 }
 
 export async function toggleSheetConnection(connectionId: string, isActive: boolean) {
-  const supabase = createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profile?.role !== 'owner' && profile?.role !== 'finance')
-    throw new Error('Only owners and finance users can manage sheet connections');
+  await requireDailyAdminAccess('Admin Daily Data');
 
   const svc = createServiceSupabase();
   const { error } = await svc

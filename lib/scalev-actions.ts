@@ -2,7 +2,11 @@
 'use server';
 
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-server';
-import { requireAnyDashboardTabAccess, requireDashboardTabAccess } from '@/lib/dashboard-access';
+import {
+  requireAnyDashboardTabAccess,
+  requireDashboardPermissionAccess,
+  requireDashboardTabAccess,
+} from '@/lib/dashboard-access';
 
 async function requireCustomerAnalyticsAccess(label: string) {
   await requireAnyDashboardTabAccess(['pulse', 'customers'], label);
@@ -12,8 +16,14 @@ async function requireBrandAnalysisAccess(label: string) {
   await requireDashboardTabAccess('brand-analysis', label);
 }
 
+async function requireAdminSyncAccess(label: string) {
+  await requireDashboardPermissionAccess('admin:sync', label);
+}
+
 // ── Get Scalev integration status ──
 export async function getScalevStatus() {
+  await requireAdminSyncAccess('Admin Sync');
+
   try {
     const svc = createServiceSupabase();
 
@@ -94,6 +104,8 @@ export type PendingOrder = {
 };
 
 export async function getPendingOrders(): Promise<PendingOrder[]> {
+  await requireAdminSyncAccess('Admin Sync');
+
   const svc = createServiceSupabase();
   const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready', 'in_process'];
 

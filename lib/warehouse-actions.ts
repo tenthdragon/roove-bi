@@ -2,14 +2,20 @@
 'use server';
 
 import { createServiceSupabase } from './supabase-server';
-import { requireDashboardTabAccess } from './dashboard-access';
+import { requireDashboardPermissionAccess, requireDashboardTabAccess } from './dashboard-access';
 import { parseWarehouseSheet } from './warehouse-parser';
+
+async function requireWarehouseAdminAccess(label: string) {
+  await requireDashboardPermissionAccess('admin:warehouse', label);
+}
 
 // ============================================================
 // SHEET CONNECTION MANAGEMENT
 // ============================================================
 
 export async function getWarehouseConnections() {
+  await requireWarehouseAdminAccess('Admin Warehouse');
+
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_sheet_connections')
@@ -20,6 +26,8 @@ export async function getWarehouseConnections() {
 }
 
 export async function addWarehouseConnection(spreadsheetId: string, label: string, warehouseName: string) {
+  await requireWarehouseAdminAccess('Admin Warehouse');
+
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_sheet_connections')
@@ -31,6 +39,8 @@ export async function addWarehouseConnection(spreadsheetId: string, label: strin
 }
 
 export async function removeWarehouseConnection(id: string) {
+  await requireWarehouseAdminAccess('Admin Warehouse');
+
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('warehouse_sheet_connections')
@@ -40,10 +50,12 @@ export async function removeWarehouseConnection(id: string) {
 }
 
 export async function toggleWarehouseConnection(id: string, isActive: boolean) {
+  await requireWarehouseAdminAccess('Admin Warehouse');
+
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('warehouse_sheet_connections')
-    .update({ is_active: !isActive })
+    .update({ is_active: isActive })
     .eq('id', id);
   if (error) throw error;
 }
@@ -53,6 +65,8 @@ export async function toggleWarehouseConnection(id: string, isActive: boolean) {
 // ============================================================
 
 export async function triggerWarehouseSync() {
+  await requireWarehouseAdminAccess('Admin Warehouse');
+
   const svc = createServiceSupabase();
 
   const { data: connections, error: connError } = await svc

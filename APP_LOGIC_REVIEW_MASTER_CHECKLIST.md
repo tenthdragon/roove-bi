@@ -898,8 +898,8 @@ Status legend:
 | Brand Analysis | `app/dashboard/brand-analysis/page.tsx`, `lib/scalev-actions.ts` | DN | Direview dan dipatch lokal: server actions Brand Analysis kini enforce akses tab server-side, query refresh-time/logging tidak lagi fail-silent, dan page refresh/load sekarang menampilkan error state yang jujur alih-alih tersamar sebagai no-data. Runtime verification disarankan |
 | Finance Analysis | `app/dashboard/finance/page.tsx`, `lib/financial-actions.ts`, `app/api/financial-analysis/route.ts` | DN | Direview dan dipatch lokal: dashboard Finance kini tahan partial failure untuk ratio/BS, warning BS tidak lagi tersamar sebagai no-data biasa, AI advisory route kini owner-only + memakai full prompt yang benar, dan riwayat analisis disimpan/dibaca server-side dengan warning eksplisit bila save gagal. Runtime verification disarankan |
 | Business Settings | `app/dashboard/business-settings/page.tsx`, `lib/webhook-actions.ts` | DN | Direview dan dipatch lokal: server actions Business Settings kini konsisten owner-only di server-side, status PKP tidak lagi diupdate langsung dari browser, store sekarang bisa mengatur `channel_override` yang memang dipakai webhook backend, hasil refresh store tidak lagi mengklaim inserted count palsu, dan page/store section kini punya error state yang jujur. Runtime verification disarankan |
-| Admin | `app/dashboard/admin/page.tsx`, admin components and upload/sync APIs | NS |  |
-| Hidden products route | `app/dashboard/products/page.tsx` | NS |  |
+| Admin | `app/dashboard/admin/page.tsx`, admin components and upload/sync APIs | DN | Direview dan dipatch lokal: bootstrap/profile Admin tidak lagi false-deny atau blank saat tab default tidak terlihat, mutation/read sensitif dipindah dari browser ke server actions owner/admin guard, dan jalur upload/sync/config Admin kini enforce permission `admin:*` atau owner-only di server-side. Runtime verification disarankan |
+| Hidden products route | `app/dashboard/products/page.tsx` | DN | Direview dan dipatch lokal: route legacy `products` yang sudah disembunyikan dari nav kini di-redirect server-side ke Overview sehingga direct URL tidak lagi memuat query/product analytics lama sebelum redirect client berjalan. Runtime verification disarankan |
 | Scalev integration backend | `app/api/scalev-webhook/route.ts`, `app/api/scalev-sync/route.ts`, `lib/scalev-api.ts` | NS |  |
 | Sheets/financial/warehouse sync backend | `/api/sync`, `/api/financial-sync`, `/api/warehouse-sync`, parsers | NS |  |
 | Meta/WhatsApp/XLSX backend | meta/waba/xlsx routes + libs | NS |  |
@@ -1483,6 +1483,92 @@ Status legend:
 - Next step:
   - lanjut review area `Admin`
   - verifikasi manual bahwa non-owner tidak bisa direct invoke server action Business Settings, perubahan PKP/channel override benar-benar memengaruhi klasifikasi webhook berikutnya, dan load/store error kini muncul sebagai error state alih-alih empty state
+
+### Review Notes - Admin
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/admin/page.tsx`
+  - `components/SheetManager.tsx`
+  - `components/FinancialSheetManager.tsx`
+  - `components/WarehouseSheetManager.tsx`
+  - `components/CsvOrderUploader.tsx`
+  - `components/MetaManager.tsx`
+  - `components/SyncManager.tsx`
+  - `lib/actions.ts`
+  - `lib/admin-actions.ts`
+  - `lib/sheet-actions.ts`
+  - `lib/financial-actions.ts`
+  - `lib/warehouse-actions.ts`
+  - `lib/scalev-actions.ts`
+  - `app/api/sync/route.ts`
+  - `app/api/csv-upload/route.ts`
+  - `app/api/meta-sync/route.ts`
+  - `app/api/meta-accounts/route.ts`
+  - `app/api/whatsapp-sync/route.ts`
+  - `app/api/scalev-sync/route.ts`
+- Data sources:
+  - `profiles`
+  - `role_permissions`
+  - `sheet_connections`
+  - `financial_sheet_connections`
+  - `warehouse_sheet_connections`
+  - `marketplace_commission_rates`
+  - `tax_rates`
+  - `monthly_overhead`
+  - `meta_ad_accounts`
+  - `waba_accounts`
+  - `scalev_sync_log`
+  - `data_imports`
+- Mutation paths:
+  - Excel upload via `uploadExcelData()`
+  - CSV upload via `POST /api/csv-upload`
+  - Google Sheets / financial / warehouse connection CRUD + sync
+  - Meta/WABA account config CRUD + sync
+  - Scalev repair/sync via `POST /api/scalev-sync`
+  - role update / invite / `telegram_chat_id` update
+  - permission matrix persistence
+  - marketplace commission / tax rate / monthly overhead editors
+- Findings summary:
+  - page Admin sebelumnya bootstrap profile langsung dari browser tanpa loading gate, sehingga user bisa melihat `Akses Ditolak` palsu saat init belum selesai dan non-owner dengan tab terbatas bisa jatuh ke blank state karena `activeTab` default tetap `daily`
+  - tab owner-only seperti `users`, `permissions`, dan editor data reference sebelumnya masih membaca/menulis tabel sensitif langsung dari browser, termasuk `role_permissions`, `profiles.telegram_chat_id`, `marketplace_commission_rates`, `tax_rates`, dan `monthly_overhead`; direct invoke client berhasil melewati guard server-side yang seharusnya menjadi source of truth
+  - `MetaManager` sebelumnya memuat dan mengubah `meta_ad_accounts` / `waba_accounts` langsung dari browser, sehingga siapa pun yang bisa menjalankan code path ini berpotensi bypass model akses `admin:meta`
+  - action/route Admin untuk sheet sync, financial sync, warehouse sync, CSV upload, Meta/WABA sync, dan Scalev sync sebelumnya banyak yang masih tanpa guard atau masih memakai role legacy `owner/finance`; akibatnya permission matrix `admin:*` tidak benar-benar enforced di server
+  - `/api/csv-upload` sebelumnya memakai service-role tanpa auth guard sama sekali, sehingga upload CSV order bisa dipicu di luar UI Admin; `getScalevStatus()` dan `getPendingOrders()` untuk tab Sync juga belum memverifikasi akses server-side
+  - tab Logs dan sebagian loader Admin sebelumnya gagal-diam dengan `console.error()` saja; akibatnya kegagalan query mudah tersamar sebagai empty state biasa
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Scalev integration backend`
+  - verifikasi manual bahwa role non-owner hanya bisa membuka sub-tab Admin yang diizinkan, direct invoke upload/sync/config tanpa permission kini ditolak, dan Admin tidak lagi blank/false-deny saat pertama dibuka
+
+### Review Notes - Hidden products route
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/products/page.tsx`
+  - `app/dashboard/layout.tsx`
+  - `lib/utils.ts`
+- Data sources:
+  - `daily_product_summary`
+  - `dashboard-cache`
+  - `DateRangeContext`
+  - `ActiveBrandsContext`
+- Mutation paths:
+  - tidak ada mutation; route hanya membaca analytics produk legacy
+- Findings summary:
+  - tab `products` sudah lama disembunyikan dari navigation (`lib/utils.ts`) dan secara konsep sudah digabung ke Overview, tetapi route `app/dashboard/products/page.tsx` masih tetap aktif dan melakukan query browser langsung ke `daily_product_summary`
+  - direct URL ke `/dashboard/products` masih berpotensi memuat data legacy sebelum redirect client-level di shell selesai berjalan, sehingga route tersembunyi ini tetap menjadi surface area analytics yang tidak lagi dipelihara
+  - page legacy juga masih memakai cache/query sendiri yang terpisah dari flow Overview saat ini, sehingga kalau dibiarkan aktif ada risiko drift logika dan kebingungan support saat ada orang membuka URL lama
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Scalev integration backend`
+  - verifikasi manual bahwa akses langsung ke `/dashboard/products` kini selalu dilempar ke `/dashboard` tanpa sempat menampilkan UI produk legacy
 
 Saat mereview satu area, catat minimal format ini:
 

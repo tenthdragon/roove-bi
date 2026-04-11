@@ -2,14 +2,20 @@
 'use server';
 
 import { createServiceSupabase } from './supabase-server';
-import { requireDashboardRoles, requireDashboardTabAccess } from './dashboard-access';
+import { requireDashboardPermissionAccess, requireDashboardRoles, requireDashboardTabAccess } from './dashboard-access';
 import { parseFinancialReport } from './financial-parser';
+
+async function requireFinancialAdminAccess(label: string) {
+  await requireDashboardPermissionAccess('admin:financial', label);
+}
 
 // ============================================================
 // SHEET CONNECTION MANAGEMENT
 // ============================================================
 
 export async function getFinancialConnections() {
+  await requireFinancialAdminAccess('Admin Financial');
+
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('financial_sheet_connections')
@@ -20,6 +26,8 @@ export async function getFinancialConnections() {
 }
 
 export async function addFinancialConnection(spreadsheetId: string, label: string) {
+  await requireFinancialAdminAccess('Admin Financial');
+
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('financial_sheet_connections')
@@ -31,6 +39,8 @@ export async function addFinancialConnection(spreadsheetId: string, label: strin
 }
 
 export async function removeFinancialConnection(id: string) {
+  await requireFinancialAdminAccess('Admin Financial');
+
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('financial_sheet_connections')
@@ -40,10 +50,12 @@ export async function removeFinancialConnection(id: string) {
 }
 
 export async function toggleFinancialConnection(id: string, isActive: boolean) {
+  await requireFinancialAdminAccess('Admin Financial');
+
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('financial_sheet_connections')
-    .update({ is_active: !isActive })
+    .update({ is_active: isActive })
     .eq('id', id);
   if (error) throw error;
 }
@@ -53,6 +65,8 @@ export async function toggleFinancialConnection(id: string, isActive: boolean) {
 // ============================================================
 
 export async function triggerFinancialSync() {
+  await requireFinancialAdminAccess('Admin Financial');
+
   const svc = createServiceSupabase();
 
   const { data: connections, error: connError } = await svc

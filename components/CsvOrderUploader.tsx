@@ -2,10 +2,9 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { useSupabase } from '@/lib/supabase-browser';
+import { getCsvUploadHistory } from '@/lib/admin-actions';
 
 export default function CsvOrderUploader() {
-  const supabase = useSupabase();
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [results, setResults] = useState<any[]>([]);
@@ -15,14 +14,13 @@ export default function CsvOrderUploader() {
   const [showHistory, setShowHistory] = useState(false);
 
   const loadHistory = useCallback(async () => {
-    const { data } = await supabase
-      .from('scalev_sync_log')
-      .select('*')
-      .in('sync_type', ['csv_upload', 'ops_upload'])
-      .order('started_at', { ascending: false })
-      .limit(5);
-    setHistory(data || []);
-  }, [supabase]);
+    try {
+      const data = await getCsvUploadHistory();
+      setHistory(data || []);
+    } catch (err: any) {
+      setError(err.message || 'Gagal memuat riwayat upload');
+    }
+  }, []);
 
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
@@ -45,8 +43,6 @@ export default function CsvOrderUploader() {
     const allResults: any[] = [];
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-
       for (let fi = 0; fi < csvFiles.length; fi++) {
         const file = csvFiles[fi];
 
@@ -84,7 +80,6 @@ export default function CsvOrderUploader() {
 
             const formData = new FormData();
             formData.append('file', chunkFile);
-            if (user?.email) formData.append('uploaded_by', user.email);
             formData.append('filename', csvFiles.length > 1
               ? `${file.name} (file ${fi + 1}/${csvFiles.length}${totalChunks > 1 ? `, part ${c + 1}/${totalChunks}` : ''})`
               : `${file.name}${totalChunks > 1 ? ` (part ${c + 1}/${totalChunks})` : ''}`
@@ -133,7 +128,7 @@ export default function CsvOrderUploader() {
     } finally {
       setUploading(false);
     }
-  }, [supabase, loadHistory]);
+  }, [loadHistory]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

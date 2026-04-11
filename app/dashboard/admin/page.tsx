@@ -3,19 +3,29 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useSupabase } from '@/lib/supabase-browser';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
+import {
+  deleteCommissionRate,
+  deleteMonthlyOverhead,
+  deleteTaxRate,
+  getAdminBootstrap,
+  getAdminDataReferenceSnapshot,
+  getAdminLogsSnapshot,
+  updateTelegramChatId,
+  saveCommissionRate,
+  saveMonthlyOverhead,
+  saveRolePermissionsMatrix,
+  saveTaxRate,
+  getRolePermissionsMatrix,
+} from '@/lib/admin-actions';
 import { MATRIX_ROLES, PERMISSION_GROUPS } from '@/lib/utils';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { invalidateAll } from '@/lib/dashboard-cache';
 import SheetManager from '@/components/SheetManager';
-import ConnectionManager from '@/components/ConnectionManager';
 import SyncManager from '@/components/SyncManager';
 import FinancialSheetManager from '@/components/FinancialSheetManager';
 import CsvOrderUploader from '@/components/CsvOrderUploader';
-import BrandManager from '@/components/BrandManager';
 import MetaManager from '@/components/MetaManager';
-// WebhookManager merged into ConnectionManager
 import WarehouseSheetManager from '@/components/WarehouseSheetManager';
 
 const TABS = [
@@ -32,13 +42,13 @@ const TABS = [
 ];
 
 export default function AdminPage() {
-  const supabase = useSupabase();
   const { can } = usePermissions();
   const searchParams = useSearchParams();
   const showAdvanced = searchParams.get('advanced') === 'true';
 
   const [profile, setProfile] = useState(null);
   const [activeTab, setActiveTab] = useState('daily');
+  const [bootstrapping, setBootstrapping] = useState(true);
 
   // Upload states
   const [uploading, setUploading] = useState(false);
@@ -50,6 +60,8 @@ export default function AdminPage() {
   const [logsData, setLogsData] = useState([]);
   const [excelImports, setExcelImports] = useState([]);
   const [logsLoading, setLogsLoading] = useState(false);
+  const [logsError, setLogsError] = useState('');
+  const [logsInitialized, setLogsInitialized] = useState(false);
   const [logFilter, setLogFilter] = useState('all');
 
   // Data Reference states
@@ -72,18 +84,7 @@ export default function AdminPage() {
   const [overheadSaving, setOverheadSaving] = useState(false);
   const [overheadMsg, setOverheadMsg] = useState(null);
   const [editingOverhead, setEditingOverhead] = useState(null); // { year_month, amount, isNew }
-
-  // Business Tax Config states
-  const [bizTaxData, setBizTaxData] = useState([]);
-  const [bizTaxLoading, setBizTaxLoading] = useState(false);
-  const [bizTaxSaving, setBizTaxSaving] = useState(false);
-  const [bizTaxMsg, setBizTaxMsg] = useState(null);
-
-  // Business → Warehouse Mapping states
-  const [whMappingData, setWhMappingData] = useState([]);
-  const [whMappingLoading, setWhMappingLoading] = useState(false);
-  const [whMappingSaving, setWhMappingSaving] = useState(false);
-  const [whMappingMsg, setWhMappingMsg] = useState(null);
+  const [dataRefInitialized, setDataRefInitialized] = useState(false);
 
   // User management states
   const [users, setUsers] = useState([]);
@@ -92,178 +93,104 @@ export default function AdminPage() {
   const [inviting, setInviting] = useState(false);
   const [inviteMsg, setInviteMsg] = useState(null);
 
+  const visibleTabs = TABS.filter((tab) => {
+    if ((tab.id === 'users' || tab.id === 'permissions') && profile?.role !== 'owner') return false;
+    if (tab.id === 'data_ref' && profile?.role !== 'owner') return false;
+    if (profile?.role === 'owner') return true;
+    return can(`admin:${tab.id}`);
+  });
+
+  const currentTabId = visibleTabs.some((tab) => tab.id === activeTab)
+    ? activeTab
+    : visibleTabs[0]?.id || activeTab;
+
   useEffect(() => {
+    let mounted = true;
+
     async function init() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-        setProfile(p);
-        if (p?.role === 'owner') {
-          const { data: u } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
-          setUsers(u || []);
-        }
+      setBootstrapping(true);
+      try {
+        const bootstrap = await getAdminBootstrap();
+        if (!mounted) return;
+        setProfile(bootstrap.profile);
+        setUsers(bootstrap.users || []);
+      } catch (err) {
+        console.error('Failed to bootstrap admin page:', err);
+        if (mounted) setProfile(null);
+      } finally {
+        if (mounted) setBootstrapping(false);
       }
     }
+
     init();
-  }, [supabase]);
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (visibleTabs.length > 0 && currentTabId !== activeTab) {
+      setActiveTab(currentTabId);
+    }
+  }, [activeTab, currentTabId, visibleTabs.length]);
+
+  const refreshUsers = useCallback(async () => {
+    const allUsers = await fetchAllUsers();
+    setUsers(allUsers || []);
+  }, []);
+
+  const loadLogs = useCallback(async () => {
+    setLogsLoading(true);
+    setLogsError('');
+    try {
+      const snapshot = await getAdminLogsSnapshot();
+      setLogsData(snapshot.syncLogs || []);
+      setExcelImports(snapshot.imports || []);
+    } catch (err) {
+      console.error('Failed to load logs:', err);
+      setLogsError(err.message || 'Gagal memuat log aktivitas');
+    } finally {
+      setLogsLoading(false);
+    }
+  }, []);
 
   // Load logs when tab becomes active
   useEffect(() => {
-    if (activeTab !== 'logs' || logsData.length > 0) return;
-    (async () => {
-      setLogsLoading(true);
-      try {
-        const [{ data: syncLogs }, { data: imports }] = await Promise.all([
-          supabase.from('scalev_sync_log').select('*').order('started_at', { ascending: false }).limit(100),
-          supabase.from('data_imports').select('*').order('imported_at', { ascending: false }).limit(100),
-        ]);
-        setLogsData(syncLogs || []);
-        setExcelImports(imports || []);
-      } catch (err) {
-        console.error('Failed to load logs:', err);
-      } finally {
-        setLogsLoading(false);
-      }
-    })();
-  }, [activeTab, supabase]);
+    if (currentTabId !== 'logs' || logsInitialized) return;
+    setLogsInitialized(true);
+    void loadLogs();
+  }, [currentTabId, loadLogs, logsInitialized]);
 
-  const refreshUsers = useCallback(async () => {
-    const { data: u } = await supabase.from('profiles').select('*').order('created_at', { ascending: true });
-    setUsers(u || []);
-  }, [supabase]);
-
-  // Load commission rates when Data Reference tab is active
-  const loadCommRates = useCallback(async () => {
+  const loadDataReference = useCallback(async () => {
     setCommLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('marketplace_commission_rates')
-        .select('*')
-        .order('channel')
-        .order('effective_from', { ascending: false });
-      if (error) throw error;
-      setCommRates(data || []);
-    } catch (err) {
-      console.error('Failed to load commission rates:', err);
-    } finally {
-      setCommLoading(false);
-    }
-  }, [supabase]);
-
-  // Load tax rates
-  const loadTaxRates = useCallback(async () => {
     setTaxLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('tax_rates')
-        .select('*')
-        .order('name')
-        .order('effective_from', { ascending: false });
-      if (error) throw error;
-      setTaxRates(data || []);
-    } catch (err) {
-      console.error('Failed to load tax rates:', err);
-    } finally {
-      setTaxLoading(false);
-    }
-  }, [supabase]);
-
-  // Load monthly overhead
-  const loadOverhead = useCallback(async () => {
     setOverheadLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('monthly_overhead')
-        .select('*')
-        .order('year_month', { ascending: false });
-      if (error) throw error;
-      setOverheadData(data || []);
+      const snapshot = await getAdminDataReferenceSnapshot();
+      setCommRates(snapshot.commRates || []);
+      setTaxRates(snapshot.taxRates || []);
+      setOverheadData(snapshot.overheadData || []);
+      setCommMsg(null);
+      setTaxMsg(null);
+      setOverheadMsg(null);
     } catch (err) {
-      console.error('Failed to load overhead:', err);
+      console.error('Failed to load data reference:', err);
+      const message = err.message || 'Gagal memuat data reference';
+      setCommMsg({ type: 'error', text: message });
+      setTaxMsg({ type: 'error', text: message });
+      setOverheadMsg({ type: 'error', text: message });
     } finally {
+      setCommLoading(false);
+      setTaxLoading(false);
       setOverheadLoading(false);
     }
-  }, [supabase]);
-
-  // Load business tax config
-  const loadBizTax = useCallback(async () => {
-    setBizTaxLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('scalev_webhook_businesses')
-        .select('id, business_code, business_name, tax_rate_name, is_active')
-        .order('id');
-      if (error) throw error;
-      setBizTaxData(data || []);
-    } catch (err) {
-      console.error('Failed to load business tax config:', err);
-    } finally {
-      setBizTaxLoading(false);
-    }
-  }, [supabase]);
-
-  // Business → Warehouse Mapping
-  const loadWhMapping = useCallback(async () => {
-    setWhMappingLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from('warehouse_business_mapping')
-        .select('*, scalev_webhook_businesses!inner(business_name)')
-        .order('business_code');
-      if (error) throw error;
-      setWhMappingData(data || []);
-    } catch (err) {
-      console.error('Failed to load warehouse mapping:', err);
-    } finally {
-      setWhMappingLoading(false);
-    }
-  }, [supabase]);
-
-  const handleWhMappingChange = async (id, field, value) => {
-    setWhMappingSaving(true);
-    setWhMappingMsg(null);
-    try {
-      const { error } = await supabase
-        .from('warehouse_business_mapping')
-        .update({ [field]: value })
-        .eq('id', id);
-      if (error) throw error;
-      setWhMappingMsg({ type: 'success', text: 'Mapping updated' });
-      await loadWhMapping();
-    } catch (err) {
-      setWhMappingMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
-    } finally {
-      setWhMappingSaving(false);
-    }
-  };
-
-  const handleBizTaxChange = async (bizId, newTaxRateName) => {
-    setBizTaxSaving(true);
-    setBizTaxMsg(null);
-    try {
-      const { error } = await supabase
-        .from('scalev_webhook_businesses')
-        .update({ tax_rate_name: newTaxRateName })
-        .eq('id', bizId);
-      if (error) throw error;
-      setBizTaxMsg({ type: 'success', text: 'Tax config updated' });
-      await loadBizTax();
-    } catch (err) {
-      setBizTaxMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
-    } finally {
-      setBizTaxSaving(false);
-    }
-  };
+  }, []);
 
   useEffect(() => {
-    if (activeTab === 'data_ref') {
-      if (commRates.length === 0) loadCommRates();
-      if (taxRates.length === 0) loadTaxRates();
-      if (overheadData.length === 0) loadOverhead();
-      if (bizTaxData.length === 0) loadBizTax();
-      if (whMappingData.length === 0) loadWhMapping();
-    }
-  }, [activeTab]);
+    if (currentTabId !== 'data_ref' || dataRefInitialized) return;
+    setDataRefInitialized(true);
+    void loadDataReference();
+  }, [currentTabId, dataRefInitialized, loadDataReference]);
 
   const handleSaveRate = async (row) => {
     if (!row.channel || !row.rate || !row.effective_from) {
@@ -277,17 +204,14 @@ export default function AdminPage() {
       if (isNaN(rateNum) || rateNum < 0 || rateNum > 1) {
         throw new Error('Rate harus berupa desimal antara 0 dan 1 (contoh: 0.19 = 19%)');
       }
-      const { error } = await supabase
-        .from('marketplace_commission_rates')
-        .upsert({
-          channel: row.channel,
-          rate: rateNum,
-          effective_from: row.effective_from,
-        }, { onConflict: 'channel,effective_from' });
-      if (error) throw error;
+      await saveCommissionRate({
+        channel: row.channel,
+        rate: rateNum,
+        effective_from: row.effective_from,
+      });
       setCommMsg({ type: 'success', text: `Rate ${row.channel} berhasil disimpan` });
       setEditingRate(null);
-      await loadCommRates();
+      await loadDataReference();
     } catch (err) {
       setCommMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
     } finally {
@@ -298,10 +222,9 @@ export default function AdminPage() {
   const handleDeleteRate = async (id) => {
     if (!confirm('Hapus rate ini? Data mp_admin_cost akan otomatis dihitung ulang.')) return;
     try {
-      const { error } = await supabase.from('marketplace_commission_rates').delete().eq('id', id);
-      if (error) throw error;
+      await deleteCommissionRate(id);
       setCommMsg({ type: 'success', text: 'Rate dihapus' });
-      await loadCommRates();
+      await loadDataReference();
     } catch (err) {
       setCommMsg({ type: 'error', text: err.message || 'Gagal menghapus' });
     }
@@ -319,17 +242,14 @@ export default function AdminPage() {
       if (isNaN(rateNum) || rateNum < 0 || rateNum > 100) {
         throw new Error('Rate harus berupa angka persentase antara 0 dan 100 (contoh: 11 = 11%)');
       }
-      const { error } = await supabase
-        .from('tax_rates')
-        .upsert({
-          name: row.name.trim(),
-          rate: rateNum,
-          effective_from: row.effective_from,
-        }, { onConflict: 'name,effective_from' });
-      if (error) throw error;
+      await saveTaxRate({
+        name: row.name.trim(),
+        rate: rateNum,
+        effective_from: row.effective_from,
+      });
       setTaxMsg({ type: 'success', text: `Tax rate ${row.name} berhasil disimpan` });
       setEditingTax(null);
-      await loadTaxRates();
+      await loadDataReference();
     } catch (err) {
       setTaxMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
     } finally {
@@ -340,10 +260,9 @@ export default function AdminPage() {
   const handleDeleteTax = async (id) => {
     if (!confirm('Hapus tax rate ini?')) return;
     try {
-      const { error } = await supabase.from('tax_rates').delete().eq('id', id);
-      if (error) throw error;
+      await deleteTaxRate(id);
       setTaxMsg({ type: 'success', text: 'Tax rate dihapus' });
-      await loadTaxRates();
+      await loadDataReference();
     } catch (err) {
       setTaxMsg({ type: 'error', text: err.message || 'Gagal menghapus' });
     }
@@ -361,17 +280,13 @@ export default function AdminPage() {
       if (isNaN(amount) || amount < 0) {
         throw new Error('Nominal harus berupa angka positif');
       }
-      const { error } = await supabase
-        .from('monthly_overhead')
-        .upsert({
-          year_month: row.year_month,
-          amount,
-          updated_at: new Date().toISOString(),
-        }, { onConflict: 'year_month' });
-      if (error) throw error;
+      await saveMonthlyOverhead({
+        year_month: row.year_month,
+        amount,
+      });
       setOverheadMsg({ type: 'success', text: `Overhead ${row.year_month} berhasil disimpan` });
       setEditingOverhead(null);
-      await loadOverhead();
+      await loadDataReference();
     } catch (err) {
       setOverheadMsg({ type: 'error', text: err.message || 'Gagal menyimpan' });
     } finally {
@@ -382,10 +297,9 @@ export default function AdminPage() {
   const handleDeleteOverhead = async (id) => {
     if (!confirm('Hapus overhead ini?')) return;
     try {
-      const { error } = await supabase.from('monthly_overhead').delete().eq('id', id);
-      if (error) throw error;
+      await deleteMonthlyOverhead(id);
       setOverheadMsg({ type: 'success', text: 'Overhead dihapus' });
-      await loadOverhead();
+      await loadDataReference();
     } catch (err) {
       setOverheadMsg({ type: 'error', text: err.message || 'Gagal menghapus' });
     }
@@ -458,16 +372,6 @@ export default function AdminPage() {
     }
   };
 
-  if (!profile?.role || profile.role === 'pending') {
-    return (
-      <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
-        <div style={{ fontSize: 18, fontWeight: 600 }}>Akses Ditolak</div>
-        <div>Anda tidak memiliki akses ke halaman ini.</div>
-      </div>
-    );
-  }
-
   const roleLabel = (r) => {
     switch (r) {
       case 'owner':              return { text: 'Owner',             bg: 'var(--accent-subtle)',    color: '#818cf8' };
@@ -490,15 +394,33 @@ export default function AdminPage() {
     }
   };
 
-  // Filter tabs based on role + permissions
-  const visibleTabs = TABS.filter(t => {
-    if ((t.id === 'users' || t.id === 'permissions') && profile?.role !== 'owner') return false;
-    if (t.id === 'data_ref' && profile?.role !== 'owner') return false;
-    // owner sees all tabs
-    if (profile?.role === 'owner') return true;
-    // other roles: check admin:* permission
-    return can(`admin:${t.id}`);
-  });
+  if (bootstrapping) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
+        <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
+      </div>
+    );
+  }
+
+  if (!profile?.role || profile.role === 'pending') {
+    return (
+      <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>🔒</div>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>Akses Ditolak</div>
+        <div>Anda tidak memiliki akses ke halaman ini.</div>
+      </div>
+    );
+  }
+
+  if (visibleTabs.length === 0) {
+    return (
+      <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>
+        <div style={{ fontSize: 36, marginBottom: 16 }}>🛡️</div>
+        <div style={{ fontSize: 18, fontWeight: 600 }}>Akses Admin Belum Tersedia</div>
+        <div>Akun ini belum memiliki izin sub-tab Admin yang bisa dibuka.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="fade-in">
@@ -517,9 +439,9 @@ export default function AdminPage() {
             onClick={() => setActiveTab(tab.id)}
             style={{
               padding: '8px 16px', background: 'none', border: 'none', whiteSpace: 'nowrap', flexShrink: 0,
-              borderBottom: activeTab === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
-              color: activeTab === tab.id ? 'var(--text)' : 'var(--dim)',
-              fontSize: 13, fontWeight: activeTab === tab.id ? 700 : 500,
+              borderBottom: currentTabId === tab.id ? '2px solid var(--accent)' : '2px solid transparent',
+              color: currentTabId === tab.id ? 'var(--text)' : 'var(--dim)',
+              fontSize: 13, fontWeight: currentTabId === tab.id ? 700 : 500,
               cursor: 'pointer', transition: 'all 0.15s',
             }}
           >
@@ -529,7 +451,7 @@ export default function AdminPage() {
       </div>
 
       {/* ═══ TAB: DAILY DATA ═══ */}
-      {activeTab === 'daily' && (
+      {currentTabId === 'daily' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Google Sheets Sync */}
           <SheetManager />
@@ -589,29 +511,29 @@ export default function AdminPage() {
       )}
 
       {/* ═══ TAB: META ADS ═══ */}
-      {activeTab === 'meta' && (
+      {currentTabId === 'meta' && (
         <MetaManager />
       )}
 
       {/* ═══ TAB: FINANCIAL ═══ */}
-      {activeTab === 'financial' && (
+      {currentTabId === 'financial' && (
         <FinancialSheetManager />
       )}
 
       {/* ═══ TAB: WAREHOUSE ═══ */}
-      {activeTab === 'warehouse' && (
+      {currentTabId === 'warehouse' && (
         <WarehouseSheetManager />
       )}
 
       {/* Connection + PKP moved to Business Settings */}
 
       {/* ═══ TAB: SYNC ═══ */}
-      {activeTab === 'sync' && (
+      {currentTabId === 'sync' && (
         <SyncManager />
       )}
 
       {/* ═══ TAB: DATA REFERENCE ═══ */}
-      {activeTab === 'data_ref' && (
+      {currentTabId === 'data_ref' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Marketplace Commission Rates */}
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
@@ -1044,7 +966,7 @@ export default function AdminPage() {
       )}
 
       {/* ═══ TAB: LOGS ═══ */}
-      {activeTab === 'logs' && (() => {
+      {currentTabId === 'logs' && (() => {
         const WEBHOOK_LABELS = {
           webhook: 'Webhook', webhook_created: 'Order Created', webhook_updated: 'Order Updated',
           webhook_deleted: 'Order Deleted', webhook_status_changed: 'Status Changed',
@@ -1130,6 +1052,8 @@ export default function AdminPage() {
               <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
                 <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
               </div>
+            ) : logsError ? (
+              <div style={{ textAlign: 'center', padding: 60, color: 'var(--red)' }}>{logsError}</div>
             ) : filtered.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)' }}>Belum ada log aktivitas</div>
             ) : (
@@ -1182,7 +1106,7 @@ export default function AdminPage() {
       })()}
 
       {/* ═══ TAB: USERS ═══ */}
-      {activeTab === 'users' && profile?.role === 'owner' && (
+      {currentTabId === 'users' && profile?.role === 'owner' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {/* Invite Form */}
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
@@ -1367,7 +1291,8 @@ export default function AdminPage() {
                           onBlur={async (e) => {
                             const val = e.target.value.trim();
                             try {
-                              await supabase.from('profiles').update({ telegram_chat_id: val || null }).eq('id', u.id);
+                              await updateTelegramChatId(u.id, val || null);
+                              await refreshUsers();
                             } catch {}
                           }}
                           style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, width: 140 }}
@@ -1382,8 +1307,8 @@ export default function AdminPage() {
         </div>
       )}
 
-      {activeTab === 'permissions' && profile?.role === 'owner' && (
-        <PermissionsMatrix supabase={supabase} />
+      {currentTabId === 'permissions' && profile?.role === 'owner' && (
+        <PermissionsMatrix />
       )}
     </div>
   );
@@ -1392,21 +1317,45 @@ export default function AdminPage() {
 // ============================================================
 // Permissions Matrix Component
 // ============================================================
-function PermissionsMatrix({ supabase }) {
+function PermissionsMatrix() {
   const [matrix, setMatrix] = useState<Record<string, Set<string>>>({});
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    supabase.from('role_permissions').select('role, permission_key').then(({ data }) => {
-      const m: Record<string, Set<string>> = {};
-      MATRIX_ROLES.forEach(r => { m[r.id] = new Set(); });
-      (data ?? []).forEach((row: any) => {
-        if (!m[row.role]) m[row.role] = new Set();
-        m[row.role].add(row.permission_key);
-      });
-      setMatrix(m);
-    });
+    let mounted = true;
+
+    async function loadMatrix() {
+      setLoading(true);
+      setError('');
+      try {
+        const data = await getRolePermissionsMatrix();
+        if (!mounted) return;
+
+        const nextMatrix: Record<string, Set<string>> = {};
+        MATRIX_ROLES.forEach((role) => {
+          nextMatrix[role.id] = new Set();
+        });
+
+        (data ?? []).forEach((row: any) => {
+          if (!nextMatrix[row.role]) nextMatrix[row.role] = new Set();
+          nextMatrix[row.role].add(row.permission_key);
+        });
+
+        setMatrix(nextMatrix);
+      } catch (err: any) {
+        if (mounted) setError(err.message || 'Gagal memuat permission matrix');
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+
+    loadMatrix();
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const toggle = (role: string, key: string) => {
@@ -1420,16 +1369,21 @@ function PermissionsMatrix({ supabase }) {
 
   const save = async () => {
     setSaving(true);
-    // Delete all existing, then re-insert checked ones
-    await supabase.from('role_permissions').delete().neq('role', 'owner');
-    const rows: { role: string; permission_key: string }[] = [];
-    MATRIX_ROLES.forEach(r => {
-      matrix[r.id]?.forEach(key => rows.push({ role: r.id, permission_key: key }));
-    });
-    if (rows.length > 0) await supabase.from('role_permissions').insert(rows);
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    setError('');
+    try {
+      const serializedMatrix: Record<string, string[]> = {};
+      MATRIX_ROLES.forEach((role) => {
+        serializedMatrix[role.id] = Array.from(matrix[role.id] || []);
+      });
+
+      await saveRolePermissionsMatrix(serializedMatrix);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (err: any) {
+      setError(err.message || 'Gagal menyimpan permission matrix');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const thStyle: React.CSSProperties = {
@@ -1462,42 +1416,53 @@ function PermissionsMatrix({ supabase }) {
           {saving ? 'Menyimpan...' : saved ? '✓ Tersimpan' : 'Simpan'}
         </button>
       </div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
-          <thead>
-            <tr>
-              <th style={{ ...thStyle, textAlign: 'left', minWidth: 180 }}>Fitur / Halaman</th>
-              {MATRIX_ROLES.map(r => (
-                <th key={r.id} style={thStyle}>{r.label}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {PERMISSION_GROUPS.map(group => (
-              <>
-                <tr key={group.label}>
-                  <td colSpan={MATRIX_ROLES.length + 1} style={groupHeaderStyle}>{group.label}</td>
-                </tr>
-                {group.keys.map(({ key, label }) => (
-                  <tr key={key} style={{ background: 'var(--card)' }}>
-                    <td style={labelStyle}>{label}</td>
-                    {MATRIX_ROLES.map(r => (
-                      <td key={r.id} style={tdStyle}>
-                        <input
-                          type="checkbox"
-                          checked={matrix[r.id]?.has(key) ?? false}
-                          onChange={() => toggle(r.id, key)}
-                          style={{ cursor: 'pointer', width: 15, height: 15 }}
-                        />
-                      </td>
-                    ))}
-                  </tr>
+      {error && (
+        <div style={{ padding: '12px 20px', background: 'var(--badge-red-bg)', color: 'var(--red)', fontSize: 12 }}>
+          ❌ {error}
+        </div>
+      )}
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+          <div className="spinner" style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
+        </div>
+      ) : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+            <thead>
+              <tr>
+                <th style={{ ...thStyle, textAlign: 'left', minWidth: 180 }}>Fitur / Halaman</th>
+                {MATRIX_ROLES.map(r => (
+                  <th key={r.id} style={thStyle}>{r.label}</th>
                 ))}
-              </>
-            ))}
-          </tbody>
-        </table>
-      </div>
+              </tr>
+            </thead>
+            <tbody>
+              {PERMISSION_GROUPS.map(group => (
+                <>
+                  <tr key={group.label}>
+                    <td colSpan={MATRIX_ROLES.length + 1} style={groupHeaderStyle}>{group.label}</td>
+                  </tr>
+                  {group.keys.map(({ key, label }) => (
+                    <tr key={key} style={{ background: 'var(--card)' }}>
+                      <td style={labelStyle}>{label}</td>
+                      {MATRIX_ROLES.map(r => (
+                        <td key={r.id} style={tdStyle}>
+                          <input
+                            type="checkbox"
+                            checked={matrix[r.id]?.has(key) ?? false}
+                            onChange={() => toggle(r.id, key)}
+                            style={{ cursor: 'pointer', width: 15, height: 15 }}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

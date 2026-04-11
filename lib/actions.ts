@@ -1,6 +1,7 @@
 'use server';
 
 import { createServerSupabase, createServiceSupabase } from './supabase-server';
+import { requireDashboardPermissionAccess, requireDashboardRoles } from './dashboard-access';
 import { parseRooveExcel } from './excel-parser';
 import type { Profile, DailyProductSummary, MonthlyProductSummary } from './utils';
 
@@ -111,20 +112,7 @@ export async function fetchDateRange() {
 // ── Upload & Import ──
 
 export async function uploadExcelData(formData: FormData) {
-  const supabase = createServerSupabase();
-
-  // Verify user is owner or finance
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (!['owner', 'direktur_finance', 'staf_finance', 'finance', 'staf_ops', 'staff'].includes(profile?.role))
-    throw new Error('Tidak memiliki akses untuk upload data');
+  const { profile } = await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
 
   const file = formData.get('file') as File;
   if (!file) throw new Error('No file provided');
@@ -153,7 +141,7 @@ export async function uploadExcelData(formData: FormData) {
       filename: file.name,
       period_month: parsed.period.month,
       period_year: parsed.period.year,
-      imported_by: user.id,
+      imported_by: profile.id,
       row_count: parsed.dailyProduct.length,
       status: 'processing',
     }, { onConflict: 'period_month,period_year,filename' })
@@ -253,8 +241,10 @@ export async function uploadExcelData(formData: FormData) {
 // ── User Management ──
 
 export async function fetchAllUsers() {
-  const supabase = createServerSupabase();
-  const { data, error } = await supabase
+  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengakses daftar user.');
+
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
     .from('profiles')
     .select('*')
     .order('created_at', { ascending: true });
