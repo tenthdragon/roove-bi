@@ -2,10 +2,14 @@
 'use server';
 
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-server';
-import { requireAnyDashboardTabAccess } from '@/lib/dashboard-access';
+import { requireAnyDashboardTabAccess, requireDashboardTabAccess } from '@/lib/dashboard-access';
 
 async function requireCustomerAnalyticsAccess(label: string) {
   await requireAnyDashboardTabAccess(['pulse', 'customers'], label);
+}
+
+async function requireBrandAnalysisAccess(label: string) {
+  await requireDashboardTabAccess('brand-analysis', label);
 }
 
 // ── Get Scalev integration status ──
@@ -419,6 +423,7 @@ export async function fetchRtsCancelStats(from?: string, to?: string) {
 
 // ── Cross-brand matrix ──
 export async function fetchCrossBrandMatrix() {
+  await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('mv_cross_brand_matrix')
@@ -430,6 +435,7 @@ export async function fetchCrossBrandMatrix() {
 
 // ── Multi-brand customer stats (pre-aggregated) ──
 export async function fetchMultiBrandStats() {
+  await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('v_brand_analysis_summary')
@@ -463,6 +469,7 @@ export async function fetchMultiBrandStats() {
 
 // ── Brand journey transitions ──
 export async function fetchBrandJourney() {
+  await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('mv_brand_journey')
@@ -474,6 +481,7 @@ export async function fetchBrandJourney() {
 
 // ── Customer-brand map (per brand summary) ──
 export async function fetchBrandSummary() {
+  await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('mv_customer_brand_map')
@@ -484,27 +492,31 @@ export async function fetchBrandSummary() {
 
 // ── Last refresh time ──
 export async function fetchBrandAnalysisRefreshTime() {
+  await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
-  const { data } = await svc
+  const { data, error } = await svc
     .from('mv_refresh_log')
     .select('refreshed_at, triggered_by')
     .eq('view_name', 'brand_analysis')
     .order('refreshed_at', { ascending: false })
     .limit(1)
     .maybeSingle();
+  if (error) throw error;
   return data;
 }
 
 // ── Trigger refresh ──
 export async function refreshBrandAnalysis() {
+  await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const { error } = await svc.rpc('refresh_brand_analysis');
   if (error) throw error;
   
-  await svc.from('mv_refresh_log').insert({
+  const { error: logError } = await svc.from('mv_refresh_log').insert({
     view_name: 'brand_analysis',
     triggered_by: 'manual',
   });
+  if (logError) throw logError;
   
   return { success: true };
 }

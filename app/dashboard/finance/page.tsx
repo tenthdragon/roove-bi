@@ -7,6 +7,7 @@ import {
   getFinancialCFSummary,
   getFinancialRatios,
   getFinancialBS,
+  getLatestFinancialAnalysis,
 } from '@/lib/financial-actions';
 
 // ============================================================
@@ -326,37 +327,42 @@ function RatiosTable({ data }: { data: RatioData[] }) {
 // AI ANALYSIS PANEL — Opus 4.6 Strategic Advisory
 // ============================================================
 
-function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[]; ratios: RatioData[]; userId?: string }) {
+function AIPanel({ pl, cf, ratios }: { pl: PLSummary[]; cf: CFSummary[]; ratios: RatioData[] }) {
   const [analysis, setAnalysis] = useState<AIAnalysis | null>(null);
   const [analysisTime, setAnalysisTime] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingPrev, setLoadingPrev] = useState(true);
   const [error, setError] = useState('');
+  const [warning, setWarning] = useState('');
 
   useEffect(() => { loadSavedAnalysis(); }, []);
 
   async function loadSavedAnalysis() {
     setLoadingPrev(true);
+    setWarning('');
     try {
-      const { createClient } = await import('@/lib/supabase-browser');
-      const supabase = createClient();
-      const { data } = await supabase.from('financial_analyses')
-        .select('analysis_data, created_at').eq('analysis_type', 'executive')
-        .order('created_at', { ascending: false }).limit(1).single();
+      const data = await getLatestFinancialAnalysis();
       if (data) { setAnalysis(data.analysis_data as AIAnalysis); setAnalysisTime(data.created_at); }
-    } catch (e: any) { /* No saved */ }
+      else {
+        setAnalysis(null);
+        setAnalysisTime(null);
+      }
+      setError('');
+    } catch (e: any) {
+      setError(e.message || 'Gagal memuat analisis keuangan terakhir.');
+    }
     setLoadingPrev(false);
   }
 
   async function generate() {
-    setLoading(true); setError('');
+    setLoading(true); setError(''); setWarning('');
     try {
       const res = await fetch('/api/financial-analysis', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ mode: 'executive', numMonths: 12 }),
       });
       const data = await res.json();
-      if (data.error) throw new Error(data.error);
+      if (!res.ok || data.error) throw new Error(data.error || 'Gagal membuat AI analysis.');
 
       // Server should return clean JSON string, but double-safe parse
       let parsed: any;
@@ -371,15 +377,9 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
         parsed = JSON.parse(raw.slice(start, end + 1));
       }
 
-      setAnalysis(parsed); setAnalysisTime(new Date().toISOString());
-      try {
-        const { createClient } = await import('@/lib/supabase-browser');
-        const supabase = createClient();
-        await supabase.from('financial_analyses').insert({
-          analysis_type: 'executive', analysis_data: parsed,
-          health_score: parsed.health_score || null, generated_by: userId || null,
-        });
-      } catch (e) { console.error('Save failed:', e); }
+      setAnalysis(parsed);
+      setAnalysisTime(data.savedAt || new Date().toISOString());
+      if (data.saveWarning) setWarning(data.saveWarning);
     } catch (e: any) { setError(e.message); }
     setLoading(false);
   }
@@ -419,6 +419,7 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
       </div>
 
       {error && <p style={{ color: '#f87171', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+      {warning && <p style={{ color: '#fbbf24', fontSize: 13, marginBottom: 12 }}>{warning}</p>}
       {!analysis && !loading && !loadingPrev && (
         <p style={{ color: 'var(--dim)', fontSize: 13 }}>Klik &quot;Generate Analysis&quot; untuk insight strategis dari Claude Opus 4.6.</p>
       )}
@@ -622,7 +623,7 @@ function AIPanel({ pl, cf, ratios, userId }: { pl: PLSummary[]; cf: CFSummary[];
 // DIAGNOSTIC METRIC CARDS (Cunningham Framework)
 // ============================================================
 
-function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs: BSData[] }) {
+function DiagnosticCards({ pl, cf, bs, bsLoadFailed }: { pl: PLSummary[]; cf: CFSummary[]; bs: BSData[]; bsLoadFailed?: boolean }) {
   // ── Group BS by month ──
   const bsByMonth: Record<string, Record<string, number>> = {};
   bs.forEach(r => {
@@ -714,7 +715,7 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
       <div style={cardStyle('var(--accent-subtle)')}>
         <p style={labelStyle}>💰 Cash in Hand</p>
         {noBSData ? (
-          <p style={{ ...subStyle, color: '#fbbf24' }}>Sync BS data dulu</p>
+          <p style={{ ...subStyle, color: '#fbbf24' }}>{bsLoadFailed ? 'Data BS gagal dimuat' : 'Sync BS data dulu'}</p>
         ) : (
           <>
             <p style={valueStyle(cashInHand > 0 ? '#60a5fa' : '#f87171')}>{fmtB(cashInHand)}</p>
@@ -766,7 +767,7 @@ function DiagnosticCards({ pl, cf, bs }: { pl: PLSummary[]; cf: CFSummary[]; bs:
       )}>
         <p style={labelStyle}>⏱️ DPO–DIO Gap</p>
         {noBSData ? (
-          <p style={{ ...subStyle, color: '#fbbf24' }}>Sync BS data dulu</p>
+          <p style={{ ...subStyle, color: '#fbbf24' }}>{bsLoadFailed ? 'Data BS gagal dimuat' : 'Sync BS data dulu'}</p>
         ) : dpoDioCurrent ? (
           <>
             <p style={valueStyle(dpoDioCurrent.gap >= 20 ? '#34d399' : dpoDioCurrent.gap >= 10 ? '#fbbf24' : '#f87171')}>
@@ -828,31 +829,55 @@ export default function FinancePage() {
   const [bs, setBS] = useState<BSData[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [profile, setProfile] = useState<any>(null);
+  const [loadWarnings, setLoadWarnings] = useState<string[]>([]);
+  const [bsLoadFailed, setBsLoadFailed] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
   async function loadData() {
     setLoading(true);
+    setError('');
+    setLoadWarnings([]);
+    setBsLoadFailed(false);
     try {
-      const { createClient } = await import('@/lib/supabase-browser');
-      const supabase = createClient();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: p } = await supabase.from('profiles').select('*').eq('id', user.id).single();
-        setProfile(p);
-      }
-      const [plData, cfData, ratioData, bsData] = await Promise.all([
+      const [plResult, cfResult, ratioResult, bsResult] = await Promise.allSettled([
         getFinancialPLSummary(12),
         getFinancialCFSummary(12),
         getFinancialRatios(12),
         getFinancialBS(12),
       ]);
+
+      const plData = plResult.status === 'fulfilled' ? plResult.value : [];
+      const cfData = cfResult.status === 'fulfilled' ? cfResult.value : [];
+      const ratioData = ratioResult.status === 'fulfilled' ? ratioResult.value : [];
+      const bsData = bsResult.status === 'fulfilled' ? bsResult.value : [];
+
       setPL(plData);
       setCF(cfData);
       setRatios(ratioData);
       setBS(bsData);
-    } catch (e: any) { setError(e.message); }
+
+      const warnings: string[] = [];
+      if (plResult.status === 'rejected') warnings.push(`P&L gagal dimuat: ${plResult.reason?.message || 'Unknown error'}`);
+      if (cfResult.status === 'rejected') warnings.push(`Cash Flow gagal dimuat: ${cfResult.reason?.message || 'Unknown error'}`);
+      if (ratioResult.status === 'rejected') warnings.push(`Rasio gagal dimuat: ${ratioResult.reason?.message || 'Unknown error'}`);
+      if (bsResult.status === 'rejected') warnings.push(`Balance Sheet gagal dimuat: ${bsResult.reason?.message || 'Unknown error'}`);
+
+      const allCoreFailed =
+        plResult.status === 'rejected' &&
+        cfResult.status === 'rejected' &&
+        ratioResult.status === 'rejected';
+
+      if (allCoreFailed) {
+        setError(warnings.slice(0, 3).join(' | ') || 'Gagal memuat data finance.');
+      } else {
+        setLoadWarnings(warnings);
+      }
+
+      setBsLoadFailed(bsResult.status === 'rejected');
+    } catch (e: any) {
+      setError(e.message || 'Gagal memuat data finance.');
+    }
     setLoading(false);
   }
 
@@ -870,7 +895,7 @@ export default function FinancePage() {
     );
   }
 
-  if (pl.length === 0 && cf.length === 0 && ratios.length === 0) {
+  if (pl.length === 0 && cf.length === 0 && ratios.length === 0 && bs.length === 0) {
     return (
       <div style={{ padding: 24 }}>
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 24, textAlign: 'center' }}>
@@ -899,6 +924,17 @@ export default function FinancePage() {
           padding: '6px 12px', color: 'var(--text-secondary)', fontSize: 12, cursor: 'pointer',
         }}>🔄 Refresh</button>
       </div>
+
+      {loadWarnings.length > 0 && (
+        <div style={{ background: 'rgba(120,53,15,0.15)', border: '1px solid rgba(146,64,14,0.6)', borderRadius: 8, padding: 14, color: '#fde68a' }}>
+          <p style={{ fontWeight: 700, marginBottom: 6 }}>Sebagian data finance belum berhasil dimuat</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
+            {loadWarnings.map((warning) => (
+              <p key={warning}>{warning}</p>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
@@ -929,10 +965,10 @@ export default function FinancePage() {
       </div>
 
       {/* Diagnostic Metric Cards (Cunningham Framework) */}
-      <DiagnosticCards pl={pl} cf={cf} bs={bs} />
+      <DiagnosticCards pl={pl} cf={cf} bs={bs} bsLoadFailed={bsLoadFailed} />
 
       {/* AI Panel — temporarily hidden
-      {profile?.role === 'owner' && <AIPanel pl={pl} cf={cf} ratios={ratios} userId={profile?.id} />}
+      <AIPanel pl={pl} cf={cf} ratios={ratios} />
       */}
 
       <PLTable data={pl} />

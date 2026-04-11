@@ -1,6 +1,8 @@
 // app/api/financial-analysis/route.ts
 import { NextRequest } from 'next/server';
 import { getFinancialDataForAI } from '@/lib/financial-actions';
+import { createServiceSupabase } from '@/lib/supabase-server';
+import { requireDashboardRoles } from '@/lib/dashboard-access';
 import Anthropic from '@anthropic-ai/sdk';
 
 export const maxDuration = 300;
@@ -19,15 +21,24 @@ const MAX_TOKENS = USE_OPUS ? 4096 : 4096;
 
 export async function POST(request: NextRequest) {
   try {
-    const { mode = 'executive', numMonths: rawMonths = 12 } = await request.json();
+    const { profile } = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa menjalankan AI Finance Analysis.');
+
+    if (!process.env.ANTHROPIC_API_KEY) {
+      throw new Error('ANTHROPIC_API_KEY belum dikonfigurasi.');
+    }
+
+    const { mode: rawMode = 'executive', numMonths: rawMonths = 12 } = await request.json();
+    const mode = rawMode === 'executive' ? 'executive' : 'executive';
     const numMonths = Math.min(Math.max(Number(rawMonths) || 12, 1), 36);
 
     const financialData = await getFinancialDataForAI(numMonths);
 
-    // TEST MODE: minimal output to validate pipeline works.
-    // Once confirmed, swap to buildFullSystemPrompt / buildFullUserPrompt.
-    const systemPrompt = buildTestSystemPrompt();
-    const userPrompt = buildTestUserPrompt(financialData);
+    const systemPrompt = USE_OPUS
+      ? buildFullSystemPrompt(mode)
+      : buildTestSystemPrompt();
+    const userPrompt = USE_OPUS
+      ? buildFullUserPrompt(financialData, mode)
+      : buildTestUserPrompt(financialData);
 
     // Always use streaming to avoid Vercel timeout
     const stream = await client.messages.stream({
@@ -50,8 +61,32 @@ export async function POST(request: NextRequest) {
 
     // Extract clean JSON
     const cleanJson = extractJSON(fullText);
+    const parsedAnalysis = JSON.parse(cleanJson);
 
-    return new Response(JSON.stringify({ analysis: cleanJson, mode }), {
+    let savedAt: string | null = null;
+    let saveWarning: string | undefined;
+
+    try {
+      const svc = createServiceSupabase();
+      const { data: saved, error: saveError } = await svc
+        .from('financial_analyses')
+        .insert({
+          analysis_type: mode,
+          analysis_data: parsedAnalysis,
+          health_score: parsedAnalysis.health_score || null,
+          generated_by: profile.id,
+        })
+        .select('created_at')
+        .single();
+
+      if (saveError) throw saveError;
+      savedAt = saved?.created_at || null;
+    } catch (saveErr: any) {
+      console.error('[Financial Analysis API] Save failed:', saveErr);
+      saveWarning = 'Analisis berhasil dibuat, tetapi gagal disimpan ke riwayat.';
+    }
+
+    return new Response(JSON.stringify({ analysis: parsedAnalysis, mode, savedAt, saveWarning }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

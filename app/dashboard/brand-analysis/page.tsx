@@ -14,12 +14,15 @@ export default function BrandAnalysisPage() {
   const [refreshTime, setRefreshTime] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState('');
+  const [refreshError, setRefreshError] = useState('');
   const [crossFilter, setCrossFilter] = useState('all'); // 'all' | 'bundle_only' | 'separate_only' | 'mixed'
 
   useEffect(() => { loadData(); }, []);
 
-  async function loadData() {
-    setLoading(true);
+  async function loadData(options?: { showSpinner?: boolean }) {
+    const showSpinner = options?.showSpinner !== false;
+    if (showSpinner) setLoading(true);
     try {
       const [m, s, j, rt] = await Promise.all([
         fetchCrossBrandMatrix(),
@@ -31,20 +34,29 @@ export default function BrandAnalysisPage() {
       setStats(s);
       setJourney(j);
       setRefreshTime(rt);
-    } catch (err) {
+      setLoadError('');
+      return true;
+    } catch (err: any) {
       console.error('Failed to load brand analysis:', err);
+      setLoadError(err?.message || 'Gagal memuat Brand Analysis.');
+      return false;
     } finally {
-      setLoading(false);
+      if (showSpinner) setLoading(false);
     }
   }
 
   async function handleRefresh() {
     setRefreshing(true);
+    setRefreshError('');
     try {
       await refreshBrandAnalysis();
-      await loadData();
-    } catch (err) {
+      const ok = await loadData({ showSpinner: false });
+      if (!ok) {
+        setRefreshError('Refresh berhasil dijalankan, tetapi data terbaru gagal dimuat ulang.');
+      }
+    } catch (err: any) {
       console.error('Refresh failed:', err);
+      setRefreshError(err?.message || 'Refresh Brand Analysis gagal dijalankan.');
     } finally {
       setRefreshing(false);
     }
@@ -152,7 +164,19 @@ export default function BrandAnalysisPage() {
         </div>
       </div>
 
-      {!hasData ? (
+      {refreshError && (
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 14, color: '#fca5a5', marginBottom: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Refresh Brand Analysis Bermasalah</div>
+          <div style={{ fontSize: 12 }}>{refreshError}</div>
+        </div>
+      )}
+
+      {loadError ? (
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Data Brand Analysis Gagal Dimuat</div>
+          <div style={{ fontSize: 13 }}>{loadError}</div>
+        </div>
+      ) : !hasData ? (
         <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40, background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)' }}>
           Belum ada data brand analysis. Pastikan materialized view sudah di-refresh setelah upload data.
           <div style={{ marginTop: 12 }}>

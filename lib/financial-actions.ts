@@ -2,7 +2,7 @@
 'use server';
 
 import { createServiceSupabase } from './supabase-server';
-import { requireDashboardTabAccess } from './dashboard-access';
+import { requireDashboardRoles, requireDashboardTabAccess } from './dashboard-access';
 import { parseFinancialReport } from './financial-parser';
 
 // ============================================================
@@ -286,6 +286,25 @@ export async function getFinancialCFDetail(month: string) {
     .order('section');
   if (error) throw error;
   return data || [];
+}
+
+async function requireFinancialAiAccess() {
+  return requireDashboardRoles(['owner'], 'Hanya owner yang bisa menggunakan AI Finance Analysis.');
+}
+
+export async function getLatestFinancialAnalysis() {
+  await requireFinancialAiAccess();
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('financial_analyses')
+    .select('analysis_data, created_at')
+    .eq('analysis_type', 'executive')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data || null;
 }
 
 // For AI analysis — get comprehensive data

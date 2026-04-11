@@ -3,20 +3,18 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { fmtCompact, fmtRupiah, fmtPct } from '@/lib/utils';
+import { fmtCompact, fmtRupiah, fmtPct, getDatePartsInTimeZone } from '@/lib/utils';
+import { useDateRange } from '@/lib/DateRangeContext';
 import DateRangePicker from '@/components/DateRangePicker';
 import {
   fetchCustomerTypeDaily,
-  fetchCustomerKPIs,
   fetchCustomerCohort,
   fetchMonthlyCohort,
   fetchMonthlyCohortByChannel,
   fetchChannelLtv90d,
-  fetchChannelCac,
   fetchLtvTrend,
   fetchAvailableBrands,
   fetchMonthlyCac,
-  fetchRtsCancelStats,
 } from '@/lib/scalev-actions';
 
 // ── Channel grouping ──
@@ -58,53 +56,116 @@ const SUB_TABS = [
 ];
 
 export default function CustomersPage() {
+  const { dateExtent, loading: dateExtentLoading } = useDateRange();
   const [subTab, setSubTab] = useState('overview');
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
-  const [kpis, setKpis] = useState(null);
   const [dailyData, setDailyData] = useState([]);
   const [cohortData, setCohortData] = useState([]);
   const [cohortChannelData, setCohortChannelData] = useState([]);
   const [topCustomers, setTopCustomers] = useState([]);
-  const [rtsCancel, setRtsCancel] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+  const [cohortLoading, setCohortLoading] = useState(true);
+  const [overviewError, setOverviewError] = useState('');
+  const [cohortError, setCohortError] = useState('');
   const [channelFilter, setChannelFilter] = useState('Global');
 
-  // Default: bulan ini
-  useEffect(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = String(now.getMonth() + 1).padStart(2, '0');
-    setDateRange({ from: `${y}-${m}-01`, to: now.toISOString().slice(0, 10) });
-  }, []);
+  const pickerEarliest = useMemo(() => {
+    if (!dateExtent.earliest || dateExtent.earliest < '2025-12-01') return '2025-12-01';
+    return dateExtent.earliest;
+  }, [dateExtent.earliest]);
 
-  useEffect(() => {
-    if (!dateRange.from) return;
-    loadData();
-  }, [dateRange]);
+  const pickerLatest = useMemo(() => {
+    return dateExtent.latest || getDatePartsInTimeZone('Asia/Jakarta').iso;
+  }, [dateExtent.latest]);
 
-  async function loadData() {
-    setLoading(true);
-    try {
-      const [kpiData, daily, cohort, cohortCh, customers, rts] = await Promise.all([
-        fetchCustomerKPIs(dateRange.from, dateRange.to),
-        fetchCustomerTypeDaily(dateRange.from, dateRange.to),
-        fetchMonthlyCohort(),
-        fetchMonthlyCohortByChannel(),
-        fetchCustomerCohort(50, dateRange.from, dateRange.to),
-        fetchRtsCancelStats(dateRange.from, dateRange.to),
-      ]);
-      setKpis(kpiData);
-      setDailyData(daily);
-      setCohortData(cohort);
-      setCohortChannelData(cohortCh);
-      setTopCustomers(customers);
-      setRtsCancel(rts);
-    } catch (err) {
-      console.error('Failed to load customer data:', err);
-    } finally {
-      setLoading(false);
+  // Default: latest available month window in WIB/customer-safe range
+  useEffect(() => {
+    if (dateExtentLoading || dateRange.from) return;
+
+    const { year, month, iso: todayWib } = getDatePartsInTimeZone('Asia/Jakarta');
+    const monthStart = `${year}-${month}-01`;
+
+    if (pickerLatest && pickerLatest >= monthStart) {
+      setDateRange({ from: monthStart, to: pickerLatest });
+      return;
     }
-  }
+
+    if (pickerLatest) {
+      setDateRange({ from: `${pickerLatest.slice(0, 7)}-01`, to: pickerLatest });
+      return;
+    }
+
+    setDateRange({ from: monthStart, to: todayWib });
+  }, [dateExtentLoading, pickerLatest, dateRange.from]);
+
+  useEffect(() => {
+    if (!dateRange.from || !dateRange.to) return;
+    let cancelled = false;
+
+    async function loadOverviewData() {
+      setOverviewLoading(true);
+      setOverviewError('');
+
+      try {
+        const [daily, customers] = await Promise.all([
+          fetchCustomerTypeDaily(dateRange.from, dateRange.to),
+          fetchCustomerCohort(50, dateRange.from, dateRange.to),
+        ]);
+
+        if (cancelled) return;
+        setDailyData(daily);
+        setTopCustomers(customers);
+      } catch (err: any) {
+        if (cancelled) return;
+        console.error('Failed to load customer overview data:', err);
+        setDailyData([]);
+        setTopCustomers([]);
+        setOverviewError(err?.message || 'Gagal memuat data customer overview.');
+      } finally {
+        if (!cancelled) setOverviewLoading(false);
+      }
+    }
+
+    loadOverviewData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [dateRange.from, dateRange.to]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCohortData() {
+      setCohortLoading(true);
+      setCohortError('');
+
+      try {
+        const [cohort, cohortCh] = await Promise.all([
+          fetchMonthlyCohort(),
+          fetchMonthlyCohortByChannel(),
+        ]);
+
+        if (cancelled) return;
+        setCohortData(cohort);
+        setCohortChannelData(cohortCh);
+      } catch (err: any) {
+        if (cancelled) return;
+        console.error('Failed to load customer cohort data:', err);
+        setCohortData([]);
+        setCohortChannelData([]);
+        setCohortError(err?.message || 'Gagal memuat data cohort customer.');
+      } finally {
+        if (!cancelled) setCohortLoading(false);
+      }
+    }
+
+    loadCohortData();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const groupedDaily = useMemo(() =>
     dailyData.map(d => ({ ...d, channel_group: getChannelGroup(d.sales_channel) })),
@@ -121,9 +182,15 @@ export default function CustomersPage() {
     return CHANNEL_ORDER.filter(ch => ch === 'Global' || groups.has(ch));
   }, [groupedDaily]);
 
+  useEffect(() => {
+    if (!availableChannels.includes(channelFilter)) {
+      setChannelFilter('Global');
+    }
+  }, [availableChannels, channelFilter]);
+
   // ── KPIs: now with unidentified ──
   const filteredKpis = useMemo(() => {
-    if (!kpis) return null;
+    if (filteredDaily.length === 0) return null;
     let newC = 0, repC = 0, unidC = 0;
     let newR = 0, repR = 0, unidR = 0;
     let newO = 0, repO = 0, unidO = 0;
@@ -155,7 +222,7 @@ export default function CustomersPage() {
       totalRevenue: newR + repR + unidR,
       totalOrders: newO + repO + unidO,
     };
-  }, [kpis, filteredDaily]);
+  }, [filteredDaily]);
 
   // ── Channel performance: include unidentified ──
   const channelPerformance = useMemo(() => {
@@ -222,11 +289,21 @@ export default function CustomersPage() {
           <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700 }}>Customer Analytics</h2>
           <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>New vs Repeat vs Unidentified</p>
         </div>
-        <DateRangePicker
-          from={dateRange.from} to={dateRange.to}
-          onChange={(f, t) => setDateRange({ from: f, to: t })}
-          earliest="2025-12-01" latest={new Date().toISOString().slice(0, 10)}
-        />
+        {subTab === 'overview' && dateRange.from ? (
+          <DateRangePicker
+            from={dateRange.from}
+            to={dateRange.to}
+            onChange={(f, t) => setDateRange({ from: f, to: t })}
+            earliest={pickerEarliest}
+            latest={pickerLatest}
+          />
+        ) : (
+          <div style={{ fontSize: 12, color: 'var(--dim)', maxWidth: 320, textAlign: 'right' }}>
+            {subTab === 'cohort' && 'Tab Cohort memakai data all-time per acquisition cohort, jadi tidak mengikuti date range Overview.'}
+            {subTab === 'ltv' && 'Tab LTV memakai jendela 90 hari per customer dan selector brand, jadi tidak mengikuti date range Overview.'}
+            {subTab === 'cac' && 'Tab CAC memakai deret bulanan all-time dan selector brand/channel, jadi tidak mengikuti date range Overview.'}
+          </div>
+        )}
       </div>
 
       {/* ═══ SUB TABS ═══ */}
@@ -240,14 +317,39 @@ export default function CustomersPage() {
         ))}
       </div>
 
-      {loading ? (
+      {dateExtentLoading || (subTab === 'overview' && overviewLoading) || (subTab === 'cohort' && cohortLoading) ? (
         <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
           <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
         </div>
       ) : (
         <>
-          {subTab === 'overview' && <OverviewTab kpis={filteredKpis} channelPerformance={channelPerformance} channelFilter={channelFilter} setChannelFilter={setChannelFilter} availableChannels={availableChannels} topCustomers={filteredTopCustomers} rtsCancel={rtsCancel} />}
-          {subTab === 'cohort' && <CohortTab data={cohortData} channelData={cohortChannelData} />}
+          {subTab === 'overview' && (
+            overviewError ? (
+              <SectionError
+                title="Data Customer Overview Gagal Dimuat"
+                message={overviewError}
+              />
+            ) : (
+              <OverviewTab
+                kpis={filteredKpis}
+                channelPerformance={channelPerformance}
+                channelFilter={channelFilter}
+                setChannelFilter={setChannelFilter}
+                availableChannels={availableChannels}
+                topCustomers={filteredTopCustomers}
+              />
+            )
+          )}
+          {subTab === 'cohort' && (
+            cohortError ? (
+              <SectionError
+                title="Data Cohort Customer Gagal Dimuat"
+                message={cohortError}
+              />
+            ) : (
+              <CohortTab data={cohortData} channelData={cohortChannelData} />
+            )
+          )}
           {subTab === 'ltv' && <LtvTab />}
           {subTab === 'cac' && <CacTab />}
         </>
@@ -259,7 +361,7 @@ export default function CustomersPage() {
 // ═══════════════════════════════════════════════════
 // OVERVIEW TAB
 // ═══════════════════════════════════════════════════
-function OverviewTab({ kpis: k, channelPerformance, channelFilter, setChannelFilter, availableChannels, topCustomers, rtsCancel }) {
+function OverviewTab({ kpis: k, channelPerformance, channelFilter, setChannelFilter, availableChannels, topCustomers }) {
   if (!k) return <div style={{ color: 'var(--dim)', padding: 40, textAlign: 'center' }}>Belum ada data customer untuk periode ini.</div>;
 
   const totalRevAll = k.totalRevenue;
@@ -362,6 +464,15 @@ function OverviewTab({ kpis: k, channelPerformance, channelFilter, setChannelFil
 // ═══════════════════════════════════════════════════
 // SMALL COMPONENTS
 // ═══════════════════════════════════════════════════
+
+function SectionError({ title, message }) {
+  return (
+    <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+      <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{title}</div>
+      <div style={{ fontSize: 13 }}>{message}</div>
+    </div>
+  );
+}
 
 function RevenueCard({ label, value, pct, color, bgColor, orders, tooltip }) {
   return (
@@ -634,17 +745,40 @@ function LtvTab() {
   const [data, setData] = useState([]);
   const [trendData, setTrendData] = useState([]);
   const [ltvLoading, setLtvLoading] = useState(true);
+  const [brandError, setBrandError] = useState('');
+  const [ltvError, setLtvError] = useState('');
 
   // Load brands on mount
   useEffect(() => {
-    fetchAvailableBrands().then(setBrands).catch(() => {});
+    let cancelled = false;
+    fetchAvailableBrands()
+      .then((nextBrands) => {
+        if (cancelled) return;
+        setBrands(nextBrands);
+        setBrandError('');
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('Failed to load available brands:', err);
+        setBrands([]);
+        setBrandError(err?.message || 'Daftar brand LTV gagal dimuat.');
+      });
+    return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (brands.length === 0) return;
+    if (!brands.some((brand) => brand.brand === selectedBrand)) {
+      setSelectedBrand(brands[0].brand);
+    }
+  }, [brands, selectedBrand]);
 
   // Reload LTV data when brand changes
   useEffect(() => {
     let cancelled = false;
     async function reload() {
       setLtvLoading(true);
+      setLtvError('');
       try {
         const [ltv, trend] = await Promise.all([
           fetchChannelLtv90d(selectedBrand),
@@ -654,8 +788,13 @@ function LtvTab() {
           setData(ltv);
           setTrendData(trend);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to load LTV for brand:', err);
+        if (!cancelled) {
+          setData([]);
+          setTrendData([]);
+          setLtvError(err?.message || 'Data LTV gagal dimuat.');
+        }
       } finally {
         if (!cancelled) setLtvLoading(false);
       }
@@ -664,7 +803,7 @@ function LtvTab() {
     return () => { cancelled = true; };
   }, [selectedBrand]);
 
-  if (ltvLoading || !data || data.length === 0) return (
+  if (ltvLoading) return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       {/* Brand selector even while loading */}
       {brands.length > 0 && (
@@ -683,6 +822,44 @@ function LtvTab() {
     </div>
   );
 
+  if (ltvError) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {brands.length > 0 && (
+          <select value={selectedBrand} onChange={e => setSelectedBrand(e.target.value)} style={{
+            padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)',
+            background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontWeight: 600,
+            cursor: 'pointer', width: 'fit-content',
+          }}>
+            {brands.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
+          </select>
+        )}
+        {brandError && <div style={{ fontSize: 12, color: 'var(--dim)' }}>{brandError}</div>}
+        <SectionError title="Data LTV Gagal Dimuat" message={ltvError} />
+      </div>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {brands.length > 0 && (
+          <select value={selectedBrand} onChange={e => setSelectedBrand(e.target.value)} style={{
+            padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)',
+            background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontWeight: 600,
+            cursor: 'pointer', width: 'fit-content',
+          }}>
+            {brands.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
+          </select>
+        )}
+        {brandError && <div style={{ fontSize: 12, color: 'var(--dim)' }}>{brandError}</div>}
+        <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>
+          Belum ada data LTV untuk brand {selectedBrand}.
+        </div>
+      </div>
+    );
+  }
+
   const globalRow = data.find(r => r.channel_group === 'Global');
   const channelRows = data.filter(r => r.channel_group !== 'Global' && r.channel_group !== 'Reseller');
 
@@ -696,15 +873,18 @@ function LtvTab() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Brand selector */}
-      {brands.length > 0 && (
-        <select value={selectedBrand} onChange={e => setSelectedBrand(e.target.value)} style={{
-          padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)',
-          background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontWeight: 600,
-          cursor: 'pointer', width: 'fit-content',
-        }}>
-          {brands.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
-        </select>
-      )}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {brands.length > 0 && (
+          <select value={selectedBrand} onChange={e => setSelectedBrand(e.target.value)} style={{
+            padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)',
+            background: 'var(--card)', color: 'var(--text)', fontSize: 13, fontWeight: 600,
+            cursor: 'pointer', width: 'fit-content',
+          }}>
+            {brands.map(b => <option key={b.brand} value={b.brand}>{b.brand}</option>)}
+          </select>
+        )}
+        {brandError && <div style={{ fontSize: 12, color: 'var(--dim)' }}>{brandError}</div>}
+      </div>
 
       {/* Summary cards */}
       {globalRow && (
@@ -919,19 +1099,42 @@ function CacTab() {
   const [selectedChannel, setSelectedChannel] = useState('all');
   const [selectedBrand, setSelectedBrand] = useState(null);
   const [brands, setBrands] = useState([]);
+  const [brandError, setBrandError] = useState('');
+  const [cacError, setCacError] = useState('');
 
   // Load brands
   useEffect(() => {
-    fetchAvailableBrands().then(setBrands).catch(() => {});
+    let cancelled = false;
+    fetchAvailableBrands()
+      .then((nextBrands) => {
+        if (cancelled) return;
+        setBrands(nextBrands);
+        setBrandError('');
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('Failed to load CAC brands:', err);
+        setBrands([]);
+        setBrandError(err?.message || 'Daftar brand CAC gagal dimuat.');
+      });
+    return () => { cancelled = true; };
   }, []);
 
   // Load CAC data (re-fetch when brand changes)
   useEffect(() => {
     let cancelled = false;
     setCacLoading(true);
+    setCacError('');
     fetchMonthlyCac(selectedBrand)
-      .then(d => { if (!cancelled) setCacData(d); })
-      .catch(err => console.error('Failed to load CAC:', err))
+      .then(d => {
+        if (!cancelled) setCacData(d);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        console.error('Failed to load CAC:', err);
+        setCacData([]);
+        setCacError(err?.message || 'Data CAC gagal dimuat.');
+      })
       .finally(() => { if (!cancelled) setCacLoading(false); });
     return () => { cancelled = true; };
   }, [selectedBrand]);
@@ -957,12 +1160,34 @@ function CacTab() {
     </div>
   );
 
+  if (cacError) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {brandSelector}
+        {brandError && <div style={{ fontSize: 12, color: 'var(--dim)' }}>{brandError}</div>}
+        <SectionError title="Data CAC Gagal Dimuat" message={cacError} />
+      </div>
+    );
+  }
+
   // Only show months with ad spend data
   const withSpend = cacData.filter(r => Number(r.ad_spend) > 0);
   const months = [...new Set(withSpend.map(r => r.month))].sort();
   const channels = [...new Set(withSpend.map(r => r.channel_group))].sort();
 
   const filtered = selectedChannel === 'all' ? withSpend : withSpend.filter(r => r.channel_group === selectedChannel);
+
+  if (withSpend.length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {brandSelector}
+        {brandError && <div style={{ fontSize: 12, color: 'var(--dim)' }}>{brandError}</div>}
+        <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40 }}>
+          Belum ada data CAC dengan ad spend untuk filter brand ini.
+        </div>
+      </div>
+    );
+  }
 
   // Summary: totals across all months with spend
   const totalSpend = withSpend.reduce((s, r) => s + Number(r.ad_spend || 0), 0);
@@ -987,6 +1212,7 @@ function CacTab() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Brand selector */}
       {brandSelector}
+      {brandError && <div style={{ fontSize: 12, color: 'var(--dim)' }}>{brandError}</div>}
 
       {/* Summary cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>

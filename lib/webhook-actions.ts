@@ -2,31 +2,23 @@
 'use server';
 
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-server';
+import { requireDashboardRoles } from '@/lib/dashboard-access';
 import { fetchStoreList, guessStoreType } from '@/lib/scalev-api';
 
 // ── Auth helper: require owner role ──
-async function requireOwner() {
-  const supabase = createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profile?.role !== 'owner') throw new Error('Hanya owner yang bisa mengelola webhook');
-  return user;
+async function requireOwner(label: string) {
+  const { profile } = await requireDashboardRoles(['owner'], `Hanya owner yang bisa mengakses ${label}.`);
+  return profile;
 }
 
 // ── List all webhook businesses ──
 export async function getWebhookBusinesses() {
+  await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
-    .select('id, business_code, business_name, is_active, api_key, created_at, updated_at')
+    .select('id, business_code, business_name, is_active, api_key, tax_rate_name, created_at, updated_at')
     .order('business_code', { ascending: true });
 
   if (error) throw error;
@@ -62,7 +54,7 @@ export async function saveWebhookBusiness(input: {
   webhook_secret: string;
   api_key?: string;
 }) {
-  await requireOwner();
+  await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const code = input.business_code.trim().toUpperCase();
@@ -142,7 +134,7 @@ export async function saveWebhookBusiness(input: {
 
 // ── Toggle active status ──
 export async function toggleWebhookBusiness(id: number, isActive: boolean) {
-  await requireOwner();
+  await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { error } = await svc
@@ -156,7 +148,7 @@ export async function toggleWebhookBusiness(id: number, isActive: boolean) {
 
 // ── Delete a webhook business ──
 export async function deleteWebhookBusiness(id: number) {
-  await requireOwner();
+  await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { error } = await svc
@@ -170,11 +162,12 @@ export async function deleteWebhookBusiness(id: number) {
 
 // ── List store channels for a business ──
 export async function getStoreChannels(businessId: number) {
+  await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { data, error } = await svc
     .from('scalev_store_channels')
-    .select('id, store_name, store_type, is_active, created_at')
+    .select('id, store_name, store_type, channel_override, is_active, created_at')
     .eq('business_id', businessId)
     .order('store_name', { ascending: true });
 
@@ -188,12 +181,14 @@ export async function saveStoreChannel(input: {
   business_id: number;
   store_name: string;
   store_type: string;
+  channel_override?: string | null;
 }) {
-  await requireOwner();
+  await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const storeName = input.store_name.trim();
   const storeType = input.store_type.trim();
+  const channelOverride = input.channel_override?.trim() || null;
 
   if (!storeName || !storeType) {
     throw new Error('Store name dan store type wajib diisi');
@@ -205,7 +200,7 @@ export async function saveStoreChannel(input: {
   if (input.id) {
     const { error } = await svc
       .from('scalev_store_channels')
-      .update({ store_name: storeName, store_type: storeType })
+      .update({ store_name: storeName, store_type: storeType, channel_override: channelOverride })
       .eq('id', input.id);
 
     if (error) {
@@ -215,7 +210,7 @@ export async function saveStoreChannel(input: {
   } else {
     const { error } = await svc
       .from('scalev_store_channels')
-      .insert({ business_id: input.business_id, store_name: storeName, store_type: storeType });
+      .insert({ business_id: input.business_id, store_name: storeName, store_type: storeType, channel_override: channelOverride });
 
     if (error) {
       if (error.code === '23505') throw new Error(`Store "${storeName}" sudah terdaftar di business ini`);
@@ -228,7 +223,7 @@ export async function saveStoreChannel(input: {
 
 // ── Toggle store channel active status ──
 export async function toggleStoreChannel(id: number, isActive: boolean) {
-  await requireOwner();
+  await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { error } = await svc
@@ -242,7 +237,7 @@ export async function toggleStoreChannel(id: number, isActive: boolean) {
 
 // ── Delete a store channel mapping ──
 export async function deleteStoreChannel(id: number) {
-  await requireOwner();
+  await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { error } = await svc
@@ -256,7 +251,7 @@ export async function deleteStoreChannel(id: number) {
 
 // ── Fetch stores from Scalev API and auto-insert ──
 export async function fetchStoresFromScalev(businessId: number) {
-  await requireOwner();
+  await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   // Get API key for this business
@@ -271,25 +266,56 @@ export async function fetchStoresFromScalev(businessId: number) {
 
   // Fetch stores from Scalev API
   const stores = await fetchStoreList(biz.api_key, 'https://api.scalev.id/v2');
+  const { data: existingStores, error: existingError } = await svc
+    .from('scalev_store_channels')
+    .select('store_name')
+    .eq('business_id', businessId);
+
+  if (existingError) throw existingError;
+
+  const existingNames = new Set((existingStores || []).map((row) => String(row.store_name || '').toLowerCase()));
 
   let inserted = 0;
   let skipped = 0;
 
   for (const store of stores) {
+    const storeName = String(store.name || '').trim();
+    if (!storeName) {
+      skipped++;
+      continue;
+    }
+
+    if (existingNames.has(storeName.toLowerCase())) {
+      skipped++;
+      continue;
+    }
+
     const storeType = guessStoreType(store.name);
     const { error } = await svc
       .from('scalev_store_channels')
-      .upsert(
-        { business_id: businessId, store_name: store.name, store_type: storeType },
-        { onConflict: 'business_id,store_name', ignoreDuplicates: true }
-      );
+      .insert({ business_id: businessId, store_name: storeName, store_type: storeType });
 
     if (error) {
       skipped++;
     } else {
       inserted++;
+      existingNames.add(storeName.toLowerCase());
     }
   }
 
   return { success: true, total: stores.length, inserted, skipped };
+}
+
+export async function updateWebhookBusinessTaxRate(id: number, taxRateName: string) {
+  await requireOwner('Business Settings');
+  const svc = createServiceSupabase();
+
+  const normalizedTaxRate = taxRateName.trim() || 'PPN';
+  const { error } = await svc
+    .from('scalev_webhook_businesses')
+    .update({ tax_rate_name: normalizedTaxRate, updated_at: new Date().toISOString() })
+    .eq('id', id);
+
+  if (error) throw error;
+  return { success: true };
 }

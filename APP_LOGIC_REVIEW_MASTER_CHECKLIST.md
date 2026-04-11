@@ -894,10 +894,10 @@ Status legend:
 | Warehouse | `app/dashboard/warehouse/page.tsx`, `lib/warehouse-actions.ts`, `lib/warehouse-ledger-actions.ts` | DN | Direview dan dipatch lokal: transfer antar entity kini menulis `TRANSFER_IN` ke target, batch mutation menolak overdraw alih-alih clamp diam-diam, stock opname kini mewajibkan hitung lengkap + approve idempotent, dan server actions Warehouse sekarang enforce akses tab/permission. Runtime verification disarankan |
 | Warehouse Settings | `app/dashboard/warehouse-settings/page.tsx`, `lib/brand-actions.ts`, `lib/warehouse-ledger-actions.ts` | DN | Direview dan dipatch lokal: server actions kini konsisten mengikuti permission sub-tab `whs:*`, create product tidak lagi membuang `vendor_id`, overview Active Warehouse kembali menghitung total vs active dengan benar, dan page tidak lagi blank saat user tidak punya sub-tab yang terlihat. Runtime verification disarankan |
 | Business Pulse | `app/dashboard/pulse/page.tsx`, `lib/scalev-actions.ts` | DN | Direview dan dipatch lokal: previous-range repeat KPI kini di-clamp aman, core load tidak lagi fail-silent saat query channel/ads/mapping gagal, blended ROAS kini tetap memasukkan ads spend unmapped dengan warning eksplisit, unit-economics kini memakai monthly CAC + field LTV yang benar, KPI customer tidak lagi menghitung `unidentified` sebagai repeat, dan server actions analytics kini enforce akses tab `pulse/customers`. Runtime verification disarankan |
-| Customer Analysis | `app/dashboard/customers/page.tsx`, `lib/scalev-actions.ts` | NS |  |
-| Brand Analysis | `app/dashboard/brand-analysis/page.tsx`, `lib/scalev-actions.ts` | NS |  |
-| Finance Analysis | `app/dashboard/finance/page.tsx`, `lib/financial-actions.ts`, `app/api/financial-analysis/route.ts` | NS |  |
-| Business Settings | `app/dashboard/business-settings/page.tsx`, `lib/webhook-actions.ts` | NS |  |
+| Customer Analysis | `app/dashboard/customers/page.tsx`, `lib/scalev-actions.ts` | DN | Direview dan dipatch lokal: overview customers tidak lagi digagalkan request KPI/RTS yang tidak dipakai, picker lokal kini memakai boundary tanggal yang lebih aman dan hanya muncul pada tab yang memang mengikuti range, filter channel otomatis reset saat range baru tidak lagi punya channel lama, serta subtab Overview/Cohort/LTV/CAC sekarang punya error/empty state yang jujur. Runtime verification disarankan |
+| Brand Analysis | `app/dashboard/brand-analysis/page.tsx`, `lib/scalev-actions.ts` | DN | Direview dan dipatch lokal: server actions Brand Analysis kini enforce akses tab server-side, query refresh-time/logging tidak lagi fail-silent, dan page refresh/load sekarang menampilkan error state yang jujur alih-alih tersamar sebagai no-data. Runtime verification disarankan |
+| Finance Analysis | `app/dashboard/finance/page.tsx`, `lib/financial-actions.ts`, `app/api/financial-analysis/route.ts` | DN | Direview dan dipatch lokal: dashboard Finance kini tahan partial failure untuk ratio/BS, warning BS tidak lagi tersamar sebagai no-data biasa, AI advisory route kini owner-only + memakai full prompt yang benar, dan riwayat analisis disimpan/dibaca server-side dengan warning eksplisit bila save gagal. Runtime verification disarankan |
+| Business Settings | `app/dashboard/business-settings/page.tsx`, `lib/webhook-actions.ts` | DN | Direview dan dipatch lokal: server actions Business Settings kini konsisten owner-only di server-side, status PKP tidak lagi diupdate langsung dari browser, store sekarang bisa mengatur `channel_override` yang memang dipakai webhook backend, hasil refresh store tidak lagi mengklaim inserted count palsu, dan page/store section kini punya error state yang jujur. Runtime verification disarankan |
 | Admin | `app/dashboard/admin/page.tsx`, admin components and upload/sync APIs | NS |  |
 | Hidden products route | `app/dashboard/products/page.tsx` | NS |  |
 | Scalev integration backend | `app/api/scalev-webhook/route.ts`, `app/api/scalev-sync/route.ts`, `lib/scalev-api.ts` | NS |  |
@@ -1335,6 +1335,154 @@ Status legend:
 - Next step:
   - lanjut review area `Customer Analysis`
   - verifikasi manual repeat rate saat ada order `unidentified`, custom range yang berakhir tanggal 29/30/31, ads spend unmapped pada blended ROAS, role yang punya `pulse` tapi tidak punya `warehouse`, dan direct invoke server action analytics tanpa akses `pulse/customers`
+
+### Review Notes - Customer Analysis
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/customers/page.tsx`
+  - `lib/scalev-actions.ts`
+  - `components/DateRangePicker.tsx`
+  - `lib/DateRangeContext.tsx`
+  - `supabase/migrations/042_persist_customer_identifier.sql`
+  - `supabase/migrations/052_cohort_by_channel.sql`
+  - `supabase/migrations/056_ltv_brand_param.sql`
+  - `supabase/migrations/057_ltv_summary_table.sql`
+  - `supabase/migrations/058_monthly_cac.sql`
+- Data sources:
+  - `v_daily_customer_type`
+  - `v_customer_cohort`
+  - `v_monthly_cohort`
+  - `v_monthly_cohort_channel`
+  - RPC `get_channel_ltv_90d`
+  - RPC `get_ltv_trend_by_cohort`
+  - RPC `get_available_brands`
+  - RPC `get_monthly_cac`
+- Mutation paths:
+  - tidak ada mutation langsung; freshness bergantung pada refresh summary Scalev/customer
+- Findings summary:
+  - halaman overview sebelumnya tetap memanggil `fetchCustomerKPIs()` dan `fetchRtsCancelStats()` walau hasilnya tidak benar-benar dipakai di UI; karena semua request digabung dalam satu `Promise.all`, kegagalan endpoint yang tidak terpakai itu tetap bisa menjatuhkan seluruh halaman Customer Analytics
+  - picker tanggal sebelumnya memakai boundary lokal sendiri dengan `latest={new Date().toISOString().slice(0, 10)}` dan default bulan dari browser saat ini, bukan extent data dashboard/WIB; ini rawan geser tanggal UTC dan membuat range customers tidak sinkron dengan data yang memang tersedia
+  - picker tanggal juga tetap tampil pada tab `Cohort`, `LTV`, dan `CAC`, padahal query di tab-tab itu seluruhnya all-time / brand-scoped dan tidak mengikuti `dateRange`; akibatnya chart/table terlihat seolah terfilter oleh date picker padahal tidak
+  - ketika user mengganti range dan channel lama tidak ada lagi di dataset baru, `channelFilter` sebelumnya tetap dipertahankan sehingga overview bisa jatuh ke empty-state palsu sampai user sadar reset manual ke `Global`
+  - tab `LTV` dan `CAC` sebelumnya hanya `console.error()` saat fetch gagal; khusus `LTV`, kondisi gagal atau data kosong tetap dirender sebagai spinner "Memuat..." sehingga error tersamar sebagai loading berkepanjangan
+  - tab `LTV` juga hardcoded ke brand awal `Roove`; jika daftar brand yang lolos `get_available_brands()` berubah dan `Roove` tidak ada, selector bisa berada pada state tidak valid tanpa fallback eksplisit
+  - load `Cohort` dan `Overview` sebelumnya terikat dalam satu fetch utama, sehingga error pada data cohort bisa ikut mengganggu tampilan overview yang sebenarnya masih bisa dibuka
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Brand Analysis`
+  - verifikasi manual bahwa picker hanya mempengaruhi tab Overview, ganti range me-reset channel invalid ke `Global`, error LTV/CAC muncul sebagai error state alih-alih spinner, dan brand default berpindah aman bila `Roove` tidak ada di daftar brand
+
+### Review Notes - Brand Analysis
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/brand-analysis/page.tsx`
+  - `lib/scalev-actions.ts`
+- Data sources:
+  - `mv_cross_brand_matrix`
+  - `v_brand_analysis_summary`
+  - `mv_brand_journey`
+  - `mv_customer_brand_map`
+  - `mv_refresh_log`
+  - RPC `refresh_brand_analysis`
+- Mutation paths:
+  - refresh manual Brand Analysis via `refreshBrandAnalysis()` → RPC + insert `mv_refresh_log`
+- Findings summary:
+  - server actions Brand Analysis sebelumnya belum memverifikasi `tab:brand-analysis` di server-side, sehingga direct invoke masih bisa membaca matrix/journey lintas brand atau menjalankan refresh tanpa akses halaman
+  - `fetchBrandAnalysisRefreshTime()` sebelumnya mengabaikan error query `mv_refresh_log`, sehingga kegagalan baca freshness terlihat seperti "belum pernah refresh" biasa
+  - `refreshBrandAnalysis()` sebelumnya mengabaikan kegagalan insert log refresh manual; akibatnya RPC bisa jalan tetapi audit trail refresh hilang diam-diam
+  - page sebelumnya menyamakan load failure dengan no-data; error query materialized view tampil sebagai empty state yang menyuruh user refresh lagi, bukan sebagai kegagalan load
+  - flow refresh sebelumnya hanya `console.error()` saat RPC gagal atau reload setelah refresh gagal, jadi user tidak mendapat sinyal jelas ketika refresh bermasalah sebagian
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Finance Analysis`
+  - verifikasi manual bahwa direct invoke server action tanpa akses `brand-analysis` ditolak, gagal query materialized view muncul sebagai error card, dan refresh yang gagal update `mv_refresh_log` tidak lagi terlihat sukses palsu
+
+### Review Notes - Finance Analysis
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/finance/page.tsx`
+  - `lib/financial-actions.ts`
+  - `app/api/financial-analysis/route.ts`
+  - `lib/financial-parser.ts`
+  - `app/api/financial-sync/route.ts`
+  - `components/FinancialSheetManager.tsx`
+- Data sources:
+  - `v_pl_summary`
+  - `v_cf_summary`
+  - `financial_ratios_monthly`
+  - `financial_bs_monthly`
+  - `financial_analyses`
+  - Anthropic via `/api/financial-analysis`
+- Mutation paths:
+  - AI advisory via `POST /api/financial-analysis`
+  - save riwayat analisis ke `financial_analyses`
+  - financial sync via `triggerFinancialSync()` / `/api/financial-sync`
+- Findings summary:
+  - halaman Finance sebelumnya memuat PL/CF/ratio/BS dalam satu `Promise.all`, sehingga kegagalan dataset sekunder seperti `financial_bs_monthly` atau rasio bisa menjatuhkan seluruh dashboard walau PL/CF masih bisa ditampilkan
+  - kartu diagnostik sebelumnya hanya menampilkan pesan generik "sync BS data dulu" saat data BS kosong; bila query BS sebenarnya gagal, error tersebut tersamar sebagai no-data biasa
+  - route `/api/financial-analysis` sebelumnya selalu memakai `buildTestSystemPrompt()` / `buildTestUserPrompt()` walau `USE_OPUS = true` dan full prompt produksi sudah tersedia, sehingga advisory eksekutif diam-diam tetap menghasilkan output stub/test
+  - route AI sebelumnya hanya bergantung pada akses tab `finance`; artinya user non-owner yang tahu endpoint masih bisa memicu panggilan Anthropic langsung walau panel advisory disembunyikan untuk owner saja, sehingga ada risiko cost leak dan policy bypass
+  - load/save riwayat `financial_analyses` sebelumnya dilakukan dari browser dan kegagalan save hanya dicatat ke console; hasil analisis bisa hilang saat reload tanpa warning eksplisit dan tanpa guard owner di server
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Business Settings`
+  - verifikasi manual bahwa kegagalan BS/ratio kini hanya muncul sebagai warning parsial, non-owner tidak bisa memanggil `/api/financial-analysis`, dan analisis yang berhasil dibuat tetap tersimpan server-side atau memunculkan warning save yang jujur
+
+### Review Notes - Business Settings
+
+- Status: `DN`
+- Files read:
+  - `app/dashboard/business-settings/page.tsx`
+  - `lib/webhook-actions.ts`
+  - `lib/warehouse-ledger-actions.ts`
+  - `app/api/scalev-webhook/route.ts`
+  - `lib/scalev-api.ts`
+  - `supabase/migrations/012_webhook_businesses.sql`
+  - `supabase/migrations/028_store_channels.sql`
+  - `supabase/migrations/030_store_type.sql`
+  - `supabase/migrations/034_business_tax_config.sql`
+  - `supabase/migrations/043_add_waba_channel.sql`
+  - `supabase/migrations/067_business_warehouse_mapping.sql`
+  - `supabase/migrations/080_relax_deduct_entity_check.sql`
+- Data sources:
+  - `scalev_webhook_businesses`
+  - `scalev_store_channels`
+  - `warehouse_business_mapping`
+  - `warehouse_products`
+  - `scalev_sync_log`
+  - Scalev store list API via `fetchStoreList()`
+- Mutation paths:
+  - CRUD/toggle `scalev_webhook_businesses`
+  - update `tax_rate_name`
+  - refresh/import store list dari Scalev
+  - update store type / `channel_override` / active flag / delete store
+  - create/update `warehouse_business_mapping`
+- Findings summary:
+  - page `Business Settings` di UI bersifat owner-only, tetapi server actions `getWebhookBusinesses()` dan `getStoreChannels()` sebelumnya belum punya guard owner/tab di server-side; direct invoke masih bisa membaca konfigurasi business/store di luar route gate
+  - `loadAll()` sebelumnya melakukan query browser tambahan ke `scalev_webhook_businesses` hanya untuk `tax_rate_name`; jika query ini gagal atau dibatasi RLS, semua business bisa jatuh ke default `PPN` di UI dan status Non-PKP tersamar
+  - perubahan status PKP sebelumnya dikirim langsung dari browser ke tabel `scalev_webhook_businesses` tanpa server guard dan tanpa cek `error` Supabase; UI bisa menampilkan sukses palsu walau konfigurasi tax tidak benar-benar berubah
+  - `channel_override` sudah dipakai webhook backend (`/api/scalev-webhook`) untuk memaksa klasifikasi channel seperti `WABA`, tetapi UI Business Settings sebelumnya tidak pernah membaca/menyimpan field ini sehingga operator tidak punya cara resmi memperbaiki mapping channel store
+  - load error halaman dan error fetch store sebelumnya banyak yang hanya `console.error()` atau ditelan diam-diam; akibatnya kegagalan permission/query terlihat seperti empty state "belum ada business/store"
+  - refresh store dari Scalev sebelumnya memakai `upsert(... ignoreDuplicates: true)` lalu menghitung setiap no-error sebagai insert baru, sehingga summary inserted/skipped bisa terlalu optimistis saat mayoritas store sebenarnya duplikat
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Admin`
+  - verifikasi manual bahwa non-owner tidak bisa direct invoke server action Business Settings, perubahan PKP/channel override benar-benar memengaruhi klasifikasi webhook berikutnya, dan load/store error kini muncul sebagai error state alih-alih empty state
 
 Saat mereview satu area, catat minimal format ini:
 

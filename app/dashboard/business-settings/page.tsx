@@ -2,13 +2,14 @@
 // @ts-nocheck
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import {
   getWebhookBusinesses,
   saveWebhookBusiness,
   deleteWebhookBusiness,
   toggleWebhookBusiness,
+  updateWebhookBusinessTaxRate,
   getStoreChannels,
   saveStoreChannel,
   deleteStoreChannel,
@@ -69,6 +70,19 @@ const STORE_TYPES = [
   { value: 'reseller', label: 'Reseller', color: 'var(--yellow)' },
 ];
 
+const CHANNEL_OVERRIDE_OPTIONS = [
+  { value: '', label: 'Auto' },
+  { value: 'WABA', label: 'WABA' },
+  { value: 'Scalev Ads', label: 'Scalev Ads' },
+  { value: 'CS Manual', label: 'CS Manual' },
+  { value: 'Reseller', label: 'Reseller' },
+  { value: 'Shopee', label: 'Shopee' },
+  { value: 'TikTok Shop', label: 'TikTok Shop' },
+  { value: 'Tokopedia', label: 'Tokopedia' },
+  { value: 'BliBli', label: 'BliBli' },
+  { value: 'Lazada', label: 'Lazada' },
+];
+
 // ── Helpers ──
 function formatTime(iso: string | null): string {
   if (!iso) return '-';
@@ -98,6 +112,7 @@ export default function BusinessSettingsPage() {
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [warehouseMappings, setWarehouseMappings] = useState<WarehouseMapping[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Form state
@@ -111,6 +126,7 @@ export default function BusinessSettingsPage() {
   const [storeChannels, setStoreChannels] = useState<StoreChannel[]>([]);
   const [loadingStores, setLoadingStores] = useState(false);
   const [fetchingStores, setFetchingStores] = useState(false);
+  const [storeError, setStoreError] = useState('');
   const [hideInactive, setHideInactive] = useState(true);
 
   // Warehouse entities (for dropdown)
@@ -118,31 +134,30 @@ export default function BusinessSettingsPage() {
 
   // ── Load all data ──
   async function loadAll() {
+    setLoading(true);
+    setLoadError('');
     try {
       const [bizData, whData] = await Promise.all([
         getWebhookBusinesses(),
         getWarehouseBusinessMappings(),
       ]);
-
-      // Enrich businesses with tax_rate_name
-      const { data: taxData } = await supabase
-        .from('scalev_webhook_businesses')
-        .select('id, tax_rate_name');
-      const taxMap = new Map((taxData || []).map(t => [t.id, t.tax_rate_name]));
-      const enriched = bizData.map(b => ({ ...b, tax_rate_name: taxMap.get(b.id) || 'PPN' }));
-
-      setBusinesses(enriched);
+      setBusinesses(bizData);
       setWarehouseMappings(whData);
 
       // Get distinct entities from warehouse_products
-      const { data: entityData } = await supabase
+      const { data: entityData, error: entityError } = await supabase
         .from('warehouse_products')
         .select('entity')
         .order('entity');
+      if (entityError) throw entityError;
       const entities = [...new Set((entityData || []).map(e => e.entity))].filter(Boolean);
       setWarehouseEntities(entities);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to load:', err);
+      setLoadError(err?.message || 'Gagal memuat Business Settings.');
+      setBusinesses([]);
+      setWarehouseMappings([]);
+      setWarehouseEntities([]);
     }
     setLoading(false);
   }
@@ -209,10 +224,7 @@ export default function BusinessSettingsPage() {
   // ── Tax update ──
   async function handleTaxChange(bizId: number, newTaxRateName: string) {
     try {
-      await supabase
-        .from('scalev_webhook_businesses')
-        .update({ tax_rate_name: newTaxRateName })
-        .eq('id', bizId);
+      await updateWebhookBusinessTaxRate(bizId, newTaxRateName);
       setBusinesses(prev => prev.map(b => b.id === bizId ? { ...b, tax_rate_name: newTaxRateName } : b));
       setMessage({ type: 'success', text: 'Status PKP updated' });
     } catch (err: any) {
@@ -251,28 +263,56 @@ export default function BusinessSettingsPage() {
     if (expandedBiz === bizId) { setExpandedBiz(null); return; }
     setExpandedBiz(bizId);
     setLoadingStores(true);
+    setStoreError('');
     try {
       const data = await getStoreChannels(bizId);
       setStoreChannels(data);
-    } catch { setStoreChannels([]); }
+    } catch (err: any) {
+      setStoreChannels([]);
+      setStoreError(err?.message || 'Gagal memuat daftar store.');
+    }
     setLoadingStores(false);
   }
 
   async function handleFetchStores(bizId: number) {
     setFetchingStores(true);
+    setStoreError('');
     try {
-      await fetchStoresFromScalev(bizId);
+      const result = await fetchStoresFromScalev(bizId);
       setStoreChannels(await getStoreChannels(bizId));
-      setMessage({ type: 'success', text: 'Stores berhasil di-refresh dari API' });
+      setMessage({ type: 'success', text: `Stores di-refresh: ${result.inserted} baru, ${result.skipped} dilewati` });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     }
     setFetchingStores(false);
   }
 
-  async function handleStoreTypeChange(storeId: number, storeName: string, newType: string) {
+  async function handleStoreTypeChange(store: StoreChannel, newType: string) {
     try {
-      await saveStoreChannel({ id: storeId, business_id: expandedBiz!, store_name: storeName, store_type: newType });
+      setStoreError('');
+      await saveStoreChannel({
+        id: store.id,
+        business_id: expandedBiz!,
+        store_name: store.store_name,
+        store_type: newType,
+        channel_override: store.channel_override,
+      });
+      setStoreChannels(await getStoreChannels(expandedBiz!));
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  }
+
+  async function handleChannelOverrideChange(store: StoreChannel, newOverride: string) {
+    try {
+      setStoreError('');
+      await saveStoreChannel({
+        id: store.id,
+        business_id: expandedBiz!,
+        store_name: store.store_name,
+        store_type: store.store_type,
+        channel_override: newOverride || null,
+      });
       setStoreChannels(await getStoreChannels(expandedBiz!));
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
@@ -281,20 +321,40 @@ export default function BusinessSettingsPage() {
 
   async function handleToggleStore(storeId: number, currentActive: boolean) {
     try {
+      setStoreError('');
       await toggleStoreChannel(storeId, !currentActive);
       setStoreChannels(await getStoreChannels(expandedBiz!));
-    } catch {}
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    }
   }
 
   async function handleDeleteStore(id: number) {
     try {
+      setStoreError('');
       await deleteStoreChannel(id);
       setStoreChannels(await getStoreChannels(expandedBiz!));
-    } catch {}
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    }
   }
 
   // ── Render ──
   if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--dim)' }}>Memuat...</div>;
+
+  if (loadError) {
+    return (
+      <div className="fade-in">
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Business Settings Gagal Dimuat</div>
+          <div style={{ fontSize: 13, marginBottom: 12 }}>{loadError}</div>
+          <button onClick={loadAll} style={{ background: 'transparent', color: '#fecaca', border: '1px solid #991b1b', borderRadius: 8, padding: '8px 14px', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+            Coba Lagi
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const visibleStores = hideInactive ? storeChannels.filter(s => s.is_active) : storeChannels;
 
@@ -505,6 +565,12 @@ export default function BusinessSettingsPage() {
                         </div>
                       </div>
 
+                      {storeError && (
+                        <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'var(--badge-red-bg)', color: 'var(--red)', fontSize: 11 }}>
+                          {storeError}
+                        </div>
+                      )}
+
                       {loadingStores ? (
                         <div style={{ textAlign: 'center', padding: 16, color: 'var(--dim)', fontSize: 12 }}>Memuat stores...</div>
                       ) : visibleStores.length === 0 ? (
@@ -516,7 +582,7 @@ export default function BusinessSettingsPage() {
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
                             <thead>
                               <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                                {['Store Name', 'Type', 'Status', 'Aksi'].map(h => (
+                                {['Store Name', 'Type', 'Channel', 'Status', 'Aksi'].map(h => (
                                   <th key={h} style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600 }}>{h}</th>
                                 ))}
                               </tr>
@@ -526,9 +592,15 @@ export default function BusinessSettingsPage() {
                                 <tr key={s.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                                   <td style={{ padding: '6px 8px', fontWeight: 500 }}>{s.store_name}</td>
                                   <td style={{ padding: '6px 8px' }}>
-                                    <select value={s.store_type} onChange={e => handleStoreTypeChange(s.id, s.store_name, e.target.value)}
+                                    <select value={s.store_type} onChange={e => handleStoreTypeChange(s, e.target.value)}
                                       style={{ padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 11 }}>
                                       {STORE_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                                    </select>
+                                  </td>
+                                  <td style={{ padding: '6px 8px' }}>
+                                    <select value={s.channel_override || ''} onChange={e => handleChannelOverrideChange(s, e.target.value)}
+                                      style={{ padding: '3px 6px', borderRadius: 4, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 11 }}>
+                                      {CHANNEL_OVERRIDE_OPTIONS.map(option => <option key={option.label} value={option.value}>{option.label}</option>)}
                                     </select>
                                   </td>
                                   <td style={{ padding: '6px 8px' }}>
