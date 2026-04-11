@@ -425,7 +425,7 @@ async function processOrder(
     }).eq('id', dbOrder.id);
     if (shouldReverseWarehouseForStatusChange(dbOrder.status, newStatus)) {
       try {
-        reversedCount = await reverseWarehouseDeductions(dbOrder.order_id);
+        reversedCount = await reverseWarehouseDeductions(dbOrder.order_id, dbOrder.id);
       } catch (e: any) {
         console.error(`[Sync] Failed to reverse warehouse for ${dbOrder.order_id}:`, e.message);
       }
@@ -471,7 +471,7 @@ async function processOrder(
   // For deleted/canceled: reverse warehouse deductions if any
   if (shouldReverseWarehouseForStatusChange(dbOrder.status, newStatus)) {
     try {
-      reversedCount = await reverseWarehouseDeductions(dbOrder.order_id);
+      reversedCount = await reverseWarehouseDeductions(dbOrder.order_id, dbOrder.id);
     } catch (e: any) {
       console.error(`[Sync] Failed to reverse warehouse for ${dbOrder.order_id}:`, e.message);
     }

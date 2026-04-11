@@ -4,6 +4,7 @@
 // Without date range, recalculates ALL data (slow, use sparingly).
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 
 export const maxDuration = 300;
 
@@ -17,25 +18,16 @@ function getServiceSupabase() {
 
 export async function POST(req: NextRequest) {
   try {
-    // Auth check: owner/finance or cron
+    // Auth check: admin:sync or cron
     const authHeader = req.headers.get('authorization');
     const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
 
     if (!isCron) {
-      const { createServerSupabase } = await import('@/lib/supabase-server');
-      const supabase = createServerSupabase();
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-      }
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single();
-
-      if (profile?.role !== 'owner' && profile?.role !== 'finance') {
-        return NextResponse.json({ error: 'Only owners and finance users can recalculate' }, { status: 403 });
+      try {
+        await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
+      } catch (err: any) {
+        const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
+        return NextResponse.json({ error: err.message }, { status });
       }
     }
 

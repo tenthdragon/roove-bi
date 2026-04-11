@@ -301,11 +301,17 @@ async function lookupOrderForBusiness(svc: any, orderId: string, businessCode: s
     .maybeSingle();
 }
 
-async function maybeReverseWarehouseForOrder(orderId: string, businessCode: string, oldStatus?: string | null, newStatus?: string | null) {
+async function maybeReverseWarehouseForOrder(
+  orderId: string,
+  businessCode: string,
+  scalevOrderDbId?: number | null,
+  oldStatus?: string | null,
+  newStatus?: string | null,
+) {
   if (!shouldReverseWarehouseForStatusChange(oldStatus, newStatus)) return 0;
 
   try {
-    const reversedCount = await reverseWarehouseDeductions(orderId);
+    const reversedCount = await reverseWarehouseDeductions(orderId, scalevOrderDbId);
     if (reversedCount > 0) {
       console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} reversed ${reversedCount} deductions (${oldStatus} → ${newStatus})`);
     }
@@ -667,7 +673,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
-  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.status, newStatus);
+  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.id, existing.status, newStatus);
 
   // Log
   await svc.from('scalev_sync_log').insert({
@@ -840,12 +846,22 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 
         if (orderLines && orderLines.length > 0) {
           // Check if we already deducted for this order (idempotency)
-          const { data: existingDeductions } = await svc
+          const { data: existingDeductionsByDbId } = await svc
             .from('warehouse_stock_ledger')
             .select('id')
             .eq('reference_type', 'scalev_order')
-            .eq('reference_id', orderId)
+            .eq('scalev_order_id', existing.id)
             .limit(1);
+
+          const existingDeductions = (existingDeductionsByDbId && existingDeductionsByDbId.length > 0)
+            ? existingDeductionsByDbId
+            : (await svc
+                .from('warehouse_stock_ledger')
+                .select('id')
+                .eq('reference_type', 'scalev_order')
+                .eq('reference_id', orderId)
+                .limit(1)
+              ).data;
 
           if (!existingDeductions || existingDeductions.length === 0) {
             let deducted = 0;
@@ -893,6 +909,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
                     p_reference_id: orderId,
                     p_notes: `Auto: ${line.product_name} x${deductQty} [${businessCode}→${mapping.deduct_entity}]`,
                     p_created_at: deductAt,
+                    p_scalev_order_id: existing.id,
                   });
                 if (deductErr) {
                   console.warn(`[scalev-webhook][${businessCode}] warehouse deduct error for ${line.product_name}:`, deductErr.message);
@@ -1012,7 +1029,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
-  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.status, updateData.status);
+  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.id, existing.status, updateData.status);
 
   // Replace order lines with enriched data (including financial fields)
   if (data.orderlines && Array.isArray(data.orderlines) && data.orderlines.length > 0) {
@@ -1126,7 +1143,7 @@ async function handleOrderDeleted(data: any, businessCode: string) {
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
-  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.status, 'deleted');
+  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.id, existing.status, 'deleted');
 
   // Log
   await svc.from('scalev_sync_log').insert({

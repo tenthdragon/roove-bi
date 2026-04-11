@@ -5,9 +5,38 @@ import { sendTelegramMessage, answerCallbackQuery } from '@/lib/telegram';
 
 export const maxDuration = 300;
 
+function isAuthorizedTelegramWebhook(req: NextRequest) {
+  const configuredSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (!configuredSecret) return true;
+  return req.headers.get('x-telegram-bot-api-secret-token') === configuredSecret;
+}
+
+function extractChatId(body: any): string | null {
+  const callbackChatId = body?.callback_query?.message?.chat?.id;
+  const messageChatId = body?.message?.chat?.id;
+  const effective = callbackChatId ?? messageChatId;
+  return effective != null ? String(effective) : null;
+}
+
+function isAnalyzePayloadValid(parts: string[]) {
+  if (parts.length !== 5) return false;
+  return parts.slice(1).every((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
 export async function POST(req: NextRequest) {
   try {
+    if (!isAuthorizedTelegramWebhook(req)) {
+      console.warn('[telegram-webhook] Rejected request with invalid secret token');
+      return NextResponse.json({ ok: true });
+    }
+
     const body = await req.json();
+    const expectedChatId = process.env.TELEGRAM_CHAT_ID;
+    const effectiveChatId = extractChatId(body);
+
+    if (expectedChatId && effectiveChatId && effectiveChatId !== expectedChatId) {
+      return NextResponse.json({ ok: true });
+    }
 
     // Handle callback query (inline button press)
     if (body.callback_query) {
@@ -17,6 +46,10 @@ export async function POST(req: NextRequest) {
       if (data.startsWith('analyze:')) {
         await answerCallbackQuery(cb.id, 'Starting analysis...');
         const parts = data.split(':');
+        if (!isAnalyzePayloadValid(parts)) {
+          await sendTelegramMessage('❌ <b>Analysis failed</b>\n\n<i>Payload analisis tidak valid.</i>');
+          return NextResponse.json({ ok: true });
+        }
         const [, thisFrom, thisTo, prevFrom, prevTo] = parts;
 
         await sendTelegramMessage('🧠 <b>Opus sedang menganalisis data...</b>\n<i>Querying database & building insights (30-90 detik)</i>');
@@ -41,7 +74,6 @@ export async function POST(req: NextRequest) {
     if (!message?.text) return NextResponse.json({ ok: true });
 
     const chatId = String(message.chat.id);
-    const expectedChatId = process.env.TELEGRAM_CHAT_ID;
     if (expectedChatId && chatId !== expectedChatId) {
       return NextResponse.json({ ok: true });
     }

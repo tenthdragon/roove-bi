@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import dynamic from 'next/dynamic';
 import { useSupabase } from '@/lib/supabase-browser';
 import { fmtRupiah } from '@/lib/utils';
+import { usePermissions } from '@/lib/PermissionsContext';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
 
@@ -172,6 +173,7 @@ function TemplatePreview({ template, renderWaFormatted, analytics }: { template:
 
 export default function WabaManagementPage() {
   const supabase = useSupabase();
+  const { can } = usePermissions();
   const { dateRange, loading: dateLoading } = useDateRange();
 
   // ── Template state ──
@@ -199,7 +201,6 @@ export default function WabaManagementPage() {
   const [syncing, setSyncing] = useState(false);
   const [lastSynced, setLastSynced] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<{ tone: 'success' | 'warning' | 'error'; text: string } | null>(null);
-  const [userRole, setUserRole] = useState<string | null>(null);
 
   // ── Create form state ──
   const [formName, setFormName] = useState('');
@@ -389,7 +390,8 @@ export default function WabaManagementPage() {
     return map;
   }, [activeWabaAccounts]);
 
-  const canSyncTemplates = userRole === 'owner' || userRole === 'finance';
+  const canManageTemplates = can('admin:meta');
+  const canSyncTemplates = canManageTemplates;
   const hasMultipleWabaAccounts = activeWabaAccounts.length > 1;
 
   // ── Preview body with samples substituted ──
@@ -415,10 +417,7 @@ export default function WabaManagementPage() {
   useEffect(() => {
     let cancelled = false;
 
-    Promise.all([
-      supabase.auth.getUser(),
-      supabase.from('waba_accounts').select('waba_id, waba_name').eq('is_active', true).order('waba_name'),
-    ]).then(async ([userRes, accountsRes]) => {
+    supabase.from('waba_accounts').select('waba_id, waba_name').eq('is_active', true).order('waba_name').then((accountsRes) => {
       if (cancelled) return;
 
       if (accountsRes.error) {
@@ -430,19 +429,6 @@ export default function WabaManagementPage() {
           if (prev && accounts.some((account) => account.waba_id === prev)) return prev;
           return accounts[0]?.waba_id || '';
         });
-      }
-
-      const user = userRes.data.user;
-      if (user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single();
-
-        if (!cancelled) {
-          setUserRole(profile?.role || null);
-        }
       }
 
       if (!cancelled) {
@@ -672,6 +658,7 @@ export default function WabaManagementPage() {
 
   // ── Tag management ──
   async function handleUpdateTags(templateId: string, newTags: string[]) {
+    if (!canManageTemplates) return;
     try {
       const res = await fetch('/api/waba-templates', {
         method: 'PATCH',
@@ -687,6 +674,10 @@ export default function WabaManagementPage() {
 
   // ── Create template handler ──
   async function handleCreate() {
+    if (!canManageTemplates) {
+      setFormError('Akun ini hanya memiliki akses read-only untuk template.');
+      return;
+    }
     setFormError(null);
     if (!formBody.trim()) { setFormError('Body text is required'); return; }
     if (!formName.trim()) { setFormError('Template name is required'); return; }
@@ -741,6 +732,7 @@ export default function WabaManagementPage() {
 
   // ── Delete template handler ──
   async function handleDelete(template: Template) {
+    if (!canManageTemplates) return;
     if (!window.confirm(`Delete template "${template.name}"? This cannot be undone.`)) return;
     setDeleting(template.id);
     try {
@@ -852,9 +844,11 @@ export default function WabaManagementPage() {
                 </button>
               </div>
             )}
-            <button style={btnPrimary} onClick={() => setShowCreateForm(!showCreateForm)}>
-              {showCreateForm ? 'Cancel' : '+ Create Template'}
-            </button>
+            {canManageTemplates && (
+              <button style={btnPrimary} onClick={() => setShowCreateForm(!showCreateForm)}>
+                {showCreateForm ? 'Cancel' : '+ Create Template'}
+              </button>
+            )}
           </div>
         </div>
 
@@ -886,7 +880,7 @@ export default function WabaManagementPage() {
         )}
 
         {/* ── Create Form with Live Preview ── */}
-        {showCreateForm && (
+        {canManageTemplates && showCreateForm && (
           <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 16, marginBottom: 16 }}>
             <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>New Template</div>
             <div style={{ display: 'flex', gap: 20 }}>
@@ -1286,16 +1280,18 @@ export default function WabaManagementPage() {
                                   padding: '1px 6px', fontSize: 9, fontWeight: 600, fontFamily: 'sans-serif',
                                 }}>
                                   {tag}
-                                  <button onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleUpdateTags(t.id, (t.tags || []).filter(x => x !== tag));
-                                  }} style={{
-                                    background: 'transparent', border: 'none', color: '#60a5fa',
-                                    cursor: 'pointer', padding: 0, fontSize: 10, lineHeight: 1, opacity: 0.7,
-                                  }}>×</button>
+                                  {canManageTemplates && (
+                                    <button onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleUpdateTags(t.id, (t.tags || []).filter(x => x !== tag));
+                                    }} style={{
+                                      background: 'transparent', border: 'none', color: '#60a5fa',
+                                      cursor: 'pointer', padding: 0, fontSize: 10, lineHeight: 1, opacity: 0.7,
+                                    }}>×</button>
+                                  )}
                                 </span>
                               ))}
-                              {editingTagId === t.id ? (
+                              {canManageTemplates && editingTagId === t.id ? (
                                 <input
                                   autoFocus
                                   value={tagInput}
@@ -1323,7 +1319,7 @@ export default function WabaManagementPage() {
                                     outline: 'none', fontFamily: 'sans-serif',
                                   }}
                                 />
-                              ) : (
+                              ) : canManageTemplates ? (
                                 <button onClick={(e) => {
                                   e.stopPropagation();
                                   setEditingTagId(t.id);
@@ -1333,7 +1329,7 @@ export default function WabaManagementPage() {
                                   padding: '1px 6px', fontSize: 9, color: 'var(--text-muted)', cursor: 'pointer',
                                   fontFamily: 'sans-serif',
                                 }}>+</button>
-                              )}
+                              ) : null}
                             </div>
                           </td>
                           {hasMultipleWabaAccounts && (
@@ -1371,10 +1367,14 @@ export default function WabaManagementPage() {
                             ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           </td>
                           <td style={{ ...tdStyle, textAlign: 'center' }}>
-                            <button style={btnDanger} onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
-                              disabled={deleting === t.id}>
-                              {deleting === t.id ? '...' : 'Delete'}
-                            </button>
+                            {canManageTemplates ? (
+                              <button style={btnDanger} onClick={(e) => { e.stopPropagation(); handleDelete(t); }}
+                                disabled={deleting === t.id}>
+                                {deleting === t.id ? '...' : 'Delete'}
+                              </button>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Read-only</span>
+                            )}
                           </td>
                         </tr>
                         {isExpanded && (

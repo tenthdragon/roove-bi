@@ -950,6 +950,7 @@ export async function deductStockFifo(
   scalevProductName: string,
   quantity: number,
   scalevOrderId: string,
+  scalevOrderDbId?: number,
 ) {
   const svc = createServiceSupabase();
 
@@ -969,6 +970,7 @@ export async function deductStockFifo(
       p_reference_type: 'scalev_order',
       p_reference_id: scalevOrderId,
       p_notes: `Auto-deduct: ${scalevProductName} x${quantity}`,
+      p_scalev_order_id: scalevOrderDbId ?? null,
     });
   if (error) throw error;
   return { product: product.name, deductions: data };
@@ -978,33 +980,55 @@ export async function deductStockFifo(
 // ORDER REVERSAL (for deleted/canceled orders)
 // ============================================================
 
-export async function reverseWarehouseDeductions(orderId: string): Promise<number> {
+async function findScalevOrderLedgerRows(
+  svc: any,
+  orderId: string,
+  scalevOrderDbId?: number | null,
+  movementType?: 'IN' | 'OUT',
+  reversalOnly = false,
+) {
+  if (scalevOrderDbId != null) {
+    let query = svc
+      .from('warehouse_stock_ledger')
+      .select('id')
+      .eq('reference_type', 'scalev_order')
+      .eq('scalev_order_id', scalevOrderDbId);
+
+    if (movementType) query = query.eq('movement_type', movementType);
+    if (reversalOnly) query = query.like('notes', 'Reversal:%');
+
+    const { data } = await query.limit(1);
+    if (data && data.length > 0) return data;
+  }
+
+  let legacyQuery = svc
+    .from('warehouse_stock_ledger')
+    .select('id')
+    .eq('reference_type', 'scalev_order')
+    .eq('reference_id', orderId);
+
+  if (movementType) legacyQuery = legacyQuery.eq('movement_type', movementType);
+  if (reversalOnly) legacyQuery = legacyQuery.like('notes', 'Reversal:%');
+
+  const { data } = await legacyQuery.limit(1);
+  return data || [];
+}
+
+export async function reverseWarehouseDeductions(orderId: string, scalevOrderDbId?: number | null): Promise<number> {
   const svc = createServiceSupabase();
 
   // Check if there are any OUT entries to reverse
-  const { data: existing } = await svc
-    .from('warehouse_stock_ledger')
-    .select('id')
-    .eq('reference_type', 'scalev_order')
-    .eq('reference_id', orderId)
-    .eq('movement_type', 'OUT')
-    .limit(1);
-
+  const existing = await findScalevOrderLedgerRows(svc, orderId, scalevOrderDbId, 'OUT');
   if (!existing || existing.length === 0) return 0;
 
   // Check if already reversed (avoid double reversal)
-  const { data: reversals } = await svc
-    .from('warehouse_stock_ledger')
-    .select('id')
-    .eq('reference_type', 'scalev_order')
-    .eq('reference_id', orderId)
-    .eq('movement_type', 'IN')
-    .like('notes', 'Reversal:%')
-    .limit(1);
-
+  const reversals = await findScalevOrderLedgerRows(svc, orderId, scalevOrderDbId, 'IN', true);
   if (reversals && reversals.length > 0) return 0;
 
-  const { data, error } = await svc.rpc('warehouse_reverse_order', { p_order_id: orderId });
+  const { data, error } = await svc.rpc('warehouse_reverse_order', {
+    p_order_id: orderId,
+    p_scalev_order_id: scalevOrderDbId ?? null,
+  });
   if (error) throw error;
   return data as number;
 }
@@ -1254,12 +1278,7 @@ export async function backfillWarehouseDeductions(date: string) {
 
   for (const order of orders) {
     // Check if already deducted (idempotency)
-    const { data: existing } = await svc
-      .from('warehouse_stock_ledger')
-      .select('id')
-      .eq('reference_type', 'scalev_order')
-      .eq('reference_id', order.order_id)
-      .limit(1);
+    const existing = await findScalevOrderLedgerRows(svc, order.order_id, order.id);
     if (existing && existing.length > 0) continue;
     checked++;
 
@@ -1319,6 +1338,7 @@ export async function backfillWarehouseDeductions(date: string) {
             p_reference_id: order.order_id,
             p_notes: `Backfill: ${line.product_name} x${deductQty} [${order.business_code}→${mapping.deduct_entity}]`,
             p_created_at: order.shipped_time || new Date().toISOString(),
+            p_scalev_order_id: order.id,
           });
         if (!deductErr) totalDeducted++;
       } else {
@@ -1356,22 +1376,35 @@ export async function getUndeductedOrders(date: string) {
   }
   if (orders.length === 0) return [];
 
-  // Get all existing deductions for these order IDs in one query
+  // Get all existing deductions for these orders in one query
   const orderIds = orders.map(o => o.order_id);
-  const deductedSet = new Set<string>();
+  const orderDbIds = orders.map(o => o.id);
+  const deductedLegacySet = new Set<string>();
+  const deductedDbIdSet = new Set<number>();
   const chunkSize = 200;
-  for (let i = 0; i < orderIds.length; i += chunkSize) {
-    const chunk = orderIds.slice(i, i + chunkSize);
-    const { data: ledgerRows } = await svc
+  for (let i = 0; i < Math.max(orderIds.length, orderDbIds.length); i += chunkSize) {
+    const idChunk = orderIds.slice(i, i + chunkSize);
+    const dbIdChunk = orderDbIds.slice(i, i + chunkSize);
+
+    const { data: legacyRows } = await svc
       .from('warehouse_stock_ledger')
       .select('reference_id')
       .eq('reference_type', 'scalev_order')
-      .in('reference_id', chunk);
-    (ledgerRows || []).forEach(r => deductedSet.add(r.reference_id));
+      .in('reference_id', idChunk);
+    (legacyRows || []).forEach(r => deductedLegacySet.add(r.reference_id));
+
+    const { data: dbRows } = await svc
+      .from('warehouse_stock_ledger')
+      .select('scalev_order_id')
+      .eq('reference_type', 'scalev_order')
+      .in('scalev_order_id', dbIdChunk);
+    (dbRows || []).forEach((r: any) => {
+      if (typeof r.scalev_order_id === 'number') deductedDbIdSet.add(r.scalev_order_id);
+    });
   }
 
   // Filter to undeducted orders only
-  const undeducted = orders.filter(o => !deductedSet.has(o.order_id));
+  const undeducted = orders.filter(o => !deductedDbIdSet.has(o.id) && !deductedLegacySet.has(o.order_id));
   if (undeducted.length === 0) return [];
 
   // Load all business mappings + scalev mappings for diagnosis
@@ -1464,12 +1497,7 @@ export async function backfillSingleOrder(orderId: string) {
   if (ordErr || !order) throw new Error(`Order ${orderId} tidak ditemukan`);
 
   // Idempotency check
-  const { data: existing } = await svc
-    .from('warehouse_stock_ledger')
-    .select('id')
-    .eq('reference_type', 'scalev_order')
-    .eq('reference_id', orderId)
-    .limit(1);
+  const existing = await findScalevOrderLedgerRows(svc, orderId, order.id);
   if (existing && existing.length > 0) return { deducted: 0, skipped: 0, message: 'Sudah pernah dideduct' };
 
   // Get mapping
@@ -1529,6 +1557,7 @@ export async function backfillSingleOrder(orderId: string) {
           p_reference_id: orderId,
           p_notes: `Backfill: ${line.product_name} x${deductQty} [${order.business_code}→${mapping.deduct_entity}]`,
           p_created_at: order.shipped_time || new Date().toISOString(),
+          p_scalev_order_id: order.id,
         });
       if (!deductErr) deducted++;
     } else {
@@ -1554,6 +1583,7 @@ export async function getDeductionLog(date: string) {
     const { data: page, error: pgErr } = await svc
       .from('warehouse_stock_ledger')
       .select(`
+        scalev_order_id,
         reference_id,
         quantity,
         notes,
@@ -1576,16 +1606,28 @@ export async function getDeductionLog(date: string) {
 
   if (data.length === 0) return { rows: [], totalUniqueOrders: 0 };
 
-  // Get business_code for each order_id
+  // Get business_code for each order
   const orderIds = [...new Set(data.map(d => d.reference_id))];
-  const bizMap = new Map<string, string>();
+  const orderDbIds = [...new Set(data.map(d => d.scalev_order_id).filter((id): id is number => typeof id === 'number'))];
+  const bizByOrderId = new Map<string, string>();
+  const bizByDbId = new Map<number, string>();
+
+  for (let i = 0; i < orderDbIds.length; i += 200) {
+    const chunk = orderDbIds.slice(i, i + 200);
+    const { data: orders } = await svc
+      .from('scalev_orders')
+      .select('id, business_code')
+      .in('id', chunk);
+    (orders || []).forEach(o => bizByDbId.set(o.id, o.business_code));
+  }
+
   for (let i = 0; i < orderIds.length; i += 200) {
     const chunk = orderIds.slice(i, i + 200);
     const { data: orders } = await svc
       .from('scalev_orders')
       .select('order_id, business_code')
       .in('order_id', chunk);
-    (orders || []).forEach(o => bizMap.set(o.order_id, o.business_code));
+    (orders || []).forEach(o => bizByOrderId.set(o.order_id, o.business_code));
   }
 
   // Aggregate by scalev_product + warehouse_product + entity
@@ -1619,7 +1661,9 @@ export async function getDeductionLog(date: string) {
     row.total_qty += Math.abs(Number(d.quantity));
     row.order_ids.add(d.reference_id);
     allOrderIds.add(d.reference_id);
-    const biz = bizMap.get(d.reference_id);
+    const biz = typeof d.scalev_order_id === 'number'
+      ? bizByDbId.get(d.scalev_order_id) || bizByOrderId.get(d.reference_id)
+      : bizByOrderId.get(d.reference_id);
     if (biz) row.business_codes.add(biz);
   }
 

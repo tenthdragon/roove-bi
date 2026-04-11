@@ -902,9 +902,9 @@ Status legend:
 | Hidden products route | `app/dashboard/products/page.tsx` | DN | Direview dan dipatch lokal: route legacy `products` yang sudah disembunyikan dari nav kini di-redirect server-side ke Overview sehingga direct URL tidak lagi memuat query/product analytics lama sebelum redirect client berjalan. Runtime verification disarankan |
 | Scalev integration backend | `app/api/scalev-webhook/route.ts`, `app/api/scalev-sync/route.ts`, `lib/scalev-api.ts` | DN | Direview dan dipatch lokal: webhook/sync kini lookup order per-business, fatal sync run tercatat jujur sebagai `failed`, status regression/deletion kini membalikkan deduction warehouse, dan repair/enrichment line item kini me-refresh field finansial alih-alih hanya channel/brand. Runtime verification disarankan |
 | Sheets/financial/warehouse sync backend | `/api/sync`, `/api/financial-sync`, `/api/warehouse-sync`, parsers | DN | Direview dan dipatch lokal: route financial/warehouse sync kini tidak fail-open dan cron path benar-benar bisa jalan, delete error saat replace data tidak lagi diabaikan, import Google Sheets gagal kini menandai `data_imports` sebagai `failed`, dan range tanggal warehouse tidak lagi memaksa akhir bulan `-31`. Runtime verification disarankan |
-| Meta/WhatsApp/XLSX backend | meta/waba/xlsx routes + libs | NS |  |
-| Telegram/AI ops backend | telegram routes + `lib/daily-report.ts` + `lib/opus-analyst.ts` | NS |  |
-| DB/RPC/migrations verification | `supabase/migrations/*` | NS |  |
+| Meta/WhatsApp/XLSX backend | meta/waba/xlsx routes + libs | DN | Direview dan dipatch lokal: XLSX ads upload kini enforce `admin:meta` dan hanya replace slice store yang di-upload, sync Meta/WABA tidak lagi menghapus seluruh range saat sebagian account gagal, dan fatal sync log kini menyimpan range yang benar. Runtime verification disarankan |
+| Telegram/AI ops backend | telegram routes + `lib/daily-report.ts` + `lib/opus-analyst.ts` | DN | Direview dan dipatch lokal: telegram report tidak lagi publik, webhook kini bisa memverifikasi secret token + callback chat, callback analyze tervalidasi sebelum jalan, dan report harian/bulanan tidak lagi fail-silent atau salah menghitung Meta spend dari label source kustom. Runtime verification disarankan |
+| DB/RPC/migrations verification | `supabase/migrations/*` | DN | Direview dan dipatch lokal: ledger warehouse kini bisa mengikat `scalev_orders.id` untuk reversal/deduction multi-business, write policy Meta/WABA kini mengikuti permission matrix `admin:meta` alih-alih role legacy `finance`, dan route/template refresh terkait tidak lagi false-deny atau over-grant setelah migrasi role. Runtime verification disarankan; hygiene filename migrasi duplikat masih perlu koordinasi terpisah bila repo ingin dipakai ulang dengan flow `supabase db push` yang ketat |
 
 ## 10. Template Bukti Review Per Item
 
@@ -1663,6 +1663,148 @@ Status legend:
 - Next step:
   - lanjut review area `Meta/WhatsApp/XLSX backend`
   - verifikasi manual bahwa hit route sync tanpa permission kini ditolak, cron financial/warehouse benar-benar bisa berjalan tanpa sesi user, dan koneksi yang gagal meninggalkan `last_sync_message`/`data_imports` yang sesuai kondisi nyata
+
+### Review Notes - Meta/WhatsApp/XLSX backend
+
+- Status: `DN`
+- Files read:
+  - `app/api/meta-sync/route.ts`
+  - `app/api/meta-accounts/route.ts`
+  - `app/api/whatsapp-sync/route.ts`
+  - `app/api/waba-template-sync/route.ts`
+  - `app/api/waba-templates/route.ts`
+  - `app/api/waba-template-analytics/route.ts`
+  - `app/api/xlsx-ads-upload/route.ts`
+  - `lib/meta-marketing.ts`
+  - `lib/meta-whatsapp.ts`
+  - `lib/admin-actions.ts`
+  - `components/MetaManager.tsx`
+- Data sources:
+  - `meta_ad_accounts`
+  - `meta_sync_log`
+  - `waba_accounts`
+  - `waba_sync_log`
+  - `waba_templates`
+  - `waba_template_daily_analytics`
+  - `waba_template_sync_log`
+  - `daily_ads_spend`
+  - `data_imports`
+  - Meta Graph API (`meta-marketing`, `meta-whatsapp`)
+- Mutation paths:
+  - Meta spend sync via `POST /api/meta-sync`
+  - WhatsApp spend sync via `POST /api/whatsapp-sync`
+  - WABA template sync via `POST /api/waba-template-sync`
+  - WABA template create/update-tags/delete via `/api/waba-templates`
+  - XLSX ads upload via `POST /api/xlsx-ads-upload`
+  - Meta/WABA account config CRUD via server actions `lib/admin-actions.ts`
+- Findings summary:
+  - `/api/xlsx-ads-upload` sebelumnya memakai service-role tanpa auth guard, sehingga upload ads XLSX bisa dipicu di luar UI Admin Meta
+  - jalur upload XLSX sebelumnya menghapus semua row `xlsx_upload` pada rentang tanggal file, sehingga upload file kedua untuk store lain di bulan yang sama bisa menghapus hasil upload store pertama
+  - `meta-sync` dan `whatsapp-sync` sebelumnya menghapus seluruh range `daily_ads_spend` dulu, lalu hanya mengisi ulang account yang berhasil; akibatnya partial failure pada satu account bisa menghapus histori account lain yang gagal di-refresh
+  - fatal path `meta-sync` / `whatsapp-sync` sebelumnya menulis log gagal dengan range fallback "hari ini", bukan range request yang sebenarnya, sehingga audit log menyesatkan saat sync custom range meledak
+  - route WABA template (`waba-template-sync`, `waba-templates`, `waba-template-analytics`) saya baca ulang juga; untuk area backend ini tidak ada patch tambahan baru di luar review WABA sebelumnya
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Telegram/AI ops backend`
+  - verifikasi manual bahwa partial failure Meta/WABA tidak lagi menghapus data account lain, upload XLSX tanpa `admin:meta` kini ditolak, dan upload file kedua pada bulan yang sama tidak lagi menimpa store lain yang tidak ikut di-upload
+
+### Review Notes - Telegram/AI ops backend
+
+- Status: `DN`
+- Files read:
+  - `app/api/telegram-report/route.ts`
+  - `app/api/telegram-webhook/route.ts`
+  - `lib/daily-report.ts`
+  - `lib/opus-analyst.ts`
+  - `lib/report-tools.ts`
+  - `lib/telegram.ts`
+- Data sources:
+  - `summary_daily_product_complete`
+  - `summary_daily_order_channel`
+  - `daily_ads_spend`
+  - `scalev_orders`
+  - RPC `get_cr_counts`
+  - report tool queries via `lib/report-tools.ts`
+  - Telegram Bot API
+  - Anthropic API via `lib/opus-analyst.ts`
+- Mutation paths:
+  - send daily Telegram report via `GET /api/telegram-report`
+  - handle Telegram commands and callback analysis via `POST /api/telegram-webhook`
+  - Opus/Sonnet analysis follow-up with tool calls
+  - outbound Telegram message send / callback answer
+- Findings summary:
+  - `/api/telegram-report` sebelumnya bisa dipanggil publik tanpa cron secret maupun owner session, sehingga siapa pun yang tahu URL dapat memicu pengiriman report atau membaca isi report dengan mode debug
+  - `callback_query` di `/api/telegram-webhook` sebelumnya diproses sebelum validasi chat, sehingga request palsu yang meniru payload `analyze:*` berpotensi memicu query AI dan mengirim hasil ke chat default
+  - webhook Telegram sebelumnya tidak punya hook untuk memverifikasi secret header jika deployment memakai `X-Telegram-Bot-Api-Secret-Token`, sehingga integrasi tidak siap di-hardening tanpa patch route
+  - builder report sebelumnya fail-silent: query summary/channel/shipment/CR/Meta spend yang error hanya di-log lalu dianggap nol, sehingga bot bisa mengirim report palsu saat data layer gagal
+  - fetch Meta spend di report sebelumnya mengandalkan `source = 'Facebook Ads'`, padahal konfigurasi `meta_ad_accounts.default_source` bisa dikustom; akibatnya ROAS/report Telegram bisa undercount saat source label berbeda walau row Meta API valid
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `DB/RPC/migrations verification`
+  - verifikasi manual bahwa cron/owner masih bisa menjalankan `/api/telegram-report`, webhook callback dari chat lain tidak lagi memicu analisis, dan report tidak lagi broadcast nol palsu saat query core gagal
+
+### Review Notes - DB/RPC/migrations verification
+
+- Status: `DN`
+- Files read:
+  - `supabase/migrations/008_meta_integration.sql`
+  - `supabase/migrations/011_add_business_code.sql`
+  - `supabase/migrations/044_waba_integration.sql`
+  - `supabase/migrations/045_waba_template_metrics.sql`
+  - `supabase/migrations/064_warehouse_redesign.sql`
+  - `supabase/migrations/083_deduct_fifo_created_at.sql`
+  - `supabase/migrations/088_warehouse_reverse_order.sql`
+  - `supabase/migrations/093_role_permissions.sql`
+  - `supabase/migrations/094_admin_tab_permissions.sql`
+  - `supabase/migrations/098_financial_tab_permissions.sql`
+  - `supabase/migrations/099_scalev_ledger_link_and_meta_waba_rbac.sql`
+  - `lib/warehouse-ledger-actions.ts`
+  - `app/api/scalev-webhook/route.ts`
+  - `app/api/scalev-sync/route.ts`
+  - `app/api/waba-template-sync/route.ts`
+  - `app/api/waba-templates/route.ts`
+  - `app/api/waba-template-analytics/route.ts`
+  - `app/api/refresh-views/route.ts`
+  - `app/api/refresh-single-view/route.ts`
+  - `app/dashboard/waba-management/page.tsx`
+  - `docs/ARCHITECTURE.md`
+- Data sources:
+  - `scalev_orders`
+  - `warehouse_stock_ledger`
+  - `meta_ad_accounts`
+  - `meta_sync_log`
+  - `waba_accounts`
+  - `waba_sync_log`
+  - `waba_templates`
+  - `waba_template_daily_analytics`
+  - `waba_template_sync_log`
+  - RPC `warehouse_deduct_fifo`
+  - RPC `warehouse_reverse_order`
+  - permission table `role_permissions`
+- Mutation paths:
+  - warehouse auto-deduct/backfill/reversal untuk order Scalev
+  - WABA template sync / create / patch tags / delete
+  - summary refresh manual (`/api/refresh-views`, `/api/refresh-single-view`)
+  - Meta/WABA config + sync log write path yang bergantung pada RLS
+- Findings summary:
+  - kontrak repo sebelumnya belum punya linkage DB yang aman dari `warehouse_stock_ledger` ke `scalev_orders.id`; deduction dan reversal masih bergantung pada `reference_id = order_id` text, sehingga order ID yang sama lintas business berisiko bentrok saat reverse/check idempotency
+  - kontrak migrasi juga belum menyediakan index repo-level untuk lookup `scalev_orders` per `business_code + order_id`, padahal backend sync/webhook sekarang sudah konsisten lookup scoped per business
+  - write policy Meta/WABA di migration masih mengecek role legacy `finance`, sehingga setelah migrasi role baru, akses DB authenticated bisa false-deny dan tidak lagi selaras dengan permission matrix `role_permissions`
+  - route WABA template/refresh yang masih memakai role legacy `finance` ikut menimbulkan drift: sales manager sempat mendapat jalur write template, sementara user modern yang seharusnya punya `admin:meta` / `admin:sync` bisa false-deny
+  - saya juga verifikasi ada duplicate numeric prefixes / helper file di folder `supabase/migrations`; ini saya catat sebagai hygiene risk repo, tetapi tidak saya rename di patch ini karena perubahan history migrasi perlu koordinasi dengan state DB yang sudah terpasang
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - verifikasi manual bahwa reversal warehouse pada order multi-business tetap tepat sasaran, sync/create/delete template kini hanya bisa dilakukan user dengan `admin:meta`, dan refresh summaries manual hanya bisa dijalankan user dengan `admin:sync` atau cron
+  - bila repo nantinya ingin dipakai lagi dengan alur migrasi Supabase yang ketat dari state kosong, koordinasikan normalisasi filename/version migration yang saat ini masih punya prefix duplikat
 
 Saat mereview satu area, catat minimal format ini:
 

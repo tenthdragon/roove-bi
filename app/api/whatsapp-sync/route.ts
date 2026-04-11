@@ -44,6 +44,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
+  let dateStart = getYesterdayWIB();
+  let dateEnd = dateStart;
+  let logId: number | null = null;
 
   try {
     // ── Auth ──
@@ -75,8 +78,8 @@ export async function POST(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     let body: Record<string, string> = {};
     try { body = await req.json(); } catch { /* no body */ }
-    const dateStart = searchParams.get('date_start') || body.startDate || getYesterdayWIB();
-    const dateEnd = searchParams.get('date_end') || body.endDate || dateStart;
+    dateStart = searchParams.get('date_start') || body.startDate || getYesterdayWIB();
+    dateEnd = searchParams.get('date_end') || body.endDate || dateStart;
 
     // ── Get active WABA accounts ──
     const { data: accounts, error: accountsError } = await svc
@@ -108,7 +111,7 @@ export async function POST(req: NextRequest) {
     if (logError) {
       console.error('[whatsapp-sync] Failed to create log entry:', logError);
     }
-    const logId = logEntry?.id;
+    logId = logEntry?.id ?? null;
 
     // ── Fetch analytics from WABA API ──
     console.log(`[whatsapp-sync] Fetching analytics for ${accounts.length} accounts, range: ${dateStart} to ${dateEnd}`);
@@ -120,46 +123,45 @@ export async function POST(req: NextRequest) {
       accessToken
     );
 
-    // ── Collect all rows and detect errors ──
-    const allRows: DailyAdSpendRow[] = [];
+    // ── Replace per-account slices so failed WABA accounts keep their previous data ──
     const errors: string[] = [];
     let accountsSynced = 0;
-
+    let rowsInserted = 0;
     for (const result of results) {
       if (result.error) {
         errors.push(`${result.waba_name}: ${result.error}`);
-      } else {
-        accountsSynced++;
+        continue;
       }
-      allRows.push(...result.rows);
-    }
 
-    // ── Delete existing WABA data for the date range ──
-    {
       const { error: delError } = await svc
         .from('daily_ads_spend')
         .delete()
         .gte('date', dateStart)
         .lte('date', dateEnd)
-        .eq('data_source', 'whatsapp_api');
+        .eq('data_source', 'whatsapp_api')
+        .eq('ad_account', result.waba_name);
 
       if (delError) {
-        console.error(`[whatsapp-sync] Delete error:`, delError);
+        console.error(`[whatsapp-sync] Delete error for ${result.waba_name}:`, delError);
+        errors.push(`Delete ${result.waba_name}: ${delError.message}`);
+        continue;
       }
-    }
 
-    // ── Batch insert new data ──
-    let rowsInserted = 0;
-    if (allRows.length > 0) {
-      for (let i = 0; i < allRows.length; i += 500) {
-        const batch = allRows.slice(i, i + 500);
+      let accountInsertFailed = false;
+      for (let i = 0; i < result.rows.length; i += 500) {
+        const batch = result.rows.slice(i, i + 500);
         const { error } = await svc.from('daily_ads_spend').insert(batch);
         if (error) {
-          console.error(`[whatsapp-sync] Insert batch error:`, error);
-          errors.push(`Insert batch ${Math.floor(i / 500) + 1}: ${error.message}`);
-        } else {
-          rowsInserted += batch.length;
+          console.error(`[whatsapp-sync] Insert batch error for ${result.waba_name}:`, error);
+          errors.push(`Insert ${result.waba_name} batch ${Math.floor(i / 500) + 1}: ${error.message}`);
+          accountInsertFailed = true;
+          break;
         }
+        rowsInserted += batch.length;
+      }
+
+      if (!accountInsertFailed) {
+        accountsSynced++;
       }
     }
 
@@ -198,14 +200,19 @@ export async function POST(req: NextRequest) {
 
     try {
       const svc = getServiceSupabase();
-      await svc.from('waba_sync_log').insert({
+      const payload = {
         sync_date: new Date().toISOString().split('T')[0],
-        date_range_start: new Date().toISOString().split('T')[0],
-        date_range_end: new Date().toISOString().split('T')[0],
+        date_range_start: dateStart,
+        date_range_end: dateEnd,
         status: 'failed',
         error_message: err.message,
         duration_ms: duration,
-      });
+      };
+      if (logId) {
+        await svc.from('waba_sync_log').update(payload).eq('id', logId);
+      } else {
+        await svc.from('waba_sync_log').insert(payload);
+      }
     } catch {}
 
     return NextResponse.json({ error: err.message }, { status: 500 });

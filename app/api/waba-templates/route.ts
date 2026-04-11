@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import {
+  requireDashboardPermissionAccess,
+  requireDashboardTabAccess,
+} from '@/lib/dashboard-access';
+import {
   createMessageTemplate,
   deleteMessageTemplate,
   type CreateTemplatePayload,
@@ -19,22 +23,28 @@ function getServiceSupabase() {
   );
 }
 
-async function authenticate(req: NextRequest) {
-  const { createServerSupabase } = await import('@/lib/supabase-server');
-  const supabase = createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return { error: 'Not authenticated', status: 401 };
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profile?.role !== 'owner' && profile?.role !== 'finance' && profile?.role !== 'sales_manager') {
-    return { error: 'Only owners, finance, and sales managers can manage templates', status: 403 };
+async function requireReadAccess() {
+  try {
+    await requireDashboardTabAccess('waba-management', 'WABA Management');
+    return {};
+  } catch (err: any) {
+    return {
+      error: err.message,
+      status: /sesi|login/i.test(err.message || '') ? 401 : 403,
+    };
   }
-  return { user, profile };
+}
+
+async function requireManageAccess() {
+  try {
+    await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+    return {};
+  } catch (err: any) {
+    return {
+      error: err.message,
+      status: /sesi|login/i.test(err.message || '') ? 401 : 403,
+    };
+  }
 }
 
 function getAccessToken() {
@@ -76,7 +86,7 @@ function resolveTargetWabaId(accounts: ActiveWabaAccount[], requestedWabaId?: st
 /** GET — List message templates from DB (synced via /api/waba-template-sync) */
 export async function GET(req: NextRequest) {
   try {
-    const auth = await authenticate(req);
+    const auth = await requireReadAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const activeAccounts = await getActiveWabaAccounts();
@@ -101,7 +111,7 @@ export async function GET(req: NextRequest) {
 /** POST — Create a message template (write-through: Graph API + DB) */
 export async function POST(req: NextRequest) {
   try {
-    const auth = await authenticate(req);
+    const auth = await requireManageAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const accessToken = getAccessToken();
@@ -146,7 +156,7 @@ export async function POST(req: NextRequest) {
 /** PATCH — Update template tags */
 export async function PATCH(req: NextRequest) {
   try {
-    const auth = await authenticate(req);
+    const auth = await requireManageAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const body = await req.json();
@@ -173,7 +183,7 @@ export async function PATCH(req: NextRequest) {
 /** DELETE — Delete a message template (write-through: Graph API + DB soft-delete) */
 export async function DELETE(req: NextRequest) {
   try {
-    const auth = await authenticate(req);
+    const auth = await requireManageAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
     const accessToken = getAccessToken();

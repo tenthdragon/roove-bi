@@ -97,14 +97,14 @@ function monthLabel(dateStr: string): string {
 async function fetchProductSummary(svc: any, from: string, to: string) {
   const { data, error } = await svc.from('summary_daily_product_complete')
     .select('date, net_sales, net_after_mkt, mkt_cost').gte('date', from).lte('date', to).limit(5000);
-  if (error) console.error('[report] fetchProductSummary error:', error);
+  if (error) throw new Error(`fetchProductSummary failed: ${error.message}`);
   return data || [];
 }
 
 async function fetchChannelSummary(svc: any, from: string, to: string) {
   const { data, error } = await svc.from('summary_daily_order_channel')
     .select('date, channel, net_sales').gte('date', from).lte('date', to).limit(5000);
-  if (error) console.error('[report] fetchChannelSummary error:', error);
+  if (error) throw new Error(`fetchChannelSummary failed: ${error.message}`);
   return data || [];
 }
 
@@ -114,15 +114,15 @@ async function fetchShipmentCount(svc: any, from: string, to: string): Promise<n
     .select('id', { count: 'exact', head: true })
     .in('status', ['shipped', 'completed'])
     .gte('shipped_time', utcFrom).lt('shipped_time', utcTo);
-  if (error) console.error('[report] fetchShipmentCount error:', error);
+  if (error) throw new Error(`fetchShipmentCount failed: ${error.message}`);
   return count || 0;
 }
 
 async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
   const { data, error } = await svc.from('daily_ads_spend')
     .select('date, spent').gte('date', from).lte('date', to)
-    .eq('source', 'Facebook Ads').limit(5000);
-  if (error) console.error('[report] fetchMetaAdsSpend error:', error);
+    .eq('data_source', 'meta_api').limit(5000);
+  if (error) throw new Error(`fetchMetaAdsSpend failed: ${error.message}`);
   const byDate: Record<string, number> = {};
   for (const r of data || []) byDate[r.date] = (byDate[r.date] || 0) + Number(r.spent);
   return byDate;
@@ -130,7 +130,7 @@ async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
 
 async function fetchCRForRange(svc: any, from: string, to: string): Promise<{ created: number; shipped: number }> {
   const { data, error } = await svc.rpc('get_cr_counts', { p_from: from, p_to: to });
-  if (error) console.error('[report] CR RPC error:', error);
+  if (error) throw new Error(`get_cr_counts failed: ${error.message}`);
   const row = data?.[0] || {};
   return { created: Number(row.total_leads || 0), shipped: Number(row.total_shipped || 0) };
 }

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { requireDashboardRoles } from '@/lib/dashboard-access';
 import { buildDailyReport } from '@/lib/daily-report';
 import { sendTelegramMessage } from '@/lib/telegram';
 
@@ -11,6 +12,20 @@ export async function GET(req: NextRequest) {
   const wibStr = `${wib.getFullYear()}-${String(wib.getMonth() + 1).padStart(2, '0')}-${String(wib.getDate()).padStart(2, '0')} ${String(wib.getHours()).padStart(2, '0')}:${String(wib.getMinutes()).padStart(2, '0')}`;
 
   try {
+    const authHeader = req.headers.get('authorization');
+    const secret = req.nextUrl.searchParams.get('secret');
+    const cronSecret = process.env.CRON_SECRET;
+    const isCron = !!cronSecret && (authHeader === `Bearer ${cronSecret}` || secret === cronSecret);
+
+    if (!isCron) {
+      try {
+        await requireDashboardRoles(['owner'], 'Hanya owner yang bisa menjalankan Telegram report manual.');
+      } catch (err: any) {
+        const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
+        return NextResponse.json({ ok: false, error: err.message, serverTime: wibStr }, { status });
+      }
+    }
+
     const message = await buildDailyReport();
     // @ts-ignore — debug data from buildDailyReport
     const debug = (buildDailyReport as any)._debug || {};

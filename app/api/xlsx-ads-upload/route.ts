@@ -2,6 +2,7 @@
 // Accepts pre-parsed JSON rows from client-side xlsx parsing (avoids file size limits)
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 
 function getServiceSupabase() {
   return createClient(
@@ -24,6 +25,15 @@ const STORE_NORMALIZE: Record<string, string> = {
 
 export async function POST(req: NextRequest) {
   try {
+    let profileId: string | null = null;
+    try {
+      const { profile } = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+      profileId = profile.id;
+    } catch (err: any) {
+      const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
+      return NextResponse.json({ error: err.message }, { status });
+    }
+
     const body = await req.json();
     const { filename, rows: rawRows } = body;
 
@@ -82,16 +92,22 @@ export async function POST(req: NextRequest) {
     const dates = rows.map(r => r.date).sort();
     const dateFrom = dates[0];
     const dateTo = dates[dates.length - 1];
+    const storesToReplace = Array.from(new Set(rows.map((row) => row.store).filter(Boolean)));
 
     const svc = getServiceSupabase();
 
-    // Delete existing xlsx_upload data for this date range
+    if (storesToReplace.length === 0) {
+      return NextResponse.json({ error: 'No valid store rows found after filtering' }, { status: 400 });
+    }
+
+    // Replace only the uploaded store slices so one file does not wipe other XLSX stores in the same date range.
     const { error: delErr } = await svc
       .from('daily_ads_spend')
       .delete()
       .eq('data_source', 'xlsx_upload')
       .gte('date', dateFrom)
-      .lte('date', dateTo);
+      .lte('date', dateTo)
+      .in('store', storesToReplace);
 
     if (delErr) {
       return NextResponse.json({ error: `Delete failed: ${delErr.message}` }, { status: 500 });
@@ -117,9 +133,10 @@ export async function POST(req: NextRequest) {
       filename: filename || 'unknown.xlsx',
       period_month: parseInt(dateFrom.split('-')[1]),
       period_year: parseInt(dateFrom.split('-')[0]),
+      imported_by: profileId,
       row_count: inserted,
       status: 'completed',
-      notes: `XLSX ads upload: ${inserted} rows (${skipped} skipped). Date range: ${dateFrom} to ${dateTo}`,
+      notes: `XLSX ads upload: ${inserted} rows (${skipped} skipped). Date range: ${dateFrom} to ${dateTo}. Stores: ${storesToReplace.join(', ')}`,
     });
 
     return NextResponse.json({
@@ -127,6 +144,7 @@ export async function POST(req: NextRequest) {
       inserted,
       skipped,
       skippedStores: [...skippedStores],
+      replacedStores: storesToReplace,
       dateRange: { from: dateFrom, to: dateTo },
       filename,
     });

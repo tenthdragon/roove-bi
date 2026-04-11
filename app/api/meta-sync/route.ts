@@ -46,6 +46,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
+  let dateStart = getYesterdayWIB();
+  let dateEnd = dateStart;
+  let logId: number | null = null;
 
   try {
     // ── Auth: same pattern as /api/sync ──
@@ -73,8 +76,8 @@ export async function POST(req: NextRequest) {
     // Query params: ?date_start=YYYY-MM-DD&date_end=YYYY-MM-DD
     // Default: yesterday only
     const { searchParams } = new URL(req.url);
-    const dateStart = searchParams.get('date_start') || getYesterdayWIB();
-    const dateEnd = searchParams.get('date_end') || dateStart;
+    dateStart = searchParams.get('date_start') || getYesterdayWIB();
+    dateEnd = searchParams.get('date_end') || dateStart;
 
     // ── Check token health (non-blocking warning) ──
     let tokenWarning: string | null = null;
@@ -118,7 +121,7 @@ export async function POST(req: NextRequest) {
     if (logError) {
       console.error('[meta-sync] Failed to create log entry:', logError);
     }
-    const logId = logEntry?.id;
+    logId = logEntry?.id ?? null;
 
     // ── Fetch insights from Meta API ──
     console.log(`[meta-sync] Fetching insights for ${accounts.length} accounts, range: ${dateStart} to ${dateEnd}`);
@@ -130,47 +133,45 @@ export async function POST(req: NextRequest) {
       accessToken
     );
 
-    // ── Collect all rows and detect errors ──
-    const allRows: DailyAdSpendRow[] = [];
+    // ── Replace per-account slices so failed accounts keep their previous data ──
     const errors: string[] = [];
     let accountsSynced = 0;
-
+    let rowsInserted = 0;
     for (const result of results) {
       if (result.error) {
         errors.push(`${result.account_name}: ${result.error}`);
-      } else {
-        accountsSynced++;
+        continue;
       }
-      allRows.push(...result.rows);
-    }
 
-    // ── Delete existing Meta API ads for the date range ──
-    // Only delete rows tagged as meta_api to preserve Google Sheets data
-    {
       const { error: delError } = await svc
         .from('daily_ads_spend')
         .delete()
         .gte('date', dateStart)
         .lte('date', dateEnd)
-        .eq('data_source', 'meta_api');
+        .eq('data_source', 'meta_api')
+        .eq('ad_account', result.account_name);
 
       if (delError) {
-        console.error(`[meta-sync] Delete error:`, delError);
+        console.error(`[meta-sync] Delete error for ${result.account_name}:`, delError);
+        errors.push(`Delete ${result.account_name}: ${delError.message}`);
+        continue;
       }
-    }
 
-    // ── Batch insert new data ──
-    let rowsInserted = 0;
-    if (allRows.length > 0) {
-      for (let i = 0; i < allRows.length; i += 500) {
-        const batch = allRows.slice(i, i + 500);
+      let accountInsertFailed = false;
+      for (let i = 0; i < result.rows.length; i += 500) {
+        const batch = result.rows.slice(i, i + 500);
         const { error } = await svc.from('daily_ads_spend').insert(batch);
         if (error) {
-          console.error(`[meta-sync] Insert batch error:`, error);
-          errors.push(`Insert batch ${Math.floor(i / 500) + 1}: ${error.message}`);
-        } else {
-          rowsInserted += batch.length;
+          console.error(`[meta-sync] Insert batch error for ${result.account_name}:`, error);
+          errors.push(`Insert ${result.account_name} batch ${Math.floor(i / 500) + 1}: ${error.message}`);
+          accountInsertFailed = true;
+          break;
         }
+        rowsInserted += batch.length;
+      }
+
+      if (!accountInsertFailed) {
+        accountsSynced++;
       }
     }
 
@@ -211,14 +212,19 @@ export async function POST(req: NextRequest) {
     // Try to log the failure
     try {
       const svc = getServiceSupabase();
-      await svc.from('meta_sync_log').insert({
+      const payload = {
         sync_date: new Date().toISOString().split('T')[0],
-        date_range_start: new Date().toISOString().split('T')[0],
-        date_range_end: new Date().toISOString().split('T')[0],
+        date_range_start: dateStart,
+        date_range_end: dateEnd,
         status: 'failed',
         error_message: err.message,
         duration_ms: duration,
-      });
+      };
+      if (logId) {
+        await svc.from('meta_sync_log').update(payload).eq('id', logId);
+      } else {
+        await svc.from('meta_sync_log').insert(payload);
+      }
     } catch {}
 
     return NextResponse.json({ error: err.message }, { status: 500 });

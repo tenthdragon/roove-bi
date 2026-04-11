@@ -3,6 +3,7 @@
 // with the admin sync UI. Now delegates to recalculate_all_summaries().
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 
 export const maxDuration = 300;
 
@@ -16,21 +17,12 @@ function getServiceSupabase() {
 
 export async function POST(req: NextRequest) {
   try {
-    // Auth check: owner/finance
-    const { createServerSupabase } = await import('@/lib/supabase-server');
-    const supabase = createServerSupabase();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
-    }
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-
-    if (profile?.role !== 'owner' && profile?.role !== 'finance') {
-      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    // Auth check: admin:sync
+    try {
+      await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
+    } catch (err: any) {
+      const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
+      return NextResponse.json({ error: err.message }, { status });
     }
 
     const svc = getServiceSupabase();
