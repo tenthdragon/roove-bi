@@ -11,6 +11,19 @@ import { reverseWarehouseDeductions } from '@/lib/warehouse-ledger-actions';
 
 
 export const maxDuration = 120;
+const TERMINAL_SCALEV_STATUSES = new Set(['shipped', 'completed']);
+
+function getSyncLogType(syncMode: 'full' | 'date' | 'order_id' | 'repair') {
+  return syncMode === 'full'
+    ? 'pending_reconcile'
+    : syncMode === 'repair'
+      ? 'repair_missing_lines'
+      : `targeted_${syncMode}`;
+}
+
+function shouldReverseWarehouseForStatusChange(oldStatus?: string | null, newStatus?: string | null) {
+  return TERMINAL_SCALEV_STATUSES.has(oldStatus || '') && !!newStatus && !TERMINAL_SCALEV_STATUSES.has(newStatus);
+}
 
 function getServiceSupabase() {
   return createClient(
@@ -31,6 +44,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
+  const startedAt = new Date().toISOString();
+  let syncMode: 'full' | 'date' | 'order_id' | 'repair' = 'full';
+  let targetDate: string | null = null;
+  let targetOrderIds: string[] | null = null;
+  let pendingOrdersCount = 0;
+  let logId: number | null = null;
 
   try {
     // ── Auth: cron or admin sync permission ──
@@ -48,10 +67,6 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Parse optional body for targeted sync ──
-    let syncMode: 'full' | 'date' | 'order_id' | 'repair' = 'full';
-    let targetDate: string | null = null;
-    let targetOrderIds: string[] | null = null;
-
     try {
       const ct = req.headers.get('content-type');
       if (ct?.includes('application/json')) {
@@ -99,9 +114,7 @@ export async function POST(req: NextRequest) {
     }
     taxRatesMap.set('NONE', { rate: 0, divisor: 1.0 });
 
-    if (businesses.length === 0) {
-      return NextResponse.json({ error: 'No businesses with API keys configured' }, { status: 500 });
-    }
+    if (businesses.length === 0) throw new Error('No businesses with API keys configured');
 
     const storeTypeMap = new Map<string, StoreType>();
     const channelOverrideMap = new Map<string, string>();
@@ -180,21 +193,22 @@ export async function POST(req: NextRequest) {
       if (error) throw error;
       pendingOrders = data || [];
     }
+    pendingOrdersCount = pendingOrders.length;
 
     // ── Insert sync log ──
     const { data: logEntry } = await svc
       .from('scalev_sync_log')
       .insert({
         status: 'running',
-        sync_type: syncMode === 'full' ? 'pending_reconcile' : syncMode === 'repair' ? 'repair_missing_lines' : `targeted_${syncMode}`,
-        orders_fetched: pendingOrders.length,
+        sync_type: getSyncLogType(syncMode),
+        orders_fetched: pendingOrdersCount,
         orders_updated: 0,
         orders_inserted: 0,
-        started_at: new Date().toISOString(),
+        started_at: startedAt,
       })
       .select('id')
       .single();
-    const logId = logEntry?.id;
+    logId = logEntry?.id ?? null;
 
     // Clear product mapping cache for fresh lookups
     clearProductMappingCache();
@@ -330,8 +344,9 @@ export async function POST(req: NextRequest) {
 
     // ── Update sync log ──
     if (logId) {
+      const succeededCount = updatedCount + stillPendingCount;
       await svc.from('scalev_sync_log').update({
-        status: erroredCount === 0 ? 'success' : 'partial',
+        status: erroredCount === 0 ? 'success' : succeededCount === 0 ? 'failed' : 'partial',
         orders_updated: updatedCount,
         error_message: errors.length > 0 ? errors.join('; ') : null,
         completed_at: new Date().toISOString(),
@@ -352,6 +367,26 @@ export async function POST(req: NextRequest) {
 
   } catch (err: any) {
     console.error('[scalev-sync] Fatal error:', err.message);
+    try {
+      const svc = getServiceSupabase();
+      const failedLog = {
+        status: 'failed',
+        sync_type: getSyncLogType(syncMode),
+        orders_fetched: pendingOrdersCount,
+        orders_updated: 0,
+        orders_inserted: 0,
+        error_message: err.message || 'Unknown fatal error',
+        started_at: startedAt,
+        completed_at: new Date().toISOString(),
+      };
+      if (logId) {
+        await svc.from('scalev_sync_log').update(failedLog).eq('id', logId);
+      } else {
+        await svc.from('scalev_sync_log').insert(failedLog);
+      }
+    } catch (logErr: any) {
+      console.error('[scalev-sync] Failed to persist fatal sync log:', logErr.message);
+    }
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
@@ -372,6 +407,7 @@ async function processOrder(
   channelOverrideMap: Map<string, string> = new Map(),
 ): Promise<'updated' | 'still_pending'> {
   const newStatus = apiOrder.status;
+  let reversedCount = 0;
 
   // No change — skip entirely (saves DB IO)
   if (newStatus === dbOrder.status && !forceUpdate) {
@@ -387,6 +423,13 @@ async function processOrder(
       raw_data: apiOrder,
       synced_at: new Date().toISOString(),
     }).eq('id', dbOrder.id);
+    if (shouldReverseWarehouseForStatusChange(dbOrder.status, newStatus)) {
+      try {
+        reversedCount = await reverseWarehouseDeductions(dbOrder.order_id);
+      } catch (e: any) {
+        console.error(`[Sync] Failed to reverse warehouse for ${dbOrder.order_id}:`, e.message);
+      }
+    }
     if (!lightweight) {
       const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
       const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
@@ -395,6 +438,7 @@ async function processOrder(
     details.push({
       order_id: dbOrder.order_id, store_name: dbOrder.store_name, business_code: dbOrder.business_code,
       old_status: dbOrder.status, new_status: newStatus, action: lightweight ? 'status_updated' : 'force_refreshed',
+      ...(reversedCount > 0 && { warehouse_reversed: reversedCount }),
     });
     return 'updated';
   }
@@ -425,8 +469,7 @@ async function processOrder(
   }
 
   // For deleted/canceled: reverse warehouse deductions if any
-  let reversedCount = 0;
-  if (newStatus === 'deleted' || newStatus === 'canceled') {
+  if (shouldReverseWarehouseForStatusChange(dbOrder.status, newStatus)) {
     try {
       reversedCount = await reverseWarehouseDeductions(dbOrder.order_id);
     } catch (e: any) {
@@ -458,8 +501,6 @@ async function enrichLineItems(
   taxRatesMap: Map<string, { rate: number; divisor: number }>,
   channelOverrideMap: Map<string, string>,
 ) {
-  const shippedTime = apiOrder.shipped_time || apiOrder.completed_time || null;
-
   // Derive sales channel (check store-specific override first)
   const storeName = (apiOrder.store?.name || '').toLowerCase();
   const overrideKey = `${businessId}:${storeName}`;
@@ -483,18 +524,12 @@ async function enrichLineItems(
     return price / tax.divisor;
   }
 
-  // Check if order has any existing lines
-  const { count: lineCount } = await svc
-    .from('scalev_order_lines')
-    .select('id', { count: 'exact', head: true })
-    .eq('scalev_order_id', dbOrderId);
+  const tax = taxRateName === 'NONE'
+    ? { rate: 0, divisor: 1.0 }
+    : (taxRatesMap.get(taxRateName) || { rate: 11, divisor: 1.11 });
 
-  if ((lineCount === 0 || lineCount === null) && apiOrder.orderlines?.length > 0) {
-    // ── Insert missing lines from API data ──
-    const tax = taxRateName === 'NONE'
-      ? { rate: 0, divisor: 1.0 }
-      : (taxRatesMap.get(taxRateName) || { rate: 11, divisor: 1.11 });
-
+  if (apiOrder.orderlines?.length > 0) {
+    // Replace from API so quantity/financial fields stay in sync on repairs or status regressions.
     const newLines: any[] = [];
     for (const line of apiOrder.orderlines) {
       const qty = line.quantity || 1;
@@ -521,6 +556,11 @@ async function enrichLineItems(
         synced_at: new Date().toISOString(),
       });
     }
+
+    await svc
+      .from('scalev_order_lines')
+      .delete()
+      .eq('scalev_order_id', dbOrderId);
 
     if (newLines.length > 0) {
       await svc

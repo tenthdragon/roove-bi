@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
 import { deriveChannelFromStoreType, guessStoreType, type StoreType } from '@/lib/scalev-api';
+import { reverseWarehouseDeductions } from '@/lib/warehouse-ledger-actions';
 
 function getServiceSupabase() {
   return createClient(
@@ -276,6 +277,45 @@ function calcBeforeTax(price: number, tax: { rate: number; divisor: number }): n
   return price / tax.divisor;
 }
 
+const TERMINAL_SCALEV_STATUSES = new Set(['shipped', 'completed']);
+
+function shouldReverseWarehouseForStatusChange(oldStatus?: string | null, newStatus?: string | null) {
+  return TERMINAL_SCALEV_STATUSES.has(oldStatus || '') && !!newStatus && !TERMINAL_SCALEV_STATUSES.has(newStatus);
+}
+
+async function lookupOrderForBusiness(svc: any, orderId: string, businessCode: string, columns: string) {
+  const scoped = await svc
+    .from('scalev_orders')
+    .select(columns)
+    .eq('order_id', orderId)
+    .eq('business_code', businessCode)
+    .maybeSingle();
+
+  if (scoped.error || scoped.data) return scoped;
+
+  return svc
+    .from('scalev_orders')
+    .select(columns)
+    .eq('order_id', orderId)
+    .is('business_code', null)
+    .maybeSingle();
+}
+
+async function maybeReverseWarehouseForOrder(orderId: string, businessCode: string, oldStatus?: string | null, newStatus?: string | null) {
+  if (!shouldReverseWarehouseForStatusChange(oldStatus, newStatus)) return 0;
+
+  try {
+    const reversedCount = await reverseWarehouseDeductions(orderId);
+    if (reversedCount > 0) {
+      console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} reversed ${reversedCount} deductions (${oldStatus} → ${newStatus})`);
+    }
+    return reversedCount;
+  } catch (err: any) {
+    console.warn(`[scalev-webhook][${businessCode}] warehouse reversal failed for ${orderId}:`, err.message);
+    return 0;
+  }
+}
+
 // ── Brand detection from product name (dynamic from DB, cached) ──
 type BrandKeyword = { name: string; keywords: string[] };
 let cachedBrandKeywords: BrandKeyword[] | null = null;
@@ -458,13 +498,19 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   }
 
   // Check if order already exists
-  const { data: existing } = await svc
-    .from('scalev_orders')
-    .select('id')
-    .eq('order_id', orderId)
-    .maybeSingle();
+  const { data: existing } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, business_code');
 
   if (existing) {
+    if (!existing.business_code) {
+      await svc
+        .from('scalev_orders')
+        .update({
+          business_code: businessCode,
+          raw_data: data,
+          synced_at: new Date().toISOString(),
+        })
+        .eq('id', existing.id);
+    }
     console.log(`[scalev-webhook][${businessCode}] order.created: ${orderId} already exists, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'already_exists' });
   }
@@ -575,11 +621,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
   }
 
   // Lookup order
-  const { data: existing, error: lookupErr } = await svc
-    .from('scalev_orders')
-    .select('id, order_id, status')
-    .eq('order_id', orderId)
-    .maybeSingle();
+  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, order_id, status');
 
   if (lookupErr) {
     console.error(`[scalev-webhook][${businessCode}] status_changed lookup error for ${orderId}:`, lookupErr.message);
@@ -624,6 +666,8 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     console.error(`[scalev-webhook][${businessCode}] status_changed update error for ${orderId}:`, updateErr.message);
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
+
+  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.status, newStatus);
 
   // Log
   await svc.from('scalev_sync_log').insert({
@@ -880,6 +924,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     business_code: businessCode,
     old_status: existing.status,
     new_status: newStatus,
+    ...(reversedCount > 0 && { warehouse_reversed: reversedCount }),
   });
 }
 
@@ -893,11 +938,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   }
 
   // Lookup existing order
-  const { data: existing, error: lookupErr } = await svc
-    .from('scalev_orders')
-    .select('id, order_id, status, source')
-    .eq('order_id', orderId)
-    .maybeSingle();
+  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, order_id, status, source');
 
   if (lookupErr) {
     console.error(`[scalev-webhook][${businessCode}] order.updated lookup error for ${orderId}:`, lookupErr.message);
@@ -971,6 +1012,8 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
+  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.status, updateData.status);
+
   // Replace order lines with enriched data (including financial fields)
   if (data.orderlines && Array.isArray(data.orderlines) && data.orderlines.length > 0) {
     // Delete old lines
@@ -1037,7 +1080,13 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
 
   console.log(`[scalev-webhook][${businessCode}] order.updated: ${orderId} updated successfully`);
 
-  return NextResponse.json({ ok: true, order_id: orderId, business_code: businessCode, action: 'updated' });
+  return NextResponse.json({
+    ok: true,
+    order_id: orderId,
+    business_code: businessCode,
+    action: 'updated',
+    ...(reversedCount > 0 && { warehouse_reversed: reversedCount }),
+  });
 }
 
 // ── Handle order.deleted: soft-delete by marking as canceled ──
@@ -1049,11 +1098,7 @@ async function handleOrderDeleted(data: any, businessCode: string) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await svc
-    .from('scalev_orders')
-    .select('id, order_id, status')
-    .eq('order_id', orderId)
-    .maybeSingle();
+  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, order_id, status');
 
   if (lookupErr) {
     console.error(`[scalev-webhook][${businessCode}] order.deleted lookup error for ${orderId}:`, lookupErr.message);
@@ -1081,6 +1126,8 @@ async function handleOrderDeleted(data: any, businessCode: string) {
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
+  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.status, 'deleted');
+
   // Log
   await svc.from('scalev_sync_log').insert({
     status: 'success',
@@ -1095,7 +1142,14 @@ async function handleOrderDeleted(data: any, businessCode: string) {
 
   console.log(`[scalev-webhook][${businessCode}] order.deleted: ${orderId} marked as deleted (was ${existing.status})`);
 
-  return NextResponse.json({ ok: true, order_id: orderId, business_code: businessCode, action: 'deleted', old_status: existing.status });
+  return NextResponse.json({
+    ok: true,
+    order_id: orderId,
+    business_code: businessCode,
+    action: 'deleted',
+    old_status: existing.status,
+    ...(reversedCount > 0 && { warehouse_reversed: reversedCount }),
+  });
 }
 
 // ── Handle order.payment_status_changed: update payment-related fields ──
@@ -1107,11 +1161,7 @@ async function handlePaymentStatusChanged(data: any, businessCode: string) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await svc
-    .from('scalev_orders')
-    .select('id, order_id, status')
-    .eq('order_id', orderId)
-    .maybeSingle();
+  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, order_id, status');
 
   if (lookupErr) {
     console.error(`[scalev-webhook][${businessCode}] payment_status_changed lookup error for ${orderId}:`, lookupErr.message);
@@ -1170,11 +1220,7 @@ async function handleEPaymentCreated(data: any, businessCode: string) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await svc
-    .from('scalev_orders')
-    .select('id, order_id')
-    .eq('order_id', orderId)
-    .maybeSingle();
+  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, order_id');
 
   if (lookupErr) {
     console.error(`[scalev-webhook][${businessCode}] e_payment_created lookup error for ${orderId}:`, lookupErr.message);

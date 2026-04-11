@@ -9,6 +9,13 @@ async function requireWarehouseAdminAccess(label: string) {
   await requireDashboardPermissionAccess('admin:warehouse', label);
 }
 
+function getMonthDateRange(year: number, month: number) {
+  const firstDate = `${year}-${String(month).padStart(2, '0')}-01`;
+  const lastDay = new Date(year, month, 0).getDate();
+  const lastDate = `${year}-${String(month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
+  return { firstDate, lastDate };
+}
+
 // ============================================================
 // SHEET CONNECTION MANAGEMENT
 // ============================================================
@@ -64,8 +71,10 @@ export async function toggleWarehouseConnection(id: string, isActive: boolean) {
 // SYNC
 // ============================================================
 
-export async function triggerWarehouseSync() {
-  await requireWarehouseAdminAccess('Admin Warehouse');
+export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
+  if (!options?.skipAuth) {
+    await requireWarehouseAdminAccess('Admin Warehouse');
+  }
 
   const svc = createServiceSupabase();
 
@@ -102,12 +111,13 @@ export async function triggerWarehouseSync() {
       // --- UPSERT SUMMARY ---
       if (parsed.summary.length > 0) {
         // Delete existing data for this warehouse + period
-        await svc
+        const { error: summaryDeleteError } = await svc
           .from('warehouse_stock_summary')
           .delete()
           .eq('warehouse', warehouse)
           .eq('period_month', parsed.period.month)
           .eq('period_year', parsed.period.year);
+        if (summaryDeleteError) throw new Error(`Delete warehouse_stock_summary: ${summaryDeleteError.message}`);
 
         // Insert in batches of 200
         for (let i = 0; i < parsed.summary.length; i += 200) {
@@ -133,14 +143,14 @@ export async function triggerWarehouseSync() {
       // --- UPSERT DAILY ---
       if (parsed.daily.length > 0) {
         // Delete existing daily data for this warehouse + period
-        const firstDate = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-01`;
-        const lastDate = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-31`;
-        await svc
+        const { firstDate, lastDate } = getMonthDateRange(parsed.period.year, parsed.period.month);
+        const { error: dailyDeleteError } = await svc
           .from('warehouse_daily_stock')
           .delete()
           .eq('warehouse', warehouse)
           .gte('date', firstDate)
           .lte('date', lastDate);
+        if (dailyDeleteError) throw new Error(`Delete warehouse_daily_stock: ${dailyDeleteError.message}`);
 
         for (let i = 0; i < parsed.daily.length; i += 200) {
           const batch = parsed.daily.slice(i, i + 200).map(r => ({
@@ -161,11 +171,12 @@ export async function triggerWarehouseSync() {
         // Delete existing SO data for dates found
         const soDates = Array.from(new Set(parsed.stockOpname.map(r => r.opname_date)));
         for (const dt of soDates) {
-          await svc
+          const { error: deleteSoError } = await svc
             .from('warehouse_stock_opname')
             .delete()
             .eq('warehouse', warehouse)
             .eq('opname_date', dt);
+          if (deleteSoError) throw new Error(`Delete warehouse_stock_opname ${dt}: ${deleteSoError.message}`);
         }
 
         for (let i = 0; i < parsed.stockOpname.length; i += 200) {
@@ -251,8 +262,7 @@ export async function getWarehouseSummary(month: number, year: number) {
 export async function getWarehouseDailyStock(month: number, year: number) {
   await requireDashboardTabAccess('warehouse', 'Daily Stock Gudang');
   const svc = createServiceSupabase();
-  const firstDate = `${year}-${String(month).padStart(2, '0')}-01`;
-  const lastDate = `${year}-${String(month).padStart(2, '0')}-31`;
+  const { firstDate, lastDate } = getMonthDateRange(year, month);
   const { data, error } = await svc
     .from('warehouse_daily_stock')
     .select('*')

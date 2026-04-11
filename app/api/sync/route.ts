@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
     const results = [];
 
     for (const conn of connections) {
+      let importTarget: { filename: string; periodMonth: number; periodYear: number } | null = null;
       try {
         console.log(`Syncing ads from spreadsheet: ${conn.spreadsheet_id} (${conn.label})`);
 
@@ -86,10 +87,11 @@ export async function POST(req: NextRequest) {
         // ── Filter out ads whose ad_account is managed by Meta API ──
         // This prevents duplicates when the same account exists in both
         // Google Sheets and Meta API sync.
-        const { data: metaAccounts } = await svc
+        const { data: metaAccounts, error: metaAccountsError } = await svc
           .from('meta_ad_accounts')
           .select('account_name')
           .eq('is_active', true);
+        if (metaAccountsError) throw new Error(`Load meta_ad_accounts: ${metaAccountsError.message}`);
 
         const metaManagedNames = new Set(
           (metaAccounts || []).map((a: { account_name: string }) => a.account_name)
@@ -104,11 +106,17 @@ export async function POST(req: NextRequest) {
           console.log(`[sync] Skipped ${skippedCount} rows already managed by Meta API`);
         }
 
+        importTarget = {
+          filename: `gsheet:${conn.spreadsheet_id}`,
+          periodMonth: parsed.period.month,
+          periodYear: parsed.period.year,
+        };
+
         // Create/update import record
         const { error: upsertErr } = await svc.from('data_imports').upsert({
-          filename: `gsheet:${conn.spreadsheet_id}`,
-          period_month: parsed.period.month,
-          period_year: parsed.period.year,
+          filename: importTarget.filename,
+          period_month: importTarget.periodMonth,
+          period_year: importTarget.periodYear,
           imported_by: conn.created_by,
           row_count: filteredAds.length,
           status: 'processing',
@@ -129,9 +137,9 @@ export async function POST(req: NextRequest) {
         await svc.from('data_imports').update({
           status: 'completed',
           row_count: filteredAds.length,
-        }).eq('filename', `gsheet:${conn.spreadsheet_id}`)
-          .eq('period_month', parsed.period.month)
-          .eq('period_year', parsed.period.year);
+        }).eq('filename', importTarget.filename)
+          .eq('period_month', importTarget.periodMonth)
+          .eq('period_year', importTarget.periodYear);
 
         // Update last_synced on connection
         const syncMsg = skippedCount > 0
@@ -155,6 +163,15 @@ export async function POST(req: NextRequest) {
 
       } catch (err: any) {
         console.error(`Sync failed for ${conn.spreadsheet_id}:`, err);
+
+        if (importTarget) {
+          await svc.from('data_imports').update({
+            status: 'failed',
+            notes: err.message || 'Unknown error',
+          }).eq('filename', importTarget.filename)
+            .eq('period_month', importTarget.periodMonth)
+            .eq('period_year', importTarget.periodYear);
+        }
 
         await svc.from('sheet_connections').update({
           last_synced: new Date().toISOString(),

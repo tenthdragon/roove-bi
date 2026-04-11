@@ -900,8 +900,8 @@ Status legend:
 | Business Settings | `app/dashboard/business-settings/page.tsx`, `lib/webhook-actions.ts` | DN | Direview dan dipatch lokal: server actions Business Settings kini konsisten owner-only di server-side, status PKP tidak lagi diupdate langsung dari browser, store sekarang bisa mengatur `channel_override` yang memang dipakai webhook backend, hasil refresh store tidak lagi mengklaim inserted count palsu, dan page/store section kini punya error state yang jujur. Runtime verification disarankan |
 | Admin | `app/dashboard/admin/page.tsx`, admin components and upload/sync APIs | DN | Direview dan dipatch lokal: bootstrap/profile Admin tidak lagi false-deny atau blank saat tab default tidak terlihat, mutation/read sensitif dipindah dari browser ke server actions owner/admin guard, dan jalur upload/sync/config Admin kini enforce permission `admin:*` atau owner-only di server-side. Runtime verification disarankan |
 | Hidden products route | `app/dashboard/products/page.tsx` | DN | Direview dan dipatch lokal: route legacy `products` yang sudah disembunyikan dari nav kini di-redirect server-side ke Overview sehingga direct URL tidak lagi memuat query/product analytics lama sebelum redirect client berjalan. Runtime verification disarankan |
-| Scalev integration backend | `app/api/scalev-webhook/route.ts`, `app/api/scalev-sync/route.ts`, `lib/scalev-api.ts` | NS |  |
-| Sheets/financial/warehouse sync backend | `/api/sync`, `/api/financial-sync`, `/api/warehouse-sync`, parsers | NS |  |
+| Scalev integration backend | `app/api/scalev-webhook/route.ts`, `app/api/scalev-sync/route.ts`, `lib/scalev-api.ts` | DN | Direview dan dipatch lokal: webhook/sync kini lookup order per-business, fatal sync run tercatat jujur sebagai `failed`, status regression/deletion kini membalikkan deduction warehouse, dan repair/enrichment line item kini me-refresh field finansial alih-alih hanya channel/brand. Runtime verification disarankan |
+| Sheets/financial/warehouse sync backend | `/api/sync`, `/api/financial-sync`, `/api/warehouse-sync`, parsers | DN | Direview dan dipatch lokal: route financial/warehouse sync kini tidak fail-open dan cron path benar-benar bisa jalan, delete error saat replace data tidak lagi diabaikan, import Google Sheets gagal kini menandai `data_imports` sebagai `failed`, dan range tanggal warehouse tidak lagi memaksa akhir bulan `-31`. Runtime verification disarankan |
 | Meta/WhatsApp/XLSX backend | meta/waba/xlsx routes + libs | NS |  |
 | Telegram/AI ops backend | telegram routes + `lib/daily-report.ts` + `lib/opus-analyst.ts` | NS |  |
 | DB/RPC/migrations verification | `supabase/migrations/*` | NS |  |
@@ -1569,6 +1569,100 @@ Status legend:
 - Next step:
   - lanjut review area `Scalev integration backend`
   - verifikasi manual bahwa akses langsung ke `/dashboard/products` kini selalu dilempar ke `/dashboard` tanpa sempat menampilkan UI produk legacy
+
+### Review Notes - Scalev integration backend
+
+- Status: `DN`
+- Files read:
+  - `app/api/scalev-webhook/route.ts`
+  - `app/api/scalev-sync/route.ts`
+  - `lib/scalev-api.ts`
+  - `lib/warehouse-ledger-actions.ts`
+- Data sources:
+  - `scalev_orders`
+  - `scalev_order_lines`
+  - `scalev_sync_log`
+  - `scalev_webhook_businesses`
+  - `scalev_store_channels`
+  - `tax_rates`
+  - `warehouse_business_mapping`
+  - `warehouse_scalev_mapping`
+  - `warehouse_stock_ledger`
+  - RPC `warehouse_deduct_fifo`
+  - RPC `warehouse_reverse_order`
+  - Scalev REST API (`fetchOrderDetail`)
+- Mutation paths:
+  - inbound webhook `order.created`
+  - inbound webhook `order.updated`
+  - inbound webhook `order.deleted`
+  - inbound webhook `order.status_changed`
+  - inbound webhook `order.payment_status_changed`
+  - inbound webhook `order.e_payment_created`
+  - manual/cron reconcile via `POST /api/scalev-sync`
+  - repair missing lines via mode `repair`
+  - warehouse auto-deduct / reversal side effects
+- Findings summary:
+  - webhook handler sebelumnya mencari order hanya dengan `order_id`, sehingga jika dua business punya ID order yang sama, event dari satu business bisa menimpa row business lain
+  - jalur webhook `order.deleted` dan sebagian status regression sebelumnya tidak membalikkan `warehouse_stock_ledger`, jadi stok bisa tetap terpotong walau order mundur dari `shipped/completed` ke status non-terminal
+  - route `/api/scalev-sync` sebelumnya selalu menulis run gagal-total sebagai `partial`, dan fatal error sebelum loop order bisa hilang dari `scalev_sync_log` sama sekali
+  - helper enrichment sync sebelumnya hanya memperbarui `sales_channel` dan `product_type` pada line yang sudah ada, sehingga quantity, price, discount, COGS, dan tax line bisa tetap stale setelah repair/refresh dari API
+  - utility layer `lib/scalev-api.ts` tidak menunjukkan gap security baru, tetapi correctness backend utamanya memang bergantung pada route webhook/sync di atas
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Sheets/financial/warehouse sync backend`
+  - verifikasi manual bahwa duplicate `order_id` lintas business tidak lagi saling menimpa, reversal stok benar-benar tercatat saat order mundur/delete, dan sync repair sekarang menyegarkan nilai finansial line item yang sebelumnya stale
+
+### Review Notes - Sheets/financial/warehouse sync backend
+
+- Status: `DN`
+- Files read:
+  - `app/api/sync/route.ts`
+  - `app/api/financial-sync/route.ts`
+  - `app/api/warehouse-sync/route.ts`
+  - `lib/actions.ts`
+  - `lib/google-sheets.ts`
+  - `lib/financial-actions.ts`
+  - `lib/financial-parser.ts`
+  - `lib/warehouse-actions.ts`
+  - `lib/warehouse-parser.ts`
+  - `lib/dashboard-access.ts`
+- Data sources:
+  - `sheet_connections`
+  - `financial_sheet_connections`
+  - `warehouse_sheet_connections`
+  - `data_imports`
+  - `daily_ads_spend`
+  - `meta_ad_accounts`
+  - `financial_pl_monthly`
+  - `financial_cf_monthly`
+  - `financial_ratios_monthly`
+  - `financial_bs_monthly`
+  - `warehouse_stock_summary`
+  - `warehouse_daily_stock`
+  - `warehouse_stock_opname`
+  - Google Sheets API via `lib/google-sheets.ts`, `lib/financial-parser.ts`, `lib/warehouse-parser.ts`
+- Mutation paths:
+  - ads sync via `POST /api/sync`
+  - financial report sync via `triggerFinancialSync()` dan `/api/financial-sync`
+  - warehouse stock card sync via `triggerWarehouseSync()` dan `/api/warehouse-sync`
+  - update `last_sync_*` status pada connection tables
+  - replace existing monthly/period data sebelum insert batch baru
+- Findings summary:
+  - route `/api/financial-sync` dan `/api/warehouse-sync` sebelumnya mengizinkan request tanpa header auth langsung lolos, tetapi di saat yang sama jalur cron tetap memanggil server action yang butuh sesi dashboard; hasilnya endpoint bisa dipicu secara publik sementara cron justru berisiko gagal-auth di runtime
+  - sync financial dan warehouse sebelumnya mengabaikan error saat menghapus data lama sebelum insert batch baru, sehingga proses bisa lanjut di atas state stale/setengah terhapus lalu tetap terlihat seperti sync normal
+  - sync warehouse dan fetch `getWarehouseDailyStock()` sebelumnya memakai akhir bulan hard-coded `-31`, yang berisiko salah range atau invalid untuk bulan 28/29/30 hari
+  - `/api/sync` sebelumnya mengabaikan kegagalan load `meta_ad_accounts`, sehingga saat lookup akun Meta gagal sistem bisa kembali mengimpor row Google Sheets yang seharusnya di-skip dan menimbulkan duplikasi spend
+  - kegagalan per-connection di `/api/sync` setelah `data_imports` terlanjur di-upsert sebelumnya tidak menandai import sebagai `failed`, sehingga histori import bisa tertinggal di status `processing` walau sync sebenarnya gagal
+- Patch status:
+  - patched locally
+  - build verification complete via `npm run build`
+  - runtime verification pending
+- Next step:
+  - lanjut review area `Meta/WhatsApp/XLSX backend`
+  - verifikasi manual bahwa hit route sync tanpa permission kini ditolak, cron financial/warehouse benar-benar bisa berjalan tanpa sesi user, dan koneksi yang gagal meninggalkan `last_sync_message`/`data_imports` yang sesuai kondisi nyata
 
 Saat mereview satu area, catat minimal format ini:
 

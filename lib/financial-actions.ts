@@ -9,6 +9,13 @@ async function requireFinancialAdminAccess(label: string) {
   await requireDashboardPermissionAccess('admin:financial', label);
 }
 
+async function deleteFinancialMonthOrThrow(svc: any, table: string, month: string) {
+  const { error } = await svc.from(table).delete().eq('month', month);
+  if (error) {
+    throw new Error(`Delete ${table} ${month}: ${error.message}`);
+  }
+}
+
 // ============================================================
 // SHEET CONNECTION MANAGEMENT
 // ============================================================
@@ -64,8 +71,10 @@ export async function toggleFinancialConnection(id: string, isActive: boolean) {
 // SYNC
 // ============================================================
 
-export async function triggerFinancialSync() {
-  await requireFinancialAdminAccess('Admin Financial');
+export async function triggerFinancialSync(options?: { skipAuth?: boolean }) {
+  if (!options?.skipAuth) {
+    await requireFinancialAdminAccess('Admin Financial');
+  }
 
   const svc = createServiceSupabase();
 
@@ -105,7 +114,7 @@ export async function triggerFinancialSync() {
         // Delete existing data for months found, then insert
         const plMonths = Array.from(new Set(parsed.pl.map(r => r.month)));
         for (const month of plMonths) {
-          await svc.from('financial_pl_monthly').delete().eq('month', month);
+          await deleteFinancialMonthOrThrow(svc, 'financial_pl_monthly', month);
         }
         // Insert in batches of 200
         for (let i = 0; i < parsed.pl.length; i += 200) {
@@ -130,7 +139,7 @@ export async function triggerFinancialSync() {
       if (parsed.cf.length > 0) {
         const cfMonths = Array.from(new Set(parsed.cf.map(r => r.month)));
         for (const month of cfMonths) {
-          await svc.from('financial_cf_monthly').delete().eq('month', month);
+          await deleteFinancialMonthOrThrow(svc, 'financial_cf_monthly', month);
         }
         for (let i = 0; i < parsed.cf.length; i += 200) {
           const batch = parsed.cf.slice(i, i + 200).map(r => ({
@@ -153,7 +162,7 @@ export async function triggerFinancialSync() {
       if (parsed.ratios.length > 0) {
         const ratioMonths = Array.from(new Set(parsed.ratios.map(r => r.month)));
         for (const month of ratioMonths) {
-          await svc.from('financial_ratios_monthly').delete().eq('month', month);
+          await deleteFinancialMonthOrThrow(svc, 'financial_ratios_monthly', month);
         }
         const { error: insertErr } = await svc
           .from('financial_ratios_monthly')
@@ -177,7 +186,7 @@ export async function triggerFinancialSync() {
       if (parsed.bs.length > 0) {
         const bsMonths = Array.from(new Set(parsed.bs.map(r => r.month)));
         for (const month of bsMonths) {
-          await svc.from('financial_bs_monthly').delete().eq('month', month);
+          await deleteFinancialMonthOrThrow(svc, 'financial_bs_monthly', month);
         }
         for (let i = 0; i < parsed.bs.length; i += 200) {
           const batch = parsed.bs.slice(i, i + 200).map(r => ({
