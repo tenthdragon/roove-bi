@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
 import { deriveChannelFromStoreType, guessStoreType, type StoreType } from '@/lib/scalev-api';
-import { callWarehouseDeductFifoCompat, reverseWarehouseDeductions } from '@/lib/warehouse-ledger-actions';
+import { reconcileScalevOrderWarehouse } from '@/lib/warehouse-ledger-actions';
 
 function getServiceSupabase() {
   return createClient(
@@ -277,12 +277,6 @@ function calcBeforeTax(price: number, tax: { rate: number; divisor: number }): n
   return price / tax.divisor;
 }
 
-const TERMINAL_SCALEV_STATUSES = new Set(['shipped', 'completed']);
-
-function shouldReverseWarehouseForStatusChange(oldStatus?: string | null, newStatus?: string | null) {
-  return TERMINAL_SCALEV_STATUSES.has(oldStatus || '') && !!newStatus && !TERMINAL_SCALEV_STATUSES.has(newStatus);
-}
-
 async function lookupOrderForBusiness(svc: any, orderId: string, businessCode: string, columns: string) {
   const scoped = await svc
     .from('scalev_orders')
@@ -299,27 +293,6 @@ async function lookupOrderForBusiness(svc: any, orderId: string, businessCode: s
     .eq('order_id', orderId)
     .is('business_code', null)
     .maybeSingle();
-}
-
-async function maybeReverseWarehouseForOrder(
-  orderId: string,
-  businessCode: string,
-  scalevOrderDbId?: number | null,
-  oldStatus?: string | null,
-  newStatus?: string | null,
-) {
-  if (!shouldReverseWarehouseForStatusChange(oldStatus, newStatus)) return 0;
-
-  try {
-    const reversedCount = await reverseWarehouseDeductions(orderId, scalevOrderDbId);
-    if (reversedCount > 0) {
-      console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} reversed ${reversedCount} deductions (${oldStatus} → ${newStatus})`);
-    }
-    return reversedCount;
-  } catch (err: any) {
-    console.warn(`[scalev-webhook][${businessCode}] warehouse reversal failed for ${orderId}:`, err.message);
-    return 0;
-  }
 }
 
 // ── Brand detection from product name (dynamic from DB, cached) ──
@@ -507,18 +480,8 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   const { data: existing } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, business_code');
 
   if (existing) {
-    if (!existing.business_code) {
-      await svc
-        .from('scalev_orders')
-        .update({
-          business_code: businessCode,
-          raw_data: data,
-          synced_at: new Date().toISOString(),
-        })
-        .eq('id', existing.id);
-    }
-    console.log(`[scalev-webhook][${businessCode}] order.created: ${orderId} already exists, skipping`);
-    return NextResponse.json({ ok: true, skipped: true, reason: 'already_exists' });
+    console.log(`[scalev-webhook][${businessCode}] order.created: ${orderId} already exists, treating as upsert`);
+    return handleOrderUpdated(data, businessCode, businessId, taxRateName);
   }
 
   // Extract customer info from destination_address
@@ -593,6 +556,10 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
     }
   }
 
+  const warehouseResult = inserted
+    ? await reconcileScalevOrderWarehouse(orderId, inserted.id)
+    : null;
+
   // Log
   await svc.from('scalev_sync_log').insert({
     status: 'success',
@@ -612,6 +579,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
     order_id: orderId,
     business_code: businessCode,
     action: 'created',
+    ...(warehouseResult ? { warehouse_action: warehouseResult.action } : {}),
   });
 }
 
@@ -641,7 +609,13 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 
   // Skip if status hasn't actually changed
   if (existing.status === newStatus) {
-    return NextResponse.json({ ok: true, skipped: true, reason: 'status_unchanged' });
+    const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+    return NextResponse.json({
+      ok: true,
+      skipped: true,
+      reason: 'status_unchanged',
+      ...(warehouseResult ? { warehouse_action: warehouseResult.action } : {}),
+    });
   }
 
   // Build update
@@ -672,20 +646,6 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     console.error(`[scalev-webhook][${businessCode}] status_changed update error for ${orderId}:`, updateErr.message);
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
-
-  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.id, existing.status, newStatus);
-
-  // Log
-  await svc.from('scalev_sync_log').insert({
-    status: 'success',
-    sync_type: 'webhook_status_changed',
-    business_code: businessCode,
-    orders_fetched: 1,
-    orders_updated: 1,
-    orders_inserted: 0,
-    error_message: null,
-    completed_at: new Date().toISOString(),
-  });
 
   console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} updated ${existing.status} → ${newStatus}`);
 
@@ -825,114 +785,21 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
       console.warn(`[scalev-webhook][${businessCode}] status_changed: re-enrich failed for ${orderId}:`, enrichErr.message);
     }
 
-    // ── Warehouse auto-deduct: FIFO stock reduction on shipped/completed ──
-    // Uses warehouse_business_mapping to resolve which entity's stock to deduct
-    try {
-      // Resolve deduction target from business → entity mapping
-      const { data: mapping } = await svc
-        .from('warehouse_business_mapping')
-        .select('deduct_entity, deduct_warehouse')
-        .eq('business_code', businessCode)
-        .eq('is_active', true)
-        .maybeSingle();
-
-      if (!mapping) {
-        console.log(`[scalev-webhook][${businessCode}] warehouse: no mapping found, skipping deduction`);
-      } else {
-        const { data: orderLines } = await svc
-          .from('scalev_order_lines')
-          .select('product_name, quantity')
-          .eq('scalev_order_id', existing.id);
-
-        if (orderLines && orderLines.length > 0) {
-          // Check if we already deducted for this order (idempotency)
-          const { data: existingDeductionsByDbId } = await svc
-            .from('warehouse_stock_ledger')
-            .select('id')
-            .eq('reference_type', 'scalev_order')
-            .eq('scalev_order_id', existing.id)
-            .limit(1);
-
-          const existingDeductions = (existingDeductionsByDbId && existingDeductionsByDbId.length > 0)
-            ? existingDeductionsByDbId
-            : (await svc
-                .from('warehouse_stock_ledger')
-                .select('id')
-                .eq('reference_type', 'scalev_order')
-                .eq('reference_id', orderId)
-                .limit(1)
-              ).data;
-
-          if (!existingDeductions || existingDeductions.length === 0) {
-            let deducted = 0;
-            let skipped = 0;
-            for (const line of orderLines) {
-              if (!line.product_name || !line.quantity || line.quantity <= 0) continue;
-
-              // 1. Check warehouse_scalev_mapping table first
-              const { data: scalevMapping } = await svc
-                .from('warehouse_scalev_mapping')
-                .select('warehouse_product_id, deduct_qty_multiplier, is_ignored')
-                .eq('scalev_product_name', line.product_name)
-                .maybeSingle();
-
-              // If explicitly ignored, skip
-              if (scalevMapping?.is_ignored) { skipped++; continue; }
-
-              let targetProductId: number | null = null;
-              let deductQty = line.quantity;
-
-              if (scalevMapping?.warehouse_product_id) {
-                // Use mapping table
-                targetProductId = scalevMapping.warehouse_product_id;
-                deductQty = line.quantity * (scalevMapping.deduct_qty_multiplier || 1);
-              } else {
-                // Fallback: lookup by scalev_product_names array filtered by entity
-                const { data: whProducts } = await svc
-                  .rpc('warehouse_find_product_for_deduction', {
-                    p_scalev_name: line.product_name,
-                    p_entity: mapping.deduct_entity,
-                    p_warehouse: mapping.deduct_warehouse,
-                  });
-                if (whProducts && whProducts.length > 0) {
-                  targetProductId = whProducts[0].id;
-                }
-              }
-
-              if (targetProductId) {
-                const deductAt = ts(data.shipped_time) || ts(data.completed_time) || new Date().toISOString();
-                const { error: deductErr } = await callWarehouseDeductFifoCompat(svc, {
-                  p_product_id: targetProductId,
-                  p_quantity: deductQty,
-                  p_reference_type: 'scalev_order',
-                  p_reference_id: orderId,
-                  p_notes: `Auto: ${line.product_name} x${deductQty} [${businessCode}→${mapping.deduct_entity}]`,
-                  p_created_at: deductAt,
-                  p_scalev_order_id: existing.id,
-                });
-                if (deductErr) {
-                  console.warn(`[scalev-webhook][${businessCode}] warehouse deduct error for ${line.product_name}:`, deductErr.message);
-                } else {
-                  deducted++;
-                }
-              } else {
-                skipped++; // unmapped product
-              }
-            }
-            if (deducted > 0) {
-              console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} deducted ${deducted} products from ${mapping.deduct_entity}/${mapping.deduct_warehouse}, skipped ${skipped} unmapped`);
-            }
-          } else {
-            console.log(`[scalev-webhook][${businessCode}] warehouse: ${orderId} already deducted, skipping`);
-          }
-        }
-      }
-    } catch (whErr: any) {
-      // Non-fatal: warehouse deduction failure should not block order status update
-      console.warn(`[scalev-webhook][${businessCode}] warehouse deduct failed for ${orderId}:`, whErr.message);
-    }
-
   }
+
+  const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+
+  // Log
+  await svc.from('scalev_sync_log').insert({
+    status: 'success',
+    sync_type: 'webhook_status_changed',
+    business_code: businessCode,
+    orders_fetched: 1,
+    orders_updated: 1,
+    orders_inserted: 0,
+    error_message: null,
+    completed_at: new Date().toISOString(),
+  });
 
   return NextResponse.json({
     ok: true,
@@ -940,7 +807,9 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     business_code: businessCode,
     old_status: existing.status,
     new_status: newStatus,
-    ...(reversedCount > 0 && { warehouse_reversed: reversedCount }),
+    warehouse_action: warehouseResult.action,
+    ...(warehouseResult.reversed > 0 && { warehouse_reversed: warehouseResult.reversed }),
+    ...(warehouseResult.deducted > 0 && { warehouse_deducted: warehouseResult.deducted }),
   });
 }
 
@@ -1028,8 +897,6 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
-  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.id, existing.status, updateData.status);
-
   // Replace order lines with enriched data (including financial fields)
   if (data.orderlines && Array.isArray(data.orderlines) && data.orderlines.length > 0) {
     // Delete old lines
@@ -1082,6 +949,8 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     }
   }
 
+  const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+
   // Log
   await svc.from('scalev_sync_log').insert({
     status: 'success',
@@ -1101,7 +970,9 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     order_id: orderId,
     business_code: businessCode,
     action: 'updated',
-    ...(reversedCount > 0 && { warehouse_reversed: reversedCount }),
+    warehouse_action: warehouseResult.action,
+    ...(warehouseResult.reversed > 0 && { warehouse_reversed: warehouseResult.reversed }),
+    ...(warehouseResult.deducted > 0 && { warehouse_deducted: warehouseResult.deducted }),
   });
 }
 
@@ -1141,8 +1012,7 @@ async function handleOrderDeleted(data: any, businessCode: string) {
     console.error(`[scalev-webhook][${businessCode}] order.deleted update error for ${orderId}:`, updateErr.message);
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
-
-  const reversedCount = await maybeReverseWarehouseForOrder(orderId, businessCode, existing.id, existing.status, 'deleted');
+  const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
 
   // Log
   await svc.from('scalev_sync_log').insert({
@@ -1164,7 +1034,8 @@ async function handleOrderDeleted(data: any, businessCode: string) {
     business_code: businessCode,
     action: 'deleted',
     old_status: existing.status,
-    ...(reversedCount > 0 && { warehouse_reversed: reversedCount }),
+    warehouse_action: warehouseResult.action,
+    ...(warehouseResult.reversed > 0 && { warehouse_reversed: warehouseResult.reversed }),
   });
 }
 
@@ -1210,6 +1081,10 @@ async function handlePaymentStatusChanged(data: any, businessCode: string) {
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
 
+  const warehouseResult = data.status
+    ? await reconcileScalevOrderWarehouse(orderId, existing.id)
+    : null;
+
   // Log
   await svc.from('scalev_sync_log').insert({
     status: 'success',
@@ -1224,7 +1099,13 @@ async function handlePaymentStatusChanged(data: any, businessCode: string) {
 
   console.log(`[scalev-webhook][${businessCode}] payment_status_changed: ${orderId} payment updated`);
 
-  return NextResponse.json({ ok: true, order_id: orderId, business_code: businessCode, action: 'payment_status_changed' });
+  return NextResponse.json({
+    ok: true,
+    order_id: orderId,
+    business_code: businessCode,
+    action: 'payment_status_changed',
+    ...(warehouseResult ? { warehouse_action: warehouseResult.action } : {}),
+  });
 }
 
 // ── Handle order.e_payment_created: record e-payment info on order ──
