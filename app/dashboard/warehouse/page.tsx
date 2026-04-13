@@ -184,14 +184,29 @@ export default function WarehousePage() {
           const data = await getStockBalance();
           setStockBalance(data);
         } else if (activeTab === 'daily-summary') {
-          const [summaryData, alertsData, logData] = await Promise.all([
-            getDailyMovementSummary(dailySummaryDate),
+          // Keep the main daily movement table available even if secondary
+          // warehouse diagnostics are slow or fail on high-volume dates.
+          const summaryData = await getDailyMovementSummary(dailySummaryDate);
+          setDailySummary(summaryData);
+
+          const [alertsResult, logResult] = await Promise.allSettled([
             getUndeductedOrders(dailySummaryDate),
             getDeductionLog(dailySummaryDate),
           ]);
-          setDailySummary(summaryData);
-          setDeductionAlerts(alertsData);
-          setDeductionLog(logData);
+
+          if (alertsResult.status === 'fulfilled') {
+            setDeductionAlerts(alertsResult.value);
+          } else {
+            console.error('Failed to load deduction alerts:', alertsResult.reason);
+            setDeductionAlerts([]);
+          }
+
+          if (logResult.status === 'fulfilled') {
+            setDeductionLog(logResult.value);
+          } else {
+            console.error('Failed to load deduction log:', logResult.reason);
+            setDeductionLog({ rows: [], totalUniqueOrders: 0 });
+          }
         } else if (activeTab === 'ledger') {
           const data = await getLedgerHistory({ limit: 500 });
           setLedgerHistory(data);
