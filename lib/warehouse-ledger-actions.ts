@@ -187,6 +187,26 @@ interface ScalevOrderWarehouseAssessment {
   mapping: { deduct_entity: string; deduct_warehouse: string } | null;
 }
 
+interface WarehouseBusinessTargetRow {
+  business_code: string;
+  deduct_entity: string;
+  deduct_warehouse: string | null;
+}
+
+interface WarehouseScalevMappingRow {
+  scalev_product_name: string;
+  warehouse_product_id: number | null;
+  deduct_qty_multiplier: number | null;
+  is_ignored: boolean | null;
+}
+
+interface WarehouseFallbackProductRow {
+  id: number;
+  entity: string;
+  warehouse: string;
+  scalev_product_names: string[] | null;
+}
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -203,6 +223,15 @@ function isMissingScalevOrderIdColumnError(error: any) {
 function isMissingScalevOrderIdParamError(error: any, functionName: string) {
   const text = getRpcErrorText(error).toLowerCase();
   return text.includes(functionName.toLowerCase()) && text.includes('p_scalev_order_id');
+}
+
+function isMissingRpcFunctionError(error: any, functionName: string) {
+  const text = getRpcErrorText(error).toLowerCase();
+  return (
+    text.includes(functionName.toLowerCase()) &&
+    (text.includes('function') || text.includes('schema cache')) &&
+    (text.includes('not find') || text.includes('does not exist') || text.includes('find the function'))
+  );
 }
 
 export async function callWarehouseDeductFifoCompat(
@@ -519,6 +548,280 @@ function buildWarehouseIssueSummary(assessment: ScalevOrderWarehouseAssessment) 
     problem: 'unknown',
     problem_detail: 'Deduction warehouse belum sinkron dengan shipment Scalev',
   };
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function buildWarehouseFallbackLookupKey(scalevName: string, entity?: string | null, warehouse?: string | null) {
+  return `${scalevName}::${entity || ''}::${warehouse || ''}`;
+}
+
+function buildWarehouseIssueSummaryFromState(args: {
+  orderId: string;
+  businessCode?: string | null;
+  productLines: ScalevOrderLineForWarehouse[];
+  unmappedProducts: string[];
+  mapping: { deduct_entity: string; deduct_warehouse: string } | null;
+}) {
+  if (!args.mapping) {
+    return {
+      problem: 'no_business_mapping',
+      problem_detail: `Business ${args.businessCode || '-'} tidak punya warehouse mapping`,
+    };
+  }
+
+  if (args.productLines.length === 0) {
+    return {
+      problem: 'no_order_lines',
+      problem_detail: `Order ${args.orderId} tidak punya order lines`,
+    };
+  }
+
+  if (args.unmappedProducts.length > 0) {
+    return {
+      problem: 'no_product_mapping',
+      problem_detail: `Produk tidak ditemukan di gudang ${args.mapping.deduct_entity}: ${args.unmappedProducts.join(', ')}`,
+    };
+  }
+
+  return {
+    problem: 'unknown',
+    problem_detail: 'Deduction warehouse belum sinkron dengan shipment Scalev',
+  };
+}
+
+async function fetchScalevOrdersForDate(
+  svc: ReturnType<typeof createServiceSupabase>,
+  date: string,
+) {
+  const dayStart = `${date}T00:00:00+07:00`;
+  const dayEnd = `${date}T23:59:59.999+07:00`;
+  const orders: ScalevOrderWarehouseSnapshot[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data: page, error } = await svc
+      .from('scalev_orders')
+      .select('id, order_id, business_code, status, shipped_time, completed_time')
+      .in('status', ['shipped', 'completed'])
+      .gte('shipped_time', dayStart)
+      .lt('shipped_time', dayEnd)
+      .range(offset, offset + 999);
+    if (error) throw error;
+    if (!page || page.length === 0) break;
+    orders.push(...(page as ScalevOrderWarehouseSnapshot[]));
+    if (page.length < 1000) break;
+    offset += 1000;
+  }
+
+  return orders;
+}
+
+async function fetchScalevOrderLinesByOrderIds(
+  svc: ReturnType<typeof createServiceSupabase>,
+  orderDbIds: number[],
+) {
+  const rows: { scalev_order_id: number; product_name: string; quantity: number }[] = [];
+
+  for (const chunk of chunkArray(orderDbIds, 1000)) {
+    let offset = 0;
+    while (true) {
+      const { data, error } = await svc
+        .from('scalev_order_lines')
+        .select('scalev_order_id, product_name, quantity')
+        .in('scalev_order_id', chunk)
+        .range(offset, offset + 999);
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+      for (const row of data as any[]) {
+        if (!row.product_name || Number(row.quantity) <= 0) continue;
+        rows.push({
+          scalev_order_id: Number(row.scalev_order_id),
+          product_name: row.product_name,
+          quantity: Number(row.quantity),
+        });
+      }
+      if (data.length < 1000) break;
+      offset += 1000;
+    }
+  }
+
+  return rows;
+}
+
+async function fetchBusinessMappingsByCodes(
+  svc: ReturnType<typeof createServiceSupabase>,
+  businessCodes: string[],
+) {
+  const rows: WarehouseBusinessTargetRow[] = [];
+
+  for (const chunk of chunkArray(businessCodes, 200)) {
+    const { data, error } = await svc
+      .from('warehouse_business_mapping')
+      .select('business_code, deduct_entity, deduct_warehouse')
+      .eq('is_active', true)
+      .in('business_code', chunk);
+    if (error) throw error;
+    rows.push(...((data || []) as WarehouseBusinessTargetRow[]));
+  }
+
+  return rows;
+}
+
+async function fetchScalevMappingsByProductNames(
+  svc: ReturnType<typeof createServiceSupabase>,
+  productNames: string[],
+) {
+  const rows: WarehouseScalevMappingRow[] = [];
+
+  for (const chunk of chunkArray(productNames, 500)) {
+    const { data, error } = await svc
+      .from('warehouse_scalev_mapping')
+      .select('scalev_product_name, warehouse_product_id, deduct_qty_multiplier, is_ignored')
+      .in('scalev_product_name', chunk);
+    if (error) throw error;
+    rows.push(...((data || []) as WarehouseScalevMappingRow[]));
+  }
+
+  return rows;
+}
+
+async function fetchFallbackWarehouseProducts(
+  svc: ReturnType<typeof createServiceSupabase>,
+  mappings: WarehouseBusinessTargetRow[],
+) {
+  const entities = [...new Set(mappings.map(row => row.deduct_entity).filter(Boolean))];
+  const warehouses = [...new Set(mappings.map(row => row.deduct_warehouse || 'BTN'))];
+  if (entities.length === 0 || warehouses.length === 0) return [] as WarehouseFallbackProductRow[];
+
+  const { data, error } = await svc
+    .from('warehouse_products')
+    .select('id, entity, warehouse, scalev_product_names')
+    .eq('is_active', true)
+    .in('entity', entities)
+    .in('warehouse', warehouses);
+  if (error) throw error;
+
+  return ((data || []) as any[]).map((row) => ({
+    id: Number(row.id),
+    entity: row.entity,
+    warehouse: row.warehouse,
+    scalev_product_names: Array.isArray(row.scalev_product_names) ? row.scalev_product_names : [],
+  })) as WarehouseFallbackProductRow[];
+}
+
+async function fetchOutstandingLedgerByOrderProduct(
+  svc: ReturnType<typeof createServiceSupabase>,
+  orders: ScalevOrderWarehouseSnapshot[],
+) {
+  if (orders.length === 0) return new Map<string, Map<number, number>>();
+  const loadRows = async (useScalevOrderId: boolean) => {
+    const byOrder = new Map<string, Map<number, number>>();
+    const orderIdByDbId = new Map<number, string>();
+    const orderIdSet = new Set<string>();
+
+    for (const order of orders) {
+      orderIdByDbId.set(order.id, order.order_id);
+      orderIdSet.add(order.order_id);
+    }
+
+    for (const chunk of chunkArray(orders, 500)) {
+      const scalevOrderIds = chunk.map(order => order.id);
+      const rawOrderChunk = chunk.map(order => order.order_id);
+
+      const selectFields = useScalevOrderId
+        ? 'scalev_order_id, reference_id, warehouse_product_id, quantity'
+        : 'reference_id, warehouse_product_id, quantity';
+
+      let offset = 0;
+      while (true) {
+        let query = svc
+          .from('warehouse_stock_ledger')
+          .select(selectFields)
+          .eq('reference_type', 'scalev_order');
+
+        query = useScalevOrderId
+          ? query.in('scalev_order_id', scalevOrderIds)
+          : query.in('reference_id', rawOrderChunk);
+
+        const { data, error } = await query.range(offset, offset + 999);
+        if (error) {
+          if (useScalevOrderId && isMissingScalevOrderIdColumnError(error)) {
+            return null;
+          }
+          throw error;
+        }
+        if (!data || data.length === 0) break;
+
+        for (const row of data as any[]) {
+          const resolvedOrderId = useScalevOrderId
+            ? orderIdByDbId.get(Number(row.scalev_order_id)) || row.reference_id
+            : row.reference_id;
+          if (!resolvedOrderId || !orderIdSet.has(resolvedOrderId)) continue;
+          const productId = Number(row.warehouse_product_id);
+          if (!byOrder.has(resolvedOrderId)) byOrder.set(resolvedOrderId, new Map<number, number>());
+          const productMap = byOrder.get(resolvedOrderId)!;
+          productMap.set(productId, (productMap.get(productId) || 0) + Number(row.quantity || 0));
+        }
+
+        if (data.length < 1000) break;
+        offset += 1000;
+      }
+    }
+
+    return byOrder;
+  };
+
+  const netByOrder = await loadRows(true) ?? await loadRows(false) ?? new Map<string, Map<number, number>>();
+  const outstandingByOrder = new Map<string, Map<number, number>>();
+  for (const [orderId, productMap] of netByOrder.entries()) {
+    const outstanding = new Map<number, number>();
+    for (const [productId, netQty] of productMap.entries()) {
+      if (netQty < -QUANTITY_EPSILON) {
+        outstanding.set(productId, Math.abs(netQty));
+      }
+    }
+    outstandingByOrder.set(orderId, outstanding);
+  }
+  return outstandingByOrder;
+}
+
+async function fetchDailyMovementRows(
+  svc: ReturnType<typeof createServiceSupabase>,
+  date: string,
+) {
+  const dayStart = `${date}T00:00:00+07:00`;
+  const dayEnd = `${date}T23:59:59.999+07:00`;
+  const rows: any[] = [];
+  let offset = 0;
+
+  while (true) {
+    const { data, error } = await svc
+      .from('warehouse_stock_ledger')
+      .select(`
+        warehouse_product_id,
+        movement_type,
+        quantity,
+        warehouse_products!inner(name, category, entity)
+      `)
+      .gte('created_at', dayStart)
+      .lt('created_at', dayEnd)
+      .range(offset, offset + 999);
+
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    rows.push(...data);
+    if (data.length < 1000) break;
+    offset += 1000;
+  }
+
+  return rows;
 }
 
 async function getCurrentBalance(svc: ReturnType<typeof createServiceSupabase>, productId: number): Promise<number> {
@@ -1249,7 +1552,17 @@ export async function getLedgerHistory(filters?: {
   let query = svc
     .from('warehouse_stock_ledger')
     .select(`
-      *,
+      id,
+      warehouse_product_id,
+      batch_id,
+      movement_type,
+      quantity,
+      running_balance,
+      reference_type,
+      reference_id,
+      notes,
+      created_by,
+      created_at,
       warehouse_products!inner(name, category, entity),
       warehouse_batches(batch_code, expired_date),
       profiles:created_by(full_name, email)
@@ -1270,21 +1583,17 @@ export async function getLedgerHistory(filters?: {
 export async function getDailyMovementSummary(date: string) {
   await requireWarehouseAccess('Daily Summary');
   const svc = createServiceSupabase();
-  const dayStart = `${date}T00:00:00+07:00`;
-  const dayEnd = `${date}T23:59:59.999+07:00`;
+  const rpcResult = await svc.rpc('warehouse_daily_movement_summary', { p_date: date });
+  if (rpcResult.error && !isMissingRpcFunctionError(rpcResult.error, 'warehouse_daily_movement_summary')) {
+    throw rpcResult.error;
+  }
+  if (!rpcResult.error && Array.isArray(rpcResult.data)) {
+    return (rpcResult.data || []).sort((a: any, b: any) =>
+      a.entity.localeCompare(b.entity) || a.product_name.localeCompare(b.product_name),
+    );
+  }
 
-  const { data, error } = await svc
-    .from('warehouse_stock_ledger')
-    .select(`
-      warehouse_product_id,
-      movement_type,
-      quantity,
-      warehouse_products!inner(name, category, entity)
-    `)
-    .gte('created_at', dayStart)
-    .lte('created_at', dayEnd);
-
-  if (error) throw error;
+  const data = await fetchDailyMovementRows(svc, date);
   if (!data || data.length === 0) return [];
 
   // Aggregate by product
@@ -1804,45 +2113,101 @@ export async function backfillWarehouseDeductions(date: string) {
 export async function getUndeductedOrders(date: string) {
   await requireWarehouseAccess('Daily Summary');
   const svc = createServiceSupabase();
-  const dayStart = `${date}T00:00:00+07:00`;
-  const dayEnd = `${date}T23:59:59.999+07:00`;
-
-  // All shipped orders for the date (paginated)
-  const orders: any[] = [];
-  let ordOffset = 0;
-  while (true) {
-    const { data: page, error: pgErr } = await svc
-      .from('scalev_orders')
-      .select('id, order_id, business_code')
-      .in('status', ['shipped', 'completed'])
-      .gte('shipped_time', dayStart)
-      .lt('shipped_time', dayEnd)
-      .range(ordOffset, ordOffset + 999);
-    if (pgErr) throw pgErr;
-    if (!page || page.length === 0) break;
-    orders.push(...page);
-    if (page.length < 1000) break;
-    ordOffset += 1000;
-  }
+  const orders = await fetchScalevOrdersForDate(svc, date);
   if (orders.length === 0) return [];
+
+  const orderIds = orders.map(order => order.id);
+  const businessCodes = [...new Set(orders.map(order => order.business_code).filter(Boolean))] as string[];
+  const lines = await fetchScalevOrderLinesByOrderIds(svc, orderIds);
+  const productNames = [...new Set(lines.map(line => line.product_name))];
+  const [businessMappings, scalevMappings, outstandingByOrder] = await Promise.all([
+    fetchBusinessMappingsByCodes(svc, businessCodes),
+    fetchScalevMappingsByProductNames(svc, productNames),
+    fetchOutstandingLedgerByOrderProduct(svc, orders),
+  ]);
+  const fallbackProducts = await fetchFallbackWarehouseProducts(svc, businessMappings);
+
+  const orderLinesByOrder = new Map<number, ScalevOrderLineForWarehouse[]>();
+  for (const line of lines) {
+    if (!orderLinesByOrder.has(line.scalev_order_id)) orderLinesByOrder.set(line.scalev_order_id, []);
+    orderLinesByOrder.get(line.scalev_order_id)!.push({
+      product_name: line.product_name,
+      quantity: Number(line.quantity),
+    });
+  }
+
+  const businessMappingByCode = new Map<string, WarehouseBusinessTargetRow>();
+  for (const mapping of businessMappings) {
+    businessMappingByCode.set(mapping.business_code, mapping);
+  }
+
+  const scalevMappingByName = new Map<string, WarehouseScalevMappingRow>();
+  for (const mapping of scalevMappings) {
+    scalevMappingByName.set(mapping.scalev_product_name, mapping);
+  }
+
+  const fallbackProductByKey = new Map<string, number>();
+  for (const product of fallbackProducts) {
+    for (const scalevName of product.scalev_product_names || []) {
+      const key = buildWarehouseFallbackLookupKey(scalevName, product.entity, product.warehouse);
+      if (!fallbackProductByKey.has(key)) {
+        fallbackProductByKey.set(key, product.id);
+      }
+    }
+  }
 
   const results: any[] = [];
 
   for (const order of orders) {
-    const assessment = await assessScalevOrderWarehouseState(svc, {
-      ...order,
-      status: 'shipped',
-    });
+    const productLines = orderLinesByOrder.get(order.id) || [];
+    const mapping = order.business_code ? businessMappingByCode.get(order.business_code) || null : null;
+    const desiredByProduct = new Map<number, number>();
+    const unmappedProducts: string[] = [];
 
-    const alreadyMatched = mapsEqualWithTolerance(assessment.outstandingByProduct, assessment.desiredByProduct)
-      && assessment.unmappedProducts.length === 0;
+    if (mapping) {
+      for (const line of productLines) {
+        const scalevMapping = scalevMappingByName.get(line.product_name);
+        if (scalevMapping?.is_ignored) continue;
+
+        let targetProductId = scalevMapping?.warehouse_product_id != null
+          ? Number(scalevMapping.warehouse_product_id)
+          : null;
+        let deductQty = Number(line.quantity);
+
+        if (targetProductId != null) {
+          deductQty = Number(line.quantity) * Number(scalevMapping?.deduct_qty_multiplier || 1);
+        } else {
+          targetProductId = fallbackProductByKey.get(
+            buildWarehouseFallbackLookupKey(line.product_name, mapping.deduct_entity, mapping.deduct_warehouse || 'BTN'),
+          ) || null;
+        }
+
+        if (targetProductId != null) {
+          desiredByProduct.set(targetProductId, (desiredByProduct.get(targetProductId) || 0) + deductQty);
+        } else {
+          unmappedProducts.push(line.product_name);
+        }
+      }
+    }
+
+    const outstanding = outstandingByOrder.get(order.order_id) || new Map<number, number>();
+    const alreadyMatched = mapsEqualWithTolerance(outstanding, desiredByProduct) && unmappedProducts.length === 0;
     if (alreadyMatched) continue;
 
-    const issue = buildWarehouseIssueSummary(assessment);
+    const issue = buildWarehouseIssueSummaryFromState({
+      orderId: order.order_id,
+      businessCode: order.business_code,
+      productLines,
+      unmappedProducts,
+      mapping: mapping
+        ? { deduct_entity: mapping.deduct_entity, deduct_warehouse: mapping.deduct_warehouse || 'BTN' }
+        : null,
+    });
+
     results.push({
       order_id: order.order_id,
       business_code: order.business_code,
-      product_lines: assessment.productLines,
+      product_lines: productLines,
       problem: issue.problem,
       problem_detail: issue.problem_detail,
     });
@@ -1877,6 +2242,25 @@ export async function backfillSingleOrder(orderId: string) {
 export async function getDeductionLog(date: string) {
   await requireWarehouseAccess('Daily Summary');
   const svc = createServiceSupabase();
+  const rpcResult = await svc.rpc('warehouse_daily_deduction_summary', { p_date: date });
+  if (rpcResult.error && !isMissingRpcFunctionError(rpcResult.error, 'warehouse_daily_deduction_summary')) {
+    throw rpcResult.error;
+  }
+  if (!rpcResult.error && Array.isArray(rpcResult.data)) {
+    const rows = (rpcResult.data || []).map((row: any) => ({
+      scalev_product: row.scalev_product,
+      warehouse_product: row.warehouse_product,
+      entity: row.entity,
+      total_qty: Number(row.total_qty || 0),
+      order_count: Number(row.order_count || 0),
+      business_codes: row.business_codes || '',
+    }));
+    return {
+      rows,
+      totalUniqueOrders: Number((rpcResult.data || [])[0]?.total_unique_orders || 0),
+    };
+  }
+
   const dayStart = `${date}T00:00:00+07:00`;
   const dayEnd = `${date}T23:59:59.999+07:00`;
 
@@ -1963,7 +2347,7 @@ export async function getDeductionLog(date: string) {
   const allOrderIds = new Set<string>();
 
   for (const d of data) {
-    const notesMatch = (d.notes || '').match(/(?:Auto|Backfill): (.+?) x[\d.]+/);
+    const notesMatch = (d.notes || '').match(/(?:Auto|Backfill|Auto-deduct): (.+?) x[\d.]+/);
     const wp = d.warehouse_products as any;
     const scalevProduct = notesMatch ? notesMatch[1] : d.notes || '-';
     const warehouseProduct = wp?.name || '-';
