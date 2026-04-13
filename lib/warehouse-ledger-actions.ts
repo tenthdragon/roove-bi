@@ -207,6 +207,22 @@ interface WarehouseFallbackProductRow {
   scalev_product_names: string[] | null;
 }
 
+export interface WarehouseUndeductedOrderIssue {
+  order_id: string;
+  business_code: string | null;
+  product_lines: ScalevOrderLineForWarehouse[];
+  problem: string;
+  problem_detail: string;
+}
+
+export interface WarehouseUndeductedOrdersResult {
+  rows: WarehouseUndeductedOrderIssue[];
+  totalCount: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 // ============================================================
 // HELPERS
 // ============================================================
@@ -822,6 +838,26 @@ async function fetchDailyMovementRows(
   }
 
   return rows;
+}
+
+function normalizeWarehouseOrderLines(input: any): ScalevOrderLineForWarehouse[] {
+  let raw = input;
+  if (typeof raw === 'string') {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      raw = [];
+    }
+  }
+
+  if (!Array.isArray(raw)) return [];
+
+  return raw
+    .map((line) => ({
+      product_name: String(line?.product_name || ''),
+      quantity: Number(line?.quantity || 0),
+    }))
+    .filter((line) => line.product_name && Number.isFinite(line.quantity) && line.quantity > 0);
 }
 
 async function getCurrentBalance(svc: ReturnType<typeof createServiceSupabase>, productId: number): Promise<number> {
@@ -2110,11 +2146,45 @@ export async function backfillWarehouseDeductions(date: string) {
 }
 
 // ── Get shipped orders that have NO warehouse deduction for a date ──
-export async function getUndeductedOrders(date: string) {
+export async function getUndeductedOrders(
+  date: string,
+  options?: { limit?: number; offset?: number },
+): Promise<WarehouseUndeductedOrdersResult> {
   await requireWarehouseAccess('Daily Summary');
   const svc = createServiceSupabase();
+  const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 500);
+  const offset = Math.max(Number(options?.offset || 0), 0);
+
+  const rpcResult = await svc.rpc('warehouse_daily_undeducted_orders', {
+    p_date: date,
+    p_limit: limit,
+    p_offset: offset,
+  });
+  if (rpcResult.error && !isMissingRpcFunctionError(rpcResult.error, 'warehouse_daily_undeducted_orders')) {
+    throw rpcResult.error;
+  }
+  if (!rpcResult.error && Array.isArray(rpcResult.data)) {
+    const rows = (rpcResult.data || []).map((row: any) => ({
+      order_id: row.order_id,
+      business_code: row.business_code || null,
+      product_lines: normalizeWarehouseOrderLines(row.product_lines),
+      problem: row.problem,
+      problem_detail: row.problem_detail,
+    })) as WarehouseUndeductedOrderIssue[];
+    const totalCount = Number((rpcResult.data || [])[0]?.total_count || 0);
+    return {
+      rows,
+      totalCount,
+      limit,
+      offset,
+      hasMore: offset + rows.length < totalCount,
+    };
+  }
+
   const orders = await fetchScalevOrdersForDate(svc, date);
-  if (orders.length === 0) return [];
+  if (orders.length === 0) {
+    return { rows: [], totalCount: 0, limit, offset, hasMore: false };
+  }
 
   const orderIds = orders.map(order => order.id);
   const businessCodes = [...new Set(orders.map(order => order.business_code).filter(Boolean))] as string[];
@@ -2156,7 +2226,7 @@ export async function getUndeductedOrders(date: string) {
     }
   }
 
-  const results: any[] = [];
+  const results: WarehouseUndeductedOrderIssue[] = [];
 
   for (const order of orders) {
     const productLines = orderLinesByOrder.get(order.id) || [];
@@ -2164,7 +2234,11 @@ export async function getUndeductedOrders(date: string) {
     const desiredByProduct = new Map<number, number>();
     const unmappedProducts: string[] = [];
 
-    if (mapping) {
+    if (!mapping) {
+      for (const line of productLines) {
+        unmappedProducts.push(line.product_name);
+      }
+    } else {
       for (const line of productLines) {
         const scalevMapping = scalevMappingByName.get(line.product_name);
         if (scalevMapping?.is_ignored) continue;
@@ -2191,8 +2265,11 @@ export async function getUndeductedOrders(date: string) {
     }
 
     const outstanding = outstandingByOrder.get(order.order_id) || new Map<number, number>();
-    const alreadyMatched = mapsEqualWithTolerance(outstanding, desiredByProduct) && unmappedProducts.length === 0;
-    if (alreadyMatched) continue;
+    const hasIssue = !mapping
+      || productLines.length === 0
+      || unmappedProducts.length > 0
+      || !mapsEqualWithTolerance(outstanding, desiredByProduct);
+    if (!hasIssue) continue;
 
     const issue = buildWarehouseIssueSummaryFromState({
       orderId: order.order_id,
@@ -2213,7 +2290,27 @@ export async function getUndeductedOrders(date: string) {
     });
   }
 
-  return results;
+  const problemRank: Record<string, number> = {
+    no_business_mapping: 1,
+    no_product_mapping: 2,
+    no_order_lines: 3,
+    unknown: 4,
+  };
+
+  results.sort((a, b) => {
+    const rankDiff = (problemRank[a.problem] || 99) - (problemRank[b.problem] || 99);
+    if (rankDiff !== 0) return rankDiff;
+    return b.order_id.localeCompare(a.order_id);
+  });
+
+  const rows = results.slice(offset, offset + limit);
+  return {
+    rows,
+    totalCount: results.length,
+    limit,
+    offset,
+    hasMore: offset + rows.length < results.length,
+  };
 }
 
 // ── Backfill a single order's warehouse deduction ──

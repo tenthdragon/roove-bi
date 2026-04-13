@@ -14,6 +14,7 @@ import {
   getLedgerHistory,
   getDailyMovementSummary,
   getUndeductedOrders,
+  type WarehouseUndeductedOrdersResult,
   backfillSingleOrder,
   getDeductionLog,
   getProducts,
@@ -93,6 +94,14 @@ const CATEGORY_COLORS: Record<string, string> = {
 };
 
 const EMPTY_DEDUCTION_LOG = { rows: [], totalUniqueOrders: 0 };
+const ALERTS_PAGE_SIZE = 100;
+const EMPTY_DEDUCTION_ALERTS: WarehouseUndeductedOrdersResult = {
+  rows: [],
+  totalCount: 0,
+  limit: ALERTS_PAGE_SIZE,
+  offset: 0,
+  hasMore: false,
+};
 
 // ── Helpers ──
 
@@ -147,7 +156,7 @@ export default function WarehousePage() {
   const [ledgerHistory, setLedgerHistory] = useState<any[]>([]);
   const [mappingData, setMappingData] = useState<any[]>([]);
   const [dailySummary, setDailySummary] = useState<any[]>([]);
-  const [deductionAlerts, setDeductionAlerts] = useState<any[]>([]);
+  const [deductionAlerts, setDeductionAlerts] = useState<WarehouseUndeductedOrdersResult>(EMPTY_DEDUCTION_ALERTS);
   const [deductionLog, setDeductionLog] = useState<{ rows: any[]; totalUniqueOrders: number }>(EMPTY_DEDUCTION_LOG);
   const [dailySummaryDate, setDailySummaryDate] = useState(() => {
     const now = new Date();
@@ -241,7 +250,7 @@ export default function WarehousePage() {
   );
 
   useEffect(() => {
-    setDeductionAlerts([]);
+    setDeductionAlerts(EMPTY_DEDUCTION_ALERTS);
     setDeductionLog(EMPTY_DEDUCTION_LOG);
     setAlertsLoadedFor(null);
     setAlertsError('');
@@ -249,17 +258,19 @@ export default function WarehousePage() {
     setDeductionLogError('');
   }, [dailySummaryDate]);
 
-  async function loadDailyAlerts(force = false) {
-    if (!force && alertsLoadedFor === dailySummaryDate) return;
+  async function loadDailyAlerts(options?: { force?: boolean; offset?: number }) {
+    const force = options?.force ?? false;
+    const offset = Math.max(options?.offset ?? 0, 0);
+    if (!force && alertsLoadedFor === dailySummaryDate && deductionAlerts.offset === offset) return;
     setAlertsLoading(true);
     setAlertsError('');
     try {
-      const data = await getUndeductedOrders(dailySummaryDate);
+      const data = await getUndeductedOrders(dailySummaryDate, { limit: ALERTS_PAGE_SIZE, offset });
       setDeductionAlerts(data);
       setAlertsLoadedFor(dailySummaryDate);
     } catch (e: any) {
       console.error('Failed to load deduction alerts:', e);
-      setDeductionAlerts([]);
+      setDeductionAlerts(EMPTY_DEDUCTION_ALERTS);
       setAlertsError(e?.message || 'Gagal memuat order bermasalah.');
     } finally {
       setAlertsLoading(false);
@@ -340,7 +351,11 @@ export default function WarehousePage() {
       {activeTab === 'daily-summary' && (
         <DailySummaryTab
           data={dailySummary}
-          alerts={deductionAlerts}
+          alerts={deductionAlerts.rows}
+          totalAlertsCount={deductionAlerts.totalCount}
+          alertsOffset={deductionAlerts.offset}
+          alertsPageSize={deductionAlerts.limit}
+          alertsHasMore={deductionAlerts.hasMore}
           alertsLoaded={alertsLoadedFor === dailySummaryDate}
           alertsLoading={alertsLoading}
           alertsError={alertsError}
@@ -1443,6 +1458,10 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
 function DailySummaryTab({
   data,
   alerts,
+  totalAlertsCount,
+  alertsOffset,
+  alertsPageSize,
+  alertsHasMore,
   alertsLoaded,
   alertsLoading,
   alertsError,
@@ -1459,10 +1478,14 @@ function DailySummaryTab({
 }: {
   data: any[];
   alerts: any[];
+  totalAlertsCount: number;
+  alertsOffset: number;
+  alertsPageSize: number;
+  alertsHasMore: boolean;
   alertsLoaded: boolean;
   alertsLoading: boolean;
   alertsError: string;
-  onLoadAlerts: (force?: boolean) => Promise<void>;
+  onLoadAlerts: (options?: { force?: boolean; offset?: number }) => Promise<void>;
   deductLog: any[];
   deductLogLoaded: boolean;
   deductLogLoading: boolean;
@@ -1498,6 +1521,9 @@ function DailySummaryTab({
       net_change: acc.net_change + r.net_change,
     }), { total_in: 0, total_out: 0, total_adjust: 0, net_change: 0 });
   }, [filtered]);
+
+  const visibleAlertsStart = alerts.length > 0 ? alertsOffset + 1 : 0;
+  const visibleAlertsEnd = alertsOffset + alerts.length;
 
   return (
     <>
@@ -1583,15 +1609,40 @@ function DailySummaryTab({
           <div>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>Order Belum Deduct</div>
             <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
-              Muat hanya saat dibutuhkan agar buka warehouse tetap ringan.
+              Queue ini dimuat per halaman agar tetap stabil saat shipment harian ribuan.
             </div>
+            {alertsLoaded && (
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 6 }}>
+                {totalAlertsCount > 0
+                  ? `Menampilkan ${visibleAlertsStart}-${visibleAlertsEnd} dari ${totalAlertsCount} order bermasalah`
+                  : 'Tidak ada order bermasalah untuk tanggal ini.'}
+              </div>
+            )}
           </div>
-          <button
-            onClick={() => onLoadAlerts(true)}
-            disabled={alertsLoading}
-            style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: alertsLoading ? 'var(--dim)' : 'var(--accent)', fontSize: 11, cursor: alertsLoading ? 'wait' : 'pointer', fontWeight: 600 }}>
-            {alertsLoading ? 'Memuat...' : alertsLoaded ? 'Refresh Order Bermasalah' : 'Muat Order Bermasalah'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {alertsLoaded && totalAlertsCount > alertsPageSize && (
+              <>
+                <button
+                  onClick={() => onLoadAlerts({ offset: Math.max(alertsOffset - alertsPageSize, 0) })}
+                  disabled={alertsLoading || alertsOffset === 0}
+                  style={{ padding: '5px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: alertsLoading || alertsOffset === 0 ? 'var(--dim)' : 'var(--text)', fontSize: 11, cursor: alertsLoading || alertsOffset === 0 ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+                  Sebelumnya
+                </button>
+                <button
+                  onClick={() => onLoadAlerts({ offset: alertsOffset + alertsPageSize })}
+                  disabled={alertsLoading || !alertsHasMore}
+                  style={{ padding: '5px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: alertsLoading || !alertsHasMore ? 'var(--dim)' : 'var(--text)', fontSize: 11, cursor: alertsLoading || !alertsHasMore ? 'not-allowed' : 'pointer', fontWeight: 600 }}>
+                  Berikutnya
+                </button>
+              </>
+            )}
+            <button
+              onClick={() => onLoadAlerts({ force: true, offset: 0 })}
+              disabled={alertsLoading}
+              style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: alertsLoading ? 'var(--dim)' : 'var(--accent)', fontSize: 11, cursor: alertsLoading ? 'wait' : 'pointer', fontWeight: 600 }}>
+              {alertsLoading ? 'Memuat...' : alertsLoaded ? 'Refresh Halaman 1' : 'Muat Queue'}
+            </button>
+          </div>
         </div>
 
         {!!alertsError && (
@@ -1619,9 +1670,11 @@ function DailySummaryTab({
                   const problemColors = {
                     no_business_mapping: { bg: 'var(--badge-red-bg)', color: 'var(--red)', label: 'No Mapping' },
                     no_product_mapping: { bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)', label: 'Produk?' },
+                    no_order_lines: { bg: 'rgba(148,163,184,0.18)', color: '#94a3b8', label: 'No Lines' },
                     unknown: { bg: 'var(--accent-subtle)', color: '#818cf8', label: 'Belum Sync' },
                   };
                   const pc = problemColors[a.problem] || problemColors.unknown;
+                  const canSyncThisOrder = a.problem === 'unknown' && can('wh:mapping_sync');
                   return (
                     <tr key={a.order_id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                       <td style={{ padding: '6px 10px', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>{a.order_id}</td>
@@ -1638,6 +1691,10 @@ function DailySummaryTab({
                           <span style={{ fontSize: 10, color: 'var(--red)' }}>{result.msg}</span>
                         ) : !can('wh:mapping_sync') ? (
                           <span style={{ fontSize: 10, color: 'var(--dim)' }}>Read only</span>
+                        ) : !canSyncThisOrder ? (
+                          <span style={{ fontSize: 10, color: 'var(--dim)' }}>
+                            {a.problem === 'no_business_mapping' ? 'Benahi mapping business' : a.problem === 'no_product_mapping' ? 'Benahi mapping produk' : 'Cek data order'}
+                          </span>
                         ) : (
                           <button
                             onClick={async () => {
@@ -1647,6 +1704,7 @@ function DailySummaryTab({
                                 if (r.deducted > 0) {
                                   setSyncResults(prev => ({ ...prev, [a.order_id]: { ok: true, msg: `${r.deducted} dideduct` } }));
                                   onRefresh();
+                                  await onLoadAlerts({ force: true, offset: alertsOffset });
                                 } else {
                                   setSyncResults(prev => ({ ...prev, [a.order_id]: { ok: false, msg: r.message || `0 dideduct, ${r.skipped} dilewati` } }));
                                 }
