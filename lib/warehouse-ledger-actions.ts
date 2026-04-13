@@ -124,9 +124,56 @@ export interface LedgerEntry {
   created_by?: string | null;
 }
 
+interface WarehouseDeductFifoParams {
+  p_product_id: number;
+  p_quantity: number;
+  p_reference_type?: ReferenceType | string;
+  p_reference_id?: string | null;
+  p_notes?: string | null;
+  p_created_at?: string | null;
+  p_scalev_order_id?: number | null;
+}
+
 // ============================================================
 // HELPERS
 // ============================================================
+
+function getRpcErrorText(error: any) {
+  return [error?.message, error?.details, error?.hint].filter(Boolean).join(' | ');
+}
+
+function isMissingScalevOrderIdColumnError(error: any) {
+  const text = getRpcErrorText(error).toLowerCase();
+  return text.includes('scalev_order_id') && text.includes('column');
+}
+
+function isMissingScalevOrderIdParamError(error: any, functionName: string) {
+  const text = getRpcErrorText(error).toLowerCase();
+  return text.includes(functionName.toLowerCase()) && text.includes('p_scalev_order_id');
+}
+
+export async function callWarehouseDeductFifoCompat(
+  svc: ReturnType<typeof createServiceSupabase>,
+  params: WarehouseDeductFifoParams,
+) {
+  const nextParams = {
+    p_product_id: params.p_product_id,
+    p_quantity: params.p_quantity,
+    p_reference_type: params.p_reference_type ?? 'scalev_order',
+    p_reference_id: params.p_reference_id ?? null,
+    p_notes: params.p_notes ?? null,
+    p_created_at: params.p_created_at ?? null,
+    p_scalev_order_id: params.p_scalev_order_id ?? null,
+  };
+
+  let result = await svc.rpc('warehouse_deduct_fifo', nextParams);
+  if (result.error && isMissingScalevOrderIdParamError(result.error, 'warehouse_deduct_fifo')) {
+    const { p_scalev_order_id: _ignored, ...legacyParams } = nextParams;
+    result = await svc.rpc('warehouse_deduct_fifo', legacyParams);
+  }
+
+  return result;
+}
 
 async function getCurrentBalance(svc: ReturnType<typeof createServiceSupabase>, productId: number): Promise<number> {
   const { data, error } = await svc
@@ -963,15 +1010,14 @@ export async function deductStockFifo(
   const product = products[0];
 
   // Call FIFO deduction function
-  const { data, error } = await svc
-    .rpc('warehouse_deduct_fifo', {
-      p_product_id: product.id,
-      p_quantity: quantity,
-      p_reference_type: 'scalev_order',
-      p_reference_id: scalevOrderId,
-      p_notes: `Auto-deduct: ${scalevProductName} x${quantity}`,
-      p_scalev_order_id: scalevOrderDbId ?? null,
-    });
+  const { data, error } = await callWarehouseDeductFifoCompat(svc, {
+    p_product_id: product.id,
+    p_quantity: quantity,
+    p_reference_type: 'scalev_order',
+    p_reference_id: scalevOrderId,
+    p_notes: `Auto-deduct: ${scalevProductName} x${quantity}`,
+    p_scalev_order_id: scalevOrderDbId ?? null,
+  });
   if (error) throw error;
   return { product: product.name, deductions: data };
 }
@@ -997,7 +1043,10 @@ async function findScalevOrderLedgerRows(
     if (movementType) query = query.eq('movement_type', movementType);
     if (reversalOnly) query = query.like('notes', 'Reversal:%');
 
-    const { data } = await query.limit(1);
+    const { data, error } = await query.limit(1);
+    if (error && !isMissingScalevOrderIdColumnError(error)) {
+      throw error;
+    }
     if (data && data.length > 0) return data;
   }
 
@@ -1025,10 +1074,15 @@ export async function reverseWarehouseDeductions(orderId: string, scalevOrderDbI
   const reversals = await findScalevOrderLedgerRows(svc, orderId, scalevOrderDbId, 'IN', true);
   if (reversals && reversals.length > 0) return 0;
 
-  const { data, error } = await svc.rpc('warehouse_reverse_order', {
+  let { data, error } = await svc.rpc('warehouse_reverse_order', {
     p_order_id: orderId,
     p_scalev_order_id: scalevOrderDbId ?? null,
   });
+  if (error && isMissingScalevOrderIdParamError(error, 'warehouse_reverse_order')) {
+    ({ data, error } = await svc.rpc('warehouse_reverse_order', {
+      p_order_id: orderId,
+    }));
+  }
   if (error) throw error;
   return data as number;
 }
@@ -1330,16 +1384,15 @@ export async function backfillWarehouseDeductions(date: string) {
       }
 
       if (targetProductId) {
-        const { error: deductErr } = await svc
-          .rpc('warehouse_deduct_fifo', {
-            p_product_id: targetProductId,
-            p_quantity: deductQty,
-            p_reference_type: 'scalev_order',
-            p_reference_id: order.order_id,
-            p_notes: `Backfill: ${line.product_name} x${deductQty} [${order.business_code}→${mapping.deduct_entity}]`,
-            p_created_at: order.shipped_time || new Date().toISOString(),
-            p_scalev_order_id: order.id,
-          });
+        const { error: deductErr } = await callWarehouseDeductFifoCompat(svc, {
+          p_product_id: targetProductId,
+          p_quantity: deductQty,
+          p_reference_type: 'scalev_order',
+          p_reference_id: order.order_id,
+          p_notes: `Backfill: ${line.product_name} x${deductQty} [${order.business_code}→${mapping.deduct_entity}]`,
+          p_created_at: order.shipped_time || new Date().toISOString(),
+          p_scalev_order_id: order.id,
+        });
         if (!deductErr) totalDeducted++;
       } else {
         totalSkipped++;
@@ -1393,11 +1446,12 @@ export async function getUndeductedOrders(date: string) {
       .in('reference_id', idChunk);
     (legacyRows || []).forEach(r => deductedLegacySet.add(r.reference_id));
 
-    const { data: dbRows } = await svc
+    const { data: dbRows, error: dbRowsErr } = await svc
       .from('warehouse_stock_ledger')
       .select('scalev_order_id')
       .eq('reference_type', 'scalev_order')
       .in('scalev_order_id', dbIdChunk);
+    if (dbRowsErr && !isMissingScalevOrderIdColumnError(dbRowsErr)) throw dbRowsErr;
     (dbRows || []).forEach((r: any) => {
       if (typeof r.scalev_order_id === 'number') deductedDbIdSet.add(r.scalev_order_id);
     });
@@ -1549,16 +1603,15 @@ export async function backfillSingleOrder(orderId: string) {
     }
 
     if (targetProductId) {
-      const { error: deductErr } = await svc
-        .rpc('warehouse_deduct_fifo', {
-          p_product_id: targetProductId,
-          p_quantity: deductQty,
-          p_reference_type: 'scalev_order',
-          p_reference_id: orderId,
-          p_notes: `Backfill: ${line.product_name} x${deductQty} [${order.business_code}→${mapping.deduct_entity}]`,
-          p_created_at: order.shipped_time || new Date().toISOString(),
-          p_scalev_order_id: order.id,
-        });
+      const { error: deductErr } = await callWarehouseDeductFifoCompat(svc, {
+        p_product_id: targetProductId,
+        p_quantity: deductQty,
+        p_reference_type: 'scalev_order',
+        p_reference_id: orderId,
+        p_notes: `Backfill: ${line.product_name} x${deductQty} [${order.business_code}→${mapping.deduct_entity}]`,
+        p_created_at: order.shipped_time || new Date().toISOString(),
+        p_scalev_order_id: order.id,
+      });
       if (!deductErr) deducted++;
     } else {
       skipped++;
@@ -1579,23 +1632,40 @@ export async function getDeductionLog(date: string) {
   const allData: any[] = [];
   const PAGE_SIZE = 1000;
   let offset = 0;
+  let includeScalevOrderId = true;
   while (true) {
-    const { data: page, error: pgErr } = await svc
-      .from('warehouse_stock_ledger')
-      .select(`
+    const selectFields = includeScalevOrderId
+      ? `
         scalev_order_id,
         reference_id,
         quantity,
         notes,
         created_at,
         warehouse_products!inner(name, entity)
-      `)
+      `
+      : `
+        reference_id,
+        quantity,
+        notes,
+        created_at,
+        warehouse_products!inner(name, entity)
+      `;
+
+    const { data: page, error: pgErr } = await svc
+      .from('warehouse_stock_ledger')
+      .select(selectFields)
       .eq('reference_type', 'scalev_order')
       .eq('movement_type', 'OUT')
       .gte('created_at', dayStart)
       .lt('created_at', dayEnd)
       .order('created_at', { ascending: false })
       .range(offset, offset + PAGE_SIZE - 1);
+    if (pgErr && includeScalevOrderId && isMissingScalevOrderIdColumnError(pgErr)) {
+      includeScalevOrderId = false;
+      offset = 0;
+      allData.length = 0;
+      continue;
+    }
     if (pgErr) throw pgErr;
     if (!page || page.length === 0) break;
     allData.push(...page);
@@ -1608,7 +1678,9 @@ export async function getDeductionLog(date: string) {
 
   // Get business_code for each order
   const orderIds = [...new Set(data.map(d => d.reference_id))];
-  const orderDbIds = [...new Set(data.map(d => d.scalev_order_id).filter((id): id is number => typeof id === 'number'))];
+  const orderDbIds = includeScalevOrderId
+    ? [...new Set(data.map(d => d.scalev_order_id).filter((id): id is number => typeof id === 'number'))]
+    : [];
   const bizByOrderId = new Map<string, string>();
   const bizByDbId = new Map<number, string>();
 
@@ -1661,7 +1733,7 @@ export async function getDeductionLog(date: string) {
     row.total_qty += Math.abs(Number(d.quantity));
     row.order_ids.add(d.reference_id);
     allOrderIds.add(d.reference_id);
-    const biz = typeof d.scalev_order_id === 'number'
+    const biz = includeScalevOrderId && typeof d.scalev_order_id === 'number'
       ? bizByDbId.get(d.scalev_order_id) || bizByOrderId.get(d.reference_id)
       : bizByOrderId.get(d.reference_id);
     if (biz) row.business_codes.add(biz);

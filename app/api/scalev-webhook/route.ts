@@ -4,7 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
 import { deriveChannelFromStoreType, guessStoreType, type StoreType } from '@/lib/scalev-api';
-import { reverseWarehouseDeductions } from '@/lib/warehouse-ledger-actions';
+import { callWarehouseDeductFifoCompat, reverseWarehouseDeductions } from '@/lib/warehouse-ledger-actions';
 
 function getServiceSupabase() {
   return createClient(
@@ -901,16 +901,15 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 
               if (targetProductId) {
                 const deductAt = ts(data.shipped_time) || ts(data.completed_time) || new Date().toISOString();
-                const { error: deductErr } = await svc
-                  .rpc('warehouse_deduct_fifo', {
-                    p_product_id: targetProductId,
-                    p_quantity: deductQty,
-                    p_reference_type: 'scalev_order',
-                    p_reference_id: orderId,
-                    p_notes: `Auto: ${line.product_name} x${deductQty} [${businessCode}→${mapping.deduct_entity}]`,
-                    p_created_at: deductAt,
-                    p_scalev_order_id: existing.id,
-                  });
+                const { error: deductErr } = await callWarehouseDeductFifoCompat(svc, {
+                  p_product_id: targetProductId,
+                  p_quantity: deductQty,
+                  p_reference_type: 'scalev_order',
+                  p_reference_id: orderId,
+                  p_notes: `Auto: ${line.product_name} x${deductQty} [${businessCode}→${mapping.deduct_entity}]`,
+                  p_created_at: deductAt,
+                  p_scalev_order_id: existing.id,
+                });
                 if (deductErr) {
                   console.warn(`[scalev-webhook][${businessCode}] warehouse deduct error for ${line.product_name}:`, deductErr.message);
                 } else {
