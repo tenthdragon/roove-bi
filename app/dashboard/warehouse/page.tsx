@@ -92,6 +92,8 @@ const CATEGORY_COLORS: Record<string, string> = {
   'wip_material': '#06b6d4',
 };
 
+const EMPTY_DEDUCTION_LOG = { rows: [], totalUniqueOrders: 0 };
+
 // ── Helpers ──
 
 function shortDateID(d: string) {
@@ -146,7 +148,7 @@ export default function WarehousePage() {
   const [mappingData, setMappingData] = useState<any[]>([]);
   const [dailySummary, setDailySummary] = useState<any[]>([]);
   const [deductionAlerts, setDeductionAlerts] = useState<any[]>([]);
-  const [deductionLog, setDeductionLog] = useState<{ rows: any[]; totalUniqueOrders: number }>({ rows: [], totalUniqueOrders: 0 });
+  const [deductionLog, setDeductionLog] = useState<{ rows: any[]; totalUniqueOrders: number }>(EMPTY_DEDUCTION_LOG);
   const [dailySummaryDate, setDailySummaryDate] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
@@ -162,6 +164,12 @@ export default function WarehousePage() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [tabLoading, setTabLoading] = useState(false);
   const [tabError, setTabError] = useState('');
+  const [alertsLoading, setAlertsLoading] = useState(false);
+  const [alertsLoadedFor, setAlertsLoadedFor] = useState<string | null>(null);
+  const [alertsError, setAlertsError] = useState('');
+  const [deductionLogLoading, setDeductionLogLoading] = useState(false);
+  const [deductionLogLoadedFor, setDeductionLogLoadedFor] = useState<string | null>(null);
+  const [deductionLogError, setDeductionLogError] = useState('');
   const refreshData = () => setRefreshKey(k => k + 1);
 
   // Load profile on mount
@@ -188,31 +196,10 @@ export default function WarehousePage() {
           const data = await getStockBalance();
           setStockBalance(data);
         } else if (activeTab === 'daily-summary') {
-          // Keep the main daily movement table available even if secondary
-          // warehouse diagnostics are slow or fail on high-volume dates.
           const summaryData = await getDailyMovementSummary(dailySummaryDate);
           setDailySummary(summaryData);
-
-          const [alertsResult, logResult] = await Promise.allSettled([
-            getUndeductedOrders(dailySummaryDate),
-            getDeductionLog(dailySummaryDate),
-          ]);
-
-          if (alertsResult.status === 'fulfilled') {
-            setDeductionAlerts(alertsResult.value);
-          } else {
-            console.error('Failed to load deduction alerts:', alertsResult.reason);
-            setDeductionAlerts([]);
-          }
-
-          if (logResult.status === 'fulfilled') {
-            setDeductionLog(logResult.value);
-          } else {
-            console.error('Failed to load deduction log:', logResult.reason);
-            setDeductionLog({ rows: [], totalUniqueOrders: 0 });
-          }
         } else if (activeTab === 'ledger') {
-          const data = await getLedgerHistory({ limit: 500 });
+          const data = await getLedgerHistory({ limit: 200 });
           setLedgerHistory(data);
         } else if (activeTab === 'batch') {
           const data = await getStockByBatch();
@@ -252,6 +239,49 @@ export default function WarehousePage() {
     expiryFilter === 'all' ? expiringData : expiringData.filter(r => r.expiry_status === expiryFilter),
     [expiringData, expiryFilter]
   );
+
+  useEffect(() => {
+    setDeductionAlerts([]);
+    setDeductionLog(EMPTY_DEDUCTION_LOG);
+    setAlertsLoadedFor(null);
+    setAlertsError('');
+    setDeductionLogLoadedFor(null);
+    setDeductionLogError('');
+  }, [dailySummaryDate]);
+
+  async function loadDailyAlerts(force = false) {
+    if (!force && alertsLoadedFor === dailySummaryDate) return;
+    setAlertsLoading(true);
+    setAlertsError('');
+    try {
+      const data = await getUndeductedOrders(dailySummaryDate);
+      setDeductionAlerts(data);
+      setAlertsLoadedFor(dailySummaryDate);
+    } catch (e: any) {
+      console.error('Failed to load deduction alerts:', e);
+      setDeductionAlerts([]);
+      setAlertsError(e?.message || 'Gagal memuat order bermasalah.');
+    } finally {
+      setAlertsLoading(false);
+    }
+  }
+
+  async function loadDailyDeductionLog(force = false) {
+    if (!force && deductionLogLoadedFor === dailySummaryDate) return;
+    setDeductionLogLoading(true);
+    setDeductionLogError('');
+    try {
+      const data = await getDeductionLog(dailySummaryDate);
+      setDeductionLog(data);
+      setDeductionLogLoadedFor(dailySummaryDate);
+    } catch (e: any) {
+      console.error('Failed to load deduction log:', e);
+      setDeductionLog(EMPTY_DEDUCTION_LOG);
+      setDeductionLogError(e?.message || 'Gagal memuat deduction summary.');
+    } finally {
+      setDeductionLogLoading(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -307,7 +337,25 @@ export default function WarehousePage() {
       {/* Tab content */}
       {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} userRole={userRole} />}
       {activeTab === 'wip' && <WipTab data={stockBalance} onRefresh={refreshData} userRole={userRole} />}
-      {activeTab === 'daily-summary' && <DailySummaryTab data={dailySummary} alerts={deductionAlerts} deductLog={deductionLog.rows} totalDeductedOrders={deductionLog.totalUniqueOrders} date={dailySummaryDate} setDate={setDailySummaryDate} onRefresh={refreshData} />}
+      {activeTab === 'daily-summary' && (
+        <DailySummaryTab
+          data={dailySummary}
+          alerts={deductionAlerts}
+          alertsLoaded={alertsLoadedFor === dailySummaryDate}
+          alertsLoading={alertsLoading}
+          alertsError={alertsError}
+          onLoadAlerts={loadDailyAlerts}
+          deductLog={deductionLog.rows}
+          deductLogLoaded={deductionLogLoadedFor === dailySummaryDate}
+          deductLogLoading={deductionLogLoading}
+          deductLogError={deductionLogError}
+          onLoadDeductLog={loadDailyDeductionLog}
+          totalDeductedOrders={deductionLog.totalUniqueOrders}
+          date={dailySummaryDate}
+          setDate={setDailySummaryDate}
+          onRefresh={refreshData}
+        />
+      )}
       {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} search={ledgerSearch} setSearch={setLedgerSearch} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
       {activeTab === 'mapping' && <MappingTab data={mappingData} onRefresh={refreshData} />}
@@ -1392,8 +1440,38 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
 // ============================================================
 // DAILY SUMMARY TAB
 // ============================================================
-function DailySummaryTab({ data, alerts, deductLog, totalDeductedOrders, date, setDate, onRefresh }: {
-  data: any[]; alerts: any[]; deductLog: any[]; totalDeductedOrders: number; date: string; setDate: (v: string) => void; onRefresh: () => void;
+function DailySummaryTab({
+  data,
+  alerts,
+  alertsLoaded,
+  alertsLoading,
+  alertsError,
+  onLoadAlerts,
+  deductLog,
+  deductLogLoaded,
+  deductLogLoading,
+  deductLogError,
+  onLoadDeductLog,
+  totalDeductedOrders,
+  date,
+  setDate,
+  onRefresh,
+}: {
+  data: any[];
+  alerts: any[];
+  alertsLoaded: boolean;
+  alertsLoading: boolean;
+  alertsError: string;
+  onLoadAlerts: (force?: boolean) => Promise<void>;
+  deductLog: any[];
+  deductLogLoaded: boolean;
+  deductLogLoading: boolean;
+  deductLogError: string;
+  onLoadDeductLog: (force?: boolean) => Promise<void>;
+  totalDeductedOrders: number;
+  date: string;
+  setDate: (v: string) => void;
+  onRefresh: () => void;
 }) {
   const { can } = usePermissions();
   const [entityFilter, setEntityFilter] = useState('all');
@@ -1500,12 +1578,32 @@ function DailySummaryTab({ data, alerts, deductLog, totalDeductedOrders, date, s
       )}
 
       {/* ── Deduction Alerts ── */}
-      {alerts.length > 0 && (
-        <div style={{ marginTop: 20, background: 'var(--card)', border: '1px solid #f59e0b40', borderRadius: 12, padding: 16 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b', marginBottom: 10 }}>
-            {alerts.length} order belum mendeduct gudang
+      <div style={{ marginTop: 20, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: alertsLoaded ? 10 : 0 }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>Order Belum Deduct</div>
+            <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
+              Muat hanya saat dibutuhkan agar buka warehouse tetap ringan.
+            </div>
           </div>
-          <div style={{ overflowX: 'auto' }}>
+          <button
+            onClick={() => onLoadAlerts(true)}
+            disabled={alertsLoading}
+            style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: alertsLoading ? 'var(--dim)' : 'var(--accent)', fontSize: 11, cursor: alertsLoading ? 'wait' : 'pointer', fontWeight: 600 }}>
+            {alertsLoading ? 'Memuat...' : alertsLoaded ? 'Refresh Order Bermasalah' : 'Muat Order Bermasalah'}
+          </button>
+        </div>
+
+        {!!alertsError && (
+          <div style={{ marginTop: 10, fontSize: 11, color: '#fca5a5' }}>{alertsError}</div>
+        )}
+
+        {alertsLoaded && !alertsLoading && alerts.length === 0 && !alertsError && (
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--dim)' }}>Tidak ada order bermasalah untuk tanggal ini.</div>
+        )}
+
+        {alertsLoaded && alerts.length > 0 && (
+          <div style={{ overflowX: 'auto', marginTop: 10 }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border)' }}>
@@ -1517,7 +1615,7 @@ function DailySummaryTab({ data, alerts, deductLog, totalDeductedOrders, date, s
               <tbody>
                 {alerts.map(a => {
                   const result = syncResults[a.order_id];
-                  if (result?.ok) return null; // hide successfully synced
+                  if (result?.ok) return null;
                   const problemColors = {
                     no_business_mapping: { bg: 'var(--badge-red-bg)', color: 'var(--red)', label: 'No Mapping' },
                     no_product_mapping: { bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)', label: 'Produk?' },
@@ -1569,17 +1667,31 @@ function DailySummaryTab({ data, alerts, deductLog, totalDeductedOrders, date, s
               </tbody>
             </table>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* ── Deduction Summary (grouped by entity blocks) ── */}
       <div style={{ marginTop: 20 }}>
-        <button onClick={() => setShowDeductLog(!showDeductLog)}
+        <button onClick={async () => {
+          const next = !showDeductLog;
+          setShowDeductLog(next);
+          if (next && !deductLogLoaded && !deductLogLoading) {
+            await onLoadDeductLog();
+          }
+        }}
           style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 6, color: 'var(--dim)', fontSize: 12, fontWeight: 600 }}>
           <span style={{ transform: showDeductLog ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s', fontSize: 10 }}>&#9660;</span>
-          Deduction Summary ({totalDeductedOrders} orders, {deductLog.length} produk)
+          {deductLogLoaded
+            ? `Deduction Summary (${totalDeductedOrders} orders, ${deductLog.length} produk)`
+            : 'Deduction Summary (muat saat dibuka)'}
         </button>
-        {showDeductLog && deductLog.length > 0 && (() => {
+        {showDeductLog && deductLogLoading && (
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--dim)' }}>Memuat deduction summary...</div>
+        )}
+        {showDeductLog && !!deductLogError && (
+          <div style={{ marginTop: 10, fontSize: 12, color: '#fca5a5' }}>{deductLogError}</div>
+        )}
+        {showDeductLog && deductLogLoaded && deductLog.length > 0 && (() => {
           // Group by entity
           const byEntity = new Map<string, typeof deductLog>();
           deductLog.forEach(d => {
@@ -1624,7 +1736,7 @@ function DailySummaryTab({ data, alerts, deductLog, totalDeductedOrders, date, s
             </div>
           );
         })()}
-        {showDeductLog && deductLog.length === 0 && (
+        {showDeductLog && deductLogLoaded && deductLog.length === 0 && !deductLogLoading && !deductLogError && (
           <div style={{ marginTop: 10, fontSize: 12, color: 'var(--dim)' }}>Tidak ada deduction tercatat untuk tanggal ini.</div>
         )}
       </div>
@@ -1695,6 +1807,10 @@ function LedgerTab({ data, typeFilter, setTypeFilter, search, setSearch }: {
           </button>
         ))}
         {search && <span style={{ fontSize: 11, color: 'var(--dim)' }}>{filtered.length} hasil</span>}
+      </div>
+
+      <div style={{ marginBottom: 10, fontSize: 11, color: 'var(--dim)' }}>
+        Menampilkan 200 movement terbaru agar tab ini tetap ringan saat dibuka.
       </div>
 
       {/* Table */}
