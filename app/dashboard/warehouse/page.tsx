@@ -160,6 +160,8 @@ export default function WarehousePage() {
   const [ledgerSearch, setLedgerSearch] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
+  const [tabLoading, setTabLoading] = useState(false);
+  const [tabError, setTabError] = useState('');
   const refreshData = () => setRefreshKey(k => k + 1);
 
   // Load profile on mount
@@ -179,6 +181,8 @@ export default function WarehousePage() {
   useEffect(() => {
     if (loading) return;
     (async () => {
+      setTabLoading(true);
+      setTabError('');
       try {
         if (activeTab === 'stock' || activeTab === 'wip') {
           const data = await getStockBalance();
@@ -235,8 +239,11 @@ export default function WarehousePage() {
           const data = await getWarehouseExpiring();
           setExpiringData(data);
         }
-      } catch (e) {
+      } catch (e: any) {
         console.error('Failed to load data:', e);
+        setTabError(e?.message || 'Gagal memuat data warehouse.');
+      } finally {
+        setTabLoading(false);
       }
     })();
   }, [activeTab, loading, refreshKey, dailySummaryDate]);
@@ -284,6 +291,18 @@ export default function WarehousePage() {
           </button>
         ))}
       </div>
+
+      {tabLoading && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--dim)', fontSize: 12 }}>
+          Memuat data {SUB_TABS.find(t => t.id === activeTab)?.label?.toLowerCase() || 'warehouse'}...
+        </div>
+      )}
+
+      {!!tabError && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid #ef444440', background: 'var(--card)', color: '#fca5a5', fontSize: 12 }}>
+          {tabError}
+        </div>
+      )}
 
       {/* Tab content */}
       {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} userRole={userRole} />}
