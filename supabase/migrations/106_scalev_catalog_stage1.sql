@@ -22,10 +22,10 @@ AS $$
     SELECT 1
     FROM profiles p
     LEFT JOIN role_permissions rp
-      ON rp.role = p.role
+      ON rp.role = p.role::text
      AND rp.permission_key = p_permission_key
     WHERE p.id = auth.uid()
-      AND (p.role = 'owner' OR rp.permission_key IS NOT NULL)
+      AND (p.role::text = 'owner' OR rp.permission_key IS NOT NULL)
   );
 $$;
 
