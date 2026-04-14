@@ -24,6 +24,11 @@ import {
   recordDispose,
   recordTransfer,
   recordConversion,
+  getStockReclassRequests,
+  createStockReclassRequest,
+  approveStockReclassRequest,
+  rejectStockReclassRequest,
+  getWarehouseProductOperationalProfiles,
   createBatch,
   // PO functions moved to ppic-actions (legacy import removed)
   type ConversionSource,
@@ -68,6 +73,7 @@ interface ExpiringProduct {
 const SUB_TABS = [
   { id: 'daily-summary', label: 'Daily Summary' },
   { id: 'stock', label: 'Saldo Stock' },
+  { id: 'reclass', label: 'Reklasifikasi' },
   { id: 'wip', label: 'Work in Process' },
   { id: 'batch', label: 'Batch & Expiry' },
   { id: 'stock-opname', label: 'Stock Opname' },
@@ -155,6 +161,7 @@ export default function WarehousePage() {
   const [batchStock, setBatchStock] = useState<any[]>([]);
   const [ledgerHistory, setLedgerHistory] = useState<any[]>([]);
   const [mappingData, setMappingData] = useState<any[]>([]);
+  const [reclassRequests, setReclassRequests] = useState<any[]>([]);
   const [dailySummary, setDailySummary] = useState<any[]>([]);
   const [deductionAlerts, setDeductionAlerts] = useState<WarehouseUndeductedOrdersResult>(EMPTY_DEDUCTION_ALERTS);
   const [deductionLog, setDeductionLog] = useState<{ rows: any[]; totalUniqueOrders: number }>(EMPTY_DEDUCTION_LOG);
@@ -204,6 +211,9 @@ export default function WarehousePage() {
         if (activeTab === 'stock' || activeTab === 'wip') {
           const data = await getStockBalance();
           setStockBalance(data);
+        } else if (activeTab === 'reclass') {
+          const data = await getStockReclassRequests();
+          setReclassRequests(data);
         } else if (activeTab === 'daily-summary') {
           const summaryData = await getDailyMovementSummary(dailySummaryDate);
           setDailySummary(summaryData);
@@ -372,6 +382,7 @@ export default function WarehousePage() {
         />
       )}
       {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} search={ledgerSearch} setSearch={setLedgerSearch} />}
+      {activeTab === 'reclass' && <StockReclassTab data={reclassRequests} onRefresh={refreshData} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
       {activeTab === 'mapping' && <MappingTab data={mappingData} onRefresh={refreshData} />}
       {activeTab === 'stock-opname' && <StockOpnameTab soData={soData} soSummary={soSummary} expandedSO={expandedSO} setExpandedSO={setExpandedSO} session={soSession} sessionItems={soSessionItems} onRefresh={refreshData} />}
@@ -639,6 +650,444 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
         </table>
       </div>
     </>
+  );
+}
+
+// ============================================================
+// STOCK RECLASSIFICATION TAB
+// ============================================================
+
+function StockReclassTab({ data, onRefresh }: { data: any[]; onRefresh: () => void }) {
+  const { can } = usePermissions();
+  const [showModal, setShowModal] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [actioningId, setActioningId] = useState<number | null>(null);
+
+  const filtered = useMemo(() => {
+    if (statusFilter === 'all') return data;
+    return data.filter(r => r.status === statusFilter);
+  }, [data, statusFilter]);
+
+  const requestedCount = data.filter(r => r.status === 'requested').length;
+  const appliedCount = data.filter(r => r.status === 'applied').length;
+  const rejectedCount = data.filter(r => r.status === 'rejected').length;
+
+  const statusColor = (status: string) => {
+    if (status === 'requested') return { bg: 'rgba(245,158,11,0.15)', fg: '#fbbf24', label: 'Menunggu Approval' };
+    if (status === 'applied') return { bg: 'rgba(16,185,129,0.15)', fg: '#6ee7b7', label: 'Applied' };
+    return { bg: 'rgba(239,68,68,0.15)', fg: '#fca5a5', label: 'Rejected' };
+  };
+
+  const readinessSummary = (profile: any) => {
+    if (!profile) return { brandReady: false, mappingReady: false };
+    return {
+      brandReady: Boolean(profile.brand_id),
+      mappingReady: Number(profile.active_scalev_mapping_count || 0) > 0,
+    };
+  };
+
+  const handleApprove = async (id: number) => {
+    if (!confirm('Approve dan apply reklasifikasi stock ini sekarang?')) return;
+    setActioningId(id);
+    try {
+      await approveStockReclassRequest(id);
+      onRefresh();
+    } catch (e: any) {
+      alert('Gagal approve: ' + (e.message || 'Unknown error'));
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  const handleReject = async (id: number) => {
+    const reason = prompt('Alasan reject (opsional):', '');
+    setActioningId(id);
+    try {
+      await rejectStockReclassRequest(id, reason || undefined);
+      onRefresh();
+    } catch (e: any) {
+      alert('Gagal reject: ' + (e.message || 'Unknown error'));
+    } finally {
+      setActioningId(null);
+    }
+  };
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <KPICard label="Pending" value={String(requestedCount)} color="#f59e0b" />
+        <KPICard label="Applied" value={String(appliedCount)} color="var(--green)" />
+        <KPICard label="Rejected" value={String(rejectedCount)} color="var(--red)" />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        {can('wh:reclass_request') && (
+          <button
+            onClick={() => setShowModal(true)}
+            style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#8b5cf6', color: '#fff' }}
+          >
+            + Request Reklasifikasi
+          </button>
+        )}
+        <div style={{ flex: 1 }} />
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' }}
+        >
+          <option value="all">Semua Status</option>
+          <option value="requested">Pending</option>
+          <option value="applied">Applied</option>
+          <option value="rejected">Rejected</option>
+        </select>
+      </div>
+
+      {showModal && (
+        <StockReclassRequestModal
+          onClose={() => setShowModal(false)}
+          onSuccess={() => {
+            setShowModal(false);
+            onRefresh();
+          }}
+        />
+      )}
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              {['No', 'Status', 'Dari', 'Ke', 'Qty', 'Batch', 'Readiness', 'Diminta Oleh', 'Waktu', 'Catatan', 'Aksi'].map(h => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['No', 'Qty'].includes(h) ? 'right' : 'left', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((row, i) => {
+              const badge = statusColor(row.status);
+              const requester = row.requested_by_profile?.full_name || row.requested_by_profile?.email || '-';
+              const decidedBy = row.status === 'applied'
+                ? (row.approved_by_profile?.full_name || row.approved_by_profile?.email || '-')
+                : row.status === 'rejected'
+                  ? (row.rejected_by_profile?.full_name || row.rejected_by_profile?.email || '-')
+                  : '-';
+              const sourceReady = readinessSummary(row.source_operational_profile);
+              const targetReady = readinessSummary(row.target_operational_profile);
+              return (
+                <tr key={row.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{i + 1}</td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <span style={{ padding: '3px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: badge.bg, color: badge.fg }}>{badge.label}</span>
+                  </td>
+                  <td style={{ padding: '8px 10px', minWidth: 220 }}>
+                    <div style={{ fontWeight: 600, color: 'var(--text)' }}>{row.source_product_name_snapshot}</div>
+                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>{row.source_warehouse_snapshot} - {row.source_entity_snapshot} • {row.source_category_snapshot}</div>
+                  </td>
+                  <td style={{ padding: '8px 10px', minWidth: 220 }}>
+                    <div style={{ fontWeight: 600, color: 'var(--text)' }}>{row.target_product_name_snapshot}</div>
+                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>{row.target_warehouse_snapshot} - {row.target_entity_snapshot} • {row.target_category_snapshot}</div>
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{Number(row.quantity || 0).toLocaleString('id-ID')}</td>
+                  <td style={{ padding: '8px 10px', color: 'var(--text-secondary)' }}>{row.source_batch_code_snapshot || '-'}</td>
+                  <td style={{ padding: '8px 10px', minWidth: 170 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: sourceReady.brandReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: sourceReady.brandReady ? '#6ee7b7' : '#fca5a5' }}>
+                        Src Brand {sourceReady.brandReady ? 'OK' : 'Missing'}
+                      </span>
+                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: sourceReady.mappingReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: sourceReady.mappingReady ? '#6ee7b7' : '#fca5a5' }}>
+                        Src Map {sourceReady.mappingReady ? 'OK' : 'Missing'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: targetReady.brandReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: targetReady.brandReady ? '#6ee7b7' : '#fca5a5' }}>
+                        Tgt Brand {targetReady.brandReady ? 'OK' : 'Missing'}
+                      </span>
+                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: targetReady.mappingReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: targetReady.mappingReady ? '#6ee7b7' : '#fca5a5' }}>
+                        Tgt Map {targetReady.mappingReady ? 'OK' : 'Missing'}
+                      </span>
+                    </div>
+                  </td>
+                  <td style={{ padding: '8px 10px', minWidth: 180 }}>
+                    <div style={{ color: 'var(--text)' }}>{requester}</div>
+                    {row.status !== 'requested' && <div style={{ fontSize: 11, color: 'var(--dim)' }}>Diproses: {decidedBy}</div>}
+                  </td>
+                  <td style={{ padding: '8px 10px', minWidth: 150 }}>
+                    <div style={{ color: 'var(--text)' }}>{fmtDateTime(row.requested_at)}</div>
+                    {row.applied_at && <div style={{ fontSize: 11, color: 'var(--dim)' }}>Apply: {fmtDateTime(row.applied_at)}</div>}
+                    {row.rejected_at && <div style={{ fontSize: 11, color: 'var(--dim)' }}>Reject: {fmtDateTime(row.rejected_at)}</div>}
+                  </td>
+                  <td style={{ padding: '8px 10px', minWidth: 220 }}>
+                    <div style={{ color: 'var(--text)' }}>{row.reason}</div>
+                    {row.notes && <div style={{ fontSize: 11, color: 'var(--dim)' }}>{row.notes}</div>}
+                    {row.rejection_reason && <div style={{ fontSize: 11, color: '#fca5a5' }}>Reject note: {row.rejection_reason}</div>}
+                  </td>
+                  <td style={{ padding: '8px 10px', minWidth: 160 }}>
+                    {row.status === 'requested' && can('wh:reclass_approve') ? (
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button
+                          onClick={() => handleApprove(row.id)}
+                          disabled={actioningId === row.id}
+                          style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: 'var(--green)', color: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 700, opacity: actioningId === row.id ? 0.7 : 1 }}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => handleReject(row.id)}
+                          disabled={actioningId === row.id}
+                          style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: 'var(--red)', color: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 700, opacity: actioningId === row.id ? 0.7 : 1 }}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    ) : row.ledger_reference_id ? (
+                      <span style={{ fontSize: 11, color: 'var(--dim)' }}>{row.ledger_reference_id}</span>
+                    ) : (
+                      <span style={{ fontSize: 11, color: 'var(--dim)' }}>-</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr><td colSpan={11} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada request reklasifikasi.</td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </>
+  );
+}
+
+function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
+  const [products, setProducts] = useState<any[]>([]);
+  const [stockRows, setStockRows] = useState<any[]>([]);
+  const [operationalProfiles, setOperationalProfiles] = useState<any[]>([]);
+  const [batches, setBatches] = useState<any[]>([]);
+  const [sourceProductId, setSourceProductId] = useState('');
+  const [sourceBatchId, setSourceBatchId] = useState('');
+  const [targetProductId, setTargetProductId] = useState('');
+  const [quantity, setQuantity] = useState('');
+  const [reason, setReason] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [prods, stock] = await Promise.all([
+          getProducts({ activeOnly: true }),
+          getStockBalance(),
+        ]);
+        setProducts(prods);
+        setStockRows(stock);
+        setOperationalProfiles(await getWarehouseProductOperationalProfiles());
+      } catch (e: any) {
+        setError(e.message || 'Gagal memuat master produk.');
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!sourceProductId) {
+      setBatches([]);
+      setSourceBatchId('');
+      return;
+    }
+
+    (async () => {
+      try {
+        const rows = await getBatches(Number(sourceProductId));
+        setBatches(rows.filter((row: any) => Number(row.current_qty || 0) > 0));
+      } catch {
+        setBatches([]);
+      }
+    })();
+  }, [sourceProductId]);
+
+  const stockMap = useMemo(() => {
+    const map = new Map<number, number>();
+    stockRows.forEach((row: any) => map.set(Number(row.product_id), Number(row.current_stock || 0)));
+    return map;
+  }, [stockRows]);
+
+  const sourceOptions = useMemo(() => (
+    products.filter((p: any) => ['fg', 'bonus'].includes(p.category) && Number(stockMap.get(Number(p.id)) || 0) > 0)
+  ), [products, stockMap]);
+
+  const sourceProduct = products.find((p: any) => String(p.id) === sourceProductId);
+  const profileMap = useMemo(() => {
+    const map = new Map<number, any>();
+    operationalProfiles.forEach((row: any) => map.set(Number(row.product_id), row));
+    return map;
+  }, [operationalProfiles]);
+  const targetOptions = useMemo(() => {
+    if (!sourceProduct) return [];
+    const oppositeCategory = sourceProduct.category === 'fg' ? 'bonus' : 'fg';
+    return products.filter((p: any) =>
+      p.id !== sourceProduct.id &&
+      p.category === oppositeCategory &&
+      p.entity === sourceProduct.entity &&
+      p.warehouse === sourceProduct.warehouse &&
+      p.is_active !== false
+    );
+  }, [products, sourceProduct]);
+
+  const selectedBatch = batches.find((batch: any) => String(batch.id) === sourceBatchId);
+  const sourceStock = sourceProduct ? Number(stockMap.get(Number(sourceProduct.id)) || 0) : 0;
+  const sourceProfile = sourceProduct ? profileMap.get(Number(sourceProduct.id)) : null;
+  const targetProfile = targetProductId ? profileMap.get(Number(targetProductId)) : null;
+
+  const renderOperationalCard = (label: string, profile: any) => {
+    if (!profile) return null;
+    const hasBrand = Boolean(profile.brand_id);
+    const mappingCount = Number(profile.active_scalev_mapping_count || 0);
+    const mappingNames = Array.isArray(profile.active_scalev_product_names) ? profile.active_scalev_product_names : [];
+
+    return (
+      <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-deep)', marginBottom: 12 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>{label}</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+          <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: hasBrand ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: hasBrand ? '#6ee7b7' : '#fca5a5' }}>
+            Brand {hasBrand ? profile.brand_name || 'OK' : 'Missing'}
+          </span>
+          <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: mappingCount > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: mappingCount > 0 ? '#6ee7b7' : '#fca5a5' }}>
+            Scalev Mapping {mappingCount > 0 ? `${mappingCount}x` : 'Missing'}
+          </span>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+          {mappingCount > 0
+            ? `Contoh mapping: ${mappingNames.slice(0, 3).join(', ')}${mappingNames.length > 3 ? '…' : ''}`
+            : 'Belum ada nama produk Scalev yang terhubung ke identity ini.'}
+        </div>
+      </div>
+    );
+  };
+
+  const handleSourceChange = (value: string) => {
+    setSourceProductId(value);
+    setTargetProductId('');
+    setSourceBatchId('');
+  };
+
+  const handleSubmit = async () => {
+    setError('');
+    const qty = Number(quantity || 0);
+    if (!sourceProductId) { setError('Pilih produk sumber.'); return; }
+    if (!targetProductId) { setError('Pilih produk target.'); return; }
+    if (qty <= 0) { setError('Quantity harus lebih besar dari 0.'); return; }
+    if (!reason.trim()) { setError('Alasan reklasifikasi wajib diisi.'); return; }
+
+    if (selectedBatch && qty > Number(selectedBatch.current_qty || 0)) {
+      setError(`Qty melebihi stok batch ${selectedBatch.batch_code}.`);
+      return;
+    }
+    if (!selectedBatch && qty > sourceStock) {
+      setError('Qty melebihi saldo produk sumber.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await createStockReclassRequest({
+        sourceProductId: Number(sourceProductId),
+        sourceBatchId: sourceBatchId ? Number(sourceBatchId) : null,
+        targetProductId: Number(targetProductId),
+        quantity: qty,
+        reason: reason.trim(),
+        notes: notes.trim() || undefined,
+      });
+      onSuccess();
+    } catch (e: any) {
+      setError(e.message || 'Gagal membuat request reklasifikasi.');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#8b5cf6' }}>Request Reklasifikasi Stock</h3>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--dim)', fontSize: 18, cursor: 'pointer', padding: 4 }}>&#10005;</button>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Pindahkan stok antar identity produk pada gudang/entity yang sama. V1 hanya mendukung perpindahan FG ↔ BONUS.</div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Produk Sumber *</label>
+          <select value={sourceProductId} onChange={(e) => handleSourceChange(e.target.value)} style={inputStyle}>
+            <option value="">-- Pilih Produk Sumber --</option>
+            {sourceOptions.map((p: any) => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.category}) [{p.warehouse}-{p.entity}] • saldo {Number(stockMap.get(Number(p.id)) || 0).toLocaleString('id-ID')}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {sourceProduct && (
+          <>
+            {renderOperationalCard('Kesiapan Produk Sumber', sourceProfile)}
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Batch Sumber (opsional)</label>
+              <select value={sourceBatchId} onChange={(e) => setSourceBatchId(e.target.value)} style={inputStyle}>
+                <option value="">-- Gunakan saldo produk / FIFO batch --</option>
+                {batches.map((b: any) => (
+                  <option key={b.id} value={b.id}>
+                    {b.batch_code} • qty {Number(b.current_qty || 0).toLocaleString('id-ID')}{b.expired_date ? ` • exp ${b.expired_date}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Produk Target *</label>
+              <select value={targetProductId} onChange={(e) => setTargetProductId(e.target.value)} style={inputStyle}>
+                <option value="">-- Pilih Produk Target --</option>
+                {targetOptions.map((p: any) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.category}) [{p.warehouse}-{p.entity}]
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {targetProfile && renderOperationalCard('Kesiapan Produk Target', targetProfile)}
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={labelStyle}>Quantity *</label>
+              <input type="number" min="1" value={quantity} onChange={(e) => setQuantity(e.target.value)} style={inputStyle} />
+              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 6 }}>
+                Saldo sumber: {sourceBatchId && selectedBatch
+                  ? `${Number(selectedBatch.current_qty || 0).toLocaleString('id-ID')} pada batch ${selectedBatch.batch_code}`
+                  : `${sourceStock.toLocaleString('id-ID')} unit`}
+              </div>
+            </div>
+          </>
+        )}
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Alasan *</label>
+          <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Contoh: Shaker dijadikan bonus campaign April" style={inputStyle} />
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Catatan</label>
+          <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opsional" style={inputStyle} />
+        </div>
+
+        {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: '#fca5a5', fontSize: 12, marginBottom: 12 }}>{error}</div>}
+
+        <button
+          onClick={handleSubmit}
+          disabled={submitting}
+          style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: '#8b5cf6', color: '#fff', opacity: submitting ? 0.7 : 1 }}
+        >
+          {submitting ? 'Mengirim Request...' : 'Kirim Request'}
+        </button>
+      </div>
+    </div>
   );
 }
 

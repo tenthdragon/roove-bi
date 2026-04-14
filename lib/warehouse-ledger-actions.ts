@@ -111,7 +111,7 @@ function formatNotification(type: string, productName: string, qty: number, guda
 // ============================================================
 
 export type MovementType = 'IN' | 'OUT' | 'ADJUST' | 'TRANSFER_IN' | 'TRANSFER_OUT' | 'DISPOSE';
-export type ReferenceType = 'scalev_order' | 'manual' | 'purchase_order' | 'transfer' | 'dispose' | 'opname' | 'rts';
+export type ReferenceType = 'scalev_order' | 'manual' | 'purchase_order' | 'transfer' | 'dispose' | 'opname' | 'rts' | 'reclass';
 
 export interface LedgerEntry {
   warehouse_product_id: number;
@@ -207,6 +207,17 @@ interface WarehouseFallbackProductRow {
   scalev_product_names: string[] | null;
 }
 
+interface WarehouseStockReclassRequestInput {
+  sourceProductId: number;
+  sourceBatchId?: number | null;
+  targetProductId: number;
+  quantity: number;
+  reason: string;
+  notes?: string | null;
+}
+
+type WarehouseStockReclassStatus = 'requested' | 'applied' | 'rejected';
+
 export interface WarehouseUndeductedOrderIssue {
   order_id: string;
   business_code: string | null;
@@ -275,6 +286,7 @@ export async function callWarehouseDeductFifoCompat(
 
 const TERMINAL_SCALEV_ORDER_STATUSES = new Set(['shipped', 'completed']);
 const QUANTITY_EPSILON = 0.000001;
+const ALLOWED_STOCK_RECLASS_CATEGORIES = new Set(['fg', 'bonus']);
 
 function isTerminalScalevOrderStatus(status?: string | null) {
   return TERMINAL_SCALEV_ORDER_STATUSES.has((status || '').toLowerCase());
@@ -1383,6 +1395,527 @@ export async function recordConversion(
   });
 
   return { reference_id: refId };
+}
+
+// ============================================================
+// STOCK RECLASSIFICATION — FG <-> BONUS with approval
+// ============================================================
+
+async function loadWarehouseProductsByIds(
+  svc: ReturnType<typeof createServiceSupabase>,
+  productIds: number[],
+) {
+  const uniqueIds = Array.from(new Set(productIds.filter(Boolean)));
+  if (uniqueIds.length === 0) return new Map<number, any>();
+
+  const { data, error } = await svc
+    .from('warehouse_products')
+    .select('id, name, category, entity, warehouse, is_active')
+    .in('id', uniqueIds);
+  if (error) throw error;
+
+  return new Map((data || []).map((row: any) => [Number(row.id), row]));
+}
+
+function validateStockReclassProducts(source: any, target: any) {
+  if (!source) throw new Error('Produk sumber tidak ditemukan.');
+  if (!target) throw new Error('Produk target tidak ditemukan.');
+  if (!source.is_active) throw new Error('Produk sumber sudah nonaktif.');
+  if (!target.is_active) throw new Error('Produk target sudah nonaktif.');
+  if (Number(source.id) === Number(target.id)) {
+    throw new Error('Produk sumber dan target harus berbeda.');
+  }
+  if (!ALLOWED_STOCK_RECLASS_CATEGORIES.has(source.category) || !ALLOWED_STOCK_RECLASS_CATEGORIES.has(target.category)) {
+    throw new Error('Reklasifikasi v1 hanya mendukung kategori FG dan BONUS.');
+  }
+  if (source.category === target.category) {
+    throw new Error('Reklasifikasi harus mengubah kategori FG <-> BONUS.');
+  }
+  if (source.entity !== target.entity || source.warehouse !== target.warehouse) {
+    throw new Error('Produk sumber dan target harus berada di gudang/entity yang sama.');
+  }
+}
+
+async function applyStockReclassRequestInternal(
+  svc: ReturnType<typeof createServiceSupabase>,
+  request: any,
+  sourceProduct: any,
+  targetProduct: any,
+  actedByUserId: string,
+) {
+  const refId = request.ledger_reference_id || `reclass-${request.id}`;
+  const notesBase = `[RECLASS#${request.id}] ${sourceProduct.name} (${sourceProduct.category}) -> ${targetProduct.name} (${targetProduct.category})`;
+  const quantity = Number(request.quantity || 0);
+
+  if (quantity <= 0) throw new Error('Quantity reklasifikasi tidak valid.');
+
+  if (request.source_batch_id) {
+    const sourceBatch = await deductBatchQuantityOrThrow(
+      svc,
+      Number(request.source_batch_id),
+      Number(sourceProduct.id),
+      quantity,
+    );
+
+    let targetBatchId: number | null = null;
+    if (sourceBatch.batch_code) {
+      const targetBatch = await findOrCreateTargetBatch(
+        svc,
+        Number(targetProduct.id),
+        sourceBatch.batch_code,
+        sourceBatch.expired_date || null,
+        sourceBatch.cost_per_unit ?? null,
+      );
+      targetBatchId = Number(targetBatch.id);
+
+      const { error: targetBatchErr } = await svc
+        .from('warehouse_batches')
+        .update({ current_qty: Number(targetBatch.current_qty || 0) + quantity })
+        .eq('id', targetBatchId);
+      if (targetBatchErr) throw targetBatchErr;
+    }
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(sourceProduct.id),
+      batch_id: Number(request.source_batch_id),
+      movement_type: 'OUT',
+      quantity: -quantity,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(targetProduct.id),
+      batch_id: targetBatchId,
+      movement_type: 'IN',
+      quantity,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    return { referenceId: refId };
+  }
+
+  const { data: availableBatches, error: batchErr } = await svc
+    .from('warehouse_batches')
+    .select('id')
+    .eq('warehouse_product_id', Number(sourceProduct.id))
+    .eq('is_active', true)
+    .gt('current_qty', 0)
+    .limit(1);
+  if (batchErr) throw batchErr;
+
+  if ((availableBatches || []).length === 0) {
+    const currentBalance = await getCurrentBalance(svc, Number(sourceProduct.id));
+    if (quantity > currentBalance) {
+      throw new Error(`Qty melebihi saldo produk sumber (${currentBalance}).`);
+    }
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(sourceProduct.id),
+      batch_id: null,
+      movement_type: 'OUT',
+      quantity: -quantity,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(targetProduct.id),
+      batch_id: null,
+      movement_type: 'IN',
+      quantity,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    return { referenceId: refId };
+  }
+
+  const { data: fifoBatches, error: fifoBatchErr } = await svc
+    .from('warehouse_batches')
+    .select('id, batch_code, expired_date, cost_per_unit, current_qty')
+    .eq('warehouse_product_id', Number(sourceProduct.id))
+    .eq('is_active', true)
+    .gt('current_qty', 0)
+    .order('expired_date', { ascending: true, nullsFirst: false });
+  if (fifoBatchErr) throw fifoBatchErr;
+
+  const sourceBatches = fifoBatches || [];
+  const batchTotal = sourceBatches.reduce((sum: number, row: any) => sum + Number(row.current_qty || 0), 0);
+  if (batchTotal < quantity) {
+    throw new Error(`Qty melebihi total stok batch produk sumber (${batchTotal}).`);
+  }
+
+  let remaining = quantity;
+  for (const sourceBatch of sourceBatches) {
+    if (remaining <= 0) break;
+    const deductedQty = Math.min(Number(sourceBatch.current_qty || 0), remaining);
+    if (deductedQty <= 0) continue;
+
+    await deductBatchQuantityOrThrow(
+      svc,
+      Number(sourceBatch.id),
+      Number(sourceProduct.id),
+      deductedQty,
+    );
+
+    const targetBatch = await findOrCreateTargetBatch(
+      svc,
+      Number(targetProduct.id),
+      sourceBatch.batch_code,
+      sourceBatch.expired_date || null,
+      sourceBatch.cost_per_unit ?? null,
+    );
+    const targetBatchId = Number(targetBatch.id);
+
+    const { error: targetBatchErr } = await svc
+      .from('warehouse_batches')
+      .update({ current_qty: Number(targetBatch.current_qty || 0) + deductedQty })
+      .eq('id', targetBatchId);
+    if (targetBatchErr) throw targetBatchErr;
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(sourceProduct.id),
+      batch_id: Number(sourceBatch.id),
+      movement_type: 'OUT',
+      quantity: -deductedQty,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(targetProduct.id),
+      batch_id: targetBatchId,
+      movement_type: 'IN',
+      quantity: deductedQty,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    remaining -= deductedQty;
+  }
+
+  if (remaining > 0) {
+    throw new Error(`Reklasifikasi batch tidak selesai. Sisa ${remaining} unit belum terpindah.`);
+  }
+
+  return { referenceId: refId };
+}
+
+export async function getStockReclassRequests(status?: WarehouseStockReclassStatus) {
+  await requireWarehouseAccess('Reklasifikasi Stock');
+  const svc = createServiceSupabase();
+
+  let query = svc
+    .from('warehouse_stock_reclass_requests')
+    .select('*')
+    .order('requested_at', { ascending: false })
+    .limit(200);
+
+  if (status) query = query.eq('status', status);
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const rows = data || [];
+  const productIds = rows.flatMap((row: any) => [
+    Number(row.source_warehouse_product_id),
+    Number(row.target_warehouse_product_id),
+  ]);
+  const userIds = rows.flatMap((row: any) => [
+    row.requested_by,
+    row.approved_by,
+    row.rejected_by,
+    row.applied_by,
+  ]).filter(Boolean);
+  const batchIds = rows.map((row: any) => row.source_batch_id).filter(Boolean);
+
+  const [productsRes, profilesRes, batchesRes, operationalProfilesRes] = await Promise.all([
+    productIds.length > 0
+      ? svc.from('warehouse_products').select('id, name, category, entity, warehouse').in('id', Array.from(new Set(productIds)))
+      : Promise.resolve({ data: [], error: null } as any),
+    userIds.length > 0
+      ? svc.from('profiles').select('id, full_name, email').in('id', Array.from(new Set(userIds)))
+      : Promise.resolve({ data: [], error: null } as any),
+    batchIds.length > 0
+      ? svc.from('warehouse_batches').select('id, batch_code, expired_date').in('id', Array.from(new Set(batchIds)))
+      : Promise.resolve({ data: [], error: null } as any),
+    productIds.length > 0
+      ? svc.from('v_warehouse_product_operational_profiles').select('*').in('product_id', Array.from(new Set(productIds)))
+      : Promise.resolve({ data: [], error: null } as any),
+  ]);
+
+  if (productsRes.error) throw productsRes.error;
+  if (profilesRes.error) throw profilesRes.error;
+  if (batchesRes.error) throw batchesRes.error;
+  if (operationalProfilesRes.error) throw operationalProfilesRes.error;
+
+  const productMap = new Map((productsRes.data || []).map((row: any) => [Number(row.id), row]));
+  const profileMap = new Map((profilesRes.data || []).map((row: any) => [row.id, row]));
+  const batchMap = new Map((batchesRes.data || []).map((row: any) => [Number(row.id), row]));
+  const operationalProfileMap = new Map((operationalProfilesRes.data || []).map((row: any) => [Number(row.product_id), row]));
+
+  return rows.map((row: any) => ({
+    ...row,
+    source_product: productMap.get(Number(row.source_warehouse_product_id)) || null,
+    target_product: productMap.get(Number(row.target_warehouse_product_id)) || null,
+    source_operational_profile: operationalProfileMap.get(Number(row.source_warehouse_product_id)) || null,
+    target_operational_profile: operationalProfileMap.get(Number(row.target_warehouse_product_id)) || null,
+    source_batch: row.source_batch_id ? (batchMap.get(Number(row.source_batch_id)) || null) : null,
+    requested_by_profile: row.requested_by ? (profileMap.get(row.requested_by) || null) : null,
+    approved_by_profile: row.approved_by ? (profileMap.get(row.approved_by) || null) : null,
+    rejected_by_profile: row.rejected_by ? (profileMap.get(row.rejected_by) || null) : null,
+    applied_by_profile: row.applied_by ? (profileMap.get(row.applied_by) || null) : null,
+  }));
+}
+
+export async function getWarehouseProductOperationalProfiles(productIds?: number[]) {
+  await requireWarehouseAccess('Produk Gudang');
+  const svc = createServiceSupabase();
+  let query = svc
+    .from('v_warehouse_product_operational_profiles')
+    .select('*')
+    .order('category')
+    .order('product_name');
+
+  if (productIds && productIds.length > 0) {
+    query = query.in('product_id', Array.from(new Set(productIds.filter(Boolean))));
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+export async function getScalevAttributionProfiles(scalevProductNames?: string[]) {
+  await requireWarehouseAccess('Mapping Scalev Attribution');
+  const svc = createServiceSupabase();
+  let query = svc
+    .from('v_warehouse_scalev_attribution_profiles')
+    .select('*')
+    .order('scalev_product_name');
+
+  if (scalevProductNames && scalevProductNames.length > 0) {
+    query = query.in('scalev_product_name', Array.from(new Set(scalevProductNames.filter(Boolean))));
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
+}
+
+export async function createStockReclassRequest(input: WarehouseStockReclassRequestInput) {
+  await requireWarehousePermission('wh:reclass_request', 'Reklasifikasi Stock');
+
+  const quantity = Number(input.quantity || 0);
+  if (quantity <= 0) throw new Error('Quantity harus lebih besar dari 0.');
+  if (!input.reason?.trim()) throw new Error('Alasan reklasifikasi wajib diisi.');
+
+  const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
+  if (!userId) throw new Error('Pengguna tidak ditemukan.');
+
+  const products = await loadWarehouseProductsByIds(svc, [input.sourceProductId, input.targetProductId]);
+  const sourceProduct = products.get(Number(input.sourceProductId));
+  const targetProduct = products.get(Number(input.targetProductId));
+  validateStockReclassProducts(sourceProduct, targetProduct);
+
+  let sourceBatch: any = null;
+  if (input.sourceBatchId) {
+    sourceBatch = await getBatchOrThrow(svc, Number(input.sourceBatchId), Number(sourceProduct.id));
+    if (quantity > Number(sourceBatch.current_qty || 0)) {
+      throw new Error(`Qty melebihi stok batch ${sourceBatch.batch_code} (${sourceBatch.current_qty}).`);
+    }
+  } else {
+    const currentBalance = await getCurrentBalance(svc, Number(sourceProduct.id));
+    if (quantity > currentBalance) {
+      throw new Error(`Qty melebihi saldo produk sumber (${currentBalance}).`);
+    }
+  }
+
+  const nowIso = new Date().toISOString();
+  const { data, error } = await svc
+    .from('warehouse_stock_reclass_requests')
+    .insert({
+      source_warehouse_product_id: Number(sourceProduct.id),
+      source_batch_id: input.sourceBatchId ? Number(input.sourceBatchId) : null,
+      target_warehouse_product_id: Number(targetProduct.id),
+      quantity,
+      reason: input.reason.trim(),
+      notes: input.notes?.trim() || null,
+      requested_by: userId,
+      requested_at: nowIso,
+      source_product_name_snapshot: sourceProduct.name,
+      source_category_snapshot: sourceProduct.category,
+      source_entity_snapshot: sourceProduct.entity,
+      source_warehouse_snapshot: sourceProduct.warehouse,
+      target_product_name_snapshot: targetProduct.name,
+      target_category_snapshot: targetProduct.category,
+      target_entity_snapshot: targetProduct.entity,
+      target_warehouse_snapshot: targetProduct.warehouse,
+      source_batch_code_snapshot: sourceBatch?.batch_code || null,
+      source_expired_date_snapshot: sourceBatch?.expired_date || null,
+      updated_at: nowIso,
+    })
+    .select()
+    .single();
+  if (error) throw error;
+
+  const userName = await getCurrentUserName();
+  const time = new Date(nowIso).toLocaleString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  await notifyDirekturs(
+    `📌 <b>Request Reklasifikasi Stock</b>\n` +
+    `Dari: ${sourceProduct.name} (${sourceProduct.category})\n` +
+    `Ke: ${targetProduct.name} (${targetProduct.category})\n` +
+    `Gudang: ${sourceProduct.warehouse} - ${sourceProduct.entity}\n` +
+    `Qty: ${quantity.toLocaleString('id-ID')}\n` +
+    `Batch: ${sourceBatch?.batch_code || '-'}\n` +
+    `Alasan: ${input.reason.trim()}\n` +
+    `Oleh: ${userName}\n` +
+    `Waktu: ${time}`
+  );
+
+  return data;
+}
+
+export async function approveStockReclassRequest(requestId: number) {
+  await requireWarehousePermission('wh:reclass_approve', 'Approve Reklasifikasi Stock');
+  const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
+  if (!userId) throw new Error('Pengguna tidak ditemukan.');
+
+  const { data: request, error: requestErr } = await svc
+    .from('warehouse_stock_reclass_requests')
+    .select('*')
+    .eq('id', requestId)
+    .maybeSingle();
+  if (requestErr) throw requestErr;
+  if (!request || request.status !== 'requested') {
+    throw new Error('Request reklasifikasi ini tidak siap di-approve.');
+  }
+
+  const products = await loadWarehouseProductsByIds(svc, [
+    Number(request.source_warehouse_product_id),
+    Number(request.target_warehouse_product_id),
+  ]);
+  const sourceProduct = products.get(Number(request.source_warehouse_product_id));
+  const targetProduct = products.get(Number(request.target_warehouse_product_id));
+  validateStockReclassProducts(sourceProduct, targetProduct);
+
+  const applied = await applyStockReclassRequestInternal(
+    svc,
+    request,
+    sourceProduct,
+    targetProduct,
+    userId,
+  );
+
+  const nowIso = new Date().toISOString();
+  const { error: updateErr } = await svc
+    .from('warehouse_stock_reclass_requests')
+    .update({
+      status: 'applied',
+      approved_by: userId,
+      approved_at: nowIso,
+      applied_by: userId,
+      applied_at: nowIso,
+      ledger_reference_id: applied.referenceId,
+      updated_at: nowIso,
+    })
+    .eq('id', requestId)
+    .eq('status', 'requested');
+  if (updateErr) throw updateErr;
+
+  const approverName = await getCurrentUserName();
+  const time = new Date(nowIso).toLocaleString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  await notifyDirekturs(
+    `✅ <b>Reklasifikasi Stock Applied</b>\n` +
+    `Dari: ${sourceProduct.name} (${sourceProduct.category})\n` +
+    `Ke: ${targetProduct.name} (${targetProduct.category})\n` +
+    `Qty: ${Number(request.quantity || 0).toLocaleString('id-ID')}\n` +
+    `Ref Ledger: ${applied.referenceId}\n` +
+    `Oleh: ${approverName}\n` +
+    `Waktu: ${time}`
+  );
+
+  return { requestId, referenceId: applied.referenceId };
+}
+
+export async function rejectStockReclassRequest(requestId: number, rejectionReason?: string | null) {
+  await requireWarehousePermission('wh:reclass_approve', 'Reject Reklasifikasi Stock');
+  const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
+  if (!userId) throw new Error('Pengguna tidak ditemukan.');
+
+  const { data: request, error: requestErr } = await svc
+    .from('warehouse_stock_reclass_requests')
+    .select('id, status')
+    .eq('id', requestId)
+    .maybeSingle();
+  if (requestErr) throw requestErr;
+  if (!request || request.status !== 'requested') {
+    throw new Error('Request reklasifikasi ini tidak bisa ditolak.');
+  }
+
+  const nowIso = new Date().toISOString();
+  const { error } = await svc
+    .from('warehouse_stock_reclass_requests')
+    .update({
+      status: 'rejected',
+      rejected_by: userId,
+      rejected_at: nowIso,
+      rejection_reason: rejectionReason?.trim() || null,
+      updated_at: nowIso,
+    })
+    .eq('id', requestId)
+    .eq('status', 'requested');
+  if (error) throw error;
+
+  const rejectorName = await getCurrentUserName();
+  const time = new Date(nowIso).toLocaleString('id-ID', {
+    timeZone: 'Asia/Jakarta',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+  await notifyDirekturs(
+    `❌ <b>Reklasifikasi Stock Rejected</b>\n` +
+    `Request ID: ${requestId}\n` +
+    `Alasan reject: ${rejectionReason?.trim() || '-'}\n` +
+    `Oleh: ${rejectorName}\n` +
+    `Waktu: ${time}`
+  );
+
+  return { requestId };
 }
 
 // ============================================================
