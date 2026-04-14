@@ -125,6 +125,12 @@ function fmtDateTime(d: string) {
   return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function getOppositeReclassCategory(category: string) {
+  if (category === 'fg') return 'bonus';
+  if (category === 'bonus') return 'fg';
+  return '';
+}
+
 // ── KPI Card ──
 
 function KPICard({ label, value, color = 'var(--accent)', sub }: { label: string; value: string; color?: string; sub?: string }) {
@@ -783,7 +789,14 @@ function StockReclassTab({ data, onRefresh }: { data: any[]; onRefresh: () => vo
                     <div style={{ fontSize: 11, color: 'var(--dim)' }}>{row.source_warehouse_snapshot} - {row.source_entity_snapshot} • {row.source_category_snapshot}</div>
                   </td>
                   <td style={{ padding: '8px 10px', minWidth: 220 }}>
-                    <div style={{ fontWeight: 600, color: 'var(--text)' }}>{row.target_product_name_snapshot}</div>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 2 }}>
+                      <div style={{ fontWeight: 600, color: 'var(--text)' }}>{row.target_product_name_snapshot}</div>
+                      {row.target_product_auto_created && (
+                        <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: 'rgba(139,92,246,0.18)', color: '#c4b5fd' }}>
+                          Auto-created
+                        </span>
+                      )}
+                    </div>
                     <div style={{ fontSize: 11, color: 'var(--dim)' }}>{row.target_warehouse_snapshot} - {row.target_entity_snapshot} • {row.target_category_snapshot}</div>
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{Number(row.quantity || 0).toLocaleString('id-ID')}</td>
@@ -818,6 +831,7 @@ function StockReclassTab({ data, onRefresh }: { data: any[]; onRefresh: () => vo
                   <td style={{ padding: '8px 10px', minWidth: 220 }}>
                     <div style={{ color: 'var(--text)' }}>{row.reason}</div>
                     {row.notes && <div style={{ fontSize: 11, color: 'var(--dim)' }}>{row.notes}</div>}
+                    {row.target_product_auto_created && <div style={{ fontSize: 11, color: '#c4b5fd' }}>Identity target dibuat otomatis saat request.</div>}
                     {row.rejection_reason && <div style={{ fontSize: 11, color: '#fca5a5' }}>Reject note: {row.rejection_reason}</div>}
                   </td>
                   <td style={{ padding: '8px 10px', minWidth: 160 }}>
@@ -864,7 +878,7 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
   const [batches, setBatches] = useState<any[]>([]);
   const [sourceProductId, setSourceProductId] = useState('');
   const [sourceBatchId, setSourceBatchId] = useState('');
-  const [targetProductId, setTargetProductId] = useState('');
+  const [targetCategory, setTargetCategory] = useState('');
   const [quantity, setQuantity] = useState('');
   const [reason, setReason] = useState('');
   const [notes, setNotes] = useState('');
@@ -920,22 +934,36 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
     operationalProfiles.forEach((row: any) => map.set(Number(row.product_id), row));
     return map;
   }, [operationalProfiles]);
-  const targetOptions = useMemo(() => {
-    if (!sourceProduct) return [];
-    const oppositeCategory = sourceProduct.category === 'fg' ? 'bonus' : 'fg';
-    return products.filter((p: any) =>
+  const targetCategoryOptions = useMemo(() => (
+    sourceProduct ? ['fg', 'bonus'].filter((category) => category !== sourceProduct.category) : []
+  ), [sourceProduct]);
+  const targetProduct = useMemo(() => {
+    if (!sourceProduct || !targetCategory) return null;
+    return products.find((p: any) =>
       p.id !== sourceProduct.id &&
-      p.category === oppositeCategory &&
+      p.name === sourceProduct.name &&
+      p.category === targetCategory &&
       p.entity === sourceProduct.entity &&
       p.warehouse === sourceProduct.warehouse &&
       p.is_active !== false
-    );
-  }, [products, sourceProduct]);
+    ) || null;
+  }, [products, sourceProduct, targetCategory]);
 
   const selectedBatch = batches.find((batch: any) => String(batch.id) === sourceBatchId);
   const sourceStock = sourceProduct ? Number(stockMap.get(Number(sourceProduct.id)) || 0) : 0;
   const sourceProfile = sourceProduct ? profileMap.get(Number(sourceProduct.id)) : null;
-  const targetProfile = targetProductId ? profileMap.get(Number(targetProductId)) : null;
+  const targetProfile = targetProduct ? profileMap.get(Number(targetProduct.id)) : null;
+  const willAutoCreateTarget = Boolean(sourceProduct && targetCategory && !targetProduct);
+
+  useEffect(() => {
+    if (!sourceProduct) {
+      if (targetCategory) setTargetCategory('');
+      return;
+    }
+    if (!targetCategoryOptions.includes(targetCategory)) {
+      setTargetCategory(getOppositeReclassCategory(sourceProduct.category));
+    }
+  }, [sourceProduct, targetCategory, targetCategoryOptions]);
 
   const renderOperationalCard = (label: string, profile: any) => {
     if (!profile) return null;
@@ -965,15 +993,16 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
 
   const handleSourceChange = (value: string) => {
     setSourceProductId(value);
-    setTargetProductId('');
     setSourceBatchId('');
+    const nextSource = products.find((p: any) => String(p.id) === value);
+    setTargetCategory(nextSource ? getOppositeReclassCategory(nextSource.category) : '');
   };
 
   const handleSubmit = async () => {
     setError('');
     const qty = Number(quantity || 0);
     if (!sourceProductId) { setError('Pilih produk sumber.'); return; }
-    if (!targetProductId) { setError('Pilih produk target.'); return; }
+    if (!targetCategory) { setError('Pilih kategori tujuan.'); return; }
     if (qty <= 0) { setError('Quantity harus lebih besar dari 0.'); return; }
     if (!reason.trim()) { setError('Alasan reklasifikasi wajib diisi.'); return; }
 
@@ -991,7 +1020,7 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
       await createStockReclassRequest({
         sourceProductId: Number(sourceProductId),
         sourceBatchId: sourceBatchId ? Number(sourceBatchId) : null,
-        targetProductId: Number(targetProductId),
+        targetCategory,
         quantity: qty,
         reason: reason.trim(),
         notes: notes.trim() || undefined,
@@ -1042,16 +1071,35 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
             </div>
 
             <div style={{ marginBottom: 14 }}>
-              <label style={labelStyle}>Produk Target *</label>
-              <select value={targetProductId} onChange={(e) => setTargetProductId(e.target.value)} style={inputStyle}>
-                <option value="">-- Pilih Produk Target --</option>
-                {targetOptions.map((p: any) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({p.category}) [{p.warehouse}-{p.entity}]
+              <label style={labelStyle}>Kategori Tujuan *</label>
+              <select value={targetCategory} onChange={(e) => setTargetCategory(e.target.value)} style={inputStyle}>
+                <option value="">-- Pilih Kategori Tujuan --</option>
+                {targetCategoryOptions.map((category) => (
+                  <option key={category} value={category}>
+                    {category.toUpperCase()}
                   </option>
                 ))}
               </select>
             </div>
+
+            {targetCategory && (
+              <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-deep)', marginBottom: 12 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Preview Target Reklasifikasi</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
+                  {sourceProduct.name} ({targetCategory}) [{sourceProduct.warehouse}-{sourceProduct.entity}]
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+                  {targetProduct
+                    ? 'Identity target sudah ada dan akan dipakai sebagai tujuan reklasifikasi.'
+                    : 'Identity target belum ada. Sistem akan membuat counterpart baru dengan nama yang sama, gudang/entity yang sama, kategori tujuan, dan mapping Scalev kosong saat request dibuat.'}
+                </div>
+                {willAutoCreateTarget && (
+                  <div style={{ fontSize: 11, color: '#c4b5fd', marginTop: 6 }}>
+                    Field utama seperti brand, vendor, unit, HPP, dan harga dasar akan diwariskan dari produk sumber agar jejak operasional tetap konsisten.
+                  </div>
+                )}
+              </div>
+            )}
 
             {targetProfile && renderOperationalCard('Kesiapan Produk Target', targetProfile)}
 

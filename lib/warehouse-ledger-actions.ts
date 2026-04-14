@@ -210,7 +210,8 @@ interface WarehouseFallbackProductRow {
 interface WarehouseStockReclassRequestInput {
   sourceProductId: number;
   sourceBatchId?: number | null;
-  targetProductId: number;
+  targetProductId?: number | null;
+  targetCategory?: string | null;
   quantity: number;
   reason: string;
   notes?: string | null;
@@ -1410,11 +1411,77 @@ async function loadWarehouseProductsByIds(
 
   const { data, error } = await svc
     .from('warehouse_products')
-    .select('id, name, category, entity, warehouse, is_active')
+    .select('id, name, sku, category, unit, price_list, reorder_threshold, entity, warehouse, scalev_product_names, is_active, hpp, vendor, vendor_id, brand_id')
     .in('id', uniqueIds);
   if (error) throw error;
 
   return new Map((data || []).map((row: any) => [Number(row.id), row]));
+}
+
+async function resolveOrCreateStockReclassTargetProduct(
+  svc: ReturnType<typeof createServiceSupabase>,
+  sourceProduct: any,
+  targetCategory: string,
+) {
+  if (!ALLOWED_STOCK_RECLASS_CATEGORIES.has(targetCategory)) {
+    throw new Error('Kategori tujuan reklasifikasi tidak didukung.');
+  }
+  if (targetCategory === sourceProduct.category) {
+    throw new Error('Kategori tujuan harus berbeda dari kategori sumber.');
+  }
+
+  const { data: existing, error: existingErr } = await svc
+    .from('warehouse_products')
+    .select('id, name, sku, category, unit, price_list, reorder_threshold, entity, warehouse, scalev_product_names, is_active, hpp, vendor, vendor_id, brand_id')
+    .eq('name', sourceProduct.name)
+    .eq('entity', sourceProduct.entity)
+    .eq('warehouse', sourceProduct.warehouse)
+    .eq('category', targetCategory)
+    .maybeSingle();
+  if (existingErr) throw existingErr;
+  if (existing) {
+    return { product: existing, autoCreated: false };
+  }
+
+  const insertRow: Record<string, any> = {
+    name: sourceProduct.name,
+    sku: sourceProduct.sku || null,
+    category: targetCategory,
+    unit: sourceProduct.unit || 'pcs',
+    price_list: Number(sourceProduct.price_list || 0),
+    reorder_threshold: Number(sourceProduct.reorder_threshold || 0),
+    entity: sourceProduct.entity,
+    warehouse: sourceProduct.warehouse,
+    scalev_product_names: [],
+    is_active: true,
+    hpp: Number(sourceProduct.hpp || 0),
+    vendor: sourceProduct.vendor || null,
+    vendor_id: sourceProduct.vendor_id || null,
+    brand_id: sourceProduct.brand_id || null,
+  };
+
+  const { data: created, error: createErr } = await svc
+    .from('warehouse_products')
+    .insert(insertRow)
+    .select('id, name, sku, category, unit, price_list, reorder_threshold, entity, warehouse, scalev_product_names, is_active, hpp, vendor, vendor_id, brand_id')
+    .single();
+  if (createErr) {
+    if (!isUniqueViolation(createErr)) throw createErr;
+
+    const { data: existingAfterRace, error: existingAfterRaceErr } = await svc
+      .from('warehouse_products')
+      .select('id, name, sku, category, unit, price_list, reorder_threshold, entity, warehouse, scalev_product_names, is_active, hpp, vendor, vendor_id, brand_id')
+      .eq('name', sourceProduct.name)
+      .eq('entity', sourceProduct.entity)
+      .eq('warehouse', sourceProduct.warehouse)
+      .eq('category', targetCategory)
+      .maybeSingle();
+    if (existingAfterRaceErr) throw existingAfterRaceErr;
+    if (!existingAfterRace) throw createErr;
+    return { product: existingAfterRace, autoCreated: false };
+  }
+
+  return { product: created, autoCreated: true };
 }
 
 function validateStockReclassProducts(source: any, target: any) {
@@ -1434,6 +1501,12 @@ function validateStockReclassProducts(source: any, target: any) {
   if (source.entity !== target.entity || source.warehouse !== target.warehouse) {
     throw new Error('Produk sumber dan target harus berada di gudang/entity yang sama.');
   }
+}
+
+function isUniqueViolation(error: any) {
+  const code = String(error?.code || '').toLowerCase();
+  const message = String(error?.message || '').toLowerCase();
+  return code === '23505' || message.includes('duplicate key');
 }
 
 async function applyStockReclassRequestInternal(
@@ -1728,10 +1801,29 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
   const userId = await getCurrentUserId();
   if (!userId) throw new Error('Pengguna tidak ditemukan.');
 
-  const products = await loadWarehouseProductsByIds(svc, [input.sourceProductId, input.targetProductId]);
+  const products = await loadWarehouseProductsByIds(svc, [input.sourceProductId, input.targetProductId || 0]);
   const sourceProduct = products.get(Number(input.sourceProductId));
-  const targetProduct = products.get(Number(input.targetProductId));
-  validateStockReclassProducts(sourceProduct, targetProduct);
+  if (!sourceProduct) throw new Error('Produk sumber tidak ditemukan.');
+
+  let targetCategory = input.targetCategory?.trim().toLowerCase() || '';
+  let targetProduct = input.targetProductId ? products.get(Number(input.targetProductId)) : null;
+  let targetProductAutoCreated = false;
+
+  if (targetProduct) {
+    if (targetCategory && targetCategory !== targetProduct.category) {
+      throw new Error('Kategori tujuan tidak cocok dengan produk target yang dipilih.');
+    }
+    targetCategory = targetCategory || targetProduct.category;
+    validateStockReclassProducts(sourceProduct, targetProduct);
+  } else {
+    if (!targetCategory) {
+      throw new Error('Kategori tujuan reklasifikasi wajib dipilih.');
+    }
+    const resolved = await resolveOrCreateStockReclassTargetProduct(svc, sourceProduct, targetCategory);
+    targetProduct = resolved.product;
+    targetProductAutoCreated = resolved.autoCreated;
+    validateStockReclassProducts(sourceProduct, targetProduct);
+  }
 
   let sourceBatch: any = null;
   if (input.sourceBatchId) {
@@ -1753,6 +1845,8 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
       source_warehouse_product_id: Number(sourceProduct.id),
       source_batch_id: input.sourceBatchId ? Number(input.sourceBatchId) : null,
       target_warehouse_product_id: Number(targetProduct.id),
+      requested_target_category: targetProduct.category,
+      target_product_auto_created: targetProductAutoCreated,
       quantity,
       reason: input.reason.trim(),
       notes: input.notes?.trim() || null,
@@ -1790,6 +1884,7 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
     `Gudang: ${sourceProduct.warehouse} - ${sourceProduct.entity}\n` +
     `Qty: ${quantity.toLocaleString('id-ID')}\n` +
     `Batch: ${sourceBatch?.batch_code || '-'}\n` +
+    `Auto-create target: ${targetProductAutoCreated ? 'ya' : 'tidak'}\n` +
     `Alasan: ${input.reason.trim()}\n` +
     `Oleh: ${userName}\n` +
     `Waktu: ${time}`
