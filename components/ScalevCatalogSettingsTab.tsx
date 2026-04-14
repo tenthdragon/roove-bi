@@ -40,24 +40,40 @@ function formatDateTime(value: string | null | undefined) {
 }
 
 function renderStatusBadge(status: ScalevCatalogBusinessSummary['sync_status']) {
-  const colors: Record<ScalevCatalogBusinessSummary['sync_status'], { bg: string; text: string; label: string }> = {
-    idle: { bg: 'var(--bg-deep)', text: 'var(--dim)', label: 'Idle' },
-    running: { bg: 'rgba(59,130,246,0.12)', text: '#93c5fd', label: 'Syncing' },
-    success: { bg: 'var(--badge-green-bg)', text: '#6ee7b7', label: 'Ready' },
-    failed: { bg: 'var(--badge-red-bg)', text: '#fca5a5', label: 'Failed' },
+  const colors: Record<ScalevCatalogBusinessSummary['sync_status'], { bg: string; text: string; border: string; dot: string; label: string }> = {
+    idle: { bg: 'rgba(148,163,184,0.08)', text: 'var(--dim)', border: 'rgba(148,163,184,0.16)', dot: '#64748b', label: 'Idle' },
+    running: { bg: 'rgba(59,130,246,0.12)', text: '#93c5fd', border: 'rgba(96,165,250,0.28)', dot: '#60a5fa', label: 'Syncing' },
+    success: { bg: 'rgba(16,185,129,0.14)', text: '#6ee7b7', border: 'rgba(52,211,153,0.24)', dot: '#34d399', label: 'Ready' },
+    failed: { bg: 'rgba(239,68,68,0.12)', text: '#fca5a5', border: 'rgba(248,113,113,0.22)', dot: '#f87171', label: 'Failed' },
   };
   const style = colors[status];
   return (
     <span
       style={{
-        padding: '2px 8px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        alignSelf: 'flex-start',
+        padding: '5px 10px',
         borderRadius: 999,
-        fontSize: 10,
+        border: `1px solid ${style.border}`,
+        fontSize: 11,
         fontWeight: 700,
         background: style.bg,
         color: style.text,
+        lineHeight: 1,
+        whiteSpace: 'nowrap',
       }}
     >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 999,
+          background: style.dot,
+          boxShadow: `0 0 0 3px ${style.bg}`,
+        }}
+      />
       {style.label}
     </span>
   );
@@ -443,7 +459,7 @@ export default function ScalevCatalogSettingsTab() {
                     cursor: 'pointer',
                   }}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 10 }}>
                     <div>
                       <div style={{ fontFamily: 'monospace', fontWeight: 700, color: 'var(--accent)', fontSize: 12 }}>
                         {business.business_code}
