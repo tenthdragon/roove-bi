@@ -23,6 +23,7 @@ import { fetchActiveBrands } from '@/lib/brand-actions';
 import { fmtRupiah } from '@/lib/utils';
 import BrandManager from '@/components/BrandManager';
 import ScalevCatalogSettingsTab from '@/components/ScalevCatalogSettingsTab';
+import ScalevProductMappingSettingsTab from '@/components/ScalevProductMappingSettingsTab';
 import { usePermissions } from '@/lib/PermissionsContext';
 
 const SUB_TABS = [
@@ -31,6 +32,7 @@ const SUB_TABS = [
   { id: 'products', label: 'Master Produk' },
   { id: 'warehouses', label: 'Active Warehouse' },
   { id: 'catalog', label: 'Katalog Scalev', permissionKey: 'whs:mapping' },
+  { id: 'catalog-mapping', label: 'Product Mapping Scalev', permissionKey: 'whs:mapping' },
   { id: 'mapping', label: 'Mapping Scalev' },
 ];
 
@@ -86,6 +88,7 @@ export default function WarehouseSettingsPage() {
       {effectiveTab === 'vendors' && <VendorTab />}
       {effectiveTab === 'warehouses' && <ActiveWarehouseTab />}
       {effectiveTab === 'catalog' && <ScalevCatalogSettingsTab />}
+      {effectiveTab === 'catalog-mapping' && <ScalevProductMappingSettingsTab />}
       {effectiveTab === 'mapping' && <MappingTabWrapper />}
     </div>
   );
