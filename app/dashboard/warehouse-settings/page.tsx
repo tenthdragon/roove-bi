@@ -22,6 +22,7 @@ import {
 import { fetchActiveBrands } from '@/lib/brand-actions';
 import { fmtRupiah } from '@/lib/utils';
 import BrandManager from '@/components/BrandManager';
+import ScalevCatalogSettingsTab from '@/components/ScalevCatalogSettingsTab';
 import { usePermissions } from '@/lib/PermissionsContext';
 
 const SUB_TABS = [
@@ -29,6 +30,7 @@ const SUB_TABS = [
   { id: 'vendors', label: 'Vendor' },
   { id: 'products', label: 'Master Produk' },
   { id: 'warehouses', label: 'Active Warehouse' },
+  { id: 'catalog', label: 'Katalog Scalev', permissionKey: 'whs:mapping' },
   { id: 'mapping', label: 'Mapping Scalev' },
 ];
 
@@ -42,7 +44,7 @@ const inputStyle = {
 
 export default function WarehouseSettingsPage() {
   const { can } = usePermissions();
-  const visibleTabs = SUB_TABS.filter(t => can(`whs:${t.id}`));
+  const visibleTabs = SUB_TABS.filter(t => can((t as any).permissionKey || `whs:${t.id}`));
   const [activeTab, setActiveTab] = useState('brands');
 
   // Auto-switch if current tab is no longer visible
@@ -83,6 +85,7 @@ export default function WarehouseSettingsPage() {
       {effectiveTab === 'brands' && <BrandTab />}
       {effectiveTab === 'vendors' && <VendorTab />}
       {effectiveTab === 'warehouses' && <ActiveWarehouseTab />}
+      {effectiveTab === 'catalog' && <ScalevCatalogSettingsTab />}
       {effectiveTab === 'mapping' && <MappingTabWrapper />}
     </div>
   );
