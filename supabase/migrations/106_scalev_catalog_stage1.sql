@@ -171,36 +171,46 @@ ALTER TABLE scalev_catalog_bundles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scalev_catalog_identifiers ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scalev_catalog_sync_state ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "scalev_catalog_products_read" ON scalev_catalog_products;
 CREATE POLICY "scalev_catalog_products_read" ON scalev_catalog_products
   FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "scalev_catalog_products_manage" ON scalev_catalog_products;
 CREATE POLICY "scalev_catalog_products_manage" ON scalev_catalog_products
   FOR ALL TO authenticated
   USING (dashboard_has_permission('whs:mapping'))
   WITH CHECK (dashboard_has_permission('whs:mapping'));
 
+DROP POLICY IF EXISTS "scalev_catalog_variants_read" ON scalev_catalog_variants;
 CREATE POLICY "scalev_catalog_variants_read" ON scalev_catalog_variants
   FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "scalev_catalog_variants_manage" ON scalev_catalog_variants;
 CREATE POLICY "scalev_catalog_variants_manage" ON scalev_catalog_variants
   FOR ALL TO authenticated
   USING (dashboard_has_permission('whs:mapping'))
   WITH CHECK (dashboard_has_permission('whs:mapping'));
 
+DROP POLICY IF EXISTS "scalev_catalog_bundles_read" ON scalev_catalog_bundles;
 CREATE POLICY "scalev_catalog_bundles_read" ON scalev_catalog_bundles
   FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "scalev_catalog_bundles_manage" ON scalev_catalog_bundles;
 CREATE POLICY "scalev_catalog_bundles_manage" ON scalev_catalog_bundles
   FOR ALL TO authenticated
   USING (dashboard_has_permission('whs:mapping'))
   WITH CHECK (dashboard_has_permission('whs:mapping'));
 
+DROP POLICY IF EXISTS "scalev_catalog_identifiers_read" ON scalev_catalog_identifiers;
 CREATE POLICY "scalev_catalog_identifiers_read" ON scalev_catalog_identifiers
   FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "scalev_catalog_identifiers_manage" ON scalev_catalog_identifiers;
 CREATE POLICY "scalev_catalog_identifiers_manage" ON scalev_catalog_identifiers
   FOR ALL TO authenticated
   USING (dashboard_has_permission('whs:mapping'))
   WITH CHECK (dashboard_has_permission('whs:mapping'));
 
+DROP POLICY IF EXISTS "scalev_catalog_sync_state_read" ON scalev_catalog_sync_state;
 CREATE POLICY "scalev_catalog_sync_state_read" ON scalev_catalog_sync_state
   FOR SELECT TO authenticated USING (true);
+DROP POLICY IF EXISTS "scalev_catalog_sync_state_manage" ON scalev_catalog_sync_state;
 CREATE POLICY "scalev_catalog_sync_state_manage" ON scalev_catalog_sync_state
   FOR ALL TO authenticated
   USING (dashboard_has_permission('whs:mapping'))
