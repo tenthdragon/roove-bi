@@ -18,6 +18,8 @@ export type ScalevCatalogBusinessSummary = {
   business_name: string;
   is_active: boolean;
   has_api_key: boolean;
+  catalog_schema_ready: boolean;
+  catalog_schema_message: string | null;
   sync_status: 'idle' | 'running' | 'success' | 'failed';
   last_synced_at: string | null;
   last_error: string | null;
@@ -156,6 +158,21 @@ async function requireScalevCatalogAccess(label = 'Katalog Scalev') {
   await requireDashboardPermissionAccess('whs:mapping', label);
 }
 
+function isCatalogSchemaMissingError(error: any): boolean {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return (
+    code === 'PGRST205'
+    || code === '42P01'
+    || /schema cache/i.test(message)
+    || /does not exist/i.test(message)
+  );
+}
+
+function getCatalogSchemaMissingMessage(): string {
+  return 'Tabel katalog Scalev belum tersedia untuk API Supabase. Jalankan migration tahap 1 lalu refresh schema cache Supabase.';
+}
+
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -185,6 +202,24 @@ function sanitizeSearchTerm(value: string | undefined): string | null {
     .replace(/[%(),]/g, ' ')
     .replace(/\s+/g, ' ');
   return cleaned ? `%${cleaned}%` : null;
+}
+
+async function getCatalogSchemaState(): Promise<{ ready: boolean; message: string | null }> {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('scalev_catalog_products')
+    .select('id')
+    .limit(1);
+
+  if (!error) {
+    return { ready: true, message: null };
+  }
+
+  if (isCatalogSchemaMissingError(error)) {
+    return { ready: false, message: getCatalogSchemaMissingMessage() };
+  }
+
+  throw error;
 }
 
 async function fetchScalevPaginatedResults<T>(
@@ -702,19 +737,59 @@ async function performScalevCatalogSync(business: ScalevBusinessConfig) {
 export async function getScalevCatalogBusinesses(): Promise<ScalevCatalogBusinessSummary[]> {
   await requireScalevCatalogAccess();
   const svc = createServiceSupabase();
+  const schema = await getCatalogSchemaState();
 
-  const [{ data: businesses, error: businessError }, { data: syncStates, error: syncError }] = await Promise.all([
-    svc
-      .from('scalev_webhook_businesses')
-      .select('id, business_code, business_name, is_active, api_key')
-      .order('business_code', { ascending: true }),
-    svc
-      .from('scalev_catalog_sync_state')
-      .select('business_id, sync_status, last_synced_at, last_error, products_count, variants_count, bundles_count, identifiers_count'),
-  ]);
+  const { data: businesses, error: businessError } = await svc
+    .from('scalev_webhook_businesses')
+    .select('id, business_code, business_name, is_active, api_key')
+    .order('business_code', { ascending: true });
 
   if (businessError) throw businessError;
-  if (syncError) throw syncError;
+
+  if (!schema.ready) {
+    return (businesses || []).map((business: any) => ({
+      id: Number(business.id),
+      business_code: business.business_code,
+      business_name: business.business_name,
+      is_active: Boolean(business.is_active),
+      has_api_key: Boolean(business.api_key),
+      catalog_schema_ready: false,
+      catalog_schema_message: schema.message,
+      sync_status: 'idle' as const,
+      last_synced_at: null,
+      last_error: null,
+      products_count: 0,
+      variants_count: 0,
+      bundles_count: 0,
+      identifiers_count: 0,
+    }));
+  }
+
+  const { data: syncStates, error: syncError } = await svc
+    .from('scalev_catalog_sync_state')
+    .select('business_id, sync_status, last_synced_at, last_error, products_count, variants_count, bundles_count, identifiers_count');
+
+  if (syncError) {
+    if (isCatalogSchemaMissingError(syncError)) {
+      return (businesses || []).map((business: any) => ({
+        id: Number(business.id),
+        business_code: business.business_code,
+        business_name: business.business_name,
+        is_active: Boolean(business.is_active),
+        has_api_key: Boolean(business.api_key),
+        catalog_schema_ready: false,
+        catalog_schema_message: getCatalogSchemaMissingMessage(),
+        sync_status: 'idle' as const,
+        last_synced_at: null,
+        last_error: null,
+        products_count: 0,
+        variants_count: 0,
+        bundles_count: 0,
+        identifiers_count: 0,
+      }));
+    }
+    throw syncError;
+  }
 
   const syncByBusinessId = new Map<number, any>(
     (syncStates || []).map((row: any) => [Number(row.business_id), row]),
@@ -728,6 +803,8 @@ export async function getScalevCatalogBusinesses(): Promise<ScalevCatalogBusines
       business_name: business.business_name,
       is_active: Boolean(business.is_active),
       has_api_key: Boolean(business.api_key),
+      catalog_schema_ready: true,
+      catalog_schema_message: null,
       sync_status: (syncState?.sync_status || 'idle') as 'idle' | 'running' | 'success' | 'failed',
       last_synced_at: syncState?.last_synced_at || null,
       last_error: syncState?.last_error || null,
@@ -782,6 +859,8 @@ export async function getScalevCatalogEntries(input: {
   limit?: number;
 }): Promise<ScalevCatalogEntryRow[]> {
   await requireScalevCatalogAccess();
+  const schema = await getCatalogSchemaState();
+  if (!schema.ready) return [];
   const svc = createServiceSupabase();
   const limit = Math.min(Math.max(Number(input.limit || 200), 1), 500);
   const searchTerm = sanitizeSearchTerm(input.search);
@@ -799,7 +878,10 @@ export async function getScalevCatalogEntries(input: {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      if (isCatalogSchemaMissingError(error)) return [];
+      throw error;
+    }
     return (data || []) as ScalevCatalogProductRow[];
   }
 
@@ -817,7 +899,10 @@ export async function getScalevCatalogEntries(input: {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      if (isCatalogSchemaMissingError(error)) return [];
+      throw error;
+    }
     return (data || []) as ScalevCatalogVariantRow[];
   }
 
@@ -834,7 +919,10 @@ export async function getScalevCatalogEntries(input: {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) {
+      if (isCatalogSchemaMissingError(error)) return [];
+      throw error;
+    }
     return (data || []) as ScalevCatalogBundleRow[];
   }
 
@@ -850,6 +938,9 @@ export async function getScalevCatalogEntries(input: {
   }
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) {
+    if (isCatalogSchemaMissingError(error)) return [];
+    throw error;
+  }
   return (data || []) as ScalevCatalogIdentifierRow[];
 }

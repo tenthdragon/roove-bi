@@ -228,6 +228,8 @@ export default function ScalevCatalogSettingsTab() {
     () => businesses.find((business) => business.id === selectedBusinessId) || null,
     [businesses, selectedBusinessId],
   );
+  const schemaReady = businesses.every((business) => business.catalog_schema_ready);
+  const schemaNotice = businesses.find((business) => !business.catalog_schema_ready)?.catalog_schema_message || null;
 
   const currentPlaceholder = VIEW_OPTIONS.find((option) => option.id === view)?.placeholder || 'Cari...';
 
@@ -282,6 +284,15 @@ export default function ScalevCatalogSettingsTab() {
   }, [selectedBusinessId, view, search]);
 
   async function handleSyncBusiness(businessId: number) {
+    const business = businesses.find((row) => row.id === businessId);
+    if (business && !business.catalog_schema_ready) {
+      setMessage({
+        type: 'error',
+        text: business.catalog_schema_message || 'Schema katalog Scalev belum siap dipakai.',
+      });
+      return;
+    }
+
     setSyncingBusinessId(businessId);
     setMessage(null);
     try {
@@ -299,6 +310,14 @@ export default function ScalevCatalogSettingsTab() {
   }
 
   async function handleSyncAll() {
+    if (!schemaReady) {
+      setMessage({
+        type: 'error',
+        text: schemaNotice || 'Schema katalog Scalev belum siap dipakai.',
+      });
+      return;
+    }
+
     setSyncingAll(true);
     setMessage(null);
     try {
@@ -355,14 +374,19 @@ export default function ScalevCatalogSettingsTab() {
           </div>
           <button
             onClick={handleSyncAll}
-            disabled={syncingAll || loadingBusinesses || businesses.filter((business) => business.has_api_key).length === 0}
+            disabled={
+              syncingAll
+              || loadingBusinesses
+              || !schemaReady
+              || businesses.filter((business) => business.has_api_key).length === 0
+            }
             style={{
               padding: '8px 14px',
               borderRadius: 8,
               border: '1px solid var(--border)',
               background: 'transparent',
-              color: 'var(--text)',
-              cursor: syncingAll ? 'wait' : 'pointer',
+              color: syncingAll || !schemaReady ? 'var(--dim)' : 'var(--text)',
+              cursor: syncingAll ? 'wait' : (!schemaReady ? 'not-allowed' : 'pointer'),
               fontSize: 12,
               fontWeight: 700,
             }}
@@ -370,6 +394,23 @@ export default function ScalevCatalogSettingsTab() {
             {syncingAll ? 'Sync Semua...' : 'Sync Semua Business'}
           </button>
         </div>
+
+        {!schemaReady && schemaNotice ? (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: '10px 12px',
+              borderRadius: 10,
+              border: '1px solid rgba(251,191,36,0.35)',
+              background: 'rgba(251,191,36,0.08)',
+              color: '#fde68a',
+              fontSize: 12,
+              lineHeight: 1.6,
+            }}
+          >
+            {schemaNotice}
+          </div>
+        ) : null}
 
         {loadingBusinesses ? (
           <div style={{ color: 'var(--dim)', fontSize: 13 }}>Memuat business Scalev...</div>
@@ -438,16 +479,16 @@ export default function ScalevCatalogSettingsTab() {
                         event.stopPropagation();
                         handleSyncBusiness(business.id);
                       }}
-                      disabled={!business.has_api_key || isSyncing || syncingAll}
+                      disabled={!business.has_api_key || isSyncing || syncingAll || !business.catalog_schema_ready}
                       style={{
                         padding: '6px 10px',
                         borderRadius: 8,
                         border: '1px solid var(--border)',
                         background: 'transparent',
-                        color: business.has_api_key ? 'var(--accent)' : 'var(--dim)',
+                        color: business.has_api_key && business.catalog_schema_ready ? 'var(--accent)' : 'var(--dim)',
                         fontSize: 11,
                         fontWeight: 700,
-                        cursor: business.has_api_key ? 'pointer' : 'not-allowed',
+                        cursor: business.has_api_key && business.catalog_schema_ready ? 'pointer' : 'not-allowed',
                       }}
                     >
                       {isSyncing ? 'Syncing...' : 'Sync Dari API'}
@@ -495,7 +536,23 @@ export default function ScalevCatalogSettingsTab() {
             Menampilkan <b style={{ color: 'var(--text)' }}>{VIEW_OPTIONS.find((option) => option.id === view)?.label.toLowerCase()}</b> untuk{' '}
             <b style={{ color: 'var(--text)' }}>{selectedBusiness.business_name}</b>.
           </div>
-          <DataTable view={view} rows={rows} loading={loadingRows} />
+          {!selectedBusiness.catalog_schema_ready ? (
+            <div
+              style={{
+                background: 'var(--card)',
+                border: '1px solid rgba(251,191,36,0.25)',
+                borderRadius: 12,
+                padding: 20,
+                color: '#fde68a',
+                fontSize: 13,
+                lineHeight: 1.7,
+              }}
+            >
+              {selectedBusiness.catalog_schema_message || 'Schema katalog Scalev belum siap dipakai.'}
+            </div>
+          ) : (
+            <DataTable view={view} rows={rows} loading={loadingRows} />
+          )}
         </>
       ) : (
         <div
