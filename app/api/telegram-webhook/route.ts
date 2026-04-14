@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildDailyReport, buildMonthlyReport } from '@/lib/daily-report';
 import { analyzeMonthlyReport } from '@/lib/opus-analyst';
 import { sendTelegramMessage, answerCallbackQuery } from '@/lib/telegram';
+import {
+  approveStockReclassRequestViaTelegram,
+  rejectStockReclassRequestViaTelegram,
+} from '@/lib/warehouse-ledger-actions';
 
 export const maxDuration = 300;
 
@@ -23,6 +27,17 @@ function isAnalyzePayloadValid(parts: string[]) {
   return parts.slice(1).every((value) => /^\d{4}-\d{2}-\d{2}$/.test(value));
 }
 
+function parseReclassCallbackData(data: string) {
+  const parts = data.split(':');
+  if (parts.length !== 3 || parts[0] !== 'reclass') return null;
+  const action = parts[1];
+  const requestId = Number(parts[2]);
+  if (!['approve', 'reject'].includes(action) || !Number.isFinite(requestId) || requestId <= 0) {
+    return null;
+  }
+  return { action, requestId };
+}
+
 export async function POST(req: NextRequest) {
   try {
     if (!isAuthorizedTelegramWebhook(req)) {
@@ -34,7 +49,10 @@ export async function POST(req: NextRequest) {
     const expectedChatId = process.env.TELEGRAM_CHAT_ID;
     const effectiveChatId = extractChatId(body);
 
-    if (expectedChatId && effectiveChatId && effectiveChatId !== expectedChatId) {
+    const callbackData = body?.callback_query?.data || '';
+    const isReclassCallback = callbackData.startsWith('reclass:');
+
+    if (!isReclassCallback && expectedChatId && effectiveChatId && effectiveChatId !== expectedChatId) {
       return NextResponse.json({ ok: true });
     }
 
@@ -42,6 +60,35 @@ export async function POST(req: NextRequest) {
     if (body.callback_query) {
       const cb = body.callback_query;
       const data = cb.data || '';
+
+      if (data.startsWith('reclass:')) {
+        const parsed = parseReclassCallbackData(data);
+        if (!parsed) {
+          await answerCallbackQuery(cb.id, 'Payload reklasifikasi tidak valid.');
+          return NextResponse.json({ ok: true });
+        }
+
+        const chatId = extractChatId(body);
+        if (!chatId) {
+          await answerCallbackQuery(cb.id, 'Chat Telegram tidak dikenali.');
+          return NextResponse.json({ ok: true });
+        }
+
+        try {
+          if (parsed.action === 'approve') {
+            const result = await approveStockReclassRequestViaTelegram(parsed.requestId, chatId);
+            await answerCallbackQuery(cb.id, `Request #${result.requestId} berhasil di-approve.`);
+          } else {
+            const result = await rejectStockReclassRequestViaTelegram(parsed.requestId, chatId);
+            await answerCallbackQuery(cb.id, `Request #${result.requestId} berhasil di-reject.`);
+          }
+        } catch (err: any) {
+          const message = (err?.message || 'Gagal memproses reklasifikasi.').slice(0, 180);
+          await answerCallbackQuery(cb.id, message);
+        }
+
+        return NextResponse.json({ ok: true });
+      }
 
       if (data.startsWith('analyze:')) {
         await answerCallbackQuery(cb.id, 'Starting analysis...');

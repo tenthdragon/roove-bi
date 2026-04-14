@@ -97,6 +97,25 @@ async function notifyDirekturs(message: string) {
   }
 }
 
+async function notifyDirektursWithMarkup(message: string, replyMarkup?: any) {
+  try {
+    const svc = createServiceSupabase();
+    const { data: direkturs } = await svc
+      .from('profiles')
+      .select('telegram_chat_id')
+      .in('role', ['direktur_ops', 'direktur_operasional'])
+      .not('telegram_chat_id', 'is', null);
+
+    if (direkturs && direkturs.length > 0) {
+      await Promise.allSettled(
+        direkturs.map(d => sendTelegramToChat(d.telegram_chat_id, message, { replyMarkup }))
+      );
+    }
+  } catch (e) {
+    console.warn('[warehouse] telegram notify failed:', e);
+  }
+}
+
 function formatNotification(type: string, productName: string, qty: number, gudang: string, userName: string, extra?: string): string {
   const icon = type === 'Stock Masuk' ? '\u{1F4E6}' : type === 'Transfer' ? '\u{1F500}' : type === 'Dispose' ? '\u{1F5D1}' : '\u{1F4E4}';
   const time = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -218,6 +237,12 @@ interface WarehouseStockReclassRequestInput {
 }
 
 type WarehouseStockReclassStatus = 'requested' | 'applied' | 'rejected';
+
+type TelegramWarehouseActor = {
+  id: string;
+  role: string;
+  displayName: string;
+};
 
 export interface WarehouseUndeductedOrderIssue {
   order_id: string;
@@ -1509,6 +1534,69 @@ function isUniqueViolation(error: any) {
   return code === '23505' || message.includes('duplicate key');
 }
 
+async function resolveTelegramWarehouseActorOrThrow(
+  svc: ReturnType<typeof createServiceSupabase>,
+  telegramChatId: string,
+  permissionKey: string,
+): Promise<TelegramWarehouseActor> {
+  const { data: profiles, error: profileErr } = await svc
+    .from('profiles')
+    .select('id, role, full_name, email')
+    .eq('telegram_chat_id', telegramChatId)
+    .neq('role', 'pending')
+    .limit(2);
+  if (profileErr) throw profileErr;
+
+  if (!profiles || profiles.length === 0) {
+    throw new Error('Chat Telegram ini belum terhubung ke akun dashboard yang berhak approve.');
+  }
+  if (profiles.length > 1) {
+    throw new Error('Telegram chat ini terhubung ke lebih dari satu akun. Hubungi admin untuk merapikan mapping.');
+  }
+
+  const profile = profiles[0];
+  if (profile.role !== 'owner') {
+    const { data: permissions, error: permissionErr } = await svc
+      .from('role_permissions')
+      .select('permission_key')
+      .eq('role', profile.role)
+      .eq('permission_key', permissionKey)
+      .limit(1);
+    if (permissionErr) throw permissionErr;
+    if (!permissions || permissions.length === 0) {
+      throw new Error('Akun Telegram ini tidak memiliki izin approve reklasifikasi.');
+    }
+  }
+
+  return {
+    id: profile.id,
+    role: profile.role,
+    displayName: profile.full_name || profile.email || 'Unknown',
+  };
+}
+
+async function loadStockReclassRequestWithProductsOrThrow(
+  svc: ReturnType<typeof createServiceSupabase>,
+  requestId: number,
+) {
+  const { data: request, error: requestErr } = await svc
+    .from('warehouse_stock_reclass_requests')
+    .select('*')
+    .eq('id', requestId)
+    .maybeSingle();
+  if (requestErr) throw requestErr;
+  if (!request) throw new Error(`Request reklasifikasi #${requestId} tidak ditemukan.`);
+
+  const products = await loadWarehouseProductsByIds(svc, [
+    Number(request.source_warehouse_product_id),
+    Number(request.target_warehouse_product_id),
+  ]);
+  const sourceProduct = products.get(Number(request.source_warehouse_product_id));
+  const targetProduct = products.get(Number(request.target_warehouse_product_id));
+
+  return { request, sourceProduct, targetProduct };
+}
+
 async function applyStockReclassRequestInternal(
   svc: ReturnType<typeof createServiceSupabase>,
   request: any,
@@ -1877,8 +1965,9 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
     hour: '2-digit',
     minute: '2-digit',
   });
-  await notifyDirekturs(
+  await notifyDirektursWithMarkup(
     `📌 <b>Request Reklasifikasi Stock</b>\n` +
+    `Request ID: ${data.id}\n` +
     `Dari: ${sourceProduct.name} (${sourceProduct.category})\n` +
     `Ke: ${targetProduct.name} (${targetProduct.category})\n` +
     `Gudang: ${sourceProduct.warehouse} - ${sourceProduct.entity}\n` +
@@ -1887,34 +1976,28 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
     `Auto-create target: ${targetProductAutoCreated ? 'ya' : 'tidak'}\n` +
     `Alasan: ${input.reason.trim()}\n` +
     `Oleh: ${userName}\n` +
-    `Waktu: ${time}`
+    `Waktu: ${time}`,
+    {
+      inline_keyboard: [[
+        { text: '✅ Approve', callback_data: `reclass:approve:${data.id}` },
+        { text: '❌ Reject', callback_data: `reclass:reject:${data.id}` },
+      ]],
+    }
   );
 
   return data;
 }
 
-export async function approveStockReclassRequest(requestId: number) {
-  await requireWarehousePermission('wh:reclass_approve', 'Approve Reklasifikasi Stock');
+async function approveStockReclassRequestAsActor(
+  requestId: number,
+  actor: { id: string; displayName: string },
+) {
   const svc = createServiceSupabase();
-  const userId = await getCurrentUserId();
-  if (!userId) throw new Error('Pengguna tidak ditemukan.');
-
-  const { data: request, error: requestErr } = await svc
-    .from('warehouse_stock_reclass_requests')
-    .select('*')
-    .eq('id', requestId)
-    .maybeSingle();
-  if (requestErr) throw requestErr;
-  if (!request || request.status !== 'requested') {
+  const { request, sourceProduct, targetProduct } = await loadStockReclassRequestWithProductsOrThrow(svc, requestId);
+  if (request.status !== 'requested') {
     throw new Error('Request reklasifikasi ini tidak siap di-approve.');
   }
 
-  const products = await loadWarehouseProductsByIds(svc, [
-    Number(request.source_warehouse_product_id),
-    Number(request.target_warehouse_product_id),
-  ]);
-  const sourceProduct = products.get(Number(request.source_warehouse_product_id));
-  const targetProduct = products.get(Number(request.target_warehouse_product_id));
   validateStockReclassProducts(sourceProduct, targetProduct);
 
   const applied = await applyStockReclassRequestInternal(
@@ -1922,7 +2005,7 @@ export async function approveStockReclassRequest(requestId: number) {
     request,
     sourceProduct,
     targetProduct,
-    userId,
+    actor.id,
   );
 
   const nowIso = new Date().toISOString();
@@ -1930,9 +2013,9 @@ export async function approveStockReclassRequest(requestId: number) {
     .from('warehouse_stock_reclass_requests')
     .update({
       status: 'applied',
-      approved_by: userId,
+      approved_by: actor.id,
       approved_at: nowIso,
-      applied_by: userId,
+      applied_by: actor.id,
       applied_at: nowIso,
       ledger_reference_id: applied.referenceId,
       updated_at: nowIso,
@@ -1941,7 +2024,6 @@ export async function approveStockReclassRequest(requestId: number) {
     .eq('status', 'requested');
   if (updateErr) throw updateErr;
 
-  const approverName = await getCurrentUserName();
   const time = new Date(nowIso).toLocaleString('id-ID', {
     timeZone: 'Asia/Jakarta',
     day: 'numeric',
@@ -1952,48 +2034,44 @@ export async function approveStockReclassRequest(requestId: number) {
   });
   await notifyDirekturs(
     `✅ <b>Reklasifikasi Stock Applied</b>\n` +
+    `Request ID: ${requestId}\n` +
     `Dari: ${sourceProduct.name} (${sourceProduct.category})\n` +
     `Ke: ${targetProduct.name} (${targetProduct.category})\n` +
     `Qty: ${Number(request.quantity || 0).toLocaleString('id-ID')}\n` +
     `Ref Ledger: ${applied.referenceId}\n` +
-    `Oleh: ${approverName}\n` +
+    `Oleh: ${actor.displayName}\n` +
     `Waktu: ${time}`
   );
 
   return { requestId, referenceId: applied.referenceId };
 }
 
-export async function rejectStockReclassRequest(requestId: number, rejectionReason?: string | null) {
-  await requireWarehousePermission('wh:reclass_approve', 'Reject Reklasifikasi Stock');
+async function rejectStockReclassRequestAsActor(
+  requestId: number,
+  actor: { id: string; displayName: string },
+  rejectionReason?: string | null,
+) {
   const svc = createServiceSupabase();
-  const userId = await getCurrentUserId();
-  if (!userId) throw new Error('Pengguna tidak ditemukan.');
-
-  const { data: request, error: requestErr } = await svc
-    .from('warehouse_stock_reclass_requests')
-    .select('id, status')
-    .eq('id', requestId)
-    .maybeSingle();
-  if (requestErr) throw requestErr;
-  if (!request || request.status !== 'requested') {
+  const { request } = await loadStockReclassRequestWithProductsOrThrow(svc, requestId);
+  if (request.status !== 'requested') {
     throw new Error('Request reklasifikasi ini tidak bisa ditolak.');
   }
 
   const nowIso = new Date().toISOString();
+  const normalizedReason = rejectionReason?.trim() || null;
   const { error } = await svc
     .from('warehouse_stock_reclass_requests')
     .update({
       status: 'rejected',
-      rejected_by: userId,
+      rejected_by: actor.id,
       rejected_at: nowIso,
-      rejection_reason: rejectionReason?.trim() || null,
+      rejection_reason: normalizedReason,
       updated_at: nowIso,
     })
     .eq('id', requestId)
     .eq('status', 'requested');
   if (error) throw error;
 
-  const rejectorName = await getCurrentUserName();
   const time = new Date(nowIso).toLocaleString('id-ID', {
     timeZone: 'Asia/Jakarta',
     day: 'numeric',
@@ -2005,12 +2083,56 @@ export async function rejectStockReclassRequest(requestId: number, rejectionReas
   await notifyDirekturs(
     `❌ <b>Reklasifikasi Stock Rejected</b>\n` +
     `Request ID: ${requestId}\n` +
-    `Alasan reject: ${rejectionReason?.trim() || '-'}\n` +
-    `Oleh: ${rejectorName}\n` +
+    `Alasan reject: ${normalizedReason || '-'}\n` +
+    `Oleh: ${actor.displayName}\n` +
     `Waktu: ${time}`
   );
 
   return { requestId };
+}
+
+export async function approveStockReclassRequest(requestId: number) {
+  await requireWarehousePermission('wh:reclass_approve', 'Approve Reklasifikasi Stock');
+  const userId = await getCurrentUserId();
+  if (!userId) throw new Error('Pengguna tidak ditemukan.');
+  const approverName = await getCurrentUserName();
+  return approveStockReclassRequestAsActor(requestId, {
+    id: userId,
+    displayName: approverName,
+  });
+}
+
+export async function rejectStockReclassRequest(requestId: number, rejectionReason?: string | null) {
+  await requireWarehousePermission('wh:reclass_approve', 'Reject Reklasifikasi Stock');
+  const userId = await getCurrentUserId();
+  if (!userId) throw new Error('Pengguna tidak ditemukan.');
+  const rejectorName = await getCurrentUserName();
+  return rejectStockReclassRequestAsActor(requestId, {
+    id: userId,
+    displayName: rejectorName,
+  }, rejectionReason);
+}
+
+export async function approveStockReclassRequestViaTelegram(requestId: number, telegramChatId: string) {
+  const svc = createServiceSupabase();
+  const actor = await resolveTelegramWarehouseActorOrThrow(svc, telegramChatId, 'wh:reclass_approve');
+  const result = await approveStockReclassRequestAsActor(requestId, actor);
+  return {
+    ...result,
+    actorName: actor.displayName,
+  };
+}
+
+export async function rejectStockReclassRequestViaTelegram(requestId: number, telegramChatId: string) {
+  const svc = createServiceSupabase();
+  const actor = await resolveTelegramWarehouseActorOrThrow(svc, telegramChatId, 'wh:reclass_approve');
+  const reason = `Rejected via Telegram oleh ${actor.displayName}`;
+  const result = await rejectStockReclassRequestAsActor(requestId, actor, reason);
+  return {
+    ...result,
+    actorName: actor.displayName,
+    rejectionReason: reason,
+  };
 }
 
 // ============================================================
