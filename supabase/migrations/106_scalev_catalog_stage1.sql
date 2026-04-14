@@ -6,6 +6,37 @@
 -- refresh and future mapping improvements.
 -- ============================================================
 
+-- Compatibility helpers:
+-- Some environments may not yet have the shared RBAC helper from
+-- migration 099 or the updated_at trigger helper from migration 064.
+-- Re-declaring them here is safe because CREATE OR REPLACE is idempotent.
+
+CREATE OR REPLACE FUNCTION dashboard_has_permission(p_permission_key TEXT)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM profiles p
+    LEFT JOIN role_permissions rp
+      ON rp.role = p.role
+     AND rp.permission_key = p_permission_key
+    WHERE p.id = auth.uid()
+      AND (p.role = 'owner' OR rp.permission_key IS NOT NULL)
+  );
+$$;
+
+CREATE OR REPLACE FUNCTION trg_set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = clock_timestamp();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TABLE IF NOT EXISTS scalev_catalog_products (
   id BIGSERIAL PRIMARY KEY,
   business_id INT NOT NULL REFERENCES scalev_webhook_businesses(id) ON DELETE CASCADE,
