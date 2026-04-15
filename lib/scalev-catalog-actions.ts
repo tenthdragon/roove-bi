@@ -5,6 +5,7 @@ import {
   requireDashboardPermissionAccess,
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
+import { recordWarehouseActivityLog } from '@/lib/warehouse-activity-log-actions';
 
 const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
 const SCALEV_PAGE_SIZE = 50;
@@ -669,7 +670,10 @@ async function getBusinessById(businessId: number): Promise<ScalevBusinessConfig
   return data as ScalevBusinessConfig;
 }
 
-async function performScalevCatalogSync(business: ScalevBusinessConfig) {
+async function performScalevCatalogSync(
+  business: ScalevBusinessConfig,
+  trigger: 'single' | 'bulk' = 'single',
+) {
   if (!business.api_key) {
     throw new Error(`Business ${business.business_code} belum punya API key.`);
   }
@@ -716,6 +720,30 @@ async function performScalevCatalogSync(business: ScalevBusinessConfig) {
       identifiers_count: payload.identifierRows.length,
     });
 
+    await recordWarehouseActivityLog({
+      scope: 'scalev_catalog_sync',
+      action: 'sync_success',
+      screen: 'Katalog Scalev',
+      summary: `Sync katalog ${business.business_code} berhasil`,
+      targetType: 'business',
+      targetId: String(business.id),
+      targetLabel: `${business.business_code} • ${business.business_name}`,
+      businessCode: business.business_code,
+      changedFields: ['products_count', 'variants_count', 'bundles_count', 'identifiers_count', 'last_synced_at'],
+      beforeState: {},
+      afterState: {
+        sync_status: 'success',
+        products_count: payload.productRows.length,
+        variants_count: payload.variantRows.length,
+        bundles_count: payload.bundleRows.length,
+        identifiers_count: payload.identifierRows.length,
+        last_synced_at: syncAt,
+      },
+      context: {
+        trigger,
+      },
+    });
+
     return {
       success: true,
       business_id: business.id,
@@ -733,6 +761,26 @@ async function performScalevCatalogSync(business: ScalevBusinessConfig) {
       business_code: business.business_code,
       sync_status: 'failed',
       last_error: error?.message || 'Gagal sync katalog Scalev.',
+    });
+
+    await recordWarehouseActivityLog({
+      scope: 'scalev_catalog_sync',
+      action: 'sync_failed',
+      screen: 'Katalog Scalev',
+      summary: `Sync katalog ${business.business_code} gagal`,
+      targetType: 'business',
+      targetId: String(business.id),
+      targetLabel: `${business.business_code} • ${business.business_name}`,
+      businessCode: business.business_code,
+      changedFields: ['sync_status', 'last_error'],
+      beforeState: {},
+      afterState: {
+        sync_status: 'failed',
+        last_error: error?.message || 'Gagal sync katalog Scalev.',
+      },
+      context: {
+        trigger,
+      },
     });
     throw error;
   }
@@ -823,7 +871,7 @@ export async function getScalevCatalogBusinesses(): Promise<ScalevCatalogBusines
 export async function syncScalevCatalogBusiness(businessId: number) {
   await requireScalevCatalogAccess();
   const business = await getBusinessById(businessId);
-  return performScalevCatalogSync(business);
+  return performScalevCatalogSync(business, 'single');
 }
 
 export async function syncScalevCatalogAllBusinesses() {
@@ -841,7 +889,7 @@ export async function syncScalevCatalogAllBusinesses() {
   const results: Array<Record<string, any>> = [];
   for (const business of (data || []) as ScalevBusinessConfig[]) {
     try {
-      results.push(await performScalevCatalogSync(business));
+      results.push(await performScalevCatalogSync(business, 'bulk'));
     } catch (syncError: any) {
       results.push({
         success: false,
@@ -852,6 +900,30 @@ export async function syncScalevCatalogAllBusinesses() {
       });
     }
   }
+
+  await recordWarehouseActivityLog({
+    scope: 'scalev_catalog_sync',
+    action: 'sync_all',
+    screen: 'Katalog Scalev',
+    summary: 'Menjalankan sync katalog untuk semua business aktif',
+    targetType: 'batch',
+    targetId: 'all-businesses',
+    targetLabel: 'All Scalev Businesses',
+    changedFields: ['total_businesses', 'success_count', 'failed_count'],
+    beforeState: {},
+    afterState: {
+      total_businesses: results.length,
+      success_count: results.filter((row) => row.success).length,
+      failed_count: results.filter((row) => !row.success).length,
+    },
+    context: {
+      businesses: results.map((row) => ({
+        business_id: row.business_id,
+        business_code: row.business_code,
+        success: Boolean(row.success),
+      })),
+    },
+  });
 
   return results;
 }

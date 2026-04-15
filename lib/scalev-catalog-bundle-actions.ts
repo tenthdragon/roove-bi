@@ -5,6 +5,7 @@ import {
   requireDashboardPermissionAccess,
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
+import { recordWarehouseActivityLog } from '@/lib/warehouse-activity-log-actions';
 
 const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
 const SUPABASE_PAGE_SIZE = 1000;
@@ -409,6 +410,24 @@ export async function syncScalevCatalogBundleLines(businessId: number) {
 
   if (bundleIds.length === 0) {
     await cleanupStaleBundleLines(businessId, new Date().toISOString());
+    await recordWarehouseActivityLog({
+      scope: 'scalev_bundle_sync',
+      action: 'sync_success',
+      screen: 'Bundle Mapping Scalev',
+      summary: `Sync isi bundle ${business.business_code} selesai tanpa bundle aktif`,
+      targetType: 'business',
+      targetId: String(business.id),
+      targetLabel: `${business.business_code} • ${business.business_name}`,
+      businessCode: business.business_code,
+      changedFields: ['bundles_scanned', 'bundle_lines_count', 'failed_count'],
+      beforeState: {},
+      afterState: {
+        bundles_scanned: 0,
+        bundle_lines_count: 0,
+        failed_count: 0,
+      },
+      context: {},
+    });
     return {
       success: true,
       business_id: business.id,
@@ -433,6 +452,30 @@ export async function syncScalevCatalogBundleLines(businessId: number) {
   if (errors.length === 0) {
     await cleanupStaleBundleLines(businessId, syncAt);
   }
+
+  await recordWarehouseActivityLog({
+    scope: 'scalev_bundle_sync',
+    action: errors.length === 0 ? 'sync_success' : 'sync_partial',
+    screen: 'Bundle Mapping Scalev',
+    summary: errors.length === 0
+      ? `Sync isi bundle ${business.business_code} berhasil`
+      : `Sync isi bundle ${business.business_code} selesai dengan ${errors.length} gagal`,
+    targetType: 'business',
+    targetId: String(business.id),
+    targetLabel: `${business.business_code} • ${business.business_name}`,
+    businessCode: business.business_code,
+    changedFields: ['bundles_scanned', 'bundle_lines_count', 'failed_count', 'last_synced_at'],
+    beforeState: {},
+    afterState: {
+      bundles_scanned: bundleIds.length,
+      bundle_lines_count: rows.length,
+      failed_count: errors.length,
+      last_synced_at: syncAt,
+    },
+    context: {
+      failed_bundle_ids: errors.slice(0, 20).map(({ item }) => item),
+    },
+  });
 
   return {
     success: errors.length === 0,

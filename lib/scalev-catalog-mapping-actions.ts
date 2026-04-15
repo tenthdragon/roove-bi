@@ -5,6 +5,10 @@ import {
   requireDashboardPermissionAccess,
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
+import {
+  getWarehouseActivityLogChangedFields,
+  recordWarehouseActivityLog,
+} from '@/lib/warehouse-activity-log-actions';
 
 type WarehouseProductLite = {
   id: number;
@@ -99,6 +103,24 @@ function tokenize(value: string): string[] {
     .split(' ')
     .map((part) => part.trim())
     .filter((part) => part.length >= 2);
+}
+
+function formatWarehouseProductLabel(product: WarehouseProductLite | null | undefined) {
+  if (!product?.id) return null;
+  return `${product.name} [${product.warehouse || '-'}-${product.entity || '-'}]`;
+}
+
+function pickWarehouseProduct(value: any): WarehouseProductLite | null {
+  if (!value) return null;
+  const row = Array.isArray(value) ? value[0] : value;
+  if (!row?.id) return null;
+  return {
+    id: Number(row.id),
+    name: row.name,
+    category: row.category || null,
+    entity: row.entity || null,
+    warehouse: row.warehouse || null,
+  };
 }
 
 function scoreNameSimilarity(left: string | null | undefined, right: string | null | undefined): number {
@@ -653,6 +675,32 @@ export async function saveScalevCatalogProductMapping(input: {
     throw new Error('Entity Scalev tidak ditemukan di katalog tersimpan.');
   }
 
+  const scalevEntityLabel = entityType === 'variant'
+    ? (entityRow.name || entityRow.product_name || `Variant ${entityId}`)
+    : (entityRow.display || entityRow.public_name || entityRow.name || `Product ${entityId}`);
+
+  const { data: beforeMapping, error: beforeMappingError } = await svc
+    .from('warehouse_scalev_catalog_mapping')
+    .select(`
+      id,
+      business_id,
+      business_code,
+      scalev_entity_type,
+      scalev_entity_key,
+      scalev_entity_label,
+      warehouse_product_id,
+      mapping_source,
+      notes,
+      warehouse_products(id, name, category, entity, warehouse)
+    `)
+    .eq('business_id', input.businessId)
+    .eq('scalev_entity_key', entityKey)
+    .maybeSingle();
+  if (beforeMappingError) {
+    if (isMissingTableError(beforeMappingError)) throw new Error(getMissingMappingSchemaMessage());
+    throw beforeMappingError;
+  }
+
   if (input.warehouseProductId == null && !notes) {
     const { error } = await svc
       .from('warehouse_scalev_catalog_mapping')
@@ -663,12 +711,45 @@ export async function saveScalevCatalogProductMapping(input: {
       if (isMissingTableError(error)) throw new Error(getMissingMappingSchemaMessage());
       throw error;
     }
+
+    if (beforeMapping) {
+      const beforeState = {
+        business_code: beforeMapping.business_code || entityRow.business_code,
+        scalev_entity_type: beforeMapping.scalev_entity_type || entityType,
+        scalev_entity_key: beforeMapping.scalev_entity_key,
+        scalev_entity_label: beforeMapping.scalev_entity_label || null,
+        warehouse_product_id: beforeMapping.warehouse_product_id ?? null,
+        warehouse_product_label: formatWarehouseProductLabel(pickWarehouseProduct(beforeMapping.warehouse_products)),
+        mapping_source: beforeMapping.mapping_source || null,
+        notes: beforeMapping.notes || null,
+      };
+      await recordWarehouseActivityLog({
+        scope: 'scalev_catalog_product_mapping',
+        action: 'clear',
+        screen: 'Product Mapping Scalev',
+        summary: `Menghapus mapping ${scalevEntityLabel}`,
+        targetType: entityType,
+        targetId: entityKey,
+        targetLabel: scalevEntityLabel,
+        businessCode: entityRow.business_code,
+        changedFields: ['warehouse_product_id', 'notes'],
+        beforeState,
+        afterState: {
+          business_code: entityRow.business_code,
+          scalev_entity_type: entityType,
+          scalev_entity_key: entityKey,
+          scalev_entity_label: scalevEntityLabel,
+          warehouse_product_id: null,
+          warehouse_product_label: null,
+          mapping_source: null,
+          notes: null,
+        },
+        context: {},
+      });
+    }
+
     return { success: true, action: 'cleared' as const };
   }
-
-  const scalevEntityLabel = entityType === 'variant'
-    ? (entityRow.name || entityRow.product_name || `Variant ${entityId}`)
-    : (entityRow.display || entityRow.public_name || entityRow.name || `Product ${entityId}`);
 
   const payload = {
     business_id: Number(entityRow.business_id),
@@ -689,6 +770,96 @@ export async function saveScalevCatalogProductMapping(input: {
   if (error) {
     if (isMissingTableError(error)) throw new Error(getMissingMappingSchemaMessage());
     throw error;
+  }
+
+  const { data: afterMapping, error: afterMappingError } = await svc
+    .from('warehouse_scalev_catalog_mapping')
+    .select(`
+      id,
+      business_id,
+      business_code,
+      scalev_entity_type,
+      scalev_entity_key,
+      scalev_entity_label,
+      warehouse_product_id,
+      mapping_source,
+      notes,
+      warehouse_products(id, name, category, entity, warehouse)
+    `)
+    .eq('business_id', input.businessId)
+    .eq('scalev_entity_key', entityKey)
+    .maybeSingle();
+  if (afterMappingError) {
+    if (isMissingTableError(afterMappingError)) throw new Error(getMissingMappingSchemaMessage());
+    throw afterMappingError;
+  }
+
+  const beforeState = {
+    business_code: beforeMapping?.business_code || entityRow.business_code,
+    scalev_entity_type: beforeMapping?.scalev_entity_type || entityType,
+    scalev_entity_key: entityKey,
+    scalev_entity_label: beforeMapping?.scalev_entity_label || scalevEntityLabel,
+    warehouse_product_id: beforeMapping?.warehouse_product_id ?? null,
+    warehouse_product_label: formatWarehouseProductLabel(pickWarehouseProduct(beforeMapping?.warehouse_products)),
+    mapping_source: beforeMapping?.mapping_source || null,
+    notes: beforeMapping?.notes || null,
+  };
+  const afterState = {
+    business_code: afterMapping?.business_code || entityRow.business_code,
+    scalev_entity_type: afterMapping?.scalev_entity_type || entityType,
+    scalev_entity_key: entityKey,
+    scalev_entity_label: afterMapping?.scalev_entity_label || scalevEntityLabel,
+    warehouse_product_id: afterMapping?.warehouse_product_id ?? null,
+    warehouse_product_label: formatWarehouseProductLabel(pickWarehouseProduct(afterMapping?.warehouse_products)),
+    mapping_source: afterMapping?.mapping_source || 'manual',
+    notes: afterMapping?.notes || null,
+  };
+  const changedFields = getWarehouseActivityLogChangedFields(beforeState, afterState, [
+    'warehouse_product_id',
+    'notes',
+    'mapping_source',
+  ]);
+
+  if (changedFields.length > 0) {
+    let action = 'update';
+    let summary = `Memperbarui mapping ${scalevEntityLabel}`;
+
+    if (!beforeState.warehouse_product_id && afterState.warehouse_product_id) {
+      action = 'map';
+      summary = `Memetakan ${scalevEntityLabel} ke ${afterState.warehouse_product_label}`;
+    } else if (
+      beforeState.warehouse_product_id
+      && afterState.warehouse_product_id
+      && beforeState.warehouse_product_id !== afterState.warehouse_product_id
+    ) {
+      action = 'remap';
+      summary = `Mengubah mapping ${scalevEntityLabel} dari ${beforeState.warehouse_product_label} ke ${afterState.warehouse_product_label}`;
+    } else if (beforeState.warehouse_product_id && !afterState.warehouse_product_id) {
+      action = 'unmap';
+      summary = `Melepas mapping ${scalevEntityLabel} dari ${beforeState.warehouse_product_label}`;
+    } else if (beforeState.notes !== afterState.notes) {
+      action = 'update_notes';
+      summary = `Memperbarui catatan untuk ${scalevEntityLabel}`;
+    }
+
+    await recordWarehouseActivityLog({
+      scope: 'scalev_catalog_product_mapping',
+      action,
+      screen: 'Product Mapping Scalev',
+      summary,
+      targetType: entityType,
+      targetId: entityKey,
+      targetLabel: scalevEntityLabel,
+      businessCode: entityRow.business_code,
+      changedFields,
+      beforeState,
+      afterState,
+      context: {
+        business_id: Number(entityRow.business_id),
+        scalev_product_id: Number(entityRow.scalev_product_id),
+        scalev_variant_id: entityType === 'variant' ? Number(entityRow.scalev_variant_id) : null,
+      },
+    });
   }
 
   return { success: true, action: input.warehouseProductId == null ? 'noted' : 'mapped' };

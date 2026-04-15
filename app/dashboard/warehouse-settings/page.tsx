@@ -25,6 +25,7 @@ import BrandManager from '@/components/BrandManager';
 import ScalevCatalogSettingsTab from '@/components/ScalevCatalogSettingsTab';
 import ScalevBundleMappingSettingsTab from '@/components/ScalevBundleMappingSettingsTab';
 import ScalevProductMappingSettingsTab from '@/components/ScalevProductMappingSettingsTab';
+import WarehouseActivityLogTab from '@/components/WarehouseActivityLogTab';
 import { usePermissions } from '@/lib/PermissionsContext';
 
 const SUB_TABS = [
@@ -35,6 +36,7 @@ const SUB_TABS = [
   { id: 'catalog', label: 'Katalog Scalev', permissionKey: 'whs:mapping' },
   { id: 'catalog-mapping', label: 'Product Mapping Scalev', permissionKey: 'whs:mapping' },
   { id: 'bundle-mapping', label: 'Bundle Mapping Scalev', permissionKey: 'whs:mapping' },
+  { id: 'activity-log', label: 'Log Aktivitas', permissionKey: 'whs:mapping' },
   { id: 'mapping', label: 'Mapping Scalev' },
 ];
 
@@ -92,6 +94,7 @@ export default function WarehouseSettingsPage() {
       {effectiveTab === 'catalog' && <ScalevCatalogSettingsTab />}
       {effectiveTab === 'catalog-mapping' && <ScalevProductMappingSettingsTab />}
       {effectiveTab === 'bundle-mapping' && <ScalevBundleMappingSettingsTab />}
+      {effectiveTab === 'activity-log' && <WarehouseActivityLogTab />}
       {effectiveTab === 'mapping' && <MappingTabWrapper />}
     </div>
   );

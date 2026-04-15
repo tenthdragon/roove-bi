@@ -9,6 +9,7 @@ import {
   requireDashboardTabAccess,
 } from './dashboard-access';
 import { sendTelegramToChat } from './telegram';
+import { recordWarehouseActivityLog } from './warehouse-activity-log-actions';
 
 // ============================================================
 // AUTH HELPER
@@ -373,6 +374,36 @@ function mapsEqualWithTolerance(a: Map<number, number>, b: Map<number, number>) 
     if (!quantitiesEqual(left, right)) return false;
   }
   return true;
+}
+
+function normalizeAuditArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+}
+
+function areAuditValuesEqual(left: unknown, right: unknown) {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return JSON.stringify(normalizeAuditArray(left).sort()) === JSON.stringify(normalizeAuditArray(right).sort());
+  }
+
+  if (
+    left && right
+    && typeof left === 'object'
+    && typeof right === 'object'
+  ) {
+    return JSON.stringify(left) === JSON.stringify(right);
+  }
+
+  return left === right;
+}
+
+function getAuditChangedFields<T extends Record<string, any>>(before: T, after: T, fields: string[]) {
+  return fields.filter((field) => !areAuditValuesEqual(before?.[field], after?.[field]));
+}
+
+function formatAuditWarehouseProductLabel(product: any) {
+  if (!product?.id) return null;
+  return `${product.name} [${product.warehouse || '-'}-${product.entity || '-'}]`;
 }
 
 function aggregateTargetsByProduct(targets: ResolvedWarehouseTarget[]) {
@@ -2736,27 +2767,179 @@ export async function createProduct(product: {
     .select()
     .single();
   if (error) throw error;
+
+  await recordWarehouseActivityLog({
+    scope: 'warehouse_product_config',
+    action: 'create',
+    screen: 'Master Produk Gudang',
+    summary: `Membuat produk ${data.name}`,
+    targetType: 'warehouse_product',
+    targetId: String(data.id),
+    targetLabel: `${data.name} [${data.warehouse || '-'}-${data.entity || '-'}]`,
+    changedFields: [
+      'name',
+      'category',
+      'unit',
+      'entity',
+      'warehouse',
+      'price_list',
+      'hpp',
+      'vendor_id',
+      'brand_id',
+      'reorder_threshold',
+      'scalev_product_names',
+      'is_active',
+    ],
+    beforeState: {},
+    afterState: {
+      id: Number(data.id),
+      name: data.name,
+      category: data.category || null,
+      unit: data.unit || null,
+      entity: data.entity || null,
+      warehouse: data.warehouse || null,
+      price_list: data.price_list ?? null,
+      hpp: data.hpp ?? null,
+      vendor_id: data.vendor_id ?? null,
+      brand_id: data.brand_id ?? null,
+      reorder_threshold: data.reorder_threshold ?? null,
+      scalev_product_names: normalizeAuditArray(data.scalev_product_names),
+      is_active: Boolean(data.is_active),
+    },
+    context: {},
+  });
+
   return data;
 }
 
 export async function updateProduct(id: number, updates: Record<string, any>) {
   await requireWarehouseSettingsPermission('whs:products', 'Master Produk Gudang');
   const svc = createServiceSupabase();
+  const { data: beforeRow, error: beforeError } = await svc
+    .from('warehouse_products')
+    .select('id, name, category, unit, entity, warehouse, price_list, hpp, vendor_id, brand_id, reorder_threshold, scalev_product_names, is_active')
+    .eq('id', id)
+    .maybeSingle();
+  if (beforeError) throw beforeError;
+  if (!beforeRow) throw new Error('Produk gudang tidak ditemukan.');
+
   const { error } = await svc
     .from('warehouse_products')
     .update(updates)
     .eq('id', id);
   if (error) throw error;
+
+  const { data: afterRow, error: afterError } = await svc
+    .from('warehouse_products')
+    .select('id, name, category, unit, entity, warehouse, price_list, hpp, vendor_id, brand_id, reorder_threshold, scalev_product_names, is_active')
+    .eq('id', id)
+    .maybeSingle();
+  if (afterError) throw afterError;
+  if (!afterRow) return;
+
+  const beforeState = {
+    name: beforeRow.name,
+    category: beforeRow.category || null,
+    unit: beforeRow.unit || null,
+    entity: beforeRow.entity || null,
+    warehouse: beforeRow.warehouse || null,
+    price_list: beforeRow.price_list ?? null,
+    hpp: beforeRow.hpp ?? null,
+    vendor_id: beforeRow.vendor_id ?? null,
+    brand_id: beforeRow.brand_id ?? null,
+    reorder_threshold: beforeRow.reorder_threshold ?? null,
+    scalev_product_names: normalizeAuditArray(beforeRow.scalev_product_names),
+    is_active: Boolean(beforeRow.is_active),
+  };
+  const afterState = {
+    name: afterRow.name,
+    category: afterRow.category || null,
+    unit: afterRow.unit || null,
+    entity: afterRow.entity || null,
+    warehouse: afterRow.warehouse || null,
+    price_list: afterRow.price_list ?? null,
+    hpp: afterRow.hpp ?? null,
+    vendor_id: afterRow.vendor_id ?? null,
+    brand_id: afterRow.brand_id ?? null,
+    reorder_threshold: afterRow.reorder_threshold ?? null,
+    scalev_product_names: normalizeAuditArray(afterRow.scalev_product_names),
+    is_active: Boolean(afterRow.is_active),
+  };
+  const changedFields = getAuditChangedFields(beforeState, afterState, [
+    'name',
+    'category',
+    'unit',
+    'entity',
+    'warehouse',
+    'price_list',
+    'hpp',
+    'vendor_id',
+    'brand_id',
+    'reorder_threshold',
+    'scalev_product_names',
+    'is_active',
+  ]);
+  if (changedFields.length === 0) return;
+
+  await recordWarehouseActivityLog({
+    scope: 'warehouse_product_config',
+    action: 'update',
+    screen: 'Master Produk Gudang',
+    summary: `Memperbarui produk ${afterRow.name}`,
+    targetType: 'warehouse_product',
+    targetId: String(afterRow.id),
+    targetLabel: `${afterRow.name} [${afterRow.warehouse || '-'}-${afterRow.entity || '-'}]`,
+    changedFields,
+    beforeState,
+    afterState,
+    context: {},
+  });
 }
 
 export async function deactivateProduct(id: number) {
   await requireWarehouseSettingsPermission('whs:products', 'Master Produk Gudang');
   const svc = createServiceSupabase();
+  const { data: beforeRow, error: beforeError } = await svc
+    .from('warehouse_products')
+    .select('id, name, category, unit, entity, warehouse, is_active')
+    .eq('id', id)
+    .maybeSingle();
+  if (beforeError) throw beforeError;
+  if (!beforeRow) throw new Error('Produk gudang tidak ditemukan.');
+
   const { error } = await svc
     .from('warehouse_products')
     .update({ is_active: false })
     .eq('id', id);
   if (error) throw error;
+
+  await recordWarehouseActivityLog({
+    scope: 'warehouse_product_config',
+    action: beforeRow.is_active ? 'deactivate' : 'update',
+    screen: 'Master Produk Gudang',
+    summary: `Menonaktifkan produk ${beforeRow.name}`,
+    targetType: 'warehouse_product',
+    targetId: String(beforeRow.id),
+    targetLabel: `${beforeRow.name} [${beforeRow.warehouse || '-'}-${beforeRow.entity || '-'}]`,
+    changedFields: ['is_active'],
+    beforeState: {
+      is_active: Boolean(beforeRow.is_active),
+      name: beforeRow.name,
+      category: beforeRow.category || null,
+      unit: beforeRow.unit || null,
+      entity: beforeRow.entity || null,
+      warehouse: beforeRow.warehouse || null,
+    },
+    afterState: {
+      is_active: false,
+      name: beforeRow.name,
+      category: beforeRow.category || null,
+      unit: beforeRow.unit || null,
+      entity: beforeRow.entity || null,
+      warehouse: beforeRow.warehouse || null,
+    },
+    context: {},
+  });
 }
 
 export async function getProducts(filters?: {
@@ -3274,6 +3457,22 @@ export async function updateScalevMapping(
 ) {
   await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
   const svc = createServiceSupabase();
+  const { data: beforeRow, error: beforeError } = await svc
+    .from('warehouse_scalev_mapping')
+    .select(`
+      id,
+      scalev_product_name,
+      warehouse_product_id,
+      deduct_qty_multiplier,
+      is_ignored,
+      notes,
+      warehouse_products(id, name, entity, warehouse, category)
+    `)
+    .eq('id', id)
+    .maybeSingle();
+  if (beforeError) throw beforeError;
+  if (!beforeRow) throw new Error('Mapping Scalev tidak ditemukan.');
+
   const update: Record<string, any> = {};
   if (warehouseProductId !== undefined) update.warehouse_product_id = warehouseProductId;
   if (multiplier !== undefined) update.deduct_qty_multiplier = multiplier;
@@ -3285,6 +3484,95 @@ export async function updateScalevMapping(
     .update(update)
     .eq('id', id);
   if (error) throw error;
+
+  const { data: afterRow, error: afterError } = await svc
+    .from('warehouse_scalev_mapping')
+    .select(`
+      id,
+      scalev_product_name,
+      warehouse_product_id,
+      deduct_qty_multiplier,
+      is_ignored,
+      notes,
+      warehouse_products(id, name, entity, warehouse, category)
+    `)
+    .eq('id', id)
+    .maybeSingle();
+  if (afterError) throw afterError;
+  if (!afterRow) return;
+
+  const beforeState = {
+    scalev_product_name: beforeRow.scalev_product_name,
+    warehouse_product_id: beforeRow.warehouse_product_id,
+    warehouse_product_label: formatAuditWarehouseProductLabel(beforeRow.warehouse_products),
+    deduct_qty_multiplier: beforeRow.deduct_qty_multiplier,
+    is_ignored: Boolean(beforeRow.is_ignored),
+    notes: beforeRow.notes || null,
+  };
+  const afterState = {
+    scalev_product_name: afterRow.scalev_product_name,
+    warehouse_product_id: afterRow.warehouse_product_id,
+    warehouse_product_label: formatAuditWarehouseProductLabel(afterRow.warehouse_products),
+    deduct_qty_multiplier: afterRow.deduct_qty_multiplier,
+    is_ignored: Boolean(afterRow.is_ignored),
+    notes: afterRow.notes || null,
+  };
+  const changedFields = getAuditChangedFields(beforeState, afterState, [
+    'warehouse_product_id',
+    'deduct_qty_multiplier',
+    'is_ignored',
+    'notes',
+  ]);
+
+  if (changedFields.length === 0) return;
+
+  let action = 'update';
+  let summary = `Memperbarui mapping ${afterRow.scalev_product_name}`;
+
+  if (!beforeState.is_ignored && afterState.is_ignored) {
+    action = 'ignore';
+    summary = `Meng-ignore ${afterRow.scalev_product_name}`;
+  } else if (beforeState.is_ignored && !afterState.is_ignored) {
+    action = 'unignore';
+    summary = `Membuka ignore ${afterRow.scalev_product_name}`;
+  } else if (!beforeState.warehouse_product_id && afterState.warehouse_product_id) {
+    action = 'map';
+    summary = `Memetakan ${afterRow.scalev_product_name} ke ${afterState.warehouse_product_label}`;
+  } else if (beforeState.warehouse_product_id && !afterState.warehouse_product_id) {
+    action = 'unmap';
+    summary = `Melepas mapping ${afterRow.scalev_product_name} dari ${beforeState.warehouse_product_label}`;
+  } else if (
+    beforeState.warehouse_product_id
+    && afterState.warehouse_product_id
+    && beforeState.warehouse_product_id !== afterState.warehouse_product_id
+  ) {
+    action = 'remap';
+    summary = `Mengubah mapping ${afterRow.scalev_product_name} dari ${beforeState.warehouse_product_label} ke ${afterState.warehouse_product_label}`;
+  } else if (!areAuditValuesEqual(beforeState.deduct_qty_multiplier, afterState.deduct_qty_multiplier)) {
+    action = 'update_multiplier';
+    summary = `Mengubah multiplier ${afterRow.scalev_product_name} menjadi ${afterState.deduct_qty_multiplier}`;
+  } else if (!areAuditValuesEqual(beforeState.notes, afterState.notes)) {
+    action = 'update_notes';
+    summary = `Memperbarui catatan mapping ${afterRow.scalev_product_name}`;
+  }
+
+  await recordWarehouseActivityLog({
+    scope: 'legacy_scalev_mapping',
+    action,
+    screen: 'Mapping Scalev',
+    summary,
+    targetType: 'scalev_product_name',
+    targetId: String(afterRow.id),
+    targetLabel: afterRow.scalev_product_name,
+    changedFields,
+    beforeState,
+    afterState,
+    context: {
+      mapping_id: Number(afterRow.id),
+      warehouse_product_before: beforeState.warehouse_product_label,
+      warehouse_product_after: afterState.warehouse_product_label,
+    },
+  });
 }
 
 export async function syncScalevProductNames() {
@@ -3293,6 +3581,16 @@ export async function syncScalevProductNames() {
   // Insert any new product_names not yet in mapping table
   const { error } = await svc.rpc('warehouse_sync_scalev_names');
   if (error) throw error;
+
+  await recordWarehouseActivityLog({
+    scope: 'legacy_scalev_mapping',
+    action: 'sync_names',
+    screen: 'Mapping Scalev',
+    summary: 'Menjalankan sync nama produk Scalev ke mapping legacy',
+    targetType: 'rpc',
+    targetId: 'warehouse_sync_scalev_names',
+    targetLabel: 'warehouse_sync_scalev_names',
+  });
 }
 
 // ============================================================
@@ -3313,16 +3611,78 @@ export async function getWarehouseBusinessMappings() {
 export async function updateWarehouseBusinessMapping(id: number, field: string, value: any) {
   await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
   const svc = createServiceSupabase();
+  const { data: beforeRow, error: beforeError } = await svc
+    .from('warehouse_business_mapping')
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, notes')
+    .eq('id', id)
+    .maybeSingle();
+  if (beforeError) throw beforeError;
+  if (!beforeRow) throw new Error('Business mapping tidak ditemukan.');
+
   const { error } = await svc
     .from('warehouse_business_mapping')
     .update({ [field]: value })
     .eq('id', id);
   if (error) throw error;
+
+  const { data: afterRow, error: afterError } = await svc
+    .from('warehouse_business_mapping')
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, notes')
+    .eq('id', id)
+    .maybeSingle();
+  if (afterError) throw afterError;
+  if (!afterRow) return;
+
+  const beforeState = {
+    business_code: beforeRow.business_code,
+    deduct_entity: beforeRow.deduct_entity || null,
+    deduct_warehouse: beforeRow.deduct_warehouse || null,
+    is_active: Boolean(beforeRow.is_active),
+    notes: beforeRow.notes || null,
+  };
+  const afterState = {
+    business_code: afterRow.business_code,
+    deduct_entity: afterRow.deduct_entity || null,
+    deduct_warehouse: afterRow.deduct_warehouse || null,
+    is_active: Boolean(afterRow.is_active),
+    notes: afterRow.notes || null,
+  };
+  const changedFields = getAuditChangedFields(beforeState, afterState, [
+    'deduct_entity',
+    'deduct_warehouse',
+    'is_active',
+    'notes',
+  ]);
+  if (changedFields.length === 0) return;
+
+  await recordWarehouseActivityLog({
+    scope: 'warehouse_business_mapping',
+    action: 'update',
+    screen: 'Mapping Business Warehouse',
+    summary: `Memperbarui mapping business ${afterRow.business_code}`,
+    targetType: 'business_code',
+    targetId: String(afterRow.id),
+    targetLabel: afterRow.business_code,
+    businessCode: afterRow.business_code,
+    changedFields,
+    beforeState,
+    afterState,
+    context: {
+      updated_field: field,
+    },
+  });
 }
 
 export async function createWarehouseBusinessMapping(businessCode: string, deductEntity: string, deductWarehouse = 'BTN') {
   await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
   const svc = createServiceSupabase();
+  const { data: beforeRow, error: beforeError } = await svc
+    .from('warehouse_business_mapping')
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, notes')
+    .eq('business_code', businessCode)
+    .maybeSingle();
+  if (beforeError) throw beforeError;
+
   const { error } = await svc
     .from('warehouse_business_mapping')
     .upsert({
@@ -3332,6 +3692,45 @@ export async function createWarehouseBusinessMapping(businessCode: string, deduc
       is_active: true,
     }, { onConflict: 'business_code', ignoreDuplicates: true });
   if (error) throw error;
+
+  const { data: afterRow, error: afterError } = await svc
+    .from('warehouse_business_mapping')
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, notes')
+    .eq('business_code', businessCode)
+    .maybeSingle();
+  if (afterError) throw afterError;
+  if (!afterRow) return;
+
+  await recordWarehouseActivityLog({
+    scope: 'warehouse_business_mapping',
+    action: beforeRow ? 'upsert' : 'create',
+    screen: 'Mapping Business Warehouse',
+    summary: beforeRow
+      ? `Memastikan mapping business ${businessCode} tetap aktif`
+      : `Membuat mapping business ${businessCode} ke ${deductEntity} • ${deductWarehouse}`,
+    targetType: 'business_code',
+    targetId: String(afterRow.id),
+    targetLabel: businessCode,
+    businessCode,
+    changedFields: beforeRow
+      ? getAuditChangedFields(
+          {
+            deduct_entity: beforeRow.deduct_entity || null,
+            deduct_warehouse: beforeRow.deduct_warehouse || null,
+            is_active: Boolean(beforeRow.is_active),
+          },
+          {
+            deduct_entity: afterRow.deduct_entity || null,
+            deduct_warehouse: afterRow.deduct_warehouse || null,
+            is_active: Boolean(afterRow.is_active),
+          },
+          ['deduct_entity', 'deduct_warehouse', 'is_active'],
+        )
+      : ['deduct_entity', 'deduct_warehouse', 'is_active'],
+    beforeState: beforeRow || {},
+    afterState: afterRow,
+    context: {},
+  });
 }
 
 // ── Backfill warehouse deductions for shipped orders missing deductions ──
