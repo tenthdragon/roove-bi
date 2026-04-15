@@ -169,6 +169,21 @@ export default function ScalevProductMappingSettingsTab() {
   const [savingEntityKey, setSavingEntityKey] = useState<string | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  useEffect(() => {
+    if (!message || message.type !== 'success') return;
+
+    const currentText = message.text;
+    const timeoutId = window.setTimeout(() => {
+      setMessage((current) => (
+        current?.type === 'success' && current.text === currentText
+          ? null
+          : current
+      ));
+    }, 2200);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [message]);
+
   async function refreshBusinesses(preferredBusinessId?: number | null) {
     setLoadingBusinesses(true);
     try {
@@ -354,7 +369,6 @@ export default function ScalevProductMappingSettingsTab() {
   async function persistMapping(row: ScalevCatalogMappingRow, warehouseProductId: number | null) {
     if (!selectedBusinessId) return;
     setSavingEntityKey(row.entity_key);
-    setMessage(null);
     try {
       await saveScalevCatalogProductMapping({
         businessId: selectedBusinessId,
@@ -387,15 +401,52 @@ export default function ScalevProductMappingSettingsTab() {
       {message ? (
         <div
           style={{
-            padding: '8px 12px',
-            borderRadius: 8,
-            marginBottom: 12,
+            position: 'fixed',
+            right: 20,
+            bottom: 20,
+            zIndex: 120,
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 10,
+            width: 'min(420px, calc(100vw - 32px))',
+            padding: '10px 12px',
+            borderRadius: 12,
             fontSize: 12,
-            background: message.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-            color: message.type === 'success' ? '#6ee7b7' : '#fca5a5',
+            lineHeight: 1.5,
+            boxShadow: '0 18px 50px rgba(2,6,23,0.42)',
+            border: `1px solid ${message.type === 'success' ? 'rgba(52,211,153,0.22)' : 'rgba(248,113,113,0.22)'}`,
+            background: message.type === 'success' ? 'rgba(6,78,59,0.96)' : 'rgba(127,29,29,0.96)',
+            color: message.type === 'success' ? '#a7f3d0' : '#fecaca',
+            backdropFilter: 'blur(10px)',
           }}
         >
-          {message.text}
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              marginTop: 5,
+              borderRadius: 999,
+              flexShrink: 0,
+              background: message.type === 'success' ? '#34d399' : '#f87171',
+            }}
+          />
+          <div style={{ flex: 1 }}>{message.text}</div>
+          <button
+            onClick={() => setMessage(null)}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: 'inherit',
+              cursor: 'pointer',
+              padding: 0,
+              fontSize: 14,
+              lineHeight: 1,
+              opacity: 0.8,
+            }}
+            aria-label="Dismiss message"
+          >
+            ×
+          </button>
         </div>
       ) : null}
 
