@@ -234,20 +234,38 @@ interface ScalevCatalogBusinessLookupRow {
 
 interface ScalevCatalogIdentifierLookupRow {
   business_id: number;
+  identifier: string;
   identifier_normalized: string;
   entity_key: string;
   entity_type: 'product' | 'variant' | 'bundle';
   source: string;
 }
 
+interface ScalevCatalogBundleLineLookupRow {
+  business_id: number;
+  scalev_bundle_id: number;
+  scalev_bundle_line_key: string;
+  quantity: number;
+  scalev_product_id: number | null;
+  scalev_variant_id: number | null;
+  scalev_variant_unique_id: string | null;
+  scalev_variant_uuid: string | null;
+  scalev_variant_sku: string | null;
+  scalev_variant_name: string | null;
+  scalev_variant_product_name: string | null;
+}
+
 interface WarehouseScalevCatalogMappingRow {
   business_id: number;
   scalev_entity_key: string;
+  scalev_entity_type?: 'product' | 'variant' | null;
   warehouse_product_id: number | null;
 }
 
 interface WarehouseCatalogResolvedTarget {
   warehouse_product_id: number;
+  quantity_multiplier: number;
+  scalev_label: string;
   note_suffix: string;
 }
 
@@ -468,14 +486,18 @@ async function resolveWarehouseTargetsForOrder(
   const catalogIdentifierRows = catalogBusinessId
     ? await fetchScalevCatalogIdentifiersForBusinesses(svc, businessRows, linesByBusinessCode)
     : [];
+  const catalogBundleLineRows = catalogIdentifierRows.length > 0
+    ? await fetchScalevCatalogBundleLinesByBusinesses(svc, catalogIdentifierRows)
+    : [];
   const catalogMappingRows = catalogIdentifierRows.length > 0
-    ? await fetchScalevCatalogMappingsByBusinesses(svc, catalogIdentifierRows)
+    ? await fetchScalevCatalogMappingsByBusinesses(svc, catalogIdentifierRows, catalogBundleLineRows)
     : [];
   const scalevMappings = await fetchScalevMappingsByProductNames(
     svc,
     Array.from(new Set(productLines.map(line => line.product_name))),
   );
   const catalogIdentifiersByBusinessId = buildCatalogIdentifierLookupMap(catalogIdentifierRows);
+  const catalogBundleLinesByBusinessId = buildCatalogBundleLineLookupMap(catalogBundleLineRows);
   const catalogMappingsByBusinessId = buildCatalogMappingLookupMap(catalogMappingRows);
   const scalevMappingByName = new Map<string, WarehouseScalevMappingRow>();
   for (const scalevMapping of scalevMappings) {
@@ -487,28 +509,39 @@ async function resolveWarehouseTargetsForOrder(
   let skippedIgnored = 0;
 
   for (const line of productLines) {
-    const catalogTarget = resolveCatalogWarehouseTargetForLine({
+    const catalogTargets = resolveCatalogWarehouseTargetsForLine({
       businessId: catalogBusinessId,
       line,
       identifiersByBusinessId: catalogIdentifiersByBusinessId,
       mappingsByBusinessId: catalogMappingsByBusinessId,
+      bundleLinesByBusinessId: catalogBundleLinesByBusinessId,
     });
 
     const scalevMapping = scalevMappingByName.get(line.product_name);
 
-    if (!catalogTarget && scalevMapping?.is_ignored) {
+    if ((!catalogTargets || catalogTargets.length === 0) && scalevMapping?.is_ignored) {
       skippedIgnored++;
+      continue;
+    }
+
+    const targetNoteBase = `${order.business_code}\u2192${mapping.deduct_entity}`;
+    if (catalogTargets && catalogTargets.length > 0) {
+      for (const catalogTarget of catalogTargets) {
+        targets.push({
+          warehouse_product_id: Number(catalogTarget.warehouse_product_id),
+          scalev_product_name: catalogTarget.scalev_label,
+          quantity: Number(line.quantity) * Number(catalogTarget.quantity_multiplier || 1),
+          note_context: `${targetNoteBase} via ${catalogTarget.note_suffix}`,
+        });
+      }
       continue;
     }
 
     let targetProductId: number | null = null;
     let deductQty = Number(line.quantity);
-    let targetNote = `${order.business_code}\u2192${mapping.deduct_entity}`;
+    let targetNote = targetNoteBase;
 
-    if (catalogTarget) {
-      targetProductId = Number(catalogTarget.warehouse_product_id);
-      targetNote = `${targetNote} via ${catalogTarget.note_suffix}`;
-    } else if (scalevMapping?.warehouse_product_id) {
+    if (scalevMapping?.warehouse_product_id) {
       targetProductId = Number(scalevMapping.warehouse_product_id);
       deductQty = Number(line.quantity) * Number(scalevMapping.deduct_qty_multiplier || 1);
       targetNote = `${targetNote} via legacy`;
@@ -684,6 +717,20 @@ function normalizeScalevRuntimeIdentifier(value: string | null | undefined) {
     .replace(/\s+/g, ' ');
 }
 
+function normalizeScalevLegacyIdentifier(value: string | null | undefined) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function getScalevIdentifierQueryCandidates(value: string | null | undefined) {
+  return Array.from(new Set([
+    normalizeScalevLegacyIdentifier(value),
+    normalizeScalevRuntimeIdentifier(value),
+  ].filter(Boolean)));
+}
+
 function isMissingWarehouseTableError(error: any) {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
@@ -695,9 +742,18 @@ function getCatalogIdentifierSourcePriority(source: string, mode: 'variant_sku' 
     if (source === 'variant.unique_id') return 100;
     if (source === 'variant.sku') return 90;
     if (source === 'variant.uuid') return 80;
+    if (source === 'bundle.price_option_unique_id') return 96;
+    if (source === 'bundle.price_option_slug') return 94;
+    if (source === 'bundle.custom_id') return 92;
     return 10;
   }
 
+  if (source === 'bundle.custom_id') return 99;
+  if (source === 'bundle.price_option_unique_id') return 97;
+  if (source === 'bundle.price_option_slug') return 95;
+  if (source === 'bundle.display') return 93;
+  if (source === 'bundle.public_name') return 91;
+  if (source === 'bundle.name') return 89;
   if (source === 'variant.name') return 90;
   if (source === 'product.display') return 80;
   if (source === 'product.public_name') return 75;
@@ -715,10 +771,18 @@ function buildCatalogIdentifierLookupMap(rows: ScalevCatalogIdentifierLookupRow[
       byBusinessId.set(row.business_id, new Map<string, ScalevCatalogIdentifierLookupRow[]>());
     }
     const identifierMap = byBusinessId.get(row.business_id)!;
-    if (!identifierMap.has(row.identifier_normalized)) {
-      identifierMap.set(row.identifier_normalized, []);
+    const lookupKeys = Array.from(new Set([
+      row.identifier_normalized,
+      ...getScalevIdentifierQueryCandidates(row.identifier),
+      ...getScalevIdentifierQueryCandidates(row.identifier_normalized),
+    ].filter(Boolean)));
+
+    for (const lookupKey of lookupKeys) {
+      if (!identifierMap.has(lookupKey)) {
+        identifierMap.set(lookupKey, []);
+      }
+      identifierMap.get(lookupKey)!.push(row);
     }
-    identifierMap.get(row.identifier_normalized)!.push(row);
   }
 
   return byBusinessId;
@@ -737,52 +801,134 @@ function buildCatalogMappingLookupMap(rows: WarehouseScalevCatalogMappingRow[]) 
   return byBusinessId;
 }
 
-function resolveCatalogWarehouseTargetForLine(args: {
+function buildCatalogBundleLineLookupMap(rows: ScalevCatalogBundleLineLookupRow[]) {
+  const byBusinessId = new Map<number, Map<string, ScalevCatalogBundleLineLookupRow[]>>();
+
+  for (const row of rows) {
+    if (!byBusinessId.has(row.business_id)) {
+      byBusinessId.set(row.business_id, new Map<string, ScalevCatalogBundleLineLookupRow[]>());
+    }
+    const bundleKey = `bundle:${row.scalev_bundle_id}`;
+    const bundleMap = byBusinessId.get(row.business_id)!;
+    if (!bundleMap.has(bundleKey)) {
+      bundleMap.set(bundleKey, []);
+    }
+    bundleMap.get(bundleKey)!.push(row);
+  }
+
+  for (const bundleMap of Array.from(byBusinessId.values())) {
+    for (const rowsForBundle of Array.from(bundleMap.values())) {
+      rowsForBundle.sort((left, right) => {
+        const leftVariant = left.scalev_variant_name || left.scalev_variant_product_name || '';
+        const rightVariant = right.scalev_variant_name || right.scalev_variant_product_name || '';
+        return leftVariant.localeCompare(rightVariant);
+      });
+    }
+  }
+
+  return byBusinessId;
+}
+
+function resolveCatalogWarehouseTargetsForLine(args: {
   businessId: number | null;
   line: ScalevOrderLineForWarehouse;
   identifiersByBusinessId: Map<number, Map<string, ScalevCatalogIdentifierLookupRow[]>>;
   mappingsByBusinessId: Map<number, Map<string, WarehouseScalevCatalogMappingRow>>;
-}): WarehouseCatalogResolvedTarget | null {
+  bundleLinesByBusinessId: Map<number, Map<string, ScalevCatalogBundleLineLookupRow[]>>;
+}): WarehouseCatalogResolvedTarget[] | null {
   if (!args.businessId) return null;
 
   const identifierMap = args.identifiersByBusinessId.get(args.businessId);
   const mappingMap = args.mappingsByBusinessId.get(args.businessId);
+  const bundleLineMap = args.bundleLinesByBusinessId.get(args.businessId);
   if (!identifierMap || !mappingMap) return null;
 
-  const candidateMap = new Map<string, { productId: number; priority: number; noteSuffix: string }>();
+  const candidateMap = new Map<string, { row: ScalevCatalogIdentifierLookupRow; priority: number }>();
 
   const collectCandidates = (rawValue: string | null | undefined, mode: 'variant_sku' | 'product_name') => {
-    const normalized = normalizeScalevRuntimeIdentifier(rawValue);
-    if (!normalized) return;
+    const lookupKeys = getScalevIdentifierQueryCandidates(rawValue);
+    if (lookupKeys.length === 0) return;
 
-    for (const identifierRow of identifierMap.get(normalized) || []) {
-      if (mode === 'variant_sku' && identifierRow.entity_type !== 'variant') continue;
+    for (const lookupKey of lookupKeys) {
+      for (const identifierRow of identifierMap.get(lookupKey) || []) {
+        if (mode === 'variant_sku' && identifierRow.entity_type === 'product') continue;
 
-      const mappingRow = mappingMap.get(identifierRow.entity_key);
-      if (!mappingRow?.warehouse_product_id) continue;
+        const priority = getCatalogIdentifierSourcePriority(identifierRow.source, mode);
+        const existing = candidateMap.get(identifierRow.entity_key);
+        if (existing && existing.priority >= priority) continue;
 
-      const priority = getCatalogIdentifierSourcePriority(identifierRow.source, mode);
-      const existing = candidateMap.get(identifierRow.entity_key);
-      if (existing && existing.priority >= priority) continue;
+        candidateMap.set(identifierRow.entity_key, {
+          row: identifierRow,
+          priority,
+        });
+      }
+    }
+  };
 
-      candidateMap.set(identifierRow.entity_key, {
-        productId: Number(mappingRow.warehouse_product_id),
-        priority,
-        noteSuffix: `catalog:${identifierRow.source}`,
+  const resolveDirectTarget = (identifierRow: ScalevCatalogIdentifierLookupRow) => {
+    const mappingRow = mappingMap.get(identifierRow.entity_key);
+    if (!mappingRow?.warehouse_product_id) return null;
+
+    return [{
+      warehouse_product_id: Number(mappingRow.warehouse_product_id),
+      quantity_multiplier: 1,
+      scalev_label: args.line.product_name,
+      note_suffix: `catalog:${identifierRow.source}`,
+    }] as WarehouseCatalogResolvedTarget[];
+  };
+
+  const resolveBundleTargets = (identifierRow: ScalevCatalogIdentifierLookupRow) => {
+    if (!bundleLineMap) return null;
+    const bundleLines = bundleLineMap.get(identifierRow.entity_key) || [];
+    if (bundleLines.length === 0) return null;
+
+    const resolvedTargets: WarehouseCatalogResolvedTarget[] = [];
+    for (const bundleLine of bundleLines) {
+      const variantKey = bundleLine.scalev_variant_id ? `variant:${bundleLine.scalev_variant_id}` : null;
+      const productKey = bundleLine.scalev_product_id ? `product:${bundleLine.scalev_product_id}` : null;
+      const mappingRow = (variantKey && mappingMap.get(variantKey))
+        || (productKey && mappingMap.get(productKey))
+        || null;
+
+      if (!mappingRow?.warehouse_product_id) {
+        return null;
+      }
+
+      const componentLabel = bundleLine.scalev_variant_name
+        || bundleLine.scalev_variant_product_name
+        || args.line.product_name;
+
+      resolvedTargets.push({
+        warehouse_product_id: Number(mappingRow.warehouse_product_id),
+        quantity_multiplier: Number(bundleLine.quantity || 0) || 1,
+        scalev_label: `${args.line.product_name} -> ${componentLabel}`,
+        note_suffix: `catalog:${identifierRow.source}`,
       });
     }
+
+    return resolvedTargets;
   };
 
   collectCandidates(args.line.variant_sku, 'variant_sku');
   collectCandidates(args.line.product_name, 'product_name');
 
   const ranked = Array.from(candidateMap.values()).sort((left, right) => right.priority - left.priority);
-  if (ranked.length === 0) return null;
+  for (const candidate of ranked) {
+    if (candidate.row.entity_type === 'bundle') {
+      const bundleTargets = resolveBundleTargets(candidate.row);
+      if (bundleTargets && bundleTargets.length > 0) {
+        return bundleTargets;
+      }
+      continue;
+    }
 
-  return {
-    warehouse_product_id: ranked[0].productId,
-    note_suffix: ranked[0].noteSuffix,
-  };
+    const directTargets = resolveDirectTarget(candidate.row);
+    if (directTargets && directTargets.length > 0) {
+      return directTargets;
+    }
+  }
+
+  return null;
 }
 
 function buildWarehouseIssueSummaryFromState(args: {
@@ -949,10 +1095,12 @@ async function fetchScalevCatalogIdentifiersForBusinesses(
   for (const business of businessRows) {
     const identifiers = new Set<string>();
     for (const line of linesByBusinessCode.get(business.business_code) || []) {
-      const normalizedProduct = normalizeScalevRuntimeIdentifier(line.product_name);
-      const normalizedVariant = normalizeScalevRuntimeIdentifier(line.variant_sku);
-      if (normalizedProduct) identifiers.add(normalizedProduct);
-      if (normalizedVariant) identifiers.add(normalizedVariant);
+      for (const candidate of getScalevIdentifierQueryCandidates(line.product_name)) {
+        identifiers.add(candidate);
+      }
+      for (const candidate of getScalevIdentifierQueryCandidates(line.variant_sku)) {
+        identifiers.add(candidate);
+      }
     }
 
     const identifierList = Array.from(identifiers);
@@ -961,7 +1109,7 @@ async function fetchScalevCatalogIdentifiersForBusinesses(
     for (const chunk of chunkArray(identifierList, 500)) {
       const { data, error } = await svc
         .from('scalev_catalog_identifiers')
-        .select('business_id, identifier_normalized, entity_key, entity_type, source')
+        .select('business_id, identifier, identifier_normalized, entity_key, entity_type, source')
         .eq('business_id', business.id)
         .in('identifier_normalized', chunk);
       if (error) {
@@ -975,18 +1123,80 @@ async function fetchScalevCatalogIdentifiersForBusinesses(
   return rows;
 }
 
+async function fetchScalevCatalogBundleLinesByBusinesses(
+  svc: ReturnType<typeof createServiceSupabase>,
+  identifierRows: ScalevCatalogIdentifierLookupRow[],
+) {
+  const rows: ScalevCatalogBundleLineLookupRow[] = [];
+  const bundleIdsByBusinessId = new Map<number, Set<number>>();
+
+  for (const row of identifierRows) {
+    if (row.entity_type !== 'bundle') continue;
+    const rawBundleId = Number(String(row.entity_key || '').split(':')[1] || 0);
+    if (!Number.isFinite(rawBundleId) || rawBundleId <= 0) continue;
+    if (!bundleIdsByBusinessId.has(row.business_id)) {
+      bundleIdsByBusinessId.set(row.business_id, new Set<number>());
+    }
+    bundleIdsByBusinessId.get(row.business_id)!.add(rawBundleId);
+  }
+
+  for (const [businessId, bundleIds] of Array.from(bundleIdsByBusinessId.entries())) {
+    const bundleIdList = Array.from(bundleIds);
+    for (const chunk of chunkArray(bundleIdList, 500)) {
+      const { data, error } = await svc
+        .from('scalev_catalog_bundle_lines')
+        .select(`
+          business_id,
+          scalev_bundle_id,
+          scalev_bundle_line_key,
+          quantity,
+          scalev_product_id,
+          scalev_variant_id,
+          scalev_variant_unique_id,
+          scalev_variant_uuid,
+          scalev_variant_sku,
+          scalev_variant_name,
+          scalev_variant_product_name
+        `)
+        .eq('business_id', businessId)
+        .in('scalev_bundle_id', chunk);
+      if (error) {
+        if (isMissingWarehouseTableError(error)) return [];
+        throw error;
+      }
+      rows.push(...((data || []) as ScalevCatalogBundleLineLookupRow[]));
+    }
+  }
+
+  return rows;
+}
+
 async function fetchScalevCatalogMappingsByBusinesses(
   svc: ReturnType<typeof createServiceSupabase>,
   identifierRows: ScalevCatalogIdentifierLookupRow[],
+  bundleLineRows: ScalevCatalogBundleLineLookupRow[] = [],
 ) {
   const rows: WarehouseScalevCatalogMappingRow[] = [];
   const entityKeysByBusinessId = new Map<number, Set<string>>();
 
   for (const row of identifierRows) {
+    if (row.entity_type === 'bundle') continue;
     if (!entityKeysByBusinessId.has(row.business_id)) {
       entityKeysByBusinessId.set(row.business_id, new Set<string>());
     }
     entityKeysByBusinessId.get(row.business_id)!.add(row.entity_key);
+  }
+
+  for (const row of bundleLineRows) {
+    if (!entityKeysByBusinessId.has(row.business_id)) {
+      entityKeysByBusinessId.set(row.business_id, new Set<string>());
+    }
+    if (row.scalev_variant_id) {
+      entityKeysByBusinessId.get(row.business_id)!.add(`variant:${row.scalev_variant_id}`);
+    }
+    if (row.scalev_product_id) {
+      entityKeysByBusinessId.get(row.business_id)!.add(`product:${row.scalev_product_id}`);
+    }
   }
 
   for (const [businessId, entityKeys] of Array.from(entityKeysByBusinessId.entries())) {
@@ -994,7 +1204,7 @@ async function fetchScalevCatalogMappingsByBusinesses(
     for (const chunk of chunkArray(entityKeyList, 500)) {
       const { data, error } = await svc
         .from('warehouse_scalev_catalog_mapping')
-        .select('business_id, scalev_entity_key, warehouse_product_id')
+        .select('business_id, scalev_entity_key, scalev_entity_type, warehouse_product_id')
         .eq('business_id', businessId)
         .in('scalev_entity_key', chunk)
         .not('warehouse_product_id', 'is', null);
@@ -3228,7 +3438,8 @@ export async function getUndeductedOrders(
 
   const fallbackProducts = await fetchFallbackWarehouseProducts(svc, businessMappings);
   const catalogIdentifierRows = await fetchScalevCatalogIdentifiersForBusinesses(svc, catalogBusinesses, linesByBusinessCode);
-  const catalogMappingRows = await fetchScalevCatalogMappingsByBusinesses(svc, catalogIdentifierRows);
+  const catalogBundleLineRows = await fetchScalevCatalogBundleLinesByBusinesses(svc, catalogIdentifierRows);
+  const catalogMappingRows = await fetchScalevCatalogMappingsByBusinesses(svc, catalogIdentifierRows, catalogBundleLineRows);
 
   const businessMappingByCode = new Map<string, WarehouseBusinessTargetRow>();
   for (const mapping of businessMappings) {
@@ -3246,6 +3457,7 @@ export async function getUndeductedOrders(
   }
 
   const catalogIdentifiersByBusinessId = buildCatalogIdentifierLookupMap(catalogIdentifierRows);
+  const catalogBundleLinesByBusinessId = buildCatalogBundleLineLookupMap(catalogBundleLineRows);
   const catalogMappingsByBusinessId = buildCatalogMappingLookupMap(catalogMappingRows);
 
   const fallbackProductByKey = new Map<string, number>();
@@ -3272,25 +3484,33 @@ export async function getUndeductedOrders(
       }
     } else {
       for (const line of productLines) {
-        const catalogTarget = resolveCatalogWarehouseTargetForLine({
+        const catalogTargets = resolveCatalogWarehouseTargetsForLine({
           businessId: order.business_code ? catalogBusinessIdByCode.get(order.business_code) || null : null,
           line,
           identifiersByBusinessId: catalogIdentifiersByBusinessId,
           mappingsByBusinessId: catalogMappingsByBusinessId,
+          bundleLinesByBusinessId: catalogBundleLinesByBusinessId,
         });
         const scalevMapping = scalevMappingByName.get(line.product_name);
-        if (!catalogTarget && scalevMapping?.is_ignored) continue;
+        if ((!catalogTargets || catalogTargets.length === 0) && scalevMapping?.is_ignored) continue;
 
-        let targetProductId = catalogTarget?.warehouse_product_id != null
-          ? Number(catalogTarget.warehouse_product_id)
-          : scalevMapping?.warehouse_product_id != null
-            ? Number(scalevMapping.warehouse_product_id)
-            : null;
+        if (catalogTargets && catalogTargets.length > 0) {
+          for (const catalogTarget of catalogTargets) {
+            const deductQty = Number(line.quantity) * Number(catalogTarget.quantity_multiplier || 1);
+            desiredByProduct.set(
+              catalogTarget.warehouse_product_id,
+              (desiredByProduct.get(catalogTarget.warehouse_product_id) || 0) + deductQty,
+            );
+          }
+          continue;
+        }
+
+        let targetProductId = scalevMapping?.warehouse_product_id != null
+          ? Number(scalevMapping.warehouse_product_id)
+          : null;
         let deductQty = Number(line.quantity);
 
-        if (catalogTarget?.warehouse_product_id != null) {
-          deductQty = Number(line.quantity);
-        } else if (targetProductId != null) {
+        if (targetProductId != null) {
           deductQty = Number(line.quantity) * Number(scalevMapping?.deduct_qty_multiplier || 1);
         } else {
           targetProductId = fallbackProductByKey.get(

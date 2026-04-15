@@ -187,7 +187,11 @@ function cleanString(value: unknown): string | null {
 }
 
 function normalizeIdentifier(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ');
 }
 
 function parseNumeric(value: unknown): number | null {
