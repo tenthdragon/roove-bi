@@ -89,6 +89,55 @@ function renderEntityTypeBadge(type: ScalevCatalogMappingRow['entity_type']) {
   );
 }
 
+function renderCatalogReadyBadge(isReady: boolean) {
+  const palette = isReady
+    ? {
+        bg: 'rgba(16,185,129,0.12)',
+        border: 'rgba(52,211,153,0.22)',
+        color: '#6ee7b7',
+        dot: '#34d399',
+        label: 'Catalog Ready',
+      }
+    : {
+        bg: 'rgba(251,191,36,0.12)',
+        border: 'rgba(251,191,36,0.22)',
+        color: '#fde68a',
+        dot: '#fbbf24',
+        label: 'Catalog Missing',
+      };
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        flexShrink: 0,
+        alignSelf: 'flex-start',
+        padding: '5px 10px',
+        borderRadius: 999,
+        fontSize: 10,
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+        color: palette.color,
+        background: palette.bg,
+        border: `1px solid ${palette.border}`,
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 999,
+          background: palette.dot,
+          boxShadow: `0 0 0 3px ${palette.bg}`,
+        }}
+      />
+      {palette.label}
+    </span>
+  );
+}
+
 function formatBusinessTarget(target: ScalevCatalogMappingPayload['business_target']) {
   if (!target?.is_active || !target.deduct_entity) return 'Belum ada target deduct';
   return `${target.deduct_entity}${target.deduct_warehouse ? ` • ${target.deduct_warehouse}` : ''}`;
@@ -388,19 +437,7 @@ export default function ScalevProductMappingSettingsTab() {
                         {business.business_name}
                       </div>
                     </div>
-                    <span
-                      style={{
-                        padding: '3px 8px',
-                        borderRadius: 999,
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: business.catalog_schema_ready ? '#6ee7b7' : '#fde68a',
-                        background: business.catalog_schema_ready ? 'rgba(16,185,129,0.12)' : 'rgba(251,191,36,0.12)',
-                        border: `1px solid ${business.catalog_schema_ready ? 'rgba(52,211,153,0.22)' : 'rgba(251,191,36,0.22)'}`,
-                      }}
-                    >
-                      {business.catalog_schema_ready ? 'Catalog Ready' : 'Catalog Missing'}
-                    </span>
+                    {renderCatalogReadyBadge(business.catalog_schema_ready)}
                   </div>
                   <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
                     <div>Produk: <b style={{ color: 'var(--text)' }}>{business.products_count}</b></div>
