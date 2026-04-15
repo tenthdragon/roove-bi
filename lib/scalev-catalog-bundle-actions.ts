@@ -98,6 +98,7 @@ export type ScalevBundleMappingPayload = {
   business_target: BusinessTarget | null;
   bundle_lines_count: number;
   bundle_lines_last_synced_at: string | null;
+  schema_message: string | null;
   rows: ScalevBundleMappingRow[];
 };
 
@@ -139,6 +140,10 @@ function getMissingBundleSchemaMessage() {
 
 function getMissingCatalogSchemaMessage() {
   return 'Katalog Scalev belum tersedia. Jalankan sync Katalog Scalev terlebih dahulu.';
+}
+
+function getMissingProductMappingSchemaMessage() {
+  return 'Tabel product mapping Scalev belum terlihat oleh API Supabase. Jalankan migration 107 atau refresh schema cache bila perlu.';
 }
 
 async function requireScalevBundleMappingAccess(label = 'Bundle Mapping Scalev') {
@@ -374,7 +379,6 @@ export async function syncScalevCatalogBundleLines(businessId: number) {
 
 export async function getScalevCatalogBundleMappings(businessId: number): Promise<ScalevBundleMappingPayload> {
   await requireScalevBundleMappingAccess();
-  await assertBundleLineSchemaReady();
 
   const svc = createServiceSupabase();
   const { data: businessRow, error: businessError } = await svc
@@ -385,6 +389,7 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
   if (businessError) throw businessError;
   const businessCode = businessRow?.business_code || '';
 
+  let schemaMessage: string | null = null;
   const [{ data: bundles, error: bundleError }, { data: bundleLines, error: bundleLineError }, { data: identifiers, error: identifierError }, { data: mappings, error: mappingError }, { data: businessTargetRow, error: targetError }] = await Promise.all([
     svc
       .from('scalev_catalog_bundles')
@@ -438,12 +443,21 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
   if (bundleError) throw bundleError;
   if (bundleLineError) {
     if (isMissingTableError(bundleLineError)) {
-      throw new Error(getMissingBundleSchemaMessage());
+      schemaMessage = getMissingBundleSchemaMessage();
+    } else {
+      throw bundleLineError;
     }
-    throw bundleLineError;
   }
   if (identifierError) throw identifierError;
-  if (mappingError) throw mappingError;
+  if (mappingError) {
+    if (isMissingTableError(mappingError)) {
+      schemaMessage = schemaMessage
+        ? `${schemaMessage} Product mapping juga belum terlihat oleh API Supabase.`
+        : getMissingProductMappingSchemaMessage();
+    } else {
+      throw mappingError;
+    }
+  }
   if (targetError) throw targetError;
 
   const businessTarget: BusinessTarget | null = businessTargetRow
@@ -574,6 +588,7 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
     business_target: businessTarget,
     bundle_lines_count: (bundleLines || []).length,
     bundle_lines_last_synced_at: lastSyncedAt,
+    schema_message: schemaMessage,
     rows,
   };
 }

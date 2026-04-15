@@ -143,6 +143,7 @@ export default function ScalevBundleMappingSettingsTab() {
       const nextPayload = await getScalevCatalogBundleMappings(businessId);
       setPayload(nextPayload);
       setExpandedKeys([]);
+      setMessage(nextPayload.schema_message ? { type: 'error', text: nextPayload.schema_message } : null);
     } catch (error: any) {
       setPayload(null);
       setMessage({ type: 'error', text: error?.message || 'Gagal memuat bundle mapping Scalev.' });
@@ -250,17 +251,17 @@ export default function ScalevBundleMappingSettingsTab() {
 
           <button
             onClick={handleSyncBundleLines}
-            disabled={!selectedBusinessId || syncing || !selectedBusiness?.has_api_key}
+            disabled={!selectedBusinessId || syncing || !selectedBusiness?.has_api_key || Boolean(payload?.schema_message)}
             style={{
               padding: '9px 14px',
               borderRadius: 10,
               border: '1px solid rgba(59,130,246,0.25)',
               background: 'rgba(37,99,235,0.12)',
               color: '#60a5fa',
-              cursor: !selectedBusinessId || syncing || !selectedBusiness?.has_api_key ? 'not-allowed' : 'pointer',
+              cursor: !selectedBusinessId || syncing || !selectedBusiness?.has_api_key || Boolean(payload?.schema_message) ? 'not-allowed' : 'pointer',
               fontSize: 12,
               fontWeight: 700,
-              opacity: !selectedBusinessId || syncing || !selectedBusiness?.has_api_key ? 0.6 : 1,
+              opacity: !selectedBusinessId || syncing || !selectedBusiness?.has_api_key || Boolean(payload?.schema_message) ? 0.6 : 1,
             }}
           >
             {syncing ? 'Syncing...' : 'Sync Isi Bundle'}
