@@ -1853,6 +1853,7 @@ export async function recordConversion(
   if (sources.length === 0) throw new Error('At least one source required');
   if (targetQty <= 0) throw new Error('Target quantity must be positive');
   for (const s of sources) {
+    if (!s.batchId) throw new Error('Batch sumber wajib dipilih untuk setiap bahan konversi.');
     if (s.quantity <= 0) throw new Error('Source quantities must be positive');
   }
 
@@ -1862,13 +1863,11 @@ export async function recordConversion(
 
   // Deduct each source
   for (const src of sources) {
-    if (src.batchId) {
-      await deductBatchQuantityOrThrow(svc, src.batchId, src.productId, src.quantity);
-    }
+    await deductBatchQuantityOrThrow(svc, src.batchId, src.productId, src.quantity);
 
     await insertLedgerEntry(svc, {
       warehouse_product_id: src.productId,
-      batch_id: src.batchId || null,
+      batch_id: src.batchId,
       movement_type: 'OUT',
       quantity: -src.quantity,
       reference_type: 'manual',
@@ -2954,6 +2953,184 @@ export async function getStockBalance(productId?: number) {
   const { data, error } = await query.order('category').order('product_name');
   if (error) throw error;
   return data || [];
+}
+
+export async function getWipEventHistory(limit: number = 100) {
+  await requireWarehouseAccess('Work in Process');
+  const svc = createServiceSupabase();
+
+  const { data: products, error: productError } = await svc
+    .from('warehouse_products')
+    .select('id, name, category, entity, warehouse, unit')
+    .in('category', ['wip', 'wip_material'])
+    .eq('is_active', true)
+    .order('category')
+    .order('name');
+  if (productError) throw productError;
+
+  const productRows = products || [];
+  const productIds = productRows.map((row: any) => Number(row.id)).filter(Boolean);
+  if (productIds.length === 0) return [];
+
+  const ledgerSelect = `
+    id,
+    warehouse_product_id,
+    movement_type,
+    quantity,
+    reference_type,
+    reference_id,
+    notes,
+    created_by,
+    created_at,
+    warehouse_products!inner(id, name, category, entity, warehouse, unit),
+    warehouse_batches(batch_code),
+    profiles:created_by(full_name, email)
+  `;
+
+  const [wipRowsResult, conversionRowsResult] = await Promise.all([
+    svc
+      .from('warehouse_stock_ledger')
+      .select(ledgerSelect)
+      .in('warehouse_product_id', productIds)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(Math.max(limit * 20, 500)),
+    svc
+      .from('warehouse_stock_ledger')
+      .select(ledgerSelect)
+      .like('reference_id', 'conv-%')
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(Math.max(limit * 20, 500)),
+  ]);
+
+  if (wipRowsResult.error) throw wipRowsResult.error;
+  if (conversionRowsResult.error) throw conversionRowsResult.error;
+
+  const dedupedRows = new Map<number, any>();
+  [...(wipRowsResult.data || []), ...(conversionRowsResult.data || [])].forEach((row: any) => {
+    dedupedRows.set(Number(row.id), row);
+  });
+
+  const rows = Array.from(dedupedRows.values()).sort((a: any, b: any) => {
+    const timeDiff = new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    if (timeDiff !== 0) return timeDiff;
+    return Number(b.id || 0) - Number(a.id || 0);
+  });
+
+  const events = new Map<string, any>();
+  for (const row of rows) {
+    const referenceId = String(row.reference_id || '');
+    const isConversionEvent = referenceId.startsWith('conv-');
+    const key = isConversionEvent ? `conversion:${referenceId}` : `ledger:${row.id}`;
+
+    if (!events.has(key)) {
+      events.set(key, {
+        event_key: key,
+        reference_id: row.reference_id || null,
+        reference_type: row.reference_type || null,
+        event_kind: isConversionEvent ? 'conversion' : 'single',
+        rows: [],
+      });
+    }
+
+    events.get(key).rows.push(row);
+  }
+
+  const movementLabelMap: Record<string, string> = {
+    IN: 'Masuk',
+    OUT: 'Keluar',
+    ADJUST: 'Adjust',
+    TRANSFER_IN: 'Transfer In',
+    TRANSFER_OUT: 'Transfer Out',
+    DISPOSE: 'Dispose',
+  };
+
+  return Array.from(events.values())
+    .map((event) => {
+      const eventRows = [...event.rows].sort((a: any, b: any) => {
+        const timeDiff = new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+        if (timeDiff !== 0) return timeDiff;
+        return Number(b.id || 0) - Number(a.id || 0);
+      });
+
+      const latestRow = eventRows[0];
+      const actorName = latestRow?.profiles?.full_name || latestRow?.profiles?.email || (latestRow?.created_by ? '...' : null);
+      const locations = Array.from(new Set(
+        eventRows.map((row: any) => row.warehouse_products ? `${row.warehouse_products.warehouse} - ${row.warehouse_products.entity}` : '')
+          .filter(Boolean),
+      ));
+
+      if (event.event_kind === 'conversion') {
+        const targetRows = eventRows.filter((row: any) => Number(row.quantity || 0) > 0);
+        const sourceRows = eventRows.filter((row: any) => Number(row.quantity || 0) < 0);
+        const anchorRows = (targetRows.length > 0 ? targetRows : eventRows).slice().sort((a: any, b: any) => {
+          const timeDiff = new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+          if (timeDiff !== 0) return timeDiff;
+          return Number(a.id || 0) - Number(b.id || 0);
+        });
+        const anchorRow = anchorRows[0] || latestRow;
+        const targetNames = Array.from(new Set(targetRows.map((row: any) => row.warehouse_products?.name).filter(Boolean)));
+        const sourceSummary = sourceRows
+          .map((row: any) => `${row.warehouse_products?.name || '-'} (${Math.abs(Number(row.quantity || 0)).toLocaleString('id-ID')})`)
+          .join(', ');
+        const targetQty = targetRows.reduce((sum: number, row: any) => sum + Number(row.quantity || 0), 0);
+        const note = targetRows.find((row: any) => row.notes)?.notes || latestRow?.notes || null;
+        const sourceLines = sourceRows.map((row: any) => ({
+          id: Number(row.id),
+          product_name: row.warehouse_products?.name || '-',
+          quantity: Math.abs(Number(row.quantity || 0)),
+          batch_code: row.warehouse_batches?.batch_code || null,
+          note: row.notes || null,
+        }));
+        const targetLines = targetRows.map((row: any) => ({
+          id: Number(row.id),
+          product_name: row.warehouse_products?.name || '-',
+          quantity: Number(row.quantity || 0),
+          batch_code: row.warehouse_batches?.batch_code || null,
+          note: row.notes || null,
+        }));
+
+        return {
+          event_key: event.event_key,
+          event_at: anchorRow?.created_at || latestRow?.created_at || null,
+          event_label: 'Konversi',
+          event_kind: 'conversion',
+          item_label: targetNames.join(', ') || 'Konversi',
+          component_summary: sourceSummary || '-',
+          warehouse_label: locations.join(', ') || '-',
+          quantity: targetQty || null,
+          actor_name: actorName,
+          note,
+          reference_id: event.reference_id,
+          reference_type: event.reference_type,
+          row_count: eventRows.length,
+          source_lines: sourceLines,
+          target_lines: targetLines,
+        };
+      }
+
+      const movementType = String(latestRow?.movement_type || '');
+      return {
+        event_key: event.event_key,
+        event_at: latestRow?.created_at || null,
+        event_label: movementLabelMap[movementType] || movementType || 'Aktivitas',
+        event_kind: movementType.toLowerCase() || 'single',
+        item_label: latestRow?.warehouse_products?.name || '-',
+        component_summary: latestRow?.warehouse_batches?.batch_code ? `Batch ${latestRow.warehouse_batches.batch_code}` : '-',
+        warehouse_label: locations.join(', ') || '-',
+        quantity: latestRow?.quantity == null ? null : Number(latestRow.quantity),
+        actor_name: actorName,
+        note: latestRow?.notes || null,
+        reference_id: event.reference_id,
+        reference_type: event.reference_type,
+        row_count: 1,
+        source_lines: [],
+        target_lines: [],
+      };
+    })
+    .sort((a, b) => new Date(b.event_at || 0).getTime() - new Date(a.event_at || 0).getTime())
+    .slice(0, Math.max(Number(limit || 100), 1));
 }
 
 export async function getStockByBatch(productId?: number) {

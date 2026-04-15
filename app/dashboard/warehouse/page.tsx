@@ -2,7 +2,7 @@
 // @ts-nocheck
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { Fragment, useState, useEffect, useMemo } from 'react';
 import {
   getWarehouseStockOpname,
   getWarehouseSOSummary,
@@ -10,6 +10,7 @@ import {
 } from '@/lib/warehouse-actions';
 import {
   getStockBalance,
+  getWipEventHistory,
   getStockByBatch,
   getLedgerHistory,
   getDailyMovementSummary,
@@ -125,6 +126,13 @@ function fmtDateTime(d: string) {
   return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function buildJakartaDayRange(date: string) {
+  return {
+    from: new Date(`${date}T00:00:00+07:00`).toISOString(),
+    to: new Date(`${date}T23:59:59.999+07:00`).toISOString(),
+  };
+}
+
 function getOppositeReclassCategory(category: string) {
   if (category === 'fg') return 'bonus';
   if (category === 'bonus') return 'fg';
@@ -182,6 +190,7 @@ export default function WarehousePage() {
   const [expandedSO, setExpandedSO] = useState<string | null>(null);
   const [ledgerTypeFilter, setLedgerTypeFilter] = useState('all');
   const [ledgerSearch, setLedgerSearch] = useState('');
+  const [ledgerDateFilter, setLedgerDateFilter] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
   const [tabLoading, setTabLoading] = useState(false);
@@ -224,7 +233,12 @@ export default function WarehousePage() {
           const summaryData = await getDailyMovementSummary(dailySummaryDate);
           setDailySummary(summaryData);
         } else if (activeTab === 'ledger') {
-          const data = await getLedgerHistory({ limit: 200 });
+          const dayRange = ledgerDateFilter ? buildJakartaDayRange(ledgerDateFilter) : null;
+          const data = await getLedgerHistory({
+            limit: ledgerDateFilter ? 2000 : 200,
+            dateFrom: dayRange?.from,
+            dateTo: dayRange?.to,
+          });
           setLedgerHistory(data);
         } else if (activeTab === 'batch') {
           const data = await getStockByBatch();
@@ -258,7 +272,7 @@ export default function WarehousePage() {
         setTabLoading(false);
       }
     })();
-  }, [activeTab, loading, refreshKey, dailySummaryDate]);
+  }, [activeTab, loading, refreshKey, dailySummaryDate, ledgerDateFilter]);
 
   const filteredExpiring = useMemo(() =>
     expiryFilter === 'all' ? expiringData : expiringData.filter(r => r.expiry_status === expiryFilter),
@@ -387,7 +401,17 @@ export default function WarehousePage() {
           onRefresh={refreshData}
         />
       )}
-      {activeTab === 'ledger' && <LedgerTab data={ledgerHistory} typeFilter={ledgerTypeFilter} setTypeFilter={setLedgerTypeFilter} search={ledgerSearch} setSearch={setLedgerSearch} />}
+      {activeTab === 'ledger' && (
+        <LedgerTab
+          data={ledgerHistory}
+          typeFilter={ledgerTypeFilter}
+          setTypeFilter={setLedgerTypeFilter}
+          search={ledgerSearch}
+          setSearch={setLedgerSearch}
+          dateFilter={ledgerDateFilter}
+          setDateFilter={setLedgerDateFilter}
+        />
+      )}
       {activeTab === 'reclass' && <StockReclassTab data={reclassRequests} onRefresh={refreshData} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
       {activeTab === 'mapping' && <MappingTab data={mappingData} onRefresh={refreshData} />}
@@ -558,6 +582,34 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
   const [showConvert, setShowConvert] = useState(false);
   const [warehouseFilter, setWarehouseFilter] = useState('BTN - RLB');
   const [search, setSearch] = useState('');
+  const [eventRows, setEventRows] = useState<any[]>([]);
+  const [eventLoading, setEventLoading] = useState(true);
+  const [eventError, setEventError] = useState('');
+  const [expandedEventKeys, setExpandedEventKeys] = useState<string[]>([]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    (async () => {
+      setEventLoading(true);
+      setEventError('');
+      try {
+        const rows = await getWipEventHistory(120);
+        if (isActive) setEventRows(rows);
+      } catch (e: any) {
+        if (isActive) {
+          setEventRows([]);
+          setEventError(e?.message || 'Gagal memuat history event WIP.');
+        }
+      } finally {
+        if (isActive) setEventLoading(false);
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [data]);
 
   const wipData = useMemo(() => {
     let result = data.filter(r => r.category === 'wip' || r.category === 'wip_material');
@@ -579,6 +631,38 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
   const totalWip = wipData.filter(r => r.category === 'wip').reduce((s, r) => s + Number(r.current_stock || 0), 0);
   const totalMaterial = wipData.filter(r => r.category === 'wip_material').reduce((s, r) => s + Number(r.current_stock || 0), 0);
   const totalValue = wipData.reduce((s, r) => s + Number(r.stock_value || 0), 0);
+  const allowedLocations = useMemo(() => (
+    warehouseFilter === 'all' ? null : new Set([warehouseFilter])
+  ), [warehouseFilter]);
+  const filteredEventRows = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return eventRows.filter((row: any) => {
+      if (allowedLocations && !allowedLocations.has(row.warehouse_label)) return false;
+      if (!q) return true;
+
+      const haystack = [
+        row.item_label,
+        row.component_summary,
+        row.note,
+        row.actor_name,
+        row.event_label,
+        row.reference_id,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(q);
+    });
+  }, [eventRows, allowedLocations, search]);
+
+  const toggleExpandedEvent = (eventKey: string) => {
+    setExpandedEventKeys((current) => (
+      current.includes(eventKey)
+        ? current.filter((key) => key !== eventKey)
+        : [...current, eventKey]
+    ));
+  };
 
   return (
     <>
@@ -653,6 +737,171 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
               </tr>
             </tfoot>
           )}
+        </table>
+      </div>
+
+      <div style={{ marginTop: 20, marginBottom: 10, display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>History Event WIP</div>
+          <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.6 }}>
+            Satu aksi `convert` dari modal WIP akan digabung menjadi satu event. Aktivitas WIP lain yang bukan convert tetap tampil sebagai event tunggal.
+          </div>
+        </div>
+        <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+          {filteredEventRows.length} event
+        </div>
+      </div>
+
+      {eventLoading && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--dim)', fontSize: 12 }}>
+          Memuat history event WIP...
+        </div>
+      )}
+
+      {!!eventError && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid #ef444440', background: 'var(--card)', color: '#fca5a5', fontSize: 12 }}>
+          {eventError}
+        </div>
+      )}
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              {['No', 'Tanggal', 'Event', 'Item / Hasil', 'Komponen', 'Gudang', 'Qty', 'Oleh', 'Catatan'].map((h) => (
+                <th key={h} style={{ padding: '8px 10px', textAlign: ['No', 'Qty'].includes(h) ? 'right' : 'left', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {filteredEventRows.map((row: any, i) => {
+              const isConversion = row.event_kind === 'conversion';
+              const isExpanded = expandedEventKeys.includes(row.event_key);
+              const moveCfg = isConversion
+                ? { label: 'Konversi', color: '#8b5cf6' }
+                : (Object.entries(MOVEMENT_LABELS).find(([_, cfg]) => cfg.label === row.event_label)?.[1] || { label: row.event_label, color: 'var(--text)' });
+              const qty = Number(row.quantity || 0);
+              const refText = row.reference_type
+                ? `${row.reference_type}${row.reference_id ? ` #${row.reference_id}` : ''}`
+                : '';
+
+              return (
+                <Fragment key={row.event_key}>
+                  <tr style={{ borderBottom: isExpanded ? 'none' : '1px solid var(--bg-deep)' }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{i + 1}</td>
+                    <td style={{ padding: '8px 10px', minWidth: 150 }}>
+                      {row.event_at ? (
+                        <div style={{ color: 'var(--text)' }}>{fmtDateTime(row.event_at)}</div>
+                      ) : (
+                        <span style={{ color: 'var(--dim)' }}>Belum pernah</span>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 10px', minWidth: 120 }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${moveCfg.color}20`, color: moveCfg.color }}>
+                          {moveCfg.label}
+                        </span>
+                        {isConversion && (
+                          <button
+                            onClick={() => toggleExpandedEvent(row.event_key)}
+                            style={{
+                              padding: '2px 8px',
+                              borderRadius: 999,
+                              border: '1px solid var(--border)',
+                              background: isExpanded ? 'rgba(139,92,246,0.14)' : 'transparent',
+                              color: isExpanded ? '#c4b5fd' : 'var(--dim)',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {isExpanded ? 'Tutup Detail' : 'Lihat Detail'}
+                          </button>
+                        )}
+                      </div>
+                      {(refText || row.row_count > 1) && (
+                        <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>
+                          {[refText, row.row_count > 1 ? `${row.row_count} ledger rows` : ''].filter(Boolean).join(' • ')}
+                        </div>
+                      )}
+                    </td>
+                    <td style={{ padding: '8px 10px', minWidth: 220 }}>
+                      <div style={{ fontWeight: 600, color: 'var(--text)' }}>{row.item_label || '-'}</div>
+                    </td>
+                    <td style={{ padding: '8px 10px', minWidth: 260, color: row.component_summary && row.component_summary !== '-' ? 'var(--text-secondary)' : 'var(--dim)', fontSize: 11 }}>
+                      {row.component_summary || '-'}
+                    </td>
+                    <td style={{ padding: '8px 10px', fontSize: 11 }}>
+                      <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text)' }}>{row.warehouse_label || '-'}</span>
+                    </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: qty > 0 ? 'var(--green)' : qty < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                      {row.quantity == null ? '-' : `${qty > 0 ? '+' : ''}${qty.toLocaleString('id-ID')}`}
+                    </td>
+                    <td style={{ padding: '8px 10px', minWidth: 140, color: row.actor_name ? 'var(--text)' : 'var(--dim)' }}>
+                      {row.actor_name || '-'}
+                    </td>
+                    <td style={{ padding: '8px 10px', minWidth: 240, color: row.note ? 'var(--text-secondary)' : 'var(--dim)', fontSize: 11 }}>
+                      {row.note || '-'}
+                    </td>
+                  </tr>
+                  {isConversion && isExpanded && (
+                    <tr style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                      <td colSpan={9} style={{ padding: '0 10px 12px 10px' }}>
+                        <div style={{ border: '1px solid rgba(139,92,246,0.25)', background: 'rgba(139,92,246,0.06)', borderRadius: 12, padding: 14, display: 'grid', gap: 14 }}>
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#c4b5fd', marginBottom: 8 }}>Bahan Dipakai</div>
+                            <div style={{ display: 'grid', gap: 8 }}>
+                              {(row.source_lines || []).map((detail: any) => (
+                                <div key={`src-${detail.id}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: '8px 10px', borderRadius: 10, background: 'rgba(15,23,42,0.35)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                                  <div>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{detail.product_name}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+                                      {[detail.batch_code ? `Batch ${detail.batch_code}` : '', detail.note || ''].filter(Boolean).join(' • ') || '-'}
+                                    </div>
+                                  </div>
+                                  <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: '#fdba74' }}>
+                                    -{Number(detail.quantity || 0).toLocaleString('id-ID')}
+                                  </div>
+                                </div>
+                              ))}
+                              {(!row.source_lines || row.source_lines.length === 0) && (
+                                <div style={{ fontSize: 11, color: 'var(--dim)' }}>Tidak ada detail bahan.</div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: '#c4b5fd', marginBottom: 8 }}>Hasil Konversi</div>
+                            <div style={{ display: 'grid', gap: 8 }}>
+                              {(row.target_lines || []).map((detail: any) => (
+                                <div key={`tgt-${detail.id}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: '8px 10px', borderRadius: 10, background: 'rgba(15,23,42,0.35)', border: '1px solid rgba(255,255,255,0.04)' }}>
+                                  <div>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{detail.product_name}</div>
+                                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+                                      {[detail.batch_code ? `Batch ${detail.batch_code}` : '', detail.note || ''].filter(Boolean).join(' • ') || '-'}
+                                    </div>
+                                  </div>
+                                  <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: '#6ee7b7' }}>
+                                    +{Number(detail.quantity || 0).toLocaleString('id-ID')}
+                                  </div>
+                                </div>
+                              ))}
+                              {(!row.target_lines || row.target_lines.length === 0) && (
+                                <div style={{ fontSize: 11, color: 'var(--dim)' }}>Tidak ada detail hasil.</div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
+            {filteredEventRows.length === 0 && (
+              <tr><td colSpan={9} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Belum ada history event WIP yang cocok.</td></tr>
+            )}
+          </tbody>
         </table>
       </div>
     </>
@@ -1391,13 +1640,16 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
   const [selectedEntity, setSelectedEntity] = useState('');
   const [search, setSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [sources, setSources] = useState<{ productId: number; productName: string; quantity: string }[]>([]);
+  const [sources, setSources] = useState<{ productId: number; productName: string; category: string; quantity: string; batchId: string }[]>([]);
+  const [sourceBatchMap, setSourceBatchMap] = useState<Record<number, any[]>>({});
+  const [sourceBatchLoading, setSourceBatchLoading] = useState<Record<number, boolean>>({});
   const [targetProduct, setTargetProduct] = useState('');
   const [targetSearch, setTargetSearch] = useState('');
   const [targetName, setTargetName] = useState('');
   const [targetQty, setTargetQty] = useState('');
   const [targetBatchCode, setTargetBatchCode] = useState('');
   const [targetExpiredDate, setTargetExpiredDate] = useState('');
+  const [allowNoMaterialSupport, setAllowNoMaterialSupport] = useState(false);
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -1444,14 +1696,54 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     return entityProducts.filter(p => p.category === 'fg' && (p.name.toLowerCase().includes(q) || p.category.toLowerCase().includes(q)));
   }, [entityProducts, targetSearch]);
 
+  const selectedTargetRow = useMemo(
+    () => entityProducts.find((p) => String(p.id) === targetProduct) || null,
+    [entityProducts, targetProduct],
+  );
+  const hasMaterialSource = useMemo(
+    () => sources.some((source) => source.category === 'wip_material'),
+    [sources],
+  );
+  const needsMaterialGuard = Boolean(selectedTargetRow?.category === 'fg' && sources.length > 0 && !hasMaterialSource);
+
+  const ensureSourceBatches = async (productId: number) => {
+    if (sourceBatchMap[productId] || sourceBatchLoading[productId]) return;
+
+    setSourceBatchLoading((current) => ({ ...current, [productId]: true }));
+    try {
+      const rows = await getBatches(productId);
+      const availableRows = rows.filter((row: any) => Number(row.current_qty || 0) > 0);
+      setSourceBatchMap((current) => ({ ...current, [productId]: availableRows }));
+
+      if (availableRows.length === 1) {
+        setSources((current) => current.map((source) => (
+          source.productId === productId && !source.batchId
+            ? { ...source, batchId: String(availableRows[0].id) }
+            : source
+        )));
+      }
+    } catch {
+      setSourceBatchMap((current) => ({ ...current, [productId]: [] }));
+    } finally {
+      setSourceBatchLoading((current) => ({ ...current, [productId]: false }));
+    }
+  };
+
   const addSource = (p: any) => {
     if (sources.find(s => s.productId === p.id)) return;
-    setSources([...sources, { productId: p.id, productName: p.name, quantity: '' }]);
+    setAllowNoMaterialSupport(false);
+    setSources([...sources, { productId: p.id, productName: p.name, category: p.category, quantity: '', batchId: '' }]);
+    void ensureSourceBatches(p.id);
   };
-  const removeSource = (pid: number) => setSources(sources.filter(s => s.productId !== pid));
+  const removeSource = (pid: number) => {
+    setAllowNoMaterialSupport(false);
+    setSources(sources.filter(s => s.productId !== pid));
+  };
   const updateSourceQty = (pid: number, qty: string) => setSources(sources.map(s => s.productId === pid ? { ...s, quantity: qty } : s));
+  const updateSourceBatch = (pid: number, batchId: string) => setSources(sources.map(s => s.productId === pid ? { ...s, batchId } : s));
 
   const selectTarget = (p: any) => {
+    setAllowNoMaterialSupport(false);
     setTargetProduct(String(p.id));
     setTargetName(p.name);
     setTargetSearch('');
@@ -1461,6 +1753,9 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
   const handleEntityChange = (val: string) => {
     setSelectedEntity(val);
     setSources([]);
+    setSourceBatchMap({});
+    setSourceBatchLoading({});
+    setAllowNoMaterialSupport(false);
     setTargetProduct('');
     setTargetName('');
     setSearch('');
@@ -1468,7 +1763,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
   };
 
   // Summary text
-  const summaryReady = sources.length > 0 && sources.every(s => Number(s.quantity) > 0) && targetProduct && Number(targetQty) > 0;
+  const summaryReady = sources.length > 0 && sources.every(s => Number(s.quantity) > 0 && s.batchId) && targetProduct && Number(targetQty) > 0;
 
   const handleSubmit = async () => {
     setError(''); setSuccess('');
@@ -1478,12 +1773,25 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
     const tqty = Number(targetQty);
     if (!tpid) { setError('Pilih produk tujuan'); return; }
     if (!tqty || tqty <= 0) { setError('Qty tujuan harus > 0'); return; }
+    if (needsMaterialGuard && !allowNoMaterialSupport) {
+      setError('Konversi ke FG biasanya butuh material pendukung. Tambahkan bahan `wip_material` atau centang override terlebih dahulu.');
+      return;
+    }
 
     const convSources: ConversionSource[] = [];
     for (const s of sources) {
       const qty = Number(s.quantity);
       if (!qty || qty <= 0) { setError(`Qty untuk ${s.productName} harus > 0`); return; }
-      convSources.push({ productId: s.productId, quantity: qty });
+      if (!s.batchId) { setError(`Batch untuk ${s.productName} wajib dipilih.`); return; }
+
+      const selectedBatch = (sourceBatchMap[s.productId] || []).find((row: any) => String(row.id) === String(s.batchId));
+      if (!selectedBatch) { setError(`Batch untuk ${s.productName} tidak ditemukan.`); return; }
+      if (qty > Number(selectedBatch.current_qty || 0)) {
+        setError(`Qty ${s.productName} melebihi stok batch ${selectedBatch.batch_code} (${Number(selectedBatch.current_qty || 0).toLocaleString('id-ID')}).`);
+        return;
+      }
+
+      convSources.push({ productId: s.productId, batchId: Number(s.batchId), quantity: qty });
     }
 
     setSubmitting(true);
@@ -1588,12 +1896,43 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
             {sources.length > 0 && (
               <div style={{ marginBottom: 14 }}>
                 {sources.map(s => (
-                  <div key={s.productId} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-                    <button onClick={() => removeSource(s.productId)}
-                      style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}>&#10005;</button>
-                    <div style={{ flex: 1, fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.productName}</div>
-                    <input type="number" min="1" placeholder="Qty" value={s.quantity} onChange={(e) => updateSourceQty(s.productId, e.target.value)}
-                      style={{ ...inputStyle, width: 80, flex: 'none', textAlign: 'right' }} />
+                  <div key={s.productId} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                      <button onClick={() => removeSource(s.productId)}
+                        style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: 14, cursor: 'pointer', padding: '0 4px', flexShrink: 0 }}>&#10005;</button>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.productName}</div>
+                        <div style={{ fontSize: 10, color: 'var(--dim)' }}>{s.category}</div>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
+                      <div style={{ flex: '1 1 240px' }}>
+                        <label style={labelStyle}>Batch Sumber *</label>
+                        <select
+                          value={s.batchId}
+                          onChange={(e) => updateSourceBatch(s.productId, e.target.value)}
+                          style={inputStyle}
+                          disabled={Boolean(sourceBatchLoading[s.productId])}
+                        >
+                          <option value="">{sourceBatchLoading[s.productId] ? 'Memuat batch...' : '-- Pilih Batch --'}</option>
+                          {(sourceBatchMap[s.productId] || []).map((batch: any) => (
+                            <option key={batch.id} value={batch.id}>
+                              {batch.batch_code} (qty: {Number(batch.current_qty || 0).toLocaleString('id-ID')})
+                            </option>
+                          ))}
+                        </select>
+                        {!sourceBatchLoading[s.productId] && (sourceBatchMap[s.productId] || []).length === 0 && (
+                          <div style={{ fontSize: 10, color: '#fca5a5', marginTop: 4 }}>
+                            Tidak ada batch aktif dengan stok untuk bahan ini.
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ width: 110 }}>
+                        <label style={labelStyle}>Qty *</label>
+                        <input type="number" min="1" placeholder="Qty" value={s.quantity} onChange={(e) => updateSourceQty(s.productId, e.target.value)}
+                          style={{ ...inputStyle, textAlign: 'right' }} />
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1647,6 +1986,26 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
               <label style={labelStyle}>Catatan</label>
               <input type="text" placeholder="Opsional" value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
             </div>
+
+            {needsMaterialGuard && (
+              <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.08)' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', marginBottom: 6 }}>
+                  Material pendukung belum dipilih
+                </div>
+                <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.6, marginBottom: 8 }}>
+                  Konversi ke FG biasanya juga memakai bahan `wip_material` seperti pouch atau hologram. Tambahkan bahan pendukung jika memang ikut terpakai.
+                </div>
+                <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 11, color: 'var(--text)' }}>
+                  <input
+                    type="checkbox"
+                    checked={allowNoMaterialSupport}
+                    onChange={(e) => setAllowNoMaterialSupport(e.target.checked)}
+                    style={{ marginTop: 2 }}
+                  />
+                  <span>Saya yakin konversi ini memang tidak membutuhkan material pendukung tambahan.</span>
+                </label>
+              </div>
+            )}
           </>
         )}
 
@@ -1656,7 +2015,13 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
             <div style={{ fontWeight: 700, color: '#8b5cf6', marginBottom: 6 }}>Ringkasan Konversi</div>
             {sources.map(s => (
               <div key={s.productId} style={{ color: '#f97316', marginBottom: 2 }}>
-                - {s.productName} <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>x{Number(s.quantity).toLocaleString('id-ID')}</span>
+                - {s.productName}
+                {(() => {
+                  const selectedBatch = (sourceBatchMap[s.productId] || []).find((batch: any) => String(batch.id) === String(s.batchId));
+                  return selectedBatch ? ` • Batch ${selectedBatch.batch_code}` : '';
+                })()}
+                {' '}
+                <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>x{Number(s.quantity).toLocaleString('id-ID')}</span>
               </div>
             ))}
             <div style={{ color: 'var(--dim)', margin: '4px 0' }}>menjadi</div>
@@ -2302,9 +2667,12 @@ function DailySummaryTab({
 // ============================================================
 // MOVEMENT LOG TAB
 // ============================================================
-function LedgerTab({ data, typeFilter, setTypeFilter, search, setSearch }: {
+function LedgerTab({
+  data, typeFilter, setTypeFilter, search, setSearch, dateFilter, setDateFilter
+}: {
   data: any[]; typeFilter: string; setTypeFilter: (v: string) => void;
   search: string; setSearch: (v: string) => void;
+  dateFilter: string; setDateFilter: (v: string) => void;
 }) {
   const filtered = useMemo(() => {
     let result = data;
@@ -2334,10 +2702,36 @@ function LedgerTab({ data, typeFilter, setTypeFilter, search, setSearch }: {
 
   return (
     <>
-      {/* Search + Type filter chips */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="date"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 12, outline: 'none' }}
+        />
         <input type="text" placeholder="Cari order ID, produk, user, catatan..." value={search} onChange={e => setSearch(e.target.value)}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 12, outline: 'none', minWidth: 260 }} />
+        {(dateFilter || search) && (
+          <button
+            onClick={() => {
+              setDateFilter('');
+              setSearch('');
+              setTypeFilter('all');
+            }}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid var(--border)',
+              background: 'transparent',
+              color: 'var(--dim)',
+              fontSize: 12,
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            Reset
+          </button>
+        )}
         <button
           onClick={() => setTypeFilter('all')}
           style={{
@@ -2365,10 +2759,11 @@ function LedgerTab({ data, typeFilter, setTypeFilter, search, setSearch }: {
       </div>
 
       <div style={{ marginBottom: 10, fontSize: 11, color: 'var(--dim)' }}>
-        Menampilkan 200 movement terbaru agar tab ini tetap ringan saat dibuka.
+        {dateFilter
+          ? `Menampilkan movement pada ${fullDateID(dateFilter)}.`
+          : 'Menampilkan 200 movement terbaru agar tab ini tetap ringan saat dibuka.'}
       </div>
 
-      {/* Table */}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
