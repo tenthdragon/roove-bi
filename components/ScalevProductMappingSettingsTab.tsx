@@ -1,6 +1,6 @@
 'use client';
 
-import { type CSSProperties, useEffect, useMemo, useState } from 'react';
+import { startTransition, type CSSProperties, useEffect, useMemo, useState } from 'react';
 import { getProducts } from '@/lib/warehouse-ledger-actions';
 import {
   getScalevCatalogBusinesses,
@@ -141,6 +141,17 @@ function renderCatalogReadyBadge(isReady: boolean) {
 function formatBusinessTarget(target: ScalevCatalogMappingPayload['business_target']) {
   if (!target?.is_active || !target.deduct_entity) return 'Belum ada target deduct';
   return `${target.deduct_entity}${target.deduct_warehouse ? ` • ${target.deduct_warehouse}` : ''}`;
+}
+
+function toWarehouseProductLite(product: any) {
+  if (!product?.id) return null;
+  return {
+    id: Number(product.id),
+    name: product.name,
+    category: product.category || null,
+    entity: product.entity || null,
+    warehouse: product.warehouse || null,
+  };
 }
 
 export default function ScalevProductMappingSettingsTab() {
@@ -299,6 +310,47 @@ export default function ScalevProductMappingSettingsTab() {
       .slice(0, 12);
   }, [mappingData?.business_target?.deduct_entity, mappingData?.business_target?.deduct_warehouse, productSearch, products]);
 
+  const warehouseProductById = useMemo(() => {
+    const nextMap = new Map<number, ReturnType<typeof toWarehouseProductLite>>();
+    for (const product of products) {
+      const mapped = toWarehouseProductLite(product);
+      if (mapped) nextMap.set(mapped.id, mapped);
+    }
+    return nextMap;
+  }, [products]);
+
+  function applyLocalMappingUpdate(row: ScalevCatalogMappingRow, warehouseProductId: number | null) {
+    const nextWarehouseProduct = warehouseProductId != null
+      ? warehouseProductById.get(Number(warehouseProductId)) || null
+      : null;
+
+    startTransition(() => {
+      setMappingData((current) => {
+        if (!current) return current;
+
+        return {
+          ...current,
+          rows: current.rows.map((currentRow) => {
+            if (currentRow.entity_key !== row.entity_key) return currentRow;
+
+            return {
+              ...currentRow,
+              warehouse_product_id: warehouseProductId,
+              warehouse_product: nextWarehouseProduct,
+              mapping_source: warehouseProductId != null ? 'manual' : null,
+              status: warehouseProductId != null
+                ? 'mapped'
+                : currentRow.recommendation
+                  ? 'recommended'
+                  : 'unmapped',
+              recommendation: warehouseProductId != null ? null : currentRow.recommendation,
+            };
+          }),
+        };
+      });
+    });
+  }
+
   async function persistMapping(row: ScalevCatalogMappingRow, warehouseProductId: number | null) {
     if (!selectedBusinessId) return;
     setSavingEntityKey(row.entity_key);
@@ -311,7 +363,7 @@ export default function ScalevProductMappingSettingsTab() {
       });
       setEditingEntityKey(null);
       setProductSearch('');
-      await refreshRows(selectedBusinessId);
+      applyLocalMappingUpdate(row, warehouseProductId);
       setMessage({
         type: 'success',
         text: warehouseProductId == null ? `Mapping ${row.label} dibersihkan.` : `Mapping ${row.label} disimpan.`,
