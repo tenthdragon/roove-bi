@@ -167,6 +167,7 @@ interface ScalevOrderWarehouseSnapshot {
 interface ScalevOrderLineForWarehouse {
   product_name: string;
   quantity: number;
+  variant_sku?: string | null;
 }
 
 interface ResolvedWarehouseTarget {
@@ -224,6 +225,30 @@ interface WarehouseFallbackProductRow {
   entity: string;
   warehouse: string;
   scalev_product_names: string[] | null;
+}
+
+interface ScalevCatalogBusinessLookupRow {
+  id: number;
+  business_code: string;
+}
+
+interface ScalevCatalogIdentifierLookupRow {
+  business_id: number;
+  identifier_normalized: string;
+  entity_key: string;
+  entity_type: 'product' | 'variant' | 'bundle';
+  source: string;
+}
+
+interface WarehouseScalevCatalogMappingRow {
+  business_id: number;
+  scalev_entity_key: string;
+  warehouse_product_id: number | null;
+}
+
+interface WarehouseCatalogResolvedTarget {
+  warehouse_product_id: number;
+  note_suffix: string;
 }
 
 interface WarehouseStockReclassRequestInput {
@@ -323,8 +348,8 @@ function quantitiesEqual(a: number, b: number) {
 }
 
 function mapsEqualWithTolerance(a: Map<number, number>, b: Map<number, number>) {
-  const keys = new Set<number>([...a.keys(), ...b.keys()]);
-  for (const key of keys) {
+  const keys = new Set<number>([...Array.from(a.keys()), ...Array.from(b.keys())]);
+  for (const key of Array.from(keys)) {
     const left = a.get(key) || 0;
     const right = b.get(key) || 0;
     if (!quantitiesEqual(left, right)) return false;
@@ -384,7 +409,7 @@ async function getScalevOrderWarehouseLines(
 ) {
   const { data, error } = await svc
     .from('scalev_order_lines')
-    .select('product_name, quantity')
+    .select('product_name, quantity, variant_sku')
     .eq('scalev_order_id', scalevOrderDbId);
   if (error) throw error;
 
@@ -393,6 +418,7 @@ async function getScalevOrderWarehouseLines(
     .map((line: any) => ({
       product_name: line.product_name,
       quantity: Number(line.quantity),
+      variant_sku: line.variant_sku || null,
     })) as ScalevOrderLineForWarehouse[];
 }
 
@@ -430,29 +456,62 @@ async function resolveWarehouseTargetsForOrder(
     };
   }
 
+  const businessRows = order.business_code
+    ? await fetchScalevCatalogBusinessesByCodes(svc, [order.business_code])
+    : [];
+  const catalogBusinessId = businessRows[0]?.id || null;
+  const linesByBusinessCode = new Map<string, ScalevOrderLineForWarehouse[]>();
+  if (order.business_code) {
+    linesByBusinessCode.set(order.business_code, productLines);
+  }
+
+  const catalogIdentifierRows = catalogBusinessId
+    ? await fetchScalevCatalogIdentifiersForBusinesses(svc, businessRows, linesByBusinessCode)
+    : [];
+  const catalogMappingRows = catalogIdentifierRows.length > 0
+    ? await fetchScalevCatalogMappingsByBusinesses(svc, catalogIdentifierRows)
+    : [];
+  const scalevMappings = await fetchScalevMappingsByProductNames(
+    svc,
+    Array.from(new Set(productLines.map(line => line.product_name))),
+  );
+  const catalogIdentifiersByBusinessId = buildCatalogIdentifierLookupMap(catalogIdentifierRows);
+  const catalogMappingsByBusinessId = buildCatalogMappingLookupMap(catalogMappingRows);
+  const scalevMappingByName = new Map<string, WarehouseScalevMappingRow>();
+  for (const scalevMapping of scalevMappings) {
+    scalevMappingByName.set(scalevMapping.scalev_product_name, scalevMapping);
+  }
+
   const targets: ResolvedWarehouseTarget[] = [];
   const unmappedProducts: string[] = [];
   let skippedIgnored = 0;
 
   for (const line of productLines) {
-    const { data: scalevMapping, error: scalevMappingErr } = await svc
-      .from('warehouse_scalev_mapping')
-      .select('warehouse_product_id, deduct_qty_multiplier, is_ignored')
-      .eq('scalev_product_name', line.product_name)
-      .maybeSingle();
-    if (scalevMappingErr) throw scalevMappingErr;
+    const catalogTarget = resolveCatalogWarehouseTargetForLine({
+      businessId: catalogBusinessId,
+      line,
+      identifiersByBusinessId: catalogIdentifiersByBusinessId,
+      mappingsByBusinessId: catalogMappingsByBusinessId,
+    });
 
-    if (scalevMapping?.is_ignored) {
+    const scalevMapping = scalevMappingByName.get(line.product_name);
+
+    if (!catalogTarget && scalevMapping?.is_ignored) {
       skippedIgnored++;
       continue;
     }
 
     let targetProductId: number | null = null;
     let deductQty = Number(line.quantity);
+    let targetNote = `${order.business_code}\u2192${mapping.deduct_entity}`;
 
-    if (scalevMapping?.warehouse_product_id) {
+    if (catalogTarget) {
+      targetProductId = Number(catalogTarget.warehouse_product_id);
+      targetNote = `${targetNote} via ${catalogTarget.note_suffix}`;
+    } else if (scalevMapping?.warehouse_product_id) {
       targetProductId = Number(scalevMapping.warehouse_product_id);
       deductQty = Number(line.quantity) * Number(scalevMapping.deduct_qty_multiplier || 1);
+      targetNote = `${targetNote} via legacy`;
     } else {
       const { data: whProducts, error: whProductsErr } = await svc
         .rpc('warehouse_find_product_for_deduction', {
@@ -463,6 +522,7 @@ async function resolveWarehouseTargetsForOrder(
       if (whProductsErr) throw whProductsErr;
       if (whProducts && whProducts.length > 0) {
         targetProductId = Number(whProducts[0].id);
+        targetNote = `${targetNote} via fallback`;
       }
     }
 
@@ -471,7 +531,7 @@ async function resolveWarehouseTargetsForOrder(
         warehouse_product_id: targetProductId,
         scalev_product_name: line.product_name,
         quantity: deductQty,
-        note_context: `${order.business_code}\u2192${mapping.deduct_entity}`,
+        note_context: targetNote,
       });
     } else {
       unmappedProducts.push(line.product_name);
@@ -616,6 +676,115 @@ function buildWarehouseFallbackLookupKey(scalevName: string, entity?: string | n
   return `${scalevName}::${entity || ''}::${warehouse || ''}`;
 }
 
+function normalizeScalevRuntimeIdentifier(value: string | null | undefined) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function isMissingWarehouseTableError(error: any) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return code === 'PGRST205' || code === '42P01' || /does not exist/i.test(message) || /schema cache/i.test(message);
+}
+
+function getCatalogIdentifierSourcePriority(source: string, mode: 'variant_sku' | 'product_name') {
+  if (mode === 'variant_sku') {
+    if (source === 'variant.unique_id') return 100;
+    if (source === 'variant.sku') return 90;
+    if (source === 'variant.uuid') return 80;
+    return 10;
+  }
+
+  if (source === 'variant.name') return 90;
+  if (source === 'product.display') return 80;
+  if (source === 'product.public_name') return 75;
+  if (source === 'product.name') return 70;
+  if (source === 'variant.product_name') return 55;
+  if (source === 'product.slug') return 35;
+  return 20;
+}
+
+function buildCatalogIdentifierLookupMap(rows: ScalevCatalogIdentifierLookupRow[]) {
+  const byBusinessId = new Map<number, Map<string, ScalevCatalogIdentifierLookupRow[]>>();
+
+  for (const row of rows) {
+    if (!byBusinessId.has(row.business_id)) {
+      byBusinessId.set(row.business_id, new Map<string, ScalevCatalogIdentifierLookupRow[]>());
+    }
+    const identifierMap = byBusinessId.get(row.business_id)!;
+    if (!identifierMap.has(row.identifier_normalized)) {
+      identifierMap.set(row.identifier_normalized, []);
+    }
+    identifierMap.get(row.identifier_normalized)!.push(row);
+  }
+
+  return byBusinessId;
+}
+
+function buildCatalogMappingLookupMap(rows: WarehouseScalevCatalogMappingRow[]) {
+  const byBusinessId = new Map<number, Map<string, WarehouseScalevCatalogMappingRow>>();
+
+  for (const row of rows) {
+    if (!byBusinessId.has(row.business_id)) {
+      byBusinessId.set(row.business_id, new Map<string, WarehouseScalevCatalogMappingRow>());
+    }
+    byBusinessId.get(row.business_id)!.set(row.scalev_entity_key, row);
+  }
+
+  return byBusinessId;
+}
+
+function resolveCatalogWarehouseTargetForLine(args: {
+  businessId: number | null;
+  line: ScalevOrderLineForWarehouse;
+  identifiersByBusinessId: Map<number, Map<string, ScalevCatalogIdentifierLookupRow[]>>;
+  mappingsByBusinessId: Map<number, Map<string, WarehouseScalevCatalogMappingRow>>;
+}): WarehouseCatalogResolvedTarget | null {
+  if (!args.businessId) return null;
+
+  const identifierMap = args.identifiersByBusinessId.get(args.businessId);
+  const mappingMap = args.mappingsByBusinessId.get(args.businessId);
+  if (!identifierMap || !mappingMap) return null;
+
+  const candidateMap = new Map<string, { productId: number; priority: number; noteSuffix: string }>();
+
+  const collectCandidates = (rawValue: string | null | undefined, mode: 'variant_sku' | 'product_name') => {
+    const normalized = normalizeScalevRuntimeIdentifier(rawValue);
+    if (!normalized) return;
+
+    for (const identifierRow of identifierMap.get(normalized) || []) {
+      if (mode === 'variant_sku' && identifierRow.entity_type !== 'variant') continue;
+
+      const mappingRow = mappingMap.get(identifierRow.entity_key);
+      if (!mappingRow?.warehouse_product_id) continue;
+
+      const priority = getCatalogIdentifierSourcePriority(identifierRow.source, mode);
+      const existing = candidateMap.get(identifierRow.entity_key);
+      if (existing && existing.priority >= priority) continue;
+
+      candidateMap.set(identifierRow.entity_key, {
+        productId: Number(mappingRow.warehouse_product_id),
+        priority,
+        noteSuffix: `catalog:${identifierRow.source}`,
+      });
+    }
+  };
+
+  collectCandidates(args.line.variant_sku, 'variant_sku');
+  collectCandidates(args.line.product_name, 'product_name');
+
+  const ranked = Array.from(candidateMap.values()).sort((left, right) => right.priority - left.priority);
+  if (ranked.length === 0) return null;
+
+  return {
+    warehouse_product_id: ranked[0].productId,
+    note_suffix: ranked[0].noteSuffix,
+  };
+}
+
 function buildWarehouseIssueSummaryFromState(args: {
   orderId: string;
   businessCode?: string | null;
@@ -681,14 +850,14 @@ async function fetchScalevOrderLinesByOrderIds(
   svc: ReturnType<typeof createServiceSupabase>,
   orderDbIds: number[],
 ) {
-  const rows: { scalev_order_id: number; product_name: string; quantity: number }[] = [];
+  const rows: { scalev_order_id: number; product_name: string; quantity: number; variant_sku: string | null }[] = [];
 
   for (const chunk of chunkArray(orderDbIds, 1000)) {
     let offset = 0;
     while (true) {
       const { data, error } = await svc
         .from('scalev_order_lines')
-        .select('scalev_order_id, product_name, quantity')
+        .select('scalev_order_id, product_name, quantity, variant_sku')
         .in('scalev_order_id', chunk)
         .range(offset, offset + 999);
       if (error) throw error;
@@ -699,6 +868,7 @@ async function fetchScalevOrderLinesByOrderIds(
           scalev_order_id: Number(row.scalev_order_id),
           product_name: row.product_name,
           quantity: Number(row.quantity),
+          variant_sku: row.variant_sku || null,
         });
       }
       if (data.length < 1000) break;
@@ -728,6 +898,29 @@ async function fetchBusinessMappingsByCodes(
   return rows;
 }
 
+async function fetchScalevCatalogBusinessesByCodes(
+  svc: ReturnType<typeof createServiceSupabase>,
+  businessCodes: string[],
+) {
+  const rows: ScalevCatalogBusinessLookupRow[] = [];
+  const uniqueCodes = Array.from(new Set(businessCodes.filter(Boolean)));
+  if (uniqueCodes.length === 0) return rows;
+
+  for (const chunk of chunkArray(uniqueCodes, 200)) {
+    const { data, error } = await svc
+      .from('scalev_webhook_businesses')
+      .select('id, business_code')
+      .in('business_code', chunk);
+    if (error) {
+      if (isMissingWarehouseTableError(error)) return [];
+      throw error;
+    }
+    rows.push(...((data || []) as ScalevCatalogBusinessLookupRow[]));
+  }
+
+  return rows;
+}
+
 async function fetchScalevMappingsByProductNames(
   svc: ReturnType<typeof createServiceSupabase>,
   productNames: string[],
@@ -746,12 +939,82 @@ async function fetchScalevMappingsByProductNames(
   return rows;
 }
 
+async function fetchScalevCatalogIdentifiersForBusinesses(
+  svc: ReturnType<typeof createServiceSupabase>,
+  businessRows: ScalevCatalogBusinessLookupRow[],
+  linesByBusinessCode: Map<string, ScalevOrderLineForWarehouse[]>,
+) {
+  const rows: ScalevCatalogIdentifierLookupRow[] = [];
+
+  for (const business of businessRows) {
+    const identifiers = new Set<string>();
+    for (const line of linesByBusinessCode.get(business.business_code) || []) {
+      const normalizedProduct = normalizeScalevRuntimeIdentifier(line.product_name);
+      const normalizedVariant = normalizeScalevRuntimeIdentifier(line.variant_sku);
+      if (normalizedProduct) identifiers.add(normalizedProduct);
+      if (normalizedVariant) identifiers.add(normalizedVariant);
+    }
+
+    const identifierList = Array.from(identifiers);
+    if (identifierList.length === 0) continue;
+
+    for (const chunk of chunkArray(identifierList, 500)) {
+      const { data, error } = await svc
+        .from('scalev_catalog_identifiers')
+        .select('business_id, identifier_normalized, entity_key, entity_type, source')
+        .eq('business_id', business.id)
+        .in('identifier_normalized', chunk);
+      if (error) {
+        if (isMissingWarehouseTableError(error)) return [];
+        throw error;
+      }
+      rows.push(...((data || []) as ScalevCatalogIdentifierLookupRow[]));
+    }
+  }
+
+  return rows;
+}
+
+async function fetchScalevCatalogMappingsByBusinesses(
+  svc: ReturnType<typeof createServiceSupabase>,
+  identifierRows: ScalevCatalogIdentifierLookupRow[],
+) {
+  const rows: WarehouseScalevCatalogMappingRow[] = [];
+  const entityKeysByBusinessId = new Map<number, Set<string>>();
+
+  for (const row of identifierRows) {
+    if (!entityKeysByBusinessId.has(row.business_id)) {
+      entityKeysByBusinessId.set(row.business_id, new Set<string>());
+    }
+    entityKeysByBusinessId.get(row.business_id)!.add(row.entity_key);
+  }
+
+  for (const [businessId, entityKeys] of Array.from(entityKeysByBusinessId.entries())) {
+    const entityKeyList = Array.from(entityKeys);
+    for (const chunk of chunkArray(entityKeyList, 500)) {
+      const { data, error } = await svc
+        .from('warehouse_scalev_catalog_mapping')
+        .select('business_id, scalev_entity_key, warehouse_product_id')
+        .eq('business_id', businessId)
+        .in('scalev_entity_key', chunk)
+        .not('warehouse_product_id', 'is', null);
+      if (error) {
+        if (isMissingWarehouseTableError(error)) return [];
+        throw error;
+      }
+      rows.push(...((data || []) as WarehouseScalevCatalogMappingRow[]));
+    }
+  }
+
+  return rows;
+}
+
 async function fetchFallbackWarehouseProducts(
   svc: ReturnType<typeof createServiceSupabase>,
   mappings: WarehouseBusinessTargetRow[],
 ) {
-  const entities = [...new Set(mappings.map(row => row.deduct_entity).filter(Boolean))];
-  const warehouses = [...new Set(mappings.map(row => row.deduct_warehouse || 'BTN'))];
+  const entities = Array.from(new Set(mappings.map(row => row.deduct_entity).filter(Boolean)));
+  const warehouses = Array.from(new Set(mappings.map(row => row.deduct_warehouse || 'BTN')));
   if (entities.length === 0 || warehouses.length === 0) return [] as WarehouseFallbackProductRow[];
 
   const { data, error } = await svc
@@ -834,9 +1097,9 @@ async function fetchOutstandingLedgerByOrderProduct(
 
   const netByOrder = await loadRows(true) ?? await loadRows(false) ?? new Map<string, Map<number, number>>();
   const outstandingByOrder = new Map<string, Map<number, number>>();
-  for (const [orderId, productMap] of netByOrder.entries()) {
+  for (const [orderId, productMap] of Array.from(netByOrder.entries())) {
     const outstanding = new Map<number, number>();
-    for (const [productId, netQty] of productMap.entries()) {
+    for (const [productId, netQty] of Array.from(productMap.entries())) {
       if (netQty < -QUANTITY_EPSILON) {
         outstanding.set(productId, Math.abs(netQty));
       }
@@ -2937,34 +3200,53 @@ export async function getUndeductedOrders(
   }
 
   const orderIds = orders.map(order => order.id);
-  const businessCodes = [...new Set(orders.map(order => order.business_code).filter(Boolean))] as string[];
+  const businessCodes = Array.from(new Set(orders.map(order => order.business_code).filter(Boolean))) as string[];
   const lines = await fetchScalevOrderLinesByOrderIds(svc, orderIds);
-  const productNames = [...new Set(lines.map(line => line.product_name))];
-  const [businessMappings, scalevMappings, outstandingByOrder] = await Promise.all([
+  const productNames = Array.from(new Set(lines.map(line => line.product_name)));
+  const [businessMappings, scalevMappings, outstandingByOrder, catalogBusinesses] = await Promise.all([
     fetchBusinessMappingsByCodes(svc, businessCodes),
     fetchScalevMappingsByProductNames(svc, productNames),
     fetchOutstandingLedgerByOrderProduct(svc, orders),
+    fetchScalevCatalogBusinessesByCodes(svc, businessCodes),
   ]);
-  const fallbackProducts = await fetchFallbackWarehouseProducts(svc, businessMappings);
-
   const orderLinesByOrder = new Map<number, ScalevOrderLineForWarehouse[]>();
+  const linesByBusinessCode = new Map<string, ScalevOrderLineForWarehouse[]>();
   for (const line of lines) {
     if (!orderLinesByOrder.has(line.scalev_order_id)) orderLinesByOrder.set(line.scalev_order_id, []);
     orderLinesByOrder.get(line.scalev_order_id)!.push({
       product_name: line.product_name,
       quantity: Number(line.quantity),
+      variant_sku: line.variant_sku || null,
     });
   }
+
+  for (const order of orders) {
+    if (!order.business_code) continue;
+    if (!linesByBusinessCode.has(order.business_code)) linesByBusinessCode.set(order.business_code, []);
+    linesByBusinessCode.get(order.business_code)!.push(...(orderLinesByOrder.get(order.id) || []));
+  }
+
+  const fallbackProducts = await fetchFallbackWarehouseProducts(svc, businessMappings);
+  const catalogIdentifierRows = await fetchScalevCatalogIdentifiersForBusinesses(svc, catalogBusinesses, linesByBusinessCode);
+  const catalogMappingRows = await fetchScalevCatalogMappingsByBusinesses(svc, catalogIdentifierRows);
 
   const businessMappingByCode = new Map<string, WarehouseBusinessTargetRow>();
   for (const mapping of businessMappings) {
     businessMappingByCode.set(mapping.business_code, mapping);
   }
 
+  const catalogBusinessIdByCode = new Map<string, number>();
+  for (const business of catalogBusinesses) {
+    catalogBusinessIdByCode.set(business.business_code, Number(business.id));
+  }
+
   const scalevMappingByName = new Map<string, WarehouseScalevMappingRow>();
   for (const mapping of scalevMappings) {
     scalevMappingByName.set(mapping.scalev_product_name, mapping);
   }
+
+  const catalogIdentifiersByBusinessId = buildCatalogIdentifierLookupMap(catalogIdentifierRows);
+  const catalogMappingsByBusinessId = buildCatalogMappingLookupMap(catalogMappingRows);
 
   const fallbackProductByKey = new Map<string, number>();
   for (const product of fallbackProducts) {
@@ -2990,15 +3272,25 @@ export async function getUndeductedOrders(
       }
     } else {
       for (const line of productLines) {
+        const catalogTarget = resolveCatalogWarehouseTargetForLine({
+          businessId: order.business_code ? catalogBusinessIdByCode.get(order.business_code) || null : null,
+          line,
+          identifiersByBusinessId: catalogIdentifiersByBusinessId,
+          mappingsByBusinessId: catalogMappingsByBusinessId,
+        });
         const scalevMapping = scalevMappingByName.get(line.product_name);
-        if (scalevMapping?.is_ignored) continue;
+        if (!catalogTarget && scalevMapping?.is_ignored) continue;
 
-        let targetProductId = scalevMapping?.warehouse_product_id != null
-          ? Number(scalevMapping.warehouse_product_id)
-          : null;
+        let targetProductId = catalogTarget?.warehouse_product_id != null
+          ? Number(catalogTarget.warehouse_product_id)
+          : scalevMapping?.warehouse_product_id != null
+            ? Number(scalevMapping.warehouse_product_id)
+            : null;
         let deductQty = Number(line.quantity);
 
-        if (targetProductId != null) {
+        if (catalogTarget?.warehouse_product_id != null) {
+          deductQty = Number(line.quantity);
+        } else if (targetProductId != null) {
           deductQty = Number(line.quantity) * Number(scalevMapping?.deduct_qty_multiplier || 1);
         } else {
           targetProductId = fallbackProductByKey.get(
@@ -3081,7 +3373,7 @@ export async function backfillSingleOrder(orderId: string) {
     reversed: Number(result.reversed || 0),
     skipped: Number(result.skipped || 0) + Number((result.unmapped_products || []).length),
     action: result.action,
-    ...(result.problem ? { problem: result.problem, problem_detail: result.problem_detail } : {}),
+    ...(('problem' in result && result.problem) ? { problem: result.problem, problem_detail: result.problem_detail } : {}),
   };
 }
 
@@ -3160,9 +3452,9 @@ export async function getDeductionLog(date: string) {
   if (data.length === 0) return { rows: [], totalUniqueOrders: 0 };
 
   // Get business_code for each order
-  const orderIds = [...new Set(data.map(d => d.reference_id))];
+  const orderIds = Array.from(new Set(data.map(d => d.reference_id)));
   const orderDbIds = includeScalevOrderId
-    ? [...new Set(data.map(d => d.scalev_order_id).filter((id): id is number => typeof id === 'number'))]
+    ? Array.from(new Set(data.map(d => d.scalev_order_id).filter((id): id is number => typeof id === 'number')))
     : [];
   const bizByOrderId = new Map<string, string>();
   const bizByDbId = new Map<number, string>();
