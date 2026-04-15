@@ -7,8 +7,11 @@ import {
 } from '@/lib/dashboard-access';
 
 const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
+const SUPABASE_PAGE_SIZE = 1000;
 const UPSERT_CHUNK_SIZE = 200;
-const BUNDLE_DETAIL_CONCURRENCY = 8;
+const BUNDLE_DETAIL_CONCURRENCY = 3;
+const SCALEV_FETCH_MAX_RETRIES = 4;
+const SCALEV_FETCH_RETRY_BASE_DELAY_MS = 900;
 
 type WarehouseProductLite = {
   id: number;
@@ -128,6 +131,10 @@ function parseNumeric(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function isMissingTableError(error: any): boolean {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
@@ -144,6 +151,36 @@ function getMissingCatalogSchemaMessage() {
 
 function getMissingProductMappingSchemaMessage() {
   return 'Tabel product mapping Scalev belum terlihat oleh API Supabase. Jalankan migration 107 atau refresh schema cache bila perlu.';
+}
+
+async function fetchAllPages<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
+): Promise<T[]> {
+  const rows: T[] = [];
+
+  for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
+    const to = from + SUPABASE_PAGE_SIZE - 1;
+    const { data, error } = await fetchPage(from, to);
+    if (error) throw error;
+
+    const batch = Array.isArray(data) ? data : [];
+    rows.push(...batch);
+
+    if (batch.length < SUPABASE_PAGE_SIZE) break;
+  }
+
+  return rows;
+}
+
+async function fetchAllPagesSafe<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: any }>,
+): Promise<{ data: T[] | null; error: any }> {
+  try {
+    const data = await fetchAllPages(fetchPage);
+    return { data, error: null };
+  } catch (error: any) {
+    return { data: null, error };
+  }
 }
 
 async function requireScalevBundleMappingAccess(label = 'Bundle Mapping Scalev') {
@@ -193,7 +230,12 @@ async function fetchScalevBundleDetail(
   });
 
   if (!response.ok) {
-    throw new Error(`Scalev API error ${response.status} untuk bundle ${bundleId}`);
+    const body = await response.text().catch(() => '');
+    const error = new Error(
+      `Scalev API error ${response.status} untuk bundle ${bundleId}${body ? `: ${body.slice(0, 160)}` : ''}`,
+    ) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
   }
 
   const json = await response.json();
@@ -202,6 +244,30 @@ async function fetchScalevBundleDetail(
   }
 
   return json.data as ScalevBundleDetailApi;
+}
+
+async function fetchScalevBundleDetailWithRetry(
+  apiKey: string,
+  bundleId: number,
+): Promise<ScalevBundleDetailApi> {
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt < SCALEV_FETCH_MAX_RETRIES; attempt += 1) {
+    try {
+      return await fetchScalevBundleDetail(apiKey, bundleId);
+    } catch (error: any) {
+      lastError = error;
+      const status = Number(error?.status || 0);
+      const retryable = status === 429 || (status >= 500 && status < 600);
+      if (!retryable || attempt === SCALEV_FETCH_MAX_RETRIES - 1) {
+        throw error;
+      }
+
+      await sleep(SCALEV_FETCH_RETRY_BASE_DELAY_MS * (attempt + 1));
+    }
+  }
+
+  throw lastError || new Error(`Gagal mengambil detail bundle ${bundleId}.`);
 }
 
 async function batchUpsertBundleLines(rows: Record<string, any>[]) {
@@ -316,13 +382,17 @@ export async function syncScalevCatalogBundleLines(businessId: number) {
   }
 
   const svc = createServiceSupabase();
-  const { data: bundles, error: bundleError } = await svc
-    .from('scalev_catalog_bundles')
-    .select('scalev_bundle_id')
-    .eq('business_id', businessId)
-    .order('scalev_bundle_id', { ascending: true });
-
-  if (bundleError) {
+  let bundles: Array<{ scalev_bundle_id: number | null }> = [];
+  try {
+    bundles = await fetchAllPages<{ scalev_bundle_id: number | null }>((from, to) => (
+      svc
+        .from('scalev_catalog_bundles')
+        .select('scalev_bundle_id')
+        .eq('business_id', businessId)
+        .order('scalev_bundle_id', { ascending: true })
+        .range(from, to)
+    ));
+  } catch (bundleError: any) {
     if (isMissingTableError(bundleError)) {
       throw new Error(getMissingCatalogSchemaMessage());
     }
@@ -354,7 +424,7 @@ export async function syncScalevCatalogBundleLines(businessId: number) {
   const { results, errors } = await mapWithConcurrency(
     bundleIds,
     BUNDLE_DETAIL_CONCURRENCY,
-    async (bundleId) => fetchScalevBundleDetail(business.api_key!, bundleId),
+    async (bundleId) => fetchScalevBundleDetailWithRetry(business.api_key!, bundleId),
   );
 
   const rows = buildBundleLineRows(business, results, syncAt);
@@ -390,47 +460,70 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
   const businessCode = businessRow?.business_code || '';
 
   let schemaMessage: string | null = null;
-  const [{ data: bundles, error: bundleError }, { data: bundleLines, error: bundleLineError }, { data: identifiers, error: identifierError }, { data: mappings, error: mappingError }, { data: businessTargetRow, error: targetError }] = await Promise.all([
-    svc
-      .from('scalev_catalog_bundles')
-      .select('business_id, business_code, scalev_bundle_id, name, public_name, display, custom_id')
-      .eq('business_id', businessId)
-      .order('name', { ascending: true }),
-    svc
-      .from('scalev_catalog_bundle_lines')
-      .select(`
-        business_id,
-        scalev_bundle_id,
-        scalev_bundle_name,
-        scalev_bundle_line_key,
-        line_position,
-        quantity,
-        scalev_product_id,
-        scalev_variant_id,
-        scalev_variant_unique_id,
-        scalev_variant_sku,
-        scalev_variant_name,
-        scalev_variant_product_name,
-        last_synced_at
-      `)
-      .eq('business_id', businessId)
-      .order('scalev_bundle_id', { ascending: true })
-      .order('line_position', { ascending: true }),
-    svc
-      .from('scalev_catalog_identifiers')
-      .select('entity_key, identifier')
-      .eq('business_id', businessId)
-      .eq('entity_type', 'bundle'),
-    svc
-      .from('warehouse_scalev_catalog_mapping')
-      .select(`
-        scalev_entity_key,
-        warehouse_product_id,
-        scalev_entity_type,
-        warehouse_products(id, name, category, entity, warehouse)
-      `)
-      .eq('business_id', businessId)
-      .not('warehouse_product_id', 'is', null),
+  const [
+    { data: bundles, error: bundleError },
+    { data: bundleLines, error: bundleLineError },
+    { data: identifiers, error: identifierError },
+    { data: mappings, error: mappingError },
+    { data: businessTargetRow, error: targetError },
+  ] = await Promise.all([
+    fetchAllPagesSafe<any>((from, to) => (
+      svc
+        .from('scalev_catalog_bundles')
+        .select('business_id, business_code, scalev_bundle_id, name, public_name, display, custom_id')
+        .eq('business_id', businessId)
+        .order('name', { ascending: true })
+        .order('scalev_bundle_id', { ascending: true })
+        .range(from, to)
+    )),
+    fetchAllPagesSafe<any>((from, to) => (
+      svc
+        .from('scalev_catalog_bundle_lines')
+        .select(`
+          business_id,
+          scalev_bundle_id,
+          scalev_bundle_name,
+          scalev_bundle_line_key,
+          line_position,
+          quantity,
+          scalev_product_id,
+          scalev_variant_id,
+          scalev_variant_unique_id,
+          scalev_variant_sku,
+          scalev_variant_name,
+          scalev_variant_product_name,
+          last_synced_at
+        `)
+        .eq('business_id', businessId)
+        .order('scalev_bundle_id', { ascending: true })
+        .order('line_position', { ascending: true })
+        .order('scalev_bundle_line_key', { ascending: true })
+        .range(from, to)
+    )),
+    fetchAllPagesSafe<any>((from, to) => (
+      svc
+        .from('scalev_catalog_identifiers')
+        .select('entity_key, identifier')
+        .eq('business_id', businessId)
+        .eq('entity_type', 'bundle')
+        .order('entity_key', { ascending: true })
+        .order('identifier', { ascending: true })
+        .range(from, to)
+    )),
+    fetchAllPagesSafe<any>((from, to) => (
+      svc
+        .from('warehouse_scalev_catalog_mapping')
+        .select(`
+          scalev_entity_key,
+          warehouse_product_id,
+          scalev_entity_type,
+          warehouse_products(id, name, category, entity, warehouse)
+        `)
+        .eq('business_id', businessId)
+        .not('warehouse_product_id', 'is', null)
+        .order('scalev_entity_key', { ascending: true })
+        .range(from, to)
+    )),
     businessCode
       ? svc
           .from('warehouse_business_mapping')
@@ -440,7 +533,12 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
       : Promise.resolve({ data: null, error: null }),
   ]);
 
-  if (bundleError) throw bundleError;
+  if (bundleError) {
+    if (isMissingTableError(bundleError)) {
+      throw new Error(getMissingCatalogSchemaMessage());
+    }
+    throw bundleError;
+  }
   if (bundleLineError) {
     if (isMissingTableError(bundleLineError)) {
       schemaMessage = getMissingBundleSchemaMessage();
