@@ -10,6 +10,11 @@ import {
 } from './dashboard-access';
 import { sendTelegramToChat } from './telegram';
 import { recordWarehouseActivityLog } from './warehouse-activity-log-actions';
+import {
+  areWarehouseActivityLogValuesEqual,
+  getWarehouseActivityLogChangedFields,
+  normalizeWarehouseActivityLogArray,
+} from './warehouse-activity-log-utils';
 
 // ============================================================
 // AUTH HELPER
@@ -376,30 +381,9 @@ function mapsEqualWithTolerance(a: Map<number, number>, b: Map<number, number>) 
   return true;
 }
 
-function normalizeAuditArray(value: unknown) {
-  if (!Array.isArray(value)) return [];
-  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
-}
-
-function areAuditValuesEqual(left: unknown, right: unknown) {
-  if (Array.isArray(left) || Array.isArray(right)) {
-    return JSON.stringify(normalizeAuditArray(left).sort()) === JSON.stringify(normalizeAuditArray(right).sort());
-  }
-
-  if (
-    left && right
-    && typeof left === 'object'
-    && typeof right === 'object'
-  ) {
-    return JSON.stringify(left) === JSON.stringify(right);
-  }
-
-  return left === right;
-}
-
-function getAuditChangedFields<T extends Record<string, any>>(before: T, after: T, fields: string[]) {
-  return fields.filter((field) => !areAuditValuesEqual(before?.[field], after?.[field]));
-}
+const normalizeAuditArray = normalizeWarehouseActivityLogArray;
+const areAuditValuesEqual = areWarehouseActivityLogValuesEqual;
+const getAuditChangedFields = getWarehouseActivityLogChangedFields;
 
 function formatAuditWarehouseProductLabel(product: any) {
   if (!product?.id) return null;

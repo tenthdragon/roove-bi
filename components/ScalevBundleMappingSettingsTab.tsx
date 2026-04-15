@@ -12,6 +12,8 @@ import {
   type ScalevBundleMappingRow,
 } from '@/lib/scalev-catalog-bundle-actions';
 
+const BUNDLE_SYNC_BATCH_SIZE = 80;
+
 const inputStyle: CSSProperties = {
   background: 'var(--bg)',
   border: '1px solid var(--border)',
@@ -216,12 +218,41 @@ export default function ScalevBundleMappingSettingsTab() {
     setSyncing(true);
     setMessage(null);
     try {
-      const result = await syncScalevCatalogBundleLines(selectedBusinessId);
+      let offset = 0;
+      let totalBundles = 0;
+      let scanned = 0;
+      let storedComponents = 0;
+      let failed = 0;
+
+      while (true) {
+        const result = await syncScalevCatalogBundleLines(selectedBusinessId, {
+          offset,
+          limit: BUNDLE_SYNC_BATCH_SIZE,
+        });
+
+        totalBundles = result.total_bundles || totalBundles;
+        scanned += result.bundles_scanned || 0;
+        storedComponents += result.bundle_lines_count || 0;
+        failed += result.failed_count || 0;
+
+        const processedLabel = totalBundles > 0
+          ? `${Math.min(result.next_offset || 0, totalBundles)}/${totalBundles}`
+          : `${scanned}`;
+
+        setMessage({
+          type: failed > 0 ? 'error' : 'success',
+          text: `Sync isi bundle berjalan... ${processedLabel} bundle diproses.`,
+        });
+
+        if (result.completed || !result.bundles_scanned) break;
+        offset = result.next_offset || 0;
+      }
+
       setMessage({
-        type: result.failed_count > 0 ? 'error' : 'success',
-        text: result.failed_count > 0
-          ? `Sync isi bundle selesai dengan ${result.failed_count} bundle gagal diambil.`
-          : `Sync isi bundle selesai. ${result.bundle_lines_count} komponen tersimpan.`,
+        type: failed > 0 ? 'error' : 'success',
+        text: failed > 0
+          ? `Sync isi bundle selesai. ${scanned}/${totalBundles || scanned} bundle diproses, ${storedComponents} komponen tersimpan, ${failed} bundle gagal diambil.`
+          : `Sync isi bundle selesai. ${scanned}/${totalBundles || scanned} bundle diproses dan ${storedComponents} komponen tersimpan.`,
       });
       await refreshRows(selectedBusinessId);
       await refreshBusinesses(selectedBusinessId);

@@ -11,6 +11,7 @@ const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
 const SUPABASE_PAGE_SIZE = 1000;
 const UPSERT_CHUNK_SIZE = 200;
 const BUNDLE_DETAIL_CONCURRENCY = 3;
+const BUNDLE_SYNC_BATCH_SIZE = 80;
 const SCALEV_FETCH_MAX_RETRIES = 4;
 const SCALEV_FETCH_RETRY_BASE_DELAY_MS = 900;
 
@@ -271,27 +272,29 @@ async function fetchScalevBundleDetailWithRetry(
   throw lastError || new Error(`Gagal mengambil detail bundle ${bundleId}.`);
 }
 
-async function batchUpsertBundleLines(rows: Record<string, any>[]) {
-  if (rows.length === 0) return;
+async function replaceBundleLinesForBundles(
+  businessId: number,
+  bundleIds: number[],
+  rows: Record<string, any>[],
+) {
+  if (bundleIds.length === 0) return;
 
   const svc = createServiceSupabase();
-  for (const chunk of chunkArray(rows, UPSERT_CHUNK_SIZE)) {
-    const { error } = await svc
-      .from('scalev_catalog_bundle_lines')
-      .upsert(chunk, { onConflict: 'business_id,scalev_bundle_id,scalev_bundle_line_key' });
-    if (error) throw error;
-  }
-}
-
-async function cleanupStaleBundleLines(businessId: number, syncAt: string) {
-  const svc = createServiceSupabase();
-  const { error } = await svc
+  const { error: deleteError } = await svc
     .from('scalev_catalog_bundle_lines')
     .delete()
     .eq('business_id', businessId)
-    .neq('last_synced_at', syncAt);
+    .in('scalev_bundle_id', bundleIds);
+  if (deleteError) throw deleteError;
 
-  if (error) throw error;
+  if (rows.length === 0) return;
+
+  for (const chunk of chunkArray(rows, UPSERT_CHUNK_SIZE)) {
+    const { error } = await svc
+      .from('scalev_catalog_bundle_lines')
+      .insert(chunk);
+    if (error) throw error;
+  }
 }
 
 function buildBundleLineRows(
@@ -373,7 +376,13 @@ async function mapWithConcurrency<T, R>(
   return { results, errors };
 }
 
-export async function syncScalevCatalogBundleLines(businessId: number) {
+export async function syncScalevCatalogBundleLines(
+  businessId: number,
+  options?: {
+    offset?: number;
+    limit?: number;
+  },
+) {
   await requireScalevBundleMappingAccess();
   await assertBundleLineSchemaReady();
 
@@ -383,16 +392,21 @@ export async function syncScalevCatalogBundleLines(businessId: number) {
   }
 
   const svc = createServiceSupabase();
+  const offset = Math.max(Number(options?.offset || 0), 0);
+  const limit = Math.min(Math.max(Number(options?.limit || BUNDLE_SYNC_BATCH_SIZE), 1), 200);
+
   let bundles: Array<{ scalev_bundle_id: number | null }> = [];
+  let totalBundles = 0;
   try {
-    bundles = await fetchAllPages<{ scalev_bundle_id: number | null }>((from, to) => (
-      svc
-        .from('scalev_catalog_bundles')
-        .select('scalev_bundle_id')
-        .eq('business_id', businessId)
-        .order('scalev_bundle_id', { ascending: true })
-        .range(from, to)
-    ));
+    const { data, error, count } = await svc
+      .from('scalev_catalog_bundles')
+      .select('scalev_bundle_id', { count: 'exact' })
+      .eq('business_id', businessId)
+      .order('scalev_bundle_id', { ascending: true })
+      .range(offset, offset + limit - 1);
+    if (error) throw error;
+    bundles = Array.isArray(data) ? data : [];
+    totalBundles = Number(count || 0);
   } catch (bundleError: any) {
     if (isMissingTableError(bundleError)) {
       throw new Error(getMissingCatalogSchemaMessage());
@@ -409,22 +423,25 @@ export async function syncScalevCatalogBundleLines(businessId: number) {
   );
 
   if (bundleIds.length === 0) {
-    await cleanupStaleBundleLines(businessId, new Date().toISOString());
     await recordWarehouseActivityLog({
       scope: 'scalev_bundle_sync',
       action: 'sync_success',
       screen: 'Bundle Mapping Scalev',
-      summary: `Sync isi bundle ${business.business_code} selesai tanpa bundle aktif`,
+      summary: offset === 0
+        ? `Sync isi bundle ${business.business_code} selesai tanpa bundle aktif`
+        : `Batch sync isi bundle ${business.business_code} selesai`,
       targetType: 'business',
       targetId: String(business.id),
       targetLabel: `${business.business_code} • ${business.business_name}`,
       businessCode: business.business_code,
-      changedFields: ['bundles_scanned', 'bundle_lines_count', 'failed_count'],
+      changedFields: ['bundles_scanned', 'bundle_lines_count', 'failed_count', 'offset', 'limit'],
       beforeState: {},
       afterState: {
         bundles_scanned: 0,
         bundle_lines_count: 0,
         failed_count: 0,
+        offset,
+        limit,
       },
       context: {},
     });
@@ -433,6 +450,10 @@ export async function syncScalevCatalogBundleLines(businessId: number) {
       business_id: business.id,
       business_code: business.business_code,
       business_name: business.business_name,
+      total_bundles: totalBundles,
+      offset,
+      next_offset: offset,
+      completed: offset >= totalBundles,
       bundles_scanned: 0,
       bundle_lines_count: 0,
       failed_count: 0,
@@ -447,32 +468,36 @@ export async function syncScalevCatalogBundleLines(businessId: number) {
   );
 
   const rows = buildBundleLineRows(business, results, syncAt);
-  await batchUpsertBundleLines(rows);
+  await replaceBundleLinesForBundles(businessId, bundleIds, rows);
 
-  if (errors.length === 0) {
-    await cleanupStaleBundleLines(businessId, syncAt);
-  }
+  const nextOffset = offset + bundleIds.length;
+  const completed = nextOffset >= totalBundles;
 
   await recordWarehouseActivityLog({
     scope: 'scalev_bundle_sync',
     action: errors.length === 0 ? 'sync_success' : 'sync_partial',
     screen: 'Bundle Mapping Scalev',
     summary: errors.length === 0
-      ? `Sync isi bundle ${business.business_code} berhasil`
-      : `Sync isi bundle ${business.business_code} selesai dengan ${errors.length} gagal`,
+      ? `Batch sync isi bundle ${business.business_code} berhasil`
+      : `Batch sync isi bundle ${business.business_code} selesai dengan ${errors.length} gagal`,
     targetType: 'business',
     targetId: String(business.id),
     targetLabel: `${business.business_code} • ${business.business_name}`,
     businessCode: business.business_code,
-    changedFields: ['bundles_scanned', 'bundle_lines_count', 'failed_count', 'last_synced_at'],
+    changedFields: ['bundles_scanned', 'bundle_lines_count', 'failed_count', 'last_synced_at', 'offset', 'limit', 'completed'],
     beforeState: {},
     afterState: {
       bundles_scanned: bundleIds.length,
       bundle_lines_count: rows.length,
       failed_count: errors.length,
       last_synced_at: syncAt,
+      offset,
+      limit,
+      completed,
     },
     context: {
+      total_bundles: totalBundles,
+      next_offset: nextOffset,
       failed_bundle_ids: errors.slice(0, 20).map(({ item }) => item),
     },
   });
@@ -482,6 +507,10 @@ export async function syncScalevCatalogBundleLines(businessId: number) {
     business_id: business.id,
     business_code: business.business_code,
     business_name: business.business_name,
+    total_bundles: totalBundles,
+    offset,
+    next_offset: nextOffset,
+    completed,
     bundles_scanned: bundleIds.length,
     bundle_lines_count: rows.length,
     failed_count: errors.length,

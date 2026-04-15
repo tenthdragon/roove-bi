@@ -5,10 +5,8 @@ import {
   requireDashboardPermissionAccess,
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
-import {
-  getWarehouseActivityLogChangedFields,
-  recordWarehouseActivityLog,
-} from '@/lib/warehouse-activity-log-actions';
+import { recordWarehouseActivityLog } from '@/lib/warehouse-activity-log-actions';
+import { getWarehouseActivityLogChangedFields } from '@/lib/warehouse-activity-log-utils';
 
 type WarehouseProductLite = {
   id: number;
