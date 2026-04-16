@@ -170,6 +170,17 @@ function fmtDateTimeDetailed(d: string) {
   return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
+function compareLedgerTimestampAsc(a: any, b: any) {
+  const left = String(a?.created_at || '');
+  const right = String(b?.created_at || '');
+  if (left !== right) return left.localeCompare(right);
+  return Number(a?.id || 0) - Number(b?.id || 0);
+}
+
+function compareLedgerTimestampDesc(a: any, b: any) {
+  return compareLedgerTimestampAsc(b, a);
+}
+
 function buildJakartaDayRange(date: string) {
   return {
     from: new Date(`${date}T00:00:00+07:00`).toISOString(),
@@ -2893,11 +2904,7 @@ function ProductAuditTab() {
 
   const periodRows = useMemo(() => {
     let running = Number(openingBalance || 0);
-    return [...historyRows].sort((a: any, b: any) => {
-      const timeDiff = new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
-      if (timeDiff !== 0) return timeDiff;
-      return Number(a.id || 0) - Number(b.id || 0);
-    }).map((row: any) => {
+    return [...historyRows].sort(compareLedgerTimestampAsc).map((row: any) => {
       const qty = Number(row.quantity || 0);
       const balanceBefore = running;
       running += qty;
@@ -2935,11 +2942,7 @@ function ProductAuditTab() {
         return haystack.includes(q);
       });
     }
-    return [...result].sort((a: any, b: any) => {
-      const timeDiff = new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
-      if (timeDiff !== 0) return timeDiff;
-      return Number(b.id || 0) - Number(a.id || 0);
-    });
+    return [...result].sort(compareLedgerTimestampDesc);
   }, [periodRows, movementFilter, rowSearch]);
 
   const typeCounts = useMemo(() => {
