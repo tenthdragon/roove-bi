@@ -3152,35 +3152,88 @@ export async function getLedgerHistory(filters?: {
 }) {
   await requireWarehouseAccess('Movement Log');
   const svc = createServiceSupabase();
-  let query = svc
-    .from('warehouse_stock_ledger')
-    .select(`
-      id,
-      warehouse_product_id,
-      batch_id,
-      movement_type,
-      quantity,
-      running_balance,
-      reference_type,
-      reference_id,
-      notes,
-      created_by,
-      created_at,
-      warehouse_products!inner(name, category, entity),
-      warehouse_batches(batch_code, expired_date),
-      profiles:created_by(full_name, email)
-    `);
+  const selectClause = `
+    id,
+    warehouse_product_id,
+    batch_id,
+    movement_type,
+    quantity,
+    running_balance,
+    reference_type,
+    reference_id,
+    notes,
+    created_by,
+    created_at,
+    warehouse_products!inner(name, category, entity),
+    warehouse_batches(batch_code, expired_date),
+    profiles:created_by(full_name, email)
+  `;
+  const rows: any[] = [];
+  const requestedLimit = Math.max(1, Number(filters?.limit || 100));
+  const pageSize = Math.min(requestedLimit, 1000);
+  let offset = 0;
 
-  if (filters?.productId) query = query.eq('warehouse_product_id', filters.productId);
-  if (filters?.movementType) query = query.eq('movement_type', filters.movementType);
-  if (filters?.dateFrom) query = query.gte('created_at', filters.dateFrom);
-  if (filters?.dateTo) query = query.lte('created_at', filters.dateTo);
+  while (rows.length < requestedLimit) {
+    let query = svc
+      .from('warehouse_stock_ledger')
+      .select(selectClause);
 
-  const { data, error } = await query
-    .order('created_at', { ascending: false })
-    .limit(filters?.limit || 100);
-  if (error) throw error;
-  return data || [];
+    if (filters?.productId) query = query.eq('warehouse_product_id', filters.productId);
+    if (filters?.movementType) query = query.eq('movement_type', filters.movementType);
+    if (filters?.dateFrom) query = query.gte('created_at', filters.dateFrom);
+    if (filters?.dateTo) query = query.lte('created_at', filters.dateTo);
+
+    const upper = offset + Math.min(pageSize, requestedLimit - rows.length) - 1;
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(offset, upper);
+    if (error) throw error;
+
+    const page = data || [];
+    rows.push(...page);
+    if (page.length < (upper - offset + 1)) break;
+    offset += page.length;
+  }
+
+  return rows;
+}
+
+export async function getLedgerQuantitySum(filters: {
+  productId: number;
+  beforeDateExclusive?: string;
+  dateFrom?: string;
+  dateTo?: string;
+}) {
+  await requireWarehouseAccess('Movement Log');
+  const svc = createServiceSupabase();
+  const pageSize = 1000;
+  let offset = 0;
+  let total = 0;
+
+  while (true) {
+    let query = svc
+      .from('warehouse_stock_ledger')
+      .select('quantity')
+      .eq('warehouse_product_id', filters.productId);
+
+    if (filters.beforeDateExclusive) query = query.lt('created_at', filters.beforeDateExclusive);
+    if (filters.dateFrom) query = query.gte('created_at', filters.dateFrom);
+    if (filters.dateTo) query = query.lte('created_at', filters.dateTo);
+
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(offset, offset + pageSize - 1);
+    if (error) throw error;
+
+    const page = data || [];
+    total += page.reduce((sum, row: any) => sum + Number(row.quantity || 0), 0);
+    if (page.length < pageSize) break;
+    offset += page.length;
+  }
+
+  return total;
 }
 
 export async function getDailyMovementSummary(date: string) {

@@ -13,6 +13,7 @@ import {
   getWipEventHistory,
   getStockByBatch,
   getLedgerHistory,
+  getLedgerQuantitySum,
   getDailyMovementSummary,
   getUndeductedOrders,
   type WarehouseUndeductedOrdersResult,
@@ -163,6 +164,10 @@ function deductionLabelsLookConsistent(scalevProduct: string, warehouseProduct: 
 
 function fmtDateTime(d: string) {
   return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDateTimeDetailed(d: string) {
+  return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 function buildJakartaDayRange(date: string) {
@@ -2718,6 +2723,7 @@ function DailySummaryTab({
 // ============================================================
 
 function ProductAuditTab() {
+  const AUDIT_ROW_LIMIT = 10000;
   const [products, setProducts] = useState<any[]>([]);
   const [productsLoading, setProductsLoading] = useState(true);
   const [productsError, setProductsError] = useState('');
@@ -2728,6 +2734,7 @@ function ProductAuditTab() {
   const [historyRows, setHistoryRows] = useState<any[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
+  const [openingBalance, setOpeningBalance] = useState(0);
   const [stockSnapshot, setStockSnapshot] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
   const [dateFrom, setDateFrom] = useState(() => {
@@ -2795,6 +2802,7 @@ function ProductAuditTab() {
     if (!selectedProductId) {
       setHistoryRows([]);
       setHistoryError('');
+      setOpeningBalance(0);
       return () => {
         isActive = false;
       };
@@ -2803,6 +2811,7 @@ function ProductAuditTab() {
     if (dateFrom && dateTo && dateFrom > dateTo) {
       setHistoryRows([]);
       setHistoryError('Tanggal awal tidak boleh lebih besar dari tanggal akhir.');
+      setOpeningBalance(0);
       return () => {
         isActive = false;
       };
@@ -2812,17 +2821,31 @@ function ProductAuditTab() {
       setHistoryLoading(true);
       setHistoryError('');
       try {
-        const rows = await getLedgerHistory({
-          productId: Number(selectedProductId),
-          dateFrom: dateFrom ? buildJakartaDayRange(dateFrom).from : undefined,
-          dateTo: dateTo ? buildJakartaDayRange(dateTo).to : undefined,
-          limit: 5000,
-        });
-        if (isActive) setHistoryRows(rows || []);
+        const dateFromIso = dateFrom ? buildJakartaDayRange(dateFrom).from : undefined;
+        const dateToIso = dateTo ? buildJakartaDayRange(dateTo).to : undefined;
+        const [rows, opening] = await Promise.all([
+          getLedgerHistory({
+            productId: Number(selectedProductId),
+            dateFrom: dateFromIso,
+            dateTo: dateToIso,
+            limit: AUDIT_ROW_LIMIT,
+          }),
+          dateFromIso
+            ? getLedgerQuantitySum({
+                productId: Number(selectedProductId),
+                beforeDateExclusive: dateFromIso,
+              })
+            : Promise.resolve(0),
+        ]);
+        if (isActive) {
+          setHistoryRows(rows || []);
+          setOpeningBalance(Number(opening || 0));
+        }
       } catch (e: any) {
         if (isActive) {
           setHistoryRows([]);
           setHistoryError(e?.message || 'Gagal memuat history ledger produk.');
+          setOpeningBalance(0);
         }
       } finally {
         if (isActive) setHistoryLoading(false);
@@ -2832,7 +2855,7 @@ function ProductAuditTab() {
     return () => {
       isActive = false;
     };
-  }, [selectedProductId, dateFrom, dateTo]);
+  }, [selectedProductId, dateFrom, dateTo, AUDIT_ROW_LIMIT]);
 
   const selectedProduct = useMemo(
     () => products.find((row: any) => String(row.id) === selectedProductId) || null,
@@ -2868,13 +2891,27 @@ function ProductAuditTab() {
     return result;
   }, [products, productSearch, selectedProductId]);
 
-  const periodRows = useMemo(() => (
-    [...historyRows].sort((a: any, b: any) => {
+  const periodRows = useMemo(() => {
+    let running = Number(openingBalance || 0);
+    return [...historyRows].sort((a: any, b: any) => {
       const timeDiff = new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
       if (timeDiff !== 0) return timeDiff;
       return Number(a.id || 0) - Number(b.id || 0);
-    })
-  ), [historyRows]);
+    }).map((row: any) => {
+      const qty = Number(row.quantity || 0);
+      const balanceBefore = running;
+      running += qty;
+      const balanceAfter = running;
+      const storedRunningBalance = Number(row.running_balance || 0);
+      return {
+        ...row,
+        balance_before: balanceBefore,
+        balance_after: balanceAfter,
+        stored_balance_after: storedRunningBalance,
+        has_balance_mismatch: storedRunningBalance !== balanceAfter,
+      };
+    });
+  }, [historyRows, openingBalance]);
 
   const displayedRows = useMemo(() => {
     let result = periodRows;
@@ -2918,16 +2955,14 @@ function ProductAuditTab() {
       const qty = Number(row.quantity || 0);
       return qty < 0 ? sum + Math.abs(qty) : sum;
     }, 0);
-    const openingBalance = periodRows.length > 0
-      ? Number(periodRows[0].running_balance || 0) - Number(periodRows[0].quantity || 0)
-      : Number(stockSnapshot?.current_stock || 0);
     const closingBalance = periodRows.length > 0
-      ? Number(periodRows[periodRows.length - 1].running_balance || 0)
-      : Number(stockSnapshot?.current_stock || 0);
+      ? Number(periodRows[periodRows.length - 1].balance_after || 0)
+      : Number(openingBalance || 0);
     const lowestBalance = periodRows.length > 0
-      ? Math.min(...periodRows.map((row: any) => Number(row.running_balance || 0)))
-      : Number(stockSnapshot?.current_stock || 0);
-    const negativeRows = periodRows.filter((row: any) => Number(row.running_balance || 0) < 0).length;
+      ? Math.min(Number(openingBalance || 0), ...periodRows.map((row: any) => Number(row.balance_after || 0)))
+      : Number(openingBalance || 0);
+    const negativeRows = periodRows.filter((row: any) => Number(row.balance_after || 0) < 0).length;
+    const mismatchCount = periodRows.filter((row: any) => row.has_balance_mismatch).length;
 
     return {
       totalIn,
@@ -2936,9 +2971,10 @@ function ProductAuditTab() {
       closingBalance,
       lowestBalance,
       negativeRows,
+      mismatchCount,
       netMovement: totalIn - totalOut,
     };
-  }, [periodRows, stockSnapshot]);
+  }, [periodRows, openingBalance]);
 
   const locationLabel = selectedProduct
     ? `${selectedProduct.warehouse || '-'} - ${selectedProduct.entity || '-'}`
@@ -3133,6 +3169,22 @@ function ProductAuditTab() {
         </div>
       )}
 
+      {periodSummary.mismatchCount > 0 && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px 14px',
+          borderRadius: 12,
+          border: '1px solid rgba(245, 158, 11, 0.25)',
+          background: 'rgba(120, 53, 15, 0.18)',
+          color: '#fcd34d',
+          fontSize: 12,
+          lineHeight: 1.55,
+        }}>
+          Terdeteksi {periodSummary.mismatchCount.toLocaleString('id-ID')} row dengan `running balance` tersimpan yang tidak sinkron.
+          {' '}Untuk audit ini, kolom saldo dihitung ulang dari urutan transaksi aktual agar penelusuran lebih akurat.
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
         <KPICard label="Saldo Awal Periode" value={periodSummary.openingBalance.toLocaleString('id-ID')} color="#8b5cf6" sub={dateFrom ? `Sejak ${fullDateID(dateFrom)}` : 'Awal data'} />
         <KPICard label="Total Masuk" value={periodSummary.totalIn.toLocaleString('id-ID')} color="var(--green)" sub={`${periodRows.length} row ledger`} />
@@ -3158,10 +3210,16 @@ function ProductAuditTab() {
           ? 'Pilih satu produk dulu untuk melihat audit movement-nya.'
           : displayedRows.length !== periodRows.length
             ? `Menampilkan ${displayedRows.length} dari ${periodRows.length} row ledger dalam periode terpilih.`
-            : periodRows.length >= 5000
-              ? 'Menampilkan 5.000 row terbaru untuk menjaga performa audit tetap stabil.'
+            : periodRows.length >= AUDIT_ROW_LIMIT
+              ? `Menampilkan ${AUDIT_ROW_LIMIT.toLocaleString('id-ID')} row terbaru. Sempitkan periode bila histori produk masih lebih panjang.`
               : `Menampilkan ${periodRows.length} row ledger dalam periode terpilih.`}
       </div>
+
+      {selectedProductId && (
+        <div style={{ marginBottom: 10, fontSize: 11, color: 'var(--dim)' }}>
+          `Qty` adalah perubahan pada row itu. `Saldo` adalah posisi stok sesudah row tersebut dibukukan.
+        </div>
+      )}
 
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
@@ -3187,11 +3245,11 @@ function ProductAuditTab() {
             {displayedRows.map((row: any) => {
               const moveCfg = MOVEMENT_LABELS[row.movement_type] || { label: row.movement_type, color: 'var(--text)' };
               const qty = Number(row.quantity || 0);
-              const balance = Number(row.running_balance || 0);
+              const balance = Number(row.balance_after || 0);
               return (
                 <tr key={row.id} style={{ borderBottom: '1px solid var(--bg-deep)', background: balance < 0 ? 'rgba(239, 68, 68, 0.08)' : 'transparent' }}>
                   <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
-                    {fmtDateTime(row.created_at)}
+                    {fmtDateTimeDetailed(row.created_at)}
                   </td>
                   <td style={{ padding: '6px 10px' }}>
                     <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${moveCfg.color}20`, color: moveCfg.color }}>
