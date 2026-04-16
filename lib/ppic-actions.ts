@@ -73,9 +73,27 @@ interface LegacyScalevDemandMappingRow {
   is_ignored: boolean | null;
 }
 
+interface SummaryScalevDailyDemandRow {
+  demand_date: string;
+  scalev_product_name: string;
+  total_qty: number;
+}
+
+interface MappedScalevDailyDemandRow {
+  demand_date: string;
+  warehouse_product_id: number;
+  total_qty: number;
+}
+
 function isStatementTimeoutError(error: any) {
   const message = String(error?.message || error || '').toLowerCase();
   return message.includes('statement timeout') || message.includes('canceling statement due to statement timeout');
+}
+
+function isMissingPpicDemandSummaryError(error: any) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return code === 'PGRST205' || code === '42P01' || /does not exist/i.test(message) || /schema cache/i.test(message);
 }
 
 function getJakartaCurrentDateParts() {
@@ -116,6 +134,14 @@ function formatUtcDate(date: Date) {
   const month = String(date.getUTCMonth() + 1).padStart(2, '0');
   const day = String(date.getUTCDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+function formatDateParts(year: number, month: number, day: number) {
+  return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function getDaysInMonth(year: number, month: number) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
 function chunkArray<T>(items: T[], size: number) {
@@ -181,6 +207,95 @@ function buildDemandSnapshotFromRows(rows: MonthlyDemandRow[], targetMonth: numb
   return { productDemand, actualOutMap };
 }
 
+async function getMappedScalevDailyDemandRows(
+  svc: any,
+  startDate: string,
+  endDate: string,
+): Promise<MappedScalevDailyDemandRow[]> {
+  const { data: summaryData, error: summaryErr } = await svc
+    .from('summary_scalev_daily_product_demand')
+    .select('demand_date, scalev_product_name, total_qty')
+    .gte('demand_date', startDate)
+    .lte('demand_date', endDate)
+    .order('demand_date', { ascending: true });
+
+  if (summaryErr) throw summaryErr;
+
+  const rows = (summaryData || []).map((row: any): SummaryScalevDailyDemandRow => ({
+    demand_date: String(row.demand_date),
+    scalev_product_name: String(row.scalev_product_name || ''),
+    total_qty: Number(row.total_qty || 0),
+  })).filter((row) => row.scalev_product_name && Number.isFinite(row.total_qty) && row.total_qty !== 0);
+
+  if (rows.length === 0) {
+    return [];
+  }
+
+  const mappings: LegacyScalevDemandMappingRow[] = [];
+  const uniqueNames = Array.from(new Set(rows.map(row => row.scalev_product_name)));
+
+  for (const chunk of chunkArray(uniqueNames, 500)) {
+    const { data, error } = await svc
+      .from('warehouse_scalev_mapping')
+      .select('scalev_product_name, warehouse_product_id, deduct_qty_multiplier, is_ignored')
+      .in('scalev_product_name', chunk);
+
+    if (error) throw error;
+    mappings.push(...((data || []) as LegacyScalevDemandMappingRow[]));
+  }
+
+  const mappingByName = new Map<string, LegacyScalevDemandMappingRow>();
+  for (const mapping of mappings) {
+    if (!mapping.scalev_product_name || mappingByName.has(mapping.scalev_product_name)) continue;
+    mappingByName.set(mapping.scalev_product_name, mapping);
+  }
+
+  const mappedRows: MappedScalevDailyDemandRow[] = [];
+
+  for (const row of rows) {
+    const mapping = mappingByName.get(row.scalev_product_name);
+    if (!mapping || mapping.is_ignored || !mapping.warehouse_product_id) continue;
+
+    mappedRows.push({
+      demand_date: row.demand_date,
+      warehouse_product_id: Number(mapping.warehouse_product_id),
+      total_qty: row.total_qty * Number(mapping.deduct_qty_multiplier || 1),
+    });
+  }
+
+  return mappedRows;
+}
+
+async function getMonthlyDemandRowsFromDailySummary(
+  svc: any,
+  month: number,
+  year: number,
+): Promise<MonthlyDemandRow[]> {
+  const startWindow = shiftYearMonth(year, month, -6);
+  const startDate = formatDateParts(startWindow.year, startWindow.month, 1);
+  const endDate = formatDateParts(year, month, getDaysInMonth(year, month));
+  const mappedRows = await getMappedScalevDailyDemandRows(svc, startDate, endDate);
+  const totals = new Map<string, number>();
+
+  for (const row of mappedRows) {
+    const [yrStr, mnStr] = row.demand_date.split('-');
+    const yr = Number(yrStr);
+    const mn = Number(mnStr);
+    const key = `${row.warehouse_product_id}:${yr}:${mn}`;
+    totals.set(key, (totals.get(key) || 0) + row.total_qty);
+  }
+
+  return Array.from(totals.entries()).map(([key, total_qty]) => {
+    const [warehouseProductId, yr, mn] = key.split(':').map(Number);
+    return {
+      warehouse_product_id: warehouseProductId,
+      yr,
+      mn,
+      total_qty: Math.round(total_qty * 100) / 100,
+    };
+  });
+}
+
 async function getMonthlyDemandRowsWithFallback(
   svc: any,
   month: number,
@@ -196,7 +311,15 @@ async function getMonthlyDemandRowsWithFallback(
     throw error;
   }
 
-  console.warn(`[ppic] ppic_monthly_demand timed out for ${month}/${year}; falling back to summary_scalev_monthly_movements`);
+  console.warn(`[ppic] ppic_monthly_demand timed out for ${month}/${year}; falling back to summary tables`);
+
+  try {
+    return await getMonthlyDemandRowsFromDailySummary(svc, month, year);
+  } catch (summaryError) {
+    if (!isMissingPpicDemandSummaryError(summaryError)) {
+      throw summaryError;
+    }
+  }
 
   const startWindow = shiftYearMonth(year, month, -6);
   const startYm = toYearMonthKey(startWindow.year, startWindow.month);
@@ -218,7 +341,7 @@ async function getMonthlyDemandRowsWithFallback(
   );
 }
 
-async function getExactDailyDemandMapFallback(svc: any, demandDays: number): Promise<Map<number, number>> {
+async function getExactDailyDemandMapRawFallback(svc: any, demandDays: number): Promise<Map<number, number>> {
   const safeDays = Math.max(Number(demandDays) || 0, 1);
   const today = getJakartaCurrentDateParts();
   const endDate = createUtcDate(today.year, today.month, today.day);
@@ -330,6 +453,41 @@ async function getExactDailyDemandMapFallback(svc: any, demandDays: number): Pro
   return avgDailyMap;
 }
 
+async function getExactDailyDemandMapFallback(svc: any, demandDays: number): Promise<Map<number, number>> {
+  const safeDays = Math.max(Number(demandDays) || 0, 1);
+  const today = getJakartaCurrentDateParts();
+  const todayUtc = createUtcDate(today.year, today.month, today.day);
+  const startDateValue = shiftUtcDays(todayUtc, -(safeDays - 1));
+  const endDate = formatDateParts(today.year, today.month, today.day);
+  const startDate = formatDateParts(
+    startDateValue.getUTCFullYear(),
+    startDateValue.getUTCMonth() + 1,
+    startDateValue.getUTCDate(),
+  );
+
+  try {
+    const mappedRows = await getMappedScalevDailyDemandRows(svc, startDate, endDate);
+    const totals = new Map<number, number>();
+
+    for (const row of mappedRows) {
+      totals.set(row.warehouse_product_id, (totals.get(row.warehouse_product_id) || 0) + row.total_qty);
+    }
+
+    const avgDailyMap = new Map<number, number>();
+    for (const [productId, totalQty] of Array.from(totals.entries())) {
+      avgDailyMap.set(productId, Math.round((totalQty / safeDays) * 100) / 100);
+    }
+
+    return avgDailyMap;
+  } catch (error) {
+    if (!isMissingPpicDemandSummaryError(error)) {
+      throw error;
+    }
+  }
+
+  return getExactDailyDemandMapRawFallback(svc, demandDays);
+}
+
 async function getAverageDailyDemandMap(svc: any, demandDays: number): Promise<Map<number, number>> {
   const { data, error } = await svc.rpc('ppic_avg_daily_demand', { p_days: demandDays });
   if (!error) {
@@ -340,8 +498,48 @@ async function getAverageDailyDemandMap(svc: any, demandDays: number): Promise<M
     throw error;
   }
 
-  console.warn(`[ppic] ppic_avg_daily_demand timed out for ${demandDays} days; using paginated fallback`);
+  console.warn(`[ppic] ppic_avg_daily_demand timed out for ${demandDays} days; using summary fallback`);
   return getExactDailyDemandMapFallback(svc, demandDays);
+}
+
+async function getWeeklyDemandDataFallback(svc: any, month: number, year: number) {
+  const startDate = formatDateParts(year, month, 1);
+  const endDate = formatDateParts(year, month, getDaysInMonth(year, month));
+
+  try {
+    const mappedRows = await getMappedScalevDailyDemandRows(svc, startDate, endDate);
+    const result: Record<number, any> = {};
+
+    for (const row of mappedRows) {
+      const day = Number(row.demand_date.slice(8, 10));
+      const weekNum = day <= 7 ? 1 : day <= 14 ? 2 : day <= 21 ? 3 : 4;
+      if (!result[row.warehouse_product_id]) {
+        result[row.warehouse_product_id] = { w1_out: 0, w2_out: 0, w3_out: 0, w4_out: 0 };
+      }
+      result[row.warehouse_product_id][`w${weekNum}_out`] += row.total_qty;
+    }
+
+    return result;
+  } catch (summaryError) {
+    if (!isMissingPpicDemandSummaryError(summaryError)) {
+      throw summaryError;
+    }
+  }
+
+  const { data: summaryData } = await svc
+    .from('summary_scalev_monthly_movements')
+    .select('warehouse_product_id, total_out')
+    .eq('yr', year).eq('mn', month);
+
+  if (!summaryData || summaryData.length === 0) return {};
+
+  const result: Record<number, any> = {};
+  for (const s of summaryData) {
+    const weekly = Math.round(Number(s.total_out) / 4);
+    result[Number(s.warehouse_product_id)] = { w1_out: weekly, w2_out: weekly, w3_out: weekly, w4_out: weekly };
+  }
+
+  return result;
 }
 
 async function getDemandPlanningSnapshot(svc: any, month: number, year: number) {
@@ -826,18 +1024,7 @@ export async function getWeeklyDemandData(month: number, year: number) {
   });
 
   if (error) {
-    // Fallback: use summary table for monthly total, split evenly into 4 weeks
-    const { data: summaryData } = await svc
-      .from('summary_scalev_monthly_movements')
-      .select('warehouse_product_id, total_out')
-      .eq('yr', year).eq('mn', month);
-    if (!summaryData || summaryData.length === 0) return {};
-    const result: Record<number, any> = {};
-    for (const s of summaryData) {
-      const weekly = Math.round(Number(s.total_out) / 4);
-      result[s.warehouse_product_id] = { w1_out: weekly, w2_out: weekly, w3_out: weekly, w4_out: weekly };
-    }
-    return result;
+    return getWeeklyDemandDataFallback(svc, month, year);
   }
 
   // Build result from RPC
