@@ -17,6 +17,7 @@ import {
   getDailyMovementSummary,
   getUndeductedOrders,
   type WarehouseUndeductedOrdersResult,
+  backfillWarehouseDeductions,
   backfillSingleOrder,
   getDeductionLog,
   getProducts,
@@ -346,6 +347,12 @@ export default function WarehousePage() {
     setDeductionLogLoadedFor(null);
     setDeductionLogError('');
   }, [dailySummaryDate]);
+
+  useEffect(() => {
+    if (loading || activeTab !== 'daily-summary') return;
+    if (alertsLoading || alertsLoadedFor === dailySummaryDate) return;
+    void loadDailyAlerts({ offset: 0 });
+  }, [activeTab, loading, dailySummaryDate, alertsLoadedFor, alertsLoading]);
 
   async function loadDailyAlerts(options?: { force?: boolean; offset?: number }) {
     const force = options?.force ?? false;
@@ -2422,6 +2429,15 @@ function DailySummaryTab({
   const [entityFilter, setEntityFilter] = useState('all');
   const [syncingOrder, setSyncingOrder] = useState<string | null>(null);
   const [syncResults, setSyncResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
+  const [bulkRepairRunning, setBulkRepairRunning] = useState(false);
+  const [bulkRepairResult, setBulkRepairResult] = useState<null | {
+    date: string;
+    checked: number;
+    deducted: number;
+    reversed: number;
+    skipped: number;
+  }>(null);
+  const [bulkRepairError, setBulkRepairError] = useState('');
   const [showDeductLog, setShowDeductLog] = useState(false);
 
   const entities = useMemo(() => {
@@ -2446,6 +2462,58 @@ function DailySummaryTab({
 
   const visibleAlertsStart = alerts.length > 0 ? alertsOffset + 1 : 0;
   const visibleAlertsEnd = alertsOffset + alerts.length;
+  const queuePageStats = useMemo(() => {
+    return alerts.reduce((acc, alert) => {
+      acc.loaded += 1;
+      if (alert.problem === 'unknown') acc.readyToRepair += 1;
+      else if (alert.problem === 'no_product_mapping') acc.needsProductMapping += 1;
+      else if (alert.problem === 'no_business_mapping') acc.needsBusinessMapping += 1;
+      else if (alert.problem === 'no_order_lines') acc.needsOrderData += 1;
+      return acc;
+    }, {
+      loaded: 0,
+      readyToRepair: 0,
+      needsProductMapping: 0,
+      needsBusinessMapping: 0,
+      needsOrderData: 0,
+    });
+  }, [alerts]);
+
+  useEffect(() => {
+    setBulkRepairResult(null);
+    setBulkRepairError('');
+  }, [date]);
+
+  async function handleBulkRepair() {
+    if (!can('wh:mapping_sync')) return;
+    const confirmMessage = [
+      `Repair deduction untuk semua order shipped/completed pada ${fullDateID(date)}?`,
+      '',
+      'Aksi ini tidak menghapus ledger lama.',
+      'Sistem akan reconcile order satu per satu: reversal selisih lama lalu menulis deduction final yang benar bila perlu.',
+    ].join('\n');
+    if (typeof window !== 'undefined' && !window.confirm(confirmMessage)) return;
+
+    setBulkRepairRunning(true);
+    setBulkRepairError('');
+    try {
+      const result = await backfillWarehouseDeductions(date);
+      setBulkRepairResult({
+        date,
+        checked: Number(result.checked || 0),
+        deducted: Number(result.deducted || 0),
+        reversed: Number(result.reversed || 0),
+        skipped: Number(result.skipped || 0),
+      });
+      onRefresh();
+      await onLoadAlerts({ force: true, offset: 0 });
+      if (deductLogLoaded) await onLoadDeductLog(true);
+    } catch (err: any) {
+      setBulkRepairError(err?.message || 'Gagal menjalankan repair deduction harian.');
+    } finally {
+      setBulkRepairRunning(false);
+    }
+  }
 
   return (
     <>
@@ -2524,6 +2592,83 @@ function DailySummaryTab({
           </table>
         </div>
       )}
+
+      {/* ── Deduction Guardrail ── */}
+      <div style={{ marginTop: 20, background: 'var(--card)', border: `1px solid ${totalAlertsCount > 0 ? 'rgba(245,158,11,0.28)' : 'var(--border)'}`, borderRadius: 12, padding: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: totalAlertsCount > 0 ? '#f59e0b' : 'var(--green)' }}>
+              Guardrail Deduction Harian
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2, maxWidth: 720 }}>
+              Monitor ini membandingkan deduction ledger terhadap target canonical order shipped/completed pada tanggal terpilih. Jika mismatch, backlog akan muncul di sini sebelum tim menyadarinya dari stok minus.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              onClick={() => onLoadAlerts({ force: true, offset: 0 })}
+              disabled={alertsLoading || bulkRepairRunning}
+              style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: alertsLoading || bulkRepairRunning ? 'var(--dim)' : 'var(--accent)', fontSize: 11, cursor: alertsLoading || bulkRepairRunning ? 'wait' : 'pointer', fontWeight: 600 }}>
+              {alertsLoading ? 'Memuat Queue...' : 'Refresh Guardrail'}
+            </button>
+            {can('wh:mapping_sync') && (
+              <button
+                onClick={handleBulkRepair}
+                disabled={bulkRepairRunning}
+                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(245,158,11,0.32)', background: bulkRepairRunning ? 'transparent' : 'rgba(245,158,11,0.12)', color: bulkRepairRunning ? 'var(--dim)' : '#f59e0b', fontSize: 11, cursor: bulkRepairRunning ? 'wait' : 'pointer', fontWeight: 700 }}>
+                {bulkRepairRunning ? 'Repair Berjalan...' : 'Repair Semua Order Tanggal Ini'}
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginTop: 14 }}>
+          <KPICard
+            label="Backlog Total"
+            value={alertsLoaded ? totalAlertsCount.toLocaleString('id-ID') : alertsLoading ? '...' : '-'}
+            color={totalAlertsCount > 0 ? '#f59e0b' : 'var(--green)'}
+            sub={alertsLoaded ? `Tanggal ${fullDateID(date)}` : 'Queue sedang dimuat otomatis'}
+          />
+          <KPICard
+            label="Siap Direpair"
+            value={alertsLoaded ? queuePageStats.readyToRepair.toLocaleString('id-ID') : '-'}
+            color="#60a5fa"
+            sub={alertsLoaded ? 'Pada halaman queue aktif' : 'Menunggu queue'}
+          />
+          <KPICard
+            label="Butuh Mapping"
+            value={alertsLoaded ? (queuePageStats.needsProductMapping + queuePageStats.needsBusinessMapping).toLocaleString('id-ID') : '-'}
+            color="#f59e0b"
+            sub={alertsLoaded ? 'Produk/business mapping di page aktif' : 'Menunggu queue'}
+          />
+          <KPICard
+            label="Butuh Data Order"
+            value={alertsLoaded ? queuePageStats.needsOrderData.toLocaleString('id-ID') : '-'}
+            color="#94a3b8"
+            sub={alertsLoaded ? 'No lines / perlu re-sync order' : 'Menunggu queue'}
+          />
+        </div>
+
+        {alertsLoaded && (
+          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: `1px solid ${totalAlertsCount > 0 ? 'rgba(245,158,11,0.24)' : 'rgba(16,185,129,0.24)'}`, background: totalAlertsCount > 0 ? 'rgba(245,158,11,0.08)' : 'rgba(16,185,129,0.08)', color: totalAlertsCount > 0 ? '#fcd34d' : '#86efac', fontSize: 11, lineHeight: 1.5 }}>
+            {totalAlertsCount > 0
+              ? `Masih ada ${totalAlertsCount.toLocaleString('id-ID')} order yang deduction ledger-nya belum sama dengan target final. Breakdown kartu di atas mengikuti halaman queue aktif${alertsHasMore ? ' karena backlog lebih besar dari satu halaman' : ''}.`
+              : 'Tidak ada mismatch deduction yang terdeteksi untuk tanggal ini. Jalur deduction dan ledger saat ini konsisten.'}
+          </div>
+        )}
+
+        {!!bulkRepairError && (
+          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.08)', color: '#fca5a5', fontSize: 11 }}>
+            {bulkRepairError}
+          </div>
+        )}
+
+        {bulkRepairResult && (
+          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(96,165,250,0.08)', color: '#bfdbfe', fontSize: 11, lineHeight: 1.5 }}>
+            {`Repair ${fullDateID(bulkRepairResult.date)} selesai. Dicek ${bulkRepairResult.checked.toLocaleString('id-ID')} order, menulis ${bulkRepairResult.deducted.toLocaleString('id-ID')} deduction baru, membuat ${bulkRepairResult.reversed.toLocaleString('id-ID')} reversal, dan melewati ${bulkRepairResult.skipped.toLocaleString('id-ID')} item yang masih butuh mapping/data order.`}
+          </div>
+        )}
+      </div>
 
       {/* ── Deduction Alerts ── */}
       <div style={{ marginTop: 20, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
