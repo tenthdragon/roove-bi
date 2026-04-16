@@ -2935,7 +2935,11 @@ function ProductAuditTab() {
         return haystack.includes(q);
       });
     }
-    return result;
+    return [...result].sort((a: any, b: any) => {
+      const timeDiff = new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return Number(b.id || 0) - Number(a.id || 0);
+    });
   }, [periodRows, movementFilter, rowSearch]);
 
   const typeCounts = useMemo(() => {
@@ -3217,7 +3221,7 @@ function ProductAuditTab() {
 
       {selectedProductId && (
         <div style={{ marginBottom: 10, fontSize: 11, color: 'var(--dim)' }}>
-          `Qty` adalah perubahan pada row itu. `Saldo` adalah posisi stok sesudah row tersebut dibukukan.
+          Urutan default: transaksi terbaru di paling atas. `Qty` adalah perubahan pada row itu, dan `Saldo` adalah posisi stok sesudah row tersebut dibukukan.
         </div>
       )}
 
