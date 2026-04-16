@@ -4021,16 +4021,70 @@ export async function backfillWarehouseDeductions(date: string) {
   const dayStart = `${date}T00:00:00+07:00`;
   const dayEnd = `${date}T23:59:59.999+07:00`;
 
-  // Find shipped/completed orders for the date
-  const { data: orders, error: ordErr } = await svc
-    .from('scalev_orders')
-    .select('id, order_id, business_code, shipped_time')
-    .in('status', ['shipped', 'completed'])
-    .gte('shipped_time', dayStart)
-    .lt('shipped_time', dayEnd)
-    .limit(5000);
-  if (ordErr) throw ordErr;
-  if (!orders || orders.length === 0) return { checked: 0, deducted: 0, skipped: 0 };
+  let orders: Array<{ id: number; order_id: string; business_code: string | null; shipped_time: string | null }> = [];
+  let usedBacklogQueue = false;
+
+  // Prefer the backlog queue so repair only touches orders that are actually mismatched.
+  const backlogLimit = 500;
+  let backlogOffset = 0;
+  const backlogOrderIds: string[] = [];
+  while (true) {
+    const backlogResult = await svc.rpc('warehouse_daily_undeducted_orders', {
+      p_date: date,
+      p_limit: backlogLimit,
+      p_offset: backlogOffset,
+    });
+    if (backlogResult.error && !isMissingRpcFunctionError(backlogResult.error, 'warehouse_daily_undeducted_orders')) {
+      throw backlogResult.error;
+    }
+    if (backlogResult.error) break;
+    if (!Array.isArray(backlogResult.data)) break;
+
+    const page = (backlogResult.data || [])
+      .map((row: any) => String(row.order_id || '').trim())
+      .filter(Boolean);
+    if (page.length === 0) {
+      usedBacklogQueue = true;
+      break;
+    }
+
+    backlogOrderIds.push(...page);
+    usedBacklogQueue = true;
+    const totalCount = Number((backlogResult.data || [])[0]?.total_count || 0);
+    backlogOffset += page.length;
+    if (backlogOffset >= totalCount) break;
+  }
+
+  if (usedBacklogQueue) {
+    const uniqueOrderIds = Array.from(new Set(backlogOrderIds));
+    if (uniqueOrderIds.length === 0) {
+      return { checked: 0, deducted: 0, reversed: 0, skipped: 0 };
+    }
+
+    for (let i = 0; i < uniqueOrderIds.length; i += 200) {
+      const chunk = uniqueOrderIds.slice(i, i + 200);
+      const { data: pageOrders, error: ordErr } = await svc
+        .from('scalev_orders')
+        .select('id, order_id, business_code, shipped_time')
+        .in('order_id', chunk)
+        .in('status', ['shipped', 'completed']);
+      if (ordErr) throw ordErr;
+      orders.push(...((pageOrders || []) as any[]));
+    }
+  } else {
+    // Fallback for older databases without the backlog RPC.
+    const { data: allOrders, error: ordErr } = await svc
+      .from('scalev_orders')
+      .select('id, order_id, business_code, shipped_time')
+      .in('status', ['shipped', 'completed'])
+      .gte('shipped_time', dayStart)
+      .lt('shipped_time', dayEnd)
+      .limit(5000);
+    if (ordErr) throw ordErr;
+    orders = (allOrders || []) as any[];
+  }
+
+  if (!orders || orders.length === 0) return { checked: 0, deducted: 0, reversed: 0, skipped: 0 };
 
   let totalDeducted = 0;
   let totalSkipped = 0;
