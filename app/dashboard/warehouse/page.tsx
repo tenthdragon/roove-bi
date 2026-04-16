@@ -74,6 +74,7 @@ interface ExpiringProduct {
 const SUB_TABS = [
   { id: 'daily-summary', label: 'Daily Summary' },
   { id: 'stock', label: 'Saldo Stock' },
+  { id: 'audit', label: 'Audit Produk' },
   { id: 'reclass', label: 'Reklasifikasi' },
   { id: 'wip', label: 'Work in Process' },
   { id: 'batch', label: 'Batch & Expiry' },
@@ -110,6 +111,17 @@ const EMPTY_DEDUCTION_ALERTS: WarehouseUndeductedOrdersResult = {
   hasMore: false,
 };
 
+const DEDUCTION_MATCH_STOP_WORDS = new Set([
+  'roove',
+  'sc',
+  'sachet',
+  'box',
+  'pcs',
+  'pc',
+  'free',
+  'bonus',
+]);
+
 // ── Helpers ──
 
 function shortDateID(d: string) {
@@ -122,6 +134,33 @@ function fullDateID(d: string) {
   return dt.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function normalizeDeductionLabel(value: string) {
+  return String(value || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function tokenizeDeductionLabel(value: string) {
+  return normalizeDeductionLabel(value)
+    .split(' ')
+    .map(token => token.trim())
+    .filter(token => token.length >= 2 && !DEDUCTION_MATCH_STOP_WORDS.has(token) && !/^\d+$/.test(token));
+}
+
+function deductionLabelsLookConsistent(scalevProduct: string, warehouseProduct: string) {
+  const scalevTokens = tokenizeDeductionLabel(scalevProduct);
+  const warehouseTokens = tokenizeDeductionLabel(warehouseProduct);
+  if (scalevTokens.length === 0 || warehouseTokens.length === 0) return false;
+
+  return scalevTokens.some(scalevToken =>
+    warehouseTokens.some(warehouseToken =>
+      warehouseToken.includes(scalevToken) || scalevToken.includes(warehouseToken)
+    )
+  );
+}
+
 function fmtDateTime(d: string) {
   return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
@@ -131,6 +170,10 @@ function buildJakartaDayRange(date: string) {
     from: new Date(`${date}T00:00:00+07:00`).toISOString(),
     to: new Date(`${date}T23:59:59.999+07:00`).toISOString(),
   };
+}
+
+function formatDateInputValue(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function getOppositeReclassCategory(category: string) {
@@ -401,6 +444,7 @@ export default function WarehousePage() {
           onRefresh={refreshData}
         />
       )}
+      {activeTab === 'audit' && <ProductAuditTab />}
       {activeTab === 'ledger' && (
         <LedgerTab
           data={ledgerHistory}
@@ -2641,7 +2685,12 @@ function DailySummaryTab({
                           {rows.map((d, i) => (
                             <tr key={i} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                               <td style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-secondary)' }}>{d.scalev_product}</td>
-                              <td style={{ padding: '5px 10px', fontSize: 11, fontWeight: 600, color: d.scalev_product !== d.warehouse_product ? '#f59e0b' : 'var(--text)' }}>{d.warehouse_product}</td>
+                              <td style={{
+                                padding: '5px 10px',
+                                fontSize: 11,
+                                fontWeight: 600,
+                                color: deductionLabelsLookConsistent(d.scalev_product, d.warehouse_product) ? 'var(--text)' : '#f59e0b'
+                              }}>{d.warehouse_product}</td>
                               <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: 10 }}>{d.business_codes}</td>
                               <td style={{ padding: '5px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{d.total_qty.toLocaleString('id-ID')}</td>
                               <td style={{ padding: '5px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--dim)', fontSize: 11 }}>{d.order_count}</td>
@@ -2659,6 +2708,535 @@ function DailySummaryTab({
         {showDeductLog && deductLogLoaded && deductLog.length === 0 && !deductLogLoading && !deductLogError && (
           <div style={{ marginTop: 10, fontSize: 12, color: 'var(--dim)' }}>Tidak ada deduction tercatat untuk tanggal ini.</div>
         )}
+      </div>
+    </>
+  );
+}
+
+// ============================================================
+// PRODUCT AUDIT TAB
+// ============================================================
+
+function ProductAuditTab() {
+  const [products, setProducts] = useState<any[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
+  const [productsError, setProductsError] = useState('');
+  const [selectedProductId, setSelectedProductId] = useState('');
+  const [productSearch, setProductSearch] = useState('');
+  const [movementFilter, setMovementFilter] = useState('all');
+  const [rowSearch, setRowSearch] = useState('');
+  const [historyRows, setHistoryRows] = useState<any[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [stockSnapshot, setStockSnapshot] = useState<any>(null);
+  const [stockLoading, setStockLoading] = useState(false);
+  const [dateFrom, setDateFrom] = useState(() => {
+    const now = new Date();
+    const from = new Date(now);
+    from.setDate(from.getDate() - 29);
+    return formatDateInputValue(from);
+  });
+  const [dateTo, setDateTo] = useState(() => formatDateInputValue(new Date()));
+
+  useEffect(() => {
+    let isActive = true;
+
+    (async () => {
+      setProductsLoading(true);
+      setProductsError('');
+      try {
+        const rows = await getProducts({ activeOnly: true });
+        if (isActive) setProducts(rows || []);
+      } catch (e: any) {
+        if (isActive) {
+          setProducts([]);
+          setProductsError(e?.message || 'Gagal memuat daftar produk.');
+        }
+      } finally {
+        if (isActive) setProductsLoading(false);
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!selectedProductId) {
+      setStockSnapshot(null);
+      return () => {
+        isActive = false;
+      };
+    }
+
+    (async () => {
+      setStockLoading(true);
+      try {
+        const rows = await getStockBalance(Number(selectedProductId));
+        if (isActive) setStockSnapshot(rows?.[0] || null);
+      } catch {
+        if (isActive) setStockSnapshot(null);
+      } finally {
+        if (isActive) setStockLoading(false);
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedProductId]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    if (!selectedProductId) {
+      setHistoryRows([]);
+      setHistoryError('');
+      return () => {
+        isActive = false;
+      };
+    }
+
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      setHistoryRows([]);
+      setHistoryError('Tanggal awal tidak boleh lebih besar dari tanggal akhir.');
+      return () => {
+        isActive = false;
+      };
+    }
+
+    (async () => {
+      setHistoryLoading(true);
+      setHistoryError('');
+      try {
+        const rows = await getLedgerHistory({
+          productId: Number(selectedProductId),
+          dateFrom: dateFrom ? buildJakartaDayRange(dateFrom).from : undefined,
+          dateTo: dateTo ? buildJakartaDayRange(dateTo).to : undefined,
+          limit: 5000,
+        });
+        if (isActive) setHistoryRows(rows || []);
+      } catch (e: any) {
+        if (isActive) {
+          setHistoryRows([]);
+          setHistoryError(e?.message || 'Gagal memuat history ledger produk.');
+        }
+      } finally {
+        if (isActive) setHistoryLoading(false);
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [selectedProductId, dateFrom, dateTo]);
+
+  const selectedProduct = useMemo(
+    () => products.find((row: any) => String(row.id) === selectedProductId) || null,
+    [products, selectedProductId],
+  );
+
+  const filteredProducts = useMemo(() => {
+    const q = productSearch.trim().toLowerCase();
+    let result = products;
+    if (q) {
+      result = products.filter((row: any) => {
+        const haystack = [
+          row.name,
+          row.category,
+          row.entity,
+          row.warehouse,
+          row.unit,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(q);
+      });
+    } else {
+      result = products.slice(0, 300);
+    }
+
+    if (selectedProductId && !result.some((row: any) => String(row.id) === selectedProductId)) {
+      const picked = products.find((row: any) => String(row.id) === selectedProductId);
+      if (picked) result = [picked, ...result];
+    }
+
+    return result;
+  }, [products, productSearch, selectedProductId]);
+
+  const periodRows = useMemo(() => (
+    [...historyRows].sort((a: any, b: any) => {
+      const timeDiff = new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+      if (timeDiff !== 0) return timeDiff;
+      return Number(a.id || 0) - Number(b.id || 0);
+    })
+  ), [historyRows]);
+
+  const displayedRows = useMemo(() => {
+    let result = periodRows;
+    if (movementFilter !== 'all') {
+      result = result.filter((row: any) => row.movement_type === movementFilter);
+    }
+    if (rowSearch.trim()) {
+      const q = rowSearch.trim().toLowerCase();
+      result = result.filter((row: any) => {
+        const haystack = [
+          row.reference_type,
+          row.reference_id,
+          row.notes,
+          row.warehouse_batches?.batch_code,
+          row.profiles?.full_name,
+          row.profiles?.email,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(q);
+      });
+    }
+    return result;
+  }, [periodRows, movementFilter, rowSearch]);
+
+  const typeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    historyRows.forEach((row: any) => {
+      counts[row.movement_type] = (counts[row.movement_type] || 0) + 1;
+    });
+    return counts;
+  }, [historyRows]);
+
+  const periodSummary = useMemo(() => {
+    const totalIn = periodRows.reduce((sum: number, row: any) => {
+      const qty = Number(row.quantity || 0);
+      return qty > 0 ? sum + qty : sum;
+    }, 0);
+    const totalOut = periodRows.reduce((sum: number, row: any) => {
+      const qty = Number(row.quantity || 0);
+      return qty < 0 ? sum + Math.abs(qty) : sum;
+    }, 0);
+    const openingBalance = periodRows.length > 0
+      ? Number(periodRows[0].running_balance || 0) - Number(periodRows[0].quantity || 0)
+      : Number(stockSnapshot?.current_stock || 0);
+    const closingBalance = periodRows.length > 0
+      ? Number(periodRows[periodRows.length - 1].running_balance || 0)
+      : Number(stockSnapshot?.current_stock || 0);
+    const lowestBalance = periodRows.length > 0
+      ? Math.min(...periodRows.map((row: any) => Number(row.running_balance || 0)))
+      : Number(stockSnapshot?.current_stock || 0);
+    const negativeRows = periodRows.filter((row: any) => Number(row.running_balance || 0) < 0).length;
+
+    return {
+      totalIn,
+      totalOut,
+      openingBalance,
+      closingBalance,
+      lowestBalance,
+      negativeRows,
+      netMovement: totalIn - totalOut,
+    };
+  }, [periodRows, stockSnapshot]);
+
+  const locationLabel = selectedProduct
+    ? `${selectedProduct.warehouse || '-'} - ${selectedProduct.entity || '-'}`
+    : '-';
+  const currentStock = Number(stockSnapshot?.current_stock || 0);
+  const hasNegativeBalance = currentStock < 0 || periodSummary.negativeRows > 0;
+
+  const applyPreset = (days: number) => {
+    const to = new Date();
+    const from = new Date(to);
+    from.setDate(from.getDate() - (days - 1));
+    setDateFrom(formatDateInputValue(from));
+    setDateTo(formatDateInputValue(to));
+  };
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="Cari produk, kategori, gudang, entity..."
+          value={productSearch}
+          onChange={(e) => setProductSearch(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', minWidth: 260, flex: 1 }}
+        />
+        <select
+          value={selectedProductId}
+          onChange={(e) => setSelectedProductId(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', minWidth: 320, flex: 1 }}
+        >
+          <option value="">Pilih stok untuk diaudit</option>
+          {filteredProducts.map((row: any) => (
+            <option key={row.id} value={row.id}>
+              {row.name} ({row.category}) [{row.warehouse}-{row.entity}]
+            </option>
+          ))}
+        </select>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 12, outline: 'none' }}
+        />
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 12px', color: 'var(--text)', fontSize: 12, outline: 'none' }}
+        />
+        {[7, 30, 90].map((days) => (
+          <button
+            key={days}
+            onClick={() => applyPreset(days)}
+            style={{
+              padding: '7px 10px',
+              borderRadius: 8,
+              border: '1px solid var(--border)',
+              background: 'transparent',
+              color: 'var(--dim)',
+              fontSize: 12,
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            {days} hari
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="Cari referensi, batch, user, catatan..."
+          value={rowSearch}
+          onChange={(e) => setRowSearch(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 12, outline: 'none', minWidth: 260, flex: 1 }}
+        />
+        <button
+          onClick={() => setMovementFilter('all')}
+          style={{
+            padding: '4px 12px',
+            borderRadius: 6,
+            border: `1px solid ${movementFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`,
+            background: movementFilter === 'all' ? 'var(--accent)' : 'transparent',
+            color: movementFilter === 'all' ? '#fff' : 'var(--dim)',
+            fontSize: 11,
+            cursor: 'pointer',
+            fontWeight: 600,
+          }}
+        >
+          Semua ({historyRows.length})
+        </button>
+        {Object.entries(MOVEMENT_LABELS).map(([key, cfg]) => (
+          <button
+            key={key}
+            onClick={() => setMovementFilter(movementFilter === key ? 'all' : key)}
+            style={{
+              padding: '4px 12px',
+              borderRadius: 6,
+              border: `1px solid ${movementFilter === key ? cfg.color : 'var(--border)'}`,
+              background: movementFilter === key ? `${cfg.color}20` : 'transparent',
+              color: movementFilter === key ? cfg.color : 'var(--dim)',
+              fontSize: 11,
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            {cfg.label} ({typeCounts[key] || 0})
+          </button>
+        ))}
+        {(productSearch || rowSearch || movementFilter !== 'all') && (
+          <button
+            onClick={() => {
+              setProductSearch('');
+              setRowSearch('');
+              setMovementFilter('all');
+            }}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: '1px solid var(--border)',
+              background: 'transparent',
+              color: 'var(--dim)',
+              fontSize: 12,
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            Reset Filter Lokal
+          </button>
+        )}
+      </div>
+
+      <div style={{ marginBottom: 12, fontSize: 11, color: 'var(--dim)' }}>
+        {productsLoading
+          ? 'Memuat daftar stok...'
+          : productsError
+            ? productsError
+            : !productSearch && products.length > filteredProducts.length
+              ? `Menampilkan ${filteredProducts.length} dari ${products.length} produk. Gunakan pencarian untuk menemukan SKU tertentu lebih cepat.`
+              : `${filteredProducts.length} produk siap dipilih untuk audit.`}
+      </div>
+
+      {selectedProduct && (
+        <div style={{
+          marginBottom: 16,
+          padding: 14,
+          borderRadius: 12,
+          border: '1px solid var(--border)',
+          background: 'var(--card)',
+          display: 'flex',
+          gap: 14,
+          flexWrap: 'wrap',
+          alignItems: 'center',
+        }}>
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{selectedProduct.name}</div>
+            <div style={{ marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${CATEGORY_COLORS[selectedProduct.category] || '#94a3b8'}20`, color: CATEGORY_COLORS[selectedProduct.category] || '#94a3b8' }}>
+                {selectedProduct.category}
+              </span>
+              <span style={{ fontSize: 11, color: 'var(--dim)' }}>{locationLabel}</span>
+              <span style={{ fontSize: 11, color: 'var(--dim)' }}>Satuan: {selectedProduct.unit || '-'}</span>
+            </div>
+          </div>
+          <div style={{ minWidth: 220 }}>
+            <div style={{ fontSize: 11, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 }}>
+              Saldo Sekarang
+            </div>
+            <div style={{ fontSize: 26, fontWeight: 700, fontFamily: 'monospace', color: currentStock < 0 ? 'var(--red)' : 'var(--text)' }}>
+              {stockLoading ? '...' : currentStock.toLocaleString('id-ID')}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {hasNegativeBalance && selectedProduct && (
+        <div style={{
+          marginBottom: 16,
+          padding: '12px 14px',
+          borderRadius: 12,
+          border: '1px solid #ef444440',
+          background: 'rgba(127, 29, 29, 0.16)',
+          color: '#fecaca',
+          fontSize: 12,
+          lineHeight: 1.55,
+        }}>
+          {currentStock < 0
+            ? `Saldo saat ini untuk ${selectedProduct.name} sedang minus ${Math.abs(currentStock).toLocaleString('id-ID')} unit.`
+            : `Pada periode terpilih ada ${periodSummary.negativeRows} movement yang membuat running balance sempat minus.`}
+          {' '}Tab ini bisa dipakai untuk menelusuri titik waktu dan referensi transaksi yang menyebabkan saldo turun.
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 12, marginBottom: 18, flexWrap: 'wrap' }}>
+        <KPICard label="Saldo Awal Periode" value={periodSummary.openingBalance.toLocaleString('id-ID')} color="#8b5cf6" sub={dateFrom ? `Sejak ${fullDateID(dateFrom)}` : 'Awal data'} />
+        <KPICard label="Total Masuk" value={periodSummary.totalIn.toLocaleString('id-ID')} color="var(--green)" sub={`${periodRows.length} row ledger`} />
+        <KPICard label="Total Keluar" value={periodSummary.totalOut.toLocaleString('id-ID')} color="#f97316" sub={dateTo ? `Sampai ${fullDateID(dateTo)}` : 'Sampai data terbaru'} />
+        <KPICard label="Saldo Akhir Periode" value={periodSummary.closingBalance.toLocaleString('id-ID')} color={periodSummary.closingBalance < 0 ? 'var(--red)' : 'var(--accent)'} sub={`Net ${periodSummary.netMovement >= 0 ? '+' : ''}${periodSummary.netMovement.toLocaleString('id-ID')}`} />
+        <KPICard label="Saldo Terendah" value={periodSummary.lowestBalance.toLocaleString('id-ID')} color={periodSummary.lowestBalance < 0 ? 'var(--red)' : '#06b6d4'} sub={periodSummary.negativeRows > 0 ? `${periodSummary.negativeRows} row balance minus` : 'Tidak pernah minus'} />
+      </div>
+
+      {historyLoading && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--dim)', fontSize: 12 }}>
+          Memuat history ledger untuk produk terpilih...
+        </div>
+      )}
+
+      {!!historyError && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid #ef444440', background: 'var(--card)', color: '#fca5a5', fontSize: 12 }}>
+          {historyError}
+        </div>
+      )}
+
+      <div style={{ marginBottom: 10, fontSize: 11, color: 'var(--dim)' }}>
+        {!selectedProductId
+          ? 'Pilih satu produk dulu untuk melihat audit movement-nya.'
+          : displayedRows.length !== periodRows.length
+            ? `Menampilkan ${displayedRows.length} dari ${periodRows.length} row ledger dalam periode terpilih.`
+            : periodRows.length >= 5000
+              ? 'Menampilkan 5.000 row terbaru untuk menjaga performa audit tetap stabil.'
+              : `Menampilkan ${periodRows.length} row ledger dalam periode terpilih.`}
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+              {['Waktu', 'Tipe', 'Qty', 'Saldo', 'Batch', 'Referensi', 'Oleh', 'Catatan'].map((label) => (
+                <th
+                  key={label}
+                  style={{
+                    padding: '8px 10px',
+                    textAlign: ['Tipe', 'Batch', 'Referensi', 'Catatan'].includes(label) ? 'left' : 'right',
+                    color: 'var(--dim)',
+                    fontWeight: 600,
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {label}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {displayedRows.map((row: any) => {
+              const moveCfg = MOVEMENT_LABELS[row.movement_type] || { label: row.movement_type, color: 'var(--text)' };
+              const qty = Number(row.quantity || 0);
+              const balance = Number(row.running_balance || 0);
+              return (
+                <tr key={row.id} style={{ borderBottom: '1px solid var(--bg-deep)', background: balance < 0 ? 'rgba(239, 68, 68, 0.08)' : 'transparent' }}>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    {fmtDateTime(row.created_at)}
+                  </td>
+                  <td style={{ padding: '6px 10px' }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${moveCfg.color}20`, color: moveCfg.color }}>
+                      {moveCfg.label}
+                    </span>
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: qty > 0 ? 'var(--green)' : qty < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                    {qty > 0 ? '+' : ''}{qty.toLocaleString('id-ID')}
+                  </td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: balance < 0 ? 'var(--red)' : 'var(--text)' }}>
+                    {balance.toLocaleString('id-ID')}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>
+                    {row.warehouse_batches?.batch_code || '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    {row.reference_type ? `${row.reference_type}${row.reference_id ? ` #${row.reference_id}` : ''}` : '-'}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    {row.profiles?.full_name || row.profiles?.email || (row.created_by ? '...' : 'System')}
+                  </td>
+                  <td style={{ padding: '6px 10px', color: 'var(--text-muted)', fontSize: 11, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {row.notes || '-'}
+                  </td>
+                </tr>
+              );
+            })}
+            {!historyLoading && selectedProductId && displayedRows.length === 0 && (
+              <tr>
+                <td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  {rowSearch
+                    ? `Tidak ditemukan row ledger yang cocok dengan "${rowSearch}".`
+                    : 'Tidak ada movement untuk produk ini pada periode yang dipilih.'}
+                </td>
+              </tr>
+            )}
+            {!historyLoading && !selectedProductId && (
+              <tr>
+                <td colSpan={8} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>
+                  Pilih satu produk untuk mulai audit saldo dan pergerakannya.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </>
   );
