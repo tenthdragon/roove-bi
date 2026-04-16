@@ -48,25 +48,99 @@ function getDemandHistoryWindowMonths(targetMonth: number, targetYear: number, l
   return Math.max(lookbackMonths + 1, Math.max(monthDiff, 0) + lookbackMonths + 1);
 }
 
-async function getDemandPlanningSnapshot(svc: any, month: number, year: number) {
-  const targetYm = toYearMonthKey(year, month);
-  const historyWindowMonths = getDemandHistoryWindowMonths(month, year, 6);
+interface MonthlyDemandRow {
+  warehouse_product_id: number;
+  yr: number;
+  mn: number;
+  total_qty: number;
+}
 
-  const [
-    { data: demandData, error: demandErr },
-    { data: movData, error: movErr },
-  ] = await Promise.all([
-    svc.rpc('ppic_monthly_demand', { p_months: historyWindowMonths }),
-    svc.rpc('ppic_monthly_movements', { p_months: historyWindowMonths }),
-  ]);
+interface ScalevOrderWindowRow {
+  id: number;
+  shipped_time: string;
+}
 
-  if (demandErr) throw demandErr;
-  if (movErr) throw movErr;
+interface ScalevOrderLineDemandRow {
+  scalev_order_id: number;
+  product_name: string;
+  quantity: number;
+}
 
+interface LegacyScalevDemandMappingRow {
+  scalev_product_name: string;
+  warehouse_product_id: number | null;
+  deduct_qty_multiplier: number | null;
+  is_ignored: boolean | null;
+}
+
+function isStatementTimeoutError(error: any) {
+  const message = String(error?.message || error || '').toLowerCase();
+  return message.includes('statement timeout') || message.includes('canceling statement due to statement timeout');
+}
+
+function getJakartaCurrentDateParts() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  }).formatToParts(new Date());
+
+  return {
+    year: Number(parts.find(part => part.type === 'year')?.value || new Date().getFullYear()),
+    month: Number(parts.find(part => part.type === 'month')?.value || new Date().getMonth() + 1),
+    day: Number(parts.find(part => part.type === 'day')?.value || new Date().getDate()),
+  };
+}
+
+function createUtcDate(year: number, month: number, day: number) {
+  return new Date(Date.UTC(year, month - 1, day));
+}
+
+function shiftUtcDays(date: Date, days: number) {
+  const next = new Date(date.getTime());
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function shiftYearMonth(year: number, month: number, deltaMonths: number) {
+  const shifted = new Date(Date.UTC(year, month - 1 + deltaMonths, 1));
+  return {
+    year: shifted.getUTCFullYear(),
+    month: shifted.getUTCMonth() + 1,
+  };
+}
+
+function formatUtcDate(date: Date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function normalizeMonthlyDemandRows(rows: any[]): MonthlyDemandRow[] {
+  return (rows || []).map((row: any) => ({
+    warehouse_product_id: Number(row.warehouse_product_id),
+    yr: Number(row.yr),
+    mn: Number(row.mn),
+    total_qty: Number(row.total_qty ?? row.total_out ?? 0),
+  }));
+}
+
+function buildDemandSnapshotFromRows(rows: MonthlyDemandRow[], targetMonth: number, targetYear: number) {
+  const targetYm = toYearMonthKey(targetYear, targetMonth);
   const demandMonthsByProduct = new Map<number, { ym: number; qty: number }[]>();
   const actualOutMap = new Map<number, number>();
 
-  for (const row of (demandData || [])) {
+  for (const row of rows) {
     const productId = Number(row.warehouse_product_id);
     const ym = toYearMonthKey(Number(row.yr), Number(row.mn));
     const qty = Number(row.total_qty || 0);
@@ -88,14 +162,14 @@ async function getDemandPlanningSnapshot(svc: any, month: number, year: number) 
 
   const productDemand = new Map<number, number>();
 
-  for (const [productId, months] of demandMonthsByProduct.entries()) {
-    months.sort((a, b) => a.ym - b.ym);
+  for (const [productId, months] of Array.from(demandMonthsByProduct.entries())) {
+    months.sort((a: { ym: number; qty: number }, b: { ym: number; qty: number }) => a.ym - b.ym);
     const recentMonths = months.slice(-6);
 
     let weightedTotal = 0;
     let totalWeight = 0;
 
-    recentMonths.forEach((entry, index) => {
+    recentMonths.forEach((entry: { ym: number; qty: number }, index: number) => {
       const weight = index + 1;
       weightedTotal += entry.qty * weight;
       totalWeight += weight;
@@ -103,6 +177,190 @@ async function getDemandPlanningSnapshot(svc: any, month: number, year: number) 
 
     productDemand.set(productId, totalWeight > 0 ? Math.round(weightedTotal / totalWeight) : 0);
   }
+
+  return { productDemand, actualOutMap };
+}
+
+async function getMonthlyDemandRowsWithFallback(
+  svc: any,
+  month: number,
+  year: number,
+  historyWindowMonths: number,
+) {
+  const { data, error } = await svc.rpc('ppic_monthly_demand', { p_months: historyWindowMonths });
+  if (!error) {
+    return normalizeMonthlyDemandRows(data || []);
+  }
+
+  if (!isStatementTimeoutError(error)) {
+    throw error;
+  }
+
+  console.warn(`[ppic] ppic_monthly_demand timed out for ${month}/${year}; falling back to summary_scalev_monthly_movements`);
+
+  const startWindow = shiftYearMonth(year, month, -6);
+  const startYm = toYearMonthKey(startWindow.year, startWindow.month);
+  const endYm = toYearMonthKey(year, month);
+
+  const { data: summaryData, error: summaryErr } = await svc
+    .from('summary_scalev_monthly_movements')
+    .select('warehouse_product_id, yr, mn, total_out')
+    .gte('yr', startWindow.year)
+    .lte('yr', year);
+
+  if (summaryErr) throw summaryErr;
+
+  return normalizeMonthlyDemandRows(
+    (summaryData || []).filter((row: any) => {
+      const ym = toYearMonthKey(Number(row.yr), Number(row.mn));
+      return ym >= startYm && ym <= endYm;
+    }),
+  );
+}
+
+async function getExactDailyDemandMapFallback(svc: any, demandDays: number): Promise<Map<number, number>> {
+  const safeDays = Math.max(Number(demandDays) || 0, 1);
+  const today = getJakartaCurrentDateParts();
+  const endDate = createUtcDate(today.year, today.month, today.day);
+  const startDate = shiftUtcDays(endDate, -(safeDays - 1));
+  const startIso = `${formatUtcDate(startDate)}T00:00:00+07:00`;
+  const endIso = `${formatUtcDate(endDate)}T23:59:59.999+07:00`;
+
+  const orders: ScalevOrderWindowRow[] = [];
+  let orderOffset = 0;
+
+  while (true) {
+    const { data, error } = await svc
+      .from('scalev_orders')
+      .select('id, shipped_time')
+      .in('status', ['shipped', 'completed'])
+      .not('shipped_time', 'is', null)
+      .gte('shipped_time', startIso)
+      .lte('shipped_time', endIso)
+      .order('id', { ascending: true })
+      .range(orderOffset, orderOffset + 999);
+
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+
+    orders.push(...(data as any[]).map((row) => ({
+      id: Number(row.id),
+      shipped_time: String(row.shipped_time),
+    })));
+
+    if (data.length < 1000) break;
+    orderOffset += 1000;
+  }
+
+  if (orders.length === 0) {
+    return new Map<number, number>();
+  }
+
+  const lines: ScalevOrderLineDemandRow[] = [];
+
+  for (const chunk of chunkArray(orders.map(order => order.id), 500)) {
+    let lineOffset = 0;
+
+    while (true) {
+      const { data, error } = await svc
+        .from('scalev_order_lines')
+        .select('scalev_order_id, product_name, quantity')
+        .in('scalev_order_id', chunk)
+        .range(lineOffset, lineOffset + 999);
+
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+
+      for (const row of data as any[]) {
+        if (!row.product_name || Number(row.quantity) <= 0) continue;
+        lines.push({
+          scalev_order_id: Number(row.scalev_order_id),
+          product_name: String(row.product_name),
+          quantity: Number(row.quantity),
+        });
+      }
+
+      if (data.length < 1000) break;
+      lineOffset += 1000;
+    }
+  }
+
+  if (lines.length === 0) {
+    return new Map<number, number>();
+  }
+
+  const mappings: LegacyScalevDemandMappingRow[] = [];
+  const uniqueNames = Array.from(new Set(lines.map(line => line.product_name)));
+
+  for (const chunk of chunkArray(uniqueNames, 500)) {
+    const { data, error } = await svc
+      .from('warehouse_scalev_mapping')
+      .select('scalev_product_name, warehouse_product_id, deduct_qty_multiplier, is_ignored')
+      .in('scalev_product_name', chunk);
+
+    if (error) throw error;
+    mappings.push(...((data || []) as LegacyScalevDemandMappingRow[]));
+  }
+
+  const mappingByName = new Map<string, LegacyScalevDemandMappingRow>();
+  for (const mapping of mappings) {
+    if (!mapping.scalev_product_name || mappingByName.has(mapping.scalev_product_name)) continue;
+    mappingByName.set(mapping.scalev_product_name, mapping);
+  }
+
+  const totals = new Map<number, number>();
+
+  for (const line of lines) {
+    const mapping = mappingByName.get(line.product_name);
+    if (!mapping || mapping.is_ignored || !mapping.warehouse_product_id) continue;
+
+    const multiplier = Number(mapping.deduct_qty_multiplier || 1);
+    const quantity = Number(line.quantity || 0) * multiplier;
+    totals.set(
+      Number(mapping.warehouse_product_id),
+      (totals.get(Number(mapping.warehouse_product_id)) || 0) + quantity,
+    );
+  }
+
+  const avgDailyMap = new Map<number, number>();
+  for (const [productId, totalQty] of Array.from(totals.entries())) {
+    avgDailyMap.set(productId, Math.round((totalQty / safeDays) * 100) / 100);
+  }
+
+  return avgDailyMap;
+}
+
+async function getAverageDailyDemandMap(svc: any, demandDays: number): Promise<Map<number, number>> {
+  const { data, error } = await svc.rpc('ppic_avg_daily_demand', { p_days: demandDays });
+  if (!error) {
+    return new Map<number, number>((data || []).map((row: any): [number, number] => [Number(row.warehouse_product_id), Number(row.avg_daily)]));
+  }
+
+  if (!isStatementTimeoutError(error)) {
+    throw error;
+  }
+
+  console.warn(`[ppic] ppic_avg_daily_demand timed out for ${demandDays} days; using paginated fallback`);
+  return getExactDailyDemandMapFallback(svc, demandDays);
+}
+
+async function getDemandPlanningSnapshot(svc: any, month: number, year: number) {
+  const targetYm = toYearMonthKey(year, month);
+  const historyWindowMonths = getDemandHistoryWindowMonths(month, year, 6);
+
+  const [
+    { data: demandData, error: demandErr },
+    { data: movData, error: movErr },
+  ] = await Promise.all([
+    svc.rpc('ppic_monthly_demand', { p_months: historyWindowMonths }),
+    svc.rpc('ppic_monthly_movements', { p_months: historyWindowMonths }),
+  ]);
+
+  const normalizedDemandRows = demandErr
+    ? await getMonthlyDemandRowsWithFallback(svc, month, year, historyWindowMonths)
+    : normalizeMonthlyDemandRows(demandData || []);
+  if (movErr) throw movErr;
+  const { productDemand, actualOutMap } = buildDemandSnapshotFromRows(normalizedDemandRows, month, year);
 
   const actualInMap = new Map<number, number>();
 
@@ -319,10 +577,9 @@ async function notifyPOSubmitted(svc: any, poId: number) {
 
   // Fetch stock balance + avg daily demand for DOI
   const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('product_id, current_stock');
-  const stockMap = new Map((stockData || []).map((s: any) => [s.product_id, Number(s.current_stock)]));
+  const stockMap = new Map<number, number>((stockData || []).map((s: any): [number, number] => [Number(s.product_id), Number(s.current_stock)]));
 
-  const { data: demandData } = await svc.rpc('ppic_avg_daily_demand', { p_days: 90 });
-  const demandMap = new Map((demandData || []).map((d: any) => [d.warehouse_product_id, Number(d.avg_daily)]));
+  const demandMap = await getAverageDailyDemandMap(svc, 90);
 
   const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID');
   const poDate = po.po_date ? new Date(po.po_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
@@ -336,9 +593,9 @@ async function notifyPOSubmitted(svc: any, poId: number) {
     const price = Number(item.unit_price);
     const subtotal = qty * price;
     itemsTotal += subtotal;
-    const productId = item.warehouse_product_id;
-    const stock = stockMap.get(productId) || 0;
-    const avgDaily = demandMap.get(productId) || 0;
+    const productId = Number(item.warehouse_product_id);
+    const stock = Number(stockMap.get(productId) || 0);
+    const avgDaily = Number(demandMap.get(productId) || 0);
     const doi = avgDaily > 0 ? `~${Math.round(stock / avgDaily)} hari` : '-';
     itemsText += `\n${i + 1}. <b>${name}</b>\n   Qty: ${qty} | Harga: ${fmtRp(price)} | Subtotal: ${fmtRp(subtotal)}\n   Stok saat ini: ${stock.toLocaleString('id-ID')} | DOI: ${doi}\n`;
   });
@@ -497,7 +754,7 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
   }
 
   // Recalculate weighted avg HPP for each affected product
-  for (const productId of affectedProductIds) {
+  for (const productId of Array.from(affectedProductIds)) {
     await recalculateProductHpp(svc, productId);
   }
 
@@ -773,9 +1030,7 @@ export async function getROPAnalysis(demandDays: number = 90) {
   await requirePPICAccess('Reorder Point');
   const svc = createServiceSupabase();
 
-  // Use the exact-day RPC here; monthly summary would overcount full months near the cutoff.
-  const { data: demandData, error: demandErr } = await svc.rpc('ppic_avg_daily_demand', { p_days: demandDays });
-  if (demandErr) throw demandErr;
+  const demandMap = await getAverageDailyDemandMap(svc, demandDays);
 
   // Get current stock
   const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('*');
@@ -789,17 +1044,6 @@ export async function getROPAnalysis(demandDays: number = 90) {
     .from('warehouse_products')
     .select('id, name, category, entity, unit, lead_time_days, safety_stock_days')
     .eq('is_active', true);
-
-  const productMap = new Map<number, any>();
-  for (const p of (products || [])) {
-    productMap.set(p.id, p);
-  }
-
-  // Build ROP analysis
-  const demandMap = new Map<number, number>();
-  for (const d of (demandData || [])) {
-    demandMap.set(d.warehouse_product_id, Number(d.avg_daily));
-  }
 
   const result = (products || []).map(p => {
     const avgDaily = demandMap.get(p.id) || 0;
