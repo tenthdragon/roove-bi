@@ -195,6 +195,42 @@ interface WarehouseLedgerRow {
   scalev_order_id?: number | null;
 }
 
+function formatWarehouseSystemDateLabel(value?: string | null) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Jakarta',
+  });
+}
+
+function buildWarehouseReversalNote(
+  orderId: string,
+  reason: string,
+  order?: Pick<ScalevOrderWarehouseSnapshot, 'shipped_time' | 'completed_time'> | null,
+) {
+  const effectiveDateLabel = formatWarehouseSystemDateLabel(order?.shipped_time || order?.completed_time || null);
+  const orderLabel = `Koreksi sistem untuk order ID ${orderId}${effectiveDateLabel ? ` tanggal ${effectiveDateLabel}` : ''}.`;
+  const normalizedReason = String(reason || '').toLowerCase();
+
+  if (normalizedReason.startsWith('reconcile before ')) {
+    return orderLabel;
+  }
+
+  if (normalizedReason.startsWith('status changed to ')) {
+    return `${orderLabel} Status order berubah sehingga deduction lama dibatalkan.`;
+  }
+
+  if (normalizedReason.includes('no longer shipped/completed')) {
+    return `${orderLabel} Status order tidak lagi terminal sehingga deduction lama dibatalkan.`;
+  }
+
+  return `${orderLabel} ${reason}`.trim();
+}
+
 interface OutstandingWarehouseLedgerGroup {
   warehouse_product_id: number;
   batch_id: number | null;
@@ -3196,7 +3232,32 @@ export async function getLedgerHistory(filters?: {
     offset += page.length;
   }
 
-  return rows;
+  const scalevOrderIds = Array.from(new Set(
+    rows
+      .filter((row: any) => row.reference_type === 'scalev_order' && row.reference_id)
+      .map((row: any) => String(row.reference_id)),
+  ));
+  const orderDateByOrderId = new Map<string, string | null>();
+
+  for (let i = 0; i < scalevOrderIds.length; i += 200) {
+    const chunk = scalevOrderIds.slice(i, i + 200);
+    const { data: orders, error: ordersError } = await svc
+      .from('scalev_orders')
+      .select('order_id, shipped_time, completed_time')
+      .in('order_id', chunk);
+    if (ordersError) throw ordersError;
+
+    for (const order of orders || []) {
+      orderDateByOrderId.set(order.order_id, order.shipped_time || order.completed_time || null);
+    }
+  }
+
+  return rows.map((row: any) => ({
+    ...row,
+    scalev_order_effective_date: row.reference_type === 'scalev_order'
+      ? orderDateByOrderId.get(String(row.reference_id || '')) || null
+      : null,
+  }));
 }
 
 export async function getLedgerQuantitySum(filters: {
@@ -3342,10 +3403,15 @@ async function reverseOutstandingWarehouseDeductions(
   orderId: string,
   scalevOrderDbId?: number | null,
   reason: string = 'order no longer shipped/completed',
+  orderSnapshot?: ScalevOrderWarehouseSnapshot | null,
 ) {
   const ledgerRows = await getScalevOrderLedgerRowsDetailed(svc, orderId, scalevOrderDbId);
   const outstandingGroups = summarizeOutstandingLedgerGroups(ledgerRows);
   if (outstandingGroups.length === 0) return 0;
+  const orderContext = orderSnapshot === undefined
+    ? await loadScalevOrderWarehouseSnapshot(svc, orderId, scalevOrderDbId)
+    : orderSnapshot;
+  const reversalNote = buildWarehouseReversalNote(orderId, reason, orderContext);
 
   let reversed = 0;
   for (const group of outstandingGroups) {
@@ -3366,7 +3432,7 @@ async function reverseOutstandingWarehouseDeductions(
       reference_type: 'scalev_order',
       reference_id: orderId,
       scalev_order_id: scalevOrderDbId ?? null,
-      notes: `Reversal: ${reason}`,
+      notes: reversalNote,
     });
     reversed++;
   }
@@ -3397,6 +3463,7 @@ export async function reconcileScalevOrderWarehouse(orderId: string, scalevOrder
       order.order_id,
       order.id,
       `status changed to ${order.status || 'unknown'}`,
+      order,
     );
     return {
       action: reversed > 0 ? 'reversed' : 'unchanged',
@@ -3482,6 +3549,7 @@ export async function reconcileScalevOrderWarehouse(orderId: string, scalevOrder
     order.order_id,
     order.id,
     `reconcile before ${order.status || 'unknown'} deduction`,
+    order,
   );
 
   let deducted = 0;

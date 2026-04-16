@@ -17,7 +17,6 @@ import {
   getDailyMovementSummary,
   getUndeductedOrders,
   type WarehouseUndeductedOrdersResult,
-  backfillWarehouseDeductions,
   backfillSingleOrder,
   getDeductionLog,
   getProducts,
@@ -169,6 +168,36 @@ function fmtDateTime(d: string) {
 
 function fmtDateTimeDetailed(d: string) {
   return new Date(d).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatScalevOrderDateLabel(value?: string | null) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed.toLocaleDateString('id-ID', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'Asia/Jakarta',
+  });
+}
+
+function formatWarehouseLedgerNote(row: any) {
+  const raw = String(row?.notes || '').trim();
+  if (!raw) return '';
+  if (raw.startsWith('Koreksi sistem untuk order ID')) return raw;
+  if (row?.reference_type !== 'scalev_order' || !row?.reference_id || !raw.startsWith('Reversal:')) return raw;
+
+  const orderDateLabel = formatScalevOrderDateLabel(row?.scalev_order_effective_date);
+  const base = `Koreksi sistem untuk order ID ${row.reference_id}${orderDateLabel ? ` tanggal ${orderDateLabel}` : ''}.`;
+  const normalized = raw.toLowerCase();
+  if (normalized.includes('status changed')) {
+    return `${base} Status order berubah sehingga deduction lama dibatalkan.`;
+  }
+  if (normalized.includes('no longer shipped/completed')) {
+    return `${base} Status order tidak lagi terminal sehingga deduction lama dibatalkan.`;
+  }
+  return base;
 }
 
 function compareLedgerTimestampAsc(a: any, b: any) {
@@ -2497,7 +2526,18 @@ function DailySummaryTab({
     setBulkRepairRunning(true);
     setBulkRepairError('');
     try {
-      const result = await backfillWarehouseDeductions(date);
+      const response = await fetch('/api/warehouse-deduction-repair', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ date }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Gagal menjalankan repair deduction harian.');
+      }
+      const result = payload || {};
       setBulkRepairResult({
         date,
         checked: Number(result.checked || 0),
@@ -2509,7 +2549,12 @@ function DailySummaryTab({
       await onLoadAlerts({ force: true, offset: 0 });
       if (deductLogLoaded) await onLoadDeductLog(true);
     } catch (err: any) {
-      setBulkRepairError(err?.message || 'Gagal menjalankan repair deduction harian.');
+      const message = String(err?.message || '').trim();
+      if (message === 'Load failed' || message === 'Failed to fetch') {
+        setBulkRepairError('Gagal menghubungi server repair. Coba refresh preview lalu jalankan lagi; jika masih muncul, kemungkinan proses melebihi batas request lama dan perlu endpoint repair khusus.');
+      } else {
+        setBulkRepairError(message || 'Gagal menjalankan repair deduction harian.');
+      }
     } finally {
       setBulkRepairRunning(false);
     }
@@ -3077,6 +3122,7 @@ function ProductAuditTab() {
           row.reference_type,
           row.reference_id,
           row.notes,
+          formatWarehouseLedgerNote(row),
           row.warehouse_batches?.batch_code,
           row.profiles?.full_name,
           row.profiles?.email,
@@ -3398,6 +3444,7 @@ function ProductAuditTab() {
               const moveCfg = MOVEMENT_LABELS[row.movement_type] || { label: row.movement_type, color: 'var(--text)' };
               const qty = Number(row.quantity || 0);
               const balance = Number(row.balance_after || 0);
+              const noteLabel = formatWarehouseLedgerNote(row);
               return (
                 <tr key={row.id} style={{ borderBottom: '1px solid var(--bg-deep)', background: balance < 0 ? 'rgba(239, 68, 68, 0.08)' : 'transparent' }}>
                   <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
@@ -3424,7 +3471,7 @@ function ProductAuditTab() {
                     {row.profiles?.full_name || row.profiles?.email || (row.created_by ? '...' : 'System')}
                   </td>
                   <td style={{ padding: '6px 10px', color: 'var(--text-muted)', fontSize: 11, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {row.notes || '-'}
+                    {noteLabel || '-'}
                   </td>
                 </tr>
               );
@@ -3472,6 +3519,7 @@ function LedgerTab({
       result = result.filter(r =>
         (r.reference_id || '').toLowerCase().includes(q) ||
         (r.notes || '').toLowerCase().includes(q) ||
+        formatWarehouseLedgerNote(r).toLowerCase().includes(q) ||
         (r.warehouse_products?.name || '').toLowerCase().includes(q) ||
         (r.profiles?.full_name || '').toLowerCase().includes(q) ||
         (r.profiles?.email || '').toLowerCase().includes(q)
@@ -3565,6 +3613,7 @@ function LedgerTab({
             {filtered.map(r => {
               const moveCfg = MOVEMENT_LABELS[r.movement_type] || { label: r.movement_type, color: 'var(--text)' };
               const qty = Number(r.quantity);
+              const noteLabel = formatWarehouseLedgerNote(r);
               return (
                 <tr key={r.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                   <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
@@ -3594,7 +3643,7 @@ function LedgerTab({
                     {r.profiles?.full_name || r.profiles?.email || (r.created_by ? '...' : 'System')}
                   </td>
                   <td style={{ padding: '6px 10px', color: 'var(--text-muted)', fontSize: 11, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {r.notes || '-'}
+                    {noteLabel || '-'}
                   </td>
                 </tr>
               );
