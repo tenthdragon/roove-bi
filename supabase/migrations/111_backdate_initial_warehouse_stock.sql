@@ -80,30 +80,30 @@ DO $$
 DECLARE
   v_product_ids INT[];
 BEGIN
-  WITH targets AS (
-    SELECT
-      l.id,
-      l.batch_id,
-      l.warehouse_product_id,
-      public.warehouse_seed_period_start(b.batch_code, l.notes) AS backdated_at
-    FROM public.warehouse_stock_ledger l
-    LEFT JOIN public.warehouse_batches b
-      ON b.id = l.batch_id
-    WHERE l.reference_type = 'manual'
-      AND l.movement_type = 'IN'
-      AND (
-        l.notes = 'Initial stock from Kartu Stock'
-        OR l.notes LIKE 'Initial WIP stock from Kartu Stock%'
-      )
-  )
+  CREATE TEMP TABLE tmp_warehouse_seed_backdate_targets ON COMMIT DROP AS
+  SELECT
+    l.id,
+    l.batch_id,
+    l.warehouse_product_id,
+    public.warehouse_seed_period_start(b.batch_code, l.notes) AS backdated_at
+  FROM public.warehouse_stock_ledger l
+  LEFT JOIN public.warehouse_batches b
+    ON b.id = l.batch_id
+  WHERE l.reference_type = 'manual'
+    AND l.movement_type = 'IN'
+    AND (
+      l.notes = 'Initial stock from Kartu Stock'
+      OR l.notes LIKE 'Initial WIP stock from Kartu Stock%'
+    );
+
   SELECT array_agg(DISTINCT warehouse_product_id)
   INTO v_product_ids
-  FROM targets
+  FROM tmp_warehouse_seed_backdate_targets
   WHERE backdated_at IS NOT NULL;
 
   UPDATE public.warehouse_stock_ledger l
   SET created_at = t.backdated_at
-  FROM targets t
+  FROM tmp_warehouse_seed_backdate_targets t
   WHERE l.id = t.id
     AND t.backdated_at IS NOT NULL
     AND l.created_at IS DISTINCT FROM t.backdated_at;
@@ -112,7 +112,7 @@ BEGIN
   SET created_at = t.backdated_at
   FROM (
     SELECT DISTINCT batch_id, backdated_at
-    FROM targets
+    FROM tmp_warehouse_seed_backdate_targets
     WHERE batch_id IS NOT NULL
       AND backdated_at IS NOT NULL
   ) t
