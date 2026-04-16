@@ -189,6 +189,7 @@ interface WarehouseLedgerRow {
   batch_id: number | null;
   quantity: number;
   movement_type: string;
+  reference_type?: string | null;
   notes: string | null;
   created_at: string | null;
   reference_id?: string | null;
@@ -396,11 +397,128 @@ export async function callWarehouseDeductFifoCompat(
 }
 
 const TERMINAL_SCALEV_ORDER_STATUSES = new Set(['shipped', 'completed']);
+const RETURNED_SCALEV_ORDER_STATUSES = new Set(['returned', 'rts', 'shipped_rts']);
+const WAREHOUSE_GO_LIVE_BASELINE_DATE = '2026-04-21';
+const WAREHOUSE_GO_LIVE_BASELINE_LABEL = '21 Apr 2026';
+const WAREHOUSE_GO_LIVE_NOT_BEFORE_LABEL = '21 Apr 2026 14:00 WIB';
+const WAREHOUSE_GO_LIVE_NOT_BEFORE_AT = new Date('2026-04-21T14:00:00+07:00').toISOString();
 const QUANTITY_EPSILON = 0.000001;
 const ALLOWED_STOCK_RECLASS_CATEGORIES = new Set(['fg', 'bonus']);
 
 function isTerminalScalevOrderStatus(status?: string | null) {
   return TERMINAL_SCALEV_ORDER_STATUSES.has((status || '').toLowerCase());
+}
+
+function isReturnedScalevOrderStatus(status?: string | null) {
+  return RETURNED_SCALEV_ORDER_STATUSES.has((status || '').toLowerCase());
+}
+
+function getScalevOrderWarehouseEffectiveAt(order?: Pick<ScalevOrderWarehouseSnapshot, 'shipped_time' | 'completed_time'> | null) {
+  return order?.shipped_time || order?.completed_time || null;
+}
+
+function formatJakartaDateValue(value: string) {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(parsed);
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  if (!byType.year || !byType.month || !byType.day) return null;
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
+
+async function loadWarehouseGoLiveAt(
+  svc: ReturnType<typeof createServiceSupabase>,
+) {
+  const { data, error } = await svc
+    .from('warehouse_stock_opname_sessions')
+    .select('completed_at')
+    .eq('status', 'completed')
+    .eq('opname_date', WAREHOUSE_GO_LIVE_BASELINE_DATE)
+    .not('completed_at', 'is', null)
+    .order('completed_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.completed_at) return null;
+  const approvedAt = new Date(data.completed_at);
+  const notBeforeAt = new Date(WAREHOUSE_GO_LIVE_NOT_BEFORE_AT);
+  if (Number.isNaN(approvedAt.getTime()) || Number.isNaN(notBeforeAt.getTime())) {
+    return data.completed_at;
+  }
+  return approvedAt.getTime() > notBeforeAt.getTime()
+    ? approvedAt.toISOString()
+    : notBeforeAt.toISOString();
+}
+
+function isScalevOrderBeforeWarehouseGoLive(
+  order: Pick<ScalevOrderWarehouseSnapshot, 'shipped_time' | 'completed_time'> | null | undefined,
+  goLiveAt: string | null,
+) {
+  if (!goLiveAt) return true;
+  const effectiveAt = getScalevOrderWarehouseEffectiveAt(order);
+  if (!effectiveAt) return false;
+  const effectiveParsed = new Date(effectiveAt);
+  const goLiveParsed = new Date(goLiveAt);
+  if (Number.isNaN(effectiveParsed.getTime()) || Number.isNaN(goLiveParsed.getTime())) return false;
+  return effectiveParsed.getTime() < goLiveParsed.getTime();
+}
+
+function isScalevOrderOnOrAfterWarehouseGoLive(
+  order: Pick<ScalevOrderWarehouseSnapshot, 'shipped_time' | 'completed_time'> | null | undefined,
+  goLiveAt: string | null,
+) {
+  if (!goLiveAt) return false;
+  return !isScalevOrderBeforeWarehouseGoLive(order, goLiveAt);
+}
+
+export async function getWarehouseGoLiveState() {
+  await requireWarehouseAccess('Warehouse');
+  const svc = createServiceSupabase();
+  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  return {
+    baselineDate: WAREHOUSE_GO_LIVE_BASELINE_DATE,
+    baselineLabel: WAREHOUSE_GO_LIVE_BASELINE_LABEL,
+    notBeforeLabel: WAREHOUSE_GO_LIVE_NOT_BEFORE_LABEL,
+    goLiveAt,
+  };
+}
+
+function isWarehouseGoLiveActive(goLiveAt: string | null, now: Date = new Date()) {
+  if (!goLiveAt) return false;
+  const parsed = new Date(goLiveAt);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return now.getTime() >= parsed.getTime();
+}
+
+function getWarehouseGoLiveDateValue(goLiveAt: string | null) {
+  return formatJakartaDateValue(goLiveAt || '') || WAREHOUSE_GO_LIVE_BASELINE_DATE;
+}
+
+function isDateBeforeWarehouseGoLive(date: string, goLiveAt: string | null) {
+  return date < getWarehouseGoLiveDateValue(goLiveAt);
+}
+
+function isWarehouseGoLiveDate(date: string, goLiveAt: string | null) {
+  return date === getWarehouseGoLiveDateValue(goLiveAt);
+}
+
+function shouldHidePreGoLiveSystemLedgerRow(
+  row: Pick<WarehouseLedgerRow, 'reference_type' | 'created_at'>,
+  goLiveAt: string | null,
+) {
+  const referenceType = String(row.reference_type || '').toLowerCase();
+  if (referenceType !== 'scalev_order' && referenceType !== 'rts') return false;
+  if (!goLiveAt) return true;
+
+  const createdAt = new Date(row.created_at || '');
+  const goLiveParsed = new Date(goLiveAt);
+  if (Number.isNaN(createdAt.getTime()) || Number.isNaN(goLiveParsed.getTime())) return false;
+  return createdAt.getTime() < goLiveParsed.getTime();
 }
 
 function quantitiesEqual(a: number, b: number) {
@@ -675,6 +793,49 @@ async function getScalevOrderLedgerRowsDetailed(
   })) as WarehouseLedgerRow[];
 }
 
+async function getScalevOrderRtsRowsDetailed(
+  svc: ReturnType<typeof createServiceSupabase>,
+  orderId: string,
+  scalevOrderDbId?: number | null,
+) {
+  const selectFields = 'id, warehouse_product_id, batch_id, quantity, movement_type, notes, created_at, reference_id, scalev_order_id';
+
+  if (scalevOrderDbId != null) {
+    const { data, error } = await svc
+      .from('warehouse_stock_ledger')
+      .select(selectFields)
+      .eq('reference_type', 'rts')
+      .eq('scalev_order_id', scalevOrderDbId)
+      .order('created_at', { ascending: true });
+    if (error && !isMissingScalevOrderIdColumnError(error)) {
+      throw error;
+    }
+    if (data && data.length > 0) {
+      return (data as any[]).map((row) => ({
+        ...row,
+        warehouse_product_id: Number(row.warehouse_product_id),
+        batch_id: row.batch_id == null ? null : Number(row.batch_id),
+        quantity: Number(row.quantity),
+      })) as WarehouseLedgerRow[];
+    }
+  }
+
+  const { data, error } = await svc
+    .from('warehouse_stock_ledger')
+    .select('id, warehouse_product_id, batch_id, quantity, movement_type, notes, created_at, reference_id')
+    .eq('reference_type', 'rts')
+    .eq('reference_id', orderId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+
+  return (data || []).map((row: any) => ({
+    ...row,
+    warehouse_product_id: Number(row.warehouse_product_id),
+    batch_id: row.batch_id == null ? null : Number(row.batch_id),
+    quantity: Number(row.quantity),
+  })) as WarehouseLedgerRow[];
+}
+
 function summarizeOutstandingLedgerGroups(rows: WarehouseLedgerRow[]) {
   const grouped = new Map<string, OutstandingWarehouseLedgerGroup & { netQty: number }>();
 
@@ -699,6 +860,19 @@ function summarizeOutstandingLedgerGroups(rows: WarehouseLedgerRow[]) {
     }));
 }
 
+function summarizePositiveLedgerByProduct(rows: WarehouseLedgerRow[]) {
+  const grouped = new Map<number, number>();
+  for (const row of rows) {
+    const qty = Number(row.quantity || 0);
+    if (qty <= QUANTITY_EPSILON) continue;
+    grouped.set(
+      row.warehouse_product_id,
+      (grouped.get(row.warehouse_product_id) || 0) + qty,
+    );
+  }
+  return grouped;
+}
+
 async function assessScalevOrderWarehouseState(
   svc: ReturnType<typeof createServiceSupabase>,
   order: ScalevOrderWarehouseSnapshot,
@@ -717,6 +891,90 @@ async function assessScalevOrderWarehouseState(
     unmappedProducts: resolved.unmappedProducts,
     skippedIgnored: resolved.skippedIgnored,
     mapping: resolved.mapping,
+  };
+}
+
+function buildWarehousePreGoLiveRtsNote(order: ScalevOrderWarehouseSnapshot) {
+  const effectiveDateLabel = formatWarehouseSystemDateLabel(getScalevOrderWarehouseEffectiveAt(order));
+  const statusLabel = String(order.status || '').toUpperCase();
+  return `RTS pra-stock opname untuk order ID ${order.order_id}${effectiveDateLabel ? ` tanggal ${effectiveDateLabel}` : ''}. Barang kembali setelah warehouse go-live${statusLabel ? ` [${statusLabel}]` : ''}.`;
+}
+
+async function applyPreGoLiveScalevReturn(
+  svc: ReturnType<typeof createServiceSupabase>,
+  assessment: ScalevOrderWarehouseAssessment,
+) {
+  if (!assessment.mapping || assessment.productLines.length === 0) {
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+      ...buildWarehouseIssueSummary(assessment),
+    };
+  }
+
+  if (assessment.unmappedProducts.length > 0) {
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+      ...buildWarehouseIssueSummary(assessment),
+    };
+  }
+
+  if (assessment.targets.length === 0) {
+    return {
+      action: 'unchanged',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: [],
+    };
+  }
+
+  const existingRtsRows = await getScalevOrderRtsRowsDetailed(svc, assessment.order.order_id, assessment.order.id);
+  const existingRtsByProduct = summarizePositiveLedgerByProduct(existingRtsRows);
+  if (mapsEqualWithTolerance(existingRtsByProduct, assessment.desiredByProduct)) {
+    return {
+      action: 'unchanged',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: [],
+    };
+  }
+
+  const rtsNote = buildWarehousePreGoLiveRtsNote(assessment.order);
+  let deducted = 0;
+  for (const [warehouseProductId, desiredQty] of Array.from(assessment.desiredByProduct.entries())) {
+    const existingQty = existingRtsByProduct.get(warehouseProductId) || 0;
+    const remainingQty = Number(desiredQty) - Number(existingQty);
+    if (remainingQty <= QUANTITY_EPSILON) continue;
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: warehouseProductId,
+      batch_id: null,
+      movement_type: 'IN',
+      quantity: remainingQty,
+      reference_type: 'rts',
+      reference_id: assessment.order.order_id,
+      scalev_order_id: assessment.order.id,
+      notes: rtsNote,
+      created_at: new Date().toISOString(),
+    });
+    deducted++;
+  }
+
+  return {
+    action: deducted > 0 ? 'pre_go_live_rts' : 'unchanged',
+    reversed: 0,
+    deducted,
+    skipped: assessment.skippedIgnored,
+    unmapped_products: [],
   };
 }
 
@@ -3185,6 +3443,7 @@ export async function getLedgerHistory(filters?: {
   dateFrom?: string;
   dateTo?: string;
   limit?: number;
+  shipmentGoLiveAt?: string | null;
 }) {
   await requireWarehouseAccess('Movement Log');
   const svc = createServiceSupabase();
@@ -3227,7 +3486,9 @@ export async function getLedgerHistory(filters?: {
     if (error) throw error;
 
     const page = data || [];
-    rows.push(...page);
+    rows.push(
+      ...page.filter((row: any) => !shouldHidePreGoLiveSystemLedgerRow(row, filters?.shipmentGoLiveAt ?? null)),
+    );
     if (page.length < (upper - offset + 1)) break;
     offset += page.length;
   }
@@ -3265,6 +3526,7 @@ export async function getLedgerQuantitySum(filters: {
   beforeDateExclusive?: string;
   dateFrom?: string;
   dateTo?: string;
+  shipmentGoLiveAt?: string | null;
 }) {
   await requireWarehouseAccess('Movement Log');
   const svc = createServiceSupabase();
@@ -3275,7 +3537,7 @@ export async function getLedgerQuantitySum(filters: {
   while (true) {
     let query = svc
       .from('warehouse_stock_ledger')
-      .select('quantity')
+      .select('quantity, reference_type, created_at')
       .eq('warehouse_product_id', filters.productId);
 
     if (filters.beforeDateExclusive) query = query.lt('created_at', filters.beforeDateExclusive);
@@ -3288,10 +3550,11 @@ export async function getLedgerQuantitySum(filters: {
       .range(offset, offset + pageSize - 1);
     if (error) throw error;
 
-    const page = data || [];
+    const rawPage = data || [];
+    const page = rawPage.filter((row: any) => !shouldHidePreGoLiveSystemLedgerRow(row, filters.shipmentGoLiveAt ?? null));
     total += page.reduce((sum, row: any) => sum + Number(row.quantity || 0), 0);
-    if (page.length < pageSize) break;
-    offset += page.length;
+    if (rawPage.length < pageSize) break;
+    offset += rawPage.length;
   }
 
   return total;
@@ -3453,6 +3716,32 @@ export async function reconcileScalevOrderWarehouse(orderId: string, scalevOrder
   const svc = createServiceSupabase();
   const order = await loadScalevOrderWarehouseSnapshot(svc, orderId, scalevOrderDbId);
   if (!order) throw new Error(`Order ${orderId} tidak ditemukan`);
+  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+
+  if (!isWarehouseGoLiveActive(goLiveAt)) {
+    return {
+      action: 'skipped_pre_go_live',
+      reversed: 0,
+      deducted: 0,
+      skipped: 0,
+      unmapped_products: [],
+    };
+  }
+
+  if (isScalevOrderBeforeWarehouseGoLive(order, goLiveAt)) {
+    if (isReturnedScalevOrderStatus(order.status)) {
+      const assessment = await assessScalevOrderWarehouseState(svc, order);
+      return applyPreGoLiveScalevReturn(svc, assessment);
+    }
+
+    return {
+      action: 'skipped_pre_go_live',
+      reversed: 0,
+      deducted: 0,
+      skipped: 0,
+      unmapped_products: [],
+    };
+  }
 
   const assessment = await assessScalevOrderWarehouseState(svc, order);
   const isTerminal = isTerminalScalevOrderStatus(order.status);
@@ -4018,41 +4307,56 @@ export async function createWarehouseBusinessMapping(businessCode: string, deduc
 // ── Backfill warehouse deductions for shipped orders missing deductions ──
 export async function backfillWarehouseDeductions(date: string) {
   const svc = createServiceSupabase();
+  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  if (!isWarehouseGoLiveActive(goLiveAt) || isDateBeforeWarehouseGoLive(date, goLiveAt)) {
+    return { checked: 0, deducted: 0, reversed: 0, skipped: 0 };
+  }
+
+  const isGoLiveDay = isWarehouseGoLiveDate(date, goLiveAt);
   const dayStart = `${date}T00:00:00+07:00`;
   const dayEnd = `${date}T23:59:59.999+07:00`;
 
-  let orders: Array<{ id: number; order_id: string; business_code: string | null; shipped_time: string | null }> = [];
+  let orders: Array<{
+    id: number;
+    order_id: string;
+    business_code: string | null;
+    status?: string | null;
+    shipped_time: string | null;
+    completed_time?: string | null;
+  }> = [];
   let usedBacklogQueue = false;
 
   // Prefer the backlog queue so repair only touches orders that are actually mismatched.
   const backlogLimit = 500;
   let backlogOffset = 0;
   const backlogOrderIds: string[] = [];
-  while (true) {
-    const backlogResult = await svc.rpc('warehouse_daily_undeducted_orders', {
-      p_date: date,
-      p_limit: backlogLimit,
-      p_offset: backlogOffset,
-    });
-    if (backlogResult.error && !isMissingRpcFunctionError(backlogResult.error, 'warehouse_daily_undeducted_orders')) {
-      throw backlogResult.error;
-    }
-    if (backlogResult.error) break;
-    if (!Array.isArray(backlogResult.data)) break;
+  if (!isGoLiveDay) {
+    while (true) {
+      const backlogResult = await svc.rpc('warehouse_daily_undeducted_orders', {
+        p_date: date,
+        p_limit: backlogLimit,
+        p_offset: backlogOffset,
+      });
+      if (backlogResult.error && !isMissingRpcFunctionError(backlogResult.error, 'warehouse_daily_undeducted_orders')) {
+        throw backlogResult.error;
+      }
+      if (backlogResult.error) break;
+      if (!Array.isArray(backlogResult.data)) break;
 
-    const page = (backlogResult.data || [])
-      .map((row: any) => String(row.order_id || '').trim())
-      .filter(Boolean);
-    if (page.length === 0) {
+      const page = (backlogResult.data || [])
+        .map((row: any) => String(row.order_id || '').trim())
+        .filter(Boolean);
+      if (page.length === 0) {
+        usedBacklogQueue = true;
+        break;
+      }
+
+      backlogOrderIds.push(...page);
       usedBacklogQueue = true;
-      break;
+      const totalCount = Number((backlogResult.data || [])[0]?.total_count || 0);
+      backlogOffset += page.length;
+      if (backlogOffset >= totalCount) break;
     }
-
-    backlogOrderIds.push(...page);
-    usedBacklogQueue = true;
-    const totalCount = Number((backlogResult.data || [])[0]?.total_count || 0);
-    backlogOffset += page.length;
-    if (backlogOffset >= totalCount) break;
   }
 
   if (usedBacklogQueue) {
@@ -4065,23 +4369,31 @@ export async function backfillWarehouseDeductions(date: string) {
       const chunk = uniqueOrderIds.slice(i, i + 200);
       const { data: pageOrders, error: ordErr } = await svc
         .from('scalev_orders')
-        .select('id, order_id, business_code, shipped_time')
+        .select('id, order_id, business_code, status, shipped_time, completed_time')
         .in('order_id', chunk)
         .in('status', ['shipped', 'completed']);
       if (ordErr) throw ordErr;
       orders.push(...((pageOrders || []) as any[]));
     }
   } else {
-    // Fallback for older databases without the backlog RPC.
-    const { data: allOrders, error: ordErr } = await svc
-      .from('scalev_orders')
-      .select('id, order_id, business_code, shipped_time')
-      .in('status', ['shipped', 'completed'])
-      .gte('shipped_time', dayStart)
-      .lt('shipped_time', dayEnd)
-      .limit(5000);
-    if (ordErr) throw ordErr;
-    orders = (allOrders || []) as any[];
+    if (isGoLiveDay) {
+      orders = (await fetchScalevOrdersForDate(svc, date)) as any[];
+    } else {
+      // Fallback for older databases without the backlog RPC.
+      const { data: allOrders, error: ordErr } = await svc
+        .from('scalev_orders')
+        .select('id, order_id, business_code, status, shipped_time, completed_time')
+        .in('status', ['shipped', 'completed'])
+        .gte('shipped_time', dayStart)
+        .lt('shipped_time', dayEnd)
+        .limit(5000);
+      if (ordErr) throw ordErr;
+      orders = (allOrders || []) as any[];
+    }
+  }
+
+  if (isGoLiveDay) {
+    orders = orders.filter((order) => isScalevOrderOnOrAfterWarehouseGoLive(order, goLiveAt));
   }
 
   if (!orders || orders.length === 0) return { checked: 0, deducted: 0, reversed: 0, skipped: 0 };
@@ -4112,36 +4424,46 @@ export async function getUndeductedOrders(
   const svc = createServiceSupabase();
   const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 500);
   const offset = Math.max(Number(options?.offset || 0), 0);
-
-  const rpcResult = await svc.rpc('warehouse_daily_undeducted_orders', {
-    p_date: date,
-    p_limit: limit,
-    p_offset: offset,
-  });
-  if (rpcResult.error && !isMissingRpcFunctionError(rpcResult.error, 'warehouse_daily_undeducted_orders')) {
-    throw rpcResult.error;
-  }
-  if (!rpcResult.error && Array.isArray(rpcResult.data)) {
-    const rows = (rpcResult.data || []).map((row: any) => ({
-      order_id: row.order_id,
-      business_code: row.business_code || null,
-      product_lines: normalizeWarehouseOrderLines(row.product_lines),
-      problem: row.problem,
-      problem_detail: row.problem_detail,
-    })) as WarehouseUndeductedOrderIssue[];
-    const totalCount = Number((rpcResult.data || [])[0]?.total_count || 0);
-    return {
-      rows,
-      totalCount,
-      limit,
-      offset,
-      hasMore: offset + rows.length < totalCount,
-    };
+  const emptyResult = { rows: [], totalCount: 0, limit, offset, hasMore: false };
+  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  if (!isWarehouseGoLiveActive(goLiveAt) || isDateBeforeWarehouseGoLive(date, goLiveAt)) {
+    return emptyResult;
   }
 
-  const orders = await fetchScalevOrdersForDate(svc, date);
+  const isGoLiveDay = isWarehouseGoLiveDate(date, goLiveAt);
+
+  if (!isGoLiveDay) {
+    const rpcResult = await svc.rpc('warehouse_daily_undeducted_orders', {
+      p_date: date,
+      p_limit: limit,
+      p_offset: offset,
+    });
+    if (rpcResult.error && !isMissingRpcFunctionError(rpcResult.error, 'warehouse_daily_undeducted_orders')) {
+      throw rpcResult.error;
+    }
+    if (!rpcResult.error && Array.isArray(rpcResult.data)) {
+      const rows = (rpcResult.data || []).map((row: any) => ({
+        order_id: row.order_id,
+        business_code: row.business_code || null,
+        product_lines: normalizeWarehouseOrderLines(row.product_lines),
+        problem: row.problem,
+        problem_detail: row.problem_detail,
+      })) as WarehouseUndeductedOrderIssue[];
+      const totalCount = Number((rpcResult.data || [])[0]?.total_count || 0);
+      return {
+        rows,
+        totalCount,
+        limit,
+        offset,
+        hasMore: offset + rows.length < totalCount,
+      };
+    }
+  }
+
+  const orders = (await fetchScalevOrdersForDate(svc, date))
+    .filter((order) => !isGoLiveDay || isScalevOrderOnOrAfterWarehouseGoLive(order, goLiveAt));
   if (orders.length === 0) {
-    return { rows: [], totalCount: 0, limit, offset, hasMore: false };
+    return emptyResult;
   }
 
   const orderIds = orders.map(order => order.id);

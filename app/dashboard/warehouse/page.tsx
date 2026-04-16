@@ -42,6 +42,7 @@ import {
   revertSOToCounting,
   approveStockOpname,
   cancelSOSession,
+  getWarehouseGoLiveState,
 } from '@/lib/warehouse-ledger-actions';
 import { getPurchaseOrders as getPOs, receivePOItems } from '@/lib/ppic-actions';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
@@ -110,6 +111,12 @@ const EMPTY_DEDUCTION_ALERTS: WarehouseUndeductedOrdersResult = {
   limit: ALERTS_PAGE_SIZE,
   offset: 0,
   hasMore: false,
+};
+const DEFAULT_WAREHOUSE_GO_LIVE_STATE = {
+  baselineDate: '2026-04-21',
+  baselineLabel: '21 Apr 2026',
+  notBeforeLabel: '21 Apr 2026 14:00 WIB',
+  goLiveAt: null as string | null,
 };
 
 const DEDUCTION_MATCH_STOP_WORDS = new Set([
@@ -222,6 +229,75 @@ function formatDateInputValue(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+function formatJakartaDateValue(value?: string | Date | null) {
+  if (!value) return null;
+  const parsed = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(parsed);
+  const byType = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  if (!byType.year || !byType.month || !byType.day) return null;
+  return `${byType.year}-${byType.month}-${byType.day}`;
+}
+
+function getWarehouseGoLiveDateValue(warehouseGoLive = DEFAULT_WAREHOUSE_GO_LIVE_STATE) {
+  return formatJakartaDateValue(warehouseGoLive.goLiveAt) || warehouseGoLive.baselineDate;
+}
+
+function isWarehouseGoLiveActive(warehouseGoLive = DEFAULT_WAREHOUSE_GO_LIVE_STATE) {
+  if (!warehouseGoLive.goLiveAt) return false;
+  const parsed = new Date(warehouseGoLive.goLiveAt);
+  if (Number.isNaN(parsed.getTime())) return false;
+  return Date.now() >= parsed.getTime();
+}
+
+function isDateBeforeWarehouseGoLive(date?: string | null, warehouseGoLive = DEFAULT_WAREHOUSE_GO_LIVE_STATE) {
+  return Boolean(date) && String(date) < getWarehouseGoLiveDateValue(warehouseGoLive);
+}
+
+function isWarehouseGoLiveDay(date?: string | null, warehouseGoLive = DEFAULT_WAREHOUSE_GO_LIVE_STATE) {
+  return Boolean(date) && String(date) === getWarehouseGoLiveDateValue(warehouseGoLive);
+}
+
+function shouldHideDailyMovementSummary(date?: string | null, warehouseGoLive = DEFAULT_WAREHOUSE_GO_LIVE_STATE) {
+  if (!date) return true;
+  if (!isWarehouseGoLiveActive(warehouseGoLive)) return true;
+  return String(date) <= getWarehouseGoLiveDateValue(warehouseGoLive);
+}
+
+function canUseWarehouseGuardrail(date?: string | null, warehouseGoLive = DEFAULT_WAREHOUSE_GO_LIVE_STATE) {
+  if (!date) return false;
+  if (!isWarehouseGoLiveActive(warehouseGoLive)) return false;
+  return String(date) >= getWarehouseGoLiveDateValue(warehouseGoLive);
+}
+
+function PreCutoffNotice({
+  title = 'Pra-Go-Live Warehouse',
+  body,
+}: {
+  title?: string;
+  body: string;
+}) {
+  return (
+    <div style={{
+      marginBottom: 16,
+      padding: '28px 22px',
+      borderRadius: 16,
+      border: '1px dashed rgba(245,158,11,0.35)',
+      background: 'rgba(120, 53, 15, 0.14)',
+      color: '#fcd34d',
+      textAlign: 'center',
+    }}>
+      <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>{title}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.7, maxWidth: 760, margin: '0 auto' }}>{body}</div>
+    </div>
+  );
+}
+
 function getOppositeReclassCategory(category: string) {
   if (category === 'fg') return 'bonus';
   if (category === 'bonus') return 'fg';
@@ -252,6 +328,7 @@ export default function WarehousePage() {
   const [activeTab, setActiveTab] = useState('daily-summary');
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string>('');
+  const [warehouseGoLive, setWarehouseGoLive] = useState(DEFAULT_WAREHOUSE_GO_LIVE_STATE);
 
   const [soData, setSOData] = useState<SORow[]>([]);
   const [soSummary, setSOSummary] = useState<SOSummary[]>([]);
@@ -291,6 +368,7 @@ export default function WarehousePage() {
   const [deductionLogLoadedFor, setDeductionLogLoadedFor] = useState<string | null>(null);
   const [deductionLogError, setDeductionLogError] = useState('');
   const refreshData = () => setRefreshKey(k => k + 1);
+  const warehouseGoLiveKey = warehouseGoLive.goLiveAt || 'pending';
 
   // Load profile on mount
   useEffect(() => {
@@ -304,6 +382,31 @@ export default function WarehousePage() {
       setLoading(false);
     })();
   }, []);
+
+  useEffect(() => {
+    if (loading) return;
+    let isActive = true;
+
+    (async () => {
+      try {
+        const state = await getWarehouseGoLiveState();
+        if (isActive && state) {
+          setWarehouseGoLive({
+            baselineDate: state.baselineDate || DEFAULT_WAREHOUSE_GO_LIVE_STATE.baselineDate,
+            baselineLabel: state.baselineLabel || DEFAULT_WAREHOUSE_GO_LIVE_STATE.baselineLabel,
+            notBeforeLabel: state.notBeforeLabel || DEFAULT_WAREHOUSE_GO_LIVE_STATE.notBeforeLabel,
+            goLiveAt: state.goLiveAt || null,
+          });
+        }
+      } catch (e) {
+        console.error('Failed to load warehouse go-live state:', e);
+      }
+    })();
+
+    return () => {
+      isActive = false;
+    };
+  }, [loading, refreshKey]);
 
   // Load data when tab or period changes
   useEffect(() => {
@@ -319,14 +422,19 @@ export default function WarehousePage() {
           const data = await getStockReclassRequests();
           setReclassRequests(data);
         } else if (activeTab === 'daily-summary') {
-          const summaryData = await getDailyMovementSummary(dailySummaryDate);
-          setDailySummary(summaryData);
+          if (shouldHideDailyMovementSummary(dailySummaryDate, warehouseGoLive)) {
+            setDailySummary([]);
+          } else {
+            const summaryData = await getDailyMovementSummary(dailySummaryDate);
+            setDailySummary(summaryData);
+          }
         } else if (activeTab === 'ledger') {
           const dayRange = ledgerDateFilter ? buildJakartaDayRange(ledgerDateFilter) : null;
           const data = await getLedgerHistory({
             limit: ledgerDateFilter ? 2000 : 200,
             dateFrom: dayRange?.from,
             dateTo: dayRange?.to,
+            shipmentGoLiveAt: warehouseGoLive.goLiveAt,
           });
           setLedgerHistory(data);
         } else if (activeTab === 'batch') {
@@ -361,7 +469,7 @@ export default function WarehousePage() {
         setTabLoading(false);
       }
     })();
-  }, [activeTab, loading, refreshKey, dailySummaryDate, ledgerDateFilter]);
+  }, [activeTab, loading, refreshKey, dailySummaryDate, ledgerDateFilter, warehouseGoLiveKey]);
 
   const filteredExpiring = useMemo(() =>
     expiryFilter === 'all' ? expiringData : expiringData.filter(r => r.expiry_status === expiryFilter),
@@ -379,11 +487,18 @@ export default function WarehousePage() {
 
   useEffect(() => {
     if (loading || activeTab !== 'daily-summary') return;
+    if (!canUseWarehouseGuardrail(dailySummaryDate, warehouseGoLive)) return;
     if (alertsLoading || alertsLoadedFor === dailySummaryDate) return;
     void loadDailyAlerts({ offset: 0 });
-  }, [activeTab, loading, dailySummaryDate, alertsLoadedFor, alertsLoading]);
+  }, [activeTab, loading, dailySummaryDate, alertsLoadedFor, alertsLoading, warehouseGoLiveKey]);
 
   async function loadDailyAlerts(options?: { force?: boolean; offset?: number }) {
+    if (!canUseWarehouseGuardrail(dailySummaryDate, warehouseGoLive)) {
+      setDeductionAlerts(EMPTY_DEDUCTION_ALERTS);
+      setAlertsLoadedFor(null);
+      setAlertsError('');
+      return;
+    }
     const force = options?.force ?? false;
     const offset = Math.max(options?.offset ?? 0, 0);
     if (!force && alertsLoadedFor === dailySummaryDate && deductionAlerts.offset === offset) return;
@@ -476,6 +591,7 @@ export default function WarehousePage() {
       {activeTab === 'daily-summary' && (
         <DailySummaryTab
           data={dailySummary}
+          warehouseGoLive={warehouseGoLive}
           alerts={deductionAlerts.rows}
           totalAlertsCount={deductionAlerts.totalCount}
           alertsOffset={deductionAlerts.offset}
@@ -496,10 +612,11 @@ export default function WarehousePage() {
           onRefresh={refreshData}
         />
       )}
-      {activeTab === 'audit' && <ProductAuditTab />}
+      {activeTab === 'audit' && <ProductAuditTab warehouseGoLive={warehouseGoLive} />}
       {activeTab === 'ledger' && (
         <LedgerTab
           data={ledgerHistory}
+          warehouseGoLive={warehouseGoLive}
           typeFilter={ledgerTypeFilter}
           setTypeFilter={setLedgerTypeFilter}
           search={ledgerSearch}
@@ -2415,6 +2532,7 @@ function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void })
 // ============================================================
 function DailySummaryTab({
   data,
+  warehouseGoLive,
   alerts,
   totalAlertsCount,
   alertsOffset,
@@ -2435,6 +2553,7 @@ function DailySummaryTab({
   onRefresh,
 }: {
   data: any[];
+  warehouseGoLive: typeof DEFAULT_WAREHOUSE_GO_LIVE_STATE;
   alerts: any[];
   totalAlertsCount: number;
   alertsOffset: number;
@@ -2455,6 +2574,9 @@ function DailySummaryTab({
   onRefresh: () => void;
 }) {
   const { can } = usePermissions();
+  const isGoLiveDate = isWarehouseGoLiveDay(date, warehouseGoLive);
+  const showOperationalMovementSummary = !shouldHideDailyMovementSummary(date, warehouseGoLive);
+  const guardrailActive = canUseWarehouseGuardrail(date, warehouseGoLive);
   const [entityFilter, setEntityFilter] = useState('all');
   const [syncingOrder, setSyncingOrder] = useState<string | null>(null);
   const [syncResults, setSyncResults] = useState<Record<string, { ok: boolean; msg: string }>>({});
@@ -2567,19 +2689,34 @@ function DailySummaryTab({
         <input type="date" value={date} onChange={e => { setDate(e.target.value); setSyncResults({}); }}
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }} />
         <div style={{ flex: 1 }} />
-        <button onClick={() => setEntityFilter('all')}
-          style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === 'all' ? 'var(--accent)' : 'transparent', color: entityFilter === 'all' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
-          Semua ({data.length})
-        </button>
-        {entities.map(e => (
-          <button key={e} onClick={() => setEntityFilter(entityFilter === e ? 'all' : e)}
-            style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === e ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === e ? 'var(--accent)' : 'transparent', color: entityFilter === e ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
-            {e} ({data.filter(r => r.entity === e).length})
-          </button>
-        ))}
+        {!showOperationalMovementSummary ? (
+          <span style={{ padding: '4px 10px', borderRadius: 999, border: '1px solid rgba(245,158,11,0.28)', background: 'rgba(245,158,11,0.08)', color: '#fcd34d', fontSize: 11, fontWeight: 700 }}>
+            {isGoLiveDate ? 'Hari go-live warehouse' : 'Mode pra-go-live'}
+          </span>
+        ) : (
+          <>
+            <button onClick={() => setEntityFilter('all')}
+              style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === 'all' ? 'var(--accent)' : 'transparent', color: entityFilter === 'all' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+              Semua ({data.length})
+            </button>
+            {entities.map(e => (
+              <button key={e} onClick={() => setEntityFilter(entityFilter === e ? 'all' : e)}
+                style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === e ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === e ? 'var(--accent)' : 'transparent', color: entityFilter === e ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+                {e} ({data.filter(r => r.entity === e).length})
+              </button>
+            ))}
+          </>
+        )}
       </div>
 
-      {filtered.length === 0 ? (
+      {!showOperationalMovementSummary ? (
+        <PreCutoffNotice
+          title={isGoLiveDate ? 'Hari Stock Opname / Go-Live' : 'Shipment Pra-Go-Live'}
+          body={isGoLiveDate
+            ? `Tanggal ini adalah hari stock opname warehouse. Summary movement campuran disembunyikan agar hitungan pagi sebelum SO tidak tercampur shipment yang baru boleh aktif setelah ${warehouseGoLive.notBeforeLabel}. Deduction Summary di bawah tetap bisa dipakai untuk melihat shipment keluar.`
+            : `Tanggal ini masih masuk era pra-go-live warehouse. Untuk menghindari kebingungan, halaman ini tidak menampilkan summary movement ledger campuran. Yang tetap dibuka adalah shipment keluar melalui Deduction Summary, sedangkan audit shipment/rekonsiliasi baru dianggap valid mulai ${warehouseGoLive.baselineLabel}.`}
+        />
+      ) : filtered.length === 0 ? (
         <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)' }}>
           Tidak ada pergerakan barang pada {date}
         </div>
@@ -2617,7 +2754,6 @@ function DailySummaryTab({
                   </td>
                 </tr>
               ))}
-              {/* Totals row */}
               <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg)' }}>
                 <td colSpan={3} style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL ({filtered.length} produk)</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--green)' }}>
@@ -2638,6 +2774,8 @@ function DailySummaryTab({
         </div>
       )}
 
+      {guardrailActive && (
+        <>
       {/* ── Deduction Guardrail ── */}
       <div style={{ marginTop: 20, background: 'var(--card)', border: `1px solid ${totalAlertsCount > 0 ? 'rgba(245,158,11,0.28)' : 'var(--border)'}`, borderRadius: 12, padding: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
@@ -2839,9 +2977,16 @@ function DailySummaryTab({
           </div>
         )}
       </div>
+        </>
+      )}
 
       {/* ── Deduction Summary (grouped by entity blocks) ── */}
       <div style={{ marginTop: 20 }}>
+        {!showOperationalMovementSummary && (
+          <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(96,165,250,0.08)', color: '#bfdbfe', fontSize: 11, lineHeight: 1.55 }}>
+            Untuk {isGoLiveDate ? 'hari go-live ini' : 'periode pra-go-live'}, yang ditampilkan di bawah hanya deduction shipment `OUT` per tanggal kirim. Koreksi sistem bertipe `Masuk` tidak dimasukkan ke ringkasan ini.
+          </div>
+        )}
         <button onClick={async () => {
           const next = !showDeductLog;
           setShowDeductLog(next);
@@ -2923,7 +3068,7 @@ function DailySummaryTab({
 // PRODUCT AUDIT TAB
 // ============================================================
 
-function ProductAuditTab() {
+function ProductAuditTab({ warehouseGoLive }: { warehouseGoLive: typeof DEFAULT_WAREHOUSE_GO_LIVE_STATE }) {
   const AUDIT_ROW_LIMIT = 10000;
   const [products, setProducts] = useState<any[]>([]);
   const [productsLoading, setProductsLoading] = useState(true);
@@ -2938,13 +3083,16 @@ function ProductAuditTab() {
   const [openingBalance, setOpeningBalance] = useState(0);
   const [stockSnapshot, setStockSnapshot] = useState<any>(null);
   const [stockLoading, setStockLoading] = useState(false);
-  const [dateFrom, setDateFrom] = useState(() => {
-    const now = new Date();
-    const from = new Date(now);
-    from.setDate(from.getDate() - 29);
-    return formatDateInputValue(from);
-  });
-  const [dateTo, setDateTo] = useState(() => formatDateInputValue(new Date()));
+  const [dateFrom, setDateFrom] = useState(() => DEFAULT_WAREHOUSE_GO_LIVE_STATE.baselineDate);
+  const [dateTo, setDateTo] = useState(() => DEFAULT_WAREHOUSE_GO_LIVE_STATE.baselineDate);
+  const warehouseGoLiveDate = getWarehouseGoLiveDateValue(warehouseGoLive);
+  const auditUsesPreGoLiveWindow = !isWarehouseGoLiveActive(warehouseGoLive) || String(dateFrom || '') <= warehouseGoLiveDate;
+
+  useEffect(() => {
+    if (warehouseGoLiveDate === DEFAULT_WAREHOUSE_GO_LIVE_STATE.baselineDate) return;
+    setDateFrom((prev) => prev === DEFAULT_WAREHOUSE_GO_LIVE_STATE.baselineDate ? warehouseGoLiveDate : prev);
+    setDateTo((prev) => prev === DEFAULT_WAREHOUSE_GO_LIVE_STATE.baselineDate ? warehouseGoLiveDate : prev);
+  }, [warehouseGoLiveDate]);
 
   useEffect(() => {
     let isActive = true;
@@ -3030,11 +3178,13 @@ function ProductAuditTab() {
             dateFrom: dateFromIso,
             dateTo: dateToIso,
             limit: AUDIT_ROW_LIMIT,
+            shipmentGoLiveAt: warehouseGoLive.goLiveAt,
           }),
           dateFromIso
             ? getLedgerQuantitySum({
                 productId: Number(selectedProductId),
                 beforeDateExclusive: dateFromIso,
+                shipmentGoLiveAt: warehouseGoLive.goLiveAt,
               })
             : Promise.resolve(0),
         ]);
@@ -3056,7 +3206,7 @@ function ProductAuditTab() {
     return () => {
       isActive = false;
     };
-  }, [selectedProductId, dateFrom, dateTo, AUDIT_ROW_LIMIT]);
+  }, [selectedProductId, dateFrom, dateTo, warehouseGoLive.goLiveAt]);
 
   const selectedProduct = useMemo(
     () => products.find((row: any) => String(row.id) === selectedProductId) || null,
@@ -3105,10 +3255,10 @@ function ProductAuditTab() {
         balance_before: balanceBefore,
         balance_after: balanceAfter,
         stored_balance_after: storedRunningBalance,
-        has_balance_mismatch: storedRunningBalance !== balanceAfter,
+        has_balance_mismatch: !auditUsesPreGoLiveWindow && storedRunningBalance !== balanceAfter,
       };
     });
-  }, [historyRows, openingBalance]);
+  }, [historyRows, openingBalance, auditUsesPreGoLiveWindow]);
 
   const displayedRows = useMemo(() => {
     let result = periodRows;
@@ -3181,7 +3331,8 @@ function ProductAuditTab() {
   const hasNegativeBalance = currentStock < 0 || periodSummary.negativeRows > 0;
 
   const applyPreset = (days: number) => {
-    const to = new Date();
+    const now = new Date();
+    const to = new Date(now);
     const from = new Date(to);
     from.setDate(from.getDate() - (days - 1));
     setDateFrom(formatDateInputValue(from));
@@ -3190,6 +3341,14 @@ function ProductAuditTab() {
 
   return (
     <>
+      <div style={{ marginBottom: 16 }}>
+        <PreCutoffNotice
+          title={auditUsesPreGoLiveWindow ? 'Mode Operasional Pra-SO' : 'Audit Produk Warehouse'}
+          body={auditUsesPreGoLiveWindow
+            ? `Range yang dipilih masih menyentuh periode sebelum warehouse go-live. Pada mode ini, Audit Produk tetap menampilkan jejak kerja WH seperti WIP, manual, transfer, reclass, dan disposal, tetapi shipment serta rekonsiliasi sistem sebelum go-live disembunyikan agar hasil stock opname tidak tercampur histori lama.`
+            : 'Range yang dipilih sudah berada di era warehouse go-live. Deduction shipment dan activity warehouse dibaca bersama sebagai history audit yang normal.'}
+        />
+      </div>
       <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text"
@@ -3367,7 +3526,7 @@ function ProductAuditTab() {
         </div>
       )}
 
-      {periodSummary.mismatchCount > 0 && (
+      {!auditUsesPreGoLiveWindow && periodSummary.mismatchCount > 0 && (
         <div style={{
           marginBottom: 16,
           padding: '12px 14px',
@@ -3415,7 +3574,9 @@ function ProductAuditTab() {
 
       {selectedProductId && (
         <div style={{ marginBottom: 10, fontSize: 11, color: 'var(--dim)' }}>
-          Urutan default: transaksi terbaru di paling atas. `Qty` adalah perubahan pada row itu, dan `Saldo` adalah posisi stok sesudah row tersebut dibukukan.
+          {auditUsesPreGoLiveWindow
+            ? 'Mode operasional pra-SO aktif. `Qty` dihitung dari row yang terlihat, dan `Saldo` dibangun ulang setelah shipment/rekonsiliasi sistem pra-go-live disembunyikan.'
+            : 'Urutan default: transaksi terbaru di paling atas. `Qty` adalah perubahan pada row itu, dan `Saldo` adalah posisi stok sesudah row tersebut dibukukan.'}
         </div>
       )}
 
@@ -3503,12 +3664,19 @@ function ProductAuditTab() {
 // MOVEMENT LOG TAB
 // ============================================================
 function LedgerTab({
-  data, typeFilter, setTypeFilter, search, setSearch, dateFilter, setDateFilter
+  data, warehouseGoLive, typeFilter, setTypeFilter, search, setSearch, dateFilter, setDateFilter
 }: {
-  data: any[]; typeFilter: string; setTypeFilter: (v: string) => void;
-  search: string; setSearch: (v: string) => void;
-  dateFilter: string; setDateFilter: (v: string) => void;
+  data: any[];
+  warehouseGoLive: typeof DEFAULT_WAREHOUSE_GO_LIVE_STATE;
+  typeFilter: string;
+  setTypeFilter: (v: string) => void;
+  search: string;
+  setSearch: (v: string) => void;
+  dateFilter: string;
+  setDateFilter: (v: string) => void;
 }) {
+  const warehouseGoLiveDate = getWarehouseGoLiveDateValue(warehouseGoLive);
+  const usesPreGoLiveWindow = !isWarehouseGoLiveActive(warehouseGoLive) || !dateFilter || String(dateFilter) <= warehouseGoLiveDate;
   const filtered = useMemo(() => {
     let result = data;
     if (typeFilter !== 'all') {
@@ -3595,11 +3763,19 @@ function LedgerTab({
       </div>
 
       <div style={{ marginBottom: 10, fontSize: 11, color: 'var(--dim)' }}>
-        {dateFilter
-          ? `Menampilkan movement pada ${fullDateID(dateFilter)}.`
-          : 'Menampilkan 200 movement terbaru agar tab ini tetap ringan saat dibuka.'}
+        {!dateFilter
+          ? 'Menampilkan movement terbaru. Shipment dan rekonsiliasi sistem sebelum warehouse go-live otomatis disembunyikan.'
+          : usesPreGoLiveWindow
+            ? `Menampilkan movement operasional pada ${fullDateID(dateFilter)}. Shipment dan rekonsiliasi sistem pra-go-live disaring dari tampilan ini.`
+            : `Menampilkan movement pada ${fullDateID(dateFilter)}.`}
       </div>
 
+      {usesPreGoLiveWindow && (
+        <PreCutoffNotice
+          title="Movement Log Operasional"
+          body="Mode ini tetap menampilkan jejak kerja warehouse seperti WIP, manual, transfer, reclass, dan disposal. Shipment serta rekonsiliasi sistem sebelum warehouse go-live disembunyikan agar log lama tidak membingungkan operasional."
+        />
+      )}
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
