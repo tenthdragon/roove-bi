@@ -58,6 +58,16 @@ const STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
+const CATEGORY_COLORS: Record<string, string> = {
+  fg: '#60a5fa',
+  sachet: '#f59e0b',
+  bonus: '#34d399',
+  packaging: '#fb923c',
+  other: '#94a3b8',
+  wip: '#8b5cf6',
+  wip_material: '#06b6d4',
+};
+
 // ── KPI Card ──
 
 function KPICard({ label, value, color = 'var(--accent)', sub }: { label: string; value: string; color?: string; sub?: string }) {
@@ -1345,11 +1355,14 @@ function ROPTab() {
   const [loading, setLoading] = useState(true);
   const [demandDays, setDemandDays] = useState(90);
   const [entityFilter, setEntityFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [stockFilter, setStockFilter] = useState('all');
+  const [demandFilter, setDemandFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editField, setEditField] = useState<string>('');
   const [editValue, setEditValue] = useState('');
-  const [hideZeroDemand, setHideZeroDemand] = useState(true);
   const [ropSortCol, setRopSortCol] = useState('product_name');
   const [ropSortAsc, setRopSortAsc] = useState(true);
   const handleRopSort = (col: string) => { if (ropSortCol === col) setRopSortAsc(!ropSortAsc); else { setRopSortCol(col); setRopSortAsc(true); } };
@@ -1362,14 +1375,31 @@ function ROPTab() {
 
   useEffect(() => { loadData(); }, [demandDays]);
 
+  const categories = useMemo(() => {
+    const unique = new Set<string>();
+    data.forEach(row => {
+      if (row.category) unique.add(String(row.category));
+    });
+    return Array.from(unique).sort();
+  }, [data]);
+
   const filtered = useMemo(() => {
     let result = data;
     if (entityFilter !== 'all') result = result.filter(p => p.entity === entityFilter.replace('BTN-', ''));
+    if (categoryFilter !== 'all') result = result.filter(p => p.category === categoryFilter);
+    if (statusFilter !== 'all') result = result.filter(p => p.status === statusFilter);
+    if (stockFilter === 'in_stock') result = result.filter(p => Number(p.current_stock) > 0);
+    else if (stockFilter === 'zero_stock') result = result.filter(p => Number(p.current_stock) === 0);
+    else if (stockFilter === 'negative_stock') result = result.filter(p => Number(p.current_stock) < 0);
+    if (demandFilter === 'positive') result = result.filter(p => Number(p.avg_daily) > 0);
+    else if (demandFilter === 'zero') result = result.filter(p => Number(p.avg_daily) === 0);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      result = result.filter(p => p.product_name?.toLowerCase().includes(q));
+      result = result.filter(p =>
+        p.product_name?.toLowerCase().includes(q) ||
+        p.category?.toLowerCase().includes(q)
+      );
     }
-    if (hideZeroDemand) result = result.filter(p => Number(p.avg_daily) > 0);
     const dir = ropSortAsc ? 1 : -1;
     result = [...result].sort((a, b) => {
       let av = a[ropSortCol], bv = b[ropSortCol];
@@ -1380,7 +1410,7 @@ function ROPTab() {
       return (Number(av) - Number(bv)) * dir;
     });
     return result;
-  }, [data, entityFilter, searchQuery, hideZeroDemand, ropSortCol, ropSortAsc]);
+  }, [data, entityFilter, categoryFilter, statusFilter, stockFilter, demandFilter, searchQuery, ropSortCol, ropSortAsc]);
 
   const kpi = useMemo(() => {
     const critical = data.filter(d => d.status === 'critical').length;
@@ -1433,9 +1463,35 @@ function ROPTab() {
           <option value="all">Semua Entity</option>
           {ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}
         </select>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--dim)', cursor: 'pointer', whiteSpace: 'nowrap' }}>
-          <input type="checkbox" checked={hideZeroDemand} onChange={e => setHideZeroDemand(e.target.checked)} /> Sembunyikan demand = 0
-        </label>
+        <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }}>
+          <option value="all">Semua Kategori</option>
+          {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        </select>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }}>
+          <option value="all">Semua Status</option>
+          <option value="critical">Critical</option>
+          <option value="reorder">Reorder</option>
+          <option value="ok">OK</option>
+        </select>
+        <select value={stockFilter} onChange={e => setStockFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }}>
+          <option value="all">Semua Stok</option>
+          <option value="in_stock">Ada Stok</option>
+          <option value="zero_stock">Stock = 0</option>
+          <option value="negative_stock">Stock Minus</option>
+        </select>
+        <select value={demandFilter} onChange={e => setDemandFilter(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }}>
+          <option value="all">Semua Demand</option>
+          <option value="positive">Ada Demand</option>
+          <option value="zero">Demand = 0</option>
+        </select>
+      </div>
+
+      <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 8 }}>
+        Menampilkan {fmtNum(filtered.length)} dari {fmtNum(data.length)} produk.
       </div>
 
       <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 12 }}>
@@ -1449,12 +1505,13 @@ function ROPTab() {
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
                 {[
                   { label: 'Produk', key: 'product_name', align: 'left' },
+                  { label: 'Kategori', key: 'category', align: 'left' },
                   { label: 'Entity', key: 'entity', align: 'left' },
                   { label: 'Stock', key: 'current_stock', align: 'right' },
                   { label: 'Avg/Day', key: 'avg_daily', align: 'right' },
-                  { label: 'Lead Time', key: 'lead_time', align: 'right' },
-                  { label: 'Safety Days', key: 'safety_days', align: 'right' },
-                  { label: 'Safety Qty', key: 'safety_stock', align: 'right' },
+                  { label: 'Lead Time', key: 'lead_time_days', align: 'right' },
+                  { label: 'Safety Days', key: 'safety_stock_days', align: 'right' },
+                  { label: 'Safety Qty', key: 'safety_stock_qty', align: 'right' },
                   { label: 'ROP', key: 'rop', align: 'right' },
                   { label: 'Days Left', key: 'days_of_stock', align: 'right' },
                   { label: 'Status', key: 'status', align: 'left' },
@@ -1470,6 +1527,18 @@ function ROPTab() {
               {filtered.map(row => (
                 <tr key={row.product_id} style={{ borderBottom: '1px solid var(--border)', background: row.status === 'critical' ? 'rgba(239,68,68,0.05)' : row.status === 'reorder' ? 'rgba(245,158,11,0.05)' : 'transparent' }}>
                   <td style={{ padding: '8px 10px', fontWeight: 600 }}>{row.product_name}</td>
+                  <td style={{ padding: '8px 10px' }}>
+                    <span style={{
+                      padding: '2px 6px',
+                      borderRadius: 4,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      background: CATEGORY_COLORS[row.category] ? `${CATEGORY_COLORS[row.category]}20` : 'var(--bg-deep)',
+                      color: CATEGORY_COLORS[row.category] || 'var(--dim)',
+                    }}>
+                      {row.category || '-'}
+                    </span>
+                  </td>
                   <td style={{ padding: '8px 10px' }}>{row.entity}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtNum(row.current_stock)}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{row.avg_daily.toFixed(1)}</td>
