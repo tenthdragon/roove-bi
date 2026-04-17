@@ -276,7 +276,7 @@ export default function ScalevBundleMappingSettingsTab() {
           <div>
             <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Bundle Mapping Scalev</div>
             <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4, maxWidth: 780, lineHeight: 1.6 }}>
-              Tab ini membaca isi bundle dari Scalev lalu mencoba me-resolve setiap komponen ke produk warehouse lewat mapping produk Scalev yang sudah kita buat. Jika masih partial atau unresolved, cukup lanjut map variannya di tab Product Mapping Scalev.
+              Tab ini membaca isi bundle dari Scalev lalu mencoba me-resolve setiap komponen ke produk warehouse lewat mapping produk Scalev. Untuk komponen shared, sistem akan mencoba memakai mapping dari business pemilik produk lebih dulu.
             </div>
           </div>
 
@@ -578,16 +578,31 @@ export default function ScalevBundleMappingSettingsTab() {
                                           </>
                                         ) : (
                                           <div style={{ color: '#fca5a5', fontSize: 10, fontWeight: 700 }}>
-                                            Belum terhubung ke Product Mapping Scalev
+                                            {component.source_business_code && component.source_business_code !== payload?.business_code
+                                              ? `Belum ada Product Mapping Scalev di business sumber ${component.source_business_code}`
+                                              : 'Belum terhubung ke Product Mapping Scalev'}
                                           </div>
                                         )}
                                       </td>
-                                      <td style={{ padding: '8px 6px', color: component.resolution_source ? '#93c5fd' : 'var(--dim)', fontSize: 10, fontWeight: 700 }}>
-                                        {component.resolution_source === 'variant'
-                                          ? 'variant'
-                                          : component.resolution_source === 'product'
-                                            ? 'product'
-                                            : '-'}
+                                      <td style={{ padding: '8px 6px', fontSize: 10 }}>
+                                        <div style={{ color: component.resolution_source ? '#93c5fd' : 'var(--dim)', fontWeight: 700 }}>
+                                          {component.resolution_source === 'variant'
+                                            ? 'variant'
+                                            : component.resolution_source === 'product'
+                                              ? 'product'
+                                              : '-'}
+                                        </div>
+                                        {component.source_business_code ? (
+                                          <div style={{ color: 'var(--dim)', marginTop: 3 }}>
+                                            source: {component.source_business_code}
+                                            {component.is_shared_component ? ' shared' : ''}
+                                          </div>
+                                        ) : null}
+                                        {component.mapping_business_code ? (
+                                          <div style={{ color: 'var(--dim)', marginTop: 3 }}>
+                                            map: {component.mapping_business_code}
+                                          </div>
+                                        ) : null}
                                       </td>
                                     </tr>
                                   ))}
