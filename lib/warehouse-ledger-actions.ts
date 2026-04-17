@@ -1905,12 +1905,12 @@ async function findOrCreateTargetBatch(
   svc: ReturnType<typeof createServiceSupabase>,
   productId: number,
   batchCode: string,
-  expiredDate: string | null,
+  expiredDate: string | null | undefined,
   costPerUnit?: number | null
 ) {
   const { data: existing, error: existingErr } = await svc
     .from('warehouse_batches')
-    .select('id, current_qty, cost_per_unit')
+    .select('id, current_qty, cost_per_unit, initial_qty')
     .eq('warehouse_product_id', productId)
     .eq('batch_code', batchCode)
     .maybeSingle();
@@ -1926,7 +1926,7 @@ async function findOrCreateTargetBatch(
       const { error } = await svc.from('warehouse_batches').update(update).eq('id', existing.id);
       if (error) throw error;
     }
-    return existing;
+    return { ...existing, created: false };
   }
 
   const insertRow: Record<string, any> = {
@@ -1943,11 +1943,11 @@ async function findOrCreateTargetBatch(
   const { data: created, error: createdErr } = await svc
     .from('warehouse_batches')
     .insert(insertRow)
-    .select('id, current_qty')
+    .select('id, current_qty, initial_qty')
     .single();
   if (createdErr) throw createdErr;
 
-  return created;
+  return { ...created, created: true };
 }
 
 // ============================================================
@@ -3124,36 +3124,45 @@ export async function createBatchInternal(
   batchCode: string,
   expiredDate: string | null,
   initialQty: number = 0,
+  notes?: string,
 ) {
   const svc = createServiceSupabase();
-  const userId = await getCurrentUserId();
-  const { data, error } = await svc
-    .from('warehouse_batches')
-    .insert({
-      warehouse_product_id: productId,
-      batch_code: batchCode,
-      expired_date: expiredDate,
-      initial_qty: initialQty,
-      current_qty: initialQty,
-    })
-    .select()
-    .single();
-  if (error) throw error;
+  const normalizedBatchCode = batchCode.trim();
+  const normalizedNotes = notes?.trim();
+  if (!normalizedBatchCode) throw new Error('Kode batch wajib diisi');
+
+  const batch = await findOrCreateTargetBatch(
+    svc,
+    productId,
+    normalizedBatchCode,
+    expiredDate || undefined,
+  );
 
   // If initial qty > 0, create ledger entry
   if (initialQty > 0) {
-    await insertLedgerEntry(svc, {
-      warehouse_product_id: productId,
-      batch_id: data.id,
-      movement_type: 'IN',
-      quantity: initialQty,
-      reference_type: 'manual',
-      created_by: userId,
-      notes: `Initial stock for batch ${batchCode}`,
-    });
+    if (batch.created) {
+      const { error } = await svc
+        .from('warehouse_batches')
+        .update({ initial_qty: initialQty })
+        .eq('id', batch.id);
+      if (error) throw error;
+    }
+
+    await recordStockInInternal(
+      productId,
+      batch.id,
+      initialQty,
+      'manual',
+      undefined,
+      normalizedNotes || (
+        batch.created
+          ? `Initial stock for batch ${normalizedBatchCode}`
+          : `Stock masuk tambahan untuk batch ${normalizedBatchCode}`
+      ),
+    );
   }
 
-  return data;
+  return batch;
 }
 
 export async function createBatch(
@@ -3161,9 +3170,10 @@ export async function createBatch(
   batchCode: string,
   expiredDate: string | null,
   initialQty: number = 0,
+  notes?: string,
 ) {
   await requireWarehousePermission('wh:stock_masuk', 'Batch Stock');
-  return createBatchInternal(productId, batchCode, expiredDate, initialQty);
+  return createBatchInternal(productId, batchCode, expiredDate, initialQty, notes);
 }
 
 // ============================================================

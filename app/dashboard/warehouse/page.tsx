@@ -1731,7 +1731,7 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
             setSuccess(`Stock masuk: ${qty} unit (${poItem.po_number}, batch: ${batchCode})`);
           }
         } else {
-          await createBatch(pid, batchCode.trim(), expiredDate || null, qty);
+          await createBatch(pid, batchCode.trim(), expiredDate || null, qty, notes || undefined);
           setSuccess(`Stock masuk: ${qty} unit (batch: ${batchCode})`);
         }
       } else if (mode === 'out') {
