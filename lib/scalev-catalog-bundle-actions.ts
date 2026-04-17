@@ -11,9 +11,11 @@ const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
 const SUPABASE_PAGE_SIZE = 1000;
 const UPSERT_CHUNK_SIZE = 200;
 const BUNDLE_DETAIL_CONCURRENCY = 3;
+const BUNDLE_DETAIL_FALLBACK_CONCURRENCY = 1;
 const BUNDLE_SYNC_BATCH_SIZE = 80;
 const SCALEV_FETCH_MAX_RETRIES = 4;
 const SCALEV_FETCH_RETRY_BASE_DELAY_MS = 900;
+const SCALEV_FETCH_FALLBACK_PAUSE_MS = 1200;
 
 type WarehouseProductLite = {
   id: number;
@@ -458,6 +460,42 @@ async function fetchScalevBundleDetailWithRetry(
   throw lastError || new Error(`Gagal mengambil detail bundle ${bundleId}.`);
 }
 
+async function fetchScalevBundleDetailsResilient(
+  apiKey: string,
+  bundleIds: number[],
+) {
+  const firstPass = await mapWithConcurrency(
+    bundleIds,
+    BUNDLE_DETAIL_CONCURRENCY,
+    async (bundleId) => fetchScalevBundleDetailWithRetry(apiKey, bundleId),
+  );
+
+  if (firstPass.errors.length === 0) {
+    return {
+      results: firstPass.results,
+      errors: firstPass.errors,
+      recoveredErrors: [] as Array<{ item: number; message: string }>,
+    };
+  }
+
+  await sleep(SCALEV_FETCH_FALLBACK_PAUSE_MS);
+  const retryIds = firstPass.errors.map(({ item }) => item);
+  const secondPass = await mapWithConcurrency(
+    retryIds,
+    BUNDLE_DETAIL_FALLBACK_CONCURRENCY,
+    async (bundleId) => fetchScalevBundleDetailWithRetry(apiKey, bundleId),
+  );
+
+  const remainingFailedIds = new Set(secondPass.errors.map(({ item }) => item));
+  const recoveredErrors = firstPass.errors.filter(({ item }) => !remainingFailedIds.has(item));
+
+  return {
+    results: [...firstPass.results, ...secondPass.results],
+    errors: secondPass.errors,
+    recoveredErrors,
+  };
+}
+
 async function replaceBundleLinesForBundles(
   businessId: number,
   bundleIds: number[],
@@ -647,10 +685,9 @@ export async function syncScalevCatalogBundleLines(
   }
 
   const syncAt = new Date().toISOString();
-  const { results, errors } = await mapWithConcurrency(
+  const { results, errors, recoveredErrors } = await fetchScalevBundleDetailsResilient(
+    business.api_key!,
     bundleIds,
-    BUNDLE_DETAIL_CONCURRENCY,
-    async (bundleId) => fetchScalevBundleDetailWithRetry(business.api_key!, bundleId),
   );
 
   const rows = buildBundleLineRows(business, results, syncAt);
@@ -684,7 +721,12 @@ export async function syncScalevCatalogBundleLines(
     context: {
       total_bundles: totalBundles,
       next_offset: nextOffset,
+      recovered_bundle_ids: recoveredErrors.slice(0, 50).map(({ item }) => item),
       failed_bundle_ids: errors.slice(0, 20).map(({ item }) => item),
+      failed_bundle_messages: errors.slice(0, 20).map(({ item, message }) => ({
+        bundle_id: item,
+        message,
+      })),
     },
   });
 
@@ -701,6 +743,7 @@ export async function syncScalevCatalogBundleLines(
     bundle_lines_count: rows.length,
     failed_count: errors.length,
     failed_bundle_ids: errors.slice(0, 10).map(({ item }) => item),
+    recovered_bundle_ids: recoveredErrors.slice(0, 10).map(({ item }) => item),
     last_synced_at: syncAt,
   };
 }
