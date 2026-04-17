@@ -142,7 +142,7 @@ interface RangeTotals { ns: number; nam: number; mkt: number; meta: number; scal
 function computeRange(from: string, to: string, productRows: any[], channelRows: any[], metaByDate: Record<string, number>): RangeTotals {
   const rows = productRows.filter(r => r.date >= from && r.date <= to);
   let tns = 0, tnam = 0, tmkt = 0, tmeta = 0, tscalev = 0;
-  const dates = [...new Set(rows.map(r => r.date))];
+  const dates = Array.from(new Set(rows.map((r) => r.date)));
   for (const d of dates) {
     const dp = rows.filter(r => r.date === d);
     const dc = channelRows.filter(r => r.date === d);

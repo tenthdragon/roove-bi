@@ -43,7 +43,7 @@ export function setCache<T>(table: string, from: string, to: string, data: T, ex
 
 /** Invalidate all entries whose key starts with a given table name. */
 export function invalidateTable(table: string): void {
-  for (const key of store.keys()) {
+  for (const key of Array.from(store.keys())) {
     if (key.startsWith(table + '|')) store.delete(key);
   }
 }

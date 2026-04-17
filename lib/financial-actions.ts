@@ -85,7 +85,7 @@ export async function triggerFinancialSync(options?: { skipAuth?: boolean }) {
 
   if (connError) throw connError;
   if (!connections || connections.length === 0) {
-    return { message: 'No active financial sheet connections', synced: 0, results: [] };
+    return { message: 'No active financial sheet connections', synced: 0, failed: 0, results: [] };
   }
 
   const results: Array<{

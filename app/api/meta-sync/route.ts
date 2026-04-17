@@ -8,6 +8,7 @@ import {
   type MetaAdAccount,
   type DailyAdSpendRow,
 } from '@/lib/meta-marketing';
+import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 
 
 function getServiceSupabase() {
@@ -46,20 +47,38 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
+  const requestId = getRequestId(req);
   let dateStart = getYesterdayWIB();
   let dateEnd = dateStart;
   let logId: number | null = null;
+  const authHeader = req.headers.get('authorization');
+  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const mode = isCron ? 'cron_post' : 'dashboard_post';
+
+  logRouteEvent({
+    route: '/api/meta-sync',
+    job: 'meta_sync',
+    mode,
+    status: 'start',
+    request_id: requestId,
+  });
 
   try {
     // ── Auth: same pattern as /api/sync ──
-    const authHeader = req.headers.get('authorization');
-    const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
-
     if (!isCron) {
       try {
         await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
       } catch (err: any) {
         const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
+        logRouteEvent({
+          route: '/api/meta-sync',
+          job: 'meta_sync',
+          mode,
+          status: 'denied',
+          request_id: requestId,
+          duration_ms: Date.now() - startTime,
+          extra: { error: err.message, http_status: status },
+        });
         return NextResponse.json({ error: err.message }, { status });
       }
     }
@@ -193,7 +212,7 @@ export async function POST(req: NextRequest) {
 
     console.log(`[meta-sync] Done: ${accountsSynced}/${accounts.length} accounts, ${rowsInserted} rows, ${duration}ms`);
 
-    return NextResponse.json({
+    const response = {
       success: status !== 'failed',
       status,
       accounts_synced: accountsSynced,
@@ -203,7 +222,23 @@ export async function POST(req: NextRequest) {
       duration_ms: duration,
       token_warning: tokenWarning,
       errors: errors.length > 0 ? errors : undefined,
+    };
+
+    logRouteEvent({
+      route: '/api/meta-sync',
+      job: 'meta_sync',
+      mode,
+      status: status === 'failed' ? 'failed' : status === 'partial' ? 'partial' : 'success',
+      request_id: requestId,
+      duration_ms: duration,
+      rows_processed: rowsInserted,
+      extra: {
+        accounts_synced: accountsSynced,
+        accounts_total: accounts.length,
+      },
     });
+
+    return NextResponse.json(response);
 
   } catch (err: any) {
     const duration = Date.now() - startTime;
@@ -226,6 +261,16 @@ export async function POST(req: NextRequest) {
         await svc.from('meta_sync_log').insert(payload);
       }
     } catch {}
+
+    logRouteEvent({
+      route: '/api/meta-sync',
+      job: 'meta_sync',
+      mode,
+      status: 'failed',
+      request_id: requestId,
+      duration_ms: duration,
+      extra: { error: err.message },
+    });
 
     return NextResponse.json({ error: err.message }, { status: 500 });
   }

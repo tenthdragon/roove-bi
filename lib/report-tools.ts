@@ -313,7 +313,7 @@ async function closingRateByBrand(svc: any, from: string, to: string) {
 
   // Fetch order lines for these orders to determine brand
   // Batch in groups
-  const allIds = [...orderIds];
+  const allIds = Array.from(orderIds);
   const lines: any[] = [];
   for (let i = 0; i < allIds.length; i += 500) {
     const batch = allIds.slice(i, i + 500);

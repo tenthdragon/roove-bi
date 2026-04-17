@@ -111,10 +111,13 @@ export async function fetchWabaAnalytics(
   }
 
   // ── Merge by start timestamp ──
-  const allStarts = new Set([...countsByStart.keys(), ...costByStart.keys()]);
+  const allStarts = new Set([
+    ...Array.from(countsByStart.keys()),
+    ...Array.from(costByStart.keys()),
+  ]);
   const dataPoints: WabaAnalyticsDataPoint[] = [];
 
-  for (const start of allStarts) {
+  for (const start of Array.from(allStarts)) {
     const counts = countsByStart.get(start) || { sent: 0, delivered: 0 };
     const cost = costByStart.get(start) || 0;
     dataPoints.push({

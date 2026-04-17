@@ -225,14 +225,14 @@ async function getMappedScalevDailyDemandRows(
     demand_date: String(row.demand_date),
     scalev_product_name: String(row.scalev_product_name || ''),
     total_qty: Number(row.total_qty || 0),
-  })).filter((row) => row.scalev_product_name && Number.isFinite(row.total_qty) && row.total_qty !== 0);
+  })).filter((row: SummaryScalevDailyDemandRow) => row.scalev_product_name && Number.isFinite(row.total_qty) && row.total_qty !== 0);
 
   if (rows.length === 0) {
     return [];
   }
 
   const mappings: LegacyScalevDemandMappingRow[] = [];
-  const uniqueNames = Array.from(new Set(rows.map(row => row.scalev_product_name)));
+  const uniqueNames = Array.from(new Set(rows.map((row: SummaryScalevDailyDemandRow) => row.scalev_product_name)));
 
   for (const chunk of chunkArray(uniqueNames, 500)) {
     const { data, error } = await svc

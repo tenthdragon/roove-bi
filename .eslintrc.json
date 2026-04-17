@@ -1,0 +1,8 @@
+{
+  "root": true,
+  "extends": ["next/core-web-vitals"],
+  "ignorePatterns": ["mcp-server/**", "supabase/functions/**", "tmp/**", ".next/**"],
+  "rules": {
+    "react/no-unescaped-entities": "off"
+  }
+}

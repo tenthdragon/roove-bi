@@ -216,7 +216,7 @@ const BRAND_COLOR_PALETTE = [
 // the same brand always gets the same color regardless of data order.
 export function getBrandColor(brand: string, allBrands: string[]): string {
   if (!brand) return '#64748b';
-  const sorted = [...new Set(allBrands)].sort();
+  const sorted = Array.from(new Set(allBrands)).sort();
   const idx = sorted.indexOf(brand);
   if (idx < 0) return '#64748b';
   return BRAND_COLOR_PALETTE[idx % BRAND_COLOR_PALETTE.length];
@@ -225,7 +225,7 @@ export function getBrandColor(brand: string, allBrands: string[]): string {
 // Build a full color map from a list of brands (convenience helper)
 export function buildBrandColorMap(brands: string[]): Record<string, string> {
   const map: Record<string, string> = {};
-  const sorted = [...new Set(brands)].sort();
+  const sorted = Array.from(new Set(brands)).sort();
   sorted.forEach((b, i) => {
     map[b] = BRAND_COLOR_PALETTE[i % BRAND_COLOR_PALETTE.length];
   });

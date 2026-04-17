@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { parseGoogleSheet } from '@/lib/google-sheets';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 
 
 function getServiceSupabase() {
@@ -15,15 +16,35 @@ function getServiceSupabase() {
 export const maxDuration = 250;
 
 export async function POST(req: NextRequest) {
-  try {
-    const authHeader = req.headers.get('authorization');
-    const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const startTime = Date.now();
+  const requestId = getRequestId(req);
+  const authHeader = req.headers.get('authorization');
+  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const mode = isCron ? 'cron_post' : 'dashboard_post';
 
+  logRouteEvent({
+    route: '/api/sync',
+    job: 'daily_ads_sync',
+    mode,
+    status: 'start',
+    request_id: requestId,
+  });
+
+  try {
     if (!isCron) {
       try {
         await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
       } catch (err: any) {
         const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
+        logRouteEvent({
+          route: '/api/sync',
+          job: 'daily_ads_sync',
+          mode,
+          status: 'denied',
+          request_id: requestId,
+          duration_ms: Date.now() - startTime,
+          extra: { error: err.message, http_status: status },
+        });
         return NextResponse.json({ error: err.message }, { status });
       }
     }
@@ -188,14 +209,39 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    return NextResponse.json({
+    const response = {
       synced: results.filter(r => r.success).length,
       failed: results.filter(r => !r.success).length,
       results,
+    };
+
+    logRouteEvent({
+      route: '/api/sync',
+      job: 'daily_ads_sync',
+      mode,
+      status: response.failed > 0 ? 'partial' : 'success',
+      request_id: requestId,
+      duration_ms: Date.now() - startTime,
+      rows_processed: results.length,
+      extra: {
+        synced: response.synced,
+        failed: response.failed,
+      },
     });
+
+    return NextResponse.json(response);
 
   } catch (err: any) {
     console.error('Sync API error:', err);
+    logRouteEvent({
+      route: '/api/sync',
+      job: 'daily_ads_sync',
+      mode,
+      status: 'failed',
+      request_id: requestId,
+      duration_ms: Date.now() - startTime,
+      extra: { error: err.message },
+    });
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }

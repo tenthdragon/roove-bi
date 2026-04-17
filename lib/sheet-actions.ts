@@ -5,7 +5,7 @@ import { requireDashboardPermissionAccess } from './dashboard-access';
 import { testSheetConnection } from './google-sheets';
 
 async function requireDailyAdminAccess(label: string) {
-  await requireDashboardPermissionAccess('admin:daily', label);
+  return requireDashboardPermissionAccess('admin:daily', label);
 }
 
 export async function fetchSheetConnections() {

@@ -249,7 +249,7 @@ export async function lookupProductInfo(productName: string): Promise<ProductInf
   }
 
   // 2. Fuzzy match — check if any mapping key is contained in product name or vice versa
-  for (const [key, info] of mappings) {
+  for (const [key, info] of Array.from(mappings.entries())) {
     if (nameLower.includes(key) || key.includes(nameLower)) {
       return info;
     }

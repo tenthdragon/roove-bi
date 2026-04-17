@@ -84,7 +84,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         error: 'No valid rows found after filtering',
         skipped,
-        skippedStores: [...skippedStores],
+        skippedStores: Array.from(skippedStores),
       }, { status: 400 });
     }
 
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
       success: true,
       inserted,
       skipped,
-      skippedStores: [...skippedStores],
+      skippedStores: Array.from(skippedStores),
       replacedStores: storesToReplace,
       dateRange: { from: dateFrom, to: dateTo },
       filename,

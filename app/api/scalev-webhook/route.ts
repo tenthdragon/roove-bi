@@ -468,7 +468,7 @@ async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any,
 }
 
 // ── Handle order.created: insert new order into scalev_orders ──
-async function handleOrderCreated(data: any, businessCode: string, businessId: number, taxRateName = 'PPN') {
+async function handleOrderCreated(data: any, businessCode: string, businessId: number, taxRateName = 'PPN'): Promise<NextResponse> {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -584,7 +584,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
 }
 
 // ── Handle order.status_changed: update existing order ──
-async function handleStatusChanged(data: any, businessCode: string, businessId: number, taxRateName = 'PPN') {
+async function handleStatusChanged(data: any, businessCode: string, businessId: number, taxRateName = 'PPN'): Promise<NextResponse> {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -814,7 +814,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 }
 
 // ── Handle order.updated: full update of order data ──
-async function handleOrderUpdated(data: any, businessCode: string, businessId: number, taxRateName = 'PPN') {
+async function handleOrderUpdated(data: any, businessCode: string, businessId: number, taxRateName = 'PPN'): Promise<NextResponse> {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;

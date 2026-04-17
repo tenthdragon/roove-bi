@@ -274,8 +274,8 @@ function CFTable({ data }: { data: CFSummary[] }) {
 
 function RatiosTable({ data }: { data: RatioData[] }) {
   if (!data.length) return null;
-  const months = [...new Set(data.map(d => d.month))].sort().reverse();
-  const ratioNames = [...new Set(data.map(d => d.ratio_name))];
+  const months = Array.from(new Set(data.map((d) => d.month))).sort().reverse();
+  const ratioNames = Array.from(new Set(data.map((d) => d.ratio_name)));
   const niceLabel: Record<string, string> = {
     gpm: 'Gross Profit Margin', npm: 'Net Profit Margin',
     roa: 'Return on Assets', roe: 'Return on Equity',

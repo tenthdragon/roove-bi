@@ -8,6 +8,7 @@ import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { fetchOrderDetail, deriveChannelFromStoreType, guessStoreType, lookupProductType, clearProductMappingCache, type StoreType } from '@/lib/scalev-api';
 import { reverseWarehouseDeductions } from '@/lib/warehouse-ledger-actions';
+import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 
 
 export const maxDuration = 120;
@@ -44,24 +45,34 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
+  const requestId = getRequestId(req);
   const startedAt = new Date().toISOString();
   let syncMode: 'full' | 'date' | 'order_id' | 'repair' = 'full';
   let targetDate: string | null = null;
   let targetOrderIds: string[] | null = null;
   let pendingOrdersCount = 0;
   let logId: number | null = null;
+  const authHeader = req.headers.get('authorization');
+  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const requestMode = isCron ? 'cron_post' : 'dashboard_post';
 
   try {
     // ── Auth: cron or admin sync permission ──
-    const authHeader = req.headers.get('authorization');
-    const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
-
     if (!isCron) {
       try {
         await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
       } catch (authErr: any) {
         console.error('[scalev-sync] Auth error:', authErr.message);
         const status = /sesi|login/i.test(authErr.message || '') ? 401 : 403;
+        logRouteEvent({
+          route: '/api/scalev-sync',
+          job: 'scalev_sync',
+          mode: requestMode,
+          status: 'denied',
+          request_id: requestId,
+          duration_ms: Date.now() - startTime,
+          extra: { error: authErr.message, http_status: status },
+        });
         return NextResponse.json({ error: authErr.message }, { status });
       }
     }
@@ -85,6 +96,14 @@ export async function POST(req: NextRequest) {
     } catch {
       // No body or invalid JSON — full sync
     }
+
+    logRouteEvent({
+      route: '/api/scalev-sync',
+      job: 'scalev_sync',
+      mode: `${requestMode}:${syncMode}`,
+      status: 'start',
+      request_id: requestId,
+    });
 
     const svc = getServiceSupabase();
 
@@ -353,7 +372,8 @@ export async function POST(req: NextRequest) {
       }).eq('id', logId);
     }
 
-    return NextResponse.json({
+    const duration = Date.now() - startTime;
+    const response = {
       success: true,
       sync_mode: syncMode,
       pending_checked: pendingOrders.length,
@@ -361,9 +381,26 @@ export async function POST(req: NextRequest) {
       orders_repaired: repairedCount,
       orders_still_pending: stillPendingCount,
       orders_errored: erroredCount,
-      duration_ms: Date.now() - startTime,
+      duration_ms: duration,
       details,
+    };
+
+    logRouteEvent({
+      route: '/api/scalev-sync',
+      job: 'scalev_sync',
+      mode: `${requestMode}:${syncMode}`,
+      status: erroredCount > 0 ? 'partial' : 'success',
+      request_id: requestId,
+      duration_ms: duration,
+      rows_processed: pendingOrders.length,
+      extra: {
+        orders_updated: updatedCount,
+        orders_still_pending: stillPendingCount,
+        orders_errored: erroredCount,
+      },
     });
+
+    return NextResponse.json(response);
 
   } catch (err: any) {
     console.error('[scalev-sync] Fatal error:', err.message);
@@ -387,6 +424,16 @@ export async function POST(req: NextRequest) {
     } catch (logErr: any) {
       console.error('[scalev-sync] Failed to persist fatal sync log:', logErr.message);
     }
+    logRouteEvent({
+      route: '/api/scalev-sync',
+      job: 'scalev_sync',
+      mode: `${requestMode}:${syncMode}`,
+      status: 'failed',
+      request_id: requestId,
+      duration_ms: Date.now() - startTime,
+      rows_processed: pendingOrdersCount,
+      extra: { error: err.message },
+    });
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
