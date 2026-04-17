@@ -89,6 +89,29 @@ function renderEntityTypeBadge(type: ScalevCatalogMappingRow['entity_type']) {
   );
 }
 
+function renderSharingBadge(sharing: ScalevCatalogMappingRow['sharing']) {
+  if (!sharing?.is_shared) return null;
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '2px 7px',
+        borderRadius: 999,
+        background: 'rgba(59,130,246,0.12)',
+        border: '1px solid rgba(96,165,250,0.22)',
+        color: '#93c5fd',
+        fontSize: 9,
+        fontWeight: 700,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      Shared
+    </span>
+  );
+}
+
 function renderCatalogReadyBadge(isReady: boolean) {
   const palette = isReady
     ? {
@@ -267,11 +290,12 @@ export default function ScalevProductMappingSettingsTab() {
         const haystack = [
           row.label,
           row.secondary_label,
-          row.sku,
-          row.warehouse_product?.name,
-          row.recommendation?.warehouse_product_name,
-          ...(row.identifiers_preview || []),
-        ]
+            row.sku,
+            row.warehouse_product?.name,
+            row.recommendation?.warehouse_product_name,
+            ...(row.identifiers_preview || []),
+            ...((row.sharing?.business_codes || []).map((code) => `shared ${code}`)),
+          ]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -466,6 +490,9 @@ export default function ScalevProductMappingSettingsTab() {
               Halaman ini memetakan entity catalog Scalev ke master produk warehouse. Rekomendasi diambil dari mapping lama yang sudah terjadi,
               alias `scalev_product_names`, dan kemiripan nama sebagai fallback.
             </div>
+            <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.6, marginTop: 6 }}>
+              Badge `Shared` berarti entity Scalev yang sama juga muncul di business lain. Ini membantu tim operasional membedakan produk lokal vs lintas business.
+            </div>
           </div>
           <div
             style={{
@@ -636,6 +663,7 @@ export default function ScalevProductMappingSettingsTab() {
                     <td style={{ padding: '8px 8px', minWidth: 260 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                         {renderEntityTypeBadge(row.entity_type)}
+                        {renderSharingBadge(row.sharing)}
                         <span style={{ color: 'var(--text)', fontWeight: 700 }}>{row.label}</span>
                       </div>
                       {row.secondary_label ? (
@@ -654,6 +682,11 @@ export default function ScalevProductMappingSettingsTab() {
                       {row.identifiers_preview.length > 0 ? (
                         <div style={{ marginTop: 6, color: 'var(--dim)', fontSize: 10, lineHeight: 1.6 }}>
                           {row.identifiers_preview.slice(0, 3).join(' • ')}
+                        </div>
+                      ) : null}
+                      {row.sharing?.is_shared ? (
+                        <div style={{ marginTop: 6, color: '#93c5fd', fontSize: 10, lineHeight: 1.6 }}>
+                          Juga ada di {row.sharing.other_business_codes.join(', ')}
                         </div>
                       ) : null}
                     </td>

@@ -24,6 +24,12 @@ type BusinessTarget = {
   notes: string | null;
 };
 
+export type ScalevCrossBusinessSummary = {
+  is_shared: boolean;
+  business_codes: string[];
+  other_business_codes: string[];
+};
+
 type CatalogEntityRow = {
   business_id: number;
   business_code: string;
@@ -77,6 +83,7 @@ export type ScalevCatalogMappingRow = {
   warehouse_product: WarehouseProductLite | null;
   mapping_source: string | null;
   notes: string | null;
+  sharing: ScalevCrossBusinessSummary | null;
   status: 'mapped' | 'recommended' | 'unmapped';
   recommendation: ScalevCatalogMappingRecommendation | null;
 };
@@ -94,6 +101,14 @@ function normalizeIdentifier(value: string): string {
     .trim()
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ');
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function tokenize(value: string): string[] {
@@ -348,6 +363,90 @@ function dedupeIdentifiers(values: Array<string | null | undefined>): string[] {
   return result;
 }
 
+function buildCrossBusinessSummary(
+  businessCode: string,
+  presenceRows: Array<{ business_code: string | null | undefined }>,
+): ScalevCrossBusinessSummary | null {
+  const businessCodes = Array.from(new Set(
+    presenceRows
+      .map((row) => String(row.business_code || '').trim())
+      .filter(Boolean),
+  )).sort();
+
+  if (businessCodes.length === 0) return null;
+
+  const selectedCode = String(businessCode || '').trim();
+  const sortedCodes = selectedCode && businessCodes.includes(selectedCode)
+    ? [selectedCode, ...businessCodes.filter((code) => code !== selectedCode)]
+    : businessCodes;
+  const otherBusinessCodes = sortedCodes.filter((code) => code !== selectedCode);
+
+  return {
+    is_shared: otherBusinessCodes.length > 0,
+    business_codes: sortedCodes,
+    other_business_codes: otherBusinessCodes,
+  };
+}
+
+async function buildEntitySharingLookup(
+  svc: ReturnType<typeof createServiceSupabase>,
+  businessCode: string,
+  rows: CatalogEntityRow[],
+) {
+  const sharingByEntityKey = new Map<string, ScalevCrossBusinessSummary | null>();
+  const variantIds = Array.from(new Set(
+    rows
+      .filter((row) => row.entity_type === 'variant' && Number.isFinite(row.scalev_variant_id || 0) && Number(row.scalev_variant_id || 0) > 0)
+      .map((row) => Number(row.scalev_variant_id || 0)),
+  ));
+  const productIds = Array.from(new Set(
+    rows
+      .filter((row) => row.entity_type === 'product' && Number.isFinite(row.scalev_product_id) && Number(row.scalev_product_id) > 0)
+      .map((row) => Number(row.scalev_product_id)),
+  ));
+
+  const variantsById = new Map<number, Array<{ business_code: string }>>();
+  for (const chunk of chunkArray(variantIds, 500)) {
+    if (chunk.length === 0) continue;
+    const { data, error } = await svc
+      .from('scalev_catalog_variants')
+      .select('business_code, scalev_variant_id')
+      .in('scalev_variant_id', chunk);
+    if (error) throw error;
+    for (const row of (data || []) as any[]) {
+      const variantId = Number(row.scalev_variant_id || 0);
+      if (!variantId) continue;
+      if (!variantsById.has(variantId)) variantsById.set(variantId, []);
+      variantsById.get(variantId)!.push({ business_code: row.business_code });
+    }
+  }
+
+  const productsById = new Map<number, Array<{ business_code: string }>>();
+  for (const chunk of chunkArray(productIds, 500)) {
+    if (chunk.length === 0) continue;
+    const { data, error } = await svc
+      .from('scalev_catalog_products')
+      .select('business_code, scalev_product_id')
+      .in('scalev_product_id', chunk);
+    if (error) throw error;
+    for (const row of (data || []) as any[]) {
+      const productId = Number(row.scalev_product_id || 0);
+      if (!productId) continue;
+      if (!productsById.has(productId)) productsById.set(productId, []);
+      productsById.get(productId)!.push({ business_code: row.business_code });
+    }
+  }
+
+  for (const row of rows) {
+    const presenceRows = row.entity_type === 'variant'
+      ? variantsById.get(Number(row.scalev_variant_id || 0)) || []
+      : productsById.get(Number(row.scalev_product_id || 0)) || [];
+    sharingByEntityKey.set(row.entity_key, buildCrossBusinessSummary(businessCode, presenceRows));
+  }
+
+  return sharingByEntityKey;
+}
+
 async function getCatalogEntityRows(businessId: number): Promise<{ businessCode: string; rows: CatalogEntityRow[] }> {
   const svc = createServiceSupabase();
   const [{ data: products, error: productError }, { data: variants, error: variantError }] = await Promise.all([
@@ -435,6 +534,7 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
   const svc = createServiceSupabase();
 
   const { businessCode, rows } = await getCatalogEntityRows(businessId);
+  const sharingByEntityKey = await buildEntitySharingLookup(svc, businessCode, rows);
 
   const [{ data: identifiers, error: identifierError }, { data: mappings, error: mappingError }, { data: businessTargetRow, error: targetError }, { data: legacyMappings, error: legacyError }, { data: warehouseProducts, error: productError }, { data: frequencies }] = await Promise.all([
     svc
@@ -607,6 +707,7 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
       warehouse_product: warehouseProduct,
       mapping_source: existingMapping?.mapping_source || null,
       notes: existingMapping?.notes || null,
+      sharing: sharingByEntityKey.get(entity.entity_key) || null,
       status: existingMapping?.warehouse_product_id
         ? 'mapped'
         : recommendation

@@ -13,6 +13,12 @@ const UPSERT_CHUNK_SIZE = 200;
 
 export type ScalevCatalogView = 'products' | 'variants' | 'bundles' | 'identifiers';
 
+export type ScalevCrossBusinessSummary = {
+  is_shared: boolean;
+  business_codes: string[];
+  other_business_codes: string[];
+};
+
 export type ScalevCatalogBusinessSummary = {
   id: number;
   business_code: string;
@@ -32,6 +38,7 @@ export type ScalevCatalogBusinessSummary = {
 
 type ScalevCatalogProductRow = {
   id: number;
+  scalev_product_id: number;
   name: string;
   public_name: string | null;
   display: string | null;
@@ -43,10 +50,12 @@ type ScalevCatalogProductRow = {
   variants_count: number;
   scalev_last_updated_at: string | null;
   last_synced_at: string;
+  sharing: ScalevCrossBusinessSummary | null;
 };
 
 type ScalevCatalogVariantRow = {
   id: number;
+  scalev_variant_id: number;
   name: string;
   product_name: string | null;
   sku: string | null;
@@ -57,6 +66,7 @@ type ScalevCatalogVariantRow = {
   option3_value: string | null;
   item_type: string | null;
   last_synced_at: string;
+  sharing: ScalevCrossBusinessSummary | null;
 };
 
 type ScalevCatalogBundleRow = {
@@ -207,6 +217,98 @@ function sanitizeSearchTerm(value: string | undefined): string | null {
     .replace(/[%(),]/g, ' ')
     .replace(/\s+/g, ' ');
   return cleaned ? `%${cleaned}%` : null;
+}
+
+function buildCrossBusinessSummary(
+  businessCode: string,
+  presenceRows: Array<{ business_code: string | null | undefined }>,
+): ScalevCrossBusinessSummary | null {
+  const businessCodes = Array.from(new Set(
+    presenceRows
+      .map((row) => String(row.business_code || '').trim())
+      .filter(Boolean),
+  )).sort();
+
+  if (businessCodes.length === 0) return null;
+
+  const selectedCode = String(businessCode || '').trim();
+  const sortedCodes = selectedCode && businessCodes.includes(selectedCode)
+    ? [selectedCode, ...businessCodes.filter((code) => code !== selectedCode)]
+    : businessCodes;
+  const otherBusinessCodes = sortedCodes.filter((code) => code !== selectedCode);
+
+  return {
+    is_shared: otherBusinessCodes.length > 0,
+    business_codes: sortedCodes,
+    other_business_codes: otherBusinessCodes,
+  };
+}
+
+async function buildCatalogEntrySharingLookup(
+  svc: ReturnType<typeof createServiceSupabase>,
+  businessCode: string,
+  input: {
+    products?: Array<{ scalev_product_id: number }>;
+    variants?: Array<{ scalev_variant_id: number }>;
+  },
+) {
+  const productSharingById = new Map<number, ScalevCrossBusinessSummary | null>();
+  const variantSharingById = new Map<number, ScalevCrossBusinessSummary | null>();
+
+  const productIds = Array.from(new Set(
+    (input.products || [])
+      .map((row) => Number(row.scalev_product_id || 0))
+      .filter((value) => Number.isFinite(value) && value > 0),
+  ));
+  const variantIds = Array.from(new Set(
+    (input.variants || [])
+      .map((row) => Number(row.scalev_variant_id || 0))
+      .filter((value) => Number.isFinite(value) && value > 0),
+  ));
+
+  const productPresenceById = new Map<number, Array<{ business_code: string }>>();
+  for (const chunk of chunkArray(productIds, 500)) {
+    if (chunk.length === 0) continue;
+    const { data, error } = await svc
+      .from('scalev_catalog_products')
+      .select('business_code, scalev_product_id')
+      .in('scalev_product_id', chunk);
+    if (error) throw error;
+    for (const row of (data || []) as any[]) {
+      const productId = Number(row.scalev_product_id || 0);
+      if (!productId) continue;
+      if (!productPresenceById.has(productId)) productPresenceById.set(productId, []);
+      productPresenceById.get(productId)!.push({ business_code: row.business_code });
+    }
+  }
+
+  const variantPresenceById = new Map<number, Array<{ business_code: string }>>();
+  for (const chunk of chunkArray(variantIds, 500)) {
+    if (chunk.length === 0) continue;
+    const { data, error } = await svc
+      .from('scalev_catalog_variants')
+      .select('business_code, scalev_variant_id')
+      .in('scalev_variant_id', chunk);
+    if (error) throw error;
+    for (const row of (data || []) as any[]) {
+      const variantId = Number(row.scalev_variant_id || 0);
+      if (!variantId) continue;
+      if (!variantPresenceById.has(variantId)) variantPresenceById.set(variantId, []);
+      variantPresenceById.get(variantId)!.push({ business_code: row.business_code });
+    }
+  }
+
+  for (const productId of productIds) {
+    productSharingById.set(productId, buildCrossBusinessSummary(businessCode, productPresenceById.get(productId) || []));
+  }
+  for (const variantId of variantIds) {
+    variantSharingById.set(variantId, buildCrossBusinessSummary(businessCode, variantPresenceById.get(variantId) || []));
+  }
+
+  return {
+    productSharingById,
+    variantSharingById,
+  };
 }
 
 async function getCatalogSchemaState(): Promise<{ ready: boolean; message: string | null }> {
@@ -944,7 +1046,7 @@ export async function getScalevCatalogEntries(input: {
   if (input.view === 'products') {
     let query = svc
       .from('scalev_catalog_products')
-      .select('id, name, public_name, display, slug, item_type, is_inventory, is_multiple, is_listed_at_marketplace, variants_count, scalev_last_updated_at, last_synced_at')
+      .select('id, business_code, scalev_product_id, name, public_name, display, slug, item_type, is_inventory, is_multiple, is_listed_at_marketplace, variants_count, scalev_last_updated_at, last_synced_at')
       .eq('business_id', input.businessId)
       .order('name', { ascending: true })
       .limit(limit);
@@ -958,13 +1060,21 @@ export async function getScalevCatalogEntries(input: {
       if (isCatalogSchemaMissingError(error)) return [];
       throw error;
     }
-    return (data || []) as ScalevCatalogProductRow[];
+    const rows = (data || []) as any[];
+    const currentBusinessCode = String(rows[0]?.business_code || '').trim();
+    const { productSharingById } = await buildCatalogEntrySharingLookup(svc, currentBusinessCode, {
+      products: rows.map((row) => ({ scalev_product_id: Number(row.scalev_product_id) })),
+    });
+    return rows.map((row) => ({
+      ...row,
+      sharing: productSharingById.get(Number(row.scalev_product_id)) || null,
+    })) as ScalevCatalogProductRow[];
   }
 
   if (input.view === 'variants') {
     let query = svc
       .from('scalev_catalog_variants')
-      .select('id, name, product_name, sku, scalev_variant_unique_id, scalev_variant_uuid, option1_value, option2_value, option3_value, item_type, last_synced_at')
+      .select('id, business_code, scalev_variant_id, name, product_name, sku, scalev_variant_unique_id, scalev_variant_uuid, option1_value, option2_value, option3_value, item_type, last_synced_at')
       .eq('business_id', input.businessId)
       .order('product_name', { ascending: true })
       .order('name', { ascending: true })
@@ -979,7 +1089,15 @@ export async function getScalevCatalogEntries(input: {
       if (isCatalogSchemaMissingError(error)) return [];
       throw error;
     }
-    return (data || []) as ScalevCatalogVariantRow[];
+    const rows = (data || []) as any[];
+    const currentBusinessCode = String(rows[0]?.business_code || '').trim();
+    const { variantSharingById } = await buildCatalogEntrySharingLookup(svc, currentBusinessCode, {
+      variants: rows.map((row) => ({ scalev_variant_id: Number(row.scalev_variant_id) })),
+    });
+    return rows.map((row) => ({
+      ...row,
+      sharing: variantSharingById.get(Number(row.scalev_variant_id)) || null,
+    })) as ScalevCatalogVariantRow[];
   }
 
   if (input.view === 'bundles') {

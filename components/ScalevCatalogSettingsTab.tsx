@@ -29,6 +29,24 @@ const VIEW_OPTIONS: { id: ScalevCatalogView; label: string; placeholder: string 
   { id: 'identifiers', label: 'Identifier', placeholder: 'Cari raw identifier, label entity, atau source...' },
 ];
 
+function renderSharingSummary(sharing: any) {
+  if (!sharing) return <span style={{ color: 'var(--dim)' }}>-</span>;
+  if (!sharing.is_shared) {
+    return <span style={{ color: 'var(--dim)' }}>Lokal</span>;
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: 3 }}>
+      <span style={{ color: '#93c5fd', fontSize: 10, fontWeight: 700 }}>Shared</span>
+      <span style={{ color: 'var(--text-secondary)', fontSize: 10 }}>
+        {Array.isArray(sharing.other_business_codes) && sharing.other_business_codes.length > 0
+          ? `Juga ada di ${sharing.other_business_codes.join(', ')}`
+          : sharing.business_codes.join(', ')}
+      </span>
+    </div>
+  );
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return 'Belum pernah sync';
   const date = new Date(value);
@@ -107,7 +125,7 @@ function DataTable({ view, rows, loading }: { view: ScalevCatalogView; rows: Sca
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Nama', 'Public', 'Slug', 'Tipe', 'Varian', 'Marketplace', 'Updated'].map((header) => (
+              {['Nama', 'Public', 'Slug', 'Tipe', 'Varian', 'Sharing', 'Marketplace', 'Updated'].map((header) => (
                 <th key={header} style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                   {header}
                 </th>
@@ -122,6 +140,7 @@ function DataTable({ view, rows, loading }: { view: ScalevCatalogView; rows: Sca
                 <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{row.slug || '-'}</td>
                 <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{row.item_type || '-'}</td>
                 <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{row.variants_count}</td>
+                <td style={{ padding: '6px 8px' }}>{renderSharingSummary(row.sharing)}</td>
                 <td style={{ padding: '6px 8px', color: row.is_listed_at_marketplace ? '#6ee7b7' : 'var(--dim)' }}>
                   {row.is_listed_at_marketplace ? 'Ya' : 'Tidak'}
                 </td>
@@ -140,7 +159,7 @@ function DataTable({ view, rows, loading }: { view: ScalevCatalogView; rows: Sca
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Nama Varian', 'Produk', 'SKU', 'Unique ID', 'Opsi', 'Tipe'].map((header) => (
+              {['Nama Varian', 'Produk', 'SKU', 'Unique ID', 'Opsi', 'Sharing', 'Tipe'].map((header) => (
                 <th key={header} style={{ padding: '6px 8px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>
                   {header}
                 </th>
@@ -157,6 +176,7 @@ function DataTable({ view, rows, loading }: { view: ScalevCatalogView; rows: Sca
                   <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{row.sku || '-'}</td>
                   <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{row.scalev_variant_unique_id || '-'}</td>
                   <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{optionParts.length > 0 ? optionParts.join(' / ') : '-'}</td>
+                  <td style={{ padding: '6px 8px' }}>{renderSharingSummary(row.sharing)}</td>
                   <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{row.item_type || '-'}</td>
                 </tr>
               );
