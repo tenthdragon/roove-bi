@@ -7,7 +7,6 @@ import {
   addFinancialConnection,
   removeFinancialConnection,
   toggleFinancialConnection,
-  triggerFinancialSync,
 } from '@/lib/financial-actions';
 
 interface Connection {
@@ -78,16 +77,16 @@ export default function FinancialSheetManager() {
 
   async function handleSync() {
     setSyncing(true);
-    setMessage('Syncing financial data...');
+    setMessage('Mengirim sync financial ke antrean...');
     try {
-      const result = await triggerFinancialSync();
-      const detail = result.results?.map((r: any) =>
-        r.success
-          ? `✅ ${r.label}: PL ${r.plRows}, CF ${r.cfRows}, Rasio ${r.ratioRows} rows (${r.months?.length} months)`
-          : `❌ ${r.label}: ${r.error}`
-      ).join('\n') || '';
-      setMessage(`Sync selesai: ${result.synced} berhasil, ${result.failed || 0} gagal\n${detail}`);
-      await loadConnections();
+      const res = await fetch('/api/financial-sync', { method: 'POST' });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Sync gagal');
+      setMessage(
+        result.message || (result.queued
+          ? 'Sync financial berhasil dimasukkan ke antrean.'
+          : 'Sync financial selesai.')
+      );
     } catch (e: any) {
       setMessage('Sync error: ' + e.message);
     }

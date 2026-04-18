@@ -1,59 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
-import {
-  fetchAllAccountsInsights,
-  checkTokenHealth,
-  getYesterdayWIB,
-  type MetaAdAccount,
-  type DailyAdSpendRow,
-} from '@/lib/meta-marketing';
+import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 
+export const maxDuration = 60;
 
-function getServiceSupabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    { auth: { autoRefreshToken: false, persistSession: false } }
-  );
-}
-
-export const maxDuration = 250;
-
-/**
- * GET handler — called by Vercel Cron (`vercel.json`).
- * Syncs last 3 days to self-heal any gaps from missed cron runs.
- * The delete-before-insert pattern in POST ensures no duplicates.
- */
-export async function GET(req: NextRequest) {
+function getCronDateRange() {
   const now = new Date();
   const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
   const end = new Date(wib);
-  end.setDate(end.getDate() - 1); // yesterday WIB
+  end.setDate(end.getDate() - 1);
   const start = new Date(wib);
-  start.setDate(start.getDate() - 3); // 3 days ago WIB
+  start.setDate(start.getDate() - 3);
 
-  const url = new URL(req.url);
-  url.searchParams.set('date_start', start.toISOString().split('T')[0]);
-  url.searchParams.set('date_end', end.toISOString().split('T')[0]);
-
-  const proxyReq = new NextRequest(url, {
-    method: 'POST',
-    headers: req.headers,
-  });
-  return POST(proxyReq);
+  return {
+    date_start: start.toISOString().split('T')[0],
+    date_end: end.toISOString().split('T')[0],
+  };
 }
 
-export async function POST(req: NextRequest) {
+function resolveDateRange(req: NextRequest, method: 'GET' | 'POST') {
+  const { searchParams } = new URL(req.url);
+  const defaultRange = method === 'GET' ? getCronDateRange() : null;
+
+  return {
+    date_start: searchParams.get('date_start') || defaultRange?.date_start || null,
+    date_end: searchParams.get('date_end') || defaultRange?.date_end || searchParams.get('date_start') || null,
+  };
+}
+
+async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
   const startTime = Date.now();
   const requestId = getRequestId(req);
-  let dateStart = getYesterdayWIB();
-  let dateEnd = dateStart;
-  let logId: number | null = null;
   const authHeader = req.headers.get('authorization');
   const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
-  const mode = isCron ? 'cron_post' : 'dashboard_post';
+  const mode = isCron ? `cron_${method.toLowerCase()}` : `dashboard_${method.toLowerCase()}`;
+  let requestedBy: string | null = null;
 
   logRouteEvent({
     route: '/api/meta-sync',
@@ -64,10 +46,10 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    // ── Auth: same pattern as /api/sync ──
     if (!isCron) {
       try {
-        await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        const { profile } = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        requestedBy = profile.id;
       } catch (err: any) {
         const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
         logRouteEvent({
@@ -83,195 +65,73 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // ── Validate environment ──
-    const accessToken = process.env.META_ACCESS_TOKEN;
-    if (!accessToken) {
-      return NextResponse.json({ error: 'META_ACCESS_TOKEN not configured' }, { status: 500 });
-    }
-
-    const svc = getServiceSupabase();
-
-    // ── Determine date range ──
-    // Query params: ?date_start=YYYY-MM-DD&date_end=YYYY-MM-DD
-    // Default: yesterday only
-    const { searchParams } = new URL(req.url);
-    dateStart = searchParams.get('date_start') || getYesterdayWIB();
-    dateEnd = searchParams.get('date_end') || dateStart;
-
-    // ── Check token health (non-blocking warning) ──
-    let tokenWarning: string | null = null;
-    const appId = process.env.META_APP_ID;
-    const appSecret = process.env.META_APP_SECRET;
-    if (appId && appSecret) {
-      const health = await checkTokenHealth(accessToken, appId, appSecret);
-      if (health) {
-        tokenWarning = health.warning;
-        console.warn(`[meta-sync] Token warning: ${health.warning}`);
-      }
-    }
-
-    // ── Get active Meta Ad Accounts ──
-    const { data: accounts, error: accountsError } = await svc
-      .from('meta_ad_accounts')
-      .select('*')
-      .eq('is_active', true);
-
-    if (accountsError) throw accountsError;
-    if (!accounts || accounts.length === 0) {
-      return NextResponse.json({
-        message: 'No active Meta ad accounts configured',
-        accounts_synced: 0,
-        rows_inserted: 0,
-      });
-    }
-
-    // ── Create sync log entry ──
-    const { data: logEntry, error: logError } = await svc
-      .from('meta_sync_log')
-      .insert({
-        sync_date: new Date().toISOString().split('T')[0],
-        date_range_start: dateStart,
-        date_range_end: dateEnd,
-        status: 'running',
-      })
-      .select('id')
-      .single();
-
-    if (logError) {
-      console.error('[meta-sync] Failed to create log entry:', logError);
-    }
-    logId = logEntry?.id ?? null;
-
-    // ── Fetch insights from Meta API ──
-    console.log(`[meta-sync] Fetching insights for ${accounts.length} accounts, range: ${dateStart} to ${dateEnd}`);
-
-    const results = await fetchAllAccountsInsights(
-      accounts as MetaAdAccount[],
-      dateStart,
-      dateEnd,
-      accessToken
-    );
-
-    // ── Replace per-account slices so failed accounts keep their previous data ──
-    const errors: string[] = [];
-    let accountsSynced = 0;
-    let rowsInserted = 0;
-    for (const result of results) {
-      if (result.error) {
-        errors.push(`${result.account_name}: ${result.error}`);
-        continue;
-      }
-
-      const { error: delError } = await svc
-        .from('daily_ads_spend')
-        .delete()
-        .gte('date', dateStart)
-        .lte('date', dateEnd)
-        .eq('data_source', 'meta_api')
-        .eq('ad_account', result.account_name);
-
-      if (delError) {
-        console.error(`[meta-sync] Delete error for ${result.account_name}:`, delError);
-        errors.push(`Delete ${result.account_name}: ${delError.message}`);
-        continue;
-      }
-
-      let accountInsertFailed = false;
-      for (let i = 0; i < result.rows.length; i += 500) {
-        const batch = result.rows.slice(i, i + 500);
-        const { error } = await svc.from('daily_ads_spend').insert(batch);
-        if (error) {
-          console.error(`[meta-sync] Insert batch error for ${result.account_name}:`, error);
-          errors.push(`Insert ${result.account_name} batch ${Math.floor(i / 500) + 1}: ${error.message}`);
-          accountInsertFailed = true;
-          break;
-        }
-        rowsInserted += batch.length;
-      }
-
-      if (!accountInsertFailed) {
-        accountsSynced++;
-      }
-    }
-
-
-
-    // ── Update sync log ──
-    const duration = Date.now() - startTime;
-    const status = errors.length === 0 ? 'success' : (accountsSynced > 0 ? 'partial' : 'failed');
-
-    if (logId) {
-      await svc.from('meta_sync_log').update({
-        accounts_synced: accountsSynced,
-        rows_inserted: rowsInserted,
-        status,
-        error_message: errors.length > 0 ? errors.join('; ') : null,
-        duration_ms: duration,
-      }).eq('id', logId);
-    }
-
-    console.log(`[meta-sync] Done: ${accountsSynced}/${accounts.length} accounts, ${rowsInserted} rows, ${duration}ms`);
-
-    const response = {
-      success: status !== 'failed',
-      status,
-      accounts_synced: accountsSynced,
-      accounts_total: accounts.length,
-      rows_inserted: rowsInserted,
-      date_range: { start: dateStart, end: dateEnd },
-      duration_ms: duration,
-      token_warning: tokenWarning,
-      errors: errors.length > 0 ? errors : undefined,
+    const payload = resolveDateRange(req, method);
+    const dedupePayload = {
+      date_start: payload.date_start || 'default',
+      date_end: payload.date_end || payload.date_start || 'default',
     };
+
+    const { job, isDuplicate } = await enqueueSyncJob({
+      jobName: 'meta_sync',
+      route: '/api/meta-sync',
+      mode: isCron ? 'cron' : 'manual',
+      payload,
+      dedupeKey: createSyncJobDedupeKey('meta_sync', isCron ? 'cron' : 'manual', dedupePayload),
+      requestedBy,
+      requestId,
+      maxAttempts: 3,
+      priority: isCron ? 30 : 40,
+    });
 
     logRouteEvent({
       route: '/api/meta-sync',
       job: 'meta_sync',
       mode,
-      status: status === 'failed' ? 'failed' : status === 'partial' ? 'partial' : 'success',
+      status: 'success',
       request_id: requestId,
-      duration_ms: duration,
-      rows_processed: rowsInserted,
+      duration_ms: Date.now() - startTime,
+      rows_processed: 1,
       extra: {
-        accounts_synced: accountsSynced,
-        accounts_total: accounts.length,
+        queued: true,
+        duplicate: isDuplicate,
+        job_id: job.id,
+        date_start: payload.date_start,
+        date_end: payload.date_end,
       },
     });
 
-    return NextResponse.json(response);
-
+    return NextResponse.json({
+      queued: true,
+      duplicate: isDuplicate,
+      job_id: job.id,
+      status: job.status,
+      date_range: {
+        start: payload.date_start,
+        end: payload.date_end || payload.date_start,
+      },
+      message: isDuplicate
+        ? 'Sync Meta dengan rentang tanggal ini sudah ada di antrean atau sedang berjalan.'
+        : 'Sync Meta berhasil dimasukkan ke antrean.',
+    }, { status: 202 });
   } catch (err: any) {
-    const duration = Date.now() - startTime;
     console.error('[meta-sync] Fatal error:', err);
-
-    // Try to log the failure
-    try {
-      const svc = getServiceSupabase();
-      const payload = {
-        sync_date: new Date().toISOString().split('T')[0],
-        date_range_start: dateStart,
-        date_range_end: dateEnd,
-        status: 'failed',
-        error_message: err.message,
-        duration_ms: duration,
-      };
-      if (logId) {
-        await svc.from('meta_sync_log').update(payload).eq('id', logId);
-      } else {
-        await svc.from('meta_sync_log').insert(payload);
-      }
-    } catch {}
-
     logRouteEvent({
       route: '/api/meta-sync',
       job: 'meta_sync',
       mode,
       status: 'failed',
       request_id: requestId,
-      duration_ms: duration,
+      duration_ms: Date.now() - startTime,
       extra: { error: err.message },
     });
-
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
+}
+
+export async function GET(req: NextRequest) {
+  return queueMetaSync(req, 'GET');
+}
+
+export async function POST(req: NextRequest) {
+  return queueMetaSync(req, 'POST');
 }

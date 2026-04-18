@@ -1,12 +1,11 @@
-// app/api/warehouse-sync/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
-import { triggerWarehouseSync } from '@/lib/warehouse-actions';
+import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 
-export const maxDuration = 250;
+export const maxDuration = 60;
 
-async function runWarehouseSync(request: NextRequest, method: 'GET' | 'POST') {
+async function queueWarehouseSync(request: NextRequest, method: 'GET' | 'POST') {
   const startTime = Date.now();
   const requestId = getRequestId(request);
   const authHeader = request.headers.get('authorization');
@@ -17,6 +16,7 @@ async function runWarehouseSync(request: NextRequest, method: 'GET' | 'POST') {
     (method === 'GET' && secret === cronSecret)
   );
   const mode = `${isCron ? 'cron' : 'dashboard'}_${method.toLowerCase()}`;
+  let requestedBy: string | null = null;
 
   logRouteEvent({
     route: '/api/warehouse-sync',
@@ -28,7 +28,8 @@ async function runWarehouseSync(request: NextRequest, method: 'GET' | 'POST') {
 
   if (!isCron) {
     try {
-      await requireDashboardPermissionAccess('admin:warehouse', 'Admin Warehouse');
+      const { profile } = await requireDashboardPermissionAccess('admin:warehouse', 'Admin Warehouse');
+      requestedBy = profile.id;
     } catch (err: any) {
       const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
       logRouteEvent({
@@ -45,21 +46,43 @@ async function runWarehouseSync(request: NextRequest, method: 'GET' | 'POST') {
   }
 
   try {
-    const result = await triggerWarehouseSync({ skipAuth: true });
+    const queueMode = isCron ? 'cron' : 'manual';
+    const { job, isDuplicate } = await enqueueSyncJob({
+      jobName: 'warehouse_sync',
+      route: '/api/warehouse-sync',
+      mode: queueMode,
+      payload: {},
+      dedupeKey: createSyncJobDedupeKey('warehouse_sync', queueMode, {}),
+      requestedBy,
+      requestId,
+      maxAttempts: 3,
+      priority: isCron ? 35 : 45,
+    });
+
     logRouteEvent({
       route: '/api/warehouse-sync',
       job: 'warehouse_sync',
       mode,
-      status: result.failed > 0 ? 'partial' : 'success',
+      status: 'success',
       request_id: requestId,
       duration_ms: Date.now() - startTime,
-      rows_processed: result.results.length,
+      rows_processed: 1,
       extra: {
-        synced: result.synced,
-        failed: result.failed,
+        queued: true,
+        duplicate: isDuplicate,
+        job_id: job.id,
       },
     });
-    return NextResponse.json(result);
+
+    return NextResponse.json({
+      queued: true,
+      duplicate: isDuplicate,
+      job_id: job.id,
+      status: job.status,
+      message: isDuplicate
+        ? 'Sync warehouse sudah ada di antrean atau sedang berjalan.'
+        : 'Sync warehouse berhasil dimasukkan ke antrean.',
+    }, { status: 202 });
   } catch (err: any) {
     console.error('[Warehouse Sync API] Error:', err);
     logRouteEvent({
@@ -76,9 +99,9 @@ async function runWarehouseSync(request: NextRequest, method: 'GET' | 'POST') {
 }
 
 export async function POST(request: NextRequest) {
-  return runWarehouseSync(request, 'POST');
+  return queueWarehouseSync(request, 'POST');
 }
 
 export async function GET(request: NextRequest) {
-  return runWarehouseSync(request, 'GET');
+  return queueWarehouseSync(request, 'GET');
 }

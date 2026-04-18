@@ -318,13 +318,12 @@ export default function MetaManager() {
       if (!res.ok) {
         setMessage({ type: 'error', text: data.error || 'Sync gagal' });
       } else {
-        const msg = `Sync ${data.status}: ${data.accounts_synced}/${data.accounts_total} akun, ${data.rows_inserted} baris data`;
         setMessage({
-          type: data.status === 'failed' ? 'error' : 'success',
-          text: data.token_warning ? `${msg}. ⚠️ ${data.token_warning}` : msg,
+          type: 'success',
+          text: data.message || (data.queued
+            ? 'Sync Meta berhasil dimasukkan ke antrean.'
+            : 'Sync Meta selesai.'),
         });
-        invalidateAll();
-        await loadData();
       }
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message || 'Sync gagal' });

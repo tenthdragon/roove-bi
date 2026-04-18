@@ -104,8 +104,11 @@ export default function SheetManager() {
         throw new Error(result.error || `Sync failed (${res.status})`);
       }
 
-      setSuccess(`Sync selesai: ${result.synced} berhasil, ${result.failed} gagal`);
-      await loadConnections();
+      setSuccess(
+        result.message || (result.queued
+          ? 'Sync berhasil dimasukkan ke antrean.'
+          : 'Sync berhasil dijalankan.')
+      );
     } catch (err: any) {
       setError(`Sync gagal: ${err.message}`);
     } finally {

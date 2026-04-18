@@ -7,7 +7,6 @@ import {
   addWarehouseConnection,
   removeWarehouseConnection,
   toggleWarehouseConnection,
-  triggerWarehouseSync,
 } from '@/lib/warehouse-actions';
 
 interface Connection {
@@ -81,16 +80,16 @@ export default function WarehouseSheetManager() {
 
   async function handleSync() {
     setSyncing(true);
-    setMessage('Syncing warehouse data...');
+    setMessage('Mengirim sync warehouse ke antrean...');
     try {
-      const result = await triggerWarehouseSync();
-      const detail = result.results?.map((r: any) =>
-        r.success
-          ? `${r.label}: Summary ${r.summaryRows}, Daily ${r.dailyRows}, SO ${r.soRows} rows`
-          : `${r.label}: ${r.error}`
-      ).join('\n') || '';
-      setMessage(`Sync selesai: ${result.synced} berhasil, ${result.failed || 0} gagal\n${detail}`);
-      await loadConnections();
+      const res = await fetch('/api/warehouse-sync', { method: 'POST' });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || 'Sync gagal');
+      setMessage(
+        result.message || (result.queued
+          ? 'Sync warehouse berhasil dimasukkan ke antrean.'
+          : 'Sync warehouse selesai.')
+      );
     } catch (e: any) {
       setMessage('Sync error: ' + e.message);
     }

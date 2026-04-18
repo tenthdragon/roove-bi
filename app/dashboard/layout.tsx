@@ -114,16 +114,12 @@ function RefreshViewsButton() {
     if (sheetsRes.status === 'fulfilled') {
       const { ok, data } = sheetsRes.value;
       if (ok && !data.error) {
-        const synced = data.synced ?? 0;
-        const failed = data.failed ?? 0;
-        if (synced === 0 && failed === 0) {
-          setSteps(s => ({ ...s, sheets: 'skipped' }));
-          setStepMessages(s => ({ ...s, sheets: 'Tidak ada sheet aktif' }));
-        } else {
-          sheetsOk = true;
-          setSteps(s => ({ ...s, sheets: 'success' }));
-          setStepMessages(s => ({ ...s, sheets: `${synced} synced${failed > 0 ? `, ${failed} gagal` : ''}` }));
-        }
+        sheetsOk = true;
+        setSteps(s => ({ ...s, sheets: 'success' }));
+        setStepMessages(s => ({
+          ...s,
+          sheets: data.queued ? 'Masuk antrean' : (data.message || 'Dimulai'),
+        }));
       } else {
         setSteps(s => ({ ...s, sheets: 'error' }));
         setStepMessages(s => ({ ...s, sheets: data.error || data.message || 'Gagal' }));
@@ -137,20 +133,12 @@ function RefreshViewsButton() {
     if (metaRes.status === 'fulfilled') {
       const { ok, data } = metaRes.value;
       if (ok && !data.error) {
-        const rows = data.rows_inserted ?? 0;
-        const accts = data.accounts_synced ?? 0;
-        if (accts === 0 && rows === 0 && data.message) {
-          setSteps(s => ({ ...s, meta: 'skipped' }));
-          setStepMessages(s => ({ ...s, meta: 'Tidak ada akun aktif' }));
-        } else {
-          const metaFailed = data.status === 'failed';
-          metaOk = !metaFailed;
-          setSteps(s => ({ ...s, meta: metaFailed ? 'error' : 'success' }));
-          setStepMessages(s => ({
-            ...s,
-            meta: `${accts} akun, ${rows} baris${data.status === 'partial' ? ' (partial)' : ''}${data.token_warning ? ' ⚠️' : ''}`,
-          }));
-        }
+        metaOk = true;
+        setSteps(s => ({ ...s, meta: 'success' }));
+        setStepMessages(s => ({
+          ...s,
+          meta: data.queued ? 'Masuk antrean' : (data.message || 'Dimulai'),
+        }));
       } else {
         setSteps(s => ({ ...s, meta: 'error' }));
         setStepMessages(s => ({ ...s, meta: data.error || 'Gagal' }));
@@ -160,12 +148,18 @@ function RefreshViewsButton() {
       setStepMessages(s => ({ ...s, meta: 'Network error' }));
     }
 
-    // Done — summary tables are updated automatically via triggers
+    // Done — the heavy syncs now continue in the queue worker.
     setStatus(sheetsOk || metaOk ? 'success' : 'error');
     if (sheetsOk || metaOk) {
-      setTimeout(() => window.location.reload(), 1200);
+      setTimeout(() => {
+        setStatus('idle');
+        setShowDetail(false);
+      }, 1800);
     } else {
-      setTimeout(() => setStatus('idle'), 4000);
+      setTimeout(() => {
+        setStatus('idle');
+        setShowDetail(false);
+      }, 4000);
     }
   };
 
@@ -219,7 +213,7 @@ function RefreshViewsButton() {
       <button
         onClick={handleRefresh}
         disabled={status === 'loading'}
-        title="Sync semua data & refresh dashboard"
+        title="Masukkan sync Google Sheets dan Meta ke antrean"
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           width: 34, height: 34, borderRadius: 8,

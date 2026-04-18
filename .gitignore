@@ -38,7 +38,8 @@ supabase/migrations/007_validation_queries.sql
 .claude/
 
 # temp scripts
-scripts/
+scripts/*
+!scripts/sync-jobs-worker.ts
 
 # docs
 docs/

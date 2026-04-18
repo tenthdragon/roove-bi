@@ -1,12 +1,11 @@
-// app/api/financial-sync/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
-import { triggerFinancialSync } from '@/lib/financial-actions';
+import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 
-export const maxDuration = 120; // Allow up to 2 minutes for parsing
+export const maxDuration = 60;
 
-async function runFinancialSync(request: NextRequest, method: 'GET' | 'POST') {
+async function queueFinancialSync(request: NextRequest, method: 'GET' | 'POST') {
   const startTime = Date.now();
   const requestId = getRequestId(request);
   const authHeader = request.headers.get('authorization');
@@ -17,6 +16,7 @@ async function runFinancialSync(request: NextRequest, method: 'GET' | 'POST') {
     (method === 'GET' && secret === cronSecret)
   );
   const mode = `${isCron ? 'cron' : 'dashboard'}_${method.toLowerCase()}`;
+  let requestedBy: string | null = null;
 
   logRouteEvent({
     route: '/api/financial-sync',
@@ -28,7 +28,8 @@ async function runFinancialSync(request: NextRequest, method: 'GET' | 'POST') {
 
   if (!isCron) {
     try {
-      await requireDashboardPermissionAccess('admin:financial', 'Admin Financial');
+      const { profile } = await requireDashboardPermissionAccess('admin:financial', 'Admin Financial');
+      requestedBy = profile.id;
     } catch (err: any) {
       const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
       logRouteEvent({
@@ -45,21 +46,43 @@ async function runFinancialSync(request: NextRequest, method: 'GET' | 'POST') {
   }
 
   try {
-    const result = await triggerFinancialSync({ skipAuth: true });
+    const queueMode = isCron ? 'cron' : 'manual';
+    const { job, isDuplicate } = await enqueueSyncJob({
+      jobName: 'financial_sync',
+      route: '/api/financial-sync',
+      mode: queueMode,
+      payload: {},
+      dedupeKey: createSyncJobDedupeKey('financial_sync', queueMode, {}),
+      requestedBy,
+      requestId,
+      maxAttempts: 3,
+      priority: isCron ? 35 : 45,
+    });
+
     logRouteEvent({
       route: '/api/financial-sync',
       job: 'financial_sync',
       mode,
-      status: result.failed > 0 ? 'partial' : 'success',
+      status: 'success',
       request_id: requestId,
       duration_ms: Date.now() - startTime,
-      rows_processed: result.results.length,
+      rows_processed: 1,
       extra: {
-        synced: result.synced,
-        failed: result.failed,
+        queued: true,
+        duplicate: isDuplicate,
+        job_id: job.id,
       },
     });
-    return NextResponse.json(result);
+
+    return NextResponse.json({
+      queued: true,
+      duplicate: isDuplicate,
+      job_id: job.id,
+      status: job.status,
+      message: isDuplicate
+        ? 'Sync financial sudah ada di antrean atau sedang berjalan.'
+        : 'Sync financial berhasil dimasukkan ke antrean.',
+    }, { status: 202 });
   } catch (err: any) {
     console.error('[Financial Sync API] Error:', err);
     logRouteEvent({
@@ -76,10 +99,9 @@ async function runFinancialSync(request: NextRequest, method: 'GET' | 'POST') {
 }
 
 export async function POST(request: NextRequest) {
-  return runFinancialSync(request, 'POST');
+  return queueFinancialSync(request, 'POST');
 }
 
-// GET endpoint for cron jobs
 export async function GET(request: NextRequest) {
-  return runFinancialSync(request, 'GET');
+  return queueFinancialSync(request, 'GET');
 }
