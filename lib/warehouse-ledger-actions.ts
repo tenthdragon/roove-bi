@@ -4837,6 +4837,16 @@ export async function updateWarehouseBusinessMapping(id: number, field: string, 
 
   if (field === 'is_primary') {
     if (normalizedValue) {
+      const existingPrimaryIds = (await listWarehouseBusinessMappingsForCode(svc, beforeRow.business_code))
+        .filter((row) => Number(row.id) !== Number(id) && Boolean(row.is_primary))
+        .map((row) => Number(row.id));
+      if (existingPrimaryIds.length > 0) {
+        const { error } = await svc
+          .from('warehouse_business_mapping')
+          .update({ is_primary: false })
+          .in('id', existingPrimaryIds);
+        if (error) throw error;
+      }
       const { error } = await svc
         .from('warehouse_business_mapping')
         .update({ is_primary: true, is_active: true })
