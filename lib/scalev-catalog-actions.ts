@@ -10,6 +10,10 @@ import { recordWarehouseActivityLog } from '@/lib/warehouse-activity-log-actions
 const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
 const SCALEV_PAGE_SIZE = 50;
 const UPSERT_CHUNK_SIZE = 200;
+const SCALEV_REQUEST_SPACING_MS = 250;
+const SCALEV_ENDPOINT_SPACING_MS = 750;
+const SCALEV_MAX_RETRIES = 4;
+const SCALEV_RETRY_BASE_MS = 1_500;
 
 export type ScalevCatalogView = 'products' | 'variants' | 'bundles' | 'identifiers';
 
@@ -219,6 +223,33 @@ function sanitizeSearchTerm(value: string | undefined): string | null {
   return cleaned ? `%${cleaned}%` : null;
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseRetryAfterMs(headerValue: string | null): number | null {
+  if (!headerValue) return null;
+
+  const seconds = Number(headerValue);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const targetMs = Date.parse(headerValue);
+  if (!Number.isFinite(targetMs)) return null;
+
+  return Math.max(0, targetMs - Date.now());
+}
+
+function getScalevRetryDelayMs(response: Response, attempt: number): number {
+  const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
+  if (retryAfterMs != null && retryAfterMs > 0) {
+    return retryAfterMs;
+  }
+
+  return SCALEV_RETRY_BASE_MS * Math.max(1, attempt + 1);
+}
+
 function buildCrossBusinessSummary(
   businessCode: string,
   presenceRows: Array<{ business_code: string | null | undefined }>,
@@ -342,15 +373,28 @@ async function fetchScalevPaginatedResults<T>(
     let url = `${SCALEV_BASE_URL}/${path}?page_size=${pageSize}`;
     if (lastId > 0) url += `&last_id=${lastId}`;
 
-    const response = await fetch(url, {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
-      cache: 'no-store',
-    });
+    let response: Response | null = null;
 
-    if (!response.ok) {
-      throw new Error(`Scalev API error ${response.status} for ${path}`);
+    for (let attempt = 0; attempt <= SCALEV_MAX_RETRIES; attempt += 1) {
+      response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+        },
+        cache: 'no-store',
+      });
+
+      if (response.ok) break;
+
+      const shouldRetry = response.status === 429 || response.status >= 500;
+      if (!shouldRetry || attempt === SCALEV_MAX_RETRIES) {
+        throw new Error(`Scalev API error ${response.status} for ${path}`);
+      }
+
+      await sleep(getScalevRetryDelayMs(response, attempt));
+    }
+
+    if (!response || !response.ok) {
+      throw new Error(`Scalev API error saat membaca ${path}`);
     }
 
     const json = await response.json();
@@ -362,6 +406,10 @@ async function fetchScalevPaginatedResults<T>(
     allResults.push(...pageResults);
     hasNext = Boolean(json.data?.has_next);
     lastId = Number(json.data?.last_id || 0);
+
+    if (hasNext) {
+      await sleep(SCALEV_REQUEST_SPACING_MS);
+    }
   }
 
   return allResults;
@@ -789,10 +837,9 @@ async function performScalevCatalogSync(
 
   try {
     const syncAt = new Date().toISOString();
-    const [products, bundles] = await Promise.all([
-      fetchScalevPaginatedResults<ScalevProductApi>(business.api_key, 'products'),
-      fetchScalevPaginatedResults<ScalevBundleApi>(business.api_key, 'bundles/simplified'),
-    ]);
+    const products = await fetchScalevPaginatedResults<ScalevProductApi>(business.api_key, 'products');
+    await sleep(SCALEV_ENDPOINT_SPACING_MS);
+    const bundles = await fetchScalevPaginatedResults<ScalevBundleApi>(business.api_key, 'bundles/simplified');
 
     const payload = buildCatalogPayload(business, products, bundles, syncAt);
 
