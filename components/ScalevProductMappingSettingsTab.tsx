@@ -166,6 +166,15 @@ function formatBusinessTarget(target: ScalevCatalogMappingPayload['business_targ
   return `${target.deduct_entity}${target.deduct_warehouse ? ` • ${target.deduct_warehouse}` : ''}`;
 }
 
+function formatBusinessTargets(targets: ScalevCatalogMappingPayload['business_targets'] | undefined) {
+  const activeTargets = (targets || []).filter((target) => target?.is_active && target.deduct_entity);
+  if (activeTargets.length === 0) return 'Belum ada target deduct';
+
+  const primaryTarget = activeTargets.find((target) => target.is_primary) || activeTargets[0];
+  const label = formatBusinessTarget(primaryTarget);
+  return activeTargets.length > 1 ? `${label} +${activeTargets.length - 1}` : label;
+}
+
 function toWarehouseProductLite(product: any) {
   if (!product?.id) return null;
   return {
@@ -323,8 +332,7 @@ export default function ScalevProductMappingSettingsTab() {
     const query = productSearch.trim().toLowerCase();
     if (!query) return [];
 
-    const targetEntity = mappingData?.business_target?.deduct_entity || null;
-    const targetWarehouse = mappingData?.business_target?.deduct_warehouse || null;
+    const targets = mappingData?.business_targets || [];
 
     return [...products]
       .filter((product) => {
@@ -341,13 +349,22 @@ export default function ScalevProductMappingSettingsTab() {
         return haystack.includes(query);
       })
       .sort((left, right) => {
-        const leftBoost = (left.entity === targetEntity ? 2 : 0) + (left.warehouse === targetWarehouse ? 1 : 0);
-        const rightBoost = (right.entity === targetEntity ? 2 : 0) + (right.warehouse === targetWarehouse ? 1 : 0);
+        const getBoost = (product: any) => (
+          targets.reduce((best, target) => {
+            const allowedBoost = (product.entity === target.deduct_entity ? 2 : 0) + (product.warehouse === target.deduct_warehouse ? 1 : 0);
+            const primaryBoost = target.is_primary
+              ? (product.entity === target.deduct_entity ? 0.5 : 0) + (product.warehouse === target.deduct_warehouse ? 0.25 : 0)
+              : 0;
+            return Math.max(best, allowedBoost + primaryBoost);
+          }, 0)
+        );
+        const leftBoost = getBoost(left);
+        const rightBoost = getBoost(right);
         if (rightBoost !== leftBoost) return rightBoost - leftBoost;
         return left.name.localeCompare(right.name);
       })
       .slice(0, 12);
-  }, [mappingData?.business_target?.deduct_entity, mappingData?.business_target?.deduct_warehouse, productSearch, products]);
+  }, [mappingData?.business_targets, productSearch, products]);
 
   const warehouseProductById = useMemo(() => {
     const nextMap = new Map<number, ReturnType<typeof toWarehouseProductLite>>();
@@ -503,12 +520,20 @@ export default function ScalevProductMappingSettingsTab() {
               border: '1px solid var(--border)',
             }}
           >
-            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 4 }}>Target deduct default</div>
+            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 4 }}>Gudang diizinkan</div>
             <div style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13 }}>
-              {formatBusinessTarget(mappingData?.business_target || null)}
+              {formatBusinessTargets(mappingData?.business_targets)}
             </div>
             {mappingData?.business_target?.notes ? (
               <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>{mappingData.business_target.notes}</div>
+            ) : null}
+            {mappingData?.business_targets && mappingData.business_targets.length > 1 ? (
+              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4, lineHeight: 1.5 }}>
+                {mappingData.business_targets
+                  .filter((target) => target?.is_active && target.deduct_entity)
+                  .map((target) => `${target.is_primary ? 'Utama' : 'Tambahan'}: ${formatBusinessTarget(target)}`)
+                  .join(' • ')}
+              </div>
             ) : null}
           </div>
         </div>

@@ -80,6 +80,15 @@ function formatBusinessTarget(target: ScalevBundleMappingPayload['business_targe
   return `${target.deduct_entity}${target.deduct_warehouse ? ` • ${target.deduct_warehouse}` : ''}`;
 }
 
+function formatBusinessTargets(targets: ScalevBundleMappingPayload['business_targets'] | undefined) {
+  const activeTargets = (targets || []).filter((target) => target?.is_active && target.deduct_entity);
+  if (activeTargets.length === 0) return 'Belum ada target deduct';
+
+  const primaryTarget = activeTargets.find((target) => target.is_primary) || activeTargets[0];
+  const label = formatBusinessTarget(primaryTarget);
+  return activeTargets.length > 1 ? `${label} +${activeTargets.length - 1}` : label;
+}
+
 function formatDateTime(value: string | null | undefined) {
   if (!value) return '-';
   try {
@@ -367,8 +376,16 @@ export default function ScalevBundleMappingSettingsTab() {
               {selectedBusiness?.business_name || 'Pilih business'}
             </div>
             <div style={{ marginTop: 6, fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
-              Target deduct: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{formatBusinessTarget(payload?.business_target || null)}</span>
+              Gudang diizinkan: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{formatBusinessTargets(payload?.business_targets)}</span>
             </div>
+            {payload?.business_targets && payload.business_targets.length > 1 ? (
+              <div style={{ marginTop: 4, fontSize: 11, color: 'var(--dim)', lineHeight: 1.6 }}>
+                {payload.business_targets
+                  .filter((target) => target?.is_active && target.deduct_entity)
+                  .map((target) => `${target.is_primary ? 'Utama' : 'Tambahan'}: ${formatBusinessTarget(target)}`)
+                  .join(' • ')}
+              </div>
+            ) : null}
             <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
               Bundle lines tersimpan: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{payload?.bundle_lines_count || 0}</span>
               {' '}• Sync terakhir: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{formatDateTime(payload?.bundle_lines_last_synced_at)}</span>

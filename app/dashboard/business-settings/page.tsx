@@ -20,6 +20,7 @@ import {
   getWarehouseBusinessMappings,
   updateWarehouseBusinessMapping,
   createWarehouseBusinessMapping,
+  removeWarehouseBusinessMapping,
 } from '@/lib/warehouse-ledger-actions';
 
 // ── Types ──
@@ -51,6 +52,7 @@ type WarehouseMapping = {
   deduct_entity: string;
   deduct_warehouse: string;
   is_active: boolean;
+  is_primary: boolean;
   notes: string | null;
 };
 
@@ -96,6 +98,29 @@ function formatTime(iso: string | null): string {
   return d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
+function sortWarehouseMappings(rows: WarehouseMapping[]) {
+  return [...rows].sort((left, right) => {
+    if (Boolean(left.is_primary) !== Boolean(right.is_primary)) return left.is_primary ? -1 : 1;
+    if (Boolean(left.is_active) !== Boolean(right.is_active)) return left.is_active ? -1 : 1;
+    const leftLabel = `${left.deduct_entity}|${left.deduct_warehouse}`;
+    const rightLabel = `${right.deduct_entity}|${right.deduct_warehouse}`;
+    return leftLabel.localeCompare(rightLabel);
+  });
+}
+
+function formatWarehouseSummary(rows: WarehouseMapping[]) {
+  const activeRows = sortWarehouseMappings(rows.filter(row => row.is_active));
+  if (activeRows.length === 0) {
+    return rows.length > 0 ? 'Gudang nonaktif' : 'Gudang: Belum';
+  }
+
+  const primary = activeRows.find(row => row.is_primary) || activeRows[0];
+  const primaryLabel = `${primary.deduct_warehouse}-${primary.deduct_entity}`;
+  return activeRows.length > 1
+    ? `${primaryLabel} +${activeRows.length - 1}`
+    : primaryLabel;
+}
+
 const inputStyle = {
   width: '100%', padding: '8px 12px', borderRadius: 8,
   border: '1px solid var(--border)', background: 'var(--bg)',
@@ -131,6 +156,7 @@ export default function BusinessSettingsPage() {
 
   // Warehouse entities (for dropdown)
   const [warehouseEntities, setWarehouseEntities] = useState<string[]>([]);
+  const [warehouseCodes, setWarehouseCodes] = useState<string[]>([]);
 
   // ── Load all data ──
   async function loadAll() {
@@ -147,17 +173,20 @@ export default function BusinessSettingsPage() {
       // Get distinct entities from warehouse_products
       const { data: entityData, error: entityError } = await supabase
         .from('warehouse_products')
-        .select('entity')
+        .select('entity, warehouse')
         .order('entity');
       if (entityError) throw entityError;
       const entities = [...new Set((entityData || []).map(e => e.entity))].filter(Boolean);
+      const warehouses = [...new Set((entityData || []).map(e => e.warehouse))].filter(Boolean);
       setWarehouseEntities(entities);
+      setWarehouseCodes(warehouses.length > 0 ? warehouses : ['BTN']);
     } catch (err: any) {
       console.error('Failed to load:', err);
       setLoadError(err?.message || 'Gagal memuat Business Settings.');
       setBusinesses([]);
       setWarehouseMappings([]);
       setWarehouseEntities([]);
+      setWarehouseCodes(['BTN']);
     }
     setLoading(false);
   }
@@ -233,8 +262,8 @@ export default function BusinessSettingsPage() {
   }
 
   // ── Warehouse mapping ──
-  function getMapping(code: string) {
-    return warehouseMappings.find(m => m.business_code === code);
+  function getMappings(code: string) {
+    return sortWarehouseMappings(warehouseMappings.filter(m => m.business_code === code));
   }
 
   async function handleMappingChange(id: number, field: string, value: any) {
@@ -249,10 +278,32 @@ export default function BusinessSettingsPage() {
 
   async function handleCreateMapping(businessCode: string) {
     try {
-      const defaultEntity = warehouseEntities[0] || businessCode.slice(0, 3);
-      await createWarehouseBusinessMapping(businessCode, defaultEntity);
+      const existingMappings = getMappings(businessCode);
+      const existingKeys = new Set(existingMappings.map((mapping) => `${mapping.deduct_entity}|${mapping.deduct_warehouse}`));
+      const nextCandidate = warehouseEntities
+        .flatMap((entity) => warehouseCodes.map((warehouse) => ({ entity, warehouse })))
+        .find((candidate) => !existingKeys.has(`${candidate.entity}|${candidate.warehouse}`));
+
+      if (!nextCandidate) {
+        setMessage({ type: 'error', text: 'Semua kombinasi gudang yang tersedia sudah dipakai untuk business ini.' });
+        return;
+      }
+
+      const defaultEntity = nextCandidate.entity || businessCode.slice(0, 3);
+      const defaultWarehouse = nextCandidate.warehouse || 'BTN';
+      await createWarehouseBusinessMapping(businessCode, defaultEntity, defaultWarehouse);
       setWarehouseMappings(await getWarehouseBusinessMappings());
-      setMessage({ type: 'success', text: 'Warehouse mapping dibuat' });
+      setMessage({ type: 'success', text: 'Gudang business ditambahkan' });
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message });
+    }
+  }
+
+  async function handleRemoveMapping(id: number) {
+    try {
+      await removeWarehouseBusinessMapping(id);
+      setWarehouseMappings(await getWarehouseBusinessMappings());
+      setMessage({ type: 'success', text: 'Gudang business dihapus' });
     } catch (err: any) {
       setMessage({ type: 'error', text: err.message });
     }
@@ -431,7 +482,9 @@ export default function BusinessSettingsPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {businesses.map(biz => {
-            const mapping = getMapping(biz.business_code);
+            const mappings = getMappings(biz.business_code);
+            const primaryMapping = mappings.find((mapping) => mapping.is_primary) || mappings[0] || null;
+            const activeMappings = mappings.filter((mapping) => mapping.is_active);
             const isExpanded = expandedBiz === biz.id;
 
             return (
@@ -458,8 +511,8 @@ export default function BusinessSettingsPage() {
                       API {biz.has_api_key ? 'Connected' : 'Belum'}
                     </span>
                     {/* Warehouse */}
-                    <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: mapping ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: mapping ? 'var(--green)' : 'var(--red)' }}>
-                      {mapping ? `${mapping.deduct_warehouse}-${mapping.deduct_entity}` : 'Gudang: Belum'}
+                    <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: activeMappings.length > 0 ? 'var(--badge-green-bg)' : mappings.length > 0 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)', color: activeMappings.length > 0 ? 'var(--green)' : mappings.length > 0 ? 'var(--yellow)' : 'var(--red)' }}>
+                      {formatWarehouseSummary(mappings)}
                     </span>
                   </div>
                   {/* Expand arrow */}
@@ -518,33 +571,83 @@ export default function BusinessSettingsPage() {
                       {/* Gudang */}
                       <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', marginBottom: 10, textTransform: 'uppercase' }}>Gudang</div>
-                        {mapping ? (
-                          <>
-                            <div style={{ fontSize: 12, marginBottom: 6 }}>
-                              <span style={{ color: 'var(--dim)' }}>Deduct dari:</span>
-                            </div>
-                            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-                              <select value={mapping.deduct_entity} onChange={e => handleMappingChange(mapping.id, 'deduct_entity', e.target.value)}
-                                style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
-                                {warehouseEntities.map(e => <option key={e} value={e}>{e}</option>)}
-                                {!warehouseEntities.includes(mapping.deduct_entity) && <option value={mapping.deduct_entity}>{mapping.deduct_entity}</option>}
-                              </select>
-                              <span style={{ fontSize: 11, color: 'var(--dim)' }}>WH: {mapping.deduct_warehouse}</span>
-                              <span onClick={() => handleMappingChange(mapping.id, 'is_active', !mapping.is_active)}
-                                style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: 'pointer', background: mapping.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: mapping.is_active ? 'var(--green)' : 'var(--red)' }}>
-                                {mapping.is_active ? 'Active' : 'Inactive'}
-                              </span>
-                            </div>
-                          </>
-                        ) : (
-                          <div>
-                            <div style={{ fontSize: 12, color: 'var(--yellow)', marginBottom: 8 }}>Belum ada mapping gudang</div>
-                            <button onClick={() => handleCreateMapping(biz.business_code)}
-                              style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--accent)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
-                              Buat Mapping
-                            </button>
+                        <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6, marginBottom: 10 }}>
+                          Gudang yang diizinkan untuk business ini. Resolver akan tetap strict dan hanya menerima produk yang jatuh ke salah satu target di bawah.
+                        </div>
+
+                        {mappings.length > 0 ? (
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            {mappings.map((mapping) => (
+                              <div
+                                key={mapping.id}
+                                style={{
+                                  display: 'grid',
+                                  gap: 8,
+                                  padding: 10,
+                                  borderRadius: 8,
+                                  border: `1px solid ${mapping.is_primary ? 'rgba(59,130,246,0.35)' : 'var(--border)'}`,
+                                  background: mapping.is_primary ? 'rgba(37,99,235,0.08)' : 'var(--card)',
+                                }}
+                              >
+                                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                  <select value={mapping.deduct_entity} onChange={e => handleMappingChange(mapping.id, 'deduct_entity', e.target.value)}
+                                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                                    {warehouseEntities.map(entity => <option key={entity} value={entity}>{entity}</option>)}
+                                    {!warehouseEntities.includes(mapping.deduct_entity) && <option value={mapping.deduct_entity}>{mapping.deduct_entity}</option>}
+                                  </select>
+                                  <select value={mapping.deduct_warehouse} onChange={e => handleMappingChange(mapping.id, 'deduct_warehouse', e.target.value)}
+                                    style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                                    {warehouseCodes.map(warehouse => <option key={warehouse} value={warehouse}>{warehouse}</option>)}
+                                    {!warehouseCodes.includes(mapping.deduct_warehouse) && <option value={mapping.deduct_warehouse}>{mapping.deduct_warehouse}</option>}
+                                  </select>
+                                  <span onClick={() => handleMappingChange(mapping.id, 'is_active', !mapping.is_active)}
+                                    style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, cursor: 'pointer', background: mapping.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: mapping.is_active ? 'var(--green)' : 'var(--red)' }}>
+                                    {mapping.is_active ? 'Active' : 'Inactive'}
+                                  </span>
+                                  <span
+                                    onClick={() => !mapping.is_primary && handleMappingChange(mapping.id, 'is_primary', true)}
+                                    style={{
+                                      padding: '2px 8px',
+                                      borderRadius: 4,
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      cursor: mapping.is_primary ? 'default' : 'pointer',
+                                      background: mapping.is_primary ? 'rgba(37,99,235,0.18)' : 'var(--bg)',
+                                      color: mapping.is_primary ? '#93c5fd' : 'var(--dim)',
+                                      border: `1px solid ${mapping.is_primary ? 'rgba(96,165,250,0.45)' : 'var(--border)'}`,
+                                    }}
+                                  >
+                                    {mapping.is_primary ? 'Utama' : 'Jadikan Utama'}
+                                  </span>
+                                  <button
+                                    onClick={() => handleRemoveMapping(mapping.id)}
+                                    style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--red)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
+                                  >
+                                    Hapus
+                                  </button>
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.6 }}>
+                                  {mapping.is_primary
+                                    ? 'Gudang utama untuk fallback dan anchor operasional.'
+                                    : `Diizinkan sebagai warehouse tambahan untuk ${biz.business_code}.`}
+                                  {mapping.notes ? ` ${mapping.notes}` : ''}
+                                </div>
+                              </div>
+                            ))}
                           </div>
+                        ) : (
+                          <div style={{ fontSize: 12, color: 'var(--yellow)', marginBottom: 8 }}>Belum ada gudang yang diizinkan.</div>
                         )}
+
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
+                          <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+                            Utama sekarang: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{primaryMapping ? `${primaryMapping.deduct_entity} • ${primaryMapping.deduct_warehouse}` : 'Belum ada'}</span>
+                          </div>
+                          <button onClick={() => handleCreateMapping(biz.business_code)}
+                            style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--accent)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+                            + Tambah Gudang
+                          </button>
+                        </div>
                       </div>
                     </div>
 

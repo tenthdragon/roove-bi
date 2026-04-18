@@ -29,6 +29,7 @@ type BusinessTarget = {
   deduct_entity: string | null;
   deduct_warehouse: string | null;
   is_active: boolean;
+  is_primary?: boolean | null;
   notes: string | null;
 };
 
@@ -106,6 +107,7 @@ export type ScalevBundleMappingPayload = {
   business_id: number;
   business_code: string;
   business_target: BusinessTarget | null;
+  business_targets: BusinessTarget[];
   bundle_lines_count: number;
   bundle_lines_last_synced_at: string | null;
   schema_message: string | null;
@@ -145,6 +147,23 @@ function normalizeIdentifier(value: string) {
     .trim()
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ');
+}
+
+function normalizeBusinessTargetRow(row: any): BusinessTarget {
+  return {
+    deduct_entity: row?.deduct_entity || null,
+    deduct_warehouse: row?.deduct_warehouse || null,
+    is_active: Boolean(row?.is_active),
+    is_primary: Boolean(row?.is_primary),
+    notes: row?.notes || null,
+  };
+}
+
+function pickPrimaryBusinessTarget(targets: BusinessTarget[]): BusinessTarget | null {
+  return targets.find((target) => target.is_primary && target.is_active)
+    || targets.find((target) => target.is_active)
+    || targets[0]
+    || null;
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -813,10 +832,11 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
     businessCode
       ? svc
           .from('warehouse_business_mapping')
-          .select('deduct_entity, deduct_warehouse, is_active, notes')
+          .select('deduct_entity, deduct_warehouse, is_active, is_primary, notes')
           .eq('business_code', businessCode)
-          .maybeSingle()
-      : Promise.resolve({ data: null, error: null }),
+          .order('is_primary', { ascending: false })
+          .order('id', { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (bundleError) {
@@ -835,14 +855,8 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
   if (identifierError) throw identifierError;
   if (targetError) throw targetError;
 
-  const businessTarget: BusinessTarget | null = businessTargetRow
-    ? {
-        deduct_entity: businessTargetRow.deduct_entity || null,
-        deduct_warehouse: businessTargetRow.deduct_warehouse || null,
-        is_active: Boolean(businessTargetRow.is_active),
-        notes: businessTargetRow.notes || null,
-      }
-    : null;
+  const businessTargets = ((businessTargetRow || []) as any[]).map((row) => normalizeBusinessTargetRow(row));
+  const businessTarget = pickPrimaryBusinessTarget(businessTargets);
 
   const identifiersByBundleKey = new Map<string, string[]>();
   for (const row of (identifiers || []) as any[]) {
@@ -1090,6 +1104,7 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
     business_id: businessId,
     business_code: businessCode,
     business_target: businessTarget,
+    business_targets: businessTargets,
     bundle_lines_count: (bundleLines || []).length,
     bundle_lines_last_synced_at: lastSyncedAt,
     schema_message: schemaMessage,

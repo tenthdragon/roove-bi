@@ -125,8 +125,9 @@ export async function saveWebhookBusiness(input: {
         deduct_entity: defaultEntity,
         deduct_warehouse: 'BTN',
         is_active: true,
+        is_primary: true,
         notes: 'Auto-created',
-      }, { onConflict: 'business_code', ignoreDuplicates: true });
+      }, { onConflict: 'business_code,deduct_entity,deduct_warehouse' });
   }
 
   return { success: true };

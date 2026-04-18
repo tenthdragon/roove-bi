@@ -248,12 +248,17 @@ interface ScalevOrderWarehouseAssessment {
   unmappedProducts: string[];
   skippedIgnored: number;
   mapping: { deduct_entity: string; deduct_warehouse: string } | null;
+  allowedMappings?: Array<{ deduct_entity: string; deduct_warehouse: string }> | null;
 }
 
 interface WarehouseBusinessTargetRow {
+  id?: number;
   business_code: string;
   deduct_entity: string;
   deduct_warehouse: string | null;
+  is_active?: boolean | null;
+  is_primary?: boolean | null;
+  notes?: string | null;
 }
 
 interface WarehouseScalevMappingRow {
@@ -319,6 +324,13 @@ interface WarehouseScalevCatalogMappingRow {
   scalev_entity_key: string;
   scalev_entity_type?: 'product' | 'variant' | null;
   warehouse_product_id: number | null;
+  warehouse_products?: {
+    id: number;
+    name: string | null;
+    entity: string | null;
+    warehouse: string | null;
+    scalev_product_names?: string[] | null;
+  } | null;
 }
 
 interface ScalevCatalogEntityOwnerLookups {
@@ -331,6 +343,8 @@ interface WarehouseCatalogResolvedTarget {
   quantity_multiplier: number;
   scalev_label: string;
   note_suffix: string;
+  entity?: string | null;
+  warehouse?: string | null;
 }
 
 interface WarehouseStockReclassRequestInput {
@@ -565,6 +579,74 @@ function formatAuditWarehouseProductLabel(product: any) {
   return `${product.name} [${product.warehouse || '-'}-${product.entity || '-'}]`;
 }
 
+function normalizeBusinessTargetWarehouse(value: string | null | undefined) {
+  return value || 'BTN';
+}
+
+type WarehouseBusinessTargetLike = {
+  deduct_entity: string;
+  deduct_warehouse: string | null;
+};
+
+function formatBusinessTargetLabel(target: WarehouseBusinessTargetLike) {
+  return `${target.deduct_entity} • ${normalizeBusinessTargetWarehouse(target.deduct_warehouse)}`;
+}
+
+function pickPrimaryBusinessTarget(
+  mappings: WarehouseBusinessTargetRow[],
+): WarehouseBusinessTargetRow | null {
+  if (mappings.length === 0) return null;
+  return mappings.find((mapping) => Boolean(mapping.is_primary))
+    || mappings[0]
+    || null;
+}
+
+function formatBusinessTargetSummary(mappings: WarehouseBusinessTargetLike[]) {
+  if (mappings.length === 0) return '-';
+  const uniqueLabels = Array.from(new Set(
+    mappings.map((mapping) => formatBusinessTargetLabel(mapping)),
+  ));
+  return uniqueLabels.length === 1
+    ? uniqueLabels[0]
+    : uniqueLabels.join(', ');
+}
+
+function buildAllowedWarehouseTargetSet(mappings: WarehouseBusinessTargetRow[]) {
+  return new Set(
+    mappings.map((mapping) => (
+      `${mapping.deduct_entity}|${normalizeBusinessTargetWarehouse(mapping.deduct_warehouse)}`
+    )),
+  );
+}
+
+function groupBusinessMappingsByCode(mappings: WarehouseBusinessTargetRow[]) {
+  const byCode = new Map<string, WarehouseBusinessTargetRow[]>();
+  for (const mapping of mappings) {
+    if (!byCode.has(mapping.business_code)) byCode.set(mapping.business_code, []);
+    byCode.get(mapping.business_code)!.push(mapping);
+  }
+
+  for (const [businessCode, rows] of Array.from(byCode.entries())) {
+    byCode.set(businessCode, rows.sort((left, right) => {
+      if (Boolean(left.is_primary) !== Boolean(right.is_primary)) return left.is_primary ? -1 : 1;
+      return Number(left.id || 0) - Number(right.id || 0);
+    }));
+  }
+
+  return byCode;
+}
+
+function isWarehouseTargetAllowed(
+  entity: string | null | undefined,
+  warehouse: string | null | undefined,
+  mappings: WarehouseBusinessTargetRow[],
+) {
+  if (mappings.length === 0) return false;
+  return buildAllowedWarehouseTargetSet(mappings).has(
+    `${entity || ''}|${normalizeBusinessTargetWarehouse(warehouse)}`,
+  );
+}
+
 function aggregateTargetsByProduct(targets: ResolvedWarehouseTarget[]) {
   const grouped = new Map<number, number>();
   for (const target of targets) {
@@ -646,14 +728,17 @@ async function resolveWarehouseTargetsForOrder(
     };
   }
 
-  const { data: mapping, error: mappingErr } = await svc
+  const { data: mappingRowsData, error: mappingErr } = await svc
     .from('warehouse_business_mapping')
-    .select('deduct_entity, deduct_warehouse')
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
     .eq('business_code', order.business_code)
     .eq('is_active', true)
-    .maybeSingle();
+    .order('is_primary', { ascending: false })
+    .order('id', { ascending: true });
   if (mappingErr) throw mappingErr;
-  if (!mapping) {
+  const mappings = ((mappingRowsData || []) as WarehouseBusinessTargetRow[]);
+  const primaryMapping = pickPrimaryBusinessTarget(mappings);
+  if (!primaryMapping) {
     return {
       productLines,
       targets: [] as ResolvedWarehouseTarget[],
@@ -661,6 +746,7 @@ async function resolveWarehouseTargetsForOrder(
       unmappedProducts: productLines.map(line => line.product_name),
       skippedIgnored: 0,
       mapping: null,
+      allowedMappings: [],
     };
   }
 
@@ -718,9 +804,12 @@ async function resolveWarehouseTargetsForOrder(
       continue;
     }
 
-    const targetNoteBase = `${order.business_code}\u2192${mapping.deduct_entity}`;
-    if (catalogTargets && catalogTargets.length > 0) {
-      for (const catalogTarget of catalogTargets) {
+    const targetNoteBase = `${order.business_code}\u2192${formatBusinessTargetSummary(mappings)}`;
+    const allowedCatalogTargets = (catalogTargets || []).filter((catalogTarget) => (
+      isWarehouseTargetAllowed(catalogTarget.entity, catalogTarget.warehouse, mappings)
+    ));
+    if (allowedCatalogTargets.length > 0) {
+      for (const catalogTarget of allowedCatalogTargets) {
         targets.push({
           warehouse_product_id: Number(catalogTarget.warehouse_product_id),
           scalev_product_name: catalogTarget.scalev_label,
@@ -728,6 +817,10 @@ async function resolveWarehouseTargetsForOrder(
           note_context: `${targetNoteBase} via ${catalogTarget.note_suffix}`,
         });
       }
+      continue;
+    }
+    if (catalogTargets && catalogTargets.length > 0) {
+      unmappedProducts.push(line.product_name);
       continue;
     }
 
@@ -740,24 +833,26 @@ async function resolveWarehouseTargetsForOrder(
       && !isSuspiciousLegacyScalevTarget({
         scalevProductName: line.product_name,
         mapping: scalevMapping,
-        deductEntity: mapping.deduct_entity,
-        deductWarehouse: mapping.deduct_warehouse,
+        allowedTargets: mappings,
       })
     ) {
       targetProductId = Number(scalevMapping.warehouse_product_id);
       deductQty = Number(line.quantity) * Number(scalevMapping.deduct_qty_multiplier || 1);
       targetNote = `${targetNote} via legacy`;
     } else {
-      const { data: whProducts, error: whProductsErr } = await svc
-        .rpc('warehouse_find_product_for_deduction', {
-          p_scalev_name: line.product_name,
-          p_entity: mapping.deduct_entity,
-          p_warehouse: mapping.deduct_warehouse,
-        });
-      if (whProductsErr) throw whProductsErr;
-      if (whProducts && whProducts.length > 0) {
-        targetProductId = Number(whProducts[0].id);
-        targetNote = `${targetNote} via fallback`;
+      for (const allowedMapping of mappings) {
+        const { data: whProducts, error: whProductsErr } = await svc
+          .rpc('warehouse_find_product_for_deduction', {
+            p_scalev_name: line.product_name,
+            p_entity: allowedMapping.deduct_entity,
+            p_warehouse: allowedMapping.deduct_warehouse || 'BTN',
+          });
+        if (whProductsErr) throw whProductsErr;
+        if (whProducts && whProducts.length > 0) {
+          targetProductId = Number(whProducts[0].id);
+          targetNote = `${targetNote} via fallback:${allowedMapping.deduct_entity}`;
+          break;
+        }
       }
     }
 
@@ -779,7 +874,14 @@ async function resolveWarehouseTargetsForOrder(
     desiredByProduct: aggregateTargetsByProduct(targets),
     unmappedProducts,
     skippedIgnored,
-    mapping,
+    mapping: {
+      deduct_entity: primaryMapping.deduct_entity,
+      deduct_warehouse: primaryMapping.deduct_warehouse || 'BTN',
+    },
+    allowedMappings: mappings.map((row) => ({
+      deduct_entity: row.deduct_entity,
+      deduct_warehouse: row.deduct_warehouse || 'BTN',
+    })),
   };
 }
 
@@ -1027,9 +1129,12 @@ function buildWarehouseIssueSummary(assessment: ScalevOrderWarehouseAssessment) 
   }
 
   if (assessment.unmappedProducts.length > 0) {
+    const mappingSummary = formatBusinessTargetSummary(assessment.allowedMappings || []);
     return {
       problem: 'no_product_mapping',
-      problem_detail: `Produk tidak ditemukan di gudang ${assessment.mapping.deduct_entity}: ${assessment.unmappedProducts.join(', ')}`,
+      problem_detail: mappingSummary
+        ? `Produk tidak ditemukan di gudang yang diizinkan (${mappingSummary}): ${assessment.unmappedProducts.join(', ')}`
+        : `Produk tidak ditemukan di gudang ${assessment.mapping.deduct_entity}: ${assessment.unmappedProducts.join(', ')}`,
     };
   }
 
@@ -1092,15 +1197,20 @@ function isSuspiciousLegacyScalevTarget(args: {
   mapping: WarehouseScalevMappingRow | null | undefined;
   deductEntity?: string | null;
   deductWarehouse?: string | null;
+  allowedTargets?: WarehouseBusinessTargetRow[] | null;
 }) {
   const target = args.mapping?.warehouse_products;
   if (!target) return false;
 
-  if (args.deductEntity && target.entity && target.entity !== args.deductEntity) {
+  if (args.allowedTargets && args.allowedTargets.length > 0) {
+    if (!isWarehouseTargetAllowed(target.entity, target.warehouse, args.allowedTargets)) {
+      return true;
+    }
+  } else if (args.deductEntity && target.entity && target.entity !== args.deductEntity) {
     return true;
   }
 
-  if (args.deductWarehouse && target.warehouse && target.warehouse !== args.deductWarehouse) {
+  if (!args.allowedTargets?.length && args.deductWarehouse && target.warehouse && target.warehouse !== args.deductWarehouse) {
     return true;
   }
 
@@ -1290,6 +1400,8 @@ function resolveCatalogWarehouseTargetsForLine(args: {
       quantity_multiplier: 1,
       scalev_label: args.line.product_name,
       note_suffix: `catalog:${identifierRow.source}`,
+      entity: mappingRow.warehouse_products?.entity || null,
+      warehouse: mappingRow.warehouse_products?.warehouse || null,
     }] as WarehouseCatalogResolvedTarget[];
   };
 
@@ -1346,6 +1458,8 @@ function resolveCatalogWarehouseTargetsForLine(args: {
         note_suffix: mappingRow.business_code && mappingRow.business_id !== args.businessId
           ? `catalog:${identifierRow.source}:${mappingRow.business_code}`
           : `catalog:${identifierRow.source}`,
+        entity: mappingRow.warehouse_products?.entity || null,
+        warehouse: mappingRow.warehouse_products?.warehouse || null,
       });
     }
 
@@ -1380,6 +1494,7 @@ function buildWarehouseIssueSummaryFromState(args: {
   productLines: ScalevOrderLineForWarehouse[];
   unmappedProducts: string[];
   mapping: { deduct_entity: string; deduct_warehouse: string } | null;
+  allowedMappings?: Array<{ deduct_entity: string; deduct_warehouse: string }> | null;
 }) {
   if (!args.mapping) {
     return {
@@ -1396,9 +1511,12 @@ function buildWarehouseIssueSummaryFromState(args: {
   }
 
   if (args.unmappedProducts.length > 0) {
+    const allowedSummary = (args.allowedMappings || []).length > 0
+      ? ` Target diizinkan: ${(args.allowedMappings || []).map(formatBusinessTargetLabel).join(', ')}.`
+      : '';
     return {
       problem: 'no_product_mapping',
-      problem_detail: `Produk tidak ditemukan di gudang ${args.mapping.deduct_entity}: ${args.unmappedProducts.join(', ')}`,
+      problem_detail: `Produk tidak ditemukan di gudang ${formatBusinessTargetLabel(args.mapping)}: ${args.unmappedProducts.join(', ')}.${allowedSummary}`.replace(/\.\s+Target/, '. Target'),
     };
   }
 
@@ -1477,14 +1595,19 @@ async function fetchBusinessMappingsByCodes(
   for (const chunk of chunkArray(businessCodes, 200)) {
     const { data, error } = await svc
       .from('warehouse_business_mapping')
-      .select('business_code, deduct_entity, deduct_warehouse')
+      .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
       .eq('is_active', true)
       .in('business_code', chunk);
     if (error) throw error;
     rows.push(...((data || []) as WarehouseBusinessTargetRow[]));
   }
 
-  return rows;
+  return rows.sort((left, right) => {
+    const businessCompare = String(left.business_code || '').localeCompare(String(right.business_code || ''));
+    if (businessCompare !== 0) return businessCompare;
+    if (Boolean(left.is_primary) !== Boolean(right.is_primary)) return left.is_primary ? -1 : 1;
+    return Number(left.id || 0) - Number(right.id || 0);
+  });
 }
 
 async function fetchScalevCatalogBusinessesByCodes(
@@ -1766,7 +1889,14 @@ async function fetchScalevCatalogMappingsByBusinesses(
     for (const chunk of chunkArray(entityKeyList, 500)) {
       const { data, error } = await svc
         .from('warehouse_scalev_catalog_mapping')
-        .select('business_id, business_code, scalev_entity_key, scalev_entity_type, warehouse_product_id')
+        .select(`
+          business_id,
+          business_code,
+          scalev_entity_key,
+          scalev_entity_type,
+          warehouse_product_id,
+          warehouse_products(id, name, entity, warehouse, scalev_product_names)
+        `)
         .eq('business_id', businessId)
         .in('scalev_entity_key', chunk)
         .not('warehouse_product_id', 'is', null);
@@ -1774,7 +1904,30 @@ async function fetchScalevCatalogMappingsByBusinesses(
         if (isMissingWarehouseTableError(error)) return [];
         throw error;
       }
-      rows.push(...((data || []) as WarehouseScalevCatalogMappingRow[]));
+      rows.push(...((data || []).map((row: any) => {
+        const rawWarehouseProduct = Array.isArray(row.warehouse_products)
+          ? row.warehouse_products[0] || null
+          : row.warehouse_products || null;
+
+        return {
+          business_id: Number(row.business_id),
+          business_code: row.business_code || null,
+          scalev_entity_key: row.scalev_entity_key,
+          scalev_entity_type: row.scalev_entity_type || null,
+          warehouse_product_id: row.warehouse_product_id != null ? Number(row.warehouse_product_id) : null,
+          warehouse_products: rawWarehouseProduct
+            ? {
+                id: Number(rawWarehouseProduct.id),
+                name: rawWarehouseProduct.name || null,
+                entity: rawWarehouseProduct.entity || null,
+                warehouse: rawWarehouseProduct.warehouse || null,
+                scalev_product_names: Array.isArray(rawWarehouseProduct.scalev_product_names)
+                  ? rawWarehouseProduct.scalev_product_names
+                  : [],
+              }
+            : null,
+        } as WarehouseScalevCatalogMappingRow;
+      })));
     }
   }
 
@@ -4567,13 +4720,100 @@ export async function syncScalevProductNames() {
 // WAREHOUSE BUSINESS MAPPING
 // ============================================================
 
+type WarehouseBusinessMappingAuditRow = {
+  id: number;
+  business_code: string;
+  deduct_entity: string;
+  deduct_warehouse: string | null;
+  is_active: boolean | null;
+  is_primary: boolean | null;
+  notes: string | null;
+};
+
+function normalizeWarehouseBusinessAuditRow(row: Partial<WarehouseBusinessMappingAuditRow> | null | undefined) {
+  return {
+    business_code: row?.business_code || null,
+    deduct_entity: row?.deduct_entity || null,
+    deduct_warehouse: row?.deduct_warehouse || null,
+    is_active: Boolean(row?.is_active),
+    is_primary: Boolean(row?.is_primary),
+    notes: row?.notes || null,
+  };
+}
+
+async function listWarehouseBusinessMappingsForCode(
+  svc: ReturnType<typeof createServiceSupabase>,
+  businessCode: string,
+): Promise<WarehouseBusinessMappingAuditRow[]> {
+  const { data, error } = await svc
+    .from('warehouse_business_mapping')
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
+    .eq('business_code', businessCode)
+    .order('is_primary', { ascending: false })
+    .order('is_active', { ascending: false })
+    .order('id', { ascending: true });
+  if (error) throw error;
+  return (data || []) as WarehouseBusinessMappingAuditRow[];
+}
+
+async function ensurePrimaryWarehouseBusinessMapping(
+  svc: ReturnType<typeof createServiceSupabase>,
+  businessCode: string,
+  preferredId?: number | null,
+) {
+  const rows = await listWarehouseBusinessMappingsForCode(svc, businessCode);
+  const activeRows = rows.filter((row) => Boolean(row.is_active));
+
+  if (activeRows.length === 0) {
+    const primaryIds = rows.filter((row) => Boolean(row.is_primary)).map((row) => Number(row.id));
+    if (primaryIds.length > 0) {
+      const { error } = await svc
+        .from('warehouse_business_mapping')
+        .update({ is_primary: false })
+        .in('id', primaryIds);
+      if (error) throw error;
+    }
+    return null;
+  }
+
+  const preferredRow = preferredId
+    ? activeRows.find((row) => Number(row.id) === Number(preferredId)) || null
+    : null;
+  const existingPrimary = activeRows.find((row) => Boolean(row.is_primary)) || null;
+  const desiredPrimary = preferredRow || existingPrimary || activeRows[0];
+
+  const idsToClear = rows
+    .filter((row) => Number(row.id) !== Number(desiredPrimary.id) && Boolean(row.is_primary))
+    .map((row) => Number(row.id));
+  if (idsToClear.length > 0) {
+    const { error } = await svc
+      .from('warehouse_business_mapping')
+      .update({ is_primary: false })
+      .in('id', idsToClear);
+    if (error) throw error;
+  }
+
+  if (!desiredPrimary.is_primary) {
+    const { error } = await svc
+      .from('warehouse_business_mapping')
+      .update({ is_primary: true })
+      .eq('id', desiredPrimary.id);
+    if (error) throw error;
+  }
+
+  return desiredPrimary;
+}
+
 export async function getWarehouseBusinessMappings() {
   await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_business_mapping')
     .select('*, scalev_webhook_businesses!inner(business_name)')
-    .order('business_code');
+    .order('business_code', { ascending: true })
+    .order('is_primary', { ascending: false })
+    .order('is_active', { ascending: false })
+    .order('id', { ascending: true });
   if (error) throw error;
   return data || [];
 }
@@ -4583,44 +4823,66 @@ export async function updateWarehouseBusinessMapping(id: number, field: string, 
   const svc = createServiceSupabase();
   const { data: beforeRow, error: beforeError } = await svc
     .from('warehouse_business_mapping')
-    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, notes')
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
     .eq('id', id)
     .maybeSingle();
   if (beforeError) throw beforeError;
   if (!beforeRow) throw new Error('Business mapping tidak ditemukan.');
 
-  const { error } = await svc
-    .from('warehouse_business_mapping')
-    .update({ [field]: value })
-    .eq('id', id);
-  if (error) throw error;
+  const normalizedValue = field === 'deduct_warehouse'
+    ? String(value || 'BTN').trim().toUpperCase() || 'BTN'
+    : field === 'deduct_entity'
+      ? String(value || '').trim().toUpperCase()
+      : value;
+
+  if (field === 'is_primary') {
+    if (normalizedValue) {
+      const { error } = await svc
+        .from('warehouse_business_mapping')
+        .update({ is_primary: true, is_active: true })
+        .eq('id', id);
+      if (error) throw error;
+      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, id);
+    } else {
+      const { error } = await svc
+        .from('warehouse_business_mapping')
+        .update({ is_primary: false })
+        .eq('id', id);
+      if (error) throw error;
+      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code);
+    }
+  } else {
+    const updatePayload: Record<string, any> = { [field]: normalizedValue };
+    const { error } = await svc
+      .from('warehouse_business_mapping')
+      .update(updatePayload)
+      .eq('id', id);
+    if (error) throw error;
+
+    if (field === 'is_active' && !normalizedValue && beforeRow.is_primary) {
+      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code);
+    } else if (field === 'is_active' && normalizedValue) {
+      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, beforeRow.is_primary ? id : null);
+    } else if (field === 'deduct_entity' || field === 'deduct_warehouse') {
+      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, beforeRow.is_primary ? id : null);
+    }
+  }
 
   const { data: afterRow, error: afterError } = await svc
     .from('warehouse_business_mapping')
-    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, notes')
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
     .eq('id', id)
     .maybeSingle();
   if (afterError) throw afterError;
   if (!afterRow) return;
 
-  const beforeState = {
-    business_code: beforeRow.business_code,
-    deduct_entity: beforeRow.deduct_entity || null,
-    deduct_warehouse: beforeRow.deduct_warehouse || null,
-    is_active: Boolean(beforeRow.is_active),
-    notes: beforeRow.notes || null,
-  };
-  const afterState = {
-    business_code: afterRow.business_code,
-    deduct_entity: afterRow.deduct_entity || null,
-    deduct_warehouse: afterRow.deduct_warehouse || null,
-    is_active: Boolean(afterRow.is_active),
-    notes: afterRow.notes || null,
-  };
+  const beforeState = normalizeWarehouseBusinessAuditRow(beforeRow);
+  const afterState = normalizeWarehouseBusinessAuditRow(afterRow);
   const changedFields = getAuditChangedFields(beforeState, afterState, [
     'deduct_entity',
     'deduct_warehouse',
     'is_active',
+    'is_primary',
     'notes',
   ]);
   if (changedFields.length === 0) return;
@@ -4646,59 +4908,115 @@ export async function updateWarehouseBusinessMapping(id: number, field: string, 
 export async function createWarehouseBusinessMapping(businessCode: string, deductEntity: string, deductWarehouse = 'BTN') {
   await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
   const svc = createServiceSupabase();
-  const { data: beforeRow, error: beforeError } = await svc
-    .from('warehouse_business_mapping')
-    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, notes')
-    .eq('business_code', businessCode)
-    .maybeSingle();
-  if (beforeError) throw beforeError;
+  const normalizedBusinessCode = String(businessCode || '').trim().toUpperCase();
+  const normalizedEntity = String(deductEntity || '').trim().toUpperCase();
+  const normalizedWarehouse = String(deductWarehouse || 'BTN').trim().toUpperCase() || 'BTN';
+
+  if (!normalizedBusinessCode) {
+    throw new Error('Business code tidak valid.');
+  }
+  if (!normalizedEntity) {
+    throw new Error('Entity gudang tidak valid.');
+  }
+
+  const beforeRows = await listWarehouseBusinessMappingsForCode(svc, normalizedBusinessCode);
+  const beforeRow = beforeRows.find((row) => (
+    row.deduct_entity === normalizedEntity
+    && normalizeBusinessTargetWarehouse(row.deduct_warehouse) === normalizedWarehouse
+  )) || null;
+  const shouldBecomePrimary = beforeRows.filter((row) => Boolean(row.is_active)).length === 0;
 
   const { error } = await svc
     .from('warehouse_business_mapping')
     .upsert({
-      business_code: businessCode,
-      deduct_entity: deductEntity,
-      deduct_warehouse: deductWarehouse,
+      business_code: normalizedBusinessCode,
+      deduct_entity: normalizedEntity,
+      deduct_warehouse: normalizedWarehouse,
       is_active: true,
-    }, { onConflict: 'business_code', ignoreDuplicates: true });
+      is_primary: beforeRow ? beforeRow.is_primary : shouldBecomePrimary,
+    }, { onConflict: 'business_code,deduct_entity,deduct_warehouse' });
   if (error) throw error;
 
   const { data: afterRow, error: afterError } = await svc
     .from('warehouse_business_mapping')
-    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, notes')
-    .eq('business_code', businessCode)
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
+    .eq('business_code', normalizedBusinessCode)
+    .eq('deduct_entity', normalizedEntity)
+    .eq('deduct_warehouse', normalizedWarehouse)
     .maybeSingle();
   if (afterError) throw afterError;
   if (!afterRow) return;
+
+  if (shouldBecomePrimary || beforeRow?.is_primary) {
+    await ensurePrimaryWarehouseBusinessMapping(svc, normalizedBusinessCode, Number(afterRow.id));
+  } else {
+    await ensurePrimaryWarehouseBusinessMapping(svc, normalizedBusinessCode);
+  }
+
+  const { data: refreshedAfterRow, error: refreshedAfterError } = await svc
+    .from('warehouse_business_mapping')
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
+    .eq('id', afterRow.id)
+    .maybeSingle();
+  if (refreshedAfterError) throw refreshedAfterError;
+  if (!refreshedAfterRow) return;
 
   await recordWarehouseActivityLog({
     scope: 'warehouse_business_mapping',
     action: beforeRow ? 'upsert' : 'create',
     screen: 'Mapping Business Warehouse',
     summary: beforeRow
-      ? `Memastikan mapping business ${businessCode} tetap aktif`
-      : `Membuat mapping business ${businessCode} ke ${deductEntity} • ${deductWarehouse}`,
+      ? `Memastikan mapping business ${normalizedBusinessCode} tetap aktif`
+      : `Menambahkan gudang ${normalizedEntity} • ${normalizedWarehouse} untuk business ${normalizedBusinessCode}`,
     targetType: 'business_code',
-    targetId: String(afterRow.id),
-    targetLabel: businessCode,
-    businessCode,
+    targetId: String(refreshedAfterRow.id),
+    targetLabel: normalizedBusinessCode,
+    businessCode: normalizedBusinessCode,
     changedFields: beforeRow
       ? getAuditChangedFields(
-          {
-            deduct_entity: beforeRow.deduct_entity || null,
-            deduct_warehouse: beforeRow.deduct_warehouse || null,
-            is_active: Boolean(beforeRow.is_active),
-          },
-          {
-            deduct_entity: afterRow.deduct_entity || null,
-            deduct_warehouse: afterRow.deduct_warehouse || null,
-            is_active: Boolean(afterRow.is_active),
-          },
-          ['deduct_entity', 'deduct_warehouse', 'is_active'],
+          normalizeWarehouseBusinessAuditRow(beforeRow),
+          normalizeWarehouseBusinessAuditRow(refreshedAfterRow),
+          ['deduct_entity', 'deduct_warehouse', 'is_active', 'is_primary'],
         )
-      : ['deduct_entity', 'deduct_warehouse', 'is_active'],
-    beforeState: beforeRow || {},
-    afterState: afterRow,
+      : ['deduct_entity', 'deduct_warehouse', 'is_active', 'is_primary'],
+    beforeState: normalizeWarehouseBusinessAuditRow(beforeRow),
+    afterState: normalizeWarehouseBusinessAuditRow(refreshedAfterRow),
+    context: {},
+  });
+}
+
+export async function removeWarehouseBusinessMapping(id: number) {
+  await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
+  const svc = createServiceSupabase();
+
+  const { data: beforeRow, error: beforeError } = await svc
+    .from('warehouse_business_mapping')
+    .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
+    .eq('id', id)
+    .maybeSingle();
+  if (beforeError) throw beforeError;
+  if (!beforeRow) throw new Error('Business mapping tidak ditemukan.');
+
+  const { error } = await svc
+    .from('warehouse_business_mapping')
+    .delete()
+    .eq('id', id);
+  if (error) throw error;
+
+  await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code);
+
+  await recordWarehouseActivityLog({
+    scope: 'warehouse_business_mapping',
+    action: 'delete',
+    screen: 'Mapping Business Warehouse',
+    summary: `Menghapus gudang ${beforeRow.deduct_entity} • ${normalizeBusinessTargetWarehouse(beforeRow.deduct_warehouse)} dari business ${beforeRow.business_code}`,
+    targetType: 'business_code',
+    targetId: String(beforeRow.id),
+    targetLabel: beforeRow.business_code,
+    businessCode: beforeRow.business_code,
+    changedFields: ['deduct_entity', 'deduct_warehouse', 'is_active', 'is_primary'],
+    beforeState: normalizeWarehouseBusinessAuditRow(beforeRow),
+    afterState: null,
     context: {},
   });
 }
@@ -4903,10 +5221,7 @@ export async function getUndeductedOrders(
     catalogEntityOwners,
   );
 
-  const businessMappingByCode = new Map<string, WarehouseBusinessTargetRow>();
-  for (const mapping of businessMappings) {
-    businessMappingByCode.set(mapping.business_code, mapping);
-  }
+  const businessMappingByCode = groupBusinessMappingsByCode(businessMappings);
 
   const catalogBusinessIdByCode = new Map<string, number>();
   for (const business of catalogBusinesses) {
@@ -4936,11 +5251,12 @@ export async function getUndeductedOrders(
 
   for (const order of orders) {
     const productLines = orderLinesByOrder.get(order.id) || [];
-    const mapping = order.business_code ? businessMappingByCode.get(order.business_code) || null : null;
+    const mappings = order.business_code ? businessMappingByCode.get(order.business_code) || [] : [];
+    const primaryMapping = pickPrimaryBusinessTarget(mappings);
     const desiredByProduct = new Map<number, number>();
     const unmappedProducts: string[] = [];
 
-    if (!mapping) {
+    if (!primaryMapping) {
       for (const line of productLines) {
         unmappedProducts.push(line.product_name);
       }
@@ -4957,14 +5273,21 @@ export async function getUndeductedOrders(
         const scalevMapping = scalevMappingByName.get(line.product_name);
         if ((!catalogTargets || catalogTargets.length === 0) && scalevMapping?.is_ignored) continue;
 
-        if (catalogTargets && catalogTargets.length > 0) {
-          for (const catalogTarget of catalogTargets) {
+        const allowedCatalogTargets = (catalogTargets || []).filter((catalogTarget) => (
+          isWarehouseTargetAllowed(catalogTarget.entity, catalogTarget.warehouse, mappings)
+        ));
+        if (allowedCatalogTargets.length > 0) {
+          for (const catalogTarget of allowedCatalogTargets) {
             const deductQty = Number(line.quantity) * Number(catalogTarget.quantity_multiplier || 1);
             desiredByProduct.set(
               catalogTarget.warehouse_product_id,
               (desiredByProduct.get(catalogTarget.warehouse_product_id) || 0) + deductQty,
             );
           }
+          continue;
+        }
+        if (catalogTargets && catalogTargets.length > 0) {
+          unmappedProducts.push(line.product_name);
           continue;
         }
 
@@ -4976,9 +5299,16 @@ export async function getUndeductedOrders(
         if (targetProductId != null) {
           deductQty = Number(line.quantity) * Number(scalevMapping?.deduct_qty_multiplier || 1);
         } else {
-          targetProductId = fallbackProductByKey.get(
-            buildWarehouseFallbackLookupKey(line.product_name, mapping.deduct_entity, mapping.deduct_warehouse || 'BTN'),
-          ) || null;
+          for (const allowedMapping of mappings) {
+            targetProductId = fallbackProductByKey.get(
+              buildWarehouseFallbackLookupKey(
+                line.product_name,
+                allowedMapping.deduct_entity,
+                allowedMapping.deduct_warehouse || 'BTN',
+              ),
+            ) || null;
+            if (targetProductId != null) break;
+          }
         }
 
         if (
@@ -4987,8 +5317,7 @@ export async function getUndeductedOrders(
           && isSuspiciousLegacyScalevTarget({
             scalevProductName: line.product_name,
             mapping: scalevMapping,
-            deductEntity: mapping.deduct_entity,
-            deductWarehouse: mapping.deduct_warehouse || 'BTN',
+            allowedTargets: mappings,
           })
         ) {
           targetProductId = null;
@@ -5003,7 +5332,7 @@ export async function getUndeductedOrders(
     }
 
     const outstanding = outstandingByOrder.get(order.order_id) || new Map<number, number>();
-    const hasIssue = !mapping
+    const hasIssue = !primaryMapping
       || productLines.length === 0
       || unmappedProducts.length > 0
       || !mapsEqualWithTolerance(outstanding, desiredByProduct);
@@ -5014,9 +5343,13 @@ export async function getUndeductedOrders(
       businessCode: order.business_code,
       productLines,
       unmappedProducts,
-      mapping: mapping
-        ? { deduct_entity: mapping.deduct_entity, deduct_warehouse: mapping.deduct_warehouse || 'BTN' }
+      mapping: primaryMapping
+        ? { deduct_entity: primaryMapping.deduct_entity, deduct_warehouse: primaryMapping.deduct_warehouse || 'BTN' }
         : null,
+      allowedMappings: mappings.map((mapping) => ({
+        deduct_entity: mapping.deduct_entity,
+        deduct_warehouse: mapping.deduct_warehouse || 'BTN',
+      })),
     });
 
     results.push({
