@@ -261,6 +261,13 @@ interface WarehouseScalevMappingRow {
   warehouse_product_id: number | null;
   deduct_qty_multiplier: number | null;
   is_ignored: boolean | null;
+  warehouse_products?: {
+    id: number;
+    name: string | null;
+    entity: string | null;
+    warehouse: string | null;
+    scalev_product_names?: string[] | null;
+  } | null;
 }
 
 interface WarehouseFallbackProductRow {
@@ -728,7 +735,15 @@ async function resolveWarehouseTargetsForOrder(
     let deductQty = Number(line.quantity);
     let targetNote = targetNoteBase;
 
-    if (scalevMapping?.warehouse_product_id) {
+    if (
+      scalevMapping?.warehouse_product_id
+      && !isSuspiciousLegacyScalevTarget({
+        scalevProductName: line.product_name,
+        mapping: scalevMapping,
+        deductEntity: mapping.deduct_entity,
+        deductWarehouse: mapping.deduct_warehouse,
+      })
+    ) {
       targetProductId = Number(scalevMapping.warehouse_product_id);
       deductQty = Number(line.quantity) * Number(scalevMapping.deduct_qty_multiplier || 1);
       targetNote = `${targetNote} via legacy`;
@@ -1049,6 +1064,57 @@ function normalizeScalevLegacyIdentifier(value: string | null | undefined) {
     .toLowerCase()
     .trim()
     .replace(/\s+/g, ' ');
+}
+
+function extractRooveLegacyVariantToken(value: string | null | undefined) {
+  const tokens = normalizeScalevRuntimeIdentifier(value)
+    .split(' ')
+    .map(token => token.trim())
+    .filter(Boolean);
+  if (tokens.length === 0) return null;
+
+  const rooveIndex = tokens.indexOf('roove');
+  if (rooveIndex === -1) return null;
+  if (!tokens.includes('sc') && !tokens.includes('sachet')) return null;
+
+  for (const token of tokens.slice(rooveIndex + 1)) {
+    if (!token) continue;
+    if (/^\d+$/.test(token)) continue;
+    if (token === 'sc' || token === 'sachet' || token === 'box') continue;
+    return token;
+  }
+
+  return null;
+}
+
+function isSuspiciousLegacyScalevTarget(args: {
+  scalevProductName: string;
+  mapping: WarehouseScalevMappingRow | null | undefined;
+  deductEntity?: string | null;
+  deductWarehouse?: string | null;
+}) {
+  const target = args.mapping?.warehouse_products;
+  if (!target) return false;
+
+  if (args.deductEntity && target.entity && target.entity !== args.deductEntity) {
+    return true;
+  }
+
+  if (args.deductWarehouse && target.warehouse && target.warehouse !== args.deductWarehouse) {
+    return true;
+  }
+
+  const sourceVariant = extractRooveLegacyVariantToken(args.scalevProductName);
+  if (!sourceVariant) return false;
+
+  const targetVariants = new Set(
+    [target.name, ...(target.scalev_product_names || [])]
+      .map(extractRooveLegacyVariantToken)
+      .filter((value): value is string => Boolean(value)),
+  );
+
+  if (targetVariants.size === 0) return true;
+  return !targetVariants.has(sourceVariant);
 }
 
 function getScalevIdentifierQueryCandidates(value: string | null | undefined) {
@@ -1453,10 +1519,38 @@ async function fetchScalevMappingsByProductNames(
   for (const chunk of chunkArray(productNames, 500)) {
     const { data, error } = await svc
       .from('warehouse_scalev_mapping')
-      .select('scalev_product_name, warehouse_product_id, deduct_qty_multiplier, is_ignored')
+      .select(`
+        scalev_product_name,
+        warehouse_product_id,
+        deduct_qty_multiplier,
+        is_ignored,
+        warehouse_products(id, name, entity, warehouse, scalev_product_names)
+      `)
       .in('scalev_product_name', chunk);
     if (error) throw error;
-    rows.push(...((data || []) as WarehouseScalevMappingRow[]));
+    rows.push(...((data || []).map((row: any) => {
+      const rawWarehouseProduct = Array.isArray(row.warehouse_products)
+        ? row.warehouse_products[0] || null
+        : row.warehouse_products || null;
+
+      return {
+        scalev_product_name: row.scalev_product_name,
+        warehouse_product_id: row.warehouse_product_id != null ? Number(row.warehouse_product_id) : null,
+        deduct_qty_multiplier: row.deduct_qty_multiplier != null ? Number(row.deduct_qty_multiplier) : null,
+        is_ignored: row.is_ignored ?? null,
+        warehouse_products: rawWarehouseProduct
+          ? {
+              id: Number(rawWarehouseProduct.id),
+              name: rawWarehouseProduct.name || null,
+              entity: rawWarehouseProduct.entity || null,
+              warehouse: rawWarehouseProduct.warehouse || null,
+              scalev_product_names: Array.isArray(rawWarehouseProduct.scalev_product_names)
+                ? rawWarehouseProduct.scalev_product_names
+                : [],
+            }
+          : null,
+      } as WarehouseScalevMappingRow;
+    })));
   }
 
   return rows;
@@ -3807,17 +3901,22 @@ export async function deductStockFifo(
 ) {
   const svc = createServiceSupabase();
 
-  // Lookup warehouse product by ScaleV name
-  const { data: products, error: lookupErr } = await svc
-    .rpc('warehouse_find_product_by_scalev_name', { p_scalev_name: scalevProductName });
-  if (lookupErr) throw lookupErr;
-  if (!products || products.length === 0) return null; // unmapped product, skip
-
-  const product = products[0];
+  // Deprecated compatibility helper: only allow an exact legacy mapping.
+  const legacyMappings = await fetchScalevMappingsByProductNames(svc, [scalevProductName]);
+  const mapping = legacyMappings.find((row) =>
+    row.scalev_product_name === scalevProductName
+    && row.warehouse_product_id != null
+    && !row.is_ignored
+    && !isSuspiciousLegacyScalevTarget({
+      scalevProductName,
+      mapping: row,
+    })
+  );
+  if (!mapping?.warehouse_product_id) return null;
 
   // Call FIFO deduction function
   const { data, error } = await callWarehouseDeductFifoCompat(svc, {
-    p_product_id: product.id,
+    p_product_id: Number(mapping.warehouse_product_id),
     p_quantity: quantity,
     p_reference_type: 'scalev_order',
     p_reference_id: scalevOrderId,
@@ -3825,7 +3924,7 @@ export async function deductStockFifo(
     p_scalev_order_id: scalevOrderDbId ?? null,
   });
   if (error) throw error;
-  return { product: product.name, deductions: data };
+  return { product: mapping.warehouse_products?.name || scalevProductName, deductions: data };
 }
 
 // ============================================================
@@ -3872,6 +3971,39 @@ async function reverseOutstandingWarehouseDeductions(
   }
 
   return reversed;
+}
+
+function buildScalevWarehouseLedgerNote(
+  target: ResolvedWarehouseTarget,
+  prefix: string = 'Auto',
+) {
+  return `${prefix}: ${target.scalev_product_name} x${target.quantity} [${target.note_context}]`;
+}
+
+async function applyScalevWarehouseTargets(
+  svc: ReturnType<typeof createServiceSupabase>,
+  order: ScalevOrderWarehouseSnapshot,
+  targets: ResolvedWarehouseTarget[],
+  notePrefix: string = 'Auto',
+) {
+  let deducted = 0;
+  const deductAt = order.shipped_time || order.completed_time || new Date().toISOString();
+
+  for (const target of targets) {
+    const { error } = await callWarehouseDeductFifoCompat(svc, {
+      p_product_id: target.warehouse_product_id,
+      p_quantity: target.quantity,
+      p_reference_type: 'scalev_order',
+      p_reference_id: order.order_id,
+      p_notes: buildScalevWarehouseLedgerNote(target, notePrefix),
+      p_created_at: deductAt,
+      p_scalev_order_id: order.id,
+    });
+    if (error) throw error;
+    deducted++;
+  }
+
+  return deducted;
 }
 
 export async function reverseWarehouseDeductions(
@@ -3947,21 +4079,7 @@ export async function reconcileScalevOrderWarehouse(orderId: string, scalevOrder
 
   if (assessment.unmappedProducts.length > 0) {
     if (assessment.outstandingGroups.length === 0 && assessment.targets.length > 0) {
-      let deducted = 0;
-      const deductAt = order.shipped_time || order.completed_time || new Date().toISOString();
-      for (const target of assessment.targets) {
-        const { error } = await callWarehouseDeductFifoCompat(svc, {
-          p_product_id: target.warehouse_product_id,
-          p_quantity: target.quantity,
-          p_reference_type: 'scalev_order',
-          p_reference_id: order.order_id,
-          p_notes: `Auto: ${target.scalev_product_name} x${target.quantity} [${target.note_context}]`,
-          p_created_at: deductAt,
-          p_scalev_order_id: order.id,
-        });
-        if (error) throw error;
-        deducted++;
-      }
+      const deducted = await applyScalevWarehouseTargets(svc, order, assessment.targets);
 
       return {
         action: 'partial',
@@ -4012,24 +4130,134 @@ export async function reconcileScalevOrderWarehouse(orderId: string, scalevOrder
     order,
   );
 
-  let deducted = 0;
-  const deductAt = order.shipped_time || order.completed_time || new Date().toISOString();
-  for (const target of assessment.targets) {
-    const { error } = await callWarehouseDeductFifoCompat(svc, {
-      p_product_id: target.warehouse_product_id,
-      p_quantity: target.quantity,
-      p_reference_type: 'scalev_order',
-      p_reference_id: order.order_id,
-      p_notes: `Auto: ${target.scalev_product_name} x${target.quantity} [${target.note_context}]`,
-      p_created_at: deductAt,
-      p_scalev_order_id: order.id,
-    });
-    if (error) throw error;
-    deducted++;
-  }
+  const deducted = await applyScalevWarehouseTargets(svc, order, assessment.targets);
 
   return {
     action: 'deducted',
+    reversed,
+    deducted,
+    skipped: assessment.skippedIgnored,
+    unmapped_products: [],
+  };
+}
+
+export async function repairPreGoLiveWrongAttributionOrder(orderId: string, scalevOrderDbId?: number | null) {
+  await requireWarehousePermission('wh:mapping_sync', 'Sync Deduction Gudang');
+  const svc = createServiceSupabase();
+  const order = await loadScalevOrderWarehouseSnapshot(svc, orderId, scalevOrderDbId);
+  if (!order) throw new Error(`Order ${orderId} tidak ditemukan`);
+
+  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  if (isWarehouseGoLiveActive(goLiveAt) && !isScalevOrderBeforeWarehouseGoLive(order, goLiveAt)) {
+    throw new Error(`Order ${orderId} bukan order pra-go-live.`);
+  }
+
+  const assessment = await assessScalevOrderWarehouseState(svc, order);
+  const isTerminal = isTerminalScalevOrderStatus(order.status);
+  if (!isTerminal) {
+    return {
+      action: 'skipped_non_terminal',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+    };
+  }
+
+  if (!assessment.mapping || assessment.productLines.length === 0) {
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+      ...buildWarehouseIssueSummary(assessment),
+    };
+  }
+
+  if (assessment.unmappedProducts.length > 0) {
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+      ...buildWarehouseIssueSummary(assessment),
+    };
+  }
+
+  if (assessment.targets.length === 0) {
+    return {
+      action: 'unchanged',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: [],
+    };
+  }
+
+  if (assessment.outstandingGroups.length === 0) {
+    return {
+      action: 'skipped_no_existing_ledger',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: [],
+    };
+  }
+
+  const alreadyMatched = mapsEqualWithTolerance(assessment.outstandingByProduct, assessment.desiredByProduct);
+  if (alreadyMatched) {
+    return {
+      action: 'unchanged',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: [],
+    };
+  }
+
+  const reversed = await reverseOutstandingWarehouseDeductions(
+    svc,
+    order.order_id,
+    order.id,
+    'Deduction lama dibatalkan karena target produk warehouse salah.',
+    order,
+  );
+  const deducted = await applyScalevWarehouseTargets(svc, order, assessment.targets, 'Repair pra-go-live');
+
+  await recordWarehouseActivityLog({
+    scope: 'pre_go_live_ledger_repair',
+    action: 'repair_wrong_attribution',
+    screen: 'Daily Summary',
+    summary: `Memperbaiki salah atribusi deduction order ${order.order_id}`,
+    targetType: 'scalev_order',
+    targetId: String(order.id),
+    targetLabel: order.order_id,
+    businessCode: order.business_code || null,
+    changedFields: ['warehouse_deduction'],
+    beforeState: {
+      outstanding_by_product: Object.fromEntries(assessment.outstandingByProduct.entries()),
+    },
+    afterState: {
+      desired_by_product: Object.fromEntries(assessment.desiredByProduct.entries()),
+    },
+    context: {
+      reversed,
+      deducted,
+      shipped_time: order.shipped_time || null,
+      completed_time: order.completed_time || null,
+      targets: assessment.targets.map((target) => ({
+        warehouse_product_id: target.warehouse_product_id,
+        scalev_product_name: target.scalev_product_name,
+        quantity: target.quantity,
+        note_context: target.note_context,
+      })),
+    },
+  });
+
+  return {
+    action: 'repaired_pre_go_live',
     reversed,
     deducted,
     skipped: assessment.skippedIgnored,
@@ -4751,6 +4979,19 @@ export async function getUndeductedOrders(
           targetProductId = fallbackProductByKey.get(
             buildWarehouseFallbackLookupKey(line.product_name, mapping.deduct_entity, mapping.deduct_warehouse || 'BTN'),
           ) || null;
+        }
+
+        if (
+          targetProductId != null
+          && scalevMapping?.warehouse_product_id != null
+          && isSuspiciousLegacyScalevTarget({
+            scalevProductName: line.product_name,
+            mapping: scalevMapping,
+            deductEntity: mapping.deduct_entity,
+            deductWarehouse: mapping.deduct_warehouse || 'BTN',
+          })
+        ) {
+          targetProductId = null;
         }
 
         if (targetProductId != null) {
