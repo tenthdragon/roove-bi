@@ -19,13 +19,23 @@ function getCronDateRange() {
   };
 }
 
-function resolveDateRange(req: NextRequest, method: 'GET' | 'POST') {
+function resolveDateRange(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const defaultRange = method === 'GET' ? getCronDateRange() : null;
+  const queryStart = searchParams.get('date_start');
+  const queryEnd = searchParams.get('date_end') || queryStart;
+
+  if (queryStart || queryEnd) {
+    return {
+      date_start: queryStart,
+      date_end: queryEnd,
+    };
+  }
+
+  const defaultRange = getCronDateRange();
 
   return {
-    date_start: searchParams.get('date_start') || defaultRange?.date_start || null,
-    date_end: searchParams.get('date_end') || defaultRange?.date_end || searchParams.get('date_start') || null,
+    date_start: defaultRange.date_start,
+    date_end: defaultRange.date_end,
   };
 }
 
@@ -65,7 +75,7 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
       }
     }
 
-    const payload = resolveDateRange(req, method);
+    const payload = resolveDateRange(req);
     const dedupePayload = {
       date_start: payload.date_start || 'default',
       date_end: payload.date_end || payload.date_start || 'default',

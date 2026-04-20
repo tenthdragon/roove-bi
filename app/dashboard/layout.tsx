@@ -68,6 +68,7 @@ function findTabLabel(tabs, targetId) {
 // getAllowedTabs is now driven by role_permissions — see usePermissions() hook below
 
 function RefreshViewsButton() {
+  const { dateRange } = useDateRange();
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [showDetail, setShowDetail] = useState(false);
   const [steps, setSteps] = useState({
@@ -97,6 +98,14 @@ function RefreshViewsButton() {
 
     let sheetsOk = false;
     let metaOk = false;
+    const metaParams = new URLSearchParams();
+
+    if (dateRange.from) metaParams.set('date_start', dateRange.from);
+    if (dateRange.to) metaParams.set('date_end', dateRange.to);
+
+    const metaUrl = metaParams.toString()
+      ? `/api/meta-sync?${metaParams.toString()}`
+      : '/api/meta-sync';
 
     // Step 1: Run Google Sheets sync & Meta Ads sync in parallel
     const [sheetsRes, metaRes] = await Promise.allSettled([
@@ -104,7 +113,7 @@ function RefreshViewsButton() {
         const d = await r.json();
         return { ok: r.ok, data: d };
       }),
-      fetch('/api/meta-sync', { method: 'POST' }).then(async r => {
+      fetch(metaUrl, { method: 'POST' }).then(async r => {
         const d = await r.json();
         return { ok: r.ok, data: d };
       }),

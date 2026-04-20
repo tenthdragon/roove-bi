@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/sync-jobs-worker",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cashflow-snapshot",
       "schedule": "0 23 1 * *"
     },
