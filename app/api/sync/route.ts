@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
-import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
+import { runDailyAdsSync } from '@/lib/daily-ads-sync-runner';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 
 export const maxDuration = 60;
@@ -41,42 +41,33 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const { job, isDuplicate } = await enqueueSyncJob({
-      jobName: 'daily_ads_sync',
-      route: '/api/sync',
-      mode: isCron ? 'cron' : 'manual',
-      payload: {},
-      dedupeKey: createSyncJobDedupeKey('daily_ads_sync', isCron ? 'cron' : 'manual', {}),
-      requestedBy,
-      requestId,
-      maxAttempts: 3,
-      priority: isCron ? 40 : 50,
-    });
+    const result = await runDailyAdsSync();
+    const status = result.failed === 0 ? 'success' : result.synced > 0 ? 'partial' : 'failed';
 
     logRouteEvent({
       route: '/api/sync',
       job: 'daily_ads_sync',
       mode,
-      status: 'success',
+      status,
       request_id: requestId,
       duration_ms: Date.now() - startTime,
-      rows_processed: 1,
+      rows_processed: result.rows_inserted,
       extra: {
-        queued: true,
-        duplicate: isDuplicate,
-        job_id: job.id,
+        requested_by: requestedBy,
+        synced: result.synced,
+        failed: result.failed,
       },
     });
 
     return NextResponse.json({
-      queued: true,
-      duplicate: isDuplicate,
-      job_id: job.id,
-      status: job.status,
-      message: isDuplicate
-        ? 'Sync harian sudah ada di antrean atau sedang berjalan.'
-        : 'Sync harian berhasil dimasukkan ke antrean.',
-    }, { status: 202 });
+      queued: false,
+      status,
+      message: result.message,
+      synced: result.synced,
+      failed: result.failed,
+      rows_inserted: result.rows_inserted,
+      results: result.results,
+    }, { status: status === 'failed' ? 500 : 200 });
   } catch (err: any) {
     console.error('Sync API error:', err);
     logRouteEvent({

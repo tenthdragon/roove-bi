@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
-import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
+import { runMetaSync } from '@/lib/meta-sync-runner';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 
 export const maxDuration = 60;
@@ -76,53 +76,47 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
     }
 
     const payload = resolveDateRange(req);
-    const dedupePayload = {
-      date_start: payload.date_start || 'default',
-      date_end: payload.date_end || payload.date_start || 'default',
-    };
-
-    const { job, isDuplicate } = await enqueueSyncJob({
-      jobName: 'meta_sync',
-      route: '/api/meta-sync',
-      mode: isCron ? 'cron' : 'manual',
-      payload,
-      dedupeKey: createSyncJobDedupeKey('meta_sync', isCron ? 'cron' : 'manual', dedupePayload),
-      requestedBy,
-      requestId,
-      maxAttempts: 3,
-      priority: isCron ? 30 : 40,
+    const result = await runMetaSync({
+      dateStart: payload.date_start,
+      dateEnd: payload.date_end,
     });
 
     logRouteEvent({
       route: '/api/meta-sync',
       job: 'meta_sync',
       mode,
-      status: 'success',
+      status: result.status,
       request_id: requestId,
       duration_ms: Date.now() - startTime,
-      rows_processed: 1,
+      rows_processed: result.rows_inserted,
       extra: {
-        queued: true,
-        duplicate: isDuplicate,
-        job_id: job.id,
+        requested_by: requestedBy,
         date_start: payload.date_start,
         date_end: payload.date_end,
+        accounts_synced: result.accounts_synced,
+        accounts_total: result.accounts_total,
       },
     });
 
     return NextResponse.json({
-      queued: true,
-      duplicate: isDuplicate,
-      job_id: job.id,
-      status: job.status,
+      queued: false,
+      status: result.status,
       date_range: {
         start: payload.date_start,
         end: payload.date_end || payload.date_start,
       },
-      message: isDuplicate
-        ? 'Sync Meta dengan rentang tanggal ini sudah ada di antrean atau sedang berjalan.'
-        : 'Sync Meta berhasil dimasukkan ke antrean.',
-    }, { status: 202 });
+      accounts_synced: result.accounts_synced,
+      accounts_total: result.accounts_total,
+      rows_inserted: result.rows_inserted,
+      duration_ms: result.duration_ms,
+      token_warning: result.token_warning,
+      errors: result.errors,
+      message: result.message || (result.status === 'success'
+        ? 'Sync Meta selesai.'
+        : result.status === 'partial'
+          ? 'Sync Meta selesai sebagian.'
+          : 'Sync Meta gagal.'),
+    }, { status: result.status === 'failed' ? 500 : 200 });
   } catch (err: any) {
     console.error('[meta-sync] Fatal error:', err);
     logRouteEvent({
