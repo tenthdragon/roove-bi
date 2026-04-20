@@ -67,7 +67,13 @@ function findTabLabel(tabs, targetId) {
 
 // getAllowedTabs is now driven by role_permissions — see usePermissions() hook below
 
-function RefreshViewsButton() {
+function RefreshViewsButton({
+  canSyncSheets,
+  canSyncMeta,
+}: {
+  canSyncSheets: boolean;
+  canSyncMeta: boolean;
+}) {
   const { dateRange } = useDateRange();
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [showDetail, setShowDetail] = useState(false);
@@ -91,9 +97,14 @@ function RefreshViewsButton() {
   }, [showDetail]);
 
   const handleRefresh = async () => {
+    if (!canSyncSheets && !canSyncMeta) return;
+
     setStatus('loading');
     setShowDetail(true);
-    setSteps({ sheets: 'running', meta: 'running' });
+    setSteps({
+      sheets: canSyncSheets ? 'running' : 'skipped',
+      meta: canSyncMeta ? 'running' : 'skipped',
+    });
     setStepMessages({ sheets: '', meta: '' });
 
     let sheetsOk = false;
@@ -109,20 +120,27 @@ function RefreshViewsButton() {
 
     // Step 1: Run Google Sheets sync & Meta Ads sync in parallel
     const [sheetsRes, metaRes] = await Promise.allSettled([
-      fetch('/api/sync', { method: 'POST' }).then(async r => {
-        const d = await r.json();
-        return { ok: r.ok, data: d };
-      }),
-      fetch(metaUrl, { method: 'POST' }).then(async r => {
-        const d = await r.json();
-        return { ok: r.ok, data: d };
-      }),
+      canSyncSheets
+        ? fetch('/api/sync', { method: 'POST' }).then(async r => {
+            const d = await r.json();
+            return { ok: r.ok, data: d };
+          })
+        : Promise.resolve({ ok: true, data: { skipped: true } }),
+      canSyncMeta
+        ? fetch(metaUrl, { method: 'POST' }).then(async r => {
+            const d = await r.json();
+            return { ok: r.ok, data: d };
+          })
+        : Promise.resolve({ ok: true, data: { skipped: true } }),
     ]);
 
     // Process Google Sheets result
     if (sheetsRes.status === 'fulfilled') {
       const { ok, data } = sheetsRes.value;
-      if (ok && !data.error) {
+      if (data.skipped) {
+        setSteps(s => ({ ...s, sheets: 'skipped' }));
+        setStepMessages(s => ({ ...s, sheets: 'Tidak diizinkan' }));
+      } else if (ok && !data.error) {
         sheetsOk = true;
         setSteps(s => ({ ...s, sheets: 'success' }));
         setStepMessages(s => ({
@@ -141,7 +159,10 @@ function RefreshViewsButton() {
     // Process Meta Ads result
     if (metaRes.status === 'fulfilled') {
       const { ok, data } = metaRes.value;
-      if (ok && !data.error) {
+      if (data.skipped) {
+        setSteps(s => ({ ...s, meta: 'skipped' }));
+        setStepMessages(s => ({ ...s, meta: 'Tidak diizinkan' }));
+      } else if (ok && !data.error) {
         metaOk = true;
         setSteps(s => ({ ...s, meta: 'success' }));
         setStepMessages(s => ({
@@ -384,6 +405,9 @@ export default function DashboardLayout({ children }) {
     : [];
 
   const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings'].includes(currentTab);
+  const canSyncSheets = profile?.role === 'owner' || permissions.has('admin:daily');
+  const canSyncMeta = profile?.role === 'owner' || permissions.has('admin:meta');
+  const showRefreshButton = canSyncSheets || canSyncMeta;
 
   if (loading) {
     return (
@@ -774,7 +798,9 @@ export default function DashboardLayout({ children }) {
               </div>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
-              <RefreshViewsButton />
+              {showRefreshButton && (
+                <RefreshViewsButton canSyncSheets={canSyncSheets} canSyncMeta={canSyncMeta} />
+              )}
               {showDatePicker && <HeaderDatePicker />}
               <ThemeToggle />
               <div className="desktop-sidebar" style={{ fontSize:11, color:'var(--text-muted)', fontWeight:500 }}>
