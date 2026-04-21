@@ -658,6 +658,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
   const [loadingContextByVerification, setLoadingContextByVerification] = useState<Record<number, boolean>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
   const [errorByVerification, setErrorByVerification] = useState<Record<number, string>>({});
+  const isRtsDecomposeTargetCategory = (category: string | null | undefined) => category === 'wip' || category === 'wip_material';
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -715,16 +716,11 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
     return next;
   };
 
-  const makeDefaultAllocation = (sourceProductId: number, expectedQty: number, currentState: any, batches: Record<number, any[]>) => {
-    const sourceBatches = batches[sourceProductId] || batchOptionsByProduct[sourceProductId] || [];
-    const preferredBatch = currentState?.targetBatchId
-      ? sourceBatches.find((batch: any) => Number(batch.id) === Number(currentState.targetBatchId))
-      : (sourceBatches.find((batch: any) => batch.is_active) || sourceBatches[0]);
-
+  const makeDefaultAllocation = () => {
     return [{
-      targetProductId: sourceProductId,
-      targetBatchId: preferredBatch?.id ? Number(preferredBatch.id) : null,
-      quantity: Number(currentState?.restockQty ?? expectedQty ?? 0),
+      targetProductId: null,
+      targetBatchId: null,
+      quantity: 0,
       notes: '',
     }];
   };
@@ -752,7 +748,8 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
           const itemId = Number(item.id);
           const sourceProductId = Number(item.warehouse_product_id);
           const batchOptions = loadedSourceBatches[sourceProductId] || batchOptionsByProduct[sourceProductId] || [];
-          const returnTargets = loadedTargets[sourceProductId] || returnTargetsBySourceProduct[sourceProductId] || [];
+          const returnTargets = (loadedTargets[sourceProductId] || returnTargetsBySourceProduct[sourceProductId] || [])
+            .filter((candidate: any) => isRtsDecomposeTargetCategory(candidate.category));
           const previous = nextItems[itemId] || {};
 
           let allocations = Array.isArray(previous.allocations) ? previous.allocations : null;
@@ -780,14 +777,11 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
           };
 
           if (mode === 'decompose' && (!nextState.allocations || nextState.allocations.length === 0)) {
-            nextState.allocations = makeDefaultAllocation(sourceProductId, Number(item.expected_qty || 0), nextState, loadedSourceBatches);
+            nextState.allocations = makeDefaultAllocation();
           }
 
           if (mode === 'decompose') {
             nextState.allocations = (nextState.allocations || []).map((allocation: any) => {
-              if (!allocation.targetProductId && returnTargets.length > 0) {
-                allocation.targetProductId = Number(returnTargets[0].id);
-              }
               const allocationBatches = loadedAllocationBatches[Number(allocation.targetProductId)] || batchOptionsByProduct[Number(allocation.targetProductId)] || [];
               if (!allocation.targetBatchId && allocationBatches.length > 0) {
                 const batch = allocationBatches.find((row: any) => row.is_active) || allocationBatches[0];
@@ -894,15 +888,12 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
     const sourceProductId = Number(item.warehouse_product_id);
     await Promise.all([
       ensureReturnTargets([sourceProductId]),
-      ensureProductBatches([sourceProductId]),
     ]);
 
     setFormByVerification((current: any) => {
       const verification = current[verificationId] || { notes: '', items: {} };
       const itemState = verification.items?.[Number(item.id)] || {};
       const allocations = Array.isArray(itemState.allocations) ? itemState.allocations : [];
-      const sourceBatches = batchOptionsByProduct[sourceProductId] || [];
-      const preferredBatch = sourceBatches.find((batch: any) => batch.is_active) || sourceBatches[0] || null;
 
       return {
         ...current,
@@ -915,8 +906,8 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
               allocations: [
                 ...allocations,
                 {
-                  targetProductId: sourceProductId,
-                  targetBatchId: preferredBatch?.id ? Number(preferredBatch.id) : null,
+                  targetProductId: null,
+                  targetBatchId: null,
                   quantity: 0,
                   notes: '',
                 },
@@ -981,7 +972,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                 ? (itemState.targetBatchId || preferredBatch?.id || null)
                 : itemState.targetBatchId,
               allocations: mode === 'decompose'
-                ? (currentAllocations.length > 0 ? currentAllocations : makeDefaultAllocation(sourceProductId, Number(item.expected_qty || 0), itemState, {}))
+                ? (currentAllocations.length > 0 ? currentAllocations : makeDefaultAllocation())
                 : currentAllocations,
             },
           },
@@ -1144,7 +1135,8 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                             ? allocations.reduce((sum: number, allocation: any) => sum + Number(allocation.quantity || 0), 0)
                             : Number(itemState.restockQty ?? item.restock_qty ?? item.expected_qty ?? 0);
                           const damagedQty = Math.max(expectedQty - totalAllocated, 0);
-                          const returnTargets = returnTargetsBySourceProduct[sourceProductId] || [];
+                          const returnTargets = (returnTargetsBySourceProduct[sourceProductId] || [])
+                            .filter((candidate: any) => isRtsDecomposeTargetCategory(candidate.category));
 
                           return (
                             <div key={item.id} style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 12, background: 'var(--bg)' }}>
@@ -1237,7 +1229,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                   ) : (
                                     <>
                                       <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 10, background: 'rgba(139,92,246,0.08)', border: '1px solid rgba(139,92,246,0.22)', color: '#d8b4fe', fontSize: 12, lineHeight: 1.6 }}>
-                                        Gunakan mode ini jika sebagian retur masih utuh dan sebagian harus dibongkar. Anda bisa alokasikan qty ke FG, sachet WIP, pouch, selongsong, atau material lain yang benar-benar lolos cek fisik.
+                                        Gunakan mode ini jika retur tidak bisa langsung kembali sebagai FG. Pilihan tujuan dibatasi ke stok kategori WIP dan WIP material yang benar-benar lolos cek fisik.
                                       </div>
 
                                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 10 }}>

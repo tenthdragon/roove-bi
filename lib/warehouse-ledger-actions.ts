@@ -4515,6 +4515,7 @@ export async function getWarehouseRTSReturnTargets(sourceProductId: number) {
     .eq('entity', sourceProduct.entity)
     .eq('warehouse', sourceProduct.warehouse)
     .eq('is_active', true)
+    .in('category', ['wip', 'wip_material'])
     .order('category')
     .order('name');
   if (candidateErr) throw candidateErr;
