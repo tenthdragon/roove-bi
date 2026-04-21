@@ -270,7 +270,7 @@ function isWarehouseGoLiveDay(date?: string | null, warehouseGoLive = DEFAULT_WA
 function shouldHideDailyMovementSummary(date?: string | null, warehouseGoLive = DEFAULT_WAREHOUSE_GO_LIVE_STATE) {
   if (!date) return true;
   if (!isWarehouseGoLiveActive(warehouseGoLive)) return true;
-  return String(date) <= getWarehouseGoLiveDateValue(warehouseGoLive);
+  return String(date) < getWarehouseGoLiveDateValue(warehouseGoLive);
 }
 
 function canUseWarehouseGuardrail(date?: string | null, warehouseGoLive = DEFAULT_WAREHOUSE_GO_LIVE_STATE) {
@@ -3594,6 +3594,7 @@ function DailySummaryTab({
   const { can } = usePermissions();
   const isGoLiveDate = isWarehouseGoLiveDay(date, warehouseGoLive);
   const showOperationalMovementSummary = !shouldHideDailyMovementSummary(date, warehouseGoLive);
+  const isPartialGoLiveSummary = showOperationalMovementSummary && isGoLiveDate;
   const guardrailActive = canUseWarehouseGuardrail(date, warehouseGoLive);
   const [entityFilter, setEntityFilter] = useState('all');
   const [syncingOrder, setSyncingOrder] = useState<string | null>(null);
@@ -3734,6 +3735,69 @@ function DailySummaryTab({
             ? `Tanggal ini adalah hari stock opname warehouse. Summary movement campuran disembunyikan agar hitungan pagi sebelum SO tidak tercampur shipment yang baru boleh aktif setelah ${warehouseGoLive.notBeforeLabel}. Deduction Summary di bawah tetap bisa dipakai untuk melihat shipment keluar.`
             : `Tanggal ini masih masuk era pra-go-live warehouse. Untuk menghindari kebingungan, halaman ini tidak menampilkan summary movement ledger campuran. Yang tetap dibuka adalah shipment keluar melalui Deduction Summary, sedangkan audit shipment/rekonsiliasi baru dianggap valid mulai ${warehouseGoLive.baselineLabel}.`}
         />
+      ) : isPartialGoLiveSummary ? (
+        <>
+          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(96,165,250,0.08)', color: '#bfdbfe', fontSize: 11, lineHeight: 1.55 }}>
+            Summary movement untuk {fullDateID(date)} hanya menghitung ledger setelah go-live warehouse aktif pada {warehouseGoLive.notBeforeLabel}. Pergerakan sebelum cutoff tetap disembunyikan agar tidak mencampur baseline stock opname.
+          </div>
+          {filtered.length === 0 ? (
+            <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)' }}>
+              Belum ada pergerakan barang setelah cutoff go-live pada {date}
+            </div>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    {['Produk', 'Entity', 'Kategori', 'IN', 'OUT', 'Adjust', 'Net'].map(h => (
+                      <th key={h} style={{ padding: '8px 10px', textAlign: ['Produk', 'Entity', 'Kategori'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(r => (
+                    <tr key={r.product_id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
+                      <td style={{ padding: '6px 10px', fontWeight: 500 }}>{r.product_name}</td>
+                      <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{r.entity}</td>
+                      <td style={{ padding: '6px 10px' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${CATEGORY_COLORS[r.category] || '#94a3b8'}20`, color: CATEGORY_COLORS[r.category] || '#94a3b8' }}>
+                          {r.category}
+                        </span>
+                      </td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_in > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
+                        {r.total_in > 0 ? `+${r.total_in.toLocaleString('id-ID')}` : '-'}
+                      </td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_out < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                        {r.total_out < 0 ? r.total_out.toLocaleString('id-ID') : '-'}
+                      </td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_adjust !== 0 ? '#8b5cf6' : 'var(--text-muted)' }}>
+                        {r.total_adjust !== 0 ? (r.total_adjust > 0 ? '+' : '') + r.total_adjust.toLocaleString('id-ID') : '-'}
+                      </td>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: r.net_change > 0 ? 'var(--green)' : r.net_change < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                        {r.net_change > 0 ? '+' : ''}{r.net_change.toLocaleString('id-ID')}
+                      </td>
+                    </tr>
+                  ))}
+                  <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg)' }}>
+                    <td colSpan={3} style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL ({filtered.length} produk)</td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--green)' }}>
+                      {totals.total_in > 0 ? `+${totals.total_in.toLocaleString('id-ID')}` : '-'}
+                    </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f97316' }}>
+                      {totals.total_out < 0 ? totals.total_out.toLocaleString('id-ID') : '-'}
+                    </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#8b5cf6' }}>
+                      {totals.total_adjust !== 0 ? (totals.total_adjust > 0 ? '+' : '') + totals.total_adjust.toLocaleString('id-ID') : '-'}
+                    </td>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totals.net_change > 0 ? 'var(--green)' : totals.net_change < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                      {totals.net_change > 0 ? '+' : ''}{totals.net_change.toLocaleString('id-ID')}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       ) : filtered.length === 0 ? (
         <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)' }}>
           Tidak ada pergerakan barang pada {date}

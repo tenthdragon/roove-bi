@@ -2408,9 +2408,13 @@ async function fetchOutstandingLedgerByOrderProduct(
 async function fetchDailyMovementRows(
   svc: ReturnType<typeof createServiceSupabase>,
   date: string,
+  options?: {
+    fromInclusive?: string | null;
+    toExclusive?: string | null;
+  },
 ) {
-  const dayStart = `${date}T00:00:00+07:00`;
-  const dayEnd = `${date}T23:59:59.999+07:00`;
+  const dayStart = options?.fromInclusive || `${date}T00:00:00+07:00`;
+  const dayEnd = options?.toExclusive || `${date}T23:59:59.999+07:00`;
   const rows: any[] = [];
   let offset = 0;
 
@@ -4430,17 +4434,26 @@ export async function getLedgerQuantitySum(filters: {
 export async function getDailyMovementSummary(date: string) {
   await requireWarehouseAccess('Daily Summary');
   const svc = createServiceSupabase();
-  const rpcResult = await svc.rpc('warehouse_daily_movement_summary', { p_date: date });
-  if (rpcResult.error && !isMissingRpcFunctionError(rpcResult.error, 'warehouse_daily_movement_summary')) {
-    throw rpcResult.error;
-  }
-  if (!rpcResult.error && Array.isArray(rpcResult.data)) {
-    return (rpcResult.data || []).sort((a: any, b: any) =>
-      a.entity.localeCompare(b.entity) || a.product_name.localeCompare(b.product_name),
-    );
+  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  const isGoLiveDay = isWarehouseGoLiveActive(goLiveAt) && isWarehouseGoLiveDate(date, goLiveAt);
+
+  if (!isGoLiveDay) {
+    const rpcResult = await svc.rpc('warehouse_daily_movement_summary', { p_date: date });
+    if (rpcResult.error && !isMissingRpcFunctionError(rpcResult.error, 'warehouse_daily_movement_summary')) {
+      throw rpcResult.error;
+    }
+    if (!rpcResult.error && Array.isArray(rpcResult.data)) {
+      return (rpcResult.data || []).sort((a: any, b: any) =>
+        a.entity.localeCompare(b.entity) || a.product_name.localeCompare(b.product_name),
+      );
+    }
   }
 
-  const data = await fetchDailyMovementRows(svc, date);
+  const data = await fetchDailyMovementRows(
+    svc,
+    date,
+    isGoLiveDay ? { fromInclusive: goLiveAt } : undefined,
+  );
   if (!data || data.length === 0) return [];
 
   // Aggregate by product
