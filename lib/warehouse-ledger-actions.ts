@@ -265,11 +265,22 @@ interface ScalevOrderWarehouseAssessment {
 
 type WarehouseRtsVerificationScope = 'pre_go_live' | 'post_go_live';
 type WarehouseRtsVerificationStatus = 'pending' | 'completed' | 'cancelled';
+type WarehouseRtsReturnMode = 'same_product' | 'decompose';
 
 interface WarehouseRtsVerificationQueueItem {
   warehouse_product_id: number;
   scalev_product_summary: string;
   expected_qty: number;
+}
+
+interface WarehouseRtsAllocationSnapshot {
+  warehouse_product_id: number;
+  warehouse_product_name?: string | null;
+  warehouse_product_category?: string | null;
+  quantity: number;
+  target_batch_id?: number | null;
+  target_batch_code_snapshot?: string | null;
+  notes?: string | null;
 }
 
 interface WarehouseBusinessTargetRow {
@@ -1478,6 +1489,126 @@ function isMissingWarehouseTableError(error: any) {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
   return code === 'PGRST205' || code === '42P01' || /does not exist/i.test(message) || /schema cache/i.test(message);
+}
+
+const WAREHOUSE_RTS_META_MARKER = '[RTS_META]';
+const WAREHOUSE_RETURN_TARGET_TOKEN_STOPWORDS = new Set([
+  'fg',
+  'sachet',
+  'packaging',
+  'wip',
+  'material',
+  'bonus',
+  'other',
+  'non',
+  'stiker',
+  'sticker',
+  'pcs',
+  'box',
+]);
+
+function sanitizeWarehouseRtsReturnMode(value: any): WarehouseRtsReturnMode {
+  return value === 'decompose' ? 'decompose' : 'same_product';
+}
+
+function normalizeWarehouseRtsAllocationSnapshot(value: any): WarehouseRtsAllocationSnapshot | null {
+  const warehouseProductId = Number(value?.warehouse_product_id || 0);
+  const quantity = Number(value?.quantity || 0);
+  if (warehouseProductId <= 0 || quantity <= QUANTITY_EPSILON) return null;
+
+  return {
+    warehouse_product_id: warehouseProductId,
+    warehouse_product_name: value?.warehouse_product_name ? String(value.warehouse_product_name) : null,
+    warehouse_product_category: value?.warehouse_product_category ? String(value.warehouse_product_category) : null,
+    quantity,
+    target_batch_id: value?.target_batch_id == null ? null : Number(value.target_batch_id),
+    target_batch_code_snapshot: value?.target_batch_code_snapshot ? String(value.target_batch_code_snapshot) : null,
+    notes: value?.notes ? String(value.notes) : null,
+  };
+}
+
+function buildWarehouseRtsItemStoredNotes(args: {
+  userNotes?: string | null;
+  mode: WarehouseRtsReturnMode;
+  allocations: WarehouseRtsAllocationSnapshot[];
+}) {
+  const userNotes = args.userNotes?.trim() || '';
+  const payload = JSON.stringify({
+    mode: sanitizeWarehouseRtsReturnMode(args.mode),
+    allocations: (args.allocations || [])
+      .map(normalizeWarehouseRtsAllocationSnapshot)
+      .filter((row): row is WarehouseRtsAllocationSnapshot => Boolean(row)),
+  });
+  return `${userNotes}${userNotes ? '\n' : ''}${WAREHOUSE_RTS_META_MARKER}${payload}`;
+}
+
+function parseWarehouseRtsItemStoredNotes(value: any): {
+  userNotes: string | null;
+  mode: WarehouseRtsReturnMode;
+  allocations: WarehouseRtsAllocationSnapshot[];
+} {
+  const raw = String(value || '');
+  const markerIndex = raw.lastIndexOf(WAREHOUSE_RTS_META_MARKER);
+  if (markerIndex === -1) {
+    return {
+      userNotes: raw.trim() || null,
+      mode: 'same_product',
+      allocations: [],
+    };
+  }
+
+  const userNotes = raw.slice(0, markerIndex).trim() || null;
+  const payloadText = raw.slice(markerIndex + WAREHOUSE_RTS_META_MARKER.length).trim();
+
+  try {
+    const payload = JSON.parse(payloadText);
+    const allocations = Array.isArray(payload?.allocations)
+      ? payload.allocations
+        .map(normalizeWarehouseRtsAllocationSnapshot)
+        .filter((row: WarehouseRtsAllocationSnapshot | null): row is WarehouseRtsAllocationSnapshot => Boolean(row))
+      : [];
+
+    return {
+      userNotes,
+      mode: sanitizeWarehouseRtsReturnMode(payload?.mode),
+      allocations,
+    };
+  } catch {
+    return {
+      userNotes: raw.trim() || null,
+      mode: 'same_product',
+      allocations: [],
+    };
+  }
+}
+
+function tokenizeWarehouseReturnTargetName(value: string | null | undefined) {
+  return normalizeScalevRuntimeIdentifier(value)
+    .split(' ')
+    .map((token) => token.trim())
+    .filter((token) => token && !WAREHOUSE_RETURN_TARGET_TOKEN_STOPWORDS.has(token));
+}
+
+function scoreWarehouseRtsReturnTarget(source: any, candidate: any) {
+  if (!source || !candidate) return 0;
+  if (Number(source.id) === Number(candidate.id)) return 10000;
+
+  const sourceTokens = tokenizeWarehouseReturnTargetName(source.name);
+  const candidateTokens = tokenizeWarehouseReturnTargetName(candidate.name);
+  const candidateSet = new Set(candidateTokens);
+  let score = 0;
+
+  for (const token of sourceTokens) {
+    if (candidateSet.has(token)) score += /^\d+$/.test(token) ? 40 : 90;
+  }
+
+  if (candidate.category === source.category) score += 15;
+  if (candidate.category === 'wip') score += 18;
+  if (candidate.category === 'wip_material') score += 16;
+  if (candidate.category === 'packaging') score += 10;
+  if (candidate.category === 'sachet') score += 12;
+
+  return score;
 }
 
 function getCatalogIdentifierSourcePriority(source: string, mode: 'variant_sku' | 'product_name') {
@@ -4367,6 +4498,42 @@ export async function getBatches(productId: number, options?: { includeInactive?
   return data || [];
 }
 
+export async function getWarehouseRTSReturnTargets(sourceProductId: number) {
+  await requireWarehouseAccess('Verifikasi RTS');
+  const svc = createServiceSupabase();
+  const { data: sourceProduct, error: sourceErr } = await svc
+    .from('warehouse_products')
+    .select('id, name, category, entity, warehouse, unit, is_active')
+    .eq('id', sourceProductId)
+    .maybeSingle();
+  if (sourceErr) throw sourceErr;
+  if (!sourceProduct) throw new Error('Produk sumber RTS tidak ditemukan.');
+
+  const { data: candidateRows, error: candidateErr } = await svc
+    .from('warehouse_products')
+    .select('id, name, category, entity, warehouse, unit, is_active')
+    .eq('entity', sourceProduct.entity)
+    .eq('warehouse', sourceProduct.warehouse)
+    .eq('is_active', true)
+    .order('category')
+    .order('name');
+  if (candidateErr) throw candidateErr;
+
+  return (candidateRows || [])
+    .map((row: any) => ({
+      ...row,
+      id: Number(row.id),
+      related_score: scoreWarehouseRtsReturnTarget(sourceProduct, row),
+      is_source_product: Number(row.id) === Number(sourceProduct.id),
+    }))
+    .sort((left: any, right: any) =>
+      Number(right.related_score || 0) - Number(left.related_score || 0)
+      || Number(right.is_source_product ? 1 : 0) - Number(left.is_source_product ? 1 : 0)
+      || String(left.category || '').localeCompare(String(right.category || ''))
+      || String(left.name || '').localeCompare(String(right.name || '')),
+    );
+}
+
 export async function getWarehouseRTSVerifications(status: 'pending' | 'completed' | 'cancelled' | 'all' = 'pending') {
   await requireWarehouseAccess('Verifikasi RTS');
   const svc = createServiceSupabase();
@@ -4408,12 +4575,36 @@ export async function getWarehouseRTSVerifications(status: 'pending' | 'complete
   return (data || []).map((row: any) => ({
     ...row,
     items: (row.items || []).map((item: any) => ({
-      ...item,
-      warehouse_product_id: Number(item.warehouse_product_id),
-      expected_qty: Number(item.expected_qty || 0),
-      restock_qty: item.restock_qty == null ? null : Number(item.restock_qty),
-      damaged_qty: item.damaged_qty == null ? null : Number(item.damaged_qty),
-      target_batch_id: item.target_batch_id == null ? null : Number(item.target_batch_id),
+      ...(() => {
+        const parsedNotes = parseWarehouseRtsItemStoredNotes(item.notes);
+        const fallbackAllocations = parsedNotes.allocations.length > 0
+          ? parsedNotes.allocations
+          : (
+            Number(item.restock_qty || 0) > QUANTITY_EPSILON && item.target_batch_id
+              ? [{
+                  warehouse_product_id: Number(item.warehouse_product_id),
+                  warehouse_product_name: item.warehouse_products?.name || null,
+                  warehouse_product_category: item.warehouse_products?.category || null,
+                  quantity: Number(item.restock_qty || 0),
+                  target_batch_id: Number(item.target_batch_id),
+                  target_batch_code_snapshot: item.target_batch_code_snapshot || item.warehouse_batches?.batch_code || null,
+                  notes: parsedNotes.userNotes,
+                }]
+              : []
+          );
+
+        return {
+          ...item,
+          warehouse_product_id: Number(item.warehouse_product_id),
+          expected_qty: Number(item.expected_qty || 0),
+          restock_qty: item.restock_qty == null ? null : Number(item.restock_qty),
+          damaged_qty: item.damaged_qty == null ? null : Number(item.damaged_qty),
+          target_batch_id: item.target_batch_id == null ? null : Number(item.target_batch_id),
+          notes: parsedNotes.userNotes,
+          return_mode: parsedNotes.mode,
+          allocations: fallbackAllocations,
+        };
+      })(),
     })),
   }));
 }
@@ -4423,8 +4614,15 @@ export async function completeWarehouseRTSVerification(
   payload: {
     items: Array<{
       itemId: number;
-      restockQty: number;
+      mode?: WarehouseRtsReturnMode | null;
+      restockQty?: number;
       targetBatchId?: number | null;
+      allocations?: Array<{
+        targetProductId: number;
+        quantity: number;
+        targetBatchId?: number | null;
+        notes?: string | null;
+      }>;
       notes?: string | null;
     }>;
     notes?: string | null;
@@ -4447,63 +4645,186 @@ export async function completeWarehouseRTSVerification(
 
   const { data: itemRows, error: itemsErr } = await svc
     .from('warehouse_rts_verification_items')
-    .select('id, warehouse_product_id, expected_qty')
+    .select(`
+      id,
+      warehouse_product_id,
+      expected_qty,
+      warehouse_products(id, name, category, entity, warehouse, unit)
+    `)
     .eq('verification_id', verificationId)
     .order('id', { ascending: true });
   if (itemsErr) throw itemsErr;
 
-  const submittedById = new Map<number, { restockQty: number; targetBatchId?: number | null; notes?: string | null }>();
+  const submittedById = new Map<number, {
+    mode: WarehouseRtsReturnMode;
+    restockQty: number;
+    targetBatchId?: number | null;
+    notes?: string | null;
+    allocations: Array<{
+      targetProductId: number;
+      quantity: number;
+      targetBatchId?: number | null;
+      notes?: string | null;
+    }>;
+  }>();
   for (const item of payload.items || []) {
     submittedById.set(Number(item.itemId), {
+      mode: sanitizeWarehouseRtsReturnMode(item.mode),
       restockQty: Number(item.restockQty || 0),
       targetBatchId: item.targetBatchId == null ? null : Number(item.targetBatchId),
       notes: item.notes?.trim() || null,
+      allocations: Array.isArray(item.allocations)
+        ? item.allocations.map((allocation) => ({
+            targetProductId: Number(allocation.targetProductId || 0),
+            quantity: Number(allocation.quantity || 0),
+            targetBatchId: allocation.targetBatchId == null ? null : Number(allocation.targetBatchId),
+            notes: allocation.notes?.trim() || null,
+          }))
+        : [],
     });
   }
 
   const verificationItems = itemRows || [];
+  const requestedTargetProductIds = new Set<number>();
+  for (const submitted of Array.from(submittedById.values())) {
+    if (submitted.mode === 'same_product') continue;
+    for (const allocation of submitted.allocations) {
+      if (allocation.targetProductId > 0 && allocation.quantity > QUANTITY_EPSILON) {
+        requestedTargetProductIds.add(Number(allocation.targetProductId));
+      }
+    }
+  }
+
+  const targetProducts = await loadWarehouseProductsByIds(svc, Array.from(requestedTargetProductIds));
   for (const item of verificationItems) {
-    const submitted = submittedById.get(Number(item.id)) || { restockQty: 0, targetBatchId: null, notes: null };
+    const sourceProduct = item.warehouse_products as any;
+    if (!sourceProduct) throw new Error('Produk sumber RTS tidak ditemukan.');
+
+    const submitted = submittedById.get(Number(item.id)) || {
+      mode: 'same_product' as WarehouseRtsReturnMode,
+      restockQty: 0,
+      targetBatchId: null,
+      notes: null,
+      allocations: [],
+    };
     const expectedQty = Number(item.expected_qty || 0);
-    const restockQty = Number(submitted.restockQty || 0);
-    const damagedQty = expectedQty - restockQty;
-
-    if (restockQty < 0) {
-      throw new Error('Qty layak masuk tidak boleh negatif.');
-    }
-    if (restockQty - expectedQty > QUANTITY_EPSILON) {
-      throw new Error('Qty layak masuk tidak boleh melebihi qty expected.');
-    }
-    if (restockQty > QUANTITY_EPSILON && !submitted.targetBatchId) {
-      throw new Error('Batch tujuan wajib dipilih jika ada qty yang dikembalikan ke stok.');
-    }
-
+    const mode = sanitizeWarehouseRtsReturnMode(submitted.mode);
+    const persistedAllocations: WarehouseRtsAllocationSnapshot[] = [];
+    let restockQty = 0;
     let targetBatchCodeSnapshot: string | null = null;
-    if (restockQty > QUANTITY_EPSILON && submitted.targetBatchId) {
-      const batch = await getBatchOrThrow(svc, Number(submitted.targetBatchId), Number(item.warehouse_product_id));
-      targetBatchCodeSnapshot = batch.batch_code || null;
-      await recordStockInInternal(
-        Number(item.warehouse_product_id),
-        Number(submitted.targetBatchId),
-        restockQty,
-        'rts',
-        String(verification.order_id),
-        [
-          `RTS verified untuk order ${verification.order_id}`,
-          verification.business_code ? `business ${verification.business_code}` : null,
-          submitted.notes?.trim() || null,
-        ].filter(Boolean).join(' • '),
-      );
+    let targetBatchId: number | null = null;
+
+    if (mode === 'same_product') {
+      restockQty = Number(submitted.restockQty || 0);
+      if (restockQty < 0) {
+        throw new Error('Qty layak masuk tidak boleh negatif.');
+      }
+      if (restockQty - expectedQty > QUANTITY_EPSILON) {
+        throw new Error('Qty layak masuk tidak boleh melebihi qty expected.');
+      }
+      if (restockQty > QUANTITY_EPSILON && !submitted.targetBatchId) {
+        throw new Error('Batch tujuan wajib dipilih jika ada qty yang dikembalikan ke stok.');
+      }
+
+      if (restockQty > QUANTITY_EPSILON && submitted.targetBatchId) {
+        const batch = await getBatchOrThrow(svc, Number(submitted.targetBatchId), Number(item.warehouse_product_id));
+        targetBatchCodeSnapshot = batch.batch_code || null;
+        targetBatchId = Number(submitted.targetBatchId);
+        await recordStockInInternal(
+          Number(item.warehouse_product_id),
+          Number(submitted.targetBatchId),
+          restockQty,
+          'rts',
+          String(verification.order_id),
+          [
+            `RTS verified untuk order ${verification.order_id}`,
+            verification.business_code ? `business ${verification.business_code}` : null,
+            submitted.notes?.trim() || null,
+          ].filter(Boolean).join(' • '),
+        );
+
+        persistedAllocations.push({
+          warehouse_product_id: Number(item.warehouse_product_id),
+          warehouse_product_name: sourceProduct.name || null,
+          warehouse_product_category: sourceProduct.category || null,
+          quantity: restockQty,
+          target_batch_id: Number(submitted.targetBatchId),
+          target_batch_code_snapshot: targetBatchCodeSnapshot,
+          notes: submitted.notes?.trim() || null,
+        });
+      }
+    } else {
+      for (const allocation of submitted.allocations || []) {
+        const quantity = Number(allocation.quantity || 0);
+        if (quantity < 0) {
+          throw new Error('Qty alokasi RTS tidak boleh negatif.');
+        }
+        if (quantity <= QUANTITY_EPSILON) continue;
+        if (!allocation.targetProductId) {
+          throw new Error('Produk tujuan alokasi RTS wajib dipilih.');
+        }
+        if (!allocation.targetBatchId) {
+          throw new Error('Batch tujuan wajib dipilih untuk setiap alokasi RTS.');
+        }
+
+        const targetProduct = targetProducts.get(Number(allocation.targetProductId));
+        if (!targetProduct) {
+          throw new Error('Produk tujuan alokasi RTS tidak ditemukan.');
+        }
+        if (
+          targetProduct.entity !== sourceProduct.entity
+          || targetProduct.warehouse !== sourceProduct.warehouse
+        ) {
+          throw new Error('Produk tujuan alokasi RTS harus berada di gudang/entity yang sama.');
+        }
+
+        const batch = await getBatchOrThrow(svc, Number(allocation.targetBatchId), Number(allocation.targetProductId));
+        await recordStockInInternal(
+          Number(allocation.targetProductId),
+          Number(allocation.targetBatchId),
+          quantity,
+          'rts',
+          String(verification.order_id),
+          [
+            `RTS decomposed untuk order ${verification.order_id}`,
+            verification.business_code ? `business ${verification.business_code}` : null,
+            `source ${sourceProduct.name || item.warehouse_product_id}`,
+            allocation.notes?.trim() || submitted.notes?.trim() || null,
+          ].filter(Boolean).join(' • '),
+        );
+
+        persistedAllocations.push({
+          warehouse_product_id: Number(allocation.targetProductId),
+          warehouse_product_name: targetProduct.name || null,
+          warehouse_product_category: targetProduct.category || null,
+          quantity,
+          target_batch_id: Number(allocation.targetBatchId),
+          target_batch_code_snapshot: batch.batch_code || null,
+          notes: allocation.notes?.trim() || null,
+        });
+        restockQty += quantity;
+      }
+
+      if (restockQty - expectedQty > QUANTITY_EPSILON) {
+        throw new Error('Total alokasi RTS tidak boleh melebihi qty expected.');
+      }
     }
+
+    const damagedQty = expectedQty - restockQty;
+    const storedNotes = buildWarehouseRtsItemStoredNotes({
+      userNotes: submitted.notes?.trim() || null,
+      mode,
+      allocations: persistedAllocations,
+    });
 
     const { error: itemUpdateErr } = await svc
       .from('warehouse_rts_verification_items')
       .update({
         restock_qty: restockQty,
         damaged_qty: damagedQty < QUANTITY_EPSILON ? 0 : damagedQty,
-        target_batch_id: submitted.targetBatchId || null,
+        target_batch_id: targetBatchId,
         target_batch_code_snapshot: targetBatchCodeSnapshot,
-        notes: submitted.notes?.trim() || null,
+        notes: storedNotes,
         updated_at: now,
       })
       .eq('id', Number(item.id));
