@@ -80,6 +80,14 @@ async function requireVendorReadAccess(label: string) {
   await requireAnyWarehouseSettingsPermission(['whs:vendors', 'whs:products'], label);
 }
 
+function getWarehouseMutationErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  if (typeof error === 'object' && error && 'message' in error && typeof (error as any).message === 'string' && (error as any).message.trim()) {
+    return (error as any).message.trim();
+  }
+  return fallback;
+}
+
 // ============================================================
 // TELEGRAM NOTIFICATION (fire-and-forget)
 // ============================================================
@@ -137,6 +145,10 @@ function formatNotification(type: string, productName: string, qty: number, guda
 
 export type MovementType = 'IN' | 'OUT' | 'ADJUST' | 'TRANSFER_IN' | 'TRANSFER_OUT' | 'DISPOSE';
 export type ReferenceType = 'scalev_order' | 'manual' | 'purchase_order' | 'transfer' | 'dispose' | 'opname' | 'rts' | 'reclass';
+
+type WarehouseMutationResult<T = void> =
+  | { success: true; data?: T }
+  | { success: false; error: string };
 
 export interface LedgerEntry {
   warehouse_product_id: number;
@@ -3450,7 +3462,7 @@ export async function getProductsFull(filters?: {
 }
 
 export async function createProduct(product: {
-  name: string; category: string; unit: string; entity: string; warehouse: string;
+  name: string; sku?: string | null; category: string; unit: string; entity: string; warehouse: string;
   price_list?: number; hpp?: number; vendor_id?: number | null; brand_id?: number;
   reorder_threshold?: number; scalev_product_names?: string[];
 }) {
@@ -3473,6 +3485,7 @@ export async function createProduct(product: {
     targetLabel: `${data.name} [${data.warehouse || '-'}-${data.entity || '-'}]`,
     changedFields: [
       'name',
+      'sku',
       'category',
       'unit',
       'entity',
@@ -3489,6 +3502,7 @@ export async function createProduct(product: {
     afterState: {
       id: Number(data.id),
       name: data.name,
+      sku: data.sku || null,
       category: data.category || null,
       unit: data.unit || null,
       entity: data.entity || null,
@@ -3512,7 +3526,7 @@ export async function updateProduct(id: number, updates: Record<string, any>) {
   const svc = createServiceSupabase();
   const { data: beforeRow, error: beforeError } = await svc
     .from('warehouse_products')
-    .select('id, name, category, unit, entity, warehouse, price_list, hpp, vendor_id, brand_id, reorder_threshold, scalev_product_names, is_active')
+    .select('id, name, sku, category, unit, entity, warehouse, price_list, hpp, vendor_id, brand_id, reorder_threshold, scalev_product_names, is_active')
     .eq('id', id)
     .maybeSingle();
   if (beforeError) throw beforeError;
@@ -3526,7 +3540,7 @@ export async function updateProduct(id: number, updates: Record<string, any>) {
 
   const { data: afterRow, error: afterError } = await svc
     .from('warehouse_products')
-    .select('id, name, category, unit, entity, warehouse, price_list, hpp, vendor_id, brand_id, reorder_threshold, scalev_product_names, is_active')
+    .select('id, name, sku, category, unit, entity, warehouse, price_list, hpp, vendor_id, brand_id, reorder_threshold, scalev_product_names, is_active')
     .eq('id', id)
     .maybeSingle();
   if (afterError) throw afterError;
@@ -3534,6 +3548,7 @@ export async function updateProduct(id: number, updates: Record<string, any>) {
 
   const beforeState = {
     name: beforeRow.name,
+    sku: beforeRow.sku || null,
     category: beforeRow.category || null,
     unit: beforeRow.unit || null,
     entity: beforeRow.entity || null,
@@ -3548,6 +3563,7 @@ export async function updateProduct(id: number, updates: Record<string, any>) {
   };
   const afterState = {
     name: afterRow.name,
+    sku: afterRow.sku || null,
     category: afterRow.category || null,
     unit: afterRow.unit || null,
     entity: afterRow.entity || null,
@@ -3562,6 +3578,7 @@ export async function updateProduct(id: number, updates: Record<string, any>) {
   };
   const changedFields = getAuditChangedFields(beforeState, afterState, [
     'name',
+    'sku',
     'category',
     'unit',
     'entity',
@@ -5649,218 +5666,275 @@ export async function createStockOpnameSession(
   warehouse: string,
   label: string,
   date: string,
-) {
-  await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
-  const svc = createServiceSupabase();
-  const userId = await getCurrentUserId();
+) : Promise<WarehouseMutationResult<{ id: number }>> {
+  try {
+    await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    const svc = createServiceSupabase();
+    const userId = await getCurrentUserId();
 
-  const { data: existingSession, error: existingErr } = await svc
-    .from('warehouse_stock_opname_sessions')
-    .select('id, opname_label, entity, opname_date')
-    .in('status', ['counting', 'reviewing'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (existingErr) throw existingErr;
-  if (existingSession) {
-    throw new Error(`Masih ada stock opname aktif (${existingSession.opname_label} - ${existingSession.entity} ${existingSession.opname_date})`);
+    const { data: existingSession, error: existingErr } = await svc
+      .from('warehouse_stock_opname_sessions')
+      .select('id, opname_label, entity, opname_date')
+      .in('status', ['counting', 'reviewing'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existingErr) throw existingErr;
+    if (existingSession) {
+      throw new Error(`Masih ada stock opname aktif (${existingSession.opname_label} - ${existingSession.entity} ${existingSession.opname_date})`);
+    }
+
+    // Create session
+    const { data: session, error: sessErr } = await svc
+      .from('warehouse_stock_opname_sessions')
+      .insert({ entity, warehouse, opname_date: date, opname_label: label, created_by: userId })
+      .select('id')
+      .single();
+    if (sessErr) throw sessErr;
+
+    // Get all active products for this entity + warehouse
+    const { data: products, error: prodErr } = await svc
+      .from('warehouse_products')
+      .select('id, name, category')
+      .eq('entity', entity)
+      .eq('warehouse', warehouse)
+      .eq('is_active', true)
+      .order('category')
+      .order('name');
+    if (prodErr) throw prodErr;
+
+    // Get current stock balances
+    const { data: balances, error: balErr } = await svc
+      .from('v_warehouse_stock_balance')
+      .select('product_id, current_stock')
+      .eq('entity', entity)
+      .eq('warehouse', warehouse);
+    if (balErr) throw balErr;
+
+    const balMap: Record<number, number> = {};
+    (balances || []).forEach((b: any) => { balMap[b.product_id] = Number(b.current_stock) || 0; });
+
+    // Pre-populate opname rows (blind count — sesudah_so starts null)
+    const rows = (products || []).map(p => ({
+      session_id: session.id,
+      warehouse: warehouse,
+      opname_date: date,
+      opname_label: label,
+      product_name: p.name,
+      category: p.category,
+      warehouse_product_id: p.id,
+      sebelum_so: balMap[p.id] || 0,
+      sesudah_so: null,
+      selisih: 0,
+    }));
+
+    if (rows.length > 0) {
+      const { error: insErr } = await svc.from('warehouse_stock_opname').insert(rows);
+      if (insErr) throw insErr;
+    }
+
+    return { success: true, data: { id: session.id } };
+  } catch (error) {
+    return {
+      success: false,
+      error: getWarehouseMutationErrorMessage(error, 'Gagal membuat sesi stock opname.'),
+    };
   }
-
-  // Create session
-  const { data: session, error: sessErr } = await svc
-    .from('warehouse_stock_opname_sessions')
-    .insert({ entity, warehouse, opname_date: date, opname_label: label, created_by: userId })
-    .select()
-    .single();
-  if (sessErr) throw sessErr;
-
-  // Get all active products for this entity + warehouse
-  const { data: products, error: prodErr } = await svc
-    .from('warehouse_products')
-    .select('id, name, category')
-    .eq('entity', entity)
-    .eq('warehouse', warehouse)
-    .eq('is_active', true)
-    .order('category')
-    .order('name');
-  if (prodErr) throw prodErr;
-
-  // Get current stock balances
-  const { data: balances, error: balErr } = await svc
-    .from('v_warehouse_stock_balance')
-    .select('product_id, current_stock')
-    .eq('entity', entity)
-    .eq('warehouse', warehouse);
-  if (balErr) throw balErr;
-
-  const balMap: Record<number, number> = {};
-  (balances || []).forEach((b: any) => { balMap[b.product_id] = Number(b.current_stock) || 0; });
-
-  // Pre-populate opname rows (blind count — sesudah_so starts null)
-  const rows = (products || []).map(p => ({
-    session_id: session.id,
-    warehouse: warehouse,
-    opname_date: date,
-    opname_label: label,
-    product_name: p.name,
-    category: p.category,
-    warehouse_product_id: p.id,
-    sebelum_so: balMap[p.id] || 0,
-    sesudah_so: null,
-    selisih: 0,
-  }));
-
-  if (rows.length > 0) {
-    const { error: insErr } = await svc.from('warehouse_stock_opname').insert(rows);
-    if (insErr) throw insErr;
-  }
-
-  return session;
 }
 
 export async function saveStockOpnameCounts(
   sessionId: number,
   counts: { id: number; sesudah_so: number | null; sebelum_so: number }[],
-) {
-  await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
-  const svc = createServiceSupabase();
+) : Promise<WarehouseMutationResult> {
+  try {
+    await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    const svc = createServiceSupabase();
 
-  const { data: session, error: sessionErr } = await svc
-    .from('warehouse_stock_opname_sessions')
-    .select('status')
-    .eq('id', sessionId)
-    .maybeSingle();
-  if (sessionErr) throw sessionErr;
-  if (!session || session.status !== 'counting') {
-    throw new Error('Stock opname ini tidak sedang dalam fase hitung');
+    const { data: session, error: sessionErr } = await svc
+      .from('warehouse_stock_opname_sessions')
+      .select('status')
+      .eq('id', sessionId)
+      .maybeSingle();
+    if (sessionErr) throw sessionErr;
+    if (!session || session.status !== 'counting') {
+      throw new Error('Stock opname ini tidak sedang dalam fase hitung');
+    }
+
+    for (const c of counts) {
+      if (c.sesudah_so != null && (!Number.isFinite(c.sesudah_so) || c.sesudah_so < 0)) {
+        throw new Error('Stok fisik harus berupa angka 0 atau lebih besar.');
+      }
+      if (!Number.isFinite(c.sebelum_so)) {
+        throw new Error('Saldo sistem untuk stock opname tidak valid. Silakan reload halaman lalu coba lagi.');
+      }
+    }
+
+    for (const c of counts) {
+      const selisih = c.sesudah_so != null ? c.sesudah_so - c.sebelum_so : 0;
+      const { error } = await svc
+        .from('warehouse_stock_opname')
+        .update({ sesudah_so: c.sesudah_so, selisih })
+        .eq('id', c.id)
+        .eq('session_id', sessionId);
+      if (error) throw error;
+    }
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: getWarehouseMutationErrorMessage(error, 'Gagal menyimpan hasil stock opname.'),
+    };
   }
+}
 
-  for (const c of counts) {
-    const selisih = c.sesudah_so != null ? c.sesudah_so - c.sebelum_so : 0;
-    const { error } = await svc
+export async function submitSOForReview(sessionId: number): Promise<WarehouseMutationResult> {
+  try {
+    await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    const svc = createServiceSupabase();
+
+    const { data: session, error: sessionErr } = await svc
+      .from('warehouse_stock_opname_sessions')
+      .select('status')
+      .eq('id', sessionId)
+      .maybeSingle();
+    if (sessionErr) throw sessionErr;
+    if (!session || session.status !== 'counting') {
+      throw new Error('Stock opname ini tidak sedang dalam fase hitung');
+    }
+
+    const { count: incompleteCount, error: incompleteErr } = await svc
       .from('warehouse_stock_opname')
-      .update({ sesudah_so: c.sesudah_so, selisih })
-      .eq('id', c.id)
-      .eq('session_id', sessionId);
+      .select('id', { count: 'exact', head: true })
+      .eq('session_id', sessionId)
+      .is('sesudah_so', null);
+    if (incompleteErr) throw incompleteErr;
+    if ((incompleteCount || 0) > 0) {
+      throw new Error('Masih ada item yang belum diisi stok fisiknya.');
+    }
+
+    const { error } = await svc
+      .from('warehouse_stock_opname_sessions')
+      .update({ status: 'reviewing' })
+      .eq('id', sessionId)
+      .eq('status', 'counting');
     if (error) throw error;
+
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: getWarehouseMutationErrorMessage(error, 'Gagal submit stock opname untuk direview.'),
+    };
   }
 }
 
-export async function submitSOForReview(sessionId: number) {
-  await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
-  const svc = createServiceSupabase();
-
-  const { data: session, error: sessionErr } = await svc
-    .from('warehouse_stock_opname_sessions')
-    .select('status')
-    .eq('id', sessionId)
-    .maybeSingle();
-  if (sessionErr) throw sessionErr;
-  if (!session || session.status !== 'counting') {
-    throw new Error('Stock opname ini tidak sedang dalam fase hitung');
+export async function revertSOToCounting(sessionId: number): Promise<WarehouseMutationResult> {
+  try {
+    await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    const svc = createServiceSupabase();
+    const { error } = await svc
+      .from('warehouse_stock_opname_sessions')
+      .update({ status: 'counting' })
+      .eq('id', sessionId)
+      .eq('status', 'reviewing');
+    if (error) throw error;
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: getWarehouseMutationErrorMessage(error, 'Gagal mengembalikan stock opname ke fase hitung.'),
+    };
   }
-
-  const { count: incompleteCount, error: incompleteErr } = await svc
-    .from('warehouse_stock_opname')
-    .select('id', { count: 'exact', head: true })
-    .eq('session_id', sessionId)
-    .is('sesudah_so', null);
-  if (incompleteErr) throw incompleteErr;
-  if ((incompleteCount || 0) > 0) {
-    throw new Error('Masih ada item yang belum diisi stok fisiknya');
-  }
-
-  const { error } = await svc
-    .from('warehouse_stock_opname_sessions')
-    .update({ status: 'reviewing' })
-    .eq('id', sessionId)
-    .eq('status', 'counting');
-  if (error) throw error;
 }
 
-export async function revertSOToCounting(sessionId: number) {
-  await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
-  const svc = createServiceSupabase();
-  const { error } = await svc
-    .from('warehouse_stock_opname_sessions')
-    .update({ status: 'counting' })
-    .eq('id', sessionId)
-    .eq('status', 'reviewing');
-  if (error) throw error;
+export async function approveStockOpname(sessionId: number): Promise<WarehouseMutationResult<{ adjustedCount: number }>> {
+  try {
+    await requireWarehousePermission('wh:opname_approve', 'Approve Stock Opname');
+    const svc = createServiceSupabase();
+
+    const { data: session, error: sessionErr } = await svc
+      .from('warehouse_stock_opname_sessions')
+      .select('status')
+      .eq('id', sessionId)
+      .maybeSingle();
+    if (sessionErr) throw sessionErr;
+    if (!session || session.status !== 'reviewing') {
+      throw new Error('Stock opname ini tidak siap di-approve');
+    }
+
+    const { count: incompleteCount, error: incompleteErr } = await svc
+      .from('warehouse_stock_opname')
+      .select('id', { count: 'exact', head: true })
+      .eq('session_id', sessionId)
+      .is('sesudah_so', null);
+    if (incompleteErr) throw incompleteErr;
+    if ((incompleteCount || 0) > 0) {
+      throw new Error('Masih ada item stock opname yang belum dihitung');
+    }
+
+    const { data: existingAdjustments, error: adjustmentErr } = await svc
+      .from('warehouse_stock_ledger')
+      .select('id')
+      .eq('reference_type', 'opname')
+      .like('notes', `[SO#${sessionId}]%`)
+      .limit(1);
+    if (adjustmentErr) throw adjustmentErr;
+    if (existingAdjustments && existingAdjustments.length > 0) {
+      throw new Error('Stock opname ini sudah pernah di-adjust');
+    }
+
+    // Get all items with variance
+    const { data: items, error: itemErr } = await svc
+      .from('warehouse_stock_opname')
+      .select('*')
+      .eq('session_id', sessionId)
+      .neq('selisih', 0);
+    if (itemErr) throw itemErr;
+
+    // Create ADJUST entries for each variance
+    for (const item of (items || [])) {
+      if (!item.warehouse_product_id || item.selisih === 0) continue;
+      await recordStockAdjustInternal(
+        item.warehouse_product_id,
+        null,
+        item.selisih,
+        `[SO#${sessionId}] Stock Opname: ${item.opname_label} — ${item.product_name} (${item.sebelum_so} → ${item.sesudah_so})`,
+      );
+    }
+
+    // Mark session completed
+    const { error } = await svc
+      .from('warehouse_stock_opname_sessions')
+      .update({ status: 'completed', completed_at: new Date().toISOString() })
+      .eq('id', sessionId)
+      .eq('status', 'reviewing');
+    if (error) throw error;
+
+    return { success: true, data: { adjustedCount: (items || []).length } };
+  } catch (error) {
+    return {
+      success: false,
+      error: getWarehouseMutationErrorMessage(error, 'Gagal approve stock opname.'),
+    };
+  }
 }
 
-export async function approveStockOpname(sessionId: number) {
-  await requireWarehousePermission('wh:opname_approve', 'Approve Stock Opname');
-  const svc = createServiceSupabase();
-
-  const { data: session, error: sessionErr } = await svc
-    .from('warehouse_stock_opname_sessions')
-    .select('status')
-    .eq('id', sessionId)
-    .maybeSingle();
-  if (sessionErr) throw sessionErr;
-  if (!session || session.status !== 'reviewing') {
-    throw new Error('Stock opname ini tidak siap di-approve');
+export async function cancelSOSession(sessionId: number): Promise<WarehouseMutationResult> {
+  try {
+    await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    const svc = createServiceSupabase();
+    const { error } = await svc
+      .from('warehouse_stock_opname_sessions')
+      .update({ status: 'canceled' })
+      .eq('id', sessionId)
+      .eq('status', 'counting');
+    if (error) throw error;
+    return { success: true };
+  } catch (error) {
+    return {
+      success: false,
+      error: getWarehouseMutationErrorMessage(error, 'Gagal membatalkan stock opname.'),
+    };
   }
-
-  const { count: incompleteCount, error: incompleteErr } = await svc
-    .from('warehouse_stock_opname')
-    .select('id', { count: 'exact', head: true })
-    .eq('session_id', sessionId)
-    .is('sesudah_so', null);
-  if (incompleteErr) throw incompleteErr;
-  if ((incompleteCount || 0) > 0) {
-    throw new Error('Masih ada item stock opname yang belum dihitung');
-  }
-
-  const { data: existingAdjustments, error: adjustmentErr } = await svc
-    .from('warehouse_stock_ledger')
-    .select('id')
-    .eq('reference_type', 'opname')
-    .like('notes', `[SO#${sessionId}]%`)
-    .limit(1);
-  if (adjustmentErr) throw adjustmentErr;
-  if (existingAdjustments && existingAdjustments.length > 0) {
-    throw new Error('Stock opname ini sudah pernah di-adjust');
-  }
-
-  // Get all items with variance
-  const { data: items, error: itemErr } = await svc
-    .from('warehouse_stock_opname')
-    .select('*')
-    .eq('session_id', sessionId)
-    .neq('selisih', 0);
-  if (itemErr) throw itemErr;
-
-  // Create ADJUST entries for each variance
-  for (const item of (items || [])) {
-    if (!item.warehouse_product_id || item.selisih === 0) continue;
-    await recordStockAdjustInternal(
-      item.warehouse_product_id,
-      null,
-      item.selisih,
-      `[SO#${sessionId}] Stock Opname: ${item.opname_label} — ${item.product_name} (${item.sebelum_so} → ${item.sesudah_so})`,
-    );
-  }
-
-  // Mark session completed
-  const { error } = await svc
-    .from('warehouse_stock_opname_sessions')
-    .update({ status: 'completed', completed_at: new Date().toISOString() })
-    .eq('id', sessionId)
-    .eq('status', 'reviewing');
-  if (error) throw error;
-
-  return (items || []).length;
-}
-
-export async function cancelSOSession(sessionId: number) {
-  await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
-  const svc = createServiceSupabase();
-  const { error } = await svc
-    .from('warehouse_stock_opname_sessions')
-    .update({ status: 'canceled' })
-    .eq('id', sessionId)
-    .eq('status', 'counting');
-  if (error) throw error;
 }

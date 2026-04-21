@@ -4002,51 +4002,107 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
     if (!newLabel.trim()) return;
     setCreating(true);
     try {
-      await createStockOpnameSession(newEntity, 'BTN', newLabel.trim(), newDate);
+      const result = await createStockOpnameSession(newEntity, 'BTN', newLabel.trim(), newDate);
+      if (!result.success) {
+        alert('Gagal membuat SO: ' + result.error);
+        return;
+      }
       setShowCreateForm(false);
       setNewLabel('');
       onRefresh();
     } catch (e: any) {
-      alert('Gagal membuat SO: ' + e.message);
+      alert('Gagal membuat SO: ' + (e?.message || 'Terjadi kesalahan.'));
+    } finally {
+      setCreating(false);
     }
-    setCreating(false);
   };
 
-  const handleSaveCounts = async () => {
-    if (!session) return;
+  const handleSaveCounts = async (options?: { requireComplete?: boolean; skipRefresh?: boolean }) => {
+    if (!session) return false;
+    const requireComplete = options?.requireComplete ?? false;
+    const skipRefresh = options?.skipRefresh ?? false;
     setSaving(true);
     try {
-      const updates = sessionItems.map(item => ({
-        id: item.id,
-        sesudah_so: counts[item.id] !== undefined && counts[item.id] !== '' ? Number(counts[item.id]) : null,
-        sebelum_so: Number(item.sebelum_so),
-      }));
-      await saveStockOpnameCounts(session.id, updates);
-      onRefresh();
+      const updates = sessionItems.map(item => {
+        const rawValue = counts[item.id];
+        const trimmedValue = typeof rawValue === 'string' ? rawValue.trim() : '';
+
+        if (trimmedValue === '') {
+          return {
+            id: item.id,
+            product_name: item.product_name,
+            sesudah_so: null,
+            sebelum_so: Number(item.sebelum_so),
+          };
+        }
+
+        const parsed = Number(trimmedValue);
+        return {
+          id: item.id,
+          product_name: item.product_name,
+          sesudah_so: Number.isFinite(parsed) ? parsed : NaN,
+          sebelum_so: Number(item.sebelum_so),
+        };
+      });
+
+      const invalidItem = updates.find(item => item.sesudah_so != null && (!Number.isFinite(item.sesudah_so) || item.sesudah_so < 0));
+      if (invalidItem) {
+        alert(`Stok fisik untuk ${invalidItem.product_name} harus berupa angka 0 atau lebih besar.`);
+        return false;
+      }
+
+      const incompleteItem = requireComplete ? updates.find(item => item.sesudah_so == null) : null;
+      if (incompleteItem) {
+        alert(`Masih ada item yang belum diisi stok fisiknya, mulai dari ${incompleteItem.product_name}.`);
+        return false;
+      }
+
+      const result = await saveStockOpnameCounts(
+        session.id,
+        updates.map(({ id, sesudah_so, sebelum_so }) => ({ id, sesudah_so, sebelum_so }))
+      );
+      if (!result.success) {
+        alert('Gagal menyimpan: ' + result.error);
+        return false;
+      }
+
+      if (!skipRefresh) onRefresh();
+      return true;
     } catch (e: any) {
-      alert('Gagal menyimpan: ' + e.message);
+      alert('Gagal menyimpan: ' + (e?.message || 'Terjadi kesalahan.'));
+      return false;
+    } finally {
+      setSaving(false);
     }
-    setSaving(false);
   };
 
   const handleSubmitReview = async () => {
     if (!session) return;
-    await handleSaveCounts();
+    const saved = await handleSaveCounts({ requireComplete: true, skipRefresh: true });
+    if (!saved) return;
     try {
-      await submitSOForReview(session.id);
+      const result = await submitSOForReview(session.id);
+      if (!result.success) {
+        alert('Gagal submit: ' + result.error);
+        return;
+      }
       onRefresh();
     } catch (e: any) {
-      alert('Gagal submit: ' + e.message);
+      alert('Gagal submit: ' + (e?.message || 'Terjadi kesalahan.'));
     }
   };
 
   const handleRevertCounting = async () => {
     if (!session) return;
     try {
-      await revertSOToCounting(session.id);
+      const result = await revertSOToCounting(session.id);
+      if (!result.success) {
+        alert('Gagal: ' + result.error);
+        return;
+      }
       onRefresh();
     } catch (e: any) {
-      alert('Gagal: ' + e.message);
+      alert('Gagal: ' + (e?.message || 'Terjadi kesalahan.'));
     }
   };
 
@@ -4054,22 +4110,32 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
     if (!session || !confirm('Approve stock opname ini? Stok akan di-adjust sesuai hasil hitung fisik.')) return;
     setApproving(true);
     try {
-      const count = await approveStockOpname(session.id);
+      const result = await approveStockOpname(session.id);
+      if (!result.success) {
+        alert('Gagal approve: ' + result.error);
+        return;
+      }
+      const count = result.data?.adjustedCount || 0;
       alert(`Stock opname selesai. ${count} item di-adjust.`);
       onRefresh();
     } catch (e: any) {
-      alert('Gagal approve: ' + e.message);
+      alert('Gagal approve: ' + (e?.message || 'Terjadi kesalahan.'));
+    } finally {
+      setApproving(false);
     }
-    setApproving(false);
   };
 
   const handleCancel = async () => {
     if (!session || !confirm('Batalkan stock opname ini?')) return;
     try {
-      await cancelSOSession(session.id);
+      const result = await cancelSOSession(session.id);
+      if (!result.success) {
+        alert('Gagal: ' + result.error);
+        return;
+      }
       onRefresh();
     } catch (e: any) {
-      alert('Gagal: ' + e.message);
+      alert('Gagal: ' + (e?.message || 'Terjadi kesalahan.'));
     }
   };
 
