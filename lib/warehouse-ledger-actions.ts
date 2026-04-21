@@ -5638,15 +5638,7 @@ export async function deleteVendor(id: number) {
 export async function getActiveSOSession() {
   await requireWarehouseAccess('Stock Opname');
   const svc = createServiceSupabase();
-  const { data, error } = await svc
-    .from('warehouse_stock_opname_sessions')
-    .select('*')
-    .in('status', ['counting', 'reviewing'])
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
+  return getLatestUsableActiveSOSession(svc);
 }
 
 export async function getSOSessionItems(sessionId: number) {
@@ -5661,25 +5653,68 @@ export async function getSOSessionItems(sessionId: number) {
   return data || [];
 }
 
+async function getSOSessionItemCount(
+  svc: ReturnType<typeof createServiceSupabase>,
+  sessionId: number,
+) {
+  const { count, error } = await svc
+    .from('warehouse_stock_opname')
+    .select('id', { count: 'exact', head: true })
+    .eq('session_id', sessionId);
+  if (error) throw error;
+  return count || 0;
+}
+
+async function deleteEmptySOSession(
+  svc: ReturnType<typeof createServiceSupabase>,
+  sessionId: number,
+) {
+  const { error: deleteRowsErr } = await svc
+    .from('warehouse_stock_opname')
+    .delete()
+    .eq('session_id', sessionId);
+  if (deleteRowsErr) throw deleteRowsErr;
+
+  const { error: deleteSessionErr } = await svc
+    .from('warehouse_stock_opname_sessions')
+    .delete()
+    .eq('id', sessionId)
+    .in('status', ['counting', 'reviewing']);
+  if (deleteSessionErr) throw deleteSessionErr;
+}
+
+async function getLatestUsableActiveSOSession(
+  svc: ReturnType<typeof createServiceSupabase>,
+) {
+  const { data: sessions, error } = await svc
+    .from('warehouse_stock_opname_sessions')
+    .select('*')
+    .in('status', ['counting', 'reviewing'])
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  for (const session of (sessions || [])) {
+    const itemCount = await getSOSessionItemCount(svc, Number(session.id));
+    if (itemCount > 0) return session;
+    await deleteEmptySOSession(svc, Number(session.id));
+  }
+
+  return null;
+}
+
 export async function createStockOpnameSession(
   entity: string,
   warehouse: string,
   label: string,
   date: string,
 ) : Promise<WarehouseMutationResult<{ id: number }>> {
+  let sessionId: number | null = null;
   try {
     await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
     const svc = createServiceSupabase();
     const userId = await getCurrentUserId();
 
-    const { data: existingSession, error: existingErr } = await svc
-      .from('warehouse_stock_opname_sessions')
-      .select('id, opname_label, entity, opname_date')
-      .in('status', ['counting', 'reviewing'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (existingErr) throw existingErr;
+    const existingSession = await getLatestUsableActiveSOSession(svc);
     if (existingSession) {
       throw new Error(`Masih ada stock opname aktif (${existingSession.opname_label} - ${existingSession.entity} ${existingSession.opname_date})`);
     }
@@ -5691,6 +5726,7 @@ export async function createStockOpnameSession(
       .select('id')
       .single();
     if (sessErr) throw sessErr;
+    sessionId = Number(session.id);
 
     // Get all active products for this entity + warehouse
     const { data: products, error: prodErr } = await svc
@@ -5702,6 +5738,9 @@ export async function createStockOpnameSession(
       .order('category')
       .order('name');
     if (prodErr) throw prodErr;
+    if (!products || products.length === 0) {
+      throw new Error(`Belum ada produk aktif untuk ${entity}-${warehouse}, jadi SO tidak bisa dibuat.`);
+    }
 
     // Get current stock balances
     const { data: balances, error: balErr } = await svc
@@ -5716,7 +5755,7 @@ export async function createStockOpnameSession(
 
     // Pre-populate opname rows (blind count — sesudah_so starts null)
     const rows = (products || []).map(p => ({
-      session_id: session.id,
+      session_id: sessionId,
       warehouse: warehouse,
       opname_date: date,
       opname_label: label,
@@ -5729,16 +5768,29 @@ export async function createStockOpnameSession(
       is_skipped: false,
     }));
 
-    if (rows.length > 0) {
-      const { error: insErr } = await svc.from('warehouse_stock_opname').insert(rows);
-      if (insErr) throw insErr;
+    const { error: insErr } = await svc.from('warehouse_stock_opname').insert(rows);
+    if (insErr) throw insErr;
+
+    return { success: true, data: { id: sessionId } };
+  } catch (error) {
+    if (sessionId != null) {
+      try {
+        const svc = createServiceSupabase();
+        await deleteEmptySOSession(svc, sessionId);
+      } catch {}
     }
 
-    return { success: true, data: { id: session.id } };
-  } catch (error) {
+    const rawMessage = getWarehouseMutationErrorMessage(error, 'Gagal membuat sesi stock opname.');
+    if (isUniqueViolation(error) && rawMessage.includes('warehouse_stock_opname_warehouse_opname_date_opname_label')) {
+      return {
+        success: false,
+        error: 'Schema database SO masih memakai unique key lama. Jalankan migration/session uniqueness terbaru dulu, lalu coba buat SO lagi.',
+      };
+    }
+
     return {
       success: false,
-      error: getWarehouseMutationErrorMessage(error, 'Gagal membuat sesi stock opname.'),
+      error: rawMessage,
     };
   }
 }

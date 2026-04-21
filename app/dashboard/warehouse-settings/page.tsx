@@ -115,7 +115,7 @@ function MasterProdukTab() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editData, setEditData] = useState<any>({});
   const [showAdd, setShowAdd] = useState(false);
-  const [newProduct, setNewProduct] = useState({ name: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor_id: '', brand_id: '' });
+  const [newProduct, setNewProduct] = useState({ name: '', sku: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor_id: '', brand_id: '' });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
@@ -144,7 +144,11 @@ function MasterProdukTab() {
     if (filterCategory !== 'all') result = result.filter(p => p.category === filterCategory);
     if (search) {
       const q = search.toLowerCase();
-      result = result.filter(p => p.name.toLowerCase().includes(q) || (p.vendor || '').toLowerCase().includes(q));
+      result = result.filter(p =>
+        p.name.toLowerCase().includes(q)
+        || (p.sku || '').toLowerCase().includes(q)
+        || (p.vendor || '').toLowerCase().includes(q)
+      );
     }
     return result;
   }, [products, filterEntity, filterCategory, search]);
@@ -157,7 +161,7 @@ function MasterProdukTab() {
 
   const startEdit = (p: any) => {
     setEditingId(p.id);
-    setEditData({ price_list: p.price_list || 0, hpp: p.hpp || 0, vendor_id: p.vendor_id || '', brand_id: p.brand_id || '', category: p.category, unit: p.unit });
+    setEditData({ sku: p.sku || '', price_list: p.price_list || 0, hpp: p.hpp || 0, vendor_id: p.vendor_id || '', brand_id: p.brand_id || '', category: p.category, unit: p.unit });
   };
 
   const saveEdit = async () => {
@@ -165,6 +169,7 @@ function MasterProdukTab() {
     setSaving(true);
     try {
       await updateProduct(editingId, {
+        sku: editData.sku?.trim() || null,
         price_list: Number(editData.price_list) || 0,
         hpp: Number(editData.hpp) || 0,
         vendor_id: editData.vendor_id ? Number(editData.vendor_id) : null,
@@ -185,6 +190,7 @@ function MasterProdukTab() {
     try {
       await createProduct({
         name: newProduct.name.trim(),
+        sku: newProduct.sku.trim() || undefined,
         category: newProduct.category,
         unit: newProduct.unit,
         entity: newProduct.entity,
@@ -195,7 +201,7 @@ function MasterProdukTab() {
         brand_id: newProduct.brand_id ? Number(newProduct.brand_id) : undefined,
       });
       setShowAdd(false);
-      setNewProduct({ name: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor_id: '', brand_id: '' });
+      setNewProduct({ name: '', sku: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor_id: '', brand_id: '' });
       setMessage({ type: 'success', text: 'Produk ditambahkan' });
       await loadData();
     } catch (e: any) { setMessage({ type: 'error', text: e.message }); }
@@ -228,7 +234,7 @@ function MasterProdukTab() {
           + Tambah Produk
         </button>
         <div style={{ flex: 1 }} />
-        <input type="text" placeholder="Cari produk/vendor..." value={search} onChange={e => setSearch(e.target.value)}
+        <input type="text" placeholder="Cari SKU/produk/vendor..." value={search} onChange={e => setSearch(e.target.value)}
           style={{ ...inputStyle, minWidth: 200, flex: 'none', width: 'auto' }} />
         <select value={filterEntity} onChange={e => setFilterEntity(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
           <option value="all">Semua Gudang</option>
@@ -246,6 +252,7 @@ function MasterProdukTab() {
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Tambah Produk Baru</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Nama *</label><input value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} style={inputStyle} /></div>
+            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>SKU</label><input value={newProduct.sku} onChange={e => setNewProduct({...newProduct, sku: e.target.value})} style={inputStyle} /></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Kategori</label><select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} style={inputStyle}>{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Unit</label><input value={newProduct.unit} onChange={e => setNewProduct({...newProduct, unit: e.target.value})} style={inputStyle} /></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Entity</label><select value={newProduct.entity} onChange={e => setNewProduct({...newProduct, entity: e.target.value})} style={inputStyle}>{ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}</select></div>
@@ -268,7 +275,7 @@ function MasterProdukTab() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Nama', 'Brand', 'Kategori', 'Gudang', 'HPP', 'Harga Jual', 'Vendor', 'Unit', 'Status', 'Aksi'].map(h => (
+              {['Nama', 'SKU', 'Brand', 'Kategori', 'Gudang', 'HPP', 'Harga Jual', 'Vendor', 'Unit', 'Status', 'Aksi'].map(h => (
                 <th key={h} style={{ padding: '6px 8px', textAlign: ['HPP', 'Harga Jual'].includes(h) ? 'right' : 'left', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
               ))}
             </tr>
@@ -279,6 +286,13 @@ function MasterProdukTab() {
               return (
                 <tr key={p.id} style={{ borderBottom: '1px solid var(--bg-deep)', opacity: p.is_active ? 1 : 0.5 }}>
                   <td style={{ padding: '5px 8px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap', maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</td>
+                  <td style={{ padding: '5px 8px', fontSize: 10, color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
+                    {isEditing ? (
+                      <input value={editData.sku || ''} onChange={e => setEditData({...editData, sku: e.target.value})} style={{ ...inputStyle, width: 120 }} />
+                    ) : (
+                      p.sku || '-'
+                    )}
+                  </td>
                   <td style={{ padding: '5px 8px' }}>
                     {isEditing ? (
                       <select value={editData.brand_id || ''} onChange={e => setEditData({...editData, brand_id: e.target.value})} style={{ ...inputStyle, width: 100 }}>
