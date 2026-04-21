@@ -647,6 +647,69 @@ export default function WarehousePage() {
 // RTS VERIFICATION TAB
 // ============================================================
 
+function RtsCubeIcon({ color = 'currentColor', size = 18 }: { color?: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+    </svg>
+  );
+}
+
+function RtsShieldIcon({ color = 'currentColor', size = 14 }: { color?: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
+
+function RtsBreakdownIcon({ color = 'currentColor', size = 14 }: { color?: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+      <polyline points="21 8 21 21 3 21 3 8" />
+      <rect x="1" y="3" width="22" height="5" />
+      <line x1="10" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+function RtsClockIcon({ color = 'currentColor', size = 13 }: { color?: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+function RtsPlusIcon({ color = 'currentColor', size = 12 }: { color?: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5">
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+function RtsTrashIcon({ color = 'currentColor', size = 12 }: { color?: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+      <polyline points="3 6 5 6 21 6" />
+      <path d="M19 6l-1 14H6L5 6" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M9 6V4h6v2" />
+    </svg>
+  );
+}
+
+function RtsCheckIcon({ color = 'currentColor', size = 16 }: { color?: string; size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.5">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
 function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () => void }) {
   const { can } = usePermissions();
   const [statusFilter, setStatusFilter] = useState<'pending' | 'completed' | 'cancelled' | 'all'>('pending');
@@ -1082,11 +1145,11 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
       return sum + (hasConfiguredAllocation ? 1 : 0);
     }, 0);
 
-    return Math.max(12, Math.min(100, Math.round((reviewedItems / items.length) * 100)));
+    return Math.max(0, Math.min(100, Math.round((reviewedItems / items.length) * 100)));
   };
 
   return (
-    <div style={{ maxWidth: 860, margin: '0 auto', width: '100%' }}>
+    <div style={{ maxWidth: 780, margin: '0 auto', width: '100%', fontFamily: '"IBM Plex Sans", system-ui, sans-serif' }}>
       <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
         <KPICard label="Pending Verifikasi" value={String(pendingCount)} color="#f59e0b" />
         <KPICard label="Selesai Diverifikasi" value={String(completedCount)} color="var(--green)" />
@@ -1131,6 +1194,10 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
         />
       </div>
 
+      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: reviewTextMuted, padding: '4px 0 10px' }}>
+        Item Return
+      </div>
+
       {filtered.length === 0 ? (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>
           Tidak ada antrean RTS untuk filter yang dipilih.
@@ -1167,7 +1234,8 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                       </span>
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-                      <div style={{ fontSize: 12, color: reviewTextSecondary }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: reviewTextSecondary }}>
+                        <RtsClockIcon color={reviewTextSecondary} />
                         Status: {(row.order_status || '-').toUpperCase()} · Triggered {fmtDateTime(row.triggered_at)}
                         {row.completed_at ? ` · Selesai ${fmtDateTime(row.completed_at)}` : ''}
                       </div>
@@ -1211,7 +1279,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                             <div key={item.id} style={{ background: reviewSurface, border: `1px solid ${reviewBorder}`, borderRadius: 10, overflow: 'hidden' }}>
                               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '16px 18px 14px', borderBottom: `1px solid ${reviewBorderSoft}`, flexWrap: 'wrap' }}>
                                 <div style={{ width: 38, height: 38, borderRadius: 8, background: mode === 'same_product' ? reviewGreenDim : reviewAccentDim, display: 'flex', alignItems: 'center', justifyContent: 'center', color: mode === 'same_product' ? reviewGreen : reviewAccent, fontSize: 16, flexShrink: 0 }}>
-                                  □
+                                  <RtsCubeIcon color={mode === 'same_product' ? reviewGreen : reviewAccent} />
                                 </div>
                                 <div style={{ flex: 1, minWidth: 180 }}>
                                   <div style={{ fontSize: 15, fontWeight: 600, color: reviewTextPrimary, marginBottom: 4 }}>
@@ -1247,8 +1315,8 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                   <div style={{ padding: '14px 18px 0' }}>
                                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', background: reviewSurface2, border: `1px solid ${reviewBorder}`, borderRadius: 8, padding: 3, gap: 3 }}>
                                     {[
-                                      { key: 'same_product', label: 'Utuh -> Balik ke Produk Ini', color: '#60a5fa' },
-                                      { key: 'decompose', label: 'Bongkar / Custom Allocation', color: '#8b5cf6' },
+                                      { key: 'same_product', label: 'Utuh -> Balik ke Produk Ini', icon: <RtsShieldIcon color={mode === 'same_product' ? '#fff' : reviewTextMuted} /> },
+                                      { key: 'decompose', label: 'Bongkar / Custom Allocation', icon: <RtsBreakdownIcon color={mode === 'decompose' ? '#fff' : reviewTextMuted} /> },
                                     ].map((option) => (
                                       <button
                                         key={option.key}
@@ -1269,6 +1337,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                           gap: 7,
                                         }}
                                       >
+                                        {option.icon}
                                         {option.label}
                                       </button>
                                     ))}
@@ -1347,7 +1416,8 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                           onClick={() => addAllocation(verificationId, item)}
                                           style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 13px', borderRadius: 6, border: `1px solid ${reviewAccent}`, background: reviewAccentDim, color: reviewAccent, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
                                         >
-                                          + Tambah Alokasi
+                                          <RtsPlusIcon color={reviewAccent} />
+                                          Tambah Alokasi
                                         </button>
                                         </div>
 
@@ -1413,8 +1483,9 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                                   </div>
                                                   <button
                                                     onClick={() => removeAllocation(verificationId, Number(item.id), allocationIndex)}
-                                                    style={{ height: 38, padding: '0 12px', borderRadius: 6, border: `1px solid rgba(255,90,90,.25)`, background: reviewRedDim, color: reviewRed, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
+                                                    style={{ height: 38, padding: '0 12px', borderRadius: 6, border: `1px solid rgba(255,90,90,.25)`, background: reviewRedDim, color: reviewRed, fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
                                                   >
+                                                    <RtsTrashIcon color={reviewRed} />
                                                     Hapus
                                                   </button>
                                                 </div>
@@ -1438,7 +1509,8 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                     </>
                                   )}
 
-                                  <div style={{ padding: mode === 'decompose' ? '0 18px 16px' : '14px 18px 16px' }}>
+                                  <div style={{ height: 1, background: reviewBorderSoft, margin: '0 18px 12px' }} />
+                                  <div style={{ padding: mode === 'decompose' ? '0 18px 16px' : '0 18px 16px' }}>
                                     <label style={reviewLabelStyle}>Catatan Item</label>
                                     <textarea
                                       value={itemState.notes || ''}
@@ -1549,8 +1621,9 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                             <button
                               onClick={() => handleComplete(row)}
                               disabled={submittingId === verificationId}
-                              style={{ width: '100%', padding: '14px', background: reviewGreen, border: 'none', borderRadius: 6, color: '#071a0e', fontSize: 14, fontWeight: 700, letterSpacing: '0.04em', cursor: submittingId === verificationId ? 'wait' : 'pointer', opacity: submittingId === verificationId ? 0.7 : 1 }}
+                              style={{ width: '100%', padding: '14px', background: reviewGreen, border: 'none', borderRadius: 6, color: '#071a0e', fontSize: 14, fontWeight: 700, letterSpacing: '0.04em', cursor: submittingId === verificationId ? 'wait' : 'pointer', opacity: submittingId === verificationId ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                             >
+                              <RtsCheckIcon color="#071a0e" />
                               {submittingId === verificationId ? 'Menyimpan...' : 'Selesaikan Verifikasi RTS'}
                             </button>
                           </div>
