@@ -646,6 +646,7 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
   const { can } = usePermissions();
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState<'in' | 'out' | 'transfer' | 'convert' | 'dispose'>('in');
+  const [hideZeroStock, setHideZeroStock] = useState(false);
 
   // Permission-based button visibility
   const canStockIn = can('wh:stock_masuk');
@@ -670,12 +671,13 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
     let result = data;
     if (warehouseFilter !== 'all') result = result.filter(r => `${r.warehouse} - ${r.entity}` === warehouseFilter);
     if (categoryFilter !== 'all') result = result.filter(r => r.category === categoryFilter);
+    if (hideZeroStock) result = result.filter(r => Number(r.current_stock || 0) !== 0);
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       result = result.filter(r => r.product_name?.toLowerCase().includes(q));
     }
     return result;
-  }, [data, categoryFilter, searchQuery, warehouseFilter]);
+  }, [data, categoryFilter, hideZeroStock, searchQuery, warehouseFilter]);
 
   const totalStock = filtered.reduce((s, r) => s + Number(r.current_stock || 0), 0);
   const totalValue = filtered.reduce((s, r) => s + Number(r.stock_value || 0), 0);
@@ -722,6 +724,15 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
           <option value="all">Semua Kategori</option>
           {categories.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12, cursor: 'pointer', userSelect: 'none' }}>
+          <input
+            type="checkbox"
+            checked={hideZeroStock}
+            onChange={(e) => setHideZeroStock(e.target.checked)}
+            style={{ margin: 0 }}
+          />
+          Sembunyikan saldo 0
+        </label>
       </div>
 
       {/* Stock Movement Modal */}

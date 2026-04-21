@@ -2422,6 +2422,76 @@ async function recordStockAdjustInternal(
   });
 }
 
+async function recordStockOpnameAdjustInternal(
+  svc: ReturnType<typeof createServiceSupabase>,
+  item: {
+    warehouse_product_id?: number | null;
+    selisih?: number | null;
+    opname_label?: string | null;
+    product_name?: string | null;
+    sebelum_so?: number | null;
+    sesudah_so?: number | null;
+  },
+  sessionId: number,
+) {
+  const productId = Number(item.warehouse_product_id || 0);
+  const adjustmentQty = Number(item.selisih || 0);
+  if (!productId || adjustmentQty === 0) return;
+
+  const baseNote = `[SO#${sessionId}] Stock Opname: ${item.opname_label} — ${item.product_name} (${item.sebelum_so} → ${item.sesudah_so})`;
+  const { data: batchRows, error: batchErr } = await svc
+    .from('warehouse_batches')
+    .select('id, batch_code, current_qty, created_at')
+    .eq('warehouse_product_id', productId)
+    .eq('is_active', true)
+    .order('expired_date', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true });
+  if (batchErr) throw batchErr;
+
+  const activeBatches = batchRows || [];
+  const positiveBatches = activeBatches.filter((batch: any) => Number(batch.current_qty || 0) > 0);
+
+  if (adjustmentQty < 0 && positiveBatches.length > 0) {
+    let remaining = Math.abs(adjustmentQty);
+    const availableQty = positiveBatches.reduce((sum: number, batch: any) => sum + Number(batch.current_qty || 0), 0);
+    if (availableQty < remaining) {
+      throw new Error(
+        `Stok batch ${item.product_name} tidak cukup untuk sync hasil SO. Batch tersedia ${availableQty}, sedangkan koreksi SO ${remaining}.`
+      );
+    }
+
+    for (const batch of positiveBatches) {
+      if (remaining <= 0) break;
+      const batchQty = Number(batch.current_qty || 0);
+      if (batchQty <= 0) continue;
+
+      const deductedQty = Math.min(batchQty, remaining);
+      await recordStockAdjustInternal(
+        productId,
+        Number(batch.id),
+        -deductedQty,
+        `${baseNote} • Batch ${batch.batch_code}`,
+      );
+      remaining -= deductedQty;
+    }
+    return;
+  }
+
+  if (adjustmentQty > 0 && activeBatches.length > 0) {
+    const adjustmentBatchCode = `SO-ADJ-${sessionId}`;
+    const adjustmentBatch = await findOrCreateTargetBatch(svc, productId, adjustmentBatchCode, null);
+    await recordStockAdjustInternal(
+      productId,
+      Number(adjustmentBatch.id),
+      adjustmentQty,
+      `${baseNote} • Batch ${adjustmentBatchCode}`,
+    );
+    return;
+  }
+
+  await recordStockAdjustInternal(productId, null, adjustmentQty, baseNote);
+}
+
 export async function recordStockAdjust(
   productId: number,
   batchId: number | null,
@@ -5953,12 +6023,7 @@ export async function approveStockOpname(sessionId: number): Promise<WarehouseMu
     // Create ADJUST entries for each variance
     for (const item of (items || [])) {
       if (!item.warehouse_product_id || item.selisih === 0) continue;
-      await recordStockAdjustInternal(
-        item.warehouse_product_id,
-        null,
-        item.selisih,
-        `[SO#${sessionId}] Stock Opname: ${item.opname_label} — ${item.product_name} (${item.sebelum_so} → ${item.sesudah_so})`,
-      );
+      await recordStockOpnameAdjustInternal(svc, item, sessionId);
     }
 
     // Mark session completed
