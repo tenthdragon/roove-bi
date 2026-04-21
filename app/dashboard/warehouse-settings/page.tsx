@@ -40,8 +40,22 @@ const SUB_TABS = [
   { id: 'mapping', label: 'Mapping Scalev' },
 ];
 
-const CATEGORIES = ['fg', 'sachet', 'packaging', 'bonus', 'other'];
+const DEFAULT_CATEGORIES = ['fg', 'sachet', 'packaging', 'bonus', 'wip', 'wip_material', 'other'];
 const ENTITIES = ['RTI', 'RLB', 'RLT', 'JHN'];
+
+function compareCategoryOption(a: string, b: string) {
+  const left = String(a || '').trim().toLowerCase();
+  const right = String(b || '').trim().toLowerCase();
+  const leftIndex = DEFAULT_CATEGORIES.indexOf(left);
+  const rightIndex = DEFAULT_CATEGORIES.indexOf(right);
+  const leftKnown = leftIndex !== -1;
+  const rightKnown = rightIndex !== -1;
+
+  if (leftKnown && rightKnown) return leftIndex - rightIndex;
+  if (leftKnown) return -1;
+  if (rightKnown) return 1;
+  return left.localeCompare(right, 'id');
+}
 
 const inputStyle = {
   background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6,
@@ -159,6 +173,15 @@ function MasterProdukTab() {
     return Array.from(set).sort();
   }, [products]);
 
+  const categoryOptions = useMemo(() => {
+    const set = new Set(DEFAULT_CATEGORIES);
+    products.forEach((p) => {
+      const category = String(p?.category || '').trim();
+      if (category) set.add(category);
+    });
+    return Array.from(set).sort(compareCategoryOption);
+  }, [products]);
+
   const startEdit = (p: any) => {
     setEditingId(p.id);
     setEditData({ sku: p.sku || '', price_list: p.price_list || 0, hpp: p.hpp || 0, vendor_id: p.vendor_id || '', brand_id: p.brand_id || '', category: p.category, unit: p.unit });
@@ -242,7 +265,7 @@ function MasterProdukTab() {
         </select>
         <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)} style={{ ...inputStyle, width: 'auto' }}>
           <option value="all">Semua Kategori</option>
-          {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
       </div>
 
@@ -253,7 +276,7 @@ function MasterProdukTab() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Nama *</label><input value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} style={inputStyle} /></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>SKU</label><input value={newProduct.sku} onChange={e => setNewProduct({...newProduct, sku: e.target.value})} style={inputStyle} /></div>
-            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Kategori</label><select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} style={inputStyle}>{CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Kategori</label><select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} style={inputStyle}>{categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Unit</label><input value={newProduct.unit} onChange={e => setNewProduct({...newProduct, unit: e.target.value})} style={inputStyle} /></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Entity</label><select value={newProduct.entity} onChange={e => setNewProduct({...newProduct, entity: e.target.value})} style={inputStyle}>{ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}</select></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Gudang</label><input value={newProduct.warehouse} onChange={e => setNewProduct({...newProduct, warehouse: e.target.value})} style={inputStyle} /></div>
@@ -305,8 +328,8 @@ function MasterProdukTab() {
                   </td>
                   <td style={{ padding: '5px 8px' }}>
                     {isEditing ? (
-                      <select value={editData.category} onChange={e => setEditData({...editData, category: e.target.value})} style={{ ...inputStyle, width: 80 }}>
-                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                      <select value={editData.category} onChange={e => setEditData({...editData, category: e.target.value})} style={{ ...inputStyle, width: 140 }}>
+                        {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
                     ) : (
                       <span style={{ padding: '1px 5px', borderRadius: 3, fontSize: 9, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text-secondary)' }}>{p.category}</span>
