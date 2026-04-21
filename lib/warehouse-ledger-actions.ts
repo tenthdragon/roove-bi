@@ -5726,6 +5726,7 @@ export async function createStockOpnameSession(
       sebelum_so: balMap[p.id] || 0,
       sesudah_so: null,
       selisih: 0,
+      is_skipped: false,
     }));
 
     if (rows.length > 0) {
@@ -5744,7 +5745,7 @@ export async function createStockOpnameSession(
 
 export async function saveStockOpnameCounts(
   sessionId: number,
-  counts: { id: number; sesudah_so: number | null; sebelum_so: number }[],
+  counts: { id: number; sesudah_so: number | null; sebelum_so: number; is_skipped?: boolean }[],
 ) : Promise<WarehouseMutationResult> {
   try {
     await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
@@ -5761,7 +5762,7 @@ export async function saveStockOpnameCounts(
     }
 
     for (const c of counts) {
-      if (c.sesudah_so != null && (!Number.isFinite(c.sesudah_so) || c.sesudah_so < 0)) {
+      if (!c.is_skipped && c.sesudah_so != null && (!Number.isFinite(c.sesudah_so) || c.sesudah_so < 0)) {
         throw new Error('Stok fisik harus berupa angka 0 atau lebih besar.');
       }
       if (!Number.isFinite(c.sebelum_so)) {
@@ -5770,10 +5771,12 @@ export async function saveStockOpnameCounts(
     }
 
     for (const c of counts) {
-      const selisih = c.sesudah_so != null ? c.sesudah_so - c.sebelum_so : 0;
+      const isSkipped = Boolean(c.is_skipped);
+      const sesudahSo = isSkipped ? null : c.sesudah_so;
+      const selisih = !isSkipped && sesudahSo != null ? sesudahSo - c.sebelum_so : 0;
       const { error } = await svc
         .from('warehouse_stock_opname')
-        .update({ sesudah_so: c.sesudah_so, selisih })
+        .update({ sesudah_so: sesudahSo, selisih, is_skipped: isSkipped })
         .eq('id', c.id)
         .eq('session_id', sessionId);
       if (error) throw error;
@@ -5807,6 +5810,7 @@ export async function submitSOForReview(sessionId: number): Promise<WarehouseMut
       .from('warehouse_stock_opname')
       .select('id', { count: 'exact', head: true })
       .eq('session_id', sessionId)
+      .eq('is_skipped', false)
       .is('sesudah_so', null);
     if (incompleteErr) throw incompleteErr;
     if ((incompleteCount || 0) > 0) {
@@ -5867,6 +5871,7 @@ export async function approveStockOpname(sessionId: number): Promise<WarehouseMu
       .from('warehouse_stock_opname')
       .select('id', { count: 'exact', head: true })
       .eq('session_id', sessionId)
+      .eq('is_skipped', false)
       .is('sesudah_so', null);
     if (incompleteErr) throw incompleteErr;
     if ((incompleteCount || 0) > 0) {
@@ -5889,6 +5894,7 @@ export async function approveStockOpname(sessionId: number): Promise<WarehouseMu
       .from('warehouse_stock_opname')
       .select('*')
       .eq('session_id', sessionId)
+      .eq('is_skipped', false)
       .neq('selisih', 0);
     if (itemErr) throw itemErr;
 

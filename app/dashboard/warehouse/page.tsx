@@ -55,7 +55,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, Cart
 interface SORow {
   id: number; warehouse: string; opname_date: string; opname_label: string;
   product_name: string; category: string;
-  sebelum_so: number; sesudah_so: number; selisih: number;
+  sebelum_so: number; sesudah_so: number; selisih: number; is_skipped?: boolean;
 }
 
 interface SOSummary {
@@ -3986,15 +3986,22 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const [counts, setCounts] = useState<Record<number, string>>({});
+  const [skippedItems, setSkippedItems] = useState<Record<number, boolean>>({});
 
   // Initialize counts from session items
   useEffect(() => {
     if (sessionItems.length > 0) {
       const init: Record<number, string> = {};
+      const skipped: Record<number, boolean> = {};
       sessionItems.forEach(item => {
         if (item.sesudah_so != null) init[item.id] = String(item.sesudah_so);
+        skipped[item.id] = Boolean(item.is_skipped);
       });
       setCounts(init);
+      setSkippedItems(skipped);
+    } else {
+      setCounts({});
+      setSkippedItems({});
     }
   }, [sessionItems]);
 
@@ -4024,8 +4031,19 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
     setSaving(true);
     try {
       const updates = sessionItems.map(item => {
+        const isSkipped = Boolean(skippedItems[item.id]);
         const rawValue = counts[item.id];
         const trimmedValue = typeof rawValue === 'string' ? rawValue.trim() : '';
+
+        if (isSkipped) {
+          return {
+            id: item.id,
+            product_name: item.product_name,
+            sesudah_so: null,
+            sebelum_so: Number(item.sebelum_so),
+            is_skipped: true,
+          };
+        }
 
         if (trimmedValue === '') {
           return {
@@ -4033,6 +4051,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
             product_name: item.product_name,
             sesudah_so: null,
             sebelum_so: Number(item.sebelum_so),
+            is_skipped: false,
           };
         }
 
@@ -4042,16 +4061,17 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
           product_name: item.product_name,
           sesudah_so: Number.isFinite(parsed) ? parsed : NaN,
           sebelum_so: Number(item.sebelum_so),
+          is_skipped: false,
         };
       });
 
-      const invalidItem = updates.find(item => item.sesudah_so != null && (!Number.isFinite(item.sesudah_so) || item.sesudah_so < 0));
+      const invalidItem = updates.find(item => !item.is_skipped && item.sesudah_so != null && (!Number.isFinite(item.sesudah_so) || item.sesudah_so < 0));
       if (invalidItem) {
         alert(`Stok fisik untuk ${invalidItem.product_name} harus berupa angka 0 atau lebih besar.`);
         return false;
       }
 
-      const incompleteItem = requireComplete ? updates.find(item => item.sesudah_so == null) : null;
+      const incompleteItem = requireComplete ? updates.find(item => !item.is_skipped && item.sesudah_so == null) : null;
       if (incompleteItem) {
         alert(`Masih ada item yang belum diisi stok fisiknya, mulai dari ${incompleteItem.product_name}.`);
         return false;
@@ -4059,7 +4079,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
 
       const result = await saveStockOpnameCounts(
         session.id,
-        updates.map(({ id, sesudah_so, sebelum_so }) => ({ id, sesudah_so, sebelum_so }))
+        updates.map(({ id, sesudah_so, sebelum_so, is_skipped }) => ({ id, sesudah_so, sebelum_so, is_skipped }))
       );
       if (!result.success) {
         alert('Gagal menyimpan: ' + result.error);
@@ -4163,34 +4183,48 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
           </div>
         </div>
         <div style={{ padding: '8px 12px', background: 'var(--bg)', borderRadius: 8, marginBottom: 16, fontSize: 12, color: 'var(--yellow)' }}>
-          Stok sistem sengaja disembunyikan. Masukkan jumlah stok fisik untuk setiap produk.
+          Stok sistem sengaja disembunyikan. Masukkan jumlah stok fisik untuk setiap produk, atau centang item yang memang tidak ikut SO.
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--border)' }}>
               <th style={{ padding: '8px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600 }}>Produk</th>
               <th style={{ padding: '8px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, width: 80 }}>Kategori</th>
+              <th style={{ padding: '8px', textAlign: 'center', color: 'var(--dim)', fontWeight: 600, width: 120 }}>Tidak ikut SO</th>
               <th style={{ padding: '8px', textAlign: 'right', color: 'var(--dim)', fontWeight: 600, width: 120 }}>Stok Fisik</th>
             </tr>
           </thead>
           <tbody>
-            {sessionItems.map(item => (
-              <tr key={item.id} style={{ borderBottom: '1px solid var(--border)' }}>
+            {sessionItems.map(item => {
+              const isSkipped = Boolean(skippedItems[item.id]);
+              return (
+              <tr key={item.id} style={{ borderBottom: '1px solid var(--border)', opacity: isSkipped ? 0.7 : 1, background: isSkipped ? 'rgba(148,163,184,0.08)' : 'transparent' }}>
                 <td style={{ padding: '6px 8px', fontWeight: 500 }}>{item.product_name}</td>
                 <td style={{ padding: '6px 8px' }}>
                   <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: CATEGORY_COLORS[item.category] || 'var(--text-secondary)' }}>{item.category}</span>
+                </td>
+                <td style={{ padding: '4px 8px', textAlign: 'center' }}>
+                  <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--dim)', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={isSkipped}
+                      onChange={e => setSkippedItems(prev => ({ ...prev, [item.id]: e.target.checked }))}
+                    />
+                    Skip
+                  </label>
                 </td>
                 <td style={{ padding: '4px 8px', textAlign: 'right' }}>
                   <input
                     type="number"
                     value={counts[item.id] ?? ''}
                     onChange={e => setCounts(prev => ({ ...prev, [item.id]: e.target.value }))}
+                    disabled={isSkipped}
                     placeholder="—"
-                    style={{ width: 90, padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, color: 'var(--text)' }}
+                    style={{ width: 90, padding: '4px 8px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, background: isSkipped ? 'var(--bg-deep)' : 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, color: isSkipped ? 'var(--dim)' : 'var(--text)' }}
                   />
                 </td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </table>
       </div>
@@ -4199,13 +4233,14 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
 
   // ── Active session: Reviewing Phase ──
   if (session && session.status === 'reviewing') {
-    const itemsWithVariance = sessionItems.filter(i => i.selisih !== 0);
+    const itemsWithVariance = sessionItems.filter(i => !i.is_skipped && i.selisih !== 0);
+    const skippedCount = sessionItems.filter(i => i.is_skipped).length;
     return (
       <div style={{ background: 'var(--card)', border: '1px solid var(--yellow)', borderRadius: 12, padding: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
           <div>
             <div style={{ fontSize: 16, fontWeight: 700 }}>Review Variance — {session.opname_label}</div>
-            <div style={{ fontSize: 12, color: 'var(--dim)' }}>Entity: {session.entity} | {fullDateID(session.opname_date)} | {itemsWithVariance.length} item berselisih</div>
+            <div style={{ fontSize: 12, color: 'var(--dim)' }}>Entity: {session.entity} | {fullDateID(session.opname_date)} | {itemsWithVariance.length} item berselisih{skippedCount > 0 ? ` | ${skippedCount} item dilewati` : ''}</div>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             {can('wh:opname_manage') && <button onClick={handleRevertCounting} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>
@@ -4226,6 +4261,19 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
           </thead>
           <tbody>
             {sessionItems.map(item => {
+              if (item.is_skipped) {
+                return (
+                  <tr key={item.id} style={{ borderBottom: '1px solid var(--border)', background: 'rgba(148,163,184,0.08)' }}>
+                    <td style={{ padding: '6px 8px', fontWeight: 500 }}>{item.product_name}</td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: CATEGORY_COLORS[item.category] || 'var(--text-secondary)' }}>{item.category}</span>
+                    </td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--dim)' }}>{Number(item.sebelum_so).toLocaleString('id-ID')}</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--dim)', fontWeight: 600 }}>Dilewati</td>
+                    <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--dim)', fontWeight: 600 }}>-</td>
+                  </tr>
+                );
+              }
               const sel = Number(item.selisih) || 0;
               return (
                 <tr key={item.id} style={{ borderBottom: '1px solid var(--border)', background: sel !== 0 ? (sel > 0 ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)') : 'transparent' }}>
@@ -4327,15 +4375,17 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
                       </thead>
                       <tbody>
                         {details.map(d => (
-                          <tr key={d.id} style={{ borderBottom: '1px solid var(--bg-deep)', background: d.selisih !== 0 ? 'var(--red-subtle)' : 'transparent' }}>
+                          <tr key={d.id} style={{ borderBottom: '1px solid var(--bg-deep)', background: d.is_skipped ? 'rgba(148,163,184,0.08)' : d.selisih !== 0 ? 'var(--red-subtle)' : 'transparent' }}>
                             <td style={{ padding: '5px 8px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{d.product_name}</td>
                             <td style={{ padding: '5px 8px' }}>
                               <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text-secondary)' }}>{d.category}</span>
                             </td>
                             <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{d.sebelum_so.toLocaleString('id-ID')}</td>
-                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{d.sesudah_so != null ? d.sesudah_so.toLocaleString('id-ID') : '—'}</td>
-                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: d.selisih > 0 ? 'var(--green)' : d.selisih < 0 ? 'var(--red)' : 'var(--text-muted)' }}>
-                              {d.selisih > 0 ? '+' : ''}{d.selisih.toLocaleString('id-ID')}
+                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: d.is_skipped ? 'var(--dim)' : 'var(--text)' }}>
+                              {d.is_skipped ? 'Dilewati' : d.sesudah_so != null ? d.sesudah_so.toLocaleString('id-ID') : '—'}
+                            </td>
+                            <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: d.is_skipped ? 'var(--dim)' : d.selisih > 0 ? 'var(--green)' : d.selisih < 0 ? 'var(--red)' : 'var(--text-muted)' }}>
+                              {d.is_skipped ? '-' : `${d.selisih > 0 ? '+' : ''}${d.selisih.toLocaleString('id-ID')}`}
                             </td>
                           </tr>
                         ))}
