@@ -4162,6 +4162,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
   const totalEvents = soSummary.length;
   const totalItemsWithSelisih = soSummary.reduce((s, r) => s + r.items_with_selisih, 0);
   const totalAbsSelisih = soSummary.reduce((s, r) => s + r.total_abs_selisih, 0);
+  const skippedCountInCounting = sessionItems.filter(item => Boolean(skippedItems[item.id])).length;
 
   // ── Active session: Counting Phase ──
   if (session && session.status === 'counting') {
@@ -4184,6 +4185,27 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
         </div>
         <div style={{ padding: '8px 12px', background: 'var(--bg)', borderRadius: 8, marginBottom: 16, fontSize: 12, color: 'var(--yellow)' }}>
           Stok sistem sengaja disembunyikan. Masukkan jumlah stok fisik untuk setiap produk, atau centang item yang memang tidak ikut SO.
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+            {skippedCountInCounting} / {sessionItems.length} item ditandai tidak ikut SO
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setSkippedItems(Object.fromEntries(sessionItems.map(item => [item.id, true])))}
+              style={{ padding: '6px 12px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--text)', cursor: 'pointer' }}
+            >
+              Check All Tidak ikut SO
+            </button>
+            <button
+              type="button"
+              onClick={() => setSkippedItems(Object.fromEntries(sessionItems.map(item => [item.id, false])))}
+              style={{ padding: '6px 12px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}
+            >
+              Reset Pilihan
+            </button>
+          </div>
         </div>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
           <thead>
