@@ -836,6 +836,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
               ? Number(previous.targetBatchId)
               : (item.target_batch_id != null ? Number(item.target_batch_id) : (preferredBatch?.id ? Number(preferredBatch.id) : null)),
             notes: previous.notes != null ? previous.notes : (item.notes || ''),
+            allocationDefaultNotes: previous.allocationDefaultNotes != null ? previous.allocationDefaultNotes : '',
             allocations,
           };
 
@@ -1065,7 +1066,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
               targetProductId: Number(allocation.targetProductId || 0),
               quantity: Number(allocation.quantity || 0),
               targetBatchId: allocation.targetBatchId ? Number(allocation.targetBatchId) : null,
-              notes: allocation.notes || '',
+              notes: allocation.notes || state.allocationDefaultNotes || '',
             })),
           };
         }),
@@ -1105,6 +1106,8 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
   const reviewAmberDim = 'rgba(245,166,35,0.12)';
   const reviewRed = '#ff5a5a';
   const reviewRedDim = 'rgba(255,90,90,0.12)';
+  const reviewSans = '"DM Sans", system-ui, sans-serif';
+  const reviewMono = '"DM Mono", monospace';
   const reviewInputStyle = {
     ...inputStyle,
     background: reviewSurface3,
@@ -1121,42 +1124,27 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
     letterSpacing: '0.04em',
     textTransform: 'uppercase' as const,
   };
-  const getVerificationProgress = (row: any, form: any) => {
-    if (row.status === 'completed' || row.status === 'cancelled') return 100;
-    const items = row.items || [];
-    if (items.length === 0) return 0;
-
-    const reviewedItems = items.reduce((sum: number, item: any) => {
-      const state = form.items?.[Number(item.id)] || {};
-      const mode = state.mode || item.return_mode || 'same_product';
-      if (mode === 'same_product') {
-        const targetBatchId = state.targetBatchId ?? item.target_batch_id ?? null;
-        return sum + (targetBatchId ? 1 : 0);
-      }
-
-      const allocations = Array.isArray(state.allocations) ? state.allocations : [];
-      const hasConfiguredAllocation = allocations.some((allocation: any) =>
-        Number(allocation.targetProductId || 0) > 0
-        || Number(allocation.quantity || 0) > 0
-        || Number(allocation.targetBatchId || 0) > 0
-        || String(allocation.notes || '').trim().length > 0
-      );
-
-      return sum + (hasConfiguredAllocation ? 1 : 0);
-    }, 0);
-
-    return Math.max(0, Math.min(100, Math.round((reviewedItems / items.length) * 100)));
-  };
-
   return (
-    <div style={{ maxWidth: 780, margin: '0 auto', width: '100%', fontFamily: '"IBM Plex Sans", system-ui, sans-serif' }}>
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <KPICard label="Pending Verifikasi" value={String(pendingCount)} color="#f59e0b" />
-        <KPICard label="Selesai Diverifikasi" value={String(completedCount)} color="var(--green)" />
-        <KPICard label="Qty Menunggu Cek" value={fmtCompact(pendingQty)} color="#8b5cf6" />
+    <div style={{ width: '100%', fontFamily: reviewSans }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 12 }}>
+        {[
+          { label: 'Pending Verifikasi', value: String(pendingCount), borderTop: reviewAmber },
+          { label: 'Selesai Diverifikasi', value: String(completedCount), borderTop: reviewGreen },
+          { label: 'Qty Menunggu Cek', value: fmtCompact(pendingQty), borderTop: reviewAccent },
+        ].map((card) => (
+          <div key={card.label} style={{ background: reviewSurface, border: `1px solid ${reviewBorder}`, borderTop: `2px solid ${card.borderTop}`, borderRadius: 8, padding: '14px 16px' }}>
+            <div style={{ fontSize: 9.5, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: reviewTextMuted, marginBottom: 8 }}>
+              {card.label}
+            </div>
+            <div style={{ fontFamily: reviewMono, fontSize: 26, fontWeight: 500, color: reviewTextPrimary }}>
+              {card.value}
+            </div>
+          </div>
+        ))}
       </div>
 
-      <div style={{ marginBottom: 16, padding: '12px 14px', borderRadius: 10, border: `1px solid ${reviewBorder}`, background: reviewSurface, color: reviewTextSecondary, fontSize: 12.5, lineHeight: 1.7 }}>
+      <div style={{ marginBottom: 14, padding: '11px 14px', borderRadius: 8, border: `1px solid ${reviewBorder}`, background: reviewSurface, color: reviewTextSecondary, fontSize: 12, lineHeight: 1.6, display: 'flex', gap: 9, alignItems: 'flex-start' }}>
+        <RtsBreakdownIcon color={reviewTextMuted} size={13} />
         Returned / RTS tidak lagi otomatis kembali ke stock. Jika barang masih utuh, tim gudang bisa balikan langsung ke produk FG. Jika tidak utuh, alokasikan manual ke sachet WIP, material, atau komponen lain yang benar-benar masih layak.
       </div>
 
@@ -1171,14 +1159,15 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
             key={option.key}
             onClick={() => setStatusFilter(option.key as any)}
             style={{
-              padding: '6px 12px',
-              borderRadius: 999,
+              padding: '5px 13px',
+              borderRadius: 20,
               border: `1px solid ${statusFilter === option.key ? reviewAccent : reviewBorder}`,
-              background: statusFilter === option.key ? reviewAccentDim : reviewSurface,
-              color: statusFilter === option.key ? '#a0abff' : reviewTextSecondary,
+              background: statusFilter === option.key ? reviewAccent : reviewSurface2,
+              color: statusFilter === option.key ? '#fff' : reviewTextSecondary,
               fontSize: 12,
-              fontWeight: 600,
+              fontWeight: 500,
               cursor: 'pointer',
+              transition: 'all .15s',
             }}
           >
             {option.label}
@@ -1190,12 +1179,8 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
           placeholder="Cari order / produk..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          style={{ ...reviewInputStyle, minWidth: 220, borderRadius: 999, padding: '8px 14px', maxWidth: 320 }}
+          style={{ ...reviewInputStyle, marginLeft: 'auto', width: 'min(100%, 210px)', borderRadius: 5, padding: '6px 11px', fontSize: 12.5 }}
         />
-      </div>
-
-      <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.1em', textTransform: 'uppercase', color: reviewTextMuted, padding: '4px 0 10px' }}>
-        Item Return
       </div>
 
       {filtered.length === 0 ? (
@@ -1210,58 +1195,54 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
             const tone = statusTone(row.status);
             const form = formByVerification[verificationId] || { notes: '', items: {} };
             const isPending = row.status === 'pending';
-            const progressPercent = getVerificationProgress(row, form);
+            const itemCount = (row.items || []).length;
 
             return (
-              <div key={verificationId} style={{ background: reviewSurface, border: `1px solid ${reviewBorder}`, borderRadius: 10, overflow: 'hidden', boxShadow: isExpanded ? '0 10px 30px rgba(0,0,0,0.16)' : 'none' }}>
+              <div key={verificationId} style={{ background: reviewSurface, border: `1px solid ${reviewBorder}`, borderRadius: 8, overflow: 'hidden' }}>
                 <button
                   onClick={() => toggleExpanded(row)}
-                  style={{ width: '100%', padding: '18px 22px 16px', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}
+                  style={{ width: '100%', padding: '12px 16px', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap', borderBottom: `1px solid ${reviewBorderSoft}` }}
                 >
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, textAlign: 'left', flex: 1, minWidth: 240 }}>
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 15, fontWeight: 600, color: reviewTextPrimary, fontFamily: 'monospace', letterSpacing: '0.02em' }}>{row.order_id}</span>
-                      {row.business_code && (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', padding: '3px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', background: 'rgba(108,127,255,0.18)', color: '#a0abff' }}>
-                          {row.business_code}
-                        </span>
-                      )}
-                      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '3px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', background: tone.bg, color: tone.color }}>
-                        {tone.label}
-                      </span>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', padding: '3px 9px', borderRadius: 999, fontSize: 11, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', background: 'rgba(62,207,142,0.18)', color: reviewGreen }}>
-                        {scopeLabel(row.scope)}
-                      </span>
+                  <span style={{ fontFamily: reviewMono, fontSize: 13, fontWeight: 500, color: reviewTextPrimary, letterSpacing: '0.02em' }}>
+                    {row.order_id}
+                  </span>
+                  {row.business_code && (
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 12, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', background: 'rgba(108,127,255,0.15)', color: '#a0aaff' }}>
+                      {row.business_code}
+                    </span>
+                  )}
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 12, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', background: tone.bg, color: tone.color }}>
+                    {tone.label}
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 12, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', background: reviewGreenDim, color: reviewGreen }}>
+                    {scopeLabel(row.scope)}
+                  </span>
+
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorder}`, borderRadius: 4, padding: '3px 8px', fontSize: 11.5, color: reviewTextSecondary }}>
+                      <strong style={{ color: reviewTextPrimary, fontWeight: 600 }}>{itemCount}</strong> item
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 18, flexWrap: 'wrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: reviewTextSecondary }}>
-                        <RtsClockIcon color={reviewTextSecondary} />
-                        Status: {(row.order_status || '-').toUpperCase()} · Triggered {fmtDateTime(row.triggered_at)}
-                        {row.completed_at ? ` · Selesai ${fmtDateTime(row.completed_at)}` : ''}
-                      </div>
+                    <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorder}`, borderRadius: 4, padding: '3px 8px', fontSize: 11.5, color: reviewTextSecondary }}>
+                      Qty total <strong style={{ color: reviewTextPrimary, fontWeight: 600 }}>{Number(row.expected_total_qty || 0).toLocaleString('id-ID')}</strong>
                     </div>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                    <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorder}`, borderRadius: 6, padding: '4px 10px', fontSize: 12, color: reviewTextSecondary }}>
-                      <strong style={{ color: reviewTextPrimary }}>{(row.items || []).length}</strong> item
-                    </div>
-                    <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorder}`, borderRadius: 6, padding: '4px 10px', fontSize: 12, color: reviewTextSecondary }}>
-                      Qty total <strong style={{ color: reviewTextPrimary }}>{Number(row.expected_total_qty || 0).toLocaleString('id-ID')}</strong>
-                    </div>
-                    <span style={{ color: reviewTextMuted, fontSize: 14, transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>&#9660;</span>
+                    <span style={{ color: reviewTextMuted, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 3, transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform .18s ease' }}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="18 15 12 9 6 15" />
+                      </svg>
+                    </span>
                   </div>
                 </button>
-                <div style={{ height: 3, background: reviewBorderSoft }}>
-                  <div style={{ height: '100%', width: `${progressPercent}%`, background: `linear-gradient(90deg, ${reviewAccent}, ${reviewGreen})`, transition: 'width .3s ease' }} />
+                <div style={{ padding: '5px 16px 9px', fontSize: 11.5, color: reviewTextMuted, borderBottom: `1px solid ${reviewBorderSoft}` }}>
+                  Status: {(row.order_status || '-').toUpperCase()} · Triggered {fmtDateTime(row.triggered_at)}
+                  {row.completed_at ? ` · Selesai ${fmtDateTime(row.completed_at)}` : ''}
                 </div>
-
                 {isExpanded && (
-                  <div style={{ padding: '18px 18px 20px' }}>
+                  <div>
                     {(row.items || []).length === 0 ? (
-                      <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>Belum ada item RTS yang dapat diverifikasi.</div>
+                      <div style={{ padding: '16px', color: reviewTextSecondary, fontSize: 12 }}>Belum ada item RTS yang dapat diverifikasi.</div>
                     ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                        {(row.items || []).map((item: any) => {
+                      <div>
+                        {(row.items || []).map((item: any, itemIndex: number) => {
                           const itemState = form.items?.[Number(item.id)] || {};
                           const mode = itemState.mode || item.return_mode || 'same_product';
                           const sourceProductId = Number(item.warehouse_product_id);
@@ -1274,37 +1255,38 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                           const damagedQty = Math.max(expectedQty - totalAllocated, 0);
                           const returnTargets = (returnTargetsBySourceProduct[sourceProductId] || [])
                             .filter((candidate: any) => isRtsDecomposeTargetCategory(candidate.category));
+                          const allocationDefaultNotes = itemState.allocationDefaultNotes || '';
 
                           return (
-                            <div key={item.id} style={{ background: reviewSurface, border: `1px solid ${reviewBorder}`, borderRadius: 10, overflow: 'hidden' }}>
-                              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, padding: '16px 18px 14px', borderBottom: `1px solid ${reviewBorderSoft}`, flexWrap: 'wrap' }}>
-                                <div style={{ width: 38, height: 38, borderRadius: 8, background: mode === 'same_product' ? reviewGreenDim : reviewAccentDim, display: 'flex', alignItems: 'center', justifyContent: 'center', color: mode === 'same_product' ? reviewGreen : reviewAccent, fontSize: 16, flexShrink: 0 }}>
-                                  <RtsCubeIcon color={mode === 'same_product' ? reviewGreen : reviewAccent} />
+                            <div key={item.id} style={{ padding: '14px 16px', borderBottom: itemIndex === itemCount - 1 && !isPending ? 'none' : `1px solid ${reviewBorderSoft}` }}>
+                              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11, marginBottom: 11 }}>
+                                <div style={{ width: 30, height: 30, borderRadius: 7, background: mode === 'same_product' ? reviewGreenDim : reviewAccentDim, border: `1px solid ${mode === 'same_product' ? 'rgba(62,207,142,.2)' : 'rgba(108,127,255,.2)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                  <RtsCubeIcon color={mode === 'same_product' ? reviewGreen : reviewAccent} size={13} />
                                 </div>
-                                <div style={{ flex: 1, minWidth: 180 }}>
-                                  <div style={{ fontSize: 15, fontWeight: 600, color: reviewTextPrimary, marginBottom: 4 }}>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: reviewTextPrimary, marginBottom: 4 }}>
                                     {item.warehouse_products?.name || '-'}
                                   </div>
-                                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                                    <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: reviewTextMuted, background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 4, padding: '1px 6px' }}>
+                                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                    <span style={{ fontFamily: reviewMono, fontSize: 9.5, color: reviewTextMuted, background: reviewSurface3, border: `1px solid ${reviewBorder}`, borderRadius: 3, padding: '1px 5px' }}>
                                       {item.warehouse_products?.warehouse || '-'}
                                     </span>
-                                    <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: reviewTextMuted, background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 4, padding: '1px 6px' }}>
+                                    <span style={{ fontFamily: reviewMono, fontSize: 9.5, color: reviewTextMuted, background: reviewSurface3, border: `1px solid ${reviewBorder}`, borderRadius: 3, padding: '1px 5px' }}>
                                       {item.warehouse_products?.entity || '-'}
                                     </span>
-                                    <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: reviewTextMuted, background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 4, padding: '1px 6px' }}>
+                                    <span style={{ fontFamily: reviewMono, fontSize: 9.5, color: reviewTextMuted, background: reviewSurface3, border: `1px solid ${reviewBorder}`, borderRadius: 3, padding: '1px 5px' }}>
                                       {item.warehouse_products?.category || '-'}
                                     </span>
                                     {!!item.scalev_product_summary && (
-                                      <span style={{ fontFamily: 'monospace', fontSize: 10.5, color: reviewTextMuted, background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 4, padding: '1px 6px' }}>
+                                      <span style={{ fontFamily: reviewMono, fontSize: 9.5, color: reviewTextMuted, background: reviewSurface3, border: `1px solid ${reviewBorder}`, borderRadius: 3, padding: '1px 5px' }}>
                                         Scalev: {item.scalev_product_summary}
                                       </span>
                                     )}
                                   </div>
                                 </div>
                                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                                  <div style={{ fontSize: 10, color: reviewTextMuted, marginBottom: 2 }}>Expected</div>
-                                  <div style={{ fontSize: 22, fontWeight: 600, fontFamily: 'monospace', color: reviewTextPrimary }}>
+                                  <div style={{ fontSize: 9.5, color: reviewTextMuted, marginBottom: 2 }}>Expected</div>
+                                  <div style={{ display: 'block', fontFamily: reviewMono, fontSize: 21, fontWeight: 500, color: reviewTextPrimary }}>
                                     {expectedQty.toLocaleString('id-ID')}
                                   </div>
                                 </div>
@@ -1312,23 +1294,22 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
 
                               {isPending ? (
                                 <>
-                                  <div style={{ padding: '14px 18px 0' }}>
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', background: reviewSurface2, border: `1px solid ${reviewBorder}`, borderRadius: 8, padding: 3, gap: 3 }}>
+                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', background: reviewSurface2, border: `1px solid ${reviewBorder}`, borderRadius: 6, padding: 3, gap: 3, marginBottom: 10 }}>
                                     {[
-                                      { key: 'same_product', label: 'Utuh -> Balik ke Produk Ini', icon: <RtsShieldIcon color={mode === 'same_product' ? '#fff' : reviewTextMuted} /> },
-                                      { key: 'decompose', label: 'Bongkar / Custom Allocation', icon: <RtsBreakdownIcon color={mode === 'decompose' ? '#fff' : reviewTextMuted} /> },
+                                      { key: 'same_product', label: 'Utuh -> Balik ke Produk Ini', icon: <RtsShieldIcon color={mode === 'same_product' ? '#fff' : reviewTextMuted} size={12} /> },
+                                      { key: 'decompose', label: 'Bongkar / Custom Allocation', icon: <RtsBreakdownIcon color={mode === 'decompose' ? '#fff' : reviewTextMuted} size={12} /> },
                                     ].map((option) => (
                                       <button
                                         key={option.key}
                                         onClick={() => setVerificationItemMode(verificationId, item, option.key as any)}
                                         style={{
-                                          padding: '8px 12px',
-                                          borderRadius: 6,
+                                          padding: '7px 10px',
+                                          borderRadius: 4,
                                           border: 'none',
                                           background: mode === option.key ? reviewAccent : 'transparent',
                                           boxShadow: mode === option.key ? `0 2px 12px ${reviewAccentGlow}` : 'none',
                                           color: mode === option.key ? '#fff' : reviewTextMuted,
-                                          fontSize: 13,
+                                          fontSize: 12,
                                           fontWeight: 500,
                                           cursor: 'pointer',
                                           display: 'flex',
@@ -1341,41 +1322,41 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                         {option.label}
                                       </button>
                                     ))}
-                                    </div>
                                   </div>
 
                                   {mode === 'same_product' ? (
                                     <>
-                                      <div style={{ margin: '10px 18px 0', padding: '10px 13px', borderRadius: 6, fontSize: 12.5, lineHeight: 1.6, color: reviewTextSecondary, background: reviewGreenDim, borderLeft: `3px solid ${reviewGreen}` }}>
+                                      <div style={{ padding: '8px 11px', borderRadius: 5, fontSize: 12, lineHeight: 1.55, color: reviewTextSecondary, background: reviewGreenDim, borderLeft: `2px solid ${reviewGreen}`, marginBottom: 11, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                                        <RtsShieldIcon color={reviewGreen} size={12} />
                                         Retur dikembalikan utuh ke produk asal. Seluruh qty yang Anda input di bawah dianggap layak masuk sebagai FG.
                                       </div>
 
-                                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, padding: '14px 18px 0' }}>
-                                        <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 6, padding: '12px 14px' }}>
-                                          <div style={{ fontSize: 11, color: reviewTextMuted, marginBottom: 6, fontWeight: 500 }}>Qty Balik ke Produk Ini</div>
+                                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 11 }}>
+                                        <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 5, padding: '9px 12px' }}>
+                                          <div style={{ fontSize: 9.5, color: reviewTextMuted, marginBottom: 4, fontWeight: 500 }}>Qty Balik ke Produk Ini</div>
                                           <input
                                             type="number"
                                             min="0"
                                             max={expectedQty}
                                             value={Number(itemState.restockQty ?? item.restock_qty ?? item.expected_qty ?? 0)}
                                             onChange={(e) => updateVerificationItem(verificationId, Number(item.id), { restockQty: e.target.value })}
-                                            style={{ ...reviewInputStyle, fontFamily: 'monospace', fontSize: 20, fontWeight: 600, textAlign: 'center' }}
+                                            style={{ ...reviewInputStyle, fontFamily: reviewMono, fontSize: 19, fontWeight: 500, textAlign: 'center' }}
                                           />
                                         </div>
-                                        <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 6, padding: '12px 14px' }}>
-                                          <div style={{ fontSize: 11, color: reviewTextMuted, marginBottom: 6, fontWeight: 500 }}>Loss / Tidak Kembali</div>
-                                          <div style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 600, color: reviewRed }}>
+                                        <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 5, padding: '9px 12px' }}>
+                                          <div style={{ fontSize: 9.5, color: reviewTextMuted, marginBottom: 4, fontWeight: 500 }}>Loss / Tidak Kembali</div>
+                                          <div style={{ fontFamily: reviewMono, fontSize: 19, fontWeight: 500, color: reviewRed }}>
                                             {damagedQty.toLocaleString('id-ID')}
                                           </div>
                                         </div>
                                       </div>
 
-                                      <div style={{ padding: '14px 18px 0' }}>
+                                      <div style={{ marginBottom: 10 }}>
                                         <label style={reviewLabelStyle}>Batch Tujuan FG</label>
                                         <select
                                           value={itemState.targetBatchId || ''}
                                           onChange={(e) => updateVerificationItem(verificationId, Number(item.id), { targetBatchId: e.target.value ? Number(e.target.value) : null })}
-                                          style={{ ...reviewInputStyle, fontFamily: 'monospace', fontSize: 12 }}
+                                          style={{ ...reviewInputStyle, fontFamily: reviewMono, fontSize: 10.5, paddingRight: 22 }}
                                         >
                                           <option value="">-- Pilih Batch --</option>
                                           {batchOptions.map((batch: any) => (
@@ -1390,86 +1371,85 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                     </>
                                   ) : (
                                     <>
-                                      <div style={{ margin: '10px 18px 0', padding: '10px 13px', borderRadius: 6, fontSize: 12.5, lineHeight: 1.6, color: reviewTextSecondary, background: reviewAmberDim, borderLeft: `3px solid ${reviewAmber}` }}>
+                                      <div style={{ padding: '8px 11px', borderRadius: 5, fontSize: 12, lineHeight: 1.55, color: reviewTextSecondary, background: reviewAmberDim, borderLeft: `2px solid ${reviewAmber}`, marginBottom: 11, display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+                                        <RtsBreakdownIcon color={reviewAmber} size={12} />
                                         Gunakan mode ini jika retur tidak bisa langsung kembali sebagai FG. Pilihan tujuan dibatasi ke stok kategori WIP dan WIP material yang benar-benar lolos cek fisik.
                                       </div>
 
-                                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, padding: '14px 18px 0' }}>
-                                        <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 6, padding: '12px 14px' }}>
-                                          <div style={{ fontSize: 11, color: reviewTextMuted, marginBottom: 6, fontWeight: 500 }}>Total Dialokasikan</div>
-                                          <div style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 600, color: reviewTextPrimary }}>
+                                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 11 }}>
+                                        <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 5, padding: '9px 12px' }}>
+                                          <div style={{ fontSize: 9.5, color: reviewTextMuted, marginBottom: 4, fontWeight: 500 }}>Total Dialokasikan</div>
+                                          <div style={{ fontFamily: reviewMono, fontSize: 19, fontWeight: 500, color: reviewTextPrimary }}>
                                             {totalAllocated.toLocaleString('id-ID')}
                                           </div>
                                         </div>
-                                        <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 6, padding: '12px 14px' }}>
-                                          <div style={{ fontSize: 11, color: reviewTextMuted, marginBottom: 6, fontWeight: 500 }}>Loss / Tidak Kembali</div>
-                                          <div style={{ fontFamily: 'monospace', fontSize: 22, fontWeight: 600, color: reviewRed }}>
+                                        <div style={{ background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 5, padding: '9px 12px' }}>
+                                          <div style={{ fontSize: 9.5, color: reviewTextMuted, marginBottom: 4, fontWeight: 500 }}>Loss / Tidak Kembali</div>
+                                          <div style={{ fontFamily: reviewMono, fontSize: 19, fontWeight: 500, color: reviewRed }}>
                                             {damagedQty.toLocaleString('id-ID')}
                                           </div>
                                         </div>
                                       </div>
 
-                                      <div style={{ padding: '16px 18px 0' }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                                        <div style={{ fontSize: 12, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: reviewTextSecondary }}>Alokasi Return</div>
-                                        <button
-                                          onClick={() => addAllocation(verificationId, item)}
-                                          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '6px 13px', borderRadius: 6, border: `1px solid ${reviewAccent}`, background: reviewAccentDim, color: reviewAccent, fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
-                                        >
-                                          <RtsPlusIcon color={reviewAccent} />
-                                          Tambah Alokasi
-                                        </button>
+                                      <div>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.06em', textTransform: 'uppercase', color: reviewTextMuted }}>Alokasi Return</span>
+                                          <button
+                                            onClick={() => addAllocation(verificationId, item)}
+                                            style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 10px', borderRadius: 5, border: `1px solid ${reviewAccent}`, background: reviewAccentDim, color: reviewAccent, fontSize: 11.5, fontWeight: 600, cursor: 'pointer' }}
+                                          >
+                                            <RtsPlusIcon color={reviewAccent} size={10} />
+                                            Tambah Alokasi
+                                          </button>
                                         </div>
 
-                                      {(allocations || []).length === 0 ? (
-                                        <div style={{ padding: 12, borderRadius: 6, border: `1px dashed ${reviewBorder}`, color: reviewTextSecondary, fontSize: 12, textAlign: 'center', marginBottom: 10 }}>
-                                          Belum ada alokasi. Tambahkan tujuan jika retur perlu dibongkar atau dibagi ke beberapa stok.
-                                        </div>
-                                      ) : (
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 10 }}>
-                                          {(allocations || []).map((allocation: any, allocationIndex: number) => {
-                                            const allocationProductId = Number(allocation.targetProductId || 0);
-                                            const allocationBatches = batchOptionsByProduct[allocationProductId] || [];
-                                            return (
-                                              <div key={`${item.id}-allocation-${allocationIndex}`} style={{ background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 6, padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 10, alignItems: 'start' }}>
-                                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                                                    <label style={reviewLabelStyle}>Produk Tujuan</label>
-                                                    <select
-                                                      value={allocation.targetProductId || ''}
-                                                      onChange={(e) => updateAllocation(verificationId, item, allocationIndex, { targetProductId: e.target.value ? Number(e.target.value) : null, targetBatchId: null })}
-                                                      style={{ ...reviewInputStyle, fontFamily: 'monospace', fontSize: 12 }}
-                                                    >
-                                                      <option value="">-- Pilih Produk --</option>
-                                                      {returnTargets.map((candidate: any) => (
-                                                        <option key={candidate.id} value={candidate.id}>
-                                                          {candidate.name} • {candidate.category}
-                                                          {candidate.is_source_product ? ' • source' : ''}
-                                                        </option>
-                                                      ))}
-                                                    </select>
+                                        {(allocations || []).length === 0 ? (
+                                          <div style={{ padding: 12, borderRadius: 5, border: `1px dashed ${reviewBorder}`, color: reviewTextSecondary, fontSize: 12, textAlign: 'center', marginBottom: 10 }}>
+                                            Belum ada alokasi. Tambahkan tujuan jika retur perlu dibongkar atau dibagi ke beberapa stok.
+                                          </div>
+                                        ) : (
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: 7, marginBottom: 10 }}>
+                                            {(allocations || []).map((allocation: any, allocationIndex: number) => {
+                                              const allocationProductId = Number(allocation.targetProductId || 0);
+                                              const allocationBatches = batchOptionsByProduct[allocationProductId] || [];
+                                              return (
+                                                <div key={`${item.id}-allocation-${allocationIndex}`} style={{ background: reviewSurface2, border: `1px solid ${reviewBorderSoft}`, borderRadius: 5, padding: 10 }}>
+                                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 80px', gap: 7, marginBottom: 7 }}>
+                                                    <div>
+                                                      <label style={reviewLabelStyle}>Produk Tujuan</label>
+                                                      <select
+                                                        value={allocation.targetProductId || ''}
+                                                        onChange={(e) => updateAllocation(verificationId, item, allocationIndex, { targetProductId: e.target.value ? Number(e.target.value) : null, targetBatchId: null })}
+                                                        style={{ ...reviewInputStyle, fontFamily: reviewMono, fontSize: 10.5, paddingRight: 22 }}
+                                                      >
+                                                        <option value="">-- Pilih Produk --</option>
+                                                        {returnTargets.map((candidate: any) => (
+                                                          <option key={candidate.id} value={candidate.id}>
+                                                            {candidate.name} • {candidate.category}
+                                                            {candidate.is_source_product ? ' • source' : ''}
+                                                          </option>
+                                                        ))}
+                                                      </select>
+                                                    </div>
+                                                    <div>
+                                                      <label style={reviewLabelStyle}>Qty Layak</label>
+                                                      <input
+                                                        type="number"
+                                                        min="0"
+                                                        max={expectedQty}
+                                                        value={allocation.quantity ?? 0}
+                                                        onChange={(e) => updateAllocation(verificationId, item, allocationIndex, { quantity: e.target.value })}
+                                                        style={{ ...reviewInputStyle, textAlign: 'center', fontFamily: reviewMono, fontSize: 14, fontWeight: 500 }}
+                                                      />
+                                                    </div>
                                                   </div>
 
-                                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                                                    <label style={reviewLabelStyle}>Qty Layak Masuk</label>
-                                                    <input
-                                                      type="number"
-                                                      min="0"
-                                                      max={expectedQty}
-                                                      value={allocation.quantity ?? 0}
-                                                      onChange={(e) => updateAllocation(verificationId, item, allocationIndex, { quantity: e.target.value })}
-                                                      style={{ ...reviewInputStyle, width: 96, textAlign: 'center', fontFamily: 'monospace', fontSize: 16, fontWeight: 600 }}
-                                                    />
-                                                  </div>
-                                                </div>
-
-                                                <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) auto', gap: 10, alignItems: 'end' }}>
-                                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+                                                  <div style={{ marginBottom: 7 }}>
                                                     <label style={reviewLabelStyle}>Batch Tujuan</label>
                                                     <select
                                                       value={allocation.targetBatchId || ''}
                                                       onChange={(e) => updateAllocation(verificationId, item, allocationIndex, { targetBatchId: e.target.value ? Number(e.target.value) : null })}
-                                                      style={{ ...reviewInputStyle, fontFamily: 'monospace', fontSize: 12 }}
+                                                      style={{ ...reviewInputStyle, fontFamily: reviewMono, fontSize: 10.5, paddingRight: 22 }}
                                                     >
                                                       <option value="">-- Pilih Batch --</option>
                                                       {allocationBatches.map((batch: any) => (
@@ -1481,67 +1461,88 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                                       ))}
                                                     </select>
                                                   </div>
-                                                  <button
-                                                    onClick={() => removeAllocation(verificationId, Number(item.id), allocationIndex)}
-                                                    style={{ height: 38, padding: '0 12px', borderRadius: 6, border: `1px solid rgba(255,90,90,.25)`, background: reviewRedDim, color: reviewRed, fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' }}
-                                                  >
-                                                    <RtsTrashIcon color={reviewRed} />
-                                                    Hapus
-                                                  </button>
-                                                </div>
 
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                                                  <label style={reviewLabelStyle}>Catatan Alokasi</label>
-                                                  <input
-                                                    type="text"
-                                                    value={allocation.notes || ''}
-                                                    onChange={(e) => updateAllocation(verificationId, item, allocationIndex, { notes: e.target.value })}
-                                                    placeholder="Contoh: 8 sachet aman, pouch penyok"
-                                                    style={reviewInputStyle}
-                                                  />
+                                                  <div>
+                                                    <label style={reviewLabelStyle}>Catatan Alokasi</label>
+                                                    <input
+                                                      type="text"
+                                                      value={allocation.notes || ''}
+                                                      onChange={(e) => updateAllocation(verificationId, item, allocationIndex, { notes: e.target.value })}
+                                                      placeholder="Contoh: 8 sachet aman, pouch penyok"
+                                                      style={reviewInputStyle}
+                                                    />
+                                                  </div>
+
+                                                  <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6 }}>
+                                                    <button
+                                                      onClick={() => removeAllocation(verificationId, Number(item.id), allocationIndex)}
+                                                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '4px 9px', borderRadius: 5, border: `1px solid rgba(255,90,90,.2)`, background: reviewRedDim, color: reviewRed, fontSize: 11, fontWeight: 600, cursor: 'pointer' }}
+                                                    >
+                                                      <RtsTrashIcon color={reviewRed} size={10} />
+                                                      Hapus
+                                                    </button>
+                                                  </div>
                                                 </div>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
-                                      )}
+                                              );
+                                            })}
+                                          </div>
+                                        )}
                                       </div>
                                     </>
                                   )}
 
-                                  <div style={{ height: 1, background: reviewBorderSoft, margin: '0 18px 12px' }} />
-                                  <div style={{ padding: mode === 'decompose' ? '0 18px 16px' : '0 18px 16px' }}>
-                                    <label style={reviewLabelStyle}>Catatan Item</label>
-                                    <textarea
-                                      value={itemState.notes || ''}
-                                      onChange={(e) => updateVerificationItem(verificationId, Number(item.id), { notes: e.target.value })}
-                                      placeholder="Contoh: 2 pcs hilang, 1 pouch robek"
-                                      style={{ ...reviewInputStyle, minHeight: 72, resize: 'vertical', fontSize: 12.5, lineHeight: 1.5 }}
-                                    />
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 7, paddingTop: 10, borderTop: `1px solid ${reviewBorderSoft}`, marginTop: 10 }}>
+                                    <div>
+                                      <label style={reviewLabelStyle}>Catatan Item</label>
+                                      <textarea
+                                        value={itemState.notes || ''}
+                                        onChange={(e) => updateVerificationItem(verificationId, Number(item.id), { notes: e.target.value })}
+                                        placeholder="Contoh: 2 pcs hilang, 1 pouch robek"
+                                        style={{ ...reviewInputStyle, minHeight: 54, resize: 'vertical', fontSize: 12, lineHeight: 1.5 }}
+                                      />
+                                    </div>
+                                    <div>
+                                      <label style={reviewLabelStyle}>Catatan Alokasi Default</label>
+                                      <textarea
+                                        value={allocationDefaultNotes}
+                                        onChange={(e) => updateVerificationItem(verificationId, Number(item.id), { allocationDefaultNotes: e.target.value })}
+                                        placeholder={mode === 'decompose' ? 'Otomatis dipakai jika catatan per alokasi kosong' : 'Dipakai saat item di-bongkar ke WIP / material'}
+                                        disabled={mode !== 'decompose'}
+                                        style={{
+                                          ...reviewInputStyle,
+                                          minHeight: 54,
+                                          resize: 'vertical',
+                                          fontSize: 12,
+                                          lineHeight: 1.5,
+                                          opacity: mode === 'decompose' ? 1 : 0.55,
+                                          cursor: mode === 'decompose' ? 'text' : 'not-allowed',
+                                        }}
+                                      />
+                                    </div>
                                   </div>
 
                                   {loadingContextByVerification[verificationId] && (
-                                    <div style={{ margin: '0 18px 14px', fontSize: 11, color: reviewTextSecondary }}>Memuat kandidat produk & batch...</div>
+                                    <div style={{ marginTop: 10, fontSize: 11, color: reviewTextSecondary }}>Memuat kandidat produk & batch...</div>
                                   )}
                                 </>
                               ) : (
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: '16px 18px' }}>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
                                     <div>
                                       <div style={{ fontSize: 11, color: reviewTextMuted }}>Mode Return</div>
                                       <div style={{ fontSize: 12, color: reviewTextPrimary, fontWeight: 700 }}>
-                                        {item.return_mode === 'decompose' ? 'Bongkar / Custom' : 'Utuh ke Produk Ini'}
+                                        {item.return_mode === 'decompose' ? 'Bongkar / Custom Allocation' : 'Utuh -> Balik ke Produk Ini'}
                                       </div>
                                     </div>
                                     <div>
                                       <div style={{ fontSize: 11, color: reviewTextMuted }}>Qty Masuk Kembali</div>
-                                      <div style={{ fontSize: 13, fontWeight: 700, color: reviewGreen, fontFamily: 'monospace' }}>
+                                      <div style={{ fontSize: 13, fontWeight: 700, color: reviewGreen, fontFamily: reviewMono }}>
                                         {Number(item.restock_qty || 0).toLocaleString('id-ID')}
                                       </div>
                                     </div>
                                     <div>
                                       <div style={{ fontSize: 11, color: reviewTextMuted }}>Qty Loss / Tidak Direstock</div>
-                                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fca5a5', fontFamily: 'monospace' }}>
+                                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fca5a5', fontFamily: reviewMono }}>
                                         {Number(item.damaged_qty || 0).toLocaleString('id-ID')}
                                       </div>
                                     </div>
@@ -1563,7 +1564,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                               </div>
                                               <div>
                                                 <div style={{ fontSize: 11, color: reviewTextMuted }}>Qty</div>
-                                                <div style={{ fontSize: 12, color: reviewGreen, fontWeight: 700, fontFamily: 'monospace' }}>
+                                                <div style={{ fontSize: 12, color: reviewGreen, fontWeight: 700, fontFamily: reviewMono }}>
                                                   {Number(allocation.quantity || 0).toLocaleString('id-ID')}
                                                 </div>
                                               </div>
@@ -1582,11 +1583,11 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                     </div>
                                   )}
 
-                                  <div>
-                                    <div style={{ fontSize: 11, color: reviewTextMuted }}>Catatan Item</div>
-                                    <div style={{ fontSize: 12, color: reviewTextPrimary }}>{item.notes || '-'}</div>
+                                    <div>
+                                      <div style={{ fontSize: 11, color: reviewTextMuted }}>Catatan Item</div>
+                                      <div style={{ fontSize: 12, color: reviewTextPrimary }}>{item.notes || '-'}</div>
+                                    </div>
                                   </div>
-                                </div>
                               )}
                             </div>
                           );
@@ -1595,39 +1596,38 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                     )}
 
                     {isPending && (
-                      <div style={{ marginTop: 8, background: reviewSurface, border: `1px solid ${reviewBorder}`, borderRadius: 10, padding: '18px 22px' }}>
-                        <div style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: reviewTextMuted, marginBottom: 8 }}>
-                          Catatan Verifikasi Order
-                        </div>
-                        <textarea
-                          value={form.notes || ''}
-                          onChange={(e) => updateVerificationNotes(verificationId, e.target.value)}
-                          placeholder="Contoh: 10 utuh balik ke FG, 8 dibongkar ke WIP, 2 loss"
-                          style={{ ...reviewInputStyle, minHeight: 80, resize: 'vertical', fontSize: 12.5, lineHeight: 1.5 }}
-                        />
-
-                        {!!errorByVerification[verificationId] && (
-                          <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: reviewRedDim, color: '#fca5a5', fontSize: 12 }}>
-                            {errorByVerification[verificationId]}
+                      <div style={{ padding: '13px 16px', background: reviewSurface2, borderTop: `1px solid ${reviewBorderSoft}` }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, alignItems: 'end' }}>
+                          <div>
+                            <label style={reviewLabelStyle}>Catatan Verifikasi Order</label>
+                            <textarea
+                              value={form.notes || ''}
+                              onChange={(e) => updateVerificationNotes(verificationId, e.target.value)}
+                              placeholder="Contoh: 10 utuh balik ke FG, 8 dibongkar ke WIP, 2 loss"
+                              style={{ ...reviewInputStyle, minHeight: 54, resize: 'vertical', fontSize: 12, lineHeight: 1.5 }}
+                            />
+                            {!!errorByVerification[verificationId] && (
+                              <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: reviewRedDim, color: '#fca5a5', fontSize: 12 }}>
+                                {errorByVerification[verificationId]}
+                              </div>
+                            )}
                           </div>
-                        )}
 
-                        {!can('wh:stock_masuk') ? (
-                          <div style={{ marginTop: 12, color: 'var(--dim)', fontSize: 12 }}>
-                            Akun ini belum punya izin `stock masuk` untuk menyelesaikan verifikasi RTS.
-                          </div>
-                        ) : (
-                          <div style={{ marginTop: 16 }}>
+                          {!can('wh:stock_masuk') ? (
+                            <div style={{ color: reviewTextSecondary, fontSize: 12, maxWidth: 220 }}>
+                              Akun ini belum punya izin `stock masuk` untuk menyelesaikan verifikasi RTS.
+                            </div>
+                          ) : (
                             <button
                               onClick={() => handleComplete(row)}
                               disabled={submittingId === verificationId}
-                              style={{ width: '100%', padding: '14px', background: reviewGreen, border: 'none', borderRadius: 6, color: '#071a0e', fontSize: 14, fontWeight: 700, letterSpacing: '0.04em', cursor: submittingId === verificationId ? 'wait' : 'pointer', opacity: submittingId === verificationId ? 0.7 : 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                              style={{ padding: '9px 20px', background: reviewGreen, border: 'none', borderRadius: 5, color: '#071a0e', fontSize: 13, fontWeight: 700, cursor: submittingId === verificationId ? 'wait' : 'pointer', opacity: submittingId === verificationId ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', justifySelf: 'end' }}
                             >
-                              <RtsCheckIcon color="#071a0e" />
+                              <RtsCheckIcon color="#071a0e" size={14} />
                               {submittingId === verificationId ? 'Menyimpan...' : 'Selesaikan Verifikasi RTS'}
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>
