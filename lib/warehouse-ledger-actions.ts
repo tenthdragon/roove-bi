@@ -263,6 +263,15 @@ interface ScalevOrderWarehouseAssessment {
   allowedMappings?: Array<{ deduct_entity: string; deduct_warehouse: string }> | null;
 }
 
+type WarehouseRtsVerificationScope = 'pre_go_live' | 'post_go_live';
+type WarehouseRtsVerificationStatus = 'pending' | 'completed' | 'cancelled';
+
+interface WarehouseRtsVerificationQueueItem {
+  warehouse_product_id: number;
+  scalev_product_summary: string;
+  expected_qty: number;
+}
+
 interface WarehouseBusinessTargetRow {
   id?: number;
   business_code: string;
@@ -1153,6 +1162,225 @@ function buildWarehouseIssueSummary(assessment: ScalevOrderWarehouseAssessment) 
   return {
     problem: 'unknown',
     problem_detail: 'Deduction warehouse belum sinkron dengan shipment Scalev',
+  };
+}
+
+function buildWarehouseRtsVerificationQueueItems(
+  assessment: ScalevOrderWarehouseAssessment,
+): WarehouseRtsVerificationQueueItem[] {
+  const grouped = new Map<number, { expected_qty: number; labels: Set<string> }>();
+
+  for (const target of assessment.targets) {
+    const productId = Number(target.warehouse_product_id || 0);
+    if (!productId) continue;
+    if (!grouped.has(productId)) {
+      grouped.set(productId, {
+        expected_qty: 0,
+        labels: new Set<string>(),
+      });
+    }
+
+    const bucket = grouped.get(productId)!;
+    bucket.expected_qty += Number(target.quantity || 0);
+    if (target.scalev_product_name) {
+      bucket.labels.add(String(target.scalev_product_name).trim());
+    }
+  }
+
+  return Array.from(grouped.entries())
+    .map(([warehouse_product_id, value]) => ({
+      warehouse_product_id,
+      scalev_product_summary: Array.from(value.labels).filter(Boolean).join(', '),
+      expected_qty: Number(value.expected_qty || 0),
+    }))
+    .filter((item) => item.expected_qty > QUANTITY_EPSILON);
+}
+
+async function syncWarehouseRtsVerificationItems(
+  svc: ReturnType<typeof createServiceSupabase>,
+  verificationId: number,
+  items: WarehouseRtsVerificationQueueItem[],
+) {
+  const { data: existingRows, error: existingErr } = await svc
+    .from('warehouse_rts_verification_items')
+    .select('id, warehouse_product_id')
+    .eq('verification_id', verificationId);
+  if (existingErr) throw existingErr;
+
+  const existingByProductId = new Map<number, any>();
+  for (const row of existingRows || []) {
+    existingByProductId.set(Number(row.warehouse_product_id), row);
+  }
+
+  const seenProductIds = new Set<number>();
+  const now = new Date().toISOString();
+
+  for (const item of items) {
+    seenProductIds.add(Number(item.warehouse_product_id));
+    const existing = existingByProductId.get(Number(item.warehouse_product_id));
+
+    const payload: Record<string, any> = {
+      verification_id: verificationId,
+      warehouse_product_id: Number(item.warehouse_product_id),
+      scalev_product_summary: item.scalev_product_summary || null,
+      expected_qty: Number(item.expected_qty || 0),
+      updated_at: now,
+    };
+
+    if (existing) {
+      const { error: updateErr } = await svc
+        .from('warehouse_rts_verification_items')
+        .update(payload)
+        .eq('id', Number(existing.id));
+      if (updateErr) throw updateErr;
+    } else {
+      const { error: insertErr } = await svc
+        .from('warehouse_rts_verification_items')
+        .insert({
+          ...payload,
+          created_at: now,
+        });
+      if (insertErr) throw insertErr;
+    }
+  }
+
+  const staleIds = (existingRows || [])
+    .filter((row: any) => !seenProductIds.has(Number(row.warehouse_product_id)))
+    .map((row: any) => Number(row.id))
+    .filter(Boolean);
+  if (staleIds.length > 0) {
+    const { error: deleteErr } = await svc
+      .from('warehouse_rts_verification_items')
+      .delete()
+      .in('id', staleIds);
+    if (deleteErr) throw deleteErr;
+  }
+}
+
+async function cancelPendingWarehouseRtsVerification(
+  svc: ReturnType<typeof createServiceSupabase>,
+  scalevOrderId: number,
+  orderStatus?: string | null,
+) {
+  const { data, error } = await svc
+    .from('warehouse_rts_verifications')
+    .update({
+      status: 'cancelled',
+      order_status: orderStatus || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('scalev_order_id', scalevOrderId)
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  return data ? Number(data.id) : null;
+}
+
+async function queueWarehouseRtsVerification(
+  svc: ReturnType<typeof createServiceSupabase>,
+  assessment: ScalevOrderWarehouseAssessment,
+  scope: WarehouseRtsVerificationScope,
+) {
+  if (!assessment.mapping || assessment.productLines.length === 0) {
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+      ...buildWarehouseIssueSummary(assessment),
+    };
+  }
+
+  const items = buildWarehouseRtsVerificationQueueItems(assessment);
+  if (items.length === 0) {
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+      ...buildWarehouseIssueSummary(assessment),
+    };
+  }
+
+  const now = new Date().toISOString();
+  const expectedTotalQty = items.reduce((sum, item) => sum + Number(item.expected_qty || 0), 0);
+
+  const { data: existing, error: existingErr } = await svc
+    .from('warehouse_rts_verifications')
+    .select('id, status')
+    .eq('scalev_order_id', assessment.order.id)
+    .maybeSingle();
+  if (existingErr) throw existingErr;
+
+  if (existing?.status === 'completed') {
+    return {
+      action: 'rts_already_verified',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+      verification_id: Number(existing.id),
+    };
+  }
+
+  const payload = {
+    scalev_order_id: assessment.order.id,
+    order_id: assessment.order.order_id,
+    business_code: assessment.order.business_code || null,
+    order_status: assessment.order.status || null,
+    scope,
+    status: 'pending' as WarehouseRtsVerificationStatus,
+    expected_total_qty: expectedTotalQty,
+    triggered_at: now,
+    updated_at: now,
+  };
+
+  let verificationId: number;
+  if (existing?.id) {
+    const { data: refreshed, error: updateErr } = await svc
+      .from('warehouse_rts_verifications')
+      .update({
+        ...payload,
+        completed_at: null,
+        reviewed_by: null,
+      })
+      .eq('id', Number(existing.id))
+      .select('id')
+      .single();
+    if (updateErr) throw updateErr;
+    verificationId = Number(refreshed.id);
+  } else {
+    const { data: created, error: insertErr } = await svc
+      .from('warehouse_rts_verifications')
+      .insert({
+        ...payload,
+        created_at: now,
+      })
+      .select('id')
+      .single();
+    if (insertErr) throw insertErr;
+    verificationId = Number(created.id);
+  }
+
+  await syncWarehouseRtsVerificationItems(svc, verificationId, items);
+
+  const action = assessment.unmappedProducts.length > 0
+    ? 'rts_verification_partial'
+    : existing?.id
+      ? 'rts_verification_pending'
+      : 'rts_verification_needed';
+
+  return {
+    action,
+    reversed: 0,
+    deducted: 0,
+    skipped: assessment.skippedIgnored,
+    unmapped_products: assessment.unmappedProducts,
+    verification_id: verificationId,
+    ...(assessment.unmappedProducts.length > 0 ? buildWarehouseIssueSummary(assessment) : {}),
   };
 }
 
@@ -2160,6 +2388,30 @@ async function deductBatchQuantityOrThrow(
   return batch;
 }
 
+async function incrementBatchQuantityOrThrow(
+  svc: ReturnType<typeof createServiceSupabase>,
+  batchId: number,
+  productId: number,
+  quantity: number,
+) {
+  const batch = await getBatchOrThrow(svc, batchId, productId);
+  const nextQty = Number(batch.current_qty || 0) + Number(quantity || 0);
+  if (nextQty < 0) {
+    throw new Error(`Update menyebabkan stok batch ${batch.batch_code} menjadi negatif`);
+  }
+
+  const update: Record<string, any> = { current_qty: nextQty };
+  if (nextQty > 0) update.is_active = true;
+
+  const { error } = await svc
+    .from('warehouse_batches')
+    .update(update)
+    .eq('id', batchId);
+  if (error) throw error;
+
+  return batch;
+}
+
 async function findOrCreateTargetBatch(
   svc: ReturnType<typeof createServiceSupabase>,
   productId: number,
@@ -2227,17 +2479,7 @@ export async function recordStockInInternal(
 
   // Update batch qty if batch specified
   if (batchId) {
-    const { data: batch } = await svc
-      .from('warehouse_batches')
-      .select('current_qty')
-      .eq('id', batchId)
-      .single();
-    if (batch) {
-      await svc
-        .from('warehouse_batches')
-        .update({ current_qty: Number(batch.current_qty) + quantity })
-        .eq('id', batchId);
-    }
+    await incrementBatchQuantityOrThrow(svc, batchId, productId, quantity);
   }
 
   const result = await insertLedgerEntry(svc, {
@@ -2351,18 +2593,7 @@ export async function recordStockRTS(
   const svc = createServiceSupabase();
   const userId = await getCurrentUserId();
 
-  // Add back to batch qty
-  const { data: batch } = await svc
-    .from('warehouse_batches')
-    .select('current_qty')
-    .eq('id', batchId)
-    .single();
-  if (batch) {
-    await svc
-      .from('warehouse_batches')
-      .update({ current_qty: Number(batch.current_qty) + quantity })
-      .eq('id', batchId);
-  }
+  await incrementBatchQuantityOrThrow(svc, batchId, productId, quantity);
 
   const result = await insertLedgerEntry(svc, {
     warehouse_product_id: productId,
@@ -4116,17 +4347,183 @@ export async function getDailyMovementSummary(date: string) {
   })).sort((a, b) => a.entity.localeCompare(b.entity) || a.product_name.localeCompare(b.product_name));
 }
 
-export async function getBatches(productId: number) {
+export async function getBatches(productId: number, options?: { includeInactive?: boolean }) {
   await requireWarehouseAccess('Batch Stock');
   const svc = createServiceSupabase();
-  const { data, error } = await svc
+  let query = svc
     .from('warehouse_batches')
     .select('*')
-    .eq('warehouse_product_id', productId)
-    .eq('is_active', true)
-    .order('expired_date', { ascending: true, nullsFirst: false });
+    .eq('warehouse_product_id', productId);
+
+  if (!options?.includeInactive) {
+    query = query.eq('is_active', true);
+  }
+
+  const { data, error } = await query
+    .order('is_active', { ascending: false })
+    .order('expired_date', { ascending: true, nullsFirst: false })
+    .order('created_at', { ascending: true });
   if (error) throw error;
   return data || [];
+}
+
+export async function getWarehouseRTSVerifications(status: 'pending' | 'completed' | 'cancelled' | 'all' = 'pending') {
+  await requireWarehouseAccess('Verifikasi RTS');
+  const svc = createServiceSupabase();
+  let query = svc
+    .from('warehouse_rts_verifications')
+    .select(`
+      id,
+      scalev_order_id,
+      order_id,
+      business_code,
+      order_status,
+      scope,
+      status,
+      expected_total_qty,
+      notes,
+      triggered_at,
+      completed_at,
+      items:warehouse_rts_verification_items(
+        id,
+        warehouse_product_id,
+        scalev_product_summary,
+        expected_qty,
+        restock_qty,
+        damaged_qty,
+        target_batch_id,
+        target_batch_code_snapshot,
+        notes,
+        warehouse_products(id, name, category, entity, warehouse, unit),
+        warehouse_batches(id, batch_code, expired_date, current_qty, is_active)
+      )
+    `);
+
+  if (status !== 'all') query = query.eq('status', status);
+
+  const { data, error } = await query
+    .order('triggered_at', { ascending: false });
+  if (error) throw error;
+
+  return (data || []).map((row: any) => ({
+    ...row,
+    items: (row.items || []).map((item: any) => ({
+      ...item,
+      warehouse_product_id: Number(item.warehouse_product_id),
+      expected_qty: Number(item.expected_qty || 0),
+      restock_qty: item.restock_qty == null ? null : Number(item.restock_qty),
+      damaged_qty: item.damaged_qty == null ? null : Number(item.damaged_qty),
+      target_batch_id: item.target_batch_id == null ? null : Number(item.target_batch_id),
+    })),
+  }));
+}
+
+export async function completeWarehouseRTSVerification(
+  verificationId: number,
+  payload: {
+    items: Array<{
+      itemId: number;
+      restockQty: number;
+      targetBatchId?: number | null;
+      notes?: string | null;
+    }>;
+    notes?: string | null;
+  },
+) {
+  await requireWarehousePermission('wh:stock_masuk', 'Verifikasi RTS');
+  const svc = createServiceSupabase();
+  const userId = await getCurrentUserId();
+  const now = new Date().toISOString();
+
+  const { data: verification, error: verificationErr } = await svc
+    .from('warehouse_rts_verifications')
+    .select('id, order_id, business_code, order_status, scope, status')
+    .eq('id', verificationId)
+    .single();
+  if (verificationErr || !verification) throw new Error('Verifikasi RTS tidak ditemukan.');
+  if (verification.status !== 'pending') {
+    throw new Error('Verifikasi RTS ini tidak lagi berstatus pending.');
+  }
+
+  const { data: itemRows, error: itemsErr } = await svc
+    .from('warehouse_rts_verification_items')
+    .select('id, warehouse_product_id, expected_qty')
+    .eq('verification_id', verificationId)
+    .order('id', { ascending: true });
+  if (itemsErr) throw itemsErr;
+
+  const submittedById = new Map<number, { restockQty: number; targetBatchId?: number | null; notes?: string | null }>();
+  for (const item of payload.items || []) {
+    submittedById.set(Number(item.itemId), {
+      restockQty: Number(item.restockQty || 0),
+      targetBatchId: item.targetBatchId == null ? null : Number(item.targetBatchId),
+      notes: item.notes?.trim() || null,
+    });
+  }
+
+  const verificationItems = itemRows || [];
+  for (const item of verificationItems) {
+    const submitted = submittedById.get(Number(item.id)) || { restockQty: 0, targetBatchId: null, notes: null };
+    const expectedQty = Number(item.expected_qty || 0);
+    const restockQty = Number(submitted.restockQty || 0);
+    const damagedQty = expectedQty - restockQty;
+
+    if (restockQty < 0) {
+      throw new Error('Qty layak masuk tidak boleh negatif.');
+    }
+    if (restockQty - expectedQty > QUANTITY_EPSILON) {
+      throw new Error('Qty layak masuk tidak boleh melebihi qty expected.');
+    }
+    if (restockQty > QUANTITY_EPSILON && !submitted.targetBatchId) {
+      throw new Error('Batch tujuan wajib dipilih jika ada qty yang dikembalikan ke stok.');
+    }
+
+    let targetBatchCodeSnapshot: string | null = null;
+    if (restockQty > QUANTITY_EPSILON && submitted.targetBatchId) {
+      const batch = await getBatchOrThrow(svc, Number(submitted.targetBatchId), Number(item.warehouse_product_id));
+      targetBatchCodeSnapshot = batch.batch_code || null;
+      await recordStockInInternal(
+        Number(item.warehouse_product_id),
+        Number(submitted.targetBatchId),
+        restockQty,
+        'rts',
+        String(verification.order_id),
+        [
+          `RTS verified untuk order ${verification.order_id}`,
+          verification.business_code ? `business ${verification.business_code}` : null,
+          submitted.notes?.trim() || null,
+        ].filter(Boolean).join(' • '),
+      );
+    }
+
+    const { error: itemUpdateErr } = await svc
+      .from('warehouse_rts_verification_items')
+      .update({
+        restock_qty: restockQty,
+        damaged_qty: damagedQty < QUANTITY_EPSILON ? 0 : damagedQty,
+        target_batch_id: submitted.targetBatchId || null,
+        target_batch_code_snapshot: targetBatchCodeSnapshot,
+        notes: submitted.notes?.trim() || null,
+        updated_at: now,
+      })
+      .eq('id', Number(item.id));
+    if (itemUpdateErr) throw itemUpdateErr;
+  }
+
+  const { error: headerUpdateErr } = await svc
+    .from('warehouse_rts_verifications')
+    .update({
+      status: 'completed',
+      notes: payload.notes?.trim() || null,
+      reviewed_by: userId,
+      completed_at: now,
+      updated_at: now,
+      order_status: verification.order_status || null,
+    })
+    .eq('id', verificationId);
+  if (headerUpdateErr) throw headerUpdateErr;
+
+  return { verificationId };
 }
 
 // ============================================================
@@ -4189,12 +4586,12 @@ async function reverseOutstandingWarehouseDeductions(
   let reversed = 0;
   for (const group of outstandingGroups) {
     if (group.batch_id != null) {
-      const batch = await getBatchOrThrow(svc, group.batch_id, group.warehouse_product_id);
-      const { error: batchErr } = await svc
-        .from('warehouse_batches')
-        .update({ current_qty: Number(batch.current_qty || 0) + Number(group.quantity) })
-        .eq('id', group.batch_id);
-      if (batchErr) throw batchErr;
+      await incrementBatchQuantityOrThrow(
+        svc,
+        group.batch_id,
+        group.warehouse_product_id,
+        Number(group.quantity),
+      );
     }
 
     await insertLedgerEntry(svc, {
@@ -4274,9 +4671,19 @@ export async function reconcileScalevOrderWarehouse(orderId: string, scalevOrder
   if (isScalevOrderBeforeWarehouseGoLive(order, goLiveAt)) {
     if (isReturnedScalevOrderStatus(order.status)) {
       const assessment = await assessScalevOrderWarehouseState(svc, order);
-      return applyPreGoLiveScalevReturn(svc, assessment);
+      try {
+        return await queueWarehouseRtsVerification(svc, assessment, 'pre_go_live');
+      } catch (error) {
+        if (!isMissingWarehouseTableError(error)) throw error;
+        return applyPreGoLiveScalevReturn(svc, assessment);
+      }
     }
 
+    try {
+      await cancelPendingWarehouseRtsVerification(svc, order.id, order.status || null);
+    } catch (error) {
+      if (!isMissingWarehouseTableError(error)) throw error;
+    }
     return {
       action: 'skipped_pre_go_live',
       reversed: 0,
@@ -4288,6 +4695,20 @@ export async function reconcileScalevOrderWarehouse(orderId: string, scalevOrder
 
   const assessment = await assessScalevOrderWarehouseState(svc, order);
   const isTerminal = isTerminalScalevOrderStatus(order.status);
+
+  if (isReturnedScalevOrderStatus(order.status)) {
+    try {
+      return await queueWarehouseRtsVerification(svc, assessment, 'post_go_live');
+    } catch (error) {
+      if (!isMissingWarehouseTableError(error)) throw error;
+    }
+  }
+
+  try {
+    await cancelPendingWarehouseRtsVerification(svc, order.id, order.status || null);
+  } catch (error) {
+    if (!isMissingWarehouseTableError(error)) throw error;
+  }
 
   if (!isTerminal) {
     const reversed = await reverseOutstandingWarehouseDeductions(

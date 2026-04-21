@@ -43,6 +43,8 @@ import {
   approveStockOpname,
   cancelSOSession,
   getWarehouseGoLiveState,
+  getWarehouseRTSVerifications,
+  completeWarehouseRTSVerification,
 } from '@/lib/warehouse-ledger-actions';
 import { getPurchaseOrders as getPOs, receivePOItems } from '@/lib/ppic-actions';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
@@ -76,6 +78,7 @@ interface ExpiringProduct {
 const SUB_TABS = [
   { id: 'daily-summary', label: 'Daily Summary' },
   { id: 'stock', label: 'Saldo Stock' },
+  { id: 'rts', label: 'Verifikasi RTS' },
   { id: 'audit', label: 'Audit Produk' },
   { id: 'reclass', label: 'Reklasifikasi' },
   { id: 'wip', label: 'Work in Process' },
@@ -339,6 +342,7 @@ export default function WarehousePage() {
   // New ledger data
   const [stockBalance, setStockBalance] = useState<any[]>([]);
   const [batchStock, setBatchStock] = useState<any[]>([]);
+  const [rtsVerifications, setRtsVerifications] = useState<any[]>([]);
   const [ledgerHistory, setLedgerHistory] = useState<any[]>([]);
   const [mappingData, setMappingData] = useState<any[]>([]);
   const [reclassRequests, setReclassRequests] = useState<any[]>([]);
@@ -418,6 +422,9 @@ export default function WarehousePage() {
         if (activeTab === 'stock' || activeTab === 'wip') {
           const data = await getStockBalance();
           setStockBalance(data);
+        } else if (activeTab === 'rts') {
+          const data = await getWarehouseRTSVerifications('all');
+          setRtsVerifications(data);
         } else if (activeTab === 'reclass') {
           const data = await getStockReclassRequests();
           setReclassRequests(data);
@@ -588,6 +595,7 @@ export default function WarehousePage() {
       {/* Tab content */}
       {activeTab === 'stock' && <StockBalanceTab data={stockBalance} searchQuery={searchQuery} setSearchQuery={setSearchQuery} categoryFilter={categoryFilter} setCategoryFilter={setCategoryFilter} onRefresh={refreshData} userRole={userRole} />}
       {activeTab === 'wip' && <WipTab data={stockBalance} onRefresh={refreshData} userRole={userRole} />}
+      {activeTab === 'rts' && <RTSVerificationTab data={rtsVerifications} onRefresh={refreshData} />}
       {activeTab === 'daily-summary' && (
         <DailySummaryTab
           data={dailySummary}
@@ -631,6 +639,453 @@ export default function WarehousePage() {
       {activeTab === 'stock-opname' && <StockOpnameTab soData={soData} soSummary={soSummary} expandedSO={expandedSO} setExpandedSO={setExpandedSO} session={soSession} sessionItems={soSessionItems} onRefresh={refreshData} />}
       {/* Expired Monitor merged into Batch & Expiry tab */}
     </div>
+  );
+}
+
+// ============================================================
+// RTS VERIFICATION TAB
+// ============================================================
+
+function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () => void }) {
+  const { can } = usePermissions();
+  const [statusFilter, setStatusFilter] = useState<'pending' | 'completed' | 'cancelled' | 'all'>('pending');
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [search, setSearch] = useState('');
+  const [batchOptionsByProduct, setBatchOptionsByProduct] = useState<Record<number, any[]>>({});
+  const [formByVerification, setFormByVerification] = useState<Record<number, any>>({});
+  const [loadingBatchByVerification, setLoadingBatchByVerification] = useState<Record<number, boolean>>({});
+  const [submittingId, setSubmittingId] = useState<number | null>(null);
+  const [errorByVerification, setErrorByVerification] = useState<Record<number, string>>({});
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return data.filter((row: any) => {
+      if (statusFilter !== 'all' && row.status !== statusFilter) return false;
+      if (!q) return true;
+
+      const haystack = [
+        row.order_id,
+        row.business_code,
+        row.order_status,
+        row.scope,
+        ...(row.items || []).map((item: any) => item.warehouse_products?.name || ''),
+        ...(row.items || []).map((item: any) => item.scalev_product_summary || ''),
+      ].join(' ').toLowerCase();
+
+      return haystack.includes(q);
+    });
+  }, [data, search, statusFilter]);
+
+  const pendingCount = data.filter((row: any) => row.status === 'pending').length;
+  const completedCount = data.filter((row: any) => row.status === 'completed').length;
+  const pendingQty = data
+    .filter((row: any) => row.status === 'pending')
+    .reduce((sum: number, row: any) => sum + Number(row.expected_total_qty || 0), 0);
+
+  const loadVerificationContext = async (row: any) => {
+    const verificationId = Number(row.id);
+    if (!formByVerification[verificationId]) {
+      setFormByVerification((current: any) => ({
+        ...current,
+        [verificationId]: {
+          notes: row.notes || '',
+          items: Object.fromEntries(
+            (row.items || []).map((item: any) => [
+              Number(item.id),
+              {
+                restockQty: item.restock_qty != null ? Number(item.restock_qty) : Number(item.expected_qty || 0),
+                targetBatchId: item.target_batch_id != null ? Number(item.target_batch_id) : null,
+                notes: item.notes || '',
+              },
+            ]),
+          ),
+        },
+      }));
+    }
+
+    const missingProductIds = Array.from(new Set(
+      (row.items || [])
+        .map((item: any) => Number(item.warehouse_product_id))
+        .filter((productId: number) => productId > 0 && batchOptionsByProduct[productId] === undefined),
+    ));
+    if (missingProductIds.length === 0) return;
+
+    setLoadingBatchByVerification((current) => ({ ...current, [verificationId]: true }));
+    try {
+      const resultEntries = await Promise.all(
+        missingProductIds.map(async (productId) => ([productId, await getBatches(productId, { includeInactive: true })])),
+      );
+
+      const nextBatchOptions: Record<number, any[]> = {};
+      resultEntries.forEach(([productId, rows]) => {
+        nextBatchOptions[Number(productId)] = rows as any[];
+      });
+      setBatchOptionsByProduct((current) => ({ ...current, ...nextBatchOptions }));
+
+      setFormByVerification((current: any) => {
+        const existingForm = current[verificationId] || { notes: row.notes || '', items: {} };
+        const nextItems = { ...(existingForm.items || {}) };
+
+        (row.items || []).forEach((item: any) => {
+          const itemId = Number(item.id);
+          const productId = Number(item.warehouse_product_id);
+          const batchOptions = nextBatchOptions[productId] || batchOptionsByProduct[productId] || [];
+          if (!nextItems[itemId]) {
+            nextItems[itemId] = {
+              restockQty: item.restock_qty != null ? Number(item.restock_qty) : Number(item.expected_qty || 0),
+              targetBatchId: null,
+              notes: item.notes || '',
+            };
+          }
+          if (!nextItems[itemId].targetBatchId && batchOptions.length > 0) {
+            const preferred = batchOptions.find((batch: any) => batch.is_active) || batchOptions[0];
+            nextItems[itemId] = {
+              ...nextItems[itemId],
+              targetBatchId: preferred?.id ? Number(preferred.id) : null,
+            };
+          }
+        });
+
+        return {
+          ...current,
+          [verificationId]: {
+            ...existingForm,
+            items: nextItems,
+          },
+        };
+      });
+    } finally {
+      setLoadingBatchByVerification((current) => ({ ...current, [verificationId]: false }));
+    }
+  };
+
+  const toggleExpanded = async (row: any) => {
+    const nextId = expandedId === Number(row.id) ? null : Number(row.id);
+    setExpandedId(nextId);
+    if (nextId != null) {
+      await loadVerificationContext(row);
+    }
+  };
+
+  const updateVerificationItem = (verificationId: number, itemId: number, patch: any) => {
+    setFormByVerification((current: any) => ({
+      ...current,
+      [verificationId]: {
+        ...(current[verificationId] || { notes: '', items: {} }),
+        items: {
+          ...((current[verificationId]?.items) || {}),
+          [itemId]: {
+            ...(((current[verificationId]?.items) || {})[itemId] || {}),
+            ...patch,
+          },
+        },
+      },
+    }));
+  };
+
+  const updateVerificationNotes = (verificationId: number, notes: string) => {
+    setFormByVerification((current: any) => ({
+      ...current,
+      [verificationId]: {
+        ...(current[verificationId] || { items: {} }),
+        notes,
+      },
+    }));
+  };
+
+  const handleComplete = async (row: any) => {
+    const verificationId = Number(row.id);
+    const form = formByVerification[verificationId] || { notes: '', items: {} };
+
+    setSubmittingId(verificationId);
+    setErrorByVerification((current) => ({ ...current, [verificationId]: '' }));
+    try {
+      await completeWarehouseRTSVerification(verificationId, {
+        notes: form.notes || '',
+        items: (row.items || []).map((item: any) => {
+          const state = form.items?.[Number(item.id)] || {};
+          return {
+            itemId: Number(item.id),
+            restockQty: Number(state.restockQty || 0),
+            targetBatchId: state.targetBatchId ? Number(state.targetBatchId) : null,
+            notes: state.notes || '',
+          };
+        }),
+      });
+      setExpandedId(null);
+      onRefresh();
+    } catch (e: any) {
+      setErrorByVerification((current) => ({
+        ...current,
+        [verificationId]: e?.message || 'Gagal menyelesaikan verifikasi RTS.',
+      }));
+    } finally {
+      setSubmittingId(null);
+    }
+  };
+
+  const scopeLabel = (scope: string) => scope === 'pre_go_live' ? 'RTS Pra Go-Live' : 'RTS Pasca Go-Live';
+  const statusTone = (status: string) => {
+    if (status === 'completed') return { bg: 'var(--badge-green-bg)', color: '#6ee7b7', label: 'Selesai' };
+    if (status === 'cancelled') return { bg: 'rgba(148,163,184,0.16)', color: '#cbd5e1', label: 'Batal' };
+    return { bg: 'var(--badge-yellow-bg)', color: '#fcd34d', label: 'Pending' };
+  };
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <KPICard label="Pending Verifikasi" value={String(pendingCount)} color="#f59e0b" />
+        <KPICard label="Selesai Diverifikasi" value={String(completedCount)} color="var(--green)" />
+        <KPICard label="Qty Menunggu Cek" value={fmtCompact(pendingQty)} color="#8b5cf6" />
+      </div>
+
+      <div style={{ marginBottom: 14, padding: '12px 14px', borderRadius: 12, border: '1px solid rgba(245,158,11,0.25)', background: 'rgba(245,158,11,0.07)', color: '#fde68a', fontSize: 12, lineHeight: 1.6 }}>
+        Returned / RTS tidak lagi otomatis kembali ke stock. Order akan masuk antrean ini dulu, lalu tim gudang menentukan qty yang benar-benar layak masuk kembali setelah cek fisik.
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+        {[
+          { key: 'pending', label: 'Pending' },
+          { key: 'completed', label: 'Selesai' },
+          { key: 'cancelled', label: 'Batal' },
+          { key: 'all', label: 'Semua' },
+        ].map((option) => (
+          <button
+            key={option.key}
+            onClick={() => setStatusFilter(option.key as any)}
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border: `1px solid ${statusFilter === option.key ? 'var(--accent)' : 'var(--border)'}`,
+              background: statusFilter === option.key ? 'rgba(96,165,250,0.12)' : 'transparent',
+              color: statusFilter === option.key ? '#93c5fd' : 'var(--dim)',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            {option.label}
+          </button>
+        ))}
+        <div style={{ flex: 1 }} />
+        <input
+          type="text"
+          placeholder="Cari order / produk..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', minWidth: 220 }}
+        />
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>
+          Tidak ada antrean RTS untuk filter yang dipilih.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {filtered.map((row: any) => {
+            const verificationId = Number(row.id);
+            const isExpanded = expandedId === verificationId;
+            const tone = statusTone(row.status);
+            const form = formByVerification[verificationId] || { notes: '', items: {} };
+            const isPending = row.status === 'pending';
+
+            return (
+              <div key={verificationId} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 14, overflow: 'hidden' }}>
+                <button
+                  onClick={() => toggleExpanded(row)}
+                  style={{ width: '100%', padding: '14px 16px', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, textAlign: 'left' }}>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)' }}>Order {row.order_id}</span>
+                      {row.business_code && (
+                        <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: 'rgba(96,165,250,0.15)', color: '#93c5fd' }}>
+                          {row.business_code}
+                        </span>
+                      )}
+                      <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: tone.bg, color: tone.color }}>
+                        {tone.label}
+                      </span>
+                      <span style={{ padding: '2px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: 'rgba(139,92,246,0.15)', color: '#c4b5fd' }}>
+                        {scopeLabel(row.scope)}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+                      Status order: {(row.order_status || '-').toUpperCase()} • Triggered {fmtDateTime(row.triggered_at)}
+                      {row.completed_at ? ` • Selesai ${fmtDateTime(row.completed_at)}` : ''}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                    <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{(row.items || []).length} item</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Qty {Number(row.expected_total_qty || 0).toLocaleString('id-ID')}</span>
+                    <span style={{ color: 'var(--dim)', fontSize: 14, transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>&#9660;</span>
+                  </div>
+                </button>
+
+                {isExpanded && (
+                  <div style={{ borderTop: '1px solid var(--border)', padding: 16 }}>
+                    {(row.items || []).length === 0 ? (
+                      <div style={{ color: 'var(--text-muted)', fontSize: 12 }}>Belum ada item RTS yang dapat diverifikasi.</div>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        {(row.items || []).map((item: any) => {
+                          const itemState = form.items?.[Number(item.id)] || {};
+                          const batchOptions = batchOptionsByProduct[Number(item.warehouse_product_id)] || [];
+                          const restockQty = Number(itemState.restockQty ?? item.restock_qty ?? item.expected_qty ?? 0);
+                          const expectedQty = Number(item.expected_qty || 0);
+                          const damagedQty = Math.max(expectedQty - restockQty, 0);
+
+                          return (
+                            <div key={item.id} style={{ border: '1px solid var(--border)', borderRadius: 12, padding: 12, background: 'var(--bg)' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+                                <div>
+                                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                                    {item.warehouse_products?.name || '-'}
+                                  </div>
+                                  <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>
+                                    {(item.warehouse_products?.warehouse || '-')} - {(item.warehouse_products?.entity || '-')} • {item.warehouse_products?.category || '-'}
+                                  </div>
+                                  {!!item.scalev_product_summary && (
+                                    <div style={{ fontSize: 11, color: '#93c5fd', marginTop: 4 }}>
+                                      Scalev: {item.scalev_product_summary}
+                                    </div>
+                                  )}
+                                </div>
+                                <div style={{ textAlign: 'right' }}>
+                                  <div style={{ fontSize: 11, color: 'var(--dim)' }}>Expected</div>
+                                  <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: 'var(--text)' }}>
+                                    {expectedQty.toLocaleString('id-ID')}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {isPending ? (
+                                <>
+                                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 10, marginBottom: 10 }}>
+                                    <div>
+                                      <label style={labelStyle}>Qty Layak Masuk</label>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max={expectedQty}
+                                        value={restockQty}
+                                        onChange={(e) => updateVerificationItem(verificationId, Number(item.id), { restockQty: e.target.value })}
+                                        style={inputStyle}
+                                      />
+                                    </div>
+                                    <div>
+                                      <label style={labelStyle}>Qty Tidak Kembali / Rusak</label>
+                                      <input type="text" value={damagedQty.toLocaleString('id-ID')} readOnly style={{ ...inputStyle, color: 'var(--dim)' }} />
+                                    </div>
+                                  </div>
+
+                                  <div style={{ marginBottom: 10 }}>
+                                    <label style={labelStyle}>Batch Tujuan</label>
+                                    <select
+                                      value={itemState.targetBatchId || ''}
+                                      onChange={(e) => updateVerificationItem(verificationId, Number(item.id), { targetBatchId: e.target.value ? Number(e.target.value) : null })}
+                                      style={inputStyle}
+                                    >
+                                      <option value="">-- Pilih Batch --</option>
+                                      {batchOptions.map((batch: any) => (
+                                        <option key={batch.id} value={batch.id}>
+                                          {batch.batch_code} • qty {Number(batch.current_qty || 0).toLocaleString('id-ID')}
+                                          {batch.expired_date ? ` • exp ${batch.expired_date}` : ''}
+                                          {!batch.is_active ? ' • inactive' : ''}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {loadingBatchByVerification[verificationId] && (
+                                      <div style={{ marginTop: 6, fontSize: 11, color: 'var(--dim)' }}>Memuat batch...</div>
+                                    )}
+                                  </div>
+
+                                  <div>
+                                    <label style={labelStyle}>Catatan Item</label>
+                                    <input
+                                      type="text"
+                                      value={itemState.notes || ''}
+                                      onChange={(e) => updateVerificationItem(verificationId, Number(item.id), { notes: e.target.value })}
+                                      placeholder="Contoh: pouch rusak, hanya sachet 8 pcs yang layak"
+                                      style={inputStyle}
+                                    />
+                                  </div>
+                                </>
+                              ) : (
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>Qty Masuk Kembali</div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)', fontFamily: 'monospace' }}>
+                                      {Number(item.restock_qty || 0).toLocaleString('id-ID')}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>Qty Tidak Direstock</div>
+                                    <div style={{ fontSize: 13, fontWeight: 700, color: '#fca5a5', fontFamily: 'monospace' }}>
+                                      {Number(item.damaged_qty || 0).toLocaleString('id-ID')}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>Batch Tujuan</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text)' }}>{item.target_batch_code_snapshot || '-'}</div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: 'var(--dim)' }}>Catatan</div>
+                                    <div style={{ fontSize: 12, color: 'var(--text)' }}>{item.notes || '-'}</div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {isPending && (
+                      <>
+                        <div style={{ marginTop: 12 }}>
+                          <label style={labelStyle}>Catatan Verifikasi Order</label>
+                          <input
+                            type="text"
+                            value={form.notes || ''}
+                            onChange={(e) => updateVerificationNotes(verificationId, e.target.value)}
+                            placeholder="Contoh: 2 pouch rusak, sisa layak masuk"
+                            style={inputStyle}
+                          />
+                        </div>
+
+                        {!!errorByVerification[verificationId] && (
+                          <div style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: '#fca5a5', fontSize: 12 }}>
+                            {errorByVerification[verificationId]}
+                          </div>
+                        )}
+
+                        {!can('wh:stock_masuk') ? (
+                          <div style={{ marginTop: 12, color: 'var(--dim)', fontSize: 12 }}>
+                            Akun ini belum punya izin `stock masuk` untuk menyelesaikan verifikasi RTS.
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                            <button
+                              onClick={() => handleComplete(row)}
+                              disabled={submittingId === verificationId}
+                              style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: submittingId === verificationId ? 'wait' : 'pointer', opacity: submittingId === verificationId ? 0.7 : 1 }}
+                            >
+                              {submittingId === verificationId ? 'Menyimpan...' : 'Selesaikan Verifikasi RTS'}
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
