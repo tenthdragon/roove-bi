@@ -1290,10 +1290,42 @@ export async function saveMarketplaceIntakePreview(input: {
     if (linesRes.error) throw linesRes.error;
   }
 
-  const manualMemoryUpserts = normalizedOrders.flatMap((order) => (
-    (order.lines || [])
-      .filter((line) => (line.issueCodes || []).includes('manual_match_confirmed') || (line.issueCodes || []).includes('remembered_manual_match'))
-      .map((line) => ({
+  const manualMemoryUpsertMap = new Map<string, {
+    source_key: string;
+    source_label: string;
+    platform: 'shopee';
+    business_id: number;
+    business_code: string;
+    match_signature: string;
+    mp_sku: string | null;
+    mp_product_name: string;
+    mp_variation: string | null;
+    target_entity_type: 'bundle';
+    target_entity_key: string | null;
+    target_entity_label: string | null;
+    target_custom_id: string | null;
+    scalev_bundle_id: number | null;
+    mapped_store_name: string | null;
+    usage_count: number;
+    created_by_email: string | null;
+    updated_by_email: string | null;
+    last_confirmed_at: string;
+    is_active: true;
+  }>();
+
+  for (const order of normalizedOrders) {
+    for (const line of order.lines || []) {
+      const shouldRemember = (line.issueCodes || []).includes('manual_match_confirmed')
+        || (line.issueCodes || []).includes('remembered_manual_match');
+      if (!shouldRemember || !line.matchSignature) continue;
+
+      const key = [
+        SHOPEE_RLT_SOURCE.sourceKey,
+        business.business_code,
+        line.matchSignature,
+      ].join('::');
+
+      const nextRow = {
         source_key: SHOPEE_RLT_SOURCE.sourceKey,
         source_label: SHOPEE_RLT_SOURCE.sourceLabel,
         platform: SHOPEE_RLT_SOURCE.platform,
@@ -1303,7 +1335,7 @@ export async function saveMarketplaceIntakePreview(input: {
         mp_sku: line.mpSku,
         mp_product_name: line.mpProductName,
         mp_variation: line.mpVariation,
-        target_entity_type: 'bundle',
+        target_entity_type: 'bundle' as const,
         target_entity_key: line.matchedEntityKey,
         target_entity_label: line.matchedEntityLabel,
         target_custom_id: line.detectedCustomId,
@@ -1313,9 +1345,33 @@ export async function saveMarketplaceIntakePreview(input: {
         created_by_email: input.uploadedByEmail,
         updated_by_email: input.uploadedByEmail,
         last_confirmed_at: new Date().toISOString(),
-        is_active: true,
-      }))
-  ));
+        is_active: true as const,
+      };
+
+      const existing = manualMemoryUpsertMap.get(key);
+      if (!existing) {
+        manualMemoryUpsertMap.set(key, nextRow);
+        continue;
+      }
+
+      const hasConflict = existing.scalev_bundle_id !== nextRow.scalev_bundle_id
+        || existing.target_entity_key !== nextRow.target_entity_key
+        || existing.mapped_store_name !== nextRow.mapped_store_name;
+      if (hasConflict) {
+        throw new Error(
+          `Konflik memory manual untuk item "${line.mpProductName}". Ada lebih dari satu pilihan bundle untuk pola SKU yang sama dalam satu batch. Samakan pilihannya lalu coba simpan lagi.`,
+        );
+      }
+
+      existing.usage_count += 1;
+      existing.updated_by_email = input.uploadedByEmail;
+      existing.last_confirmed_at = nextRow.last_confirmed_at;
+      if (!existing.mp_sku && nextRow.mp_sku) existing.mp_sku = nextRow.mp_sku;
+      if (!existing.mp_variation && nextRow.mp_variation) existing.mp_variation = nextRow.mp_variation;
+    }
+  }
+
+  const manualMemoryUpserts = Array.from(manualMemoryUpsertMap.values());
 
   if (manualMemoryUpserts.length > 0) {
     const memoryRes = await svc
