@@ -25,10 +25,13 @@ export default function CsvOrderUploader() {
   useEffect(() => { loadHistory(); }, [loadHistory]);
 
   const handleUpload = useCallback(async (files: File[]) => {
-    const csvFiles = files.filter(f => f.name.endsWith('.csv'));
-    const skipped = files.length - csvFiles.length;
-    if (csvFiles.length === 0) {
-      setError('Tidak ada file .csv yang ditemukan.' + (skipped > 0 ? ` ${skipped} file non-CSV di-skip.` : ''));
+    const supportedFiles = files.filter((file) => {
+      const lower = file.name.toLowerCase();
+      return lower.endsWith('.csv') || lower.endsWith('.xlsx') || lower.endsWith('.xls');
+    });
+    const skipped = files.length - supportedFiles.length;
+    if (supportedFiles.length === 0) {
+      setError('Tidak ada file CSV / Excel yang ditemukan.' + (skipped > 0 ? ` ${skipped} file non-supported di-skip.` : ''));
       return;
     }
 
@@ -37,81 +40,103 @@ export default function CsvOrderUploader() {
     setResults([]);
 
     // Initialize queue
-    const initialQueue = csvFiles.map(f => ({ name: f.name, status: 'pending' as const, chunk: 0, totalChunks: 1, pct: 0 }));
+    const initialQueue = supportedFiles.map(f => ({ name: f.name, status: 'pending' as const, chunk: 0, totalChunks: 1, pct: 0 }));
     setFileQueue(initialQueue);
 
     const allResults: any[] = [];
 
     try {
-      for (let fi = 0; fi < csvFiles.length; fi++) {
-        const file = csvFiles[fi];
+      for (let fi = 0; fi < supportedFiles.length; fi++) {
+        const file = supportedFiles[fi];
+        const lowerName = file.name.toLowerCase();
+        const isCsv = lowerName.endsWith('.csv');
 
         // Mark as processing
         setFileQueue(q => q.map((item, i) => i === fi ? { ...item, status: 'processing' } : item));
 
         try {
-          const text = await file.text();
-          const lines = text.split('\n');
-          const header = lines[0];
-          const dataLines = lines.slice(1).filter(l => l.trim());
+          if (isCsv) {
+            const text = await file.text();
+            const lines = text.split('\n');
+            const header = lines[0];
+            const dataLines = lines.slice(1).filter(l => l.trim());
 
-          if (dataLines.length === 0) {
-            allResults.push({ filename: file.name, error: 'File kosong (tidak ada data rows)' });
-            setFileQueue(q => q.map((item, i) => i === fi ? { ...item, status: 'done', pct: 100 } : item));
-            setResults([...allResults]);
-            continue;
-          }
+            if (dataLines.length === 0) {
+              allResults.push({ filename: file.name, error: 'File kosong (tidak ada data rows)' });
+              setFileQueue(q => q.map((item, i) => i === fi ? { ...item, status: 'done', pct: 100 } : item));
+              setResults([...allResults]);
+              continue;
+            }
 
-          const CHUNK_SIZE = 3000;
-          const totalChunks = Math.ceil(dataLines.length / CHUNK_SIZE);
-          let finalResult: any = null;
-          let fileError = false;
+            const CHUNK_SIZE = 3000;
+            const totalChunks = Math.ceil(dataLines.length / CHUNK_SIZE);
+            let finalResult: any = null;
+            let fileError = false;
 
-          setFileQueue(q => q.map((item, i) => i === fi ? { ...item, totalChunks } : item));
+            setFileQueue(q => q.map((item, i) => i === fi ? { ...item, totalChunks } : item));
 
-          for (let c = 0; c < totalChunks; c++) {
-            // Update chunk progress
-            setFileQueue(q => q.map((item, i) => i === fi ? { ...item, chunk: c, pct: Math.round((c / totalChunks) * 100) } : item));
+            for (let c = 0; c < totalChunks; c++) {
+              setFileQueue(q => q.map((item, i) => i === fi ? { ...item, chunk: c, pct: Math.round((c / totalChunks) * 100) } : item));
 
-            const chunkLines = dataLines.slice(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
-            const csvChunk = header + '\n' + chunkLines.join('\n');
-            const blob = new Blob([csvChunk], { type: 'text/csv' });
-            const chunkFile = new File([blob], file.name, { type: 'text/csv' });
+              const chunkLines = dataLines.slice(c * CHUNK_SIZE, (c + 1) * CHUNK_SIZE);
+              const csvChunk = header + '\n' + chunkLines.join('\n');
+              const blob = new Blob([csvChunk], { type: 'text/csv' });
+              const chunkFile = new File([blob], file.name, { type: 'text/csv' });
+
+              const formData = new FormData();
+              formData.append('file', chunkFile);
+              formData.append('filename', supportedFiles.length > 1
+                ? `${file.name} (file ${fi + 1}/${supportedFiles.length}${totalChunks > 1 ? `, part ${c + 1}/${totalChunks}` : ''})`
+                : `${file.name}${totalChunks > 1 ? ` (part ${c + 1}/${totalChunks})` : ''}`
+              );
+
+              const res = await fetch('/api/csv-upload', { method: 'POST', body: formData });
+              const data = await res.json();
+
+              if (!res.ok) {
+                allResults.push({ filename: file.name, error: data.error || `Upload gagal di chunk ${c + 1}` });
+                fileError = true;
+                break;
+              }
+
+              if (!finalResult) {
+                finalResult = { ...data, filename: file.name };
+              } else {
+                finalResult.stats.totalRows += data.stats.totalRows;
+                finalResult.stats.newInserted += data.stats.newInserted;
+                finalResult.stats.updated += data.stats.updated;
+                finalResult.stats.errors += data.stats.errors;
+                finalResult.stats.lineItems = (finalResult.stats.lineItems || 0) + (data.stats.lineItems || 0);
+                if (data.stats.cogsLookedUp) {
+                  finalResult.stats.cogsLookedUp = (finalResult.stats.cogsLookedUp || 0) + data.stats.cogsLookedUp;
+                }
+              }
+
+              setFileQueue(q => q.map((item, i) => i === fi ? { ...item, chunk: c + 1, pct: Math.round(((c + 1) / totalChunks) * 100) } : item));
+            }
+
+            if (!fileError && finalResult) allResults.push(finalResult);
+          } else {
+            setFileQueue(q => q.map((item, i) => i === fi ? { ...item, totalChunks: 1, chunk: 0, pct: 15 } : item));
 
             const formData = new FormData();
-            formData.append('file', chunkFile);
-            formData.append('filename', csvFiles.length > 1
-              ? `${file.name} (file ${fi + 1}/${csvFiles.length}${totalChunks > 1 ? `, part ${c + 1}/${totalChunks}` : ''})`
-              : `${file.name}${totalChunks > 1 ? ` (part ${c + 1}/${totalChunks})` : ''}`
+            formData.append('file', file);
+            formData.append('filename', supportedFiles.length > 1
+              ? `${file.name} (file ${fi + 1}/${supportedFiles.length})`
+              : file.name
             );
 
-            const res = await fetch('/api/csv-upload', { method: 'POST', body: formData });
+            const res = await fetch('/api/marketplace-upload', { method: 'POST', body: formData });
             const data = await res.json();
 
             if (!res.ok) {
-              allResults.push({ filename: file.name, error: data.error || `Upload gagal di chunk ${c + 1}` });
-              fileError = true;
-              break;
-            }
-
-            if (!finalResult) {
-              finalResult = { ...data, filename: file.name };
+              allResults.push({ filename: file.name, error: data.error || 'Upload marketplace gagal' });
             } else {
-              finalResult.stats.totalRows += data.stats.totalRows;
-              finalResult.stats.newInserted += data.stats.newInserted;
-              finalResult.stats.updated += data.stats.updated;
-              finalResult.stats.errors += data.stats.errors;
-              finalResult.stats.lineItems = (finalResult.stats.lineItems || 0) + (data.stats.lineItems || 0);
-              if (data.stats.cogsLookedUp) {
-                finalResult.stats.cogsLookedUp = (finalResult.stats.cogsLookedUp || 0) + data.stats.cogsLookedUp;
-              }
+              allResults.push({ ...data, filename: file.name });
             }
 
-            // Update progress after chunk completes
-            setFileQueue(q => q.map((item, i) => i === fi ? { ...item, chunk: c + 1, pct: Math.round(((c + 1) / totalChunks) * 100) } : item));
+            setFileQueue(q => q.map((item, i) => i === fi ? { ...item, chunk: 1, pct: 100 } : item));
           }
-
-          if (!fileError && finalResult) allResults.push(finalResult);
         } catch (fileErr: any) {
           allResults.push({ filename: file.name, error: fileErr.message || 'Error tidak diketahui' });
         }
@@ -135,10 +160,10 @@ export default function CsvOrderUploader() {
       <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
       {/* Upload Area */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Upload CSV Order</div>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Upload Order</div>
         <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
-          Upload CSV dari <strong style={{ color: '#06b6d4' }}>Scalev</strong> (semicolon) atau <strong style={{ color: 'var(--green)' }}>Tim Ops</strong> (comma, marketplace).
-          Format otomatis terdeteksi.
+          Upload <strong style={{ color: '#06b6d4' }}>CSV Scalev</strong>, <strong style={{ color: 'var(--green)' }}>CSV Tim Ops</strong>, atau <strong style={{ color: '#f59e0b' }}>Excel Marketplace</strong>.
+          Format akan dipilih otomatis.
         </div>
 
         {/* Format info */}
@@ -148,6 +173,9 @@ export default function CsvOrderUploader() {
           </span>
           <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: 'var(--green-subtle)', color: 'var(--green)', fontWeight: 600 }}>
             👥 Tim Ops → customer identity
+          </span>
+          <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: 'rgba(245,158,11,0.14)', color: '#f59e0b', fontWeight: 600 }}>
+            📦 Marketplace Excel → create order API
           </span>
         </div>
 
@@ -162,7 +190,7 @@ export default function CsvOrderUploader() {
           onClick={() => {
             const input = document.createElement('input');
             input.type = 'file';
-            input.accept = '.csv';
+            input.accept = '.csv,.xlsx,.xls';
             input.multiple = true;
             input.onchange = (e: any) => {
               const files = Array.from(e.target.files) as File[];
@@ -199,8 +227,8 @@ export default function CsvOrderUploader() {
           ) : (
             <div>
               <div style={{ fontSize: 28, marginBottom: 6 }}>📋</div>
-              <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 13 }}>Drag & drop file CSV di sini</div>
-              <div style={{ fontSize: 11, color: 'var(--dim)' }}>Bisa pilih banyak file sekaligus (Scalev + Tim Ops campur)</div>
+              <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 13 }}>Drag & drop file CSV / Excel di sini</div>
+              <div style={{ fontSize: 11, color: 'var(--dim)' }}>Bisa pilih banyak file sekaligus (Scalev, Tim Ops, Marketplace)</div>
             </div>
           )}
         </div>
@@ -254,10 +282,18 @@ export default function CsvOrderUploader() {
                           {isDone && (
                             <span style={{
                               fontSize: 8, padding: '1px 4px', borderRadius: 3, fontWeight: 700, flexShrink: 0,
-                              background: result.stats.format === 'ops-marketplace' ? 'var(--green-subtle)' : 'var(--accent-subtle)',
-                              color: result.stats.format === 'ops-marketplace' ? 'var(--green)' : '#06b6d4',
+                              background: result.stats.format === 'ops-marketplace'
+                                ? 'var(--green-subtle)'
+                                : result.stats.format === 'marketplace-api'
+                                  ? 'rgba(245,158,11,0.14)'
+                                  : 'var(--accent-subtle)',
+                              color: result.stats.format === 'ops-marketplace'
+                                ? 'var(--green)'
+                                : result.stats.format === 'marketplace-api'
+                                  ? '#f59e0b'
+                                  : '#06b6d4',
                             }}>
-                              {result.stats.format === 'ops-marketplace' ? 'OPS' : 'SCV'}
+                              {result.stats.format === 'ops-marketplace' ? 'OPS' : result.stats.format === 'marketplace-api' ? 'MP' : 'SCV'}
                             </span>
                           )}
                           <span style={{
@@ -353,10 +389,18 @@ export default function CsvOrderUploader() {
                       }} />
                       <span style={{
                         fontSize: 10, padding: '1px 5px', borderRadius: 3, fontWeight: 700, flexShrink: 0,
-                        background: h.sync_type === 'ops_upload' ? 'var(--green-subtle)' : 'var(--accent-subtle)',
-                        color: h.sync_type === 'ops_upload' ? 'var(--green)' : '#06b6d4',
+                        background: h.sync_type === 'ops_upload'
+                          ? 'var(--green-subtle)'
+                          : h.sync_type === 'marketplace_api_upload'
+                            ? 'rgba(245,158,11,0.14)'
+                            : 'var(--accent-subtle)',
+                        color: h.sync_type === 'ops_upload'
+                          ? 'var(--green)'
+                          : h.sync_type === 'marketplace_api_upload'
+                            ? '#f59e0b'
+                            : '#06b6d4',
                       }}>
-                        {h.sync_type === 'ops_upload' ? 'OPS' : 'SCV'}
+                        {h.sync_type === 'ops_upload' ? 'OPS' : h.sync_type === 'marketplace_api_upload' ? 'MP' : 'SCV'}
                       </span>
                       <span style={{ color: 'var(--text-secondary)', fontSize: 11, whiteSpace: 'nowrap' }}>
                         {new Date(h.started_at).toLocaleString('id-ID', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}

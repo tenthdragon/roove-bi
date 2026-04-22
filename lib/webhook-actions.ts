@@ -294,7 +294,13 @@ export async function fetchStoresFromScalev(businessId: number) {
     const storeType = guessStoreType(store.name);
     const { error } = await svc
       .from('scalev_store_channels')
-      .insert({ business_id: businessId, store_name: storeName, store_type: storeType });
+      .insert({
+        business_id: businessId,
+        store_name: storeName,
+        store_type: storeType,
+        scalev_store_id: Number(store.id) || null,
+        store_unique_id: store.unique_id || null,
+      });
 
     if (error) {
       skipped++;

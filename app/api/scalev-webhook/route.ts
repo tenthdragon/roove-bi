@@ -295,6 +295,33 @@ async function lookupOrderForBusiness(svc: any, orderId: string, businessCode: s
     .maybeSingle();
 }
 
+async function lookupOrderForBusinessOrExternal(
+  svc: any,
+  orderId: string,
+  businessCode: string,
+  externalId: string | null | undefined,
+  columns: string,
+) {
+  const byOrderId = await lookupOrderForBusiness(svc, orderId, businessCode, columns);
+  if (byOrderId.error || byOrderId.data || !externalId) return byOrderId;
+
+  const scoped = await svc
+    .from('scalev_orders')
+    .select(columns)
+    .eq('external_id', externalId)
+    .eq('business_code', businessCode)
+    .maybeSingle();
+
+  if (scoped.error || scoped.data) return scoped;
+
+  return svc
+    .from('scalev_orders')
+    .select(columns)
+    .eq('external_id', externalId)
+    .is('business_code', null)
+    .maybeSingle();
+}
+
 // ── Brand detection from product name (dynamic from DB, cached) ──
 type BrandKeyword = { name: string; keywords: string[] };
 let cachedBrandKeywords: BrandKeyword[] | null = null;
@@ -477,7 +504,13 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   }
 
   // Check if order already exists
-  const { data: existing } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, business_code');
+  const { data: existing } = await lookupOrderForBusinessOrExternal(
+    svc,
+    orderId,
+    businessCode,
+    data.external_id,
+    'id, business_code, order_id, external_id, source',
+  );
 
   if (existing) {
     console.log(`[scalev-webhook][${businessCode}] order.created: ${orderId} already exists, treating as upsert`);
@@ -595,7 +628,13 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
   }
 
   // Lookup order
-  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, order_id, status');
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessOrExternal(
+    svc,
+    orderId,
+    businessCode,
+    data.external_id,
+    'id, order_id, status',
+  );
 
   if (lookupErr) {
     console.error(`[scalev-webhook][${businessCode}] status_changed lookup error for ${orderId}:`, lookupErr.message);
@@ -823,7 +862,13 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   }
 
   // Lookup existing order
-  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, order_id, status, source');
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessOrExternal(
+    svc,
+    orderId,
+    businessCode,
+    data.external_id,
+    'id, order_id, status, source',
+  );
 
   if (lookupErr) {
     console.error(`[scalev-webhook][${businessCode}] order.updated lookup error for ${orderId}:`, lookupErr.message);
@@ -869,7 +914,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   if (data.is_purchase_kwai != null) updateData.is_purchase_kwai = data.is_purchase_kwai === true || data.is_purchase_kwai === 'true';
 
   // Customer info (don't overwrite if source is ops_upload — ops is source of truth for customer)
-  if (existing.source !== 'ops_upload') {
+  if (existing.source !== 'ops_upload' && existing.source !== 'marketplace_api_upload') {
     if (dest.name) updateData.customer_name = dest.name;
     if (dest.phone) updateData.customer_phone = dest.phone;
     if (dest.email) updateData.customer_email = dest.email;

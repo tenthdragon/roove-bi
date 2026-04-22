@@ -299,8 +299,8 @@ export async function lookupProductType(productName: string): Promise<string> {
 export async function fetchStoreList(
   apiKey: string,
   baseUrl: string
-): Promise<{ id: number; name: string; uuid: string }[]> {
-  const allStores: { id: number; name: string; uuid: string }[] = [];
+): Promise<{ id: number; name: string; unique_id: string; uuid: string }[]> {
+  const allStores: { id: number; name: string; unique_id: string; uuid: string }[] = [];
   let lastId = 0;
   let hasNext = true;
 
@@ -326,6 +326,7 @@ export async function fetchStoreList(
       allStores.push({
         id: store.id,
         name: store.name,
+        unique_id: store.unique_id || '',
         uuid: store.uuid || '',
       });
     }

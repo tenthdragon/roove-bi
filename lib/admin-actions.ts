@@ -427,7 +427,7 @@ export async function getCsvUploadHistory() {
   const { data, error } = await svc
     .from('scalev_sync_log')
     .select('*')
-    .in('sync_type', ['csv_upload', 'ops_upload'])
+    .in('sync_type', ['csv_upload', 'ops_upload', 'marketplace_api_upload'])
     .order('started_at', { ascending: false })
     .limit(5);
 

@@ -1,0 +1,43 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { createServerSupabase } from '@/lib/supabase-server';
+import { saveMarketplaceIntakePreview, type MarketplaceIntakePreview } from '@/lib/marketplace-intake';
+
+export const maxDuration = 250;
+
+export async function POST(req: NextRequest) {
+  try {
+    try {
+      await requireDashboardRoles(['owner'], 'Hanya owner yang bisa menyimpan Marketplace Intake.');
+    } catch (error: any) {
+      const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
+      return NextResponse.json({ error: error.message }, { status });
+    }
+
+    const body = await req.json();
+    const preview = body?.preview as MarketplaceIntakePreview | undefined;
+    if (!preview || !preview.source || !Array.isArray(preview.orders)) {
+      return NextResponse.json({ error: 'Payload preview tidak valid.' }, { status: 400 });
+    }
+
+    const authSupabase = createServerSupabase();
+    const {
+      data: { user },
+    } = await authSupabase.auth.getUser();
+
+    const result = await saveMarketplaceIntakePreview({
+      preview,
+      uploadedByEmail: user?.email || null,
+    });
+
+    return NextResponse.json({
+      success: true,
+      batchId: result.batchId,
+      summary: result.summary,
+      message: `Preview Shopee RLT berhasil disimpan sebagai batch #${result.batchId}.`,
+    });
+  } catch (error: any) {
+    console.error('Marketplace intake confirm error:', error);
+    return NextResponse.json({ error: error.message || 'Marketplace intake confirm failed' }, { status: 500 });
+  }
+}
