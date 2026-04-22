@@ -16,7 +16,7 @@ $$ LANGUAGE plpgsql;
 
 CREATE TABLE IF NOT EXISTS marketplace_intake_batches (
   id BIGSERIAL PRIMARY KEY,
-  source_id BIGINT NOT NULL REFERENCES marketplace_upload_sources(id) ON DELETE RESTRICT,
+  source_id BIGINT,
   source_key TEXT NOT NULL,
   source_label TEXT NOT NULL,
   platform TEXT NOT NULL CHECK (platform IN ('shopee', 'tiktok', 'lazada', 'blibli')),
@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS marketplace_intake_orders (
   batch_id BIGINT NOT NULL REFERENCES marketplace_intake_batches(id) ON DELETE CASCADE,
   external_order_id TEXT NOT NULL,
   order_status TEXT NOT NULL CHECK (order_status IN ('ready', 'needs_review')),
-  final_source_store_id BIGINT REFERENCES marketplace_upload_source_stores(id) ON DELETE SET NULL,
+  final_source_store_id BIGINT,
   final_store_name TEXT,
   final_store_resolution TEXT NOT NULL CHECK (
     final_store_resolution IN ('single_store', 'dominant_amount', 'unclassified', 'ambiguous')
@@ -100,8 +100,8 @@ CREATE TABLE IF NOT EXISTS marketplace_intake_order_lines (
   matched_scalev_product_id INT,
   matched_scalev_variant_id INT,
   matched_scalev_bundle_id INT,
-  matched_rule_id BIGINT REFERENCES marketplace_store_mapping_rules(id) ON DELETE SET NULL,
-  mapped_source_store_id BIGINT REFERENCES marketplace_upload_source_stores(id) ON DELETE SET NULL,
+  matched_rule_id BIGINT,
+  mapped_source_store_id BIGINT,
   mapped_store_name TEXT,
   raw_row JSONB NOT NULL DEFAULT '{}'::JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

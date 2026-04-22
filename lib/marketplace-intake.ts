@@ -1,60 +1,43 @@
 import * as XLSX from 'xlsx';
 import { createServiceSupabase } from './service-supabase';
 
-const SHOPEE_RLT_SOURCE_KEY = 'shopee_rlt';
+const SHOPEE_RLT_SOURCE = {
+  id: null as number | null,
+  sourceKey: 'shopee_rlt',
+  sourceLabel: 'Shopee RLT',
+  platform: 'shopee' as const,
+  businessCode: 'RLT',
+  allowedStores: [
+    'Roove Main Store - Marketplace',
+    'Globite Store - Marketplace',
+    'Pluve Main Store - Marketplace',
+    'Purvu Store - Marketplace',
+    'Purvu The Secret Store - Markerplace',
+    'YUV Deodorant Serum Store - Marketplace',
+    'Osgard Oil Store',
+    'drHyun Main Store - Marketplace',
+    'Calmara Main Store - Marketplace',
+  ],
+};
 
 type SheetRow = Record<string, unknown>;
 
-type MarketplaceUploadSourceRow = {
+type BusinessRow = {
   id: number;
-  source_key: string;
-  source_label: string;
-  platform: 'shopee' | 'tiktok' | 'lazada' | 'blibli';
-  business_id: number;
   business_code: string;
-  description: string | null;
-  is_active: boolean;
+  business_name: string | null;
+  is_active: boolean | null;
 };
 
-type MarketplaceUploadSourceStoreRow = {
-  id: number;
-  source_id: number;
-  store_name: string;
-  sort_order: number;
-};
-
-type MarketplaceStoreMappingRuleRow = {
-  id: number;
-  source_id: number;
-  source_store_id: number;
+type BundleIdentifierRow = {
   business_id: number;
-  business_code: string;
-  match_field: 'sku' | 'product_name';
-  match_type: 'exact' | 'prefix' | 'contains';
-  match_value: string;
-  match_value_normalized: string;
-  target_entity_type: 'product' | 'variant' | 'bundle' | null;
-  target_entity_key: string | null;
-  scalev_product_id: number | null;
-  scalev_variant_id: number | null;
-  scalev_bundle_id: number | null;
-  target_entity_label: string | null;
-  notes: string | null;
-  is_active: boolean;
-  source_store_name: string | null;
-};
-
-type CatalogIdentifierRow = {
-  business_id: number;
-  entity_type: 'product' | 'variant' | 'bundle';
+  entity_type: 'bundle';
   entity_key: string;
   entity_label: string;
-  scalev_product_id: number | null;
-  scalev_variant_id: number | null;
   scalev_bundle_id: number | null;
   identifier: string;
   identifier_normalized: string;
-  source: string;
+  source: 'bundle.custom_id';
 };
 
 type CanonicalLine = {
@@ -97,39 +80,6 @@ type CanonicalOrder = {
   rawMeta: Record<string, string>;
 };
 
-type IdentifierMatch = {
-  status: 'matched';
-  row: CatalogIdentifierRow;
-};
-
-type IdentifierMiss = {
-  status: 'missing';
-};
-
-type IdentifierAmbiguous = {
-  status: 'ambiguous';
-  rows: CatalogIdentifierRow[];
-};
-
-type IdentifierResolution = IdentifierMatch | IdentifierMiss | IdentifierAmbiguous;
-
-type RuleMatch = {
-  status: 'matched';
-  rule: MarketplaceStoreMappingRuleRow;
-  score: number;
-};
-
-type RuleMiss = {
-  status: 'missing';
-};
-
-type RuleAmbiguous = {
-  status: 'ambiguous';
-  rules: MarketplaceStoreMappingRuleRow[];
-};
-
-type RuleResolution = RuleMatch | RuleMiss | RuleAmbiguous;
-
 type PreviewLineStatus = 'identified' | 'not_identified' | 'store_unmapped' | 'entity_mismatch';
 type PreviewOrderStatus = 'ready' | 'needs_review';
 type PreviewStoreResolution = 'single_store' | 'dominant_amount' | 'unclassified' | 'ambiguous';
@@ -146,7 +96,7 @@ export type MarketplaceIntakePreviewLine = {
   lineSubtotal: number;
   lineDiscount: number;
   detectedCustomId: string | null;
-  matchedEntityType: 'product' | 'variant' | 'bundle' | null;
+  matchedEntityType: 'bundle' | null;
   matchedEntityKey: string | null;
   matchedEntityLabel: string | null;
   matchedEntitySource: string | null;
@@ -198,7 +148,7 @@ export type MarketplaceIntakePreviewSummary = {
 
 export type MarketplaceIntakePreview = {
   source: {
-    id: number;
+    id: number | null;
     sourceKey: string;
     sourceLabel: string;
     platform: 'shopee';
@@ -421,26 +371,6 @@ async function parseShopeeWorkbook(file: File): Promise<{ orders: CanonicalOrder
   };
 }
 
-function getIdentifierSourcePriority(source: string): number {
-  if (source === 'bundle.custom_id') return 100;
-  if (source === 'variant.sku') return 90;
-  if (source === 'variant.unique_id') return 80;
-  if (source === 'bundle.price_option_unique_id') return 70;
-  if (source === 'bundle.price_option_slug') return 60;
-  return 10;
-}
-
-function getRuleTypePriority(type: 'exact' | 'prefix' | 'contains'): number {
-  if (type === 'exact') return 300;
-  if (type === 'prefix') return 200;
-  return 100;
-}
-
-function getRuleFieldPriority(field: 'sku' | 'product_name'): number {
-  if (field === 'sku') return 1000;
-  return 500;
-}
-
 function isMissingTableError(error: any): boolean {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
@@ -448,89 +378,31 @@ function isMissingTableError(error: any): boolean {
 }
 
 function getMissingSchemaMessage() {
-  return 'Tabel marketplace intake/mapping belum tersedia. Jalankan migration 118 dan 119 terlebih dahulu.';
+  return 'Tabel marketplace intake atau katalog Scalev belum tersedia. Jalankan migration intake dan sync katalog Scalev terlebih dahulu.';
 }
 
-async function loadShopeeRltSourceConfig() {
+async function loadRltBusiness(): Promise<BusinessRow> {
   const svc = createServiceSupabase();
-  const sourceRes = await svc
-    .from('marketplace_upload_sources')
-    .select('id, source_key, source_label, platform, business_id, business_code, description, is_active')
-    .eq('source_key', SHOPEE_RLT_SOURCE_KEY)
+  const { data, error } = await svc
+    .from('scalev_webhook_businesses')
+    .select('id, business_code, business_name, is_active')
+    .eq('business_code', SHOPEE_RLT_SOURCE.businessCode)
     .maybeSingle();
 
-  if (sourceRes.error) {
-    if (isMissingTableError(sourceRes.error)) throw new Error(getMissingSchemaMessage());
-    throw sourceRes.error;
+  if (error) {
+    if (isMissingTableError(error)) throw new Error(getMissingSchemaMessage());
+    throw error;
   }
-  if (!sourceRes.data) {
-    throw new Error('Source account Shopee RLT belum tersedia di marketplace mapping.');
-  }
-
-  const source = sourceRes.data as MarketplaceUploadSourceRow;
-  if (source.platform !== 'shopee') {
-    throw new Error('Source Shopee RLT tidak valid.');
+  if (!data) {
+    throw new Error('Business RLT tidak ditemukan di konfigurasi Scalev.');
   }
 
-  const [storesRes, rulesRes] = await Promise.all([
-    svc
-      .from('marketplace_upload_source_stores')
-      .select('id, source_id, store_name, sort_order')
-      .eq('source_id', source.id)
-      .order('sort_order', { ascending: true })
-      .order('store_name', { ascending: true }),
-    svc
-      .from('marketplace_store_mapping_rules')
-      .select(`
-        id,
-        source_id,
-        source_store_id,
-        business_id,
-        business_code,
-        match_field,
-        match_type,
-        match_value,
-        match_value_normalized,
-        target_entity_type,
-        target_entity_key,
-        scalev_product_id,
-        scalev_variant_id,
-        scalev_bundle_id,
-        target_entity_label,
-        notes,
-        is_active
-      `)
-      .eq('source_id', source.id)
-      .eq('is_active', true)
-      .order('match_field', { ascending: true })
-      .order('match_type', { ascending: true })
-      .order('match_value', { ascending: true }),
-  ]);
-
-  for (const response of [storesRes, rulesRes]) {
-    if (response.error) {
-      if (isMissingTableError(response.error)) throw new Error(getMissingSchemaMessage());
-      throw response.error;
-    }
-  }
-
-  const stores = (storesRes.data || []) as MarketplaceUploadSourceStoreRow[];
-  const storeNameById = new Map<number, string>(stores.map((store) => [store.id, store.store_name]));
-  const rules = ((rulesRes.data || []) as MarketplaceStoreMappingRuleRow[]).map((rule) => ({
-    ...rule,
-    source_store_name: storeNameById.get(rule.source_store_id) || null,
-  }));
-
-  return {
-    source,
-    stores,
-    rules,
-  };
+  return data as BusinessRow;
 }
 
-async function loadIdentifierLookup(businessId: number, normalizedIdentifiers: string[]) {
+async function loadBundleIdentifierLookup(businessId: number, normalizedIdentifiers: string[]) {
   const svc = createServiceSupabase();
-  if (normalizedIdentifiers.length === 0) return new Map<string, CatalogIdentifierRow[]>();
+  if (normalizedIdentifiers.length === 0) return new Map<string, BundleIdentifierRow[]>();
 
   const { data, error } = await svc
     .from('scalev_catalog_identifiers')
@@ -539,21 +411,23 @@ async function loadIdentifierLookup(businessId: number, normalizedIdentifiers: s
       entity_type,
       entity_key,
       entity_label,
-      scalev_product_id,
-      scalev_variant_id,
       scalev_bundle_id,
       identifier,
       identifier_normalized,
       source
     `)
     .eq('business_id', businessId)
-    .in('identifier_normalized', normalizedIdentifiers)
-    .in('source', ['bundle.custom_id', 'variant.sku', 'variant.unique_id', 'bundle.price_option_unique_id', 'bundle.price_option_slug']);
+    .eq('entity_type', 'bundle')
+    .eq('source', 'bundle.custom_id')
+    .in('identifier_normalized', normalizedIdentifiers);
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingTableError(error)) throw new Error(getMissingSchemaMessage());
+    throw error;
+  }
 
-  const lookup = new Map<string, CatalogIdentifierRow[]>();
-  for (const row of (data || []) as CatalogIdentifierRow[]) {
+  const lookup = new Map<string, BundleIdentifierRow[]>();
+  for (const row of (data || []) as BundleIdentifierRow[]) {
     const key = normalizeIdentifier(row.identifier_normalized || row.identifier);
     if (!key) continue;
     if (!lookup.has(key)) lookup.set(key, []);
@@ -562,79 +436,93 @@ async function loadIdentifierLookup(businessId: number, normalizedIdentifiers: s
   return lookup;
 }
 
-function resolveIdentifierForSku(
+function resolveBundleIdentifierForSku(
   sku: string | null,
-  identifierLookup: Map<string, CatalogIdentifierRow[]>,
-): IdentifierResolution {
+  identifierLookup: Map<string, BundleIdentifierRow[]>,
+): { status: 'matched'; row: BundleIdentifierRow } | { status: 'missing' } | { status: 'ambiguous'; rows: BundleIdentifierRow[] } {
   const normalized = normalizeIdentifier(sku);
   if (!normalized) return { status: 'missing' };
 
-  const matches = (identifierLookup.get(normalized) || []).slice().sort((left, right) => {
-    const priorityDiff = getIdentifierSourcePriority(right.source) - getIdentifierSourcePriority(left.source);
-    if (priorityDiff !== 0) return priorityDiff;
+  const rows = (identifierLookup.get(normalized) || []).slice().sort((left, right) => {
     return String(left.entity_key || '').localeCompare(String(right.entity_key || ''));
   });
+  if (rows.length === 0) return { status: 'missing' };
 
-  if (matches.length === 0) return { status: 'missing' };
-  if (matches.length === 1) return { status: 'matched', row: matches[0] };
-
-  const bestPriority = getIdentifierSourcePriority(matches[0].source);
-  const topMatches = matches.filter((row) => getIdentifierSourcePriority(row.source) === bestPriority);
-  const uniqueEntityKeys = Array.from(new Set(topMatches.map((row) => row.entity_key)));
-  if (uniqueEntityKeys.length === 1) return { status: 'matched', row: topMatches[0] };
-  return { status: 'ambiguous', rows: topMatches };
+  const distinctEntityKeys = Array.from(new Set(rows.map((row) => row.entity_key)));
+  if (distinctEntityKeys.length === 1) return { status: 'matched', row: rows[0] };
+  return { status: 'ambiguous', rows };
 }
 
-function ruleMatchesField(
-  value: string | null,
-  rule: MarketplaceStoreMappingRuleRow,
-): boolean {
-  const normalizedValue = normalizeIdentifier(value);
-  const normalizedRule = normalizeIdentifier(rule.match_value_normalized || rule.match_value);
-  if (!normalizedValue || !normalizedRule) return false;
-  if (rule.match_type === 'exact') return normalizedValue === normalizedRule;
-  if (rule.match_type === 'prefix') return normalizedValue.startsWith(normalizedRule);
-  return normalizedValue.includes(normalizedRule);
-}
+function classifyShopeeRltStore(input: {
+  customId: string | null;
+  entityLabel: string | null;
+  productName: string | null;
+}): {
+  storeName: string | null;
+  classifierLabel: string | null;
+} {
+  const customId = normalizeLoose(input.customId);
+  const label = normalizeIdentifier([input.entityLabel, input.productName].filter(Boolean).join(' '));
 
-function resolveRuleForLine(
-  line: CanonicalLine,
-  rules: MarketplaceStoreMappingRuleRow[],
-): RuleResolution {
-  const candidates: Array<{ rule: MarketplaceStoreMappingRuleRow; score: number }> = [];
-
-  for (const rule of rules) {
-    const targetValue = rule.match_field === 'sku' ? line.sku : line.productName;
-    if (!ruleMatchesField(targetValue, rule)) continue;
-    const score =
-      getRuleFieldPriority(rule.match_field) +
-      getRuleTypePriority(rule.match_type) +
-      normalizeIdentifier(rule.match_value_normalized || rule.match_value).length;
-    candidates.push({ rule, score });
+  if (customId.startsWith('rov') || label.includes('roove')) {
+    return {
+      storeName: 'Roove Main Store - Marketplace',
+      classifierLabel: 'Classifier: ROV / Roove',
+    };
+  }
+  if (customId.startsWith('glb') || label.includes('globite')) {
+    return {
+      storeName: 'Globite Store - Marketplace',
+      classifierLabel: 'Classifier: GLB / Globite',
+    };
+  }
+  if (customId.startsWith('plv') || label.includes('pluve')) {
+    return {
+      storeName: 'Pluve Main Store - Marketplace',
+      classifierLabel: 'Classifier: PLV / Pluve',
+    };
+  }
+  if (customId.startsWith('ogd') || label.includes('osgard')) {
+    return {
+      storeName: 'Osgard Oil Store',
+      classifierLabel: 'Classifier: OGD / Osgard',
+    };
+  }
+  if (customId.startsWith('srt') || label.includes('the secret') || (label.includes('purvu') && label.includes('secret'))) {
+    return {
+      storeName: 'Purvu The Secret Store - Markerplace',
+      classifierLabel: 'Classifier: SRT / Purvu Secret',
+    };
+  }
+  if (customId.startsWith('pam') || (label.includes('purvu') && !label.includes('secret'))) {
+    return {
+      storeName: 'Purvu Store - Marketplace',
+      classifierLabel: 'Classifier: PAM / Purvu',
+    };
+  }
+  if (customId.startsWith('yuv') || label.includes('yuv')) {
+    return {
+      storeName: 'YUV Deodorant Serum Store - Marketplace',
+      classifierLabel: 'Classifier: YUV',
+    };
+  }
+  if (customId.startsWith('drh') || label.includes('drhyun') || label.includes('dr hyun')) {
+    return {
+      storeName: 'drHyun Main Store - Marketplace',
+      classifierLabel: 'Classifier: DRH / drHyun',
+    };
+  }
+  if (customId.startsWith('clm') || customId.startsWith('cal') || label.includes('calmara')) {
+    return {
+      storeName: 'Calmara Main Store - Marketplace',
+      classifierLabel: 'Classifier: CAL / Calmara',
+    };
   }
 
-  if (candidates.length === 0) return { status: 'missing' };
-
-  candidates.sort((left, right) => {
-    if (right.score !== left.score) return right.score - left.score;
-    return left.rule.id - right.rule.id;
-  });
-
-  const bestScore = candidates[0].score;
-  const bestCandidates = candidates.filter((candidate) => candidate.score === bestScore);
-  if (bestCandidates.length === 1) {
-    return { status: 'matched', rule: bestCandidates[0].rule, score: bestScore };
-  }
-
-  const distinctTargets = Array.from(new Set(bestCandidates.map((candidate) => [
-    candidate.rule.source_store_id,
-    candidate.rule.target_entity_key || '',
-  ].join('|'))));
-  if (distinctTargets.length === 1) {
-    return { status: 'matched', rule: bestCandidates[0].rule, score: bestScore };
-  }
-
-  return { status: 'ambiguous', rules: bestCandidates.map((candidate) => candidate.rule) };
+  return {
+    storeName: null,
+    classifierLabel: null,
+  };
 }
 
 function buildOrderCustomerLabel(order: CanonicalOrder): string | null {
@@ -643,53 +531,110 @@ function buildOrderCustomerLabel(order: CanonicalOrder): string | null {
 
 function classifyOrder(
   order: CanonicalOrder,
-  rules: MarketplaceStoreMappingRuleRow[],
-  identifierLookup: Map<string, CatalogIdentifierRow[]>,
+  identifierLookup: Map<string, BundleIdentifierRow[]>,
 ): MarketplaceIntakePreviewOrder {
-  const lines: MarketplaceIntakePreviewLine[] = [];
+  const issueCodes = new Set<string>();
 
-  for (let index = 0; index < order.lines.length; index += 1) {
-    const line = order.lines[index];
-    const issueCodes: string[] = [];
-    let lineStatus: PreviewLineStatus = 'identified';
-    let matchedEntity: CatalogIdentifierRow | null = null;
-    let mappedRule: MarketplaceStoreMappingRuleRow | null = null;
-    let mappedStoreId: number | null = null;
-    let mappedStoreName: string | null = null;
-    let matchedRuleLabel: string | null = null;
-
-    const identifier = resolveIdentifierForSku(line.sku, identifierLookup);
+  const lines: MarketplaceIntakePreviewLine[] = order.lines.map((line, index) => {
+    const identifier = resolveBundleIdentifierForSku(line.sku, identifierLookup);
     if (identifier.status === 'missing') {
-      lineStatus = 'not_identified';
-      issueCodes.push('custom_id_not_found');
-    } else if (identifier.status === 'ambiguous') {
-      lineStatus = 'not_identified';
-      issueCodes.push('custom_id_ambiguous');
-    } else {
-      matchedEntity = identifier.row;
-      const ruleResolution = resolveRuleForLine(line, rules);
-      if (ruleResolution.status === 'missing') {
-        lineStatus = 'store_unmapped';
-        issueCodes.push('store_rule_missing');
-      } else if (ruleResolution.status === 'ambiguous') {
-        lineStatus = 'store_unmapped';
-        issueCodes.push('store_rule_ambiguous');
-      } else {
-        mappedRule = ruleResolution.rule;
-        mappedStoreId = Number(mappedRule.source_store_id || 0) || null;
-        mappedStoreName = mappedRule.source_store_name || null;
-        matchedRuleLabel = `${mappedRule.match_field}:${mappedRule.match_type}:${mappedRule.match_value}`;
-        if (mappedRule.target_entity_key && mappedRule.target_entity_key !== matchedEntity.entity_key) {
-          lineStatus = 'entity_mismatch';
-          issueCodes.push('rule_entity_mismatch');
-        }
-      }
+      issueCodes.add('custom_id_not_found');
+      return {
+        lineIndex: index,
+        lineStatus: 'not_identified',
+        issueCodes: ['custom_id_not_found'],
+        mpSku: line.sku,
+        mpProductName: line.productName,
+        mpVariation: line.variation,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        lineSubtotal: line.lineSubtotal,
+        lineDiscount: line.lineDiscount,
+        detectedCustomId: line.sku,
+        matchedEntityType: null,
+        matchedEntityKey: null,
+        matchedEntityLabel: null,
+        matchedEntitySource: null,
+        matchedScalevProductId: null,
+        matchedScalevVariantId: null,
+        matchedScalevBundleId: null,
+        matchedRuleId: null,
+        matchedRuleLabel: null,
+        mappedSourceStoreId: null,
+        mappedStoreName: null,
+        rawRow: line.rawRow,
+      };
     }
 
-    lines.push({
+    if (identifier.status === 'ambiguous') {
+      issueCodes.add('custom_id_ambiguous');
+      return {
+        lineIndex: index,
+        lineStatus: 'not_identified',
+        issueCodes: ['custom_id_ambiguous'],
+        mpSku: line.sku,
+        mpProductName: line.productName,
+        mpVariation: line.variation,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        lineSubtotal: line.lineSubtotal,
+        lineDiscount: line.lineDiscount,
+        detectedCustomId: line.sku,
+        matchedEntityType: null,
+        matchedEntityKey: null,
+        matchedEntityLabel: null,
+        matchedEntitySource: null,
+        matchedScalevProductId: null,
+        matchedScalevVariantId: null,
+        matchedScalevBundleId: null,
+        matchedRuleId: null,
+        matchedRuleLabel: null,
+        mappedSourceStoreId: null,
+        mappedStoreName: null,
+        rawRow: line.rawRow,
+      };
+    }
+
+    const match = identifier.row;
+    const storeClassification = classifyShopeeRltStore({
+      customId: match.identifier,
+      entityLabel: match.entity_label,
+      productName: line.productName,
+    });
+
+    if (!storeClassification.storeName || !SHOPEE_RLT_SOURCE.allowedStores.includes(storeClassification.storeName)) {
+      issueCodes.add('store_classifier_missing');
+      return {
+        lineIndex: index,
+        lineStatus: 'store_unmapped',
+        issueCodes: ['store_classifier_missing'],
+        mpSku: line.sku,
+        mpProductName: line.productName,
+        mpVariation: line.variation,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        lineSubtotal: line.lineSubtotal,
+        lineDiscount: line.lineDiscount,
+        detectedCustomId: match.identifier,
+        matchedEntityType: 'bundle',
+        matchedEntityKey: match.entity_key,
+        matchedEntityLabel: match.entity_label,
+        matchedEntitySource: match.source,
+        matchedScalevProductId: null,
+        matchedScalevVariantId: null,
+        matchedScalevBundleId: match.scalev_bundle_id,
+        matchedRuleId: null,
+        matchedRuleLabel: null,
+        mappedSourceStoreId: null,
+        mappedStoreName: null,
+        rawRow: line.rawRow,
+      };
+    }
+
+    return {
       lineIndex: index,
-      lineStatus,
-      issueCodes,
+      lineStatus: 'identified',
+      issueCodes: [],
       mpSku: line.sku,
       mpProductName: line.productName,
       mpVariation: line.variation,
@@ -697,72 +642,54 @@ function classifyOrder(
       unitPrice: line.unitPrice,
       lineSubtotal: line.lineSubtotal,
       lineDiscount: line.lineDiscount,
-      detectedCustomId: line.sku,
-      matchedEntityType: matchedEntity?.entity_type || null,
-      matchedEntityKey: matchedEntity?.entity_key || null,
-      matchedEntityLabel: matchedEntity?.entity_label || null,
-      matchedEntitySource: matchedEntity?.source || null,
-      matchedScalevProductId: matchedEntity?.scalev_product_id ?? null,
-      matchedScalevVariantId: matchedEntity?.scalev_variant_id ?? null,
-      matchedScalevBundleId: matchedEntity?.scalev_bundle_id ?? null,
-      matchedRuleId: mappedRule?.id ?? null,
-      matchedRuleLabel,
-      mappedSourceStoreId: mappedStoreId,
-      mappedStoreName,
+      detectedCustomId: match.identifier,
+      matchedEntityType: 'bundle',
+      matchedEntityKey: match.entity_key,
+      matchedEntityLabel: match.entity_label,
+      matchedEntitySource: match.source,
+      matchedScalevProductId: null,
+      matchedScalevVariantId: null,
+      matchedScalevBundleId: match.scalev_bundle_id,
+      matchedRuleId: null,
+      matchedRuleLabel: storeClassification.classifierLabel,
+      mappedSourceStoreId: null,
+      mappedStoreName: storeClassification.storeName,
       rawRow: line.rawRow,
-    });
-  }
+    };
+  });
 
   const identifiedLineCount = lines.filter((line) => line.lineStatus !== 'not_identified').length;
   const classifiedLineCount = lines.filter((line) => line.lineStatus === 'identified').length;
   const hasUnidentified = lines.some((line) => line.lineStatus === 'not_identified');
-  const issueCodes = new Set<string>();
-  lines.forEach((line) => line.issueCodes.forEach((code) => issueCodes.add(code)));
 
-  const storeTotals = new Map<number, { storeName: string; total: number }>();
+  const storeTotals = new Map<string, number>();
   for (const line of lines) {
-    if (!line.mappedSourceStoreId || !line.mappedStoreName || line.lineStatus === 'not_identified') continue;
-    const existing = storeTotals.get(line.mappedSourceStoreId);
-    if (!existing) {
-      storeTotals.set(line.mappedSourceStoreId, {
-        storeName: line.mappedStoreName,
-        total: line.lineSubtotal,
-      });
-      continue;
-    }
-    existing.total += line.lineSubtotal;
+    if (!line.mappedStoreName || line.lineStatus !== 'identified') continue;
+    storeTotals.set(line.mappedStoreName, (storeTotals.get(line.mappedStoreName) || 0) + line.lineSubtotal);
   }
 
-  let finalSourceStoreId: number | null = null;
   let finalStoreName: string | null = null;
   let finalStoreResolution: PreviewStoreResolution = 'unclassified';
   let orderStatus: PreviewOrderStatus = 'needs_review';
-  const isMixedStore = storeTotals.size > 1;
 
-  const hasBlockingIssue = lines.some((line) => line.lineStatus !== 'identified');
-  if (!hasBlockingIssue && storeTotals.size === 1) {
-    const [storeId, store] = Array.from(storeTotals.entries())[0];
-    finalSourceStoreId = storeId;
-    finalStoreName = store.storeName;
+  if (classifiedLineCount === lines.length && storeTotals.size === 1) {
+    finalStoreName = Array.from(storeTotals.keys())[0];
     finalStoreResolution = 'single_store';
     orderStatus = 'ready';
-  } else if (!hasBlockingIssue && storeTotals.size > 1) {
-    const rankedStores = Array.from(storeTotals.entries()).sort((left, right) => right[1].total - left[1].total);
-    if (rankedStores[0] && rankedStores[1] && rankedStores[0][1].total === rankedStores[1][1].total) {
+  } else if (classifiedLineCount === lines.length && storeTotals.size > 1) {
+    const ranked = Array.from(storeTotals.entries()).sort((left, right) => right[1] - left[1]);
+    if (ranked[0] && ranked[1] && ranked[0][1] === ranked[1][1]) {
       issueCodes.add('store_amount_tie');
       finalStoreResolution = 'ambiguous';
-    } else if (rankedStores[0]) {
-      finalSourceStoreId = rankedStores[0][0];
-      finalStoreName = rankedStores[0][1].storeName;
+    } else if (ranked[0]) {
+      finalStoreName = ranked[0][0];
       finalStoreResolution = 'dominant_amount';
       orderStatus = 'ready';
     }
-  } else {
-    finalStoreResolution = storeTotals.size > 1 ? 'ambiguous' : 'unclassified';
   }
 
-  if (orderStatus !== 'ready' && isMixedStore && finalStoreResolution === 'unclassified') {
-    finalStoreResolution = 'ambiguous';
+  if (lines.some((line) => line.lineStatus === 'store_unmapped')) {
+    issueCodes.add('store_classifier_missing');
   }
 
   const computedOrderAmount = order.orderAmount > 0
@@ -772,15 +699,15 @@ function classifyOrder(
   return {
     externalOrderId: order.externalId,
     orderStatus,
-    finalSourceStoreId,
+    finalSourceStoreId: null,
     finalStoreName,
     finalStoreResolution,
     issueCodes: Array.from(issueCodes),
     lineCount: lines.length,
     identifiedLineCount,
     classifiedLineCount,
-    issueCount: Array.from(issueCodes).length,
-    isMixedStore,
+    issueCount: issueCodes.size,
+    isMixedStore: storeTotals.size > 1,
     hasUnidentified,
     customerLabel: buildOrderCustomerLabel(order),
     recipientName: order.customerName,
@@ -843,7 +770,7 @@ export async function previewShopeeRltIntake(input: {
   file: File;
   filenameOverride?: string | null;
 }): Promise<MarketplaceIntakePreview> {
-  const { source, rules } = await loadShopeeRltSourceConfig();
+  const business = await loadRltBusiness();
   const { orders, rowCount } = await parseShopeeWorkbook(input.file);
 
   const normalizedIdentifiers = Array.from(new Set(
@@ -851,20 +778,20 @@ export async function previewShopeeRltIntake(input: {
       .flatMap((order) => order.lines.map((line) => normalizeIdentifier(line.sku)))
       .filter(Boolean),
   ));
-  const identifierLookup = await loadIdentifierLookup(source.business_id, normalizedIdentifiers);
+  const identifierLookup = await loadBundleIdentifierLookup(business.id, normalizedIdentifiers);
 
   const previewOrders = orders
-    .map((order) => classifyOrder(order, rules, identifierLookup))
+    .map((order) => classifyOrder(order, identifierLookup))
     .sort((left, right) => left.externalOrderId.localeCompare(right.externalOrderId));
 
   return {
     source: {
-      id: source.id,
-      sourceKey: source.source_key,
-      sourceLabel: source.source_label,
-      platform: 'shopee',
-      businessId: source.business_id,
-      businessCode: source.business_code,
+      id: SHOPEE_RLT_SOURCE.id,
+      sourceKey: SHOPEE_RLT_SOURCE.sourceKey,
+      sourceLabel: SHOPEE_RLT_SOURCE.sourceLabel,
+      platform: SHOPEE_RLT_SOURCE.platform,
+      businessId: business.id,
+      businessCode: business.business_code,
     },
     filename: String(input.filenameOverride || input.file.name || 'shopee-rlt-upload'),
     rowCount,
@@ -879,28 +806,29 @@ export async function saveMarketplaceIntakePreview(input: {
   preview: MarketplaceIntakePreview;
   uploadedByEmail: string | null;
 }) {
-  const current = await loadShopeeRltSourceConfig();
+  const business = await loadRltBusiness();
   const preview = input.preview;
-  if (!preview?.source || preview.source.sourceKey !== SHOPEE_RLT_SOURCE_KEY) {
+
+  if (!preview?.source || preview.source.sourceKey !== SHOPEE_RLT_SOURCE.sourceKey) {
     throw new Error('Preview intake tidak valid untuk Shopee RLT.');
   }
-  if (Number(preview.source.id || 0) !== current.source.id) {
-    throw new Error('Source mapping berubah. Refresh preview lalu coba simpan lagi.');
+  if (Number(preview.source.businessId || 0) !== business.id) {
+    throw new Error('Business preview berubah. Refresh preview lalu coba simpan lagi.');
   }
 
   const summary = buildPreviewSummary(preview.orders || []);
   if (summary.needsReviewOrders > 0 || summary.unidentifiedLines > 0 || summary.unresolvedStoreLines > 0) {
-    throw new Error('Masih ada order yang belum siap. Selesaikan mapping dulu sebelum menyimpan.');
+    throw new Error('Masih ada order yang belum siap. Selesaikan identifikasi SKU dulu sebelum menyimpan.');
   }
 
   const svc = createServiceSupabase();
   const batchInsert = {
-    source_id: current.source.id,
-    source_key: current.source.source_key,
-    source_label: current.source.source_label,
-    platform: current.source.platform,
-    business_id: current.source.business_id,
-    business_code: current.source.business_code,
+    source_id: null,
+    source_key: SHOPEE_RLT_SOURCE.sourceKey,
+    source_label: SHOPEE_RLT_SOURCE.sourceLabel,
+    platform: SHOPEE_RLT_SOURCE.platform,
+    business_id: business.id,
+    business_code: business.business_code,
     filename: preview.filename,
     file_size_bytes: null,
     review_status: 'confirmed',
@@ -923,6 +851,7 @@ export async function saveMarketplaceIntakePreview(input: {
     .insert(batchInsert)
     .select('id')
     .single();
+
   if (batchRes.error) {
     if (isMissingTableError(batchRes.error)) throw new Error(getMissingSchemaMessage());
     throw batchRes.error;
@@ -933,7 +862,7 @@ export async function saveMarketplaceIntakePreview(input: {
     batch_id: batchId,
     external_order_id: order.externalOrderId,
     order_status: order.orderStatus,
-    final_source_store_id: order.finalSourceStoreId,
+    final_source_store_id: null,
     final_store_name: order.finalStoreName,
     final_store_resolution: order.finalStoreResolution,
     issue_codes: order.issueCodes || [],
@@ -984,11 +913,11 @@ export async function saveMarketplaceIntakePreview(input: {
       matched_entity_key: line.matchedEntityKey,
       matched_entity_label: line.matchedEntityLabel,
       matched_entity_source: line.matchedEntitySource,
-      matched_scalev_product_id: line.matchedScalevProductId,
-      matched_scalev_variant_id: line.matchedScalevVariantId,
+      matched_scalev_product_id: null,
+      matched_scalev_variant_id: null,
       matched_scalev_bundle_id: line.matchedScalevBundleId,
-      matched_rule_id: line.matchedRuleId,
-      mapped_source_store_id: line.mappedSourceStoreId,
+      matched_rule_id: null,
+      mapped_source_store_id: null,
       mapped_store_name: line.mappedStoreName,
       raw_row: line.rawRow || {},
     }));

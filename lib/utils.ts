@@ -307,7 +307,6 @@ export const ALL_TABS: TabDef[] = [
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign', group: 'Analysis' },
   // Ungrouped (bottom)
   { id: 'marketplace-intake', label: 'Marketplace Intake', icon: 'Inbox', ownerOnly: true },
-  { id: 'marketplace-mapping', label: 'Marketplace Mapping', icon: 'Map', ownerOnly: true },
   { id: 'business-settings', label: 'Business Settings', icon: 'Building2', ownerOnly: true },
   { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true },
 ];

@@ -216,7 +216,7 @@ export default function MarketplaceIntakeManager() {
             <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Upload Shopee RLT</div>
             <div style={{ fontSize: 13, color: 'var(--dim)', maxWidth: 840, lineHeight: 1.6 }}>
               Halaman ini hanya membaca export <strong>Shopee RLT</strong>. File yang namanya mengandung <strong>SPX</strong> tetap diperlakukan sebagai Shopee.
-              App akan membaca exact <strong>custom_id</strong> lebih dulu, lalu mengecek rule mapping store yang sudah Anda definisikan.
+              App akan match exact <strong>SKU Excel</strong> ke <strong>bundle custom_id</strong> di business <strong>RLT</strong>, lalu mengklasifikasikan store secara langsung berdasarkan keluarga bundle tersebut.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -351,7 +351,7 @@ export default function MarketplaceIntakeManager() {
               <div>
                 <div style={{ fontSize: 16, fontWeight: 800 }}>Preview Mapping</div>
                 <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                  File: <strong>{preview.filename}</strong> • {fmtNumber(preview.rowCount)} row sumber
+                  File: <strong>{preview.filename}</strong> • {fmtNumber(preview.rowCount)} row sumber • classifier opinionated {'Shopee RLT -> RLT'}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -388,7 +388,7 @@ export default function MarketplaceIntakeManager() {
               </div>
             </div>
 
-            {!canConfirm ? (
+                            {!canConfirm ? (
               <div
                 style={{
                   marginBottom: 12,
@@ -400,7 +400,7 @@ export default function MarketplaceIntakeManager() {
                   border: '1px solid rgba(245,158,11,0.24)',
                 }}
               >
-                Confirm akan aktif setelah semua line berhasil diidentifikasi dan semua store sudah termapping tanpa ambiguity.
+                Confirm akan aktif setelah semua line berhasil match ke bundle `custom_id` RLT dan semua store berhasil terklasifikasi tanpa ambiguity.
               </div>
             ) : null}
 
@@ -543,7 +543,7 @@ export default function MarketplaceIntakeManager() {
                                 <div>
                                   <div style={{ fontWeight: 700 }}>{line.mappedStoreName || 'Belum termapping'}</div>
                                   <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>
-                                    {line.matchedRuleLabel || 'Rule belum ada'}
+                                    {line.matchedRuleLabel || 'Classifier belum mengenali keluarga bundle ini'}
                                   </div>
                                 </div>
                                 <div>
