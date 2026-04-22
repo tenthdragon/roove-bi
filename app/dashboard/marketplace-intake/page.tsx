@@ -9,7 +9,7 @@ export default function MarketplaceIntakePage() {
       <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Marketplace Intake</h2>
       <div style={{ fontSize: 13, color: 'var(--dim)', marginBottom: 18, maxWidth: 920 }}>
         Tahap pertama untuk jalur baru marketplace. Upload file <strong>Shopee RLT</strong>, lalu app akan match exact SKU Excel ke bundle <strong>custom_id</strong> di business <strong>RLT</strong>,
-        mengisi store dari <strong>custom_id</strong> yang sudah match exact, lalu menaruh hasilnya ke <strong>workspace warehouse</strong>. Data baru dianggap valid downstream setelah warehouse memberi <strong>shipment date</strong>.
+        lalu mencari store exact dari relasi bundle di Scalev dan menaruh hasilnya ke <strong>workspace warehouse</strong>. Data baru dianggap valid downstream setelah warehouse memberi <strong>shipment date</strong>.
       </div>
       <MarketplaceIntakeManager />
     </div>

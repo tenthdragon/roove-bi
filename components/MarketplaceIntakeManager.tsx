@@ -558,6 +558,7 @@ export default function MarketplaceIntakeManager() {
               externalOrderId,
               lineIndex: Number(lineIndexText),
               scalevBundleId: Number(candidate?.scalevBundleId || 0),
+              mappedStoreName: candidate?.storeName || null,
             };
           }).filter((row) => row.externalOrderId && Number.isFinite(row.lineIndex) && row.scalevBundleId > 0),
         }),
@@ -690,7 +691,7 @@ export default function MarketplaceIntakeManager() {
             <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Upload Shopee RLT</div>
             <div style={{ fontSize: 13, color: 'var(--dim)', maxWidth: 840, lineHeight: 1.6 }}>
               Halaman ini hanya membaca export <strong>Shopee RLT</strong>. File yang namanya mengandung <strong>SPX</strong> tetap diperlakukan sebagai Shopee.
-              App akan match exact <strong>SKU Excel</strong> ke <strong>bundle custom_id</strong> di business <strong>RLT</strong>, lalu mengisi store langsung dari <strong>custom_id</strong> yang sudah match exact.
+              App akan match exact <strong>SKU Excel</strong> ke <strong>bundle custom_id</strong> di business <strong>RLT</strong>, lalu mencari store exact dari relasi bundle di Scalev.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -825,7 +826,7 @@ export default function MarketplaceIntakeManager() {
               <div>
                 <div style={{ fontSize: 16, fontWeight: 800 }}>Preview Mapping</div>
                 <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • exact custom_id match Shopee RLT → RLT
+                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • exact bundle match + exact store lookup
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1022,6 +1023,34 @@ export default function MarketplaceIntakeManager() {
                                                 }}
                                               >
                                                 {candidate.customId || candidate.entityLabel}
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
+
+                                        {selectedCandidate?.storeCandidates?.length > 1 && !selectedCandidate?.storeName ? (
+                                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                            {selectedCandidate.storeCandidates.map((storeName) => (
+                                              <button
+                                                key={`${lineKey}-store-${storeName}`}
+                                                onClick={() => setManualSelection(order.externalOrderId, line.lineIndex, {
+                                                  ...selectedCandidate,
+                                                  storeName,
+                                                  classifierLabel: 'Manual store selection',
+                                                })}
+                                                style={{
+                                                  padding: '6px 8px',
+                                                  borderRadius: 8,
+                                                  border: '1px solid var(--border)',
+                                                  background: 'var(--bg)',
+                                                  color: 'var(--text-secondary)',
+                                                  fontSize: 11,
+                                                  fontWeight: 700,
+                                                  cursor: 'pointer',
+                                                  textAlign: 'left',
+                                                }}
+                                              >
+                                                {storeName}
                                               </button>
                                             ))}
                                           </div>

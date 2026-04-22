@@ -1,7 +1,12 @@
 import { createHash } from 'crypto';
 import * as XLSX from 'xlsx';
 import { createServiceSupabase } from './service-supabase';
-import { classifyShopeeRltStoreByCustomId } from './marketplace-intake-store';
+import {
+  createShopeeRltStoreResolverContext,
+  resolveShopeeRltStoreForBundle,
+  SHOPEE_RLT_ALLOWED_STORE_NAMES,
+  type ShopeeRltStoreResolverContext,
+} from './marketplace-intake-store';
 
 const SHOPEE_RLT_SOURCE = {
   id: null as number | null,
@@ -9,17 +14,7 @@ const SHOPEE_RLT_SOURCE = {
   sourceLabel: 'Shopee RLT',
   platform: 'shopee' as const,
   businessCode: 'RLT',
-  allowedStores: [
-    'Roove Main Store - Marketplace',
-    'Globite Store - Marketplace',
-    'Pluve Main Store - Marketplace',
-    'Purvu Store - Marketplace',
-    'Purvu The Secret Store - Markerplace',
-    'YUV Deodorant Serum Store - Marketplace',
-    'Osgard Oil Store',
-    'drHyun Main Store - Marketplace',
-    'Calmara Main Store - Marketplace',
-  ],
+  allowedStores: SHOPEE_RLT_ALLOWED_STORE_NAMES,
 };
 
 type SheetRow = Record<string, unknown>;
@@ -28,6 +23,7 @@ type BusinessRow = {
   id: number;
   business_code: string;
   business_name: string | null;
+  api_key: string | null;
   is_active: boolean | null;
 };
 
@@ -115,9 +111,10 @@ export type MarketplaceIntakeSuggestionCandidate = {
   customId: string | null;
   scalevBundleId: number;
   storeName: string | null;
+  storeCandidates: string[];
   classifierLabel: string | null;
   score: number;
-  source: 'remembered' | 'catalog' | 'manual';
+  source: 'remembered' | 'catalog' | 'manual' | 'companion';
 };
 
 export type MarketplaceIntakePreviewLine = {
@@ -208,6 +205,7 @@ export type MarketplaceIntakeManualSelectionInput = {
   externalOrderId: string;
   lineIndex: number;
   scalevBundleId: number;
+  mappedStoreName?: string | null;
 };
 
 function cleanText(value: unknown): string | null {
@@ -231,12 +229,41 @@ function normalizeLoose(value: string | null | undefined): string {
 
 function parseNumber(value: unknown): number {
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
-  const text = String(value ?? '')
-    .replace(/[^0-9,.-]+/g, '')
-    .replace(/\.(?=.*\.)/g, '')
-    .replace(/,(\d{2})$/, '.$1')
-    .replace(/,/g, '');
-  const parsed = Number(text);
+  const raw = String(value ?? '').trim();
+  if (!raw) return 0;
+
+  const text = raw.replace(/[^0-9,.-]+/g, '');
+  if (!text) return 0;
+
+  let normalized = text;
+  const hasDot = normalized.includes('.');
+  const hasComma = normalized.includes(',');
+
+  if (hasDot && hasComma) {
+    const lastDot = normalized.lastIndexOf('.');
+    const lastComma = normalized.lastIndexOf(',');
+    if (lastComma > lastDot) {
+      normalized = normalized.replace(/\./g, '').replace(',', '.');
+    } else {
+      normalized = normalized.replace(/,/g, '');
+    }
+  } else if (hasDot) {
+    if (/^-?\d{1,3}(\.\d{3})+$/.test(normalized)) {
+      normalized = normalized.replace(/\./g, '');
+    } else if (!/^-?\d+\.\d+$/.test(normalized)) {
+      normalized = normalized.replace(/\./g, '');
+    }
+  } else if (hasComma) {
+    if (/^-?\d{1,3}(,\d{3})+$/.test(normalized)) {
+      normalized = normalized.replace(/,/g, '');
+    } else if (/^-?\d+,\d+$/.test(normalized)) {
+      normalized = normalized.replace(',', '.');
+    } else {
+      normalized = normalized.replace(/,/g, '');
+    }
+  }
+
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -517,7 +544,7 @@ async function loadRltBusiness(): Promise<BusinessRow> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
-    .select('id, business_code, business_name, is_active')
+    .select('id, business_code, business_name, api_key, is_active')
     .eq('business_code', SHOPEE_RLT_SOURCE.businessCode)
     .maybeSingle();
 
@@ -629,20 +656,36 @@ function getBundleDisplayLabel(bundle: Pick<BundleCatalogRow, 'display' | 'publi
   return bundle.display || bundle.public_name || bundle.name || bundle.custom_id || 'Bundle';
 }
 
-function buildSuggestionCandidateFromBundle(
+async function buildSuggestionCandidateFromBundle(
   bundle: BundleCatalogRow,
+  business: BusinessRow,
+  storeResolver: ShopeeRltStoreResolverContext,
   source: 'remembered' | 'catalog' | 'manual',
   score: number,
-): MarketplaceIntakeSuggestionCandidate {
-  const classifier = classifyShopeeRltStoreByCustomId(bundle.custom_id);
+  preferredStoreName?: string | null,
+): Promise<MarketplaceIntakeSuggestionCandidate> {
+  const storeResolution = await resolveShopeeRltStoreForBundle(
+    business,
+    bundle.scalev_bundle_id,
+    SHOPEE_RLT_SOURCE.allowedStores,
+    storeResolver,
+  );
+  const normalizedPreferredStore = String(preferredStoreName || '').trim();
+  const resolvedStoreName = normalizedPreferredStore && storeResolution.storeCandidates.includes(normalizedPreferredStore)
+    ? normalizedPreferredStore
+    : storeResolution.storeName;
+  const resolvedClassifierLabel = normalizedPreferredStore && storeResolution.storeCandidates.includes(normalizedPreferredStore)
+    ? 'Manual store memory'
+    : storeResolution.classifierLabel;
 
   return {
     entityKey: `bundle:${bundle.scalev_bundle_id}`,
     entityLabel: getBundleDisplayLabel(bundle),
     customId: bundle.custom_id,
     scalevBundleId: bundle.scalev_bundle_id,
-    storeName: classifier.storeName,
-    classifierLabel: classifier.classifierLabel,
+    storeName: resolvedStoreName,
+    storeCandidates: storeResolution.storeCandidates,
+    classifierLabel: resolvedClassifierLabel,
     score,
     source,
   };
@@ -687,21 +730,19 @@ function scoreBundleCandidateForLine(line: CanonicalLine, bundle: BundleCatalogR
     score -= comboCount * 40;
   }
 
-  const bundleStore = classifyShopeeRltStoreByCustomId(bundle.custom_id).storeName;
-  if (bundleStore === 'Roove Main Store - Marketplace' && normalizeIdentifier(line.productName).includes('roove')) score += 80;
-  if (bundleStore === 'Purvu The Secret Store - Markerplace' && normalizeIdentifier(line.productName).includes('secret')) score += 80;
-
   return score;
 }
 
-function buildSuggestionCandidates(
+async function buildSuggestionCandidates(
   line: CanonicalLine,
   bundleCatalog: BundleCatalogRow[],
   remembered: ManualMemoryRow | null,
-): {
+  business: BusinessRow,
+  storeResolver: ShopeeRltStoreResolverContext,
+): Promise<{
   suggestions: MarketplaceIntakeSuggestionCandidate[];
   selected: MarketplaceIntakeSuggestionCandidate | null;
-} {
+}> {
   const seen = new Set<string>();
   const suggestions: MarketplaceIntakeSuggestionCandidate[] = [];
   let selected: MarketplaceIntakeSuggestionCandidate | null = null;
@@ -709,7 +750,14 @@ function buildSuggestionCandidates(
   if (remembered) {
     const rememberedBundle = bundleCatalog.find((bundle) => bundle.scalev_bundle_id === remembered.scalev_bundle_id);
     if (rememberedBundle) {
-      const candidate = buildSuggestionCandidateFromBundle(rememberedBundle, 'remembered', 10000);
+      const candidate = await buildSuggestionCandidateFromBundle(
+        rememberedBundle,
+        business,
+        storeResolver,
+        'remembered',
+        10000,
+        remembered.mapped_store_name || null,
+      );
       suggestions.push(candidate);
       selected = candidate;
       seen.add(candidate.entityKey);
@@ -725,8 +773,11 @@ function buildSuggestionCandidates(
     .sort((left, right) => right.score - left.score)
     .slice(0, 8);
 
-  for (const entry of ranked) {
-    const candidate = buildSuggestionCandidateFromBundle(entry.bundle, 'catalog', entry.score);
+  const rankedCandidates = await Promise.all(
+    ranked.map((entry) => buildSuggestionCandidateFromBundle(entry.bundle, business, storeResolver, 'catalog', entry.score)),
+  );
+
+  for (const candidate of rankedCandidates) {
     if (seen.has(candidate.entityKey)) continue;
     suggestions.push(candidate);
     seen.add(candidate.entityKey);
@@ -742,7 +793,7 @@ function buildLineFromBundleCandidate(
   line: CanonicalLine,
   lineIndex: number,
   candidate: MarketplaceIntakeSuggestionCandidate,
-  source: 'direct' | 'remembered' | 'manual',
+  source: 'direct' | 'remembered' | 'manual' | 'companion',
 ): MarketplaceIntakePreviewLine {
   const issueCodes = source === 'remembered'
     ? ['remembered_manual_match']
@@ -765,7 +816,13 @@ function buildLineFromBundleCandidate(
     matchedEntityType: 'bundle',
     matchedEntityKey: candidate.entityKey,
     matchedEntityLabel: candidate.entityLabel,
-    matchedEntitySource: source === 'direct' ? 'bundle.custom_id' : source === 'remembered' ? 'manual.memory' : 'manual.selection',
+    matchedEntitySource: source === 'direct'
+      ? 'bundle.custom_id'
+      : source === 'remembered'
+        ? 'manual.memory'
+        : source === 'manual'
+          ? 'manual.selection'
+          : 'order.companion_store',
     matchedScalevProductId: null,
     matchedScalevVariantId: null,
     matchedScalevBundleId: candidate.scalevBundleId,
@@ -778,6 +835,46 @@ function buildLineFromBundleCandidate(
     selectedSuggestion: candidate,
     rawRow: line.rawRow,
   };
+}
+
+function inheritCompanionStoreForOrder(
+  lines: MarketplaceIntakePreviewLine[],
+): MarketplaceIntakePreviewLine[] {
+  return lines.map((line, index) => {
+    if (line.lineStatus !== 'store_unmapped') return line;
+
+    const candidate = line.selectedSuggestion;
+    if (!candidate || candidate.storeName || candidate.storeCandidates.length === 0) {
+      return line;
+    }
+
+    const companionStores = Array.from(new Set(
+      lines
+        .filter((otherLine, otherIndex) => otherIndex !== index && otherLine.lineStatus === 'identified' && otherLine.mappedStoreName)
+        .map((otherLine) => String(otherLine.mappedStoreName || ''))
+        .filter(Boolean),
+    ));
+    if (companionStores.length !== 1) return line;
+
+    const companionStoreName = companionStores[0];
+    if (!candidate.storeCandidates.includes(companionStoreName)) return line;
+
+    return buildLineFromBundleCandidate({
+      sku: line.mpSku,
+      productName: line.mpProductName,
+      variation: line.mpVariation,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      lineSubtotal: line.lineSubtotal,
+      lineDiscount: line.lineDiscount,
+      rawRow: line.rawRow,
+    }, line.lineIndex, {
+      ...candidate,
+      storeName: companionStoreName,
+      classifierLabel: 'Inherited from companion order line',
+      source: 'companion',
+    }, 'companion');
+  });
 }
 
 function resolveBundleIdentifierForSku(
@@ -891,19 +988,27 @@ function summarizeOrderFromLines(
   };
 }
 
-function classifyOrder(
+async function classifyOrder(
   order: CanonicalOrder,
   identifierLookup: Map<string, BundleIdentifierRow[]>,
   bundleCatalog: BundleCatalogRow[],
   manualMemoryMap: Map<string, ManualMemoryRow>,
-): MarketplaceIntakePreviewOrder {
+  business: BusinessRow,
+  storeResolver: ShopeeRltStoreResolverContext,
+): Promise<MarketplaceIntakePreviewOrder> {
   const issueCodes = new Set<string>();
 
-  const lines: MarketplaceIntakePreviewLine[] = order.lines.map((line, index) => {
+  const lines: MarketplaceIntakePreviewLine[] = await Promise.all(order.lines.map(async (line, index): Promise<MarketplaceIntakePreviewLine> => {
     const matchSignature = buildMatchSignature(line);
     const identifier = resolveBundleIdentifierForSku(line.sku, identifierLookup);
     if (identifier.status === 'missing') {
-      const { suggestions, selected } = buildSuggestionCandidates(line, bundleCatalog, manualMemoryMap.get(matchSignature) || null);
+      const { suggestions, selected } = await buildSuggestionCandidates(
+        line,
+        bundleCatalog,
+        manualMemoryMap.get(matchSignature) || null,
+        business,
+        storeResolver,
+      );
       if (selected && selected.storeName) {
         return buildLineFromBundleCandidate(line, index, selected, 'remembered');
       }
@@ -939,7 +1044,13 @@ function classifyOrder(
     }
 
     if (identifier.status === 'ambiguous') {
-      const { suggestions, selected } = buildSuggestionCandidates(line, bundleCatalog, manualMemoryMap.get(matchSignature) || null);
+      const { suggestions, selected } = await buildSuggestionCandidates(
+        line,
+        bundleCatalog,
+        manualMemoryMap.get(matchSignature) || null,
+        business,
+        storeResolver,
+      );
       if (selected && selected.storeName) {
         return buildLineFromBundleCandidate(line, index, selected, 'remembered');
       }
@@ -977,19 +1088,26 @@ function classifyOrder(
     const match = identifier.row;
     const directCandidate: MarketplaceIntakeSuggestionCandidate = {
       entityKey: match.entity_key,
-      entityLabel: match.entity_label,
-      customId: match.identifier,
-      scalevBundleId: Number(match.scalev_bundle_id || 0),
-      storeName: null,
-      classifierLabel: null,
-      score: 9999,
-      source: 'catalog',
-    };
-    const storeClassification = classifyShopeeRltStoreByCustomId(match.identifier);
-    directCandidate.storeName = storeClassification.storeName;
-    directCandidate.classifierLabel = storeClassification.classifierLabel;
+    entityLabel: match.entity_label,
+    customId: match.identifier,
+    scalevBundleId: Number(match.scalev_bundle_id || 0),
+    storeName: null,
+    storeCandidates: [],
+    classifierLabel: null,
+    score: 9999,
+    source: 'catalog',
+  };
+    const storeResolution = await resolveShopeeRltStoreForBundle(
+      business,
+      Number(match.scalev_bundle_id || String(match.entity_key).split(':')[1] || 0),
+      SHOPEE_RLT_SOURCE.allowedStores,
+      storeResolver,
+    );
+    directCandidate.storeName = storeResolution.storeName;
+    directCandidate.storeCandidates = storeResolution.storeCandidates;
+    directCandidate.classifierLabel = storeResolution.classifierLabel;
 
-    if (!storeClassification.storeName || !SHOPEE_RLT_SOURCE.allowedStores.includes(storeClassification.storeName)) {
+    if (!storeResolution.storeName || !SHOPEE_RLT_SOURCE.allowedStores.includes(storeResolution.storeName)) {
       issueCodes.add('store_classifier_missing');
       return {
         lineIndex: index,
@@ -1016,15 +1134,16 @@ function classifyOrder(
         mappedStoreName: null,
         matchSignature,
         suggestionCandidates: [directCandidate],
-        selectedSuggestion: null,
+        selectedSuggestion: directCandidate,
         rawRow: line.rawRow,
       };
     }
 
     return buildLineFromBundleCandidate(line, index, directCandidate, 'direct');
-  });
+  }));
 
-  return summarizeOrderFromLines(order, lines, Array.from(issueCodes));
+  const normalizedLines = inheritCompanionStoreForOrder(lines);
+  return summarizeOrderFromLines(order, normalizedLines, Array.from(issueCodes));
 }
 
 function buildPreviewSummary(orders: MarketplaceIntakePreviewOrder[]): MarketplaceIntakePreviewSummary {
@@ -1077,10 +1196,11 @@ export async function previewShopeeRltIntake(input: {
       .filter(Boolean),
   ));
   const identifierLookup = await loadBundleIdentifierLookup(business.id, normalizedIdentifiers);
+  const storeResolver = createShopeeRltStoreResolverContext();
 
-  const previewOrders = orders
-    .map((order) => classifyOrder(order, identifierLookup, bundleCatalog, manualMemoryMap))
-    .sort((left, right) => left.externalOrderId.localeCompare(right.externalOrderId));
+  const previewOrders = (await Promise.all(
+    orders.map((order) => classifyOrder(order, identifierLookup, bundleCatalog, manualMemoryMap, business, storeResolver)),
+  )).sort((left, right) => left.externalOrderId.localeCompare(right.externalOrderId));
 
   return {
     source: {
@@ -1119,21 +1239,29 @@ export async function saveMarketplaceIntakePreview(input: {
 
   const bundleCatalog = await loadRltBundleCatalog(business.id);
   const bundleById = new Map<number, BundleCatalogRow>(bundleCatalog.map((bundle) => [bundle.scalev_bundle_id, bundle]));
+  const storeResolver = createShopeeRltStoreResolverContext();
   const selectionMap = new Map<string, MarketplaceIntakeManualSelectionInput>();
   for (const selection of input.manualSelections || []) {
     const key = `${selection.externalOrderId}::${selection.lineIndex}`;
     selectionMap.set(key, selection);
   }
 
-  const normalizedOrders = (preview.orders || []).map((order) => {
-    const lines = (order.lines || []).map((line) => {
+  const normalizedOrders = await Promise.all((preview.orders || []).map(async (order) => {
+    const lines = await Promise.all((order.lines || []).map(async (line) => {
       const selection = selectionMap.get(`${order.externalOrderId}::${line.lineIndex}`);
       if (!selection) return line;
 
       const bundle = bundleById.get(Number(selection.scalevBundleId || 0));
       if (!bundle) return line;
 
-      const candidate = buildSuggestionCandidateFromBundle(bundle, 'manual', 99999);
+      const candidate = await buildSuggestionCandidateFromBundle(
+        bundle,
+        business,
+        storeResolver,
+        'manual',
+        99999,
+        selection.mappedStoreName || null,
+      );
       if (!candidate.storeName || !SHOPEE_RLT_SOURCE.allowedStores.includes(candidate.storeName)) return line;
 
       return buildLineFromBundleCandidate({
@@ -1146,7 +1274,7 @@ export async function saveMarketplaceIntakePreview(input: {
         lineDiscount: line.lineDiscount,
         rawRow: line.rawRow,
       }, line.lineIndex, candidate, 'manual');
-    });
+    }));
 
     return summarizeOrderFromLines({
       platform: 'shopee',
@@ -1188,7 +1316,7 @@ export async function saveMarketplaceIntakePreview(input: {
         cancellationStatus: String(order.rawMeta?.cancellationStatus || ''),
       },
     }, lines, []);
-  });
+  }));
 
   const summary = buildPreviewSummary(normalizedOrders);
   if (summary.needsReviewOrders > 0 || summary.unidentifiedLines > 0 || summary.unresolvedStoreLines > 0) {

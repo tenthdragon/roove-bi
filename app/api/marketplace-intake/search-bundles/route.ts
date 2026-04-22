@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
-import { classifyShopeeRltStoreByCustomId } from '@/lib/marketplace-intake-store';
+import {
+  createShopeeRltStoreResolverContext,
+  resolveShopeeRltStoreForBundle,
+  SHOPEE_RLT_ALLOWED_STORE_NAMES,
+} from '@/lib/marketplace-intake-store';
 import { createServiceSupabase } from '@/lib/service-supabase';
 
 export async function GET(req: NextRequest) {
@@ -20,12 +24,13 @@ export async function GET(req: NextRequest) {
     const svc = createServiceSupabase();
     const businessRes = await svc
       .from('scalev_webhook_businesses')
-      .select('id')
+      .select('id, business_code, api_key')
       .eq('business_code', 'RLT')
       .maybeSingle();
     if (businessRes.error || !businessRes.data) {
       return NextResponse.json({ error: 'Business RLT tidak ditemukan.' }, { status: 500 });
     }
+    const business = businessRes.data;
 
     const bundlesRes = await svc
       .from('scalev_catalog_bundles')
@@ -38,19 +43,31 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: bundlesRes.error.message || 'Gagal mencari bundle.' }, { status: 500 });
     }
 
-    const results = (bundlesRes.data || []).map((bundle: any) => {
+    const storeResolver = createShopeeRltStoreResolverContext();
+    const results = await Promise.all((bundlesRes.data || []).map(async (bundle: any) => {
       const label = bundle.display || bundle.public_name || bundle.name || bundle.custom_id || 'Bundle';
+      const storeResolution = await resolveShopeeRltStoreForBundle(
+        {
+          id: Number(business.id),
+          business_code: String(business.business_code || 'RLT'),
+          api_key: business.api_key || null,
+        },
+        Number(bundle.scalev_bundle_id || 0),
+        SHOPEE_RLT_ALLOWED_STORE_NAMES,
+        storeResolver,
+      );
       return {
         entityKey: `bundle:${bundle.scalev_bundle_id}`,
         entityLabel: label,
         customId: bundle.custom_id || null,
         scalevBundleId: Number(bundle.scalev_bundle_id || 0),
-        storeName: classifyShopeeRltStoreByCustomId(bundle.custom_id || null).storeName,
-        classifierLabel: 'Manual search',
+        storeName: storeResolution.storeName,
+        storeCandidates: storeResolution.storeCandidates,
+        classifierLabel: storeResolution.classifierLabel || 'Exact bundle->store lookup',
         score: 0,
         source: 'manual',
       };
-    });
+    }));
 
     return NextResponse.json({ results });
   } catch (error: any) {
