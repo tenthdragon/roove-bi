@@ -1,7 +1,7 @@
 // @ts-nocheck
 'use client';
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const panelStyle = {
   background: 'var(--card)',
@@ -26,6 +26,36 @@ function fmtNumber(value) {
 
 function fmtCurrency(value) {
   return `Rp ${fmtNumber(Math.round(Number(value || 0)))}`;
+}
+
+function getCurrentMonthValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function fmtDateTime(value) {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return new Intl.DateTimeFormat('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(parsed);
+}
+
+function fmtMonthLabel(value) {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})$/);
+  if (!match) return value || '-';
+  const parsed = new Date(Number(match[1]), Number(match[2]) - 1, 1);
+  return new Intl.DateTimeFormat('id-ID', {
+    month: 'long',
+    year: 'numeric',
+  }).format(parsed);
 }
 
 function StatusPill({ status }) {
@@ -105,9 +135,83 @@ export default function MarketplaceIntakeManager() {
   const [lineSearchQueries, setLineSearchQueries] = useState({});
   const [lineSearchResults, setLineSearchResults] = useState({});
   const [searchingLineKey, setSearchingLineKey] = useState('');
+  const [historyMonth, setHistoryMonth] = useState(getCurrentMonthValue());
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [historyRows, setHistoryRows] = useState([]);
+  const [selectedBatchId, setSelectedBatchId] = useState(null);
+  const [selectedBatchDetail, setSelectedBatchDetail] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
 
   function getLineKey(orderId, lineIndex) {
     return `${orderId}::${lineIndex}`;
+  }
+
+  useEffect(() => {
+    loadHistory(getCurrentMonthValue());
+  }, []);
+
+  async function loadBatchDetail(batchId) {
+    if (!batchId) {
+      setSelectedBatchId(null);
+      setSelectedBatchDetail(null);
+      return;
+    }
+
+    setDetailLoading(true);
+    setHistoryError('');
+
+    try {
+      const res = await fetch(`/api/marketplace-intake/history/${batchId}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal membaca detail riwayat intake.');
+      }
+      setSelectedBatchId(Number(batchId));
+      setSelectedBatchDetail(data);
+    } catch (err) {
+      console.error(err);
+      setHistoryError(err?.message || 'Gagal membaca detail riwayat intake.');
+      setSelectedBatchId(null);
+      setSelectedBatchDetail(null);
+    } finally {
+      setDetailLoading(false);
+    }
+  }
+
+  async function loadHistory(month, preferredBatchId = null) {
+    const monthValue = String(month || getCurrentMonthValue());
+    setHistoryLoading(true);
+    setHistoryError('');
+
+    try {
+      const res = await fetch(`/api/marketplace-intake/history?month=${encodeURIComponent(monthValue)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal membaca riwayat intake.');
+      }
+
+      const rows = data.batches || [];
+      setHistoryRows(rows);
+
+      const nextSelectedBatchId = preferredBatchId
+        || (rows.some((row) => Number(row.id) === Number(selectedBatchId)) ? Number(selectedBatchId) : null);
+
+      if (nextSelectedBatchId) {
+        await loadBatchDetail(nextSelectedBatchId);
+      } else {
+        setSelectedBatchId(null);
+        setSelectedBatchDetail(null);
+      }
+    } catch (err) {
+      console.error(err);
+      setHistoryError(err?.message || 'Gagal membaca riwayat intake.');
+      setHistoryRows([]);
+      setSelectedBatchId(null);
+      setSelectedBatchDetail(null);
+    } finally {
+      setHistoryLoading(false);
+    }
   }
 
   const visibleOrders = useMemo(() => {
@@ -247,9 +351,20 @@ export default function MarketplaceIntakeManager() {
         throw new Error(data.error || 'Gagal menyimpan preview intake.');
       }
 
+      const savedMonth = String(preview.sourceOrderDate || getCurrentMonthValue()).slice(0, 7);
+      setPreview(null);
+      setExpandedOrders({});
+      setManualSelections({});
+      setLineSearchQueries({});
+      setLineSearchResults({});
+      setSearch('');
+      setIssuesOnly(false);
+      setHistoryMonth(savedMonth);
+      await loadHistory(savedMonth, data.batchId);
+
       setMessage({
         type: 'success',
-        text: data.message || `Batch #${data.batchId} berhasil disimpan.`,
+        text: data.message || `Batch #${data.batchId} berhasil disimpan dan masuk ke riwayat.`,
       });
     } catch (err) {
       console.error(err);
@@ -417,6 +532,184 @@ export default function MarketplaceIntakeManager() {
         <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
       </div>
 
+      <div style={panelStyle}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800 }}>Riwayat Intake</div>
+            <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
+              Month selector di bawah ini mengikuti <strong>tanggal order file</strong>, bukan jam upload. Batch siang dan sore di hari order yang sama akan tetap muncul terpisah.
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              type="month"
+              value={historyMonth}
+              onChange={async (event) => {
+                const nextMonth = event.target.value || getCurrentMonthValue();
+                setHistoryMonth(nextMonth);
+                await loadHistory(nextMonth);
+              }}
+              style={{
+                padding: '9px 12px',
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+                background: 'var(--bg)',
+                color: 'var(--text)',
+                fontSize: 13,
+                outline: 'none',
+              }}
+            />
+            <button
+              onClick={() => loadHistory(historyMonth, selectedBatchId)}
+              style={{
+                padding: '9px 12px',
+                borderRadius: 10,
+                border: '1px solid var(--border)',
+                background: 'var(--bg)',
+                color: 'var(--text-secondary)',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              {historyLoading ? 'Memuat...' : 'Refresh'}
+            </button>
+          </div>
+        </div>
+
+        {historyError ? (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: '10px 12px',
+              borderRadius: 10,
+              fontSize: 13,
+              background: 'rgba(239,68,68,0.12)',
+              color: '#fca5a5',
+              border: '1px solid rgba(239,68,68,0.24)',
+            }}
+          >
+            {historyError}
+          </div>
+        ) : null}
+
+        <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 12 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 860 }}>
+            <thead>
+              <tr style={{ background: 'var(--bg)' }}>
+                <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Tanggal Order</th>
+                <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Uploaded</th>
+                <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Batch</th>
+                <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>File</th>
+                <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Order</th>
+                <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Line</th>
+                <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Siap</th>
+                <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Uploaded By</th>
+              </tr>
+            </thead>
+            <tbody>
+              {historyRows.map((row) => {
+                const isSelected = Number(selectedBatchId) === Number(row.id);
+                return (
+                  <tr
+                    key={row.id}
+                    onClick={() => loadBatchDetail(row.id)}
+                    style={{
+                      cursor: 'pointer',
+                      background: isSelected ? 'rgba(59,130,246,0.08)' : 'transparent',
+                    }}
+                  >
+                    <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{row.sourceOrderDate || '-'}</td>
+                    <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{fmtDateTime(row.confirmedAt)}</td>
+                    <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700 }}>#{row.id}</td>
+                    <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{row.filename}</td>
+                    <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(row.totalOrders)}</td>
+                    <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(row.totalLines)}</td>
+                    <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(row.readyOrders)}</td>
+                    <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{row.uploadedByEmail || '-'}</td>
+                  </tr>
+                );
+              })}
+
+              {!historyLoading && historyRows.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
+                    Belum ada riwayat intake untuk bulan order {fmtMonthLabel(historyMonth)}.
+                  </td>
+                </tr>
+              ) : null}
+
+              {historyLoading ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
+                    Memuat riwayat intake...
+                  </td>
+                </tr>
+              ) : null}
+            </tbody>
+          </table>
+        </div>
+
+        {detailLoading ? (
+          <div style={{ marginTop: 14, fontSize: 13, color: 'var(--dim)' }}>Memuat detail batch...</div>
+        ) : null}
+
+        {selectedBatchDetail?.batch ? (
+          <div style={{ marginTop: 16, display: 'grid', gap: 12 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>Detail Batch #{selectedBatchDetail.batch.id}</div>
+                <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
+                  {selectedBatchDetail.batch.filename} • tanggal order {selectedBatchDetail.batch.sourceOrderDate || '-'} • uploaded {fmtDateTime(selectedBatchDetail.batch.confirmedAt)}
+                </div>
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+                {fmtNumber(selectedBatchDetail.batch.totalOrders)} order • {fmtNumber(selectedBatchDetail.batch.totalLines)} line • {fmtNumber(selectedBatchDetail.batch.readyOrders)} siap
+              </div>
+            </div>
+
+            <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 12 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
+                <thead>
+                  <tr style={{ background: 'var(--bg)' }}>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Order MP</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Customer</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Store Final</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Line</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Amount</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Status</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Tracking</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Issue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(selectedBatchDetail.orders || []).map((order) => (
+                    <tr key={order.externalOrderId}>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700 }}>{order.externalOrderId}</td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{order.customerLabel || order.recipientName || '-'}</td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{order.finalStoreName || '-'}</td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(order.lineCount)}</td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtCurrency(order.orderAmount)}</td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{order.orderStatus}</td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{order.trackingNumber || '-'}</td>
+                      <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{(order.issueCodes || []).join(', ') || '-'}</td>
+                    </tr>
+                  ))}
+
+                  {(selectedBatchDetail.orders || []).length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
+                        Batch ini belum memiliki order yang tersimpan.
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+      </div>
+
       {preview ? (
         <>
           <div
@@ -441,7 +734,7 @@ export default function MarketplaceIntakeManager() {
               <div>
                 <div style={{ fontSize: 16, fontWeight: 800 }}>Preview Mapping</div>
                 <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                  File: <strong>{preview.filename}</strong> • {fmtNumber(preview.rowCount)} row sumber • classifier opinionated {'Shopee RLT -> RLT'}
+                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • classifier opinionated {'Shopee RLT -> RLT'}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
