@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import * as XLSX from 'xlsx';
 import { createServiceSupabase } from './service-supabase';
 
@@ -194,6 +195,7 @@ export type MarketplaceIntakePreview = {
   };
   filename: string;
   sourceOrderDate: string | null;
+  fingerprint: string;
   rowCount: number;
   platform: 'shopee';
   generatedAt: string;
@@ -288,6 +290,49 @@ function inferSourceOrderDate(orders: CanonicalOrder[]): string | null {
   });
 
   return ranked[0]?.[0] || null;
+}
+
+function buildPreviewFingerprint(input: {
+  sourceKey: string;
+  businessCode: string;
+  sourceOrderDate: string | null;
+  orders: CanonicalOrder[];
+}): string {
+  const normalized = {
+    sourceKey: input.sourceKey,
+    businessCode: input.businessCode,
+    sourceOrderDate: input.sourceOrderDate,
+    orders: input.orders
+      .slice()
+      .sort((left, right) => left.externalId.localeCompare(right.externalId))
+      .map((order) => ({
+        externalId: order.externalId,
+        createdAt: order.createdAt,
+        paidAt: order.paidAt,
+        trackingNumber: order.trackingNumber,
+        orderAmount: order.orderAmount,
+        lines: (order.lines || [])
+          .slice()
+          .sort((left, right) => {
+            const leftKey = [left.sku || '', left.productName, left.variation || ''].join('|');
+            const rightKey = [right.sku || '', right.productName, right.variation || ''].join('|');
+            return leftKey.localeCompare(rightKey);
+          })
+          .map((line) => ({
+            sku: line.sku,
+            productName: line.productName,
+            variation: line.variation,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            lineSubtotal: line.lineSubtotal,
+            lineDiscount: line.lineDiscount,
+          })),
+      })),
+  };
+
+  return createHash('sha256')
+    .update(JSON.stringify(normalized))
+    .digest('hex');
 }
 
 function normalizePhone(value: string | null): string | null {
@@ -1098,6 +1143,12 @@ export async function previewShopeeRltIntake(input: {
   const business = await loadRltBusiness();
   const { orders, rowCount } = await parseShopeeWorkbook(input.file);
   const sourceOrderDate = inferSourceOrderDate(orders);
+  const fingerprint = buildPreviewFingerprint({
+    sourceKey: SHOPEE_RLT_SOURCE.sourceKey,
+    businessCode: business.business_code,
+    sourceOrderDate,
+    orders,
+  });
   const [bundleCatalog, manualMemoryMap] = await Promise.all([
     loadRltBundleCatalog(business.id),
     loadManualMemoryMap(business.id),
@@ -1125,6 +1176,7 @@ export async function previewShopeeRltIntake(input: {
     },
     filename: String(input.filenameOverride || input.file.name || 'shopee-rlt-upload'),
     sourceOrderDate,
+    fingerprint,
     rowCount,
     platform: 'shopee',
     generatedAt: new Date().toISOString(),
@@ -1261,6 +1313,26 @@ export async function saveMarketplaceIntakePreview(input: {
     throw new Error('Tanggal order file tidak bisa ditentukan. Pastikan file Shopee memiliki waktu order yang valid.');
   }
 
+  const fingerprint = String(preview.fingerprint || '').trim();
+  if (!fingerprint) {
+    throw new Error('Fingerprint preview tidak valid. Refresh preview lalu coba simpan lagi.');
+  }
+
+  const duplicateRes = await createServiceSupabase()
+    .from('marketplace_intake_batches')
+    .select('id')
+    .eq('source_key', SHOPEE_RLT_SOURCE.sourceKey)
+    .eq('business_code', business.business_code)
+    .eq('batch_fingerprint', fingerprint)
+    .maybeSingle();
+
+  if (duplicateRes.error && !isMissingTableError(duplicateRes.error)) {
+    throw duplicateRes.error;
+  }
+  if (duplicateRes.data?.id) {
+    throw new Error(`File identik ini sudah pernah disimpan sebagai batch #${duplicateRes.data.id}. Upload duplikat tidak diizinkan.`);
+  }
+
   const svc = createServiceSupabase();
   const batchInsert = {
     source_id: null,
@@ -1271,6 +1343,7 @@ export async function saveMarketplaceIntakePreview(input: {
     business_code: business.business_code,
     filename: preview.filename,
     source_order_date: sourceOrderDate,
+    batch_fingerprint: fingerprint,
     file_size_bytes: null,
     review_status: 'confirmed',
     total_orders: summary.totalOrders,
@@ -1320,6 +1393,11 @@ export async function saveMarketplaceIntakePreview(input: {
     shipping_provider: order.shippingProvider,
     delivery_option: order.deliveryOption,
     order_amount: order.orderAmount,
+    shipment_date: null,
+    warehouse_status: 'staged',
+    warehouse_note: null,
+    warehouse_updated_at: null,
+    warehouse_updated_by_email: null,
     raw_meta: order.rawMeta || {},
   }));
 
@@ -1467,23 +1545,28 @@ export async function saveMarketplaceIntakePreview(input: {
   };
 }
 
-export type MarketplaceIntakeHistoryBatchRow = {
-  id: number;
-  filename: string;
-  sourceOrderDate: string | null;
-  reviewStatus: string;
-  totalOrders: number;
-  totalLines: number;
-  readyOrders: number;
-  needsReviewOrders: number;
-  identifiedLines: number;
-  unidentifiedLines: number;
-  unresolvedStoreLines: number;
-  confirmedAt: string;
-  uploadedByEmail: string | null;
+export type MarketplaceIntakeWarehouseStatus = 'staged' | 'scheduled' | 'hold' | 'canceled';
+
+export type MarketplaceIntakeWorkspaceLineRow = {
+  lineIndex: number;
+  mpSku: string | null;
+  mpProductName: string;
+  mpVariation: string | null;
+  quantity: number;
+  lineSubtotal: number;
+  detectedCustomId: string | null;
+  matchedEntityLabel: string | null;
+  mappedStoreName: string | null;
+  lineStatus: string;
+  issueCodes: string[];
 };
 
-export type MarketplaceIntakeHistoryOrderRow = {
+export type MarketplaceIntakeWorkspaceOrderRow = {
+  id: number;
+  batchId: number;
+  batchFilename: string;
+  uploadedAt: string | null;
+  uploadedByEmail: string | null;
   externalOrderId: string;
   customerLabel: string | null;
   recipientName: string | null;
@@ -1493,127 +1576,201 @@ export type MarketplaceIntakeHistoryOrderRow = {
   orderStatus: string;
   trackingNumber: string | null;
   issueCodes: string[];
+  shipmentDate: string | null;
+  warehouseStatus: MarketplaceIntakeWarehouseStatus;
+  warehouseNote: string | null;
+  warehouseUpdatedAt: string | null;
+  warehouseUpdatedByEmail: string | null;
+  lines: MarketplaceIntakeWorkspaceLineRow[];
 };
 
-export type MarketplaceIntakeHistoryBatchDetail = {
-  batch: MarketplaceIntakeHistoryBatchRow;
-  orders: MarketplaceIntakeHistoryOrderRow[];
+export type MarketplaceIntakeWorkspaceResponse = {
+  shipmentDate: string;
+  summary: {
+    stagedCount: number;
+    scheduledCount: number;
+    holdCount: number;
+    canceledCount: number;
+  };
+  stagedOrders: MarketplaceIntakeWorkspaceOrderRow[];
+  shipmentOrders: MarketplaceIntakeWorkspaceOrderRow[];
 };
 
-function getHistoryMonthRange(month: string): { start: string; end: string } {
-  const match = String(month || '').match(/^(\d{4})-(\d{2})$/);
+export type MarketplaceIntakeWorkspaceUpdateInput = {
+  orderIds: number[];
+  shipmentDate: string | null;
+  warehouseStatus: MarketplaceIntakeWarehouseStatus;
+  warehouseNote?: string | null;
+  updatedByEmail: string | null;
+};
+
+type MarketplaceIntakeBatchMetaRow = {
+  id: number;
+  filename: string;
+  confirmedAt: string | null;
+  uploadedByEmail: string | null;
+};
+
+function normalizeShipmentDate(value: string): string {
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) {
-    throw new Error('Format bulan tidak valid. Gunakan YYYY-MM.');
+    throw new Error('Format tanggal tidak valid. Gunakan YYYY-MM-DD.');
   }
 
   const year = Number(match[1]);
-  const monthNumber = Number(match[2]);
-  if (monthNumber < 1 || monthNumber > 12) {
-    throw new Error('Format bulan tidak valid. Gunakan YYYY-MM.');
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const parsed = new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00+07:00`);
+  if (
+    !Number.isFinite(year)
+    || !Number.isFinite(month)
+    || !Number.isFinite(day)
+    || Number.isNaN(parsed.getTime())
+  ) {
+    throw new Error('Format tanggal tidak valid. Gunakan YYYY-MM-DD.');
   }
 
-  const nextYear = monthNumber === 12 ? year + 1 : year;
-  const nextMonth = monthNumber === 12 ? 1 : monthNumber + 1;
-  const start = `${year}-${String(monthNumber).padStart(2, '0')}-01`;
-  const end = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
-
-  return { start, end };
+  return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
-export async function listMarketplaceIntakeHistory(input: {
-  month: string;
-}): Promise<{ month: string; batches: MarketplaceIntakeHistoryBatchRow[] }> {
-  const { start, end } = getHistoryMonthRange(input.month);
+async function loadWorkspaceBatchMeta(): Promise<Map<number, MarketplaceIntakeBatchMetaRow>> {
   const svc = createServiceSupabase();
-
   const { data, error } = await svc
     .from('marketplace_intake_batches')
     .select(`
       id,
       filename,
-      source_order_date,
-      review_status,
-      total_orders,
-      total_lines,
-      ready_orders,
-      needs_review_orders,
-      identified_lines,
-      unidentified_lines,
-      unresolved_store_lines,
       confirmed_at,
       uploaded_by_email
     `)
     .eq('source_key', SHOPEE_RLT_SOURCE.sourceKey)
     .eq('business_code', SHOPEE_RLT_SOURCE.businessCode)
-    .gte('source_order_date', start)
-    .lt('source_order_date', end)
-    .order('source_order_date', { ascending: true })
-    .order('confirmed_at', { ascending: true })
-    .order('id', { ascending: true });
+    .order('confirmed_at', { ascending: false })
+    .order('id', { ascending: false });
 
   if (error) {
     if (isMissingTableError(error)) throw new Error(getMissingSchemaMessage());
     throw error;
   }
 
-  const batches = (data || []).map((row: any) => ({
-    id: Number(row.id),
-    filename: String(row.filename || ''),
-    sourceOrderDate: row.source_order_date || null,
-    reviewStatus: String(row.review_status || ''),
-    totalOrders: Number(row.total_orders || 0),
-    totalLines: Number(row.total_lines || 0),
-    readyOrders: Number(row.ready_orders || 0),
-    needsReviewOrders: Number(row.needs_review_orders || 0),
-    identifiedLines: Number(row.identified_lines || 0),
-    unidentifiedLines: Number(row.unidentified_lines || 0),
-    unresolvedStoreLines: Number(row.unresolved_store_lines || 0),
-    confirmedAt: String(row.confirmed_at || ''),
-    uploadedByEmail: row.uploaded_by_email || null,
-  }));
+  const batchMetaById = new Map<number, MarketplaceIntakeBatchMetaRow>();
+  for (const row of data || []) {
+    const id = Number((row as any).id || 0);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    batchMetaById.set(id, {
+      id,
+      filename: String((row as any).filename || ''),
+      confirmedAt: (row as any).confirmed_at || null,
+      uploadedByEmail: (row as any).uploaded_by_email || null,
+    });
+  }
 
+  return batchMetaById;
+}
+
+function mapWorkspaceLineRow(row: any): MarketplaceIntakeWorkspaceLineRow {
   return {
-    month: input.month,
-    batches,
+    lineIndex: Number(row.line_index || 0),
+    mpSku: row.mp_sku || null,
+    mpProductName: String(row.mp_product_name || ''),
+    mpVariation: row.mp_variation || null,
+    quantity: Number(row.quantity || 0),
+    lineSubtotal: Number(row.line_subtotal || 0),
+    detectedCustomId: row.detected_custom_id || null,
+    matchedEntityLabel: row.matched_entity_label || null,
+    mappedStoreName: row.mapped_store_name || null,
+    lineStatus: String(row.line_status || ''),
+    issueCodes: Array.isArray(row.issue_codes) ? row.issue_codes : [],
   };
 }
 
-export async function getMarketplaceIntakeHistoryBatchDetail(batchId: number): Promise<MarketplaceIntakeHistoryBatchDetail> {
+async function loadWorkspaceLinesByOrderIds(orderIds: number[]): Promise<Map<number, MarketplaceIntakeWorkspaceLineRow[]>> {
+  const linesByOrderId = new Map<number, MarketplaceIntakeWorkspaceLineRow[]>();
+  if (orderIds.length === 0) return linesByOrderId;
+
   const svc = createServiceSupabase();
-
-  const batchRes = await svc
-    .from('marketplace_intake_batches')
+  const linesRes = await svc
+    .from('marketplace_intake_order_lines')
     .select(`
-      id,
-      filename,
-      source_order_date,
-      review_status,
-      total_orders,
-      total_lines,
-      ready_orders,
-      needs_review_orders,
-      identified_lines,
-      unidentified_lines,
-      unresolved_store_lines,
-      confirmed_at,
-      uploaded_by_email
+      intake_order_id,
+      line_index,
+      mp_sku,
+      mp_product_name,
+      mp_variation,
+      quantity,
+      line_subtotal,
+      detected_custom_id,
+      matched_entity_label,
+      mapped_store_name,
+      line_status,
+      issue_codes
     `)
-    .eq('id', batchId)
-    .eq('source_key', SHOPEE_RLT_SOURCE.sourceKey)
-    .eq('business_code', SHOPEE_RLT_SOURCE.businessCode)
-    .maybeSingle();
+    .in('intake_order_id', orderIds)
+    .order('intake_order_id', { ascending: true })
+    .order('line_index', { ascending: true });
 
-  if (batchRes.error) {
-    if (isMissingTableError(batchRes.error)) throw new Error(getMissingSchemaMessage());
-    throw batchRes.error;
-  }
-  if (!batchRes.data) {
-    throw new Error('Batch intake tidak ditemukan.');
+  if (linesRes.error) {
+    if (isMissingTableError(linesRes.error)) throw new Error(getMissingSchemaMessage());
+    throw linesRes.error;
   }
 
-  const ordersRes = await svc
+  for (const row of linesRes.data || []) {
+    const orderId = Number((row as any).intake_order_id || 0);
+    if (!linesByOrderId.has(orderId)) linesByOrderId.set(orderId, []);
+    linesByOrderId.get(orderId)!.push(mapWorkspaceLineRow(row));
+  }
+
+  return linesByOrderId;
+}
+
+function mapWorkspaceOrderRow(
+  row: any,
+  batchMetaById: Map<number, MarketplaceIntakeBatchMetaRow>,
+  linesByOrderId: Map<number, MarketplaceIntakeWorkspaceLineRow[]>,
+): MarketplaceIntakeWorkspaceOrderRow | null {
+  const id = Number(row.id || 0);
+  const batchId = Number(row.batch_id || 0);
+  const batchMeta = batchMetaById.get(batchId);
+  if (!Number.isFinite(id) || id <= 0 || !batchMeta) return null;
+
+  return {
+    id,
+    batchId,
+    batchFilename: batchMeta.filename,
+    uploadedAt: batchMeta.confirmedAt,
+    uploadedByEmail: batchMeta.uploadedByEmail,
+    externalOrderId: String(row.external_order_id || ''),
+    customerLabel: row.customer_label || null,
+    recipientName: row.recipient_name || null,
+    finalStoreName: row.final_store_name || null,
+    lineCount: Number(row.line_count || 0),
+    orderAmount: Number(row.order_amount || 0),
+    orderStatus: String(row.order_status || ''),
+    trackingNumber: row.tracking_number || null,
+    issueCodes: Array.isArray(row.issue_codes) ? row.issue_codes : [],
+    shipmentDate: row.shipment_date || null,
+    warehouseStatus: String(row.warehouse_status || 'staged') as MarketplaceIntakeWarehouseStatus,
+    warehouseNote: row.warehouse_note || null,
+    warehouseUpdatedAt: row.warehouse_updated_at || null,
+    warehouseUpdatedByEmail: row.warehouse_updated_by_email || null,
+    lines: linesByOrderId.get(id) || [],
+  };
+}
+
+async function loadWorkspaceOrders(input: {
+  batchIds: number[];
+  stagedOnly?: boolean;
+  shipmentDate?: string;
+  batchMetaById: Map<number, MarketplaceIntakeBatchMetaRow>;
+}): Promise<MarketplaceIntakeWorkspaceOrderRow[]> {
+  if (input.batchIds.length === 0) return [];
+
+  const svc = createServiceSupabase();
+  let query = svc
     .from('marketplace_intake_orders')
     .select(`
+      id,
+      batch_id,
       external_order_id,
       customer_label,
       recipient_name,
@@ -1622,42 +1779,140 @@ export async function getMarketplaceIntakeHistoryBatchDetail(batchId: number): P
       order_amount,
       order_status,
       tracking_number,
-      issue_codes
+      issue_codes,
+      shipment_date,
+      warehouse_status,
+      warehouse_note,
+      warehouse_updated_at,
+      warehouse_updated_by_email
     `)
-    .eq('batch_id', batchId)
-    .order('external_order_id', { ascending: true });
+    .in('batch_id', input.batchIds);
 
+  if (input.stagedOnly) {
+    query = query
+      .is('shipment_date', null)
+      .eq('warehouse_status', 'staged')
+      .order('created_at', { ascending: false })
+      .order('external_order_id', { ascending: true });
+  } else if (input.shipmentDate) {
+    query = query
+      .eq('shipment_date', input.shipmentDate)
+      .order('warehouse_status', { ascending: true })
+      .order('updated_at', { ascending: false })
+      .order('external_order_id', { ascending: true });
+  }
+
+  const ordersRes = await query;
   if (ordersRes.error) {
     if (isMissingTableError(ordersRes.error)) throw new Error(getMissingSchemaMessage());
     throw ordersRes.error;
   }
 
+  const orderIds = (ordersRes.data || [])
+    .map((row: any) => Number(row.id || 0))
+    .filter((id) => Number.isFinite(id) && id > 0);
+  const linesByOrderId = await loadWorkspaceLinesByOrderIds(orderIds);
+
+  return (ordersRes.data || [])
+    .map((row: any) => mapWorkspaceOrderRow(row, input.batchMetaById, linesByOrderId))
+    .filter((row): row is MarketplaceIntakeWorkspaceOrderRow => Boolean(row));
+}
+
+export async function listMarketplaceIntakeWorkspace(input: {
+  shipmentDate: string;
+}): Promise<MarketplaceIntakeWorkspaceResponse> {
+  const shipmentDate = normalizeShipmentDate(input.shipmentDate);
+  const batchMetaById = await loadWorkspaceBatchMeta();
+  const batchIds = Array.from(batchMetaById.keys());
+
+  const [stagedOrders, shipmentOrders] = await Promise.all([
+    loadWorkspaceOrders({
+      batchIds,
+      stagedOnly: true,
+      batchMetaById,
+    }),
+    loadWorkspaceOrders({
+      batchIds,
+      shipmentDate,
+      batchMetaById,
+    }),
+  ]);
+
   return {
-    batch: {
-      id: Number(batchRes.data.id),
-      filename: String(batchRes.data.filename || ''),
-      sourceOrderDate: batchRes.data.source_order_date || null,
-      reviewStatus: String(batchRes.data.review_status || ''),
-      totalOrders: Number(batchRes.data.total_orders || 0),
-      totalLines: Number(batchRes.data.total_lines || 0),
-      readyOrders: Number(batchRes.data.ready_orders || 0),
-      needsReviewOrders: Number(batchRes.data.needs_review_orders || 0),
-      identifiedLines: Number(batchRes.data.identified_lines || 0),
-      unidentifiedLines: Number(batchRes.data.unidentified_lines || 0),
-      unresolvedStoreLines: Number(batchRes.data.unresolved_store_lines || 0),
-      confirmedAt: String(batchRes.data.confirmed_at || ''),
-      uploadedByEmail: batchRes.data.uploaded_by_email || null,
+    shipmentDate,
+    summary: {
+      stagedCount: stagedOrders.length,
+      scheduledCount: shipmentOrders.filter((order) => order.warehouseStatus === 'scheduled').length,
+      holdCount: shipmentOrders.filter((order) => order.warehouseStatus === 'hold').length,
+      canceledCount: shipmentOrders.filter((order) => order.warehouseStatus === 'canceled').length,
     },
-    orders: (ordersRes.data || []).map((row: any) => ({
-      externalOrderId: String(row.external_order_id || ''),
-      customerLabel: row.customer_label || null,
-      recipientName: row.recipient_name || null,
-      finalStoreName: row.final_store_name || null,
-      lineCount: Number(row.line_count || 0),
-      orderAmount: Number(row.order_amount || 0),
-      orderStatus: String(row.order_status || ''),
-      trackingNumber: row.tracking_number || null,
-      issueCodes: Array.isArray(row.issue_codes) ? row.issue_codes : [],
-    })),
+    stagedOrders,
+    shipmentOrders,
+  };
+}
+
+export async function updateMarketplaceIntakeWorkspace(input: MarketplaceIntakeWorkspaceUpdateInput) {
+  const orderIds = Array.from(new Set(
+    (input.orderIds || [])
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0),
+  ));
+  if (orderIds.length === 0) {
+    throw new Error('Pilih minimal satu order untuk diubah.');
+  }
+
+  if (!['staged', 'scheduled', 'hold', 'canceled'].includes(String(input.warehouseStatus || ''))) {
+    throw new Error('Status warehouse tidak valid.');
+  }
+
+  const shipmentDate = input.warehouseStatus === 'staged'
+    ? null
+    : normalizeShipmentDate(String(input.shipmentDate || ''));
+
+  const batchMetaById = await loadWorkspaceBatchMeta();
+  const allowedBatchIds = new Set<number>(batchMetaById.keys());
+  const svc = createServiceSupabase();
+  const existingRes = await svc
+    .from('marketplace_intake_orders')
+    .select('id, batch_id')
+    .in('id', orderIds);
+
+  if (existingRes.error) {
+    if (isMissingTableError(existingRes.error)) throw new Error(getMissingSchemaMessage());
+    throw existingRes.error;
+  }
+
+  const rows = existingRes.data || [];
+  if (rows.length !== orderIds.length) {
+    throw new Error('Sebagian order workspace tidak ditemukan.');
+  }
+
+  for (const row of rows) {
+    const batchId = Number((row as any).batch_id || 0);
+    if (!allowedBatchIds.has(batchId)) {
+      throw new Error('Ada order yang tidak termasuk workspace Shopee RLT.');
+    }
+  }
+
+  const updateRes = await svc
+    .from('marketplace_intake_orders')
+    .update({
+      shipment_date: shipmentDate,
+      warehouse_status: input.warehouseStatus,
+      warehouse_note: cleanText(input.warehouseNote),
+      warehouse_updated_at: new Date().toISOString(),
+      warehouse_updated_by_email: input.updatedByEmail,
+    })
+    .in('id', orderIds);
+
+  if (updateRes.error) {
+    if (isMissingTableError(updateRes.error)) throw new Error(getMissingSchemaMessage());
+    throw updateRes.error;
+  }
+
+  return {
+    updatedCount: orderIds.length,
+    shipmentDate,
+    warehouseStatus: input.warehouseStatus,
   };
 }

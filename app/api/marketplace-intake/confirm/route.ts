@@ -42,10 +42,11 @@ export async function POST(req: NextRequest) {
       success: true,
       batchId: result.batchId,
       summary: result.summary,
-      message: `Preview Shopee RLT berhasil disimpan sebagai batch #${result.batchId}.`,
+      message: `Preview Shopee RLT berhasil disimpan sebagai batch #${result.batchId} dan masuk ke workspace warehouse.`,
     });
   } catch (error: any) {
     console.error('Marketplace intake confirm error:', error);
-    return NextResponse.json({ error: error.message || 'Marketplace intake confirm failed' }, { status: 500 });
+    const status = /duplikat tidak diizinkan|sudah pernah disimpan/i.test(error.message || '') ? 409 : 500;
+    return NextResponse.json({ error: error.message || 'Marketplace intake confirm failed' }, { status });
   }
 }
