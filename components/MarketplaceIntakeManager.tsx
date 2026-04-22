@@ -297,10 +297,142 @@ export default function MarketplaceIntakeManager() {
     loadWorkspace(getCurrentDateValue());
   }, []);
 
-  const visibleOrders = useMemo(() => {
+  const effectivePreviewOrders = useMemo(() => {
     if (!preview?.orders) return [];
+
+    return preview.orders.map((order) => {
+      const lines = (order.lines || []).map((line) => {
+        const lineKey = getLineKey(order.externalOrderId, line.lineIndex);
+        const selectedCandidate = manualSelections[lineKey] || line.selectedSuggestion || null;
+        let effectiveStatus = line.lineStatus;
+        let effectiveEntityLabel = line.matchedEntityLabel;
+        let effectiveCustomId = line.detectedCustomId;
+        let effectiveStoreName = line.mappedStoreName;
+        let effectiveEntitySource = line.matchedEntitySource;
+        let effectiveClassifierLabel = line.matchedRuleLabel;
+        const effectiveIssueCodes = new Set(line.issueCodes || []);
+
+        if (selectedCandidate) {
+          effectiveEntityLabel = selectedCandidate.entityLabel || effectiveEntityLabel;
+          effectiveCustomId = selectedCandidate.customId || effectiveCustomId;
+          effectiveStoreName = selectedCandidate.storeName || effectiveStoreName;
+          effectiveEntitySource = selectedCandidate.source || effectiveEntitySource;
+          effectiveClassifierLabel = selectedCandidate.classifierLabel || effectiveClassifierLabel;
+
+          if (selectedCandidate.storeName) {
+            effectiveStatus = 'identified';
+            effectiveIssueCodes.delete('custom_id_not_found');
+            effectiveIssueCodes.delete('custom_id_ambiguous');
+            effectiveIssueCodes.delete('store_classifier_missing');
+            effectiveIssueCodes.delete('entity_mismatch');
+          } else if (line.lineStatus !== 'identified') {
+            effectiveStatus = 'store_unmapped';
+            effectiveIssueCodes.delete('custom_id_not_found');
+            effectiveIssueCodes.delete('custom_id_ambiguous');
+            effectiveIssueCodes.add('store_classifier_missing');
+          }
+        }
+
+        return {
+          ...line,
+          selectedCandidate,
+          effectiveStatus,
+          effectiveEntityLabel,
+          effectiveCustomId,
+          effectiveStoreName,
+          effectiveEntitySource,
+          effectiveClassifierLabel,
+          effectiveIssueCodes: Array.from(effectiveIssueCodes),
+        };
+      });
+
+      const issueCodes = new Set(
+        (order.issueCodes || []).filter((code) => !['custom_id_not_found', 'custom_id_ambiguous', 'store_classifier_missing', 'store_amount_tie'].includes(code)),
+      );
+      const identifiedLineCount = lines.filter((line) => line.effectiveStatus !== 'not_identified').length;
+      const classifiedLineCount = lines.filter((line) => line.effectiveStatus === 'identified').length;
+      const storeTotals = new Map();
+
+      for (const line of lines) {
+        for (const code of line.effectiveIssueCodes || []) {
+          if (code !== 'remembered_manual_match') {
+            issueCodes.add(code);
+          }
+        }
+        if (!line.effectiveStoreName || line.effectiveStatus !== 'identified') continue;
+        storeTotals.set(line.effectiveStoreName, (storeTotals.get(line.effectiveStoreName) || 0) + Number(line.lineSubtotal || 0));
+      }
+
+      let finalStoreName = null;
+      let finalStoreResolution = 'unclassified';
+      let orderStatus = 'needs_review';
+
+      if (classifiedLineCount === lines.length && storeTotals.size === 1) {
+        finalStoreName = Array.from(storeTotals.keys())[0];
+        finalStoreResolution = 'single_store';
+        orderStatus = 'ready';
+      } else if (classifiedLineCount === lines.length && storeTotals.size > 1) {
+        const ranked = Array.from(storeTotals.entries()).sort((left, right) => right[1] - left[1]);
+        if (ranked[0] && ranked[1] && ranked[0][1] === ranked[1][1]) {
+          issueCodes.add('store_amount_tie');
+          finalStoreResolution = 'ambiguous';
+        } else if (ranked[0]) {
+          finalStoreName = ranked[0][0];
+          finalStoreResolution = 'dominant_amount';
+          orderStatus = 'ready';
+        }
+      }
+
+      if (lines.some((line) => line.effectiveStatus === 'store_unmapped')) {
+        issueCodes.add('store_classifier_missing');
+      }
+      if (lines.some((line) => line.effectiveStatus === 'not_identified')) {
+        issueCodes.add('custom_id_not_found');
+      }
+
+      return {
+        ...order,
+        lines,
+        issueCodes: Array.from(issueCodes),
+        identifiedLineCount,
+        classifiedLineCount,
+        finalStoreName,
+        finalStoreResolution,
+        orderStatus,
+      };
+    });
+  }, [manualSelections, preview]);
+
+  const effectivePreviewSummary = useMemo(() => {
+    const totalLines = effectivePreviewOrders.reduce((sum, order) => sum + Number(order.lineCount || 0), 0);
+    const identifiedLines = effectivePreviewOrders.reduce((sum, order) => sum + Number(order.identifiedLineCount || 0), 0);
+    const classifiedLines = effectivePreviewOrders.reduce((sum, order) => sum + Number(order.classifiedLineCount || 0), 0);
+    const unidentifiedLines = effectivePreviewOrders.reduce(
+      (sum, order) => sum + (order.lines || []).filter((line) => line.effectiveStatus === 'not_identified').length,
+      0,
+    );
+    const unresolvedStoreLines = effectivePreviewOrders.reduce(
+      (sum, order) => sum + (order.lines || []).filter((line) => line.effectiveStatus === 'store_unmapped' || line.effectiveStatus === 'entity_mismatch').length,
+      0,
+    );
+
+    return {
+      totalOrders: effectivePreviewOrders.length,
+      totalLines,
+      readyOrders: effectivePreviewOrders.filter((order) => order.orderStatus === 'ready').length,
+      needsReviewOrders: effectivePreviewOrders.filter((order) => order.orderStatus === 'needs_review').length,
+      mixedStoreOrders: effectivePreviewOrders.filter((order) => order.isMixedStore).length,
+      identifiedLines,
+      classifiedLines,
+      unidentifiedLines,
+      unresolvedStoreLines,
+    };
+  }, [effectivePreviewOrders]);
+
+  const visibleOrders = useMemo(() => {
+    if (!effectivePreviewOrders.length) return [];
     const query = String(search || '').trim().toLowerCase();
-    return preview.orders.filter((order) => {
+    return effectivePreviewOrders.filter((order) => {
       if (issuesOnly && order.orderStatus === 'ready') return false;
       if (!query) return true;
       const haystack = [
@@ -311,49 +443,28 @@ export default function MarketplaceIntakeManager() {
         ...(order.lines || []).flatMap((line) => [
           line.mpSku,
           line.mpProductName,
-          line.matchedEntityLabel,
-          line.mappedStoreName,
+          line.effectiveEntityLabel,
+          line.effectiveStoreName,
         ]),
       ].join(' ').toLowerCase();
       return haystack.includes(query);
     });
-  }, [issuesOnly, preview, search]);
+  }, [effectivePreviewOrders, issuesOnly, search]);
 
   const unresolvedSelectionCount = useMemo(() => {
-    if (!preview?.orders) return 0;
-    let missing = 0;
-    for (const order of preview.orders) {
-      for (const line of order.lines || []) {
-        if (line.lineStatus === 'not_identified' && !manualSelections[getLineKey(order.externalOrderId, line.lineIndex)]) {
-          missing += 1;
-        }
-      }
-    }
-    return missing;
-  }, [manualSelections, preview]);
+    return effectivePreviewSummary.unidentifiedLines;
+  }, [effectivePreviewSummary.unidentifiedLines]);
 
   const blockingOrderCount = useMemo(() => {
-    if (!preview?.orders) return 0;
-    let count = 0;
-    for (const order of preview.orders) {
-      const unresolvedLineWithoutSelection = (order.lines || []).some((line) => (
-        line.lineStatus === 'not_identified'
-        && !manualSelections[getLineKey(order.externalOrderId, line.lineIndex)]
-      ));
-      const hasBlockingIssue = (order.lines || []).some((line) => line.lineStatus === 'store_unmapped' || line.lineStatus === 'entity_mismatch')
-        || (order.issueCodes || []).includes('store_amount_tie');
-      if (unresolvedLineWithoutSelection || hasBlockingIssue) count += 1;
-    }
-    return count;
-  }, [manualSelections, preview]);
+    return effectivePreviewSummary.needsReviewOrders;
+  }, [effectivePreviewSummary.needsReviewOrders]);
 
   const canConfirm = Boolean(
     preview
-    && preview.summary
-    && preview.summary.totalOrders > 0
-    && preview.summary.unresolvedStoreLines === 0
-    && unresolvedSelectionCount === 0
-    && blockingOrderCount === 0
+    && effectivePreviewSummary.totalOrders > 0
+    && effectivePreviewSummary.unidentifiedLines === 0
+    && effectivePreviewSummary.unresolvedStoreLines === 0
+    && effectivePreviewSummary.needsReviewOrders === 0
     && !confirming,
   );
 
@@ -699,14 +810,14 @@ export default function MarketplaceIntakeManager() {
               gap: 12,
             }}
           >
-            <SummaryCard label="Total Order" value={preview.summary.totalOrders} />
-            <SummaryCard label="Total Line" value={preview.summary.totalLines} />
-            <SummaryCard label="Ready" value={preview.summary.readyOrders} tone="success" />
-            <SummaryCard label="Needs Review" value={preview.summary.needsReviewOrders} tone={preview.summary.needsReviewOrders > 0 ? 'warn' : 'default'} />
-            <SummaryCard label="Identified" value={preview.summary.identifiedLines} tone="success" />
-            <SummaryCard label="Unidentified" value={preview.summary.unidentifiedLines} tone={preview.summary.unidentifiedLines > 0 ? 'danger' : 'default'} />
-            <SummaryCard label="Store Unresolved" value={preview.summary.unresolvedStoreLines} tone={preview.summary.unresolvedStoreLines > 0 ? 'warn' : 'default'} />
-            <SummaryCard label="Mixed Store" value={preview.summary.mixedStoreOrders} helper="Sudah dipilih store nominal terbesar jika tidak tie." />
+            <SummaryCard label="Total Order" value={effectivePreviewSummary.totalOrders} />
+            <SummaryCard label="Total Line" value={effectivePreviewSummary.totalLines} />
+            <SummaryCard label="Ready" value={effectivePreviewSummary.readyOrders} tone="success" />
+            <SummaryCard label="Needs Review" value={effectivePreviewSummary.needsReviewOrders} tone={effectivePreviewSummary.needsReviewOrders > 0 ? 'warn' : 'default'} />
+            <SummaryCard label="Identified" value={effectivePreviewSummary.identifiedLines} tone="success" />
+            <SummaryCard label="Unidentified" value={effectivePreviewSummary.unidentifiedLines} tone={effectivePreviewSummary.unidentifiedLines > 0 ? 'danger' : 'default'} />
+            <SummaryCard label="Store Unresolved" value={effectivePreviewSummary.unresolvedStoreLines} tone={effectivePreviewSummary.unresolvedStoreLines > 0 ? 'warn' : 'default'} />
+            <SummaryCard label="Mixed Store" value={effectivePreviewSummary.mixedStoreOrders} helper="Sudah dipilih store nominal terbesar jika tidak tie." />
           </div>
 
           <div style={panelStyle}>
@@ -754,7 +865,7 @@ export default function MarketplaceIntakeManager() {
                   border: '1px solid rgba(245,158,11,0.24)',
                 }}
               >
-                Confirm akan aktif setelah semua line unidentified punya bundle pilihan dan tidak ada issue order-level lain. Saat ini masih ada {fmtNumber(unresolvedSelectionCount)} line belum dipilih dan {fmtNumber(blockingOrderCount)} order masih blocking.
+                Confirm akan aktif setelah semua line bermasalah benar-benar resolved. Saat ini masih ada {fmtNumber(unresolvedSelectionCount)} line belum teridentifikasi, {fmtNumber(effectivePreviewSummary.unresolvedStoreLines)} line belum punya store valid, dan {fmtNumber(blockingOrderCount)} order masih blocking.
               </div>
             ) : null}
 
@@ -850,9 +961,9 @@ export default function MarketplaceIntakeManager() {
                               <div>Status</div>
                             </div>
 
-                            {(order.lines || []).map((line) => {
+                              {(order.lines || []).map((line) => {
                               const lineKey = getLineKey(order.externalOrderId, line.lineIndex);
-                              const selectedCandidate = manualSelections[lineKey] || line.selectedSuggestion || null;
+                              const selectedCandidate = line.selectedCandidate || null;
                               const searchResults = lineSearchResults[lineKey] || [];
 
                               return (
@@ -875,22 +986,22 @@ export default function MarketplaceIntakeManager() {
                                   </div>
                                   <div>
                                     <div style={{ fontWeight: 700 }}>{line.mpProductName}</div>
-                                    {(line.issueCodes || []).length ? (
-                                      <div style={{ marginTop: 6, fontSize: 12, color: (line.issueCodes || []).includes('remembered_manual_match') ? '#93c5fd' : '#fca5a5' }}>
-                                        {(line.issueCodes || []).join(', ')}
+                                    {(line.effectiveIssueCodes || []).length ? (
+                                      <div style={{ marginTop: 6, fontSize: 12, color: (line.effectiveIssueCodes || []).includes('remembered_manual_match') ? '#93c5fd' : '#fca5a5' }}>
+                                        {(line.effectiveIssueCodes || []).join(', ')}
                                       </div>
                                     ) : null}
                                   </div>
                                   <div>
                                     <div style={{ fontWeight: 700 }}>
-                                      {selectedCandidate?.entityLabel || line.matchedEntityLabel || 'Belum match'}
+                                      {line.effectiveEntityLabel || 'Belum match'}
                                     </div>
                                     <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>
-                                      {selectedCandidate?.customId || line.detectedCustomId || '-'}
-                                      {(selectedCandidate?.source || line.matchedEntitySource) ? ` • ${selectedCandidate?.source || line.matchedEntitySource}` : ''}
+                                      {line.effectiveCustomId || '-'}
+                                      {line.effectiveEntitySource ? ` • ${line.effectiveEntitySource}` : ''}
                                     </div>
 
-                                    {line.lineStatus === 'not_identified' ? (
+                                    {line.effectiveStatus !== 'identified' ? (
                                       <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
                                         {(line.suggestionCandidates || []).length ? (
                                           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -968,10 +1079,10 @@ export default function MarketplaceIntakeManager() {
                                   </div>
                                   <div>
                                     <div style={{ fontWeight: 700 }}>
-                                      {selectedCandidate?.storeName || line.mappedStoreName || 'Belum termapping'}
+                                      {line.effectiveStoreName || 'Belum termapping'}
                                     </div>
                                     <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>
-                                      {selectedCandidate?.classifierLabel || line.matchedRuleLabel || 'Classifier belum mengenali keluarga bundle ini'}
+                                      {line.effectiveClassifierLabel || 'Belum ada store valid untuk custom_id ini'}
                                     </div>
                                   </div>
                                   <div>
@@ -979,7 +1090,7 @@ export default function MarketplaceIntakeManager() {
                                     <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>{fmtCurrency(line.lineSubtotal)}</div>
                                   </div>
                                   <div>
-                                    <StatusPill status={line.lineStatus === 'not_identified' && selectedCandidate ? 'identified' : line.lineStatus} />
+                                    <StatusPill status={line.effectiveStatus} />
                                   </div>
                                 </div>
                               );
