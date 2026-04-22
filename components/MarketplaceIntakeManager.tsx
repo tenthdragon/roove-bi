@@ -691,7 +691,7 @@ export default function MarketplaceIntakeManager() {
             <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Upload Shopee RLT</div>
             <div style={{ fontSize: 13, color: 'var(--dim)', maxWidth: 840, lineHeight: 1.6 }}>
               Halaman ini hanya membaca export <strong>Shopee RLT</strong>. File yang namanya mengandung <strong>SPX</strong> tetap diperlakukan sebagai Shopee.
-              App akan match exact <strong>SKU Excel</strong> ke <strong>bundle custom_id</strong> di business <strong>RLT</strong>, lalu mencari store exact dari relasi bundle di Scalev.
+              App akan match exact <strong>SKU Excel</strong> ke <strong>bundle custom_id</strong> di business <strong>RLT</strong>, lalu menebak store dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -826,7 +826,7 @@ export default function MarketplaceIntakeManager() {
               <div>
                 <div style={{ fontSize: 16, fontWeight: 800 }}>Preview Mapping</div>
                 <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • exact bundle match + exact store lookup
+                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • exact bundle match + local store guess
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -966,6 +966,11 @@ export default function MarketplaceIntakeManager() {
                               const lineKey = getLineKey(order.externalOrderId, line.lineIndex);
                               const selectedCandidate = line.selectedCandidate || null;
                               const searchResults = lineSearchResults[lineKey] || [];
+                              const entityOptions = Array.from(
+                                new Map(
+                                  [...(line.suggestionCandidates || []), ...searchResults].map((candidate) => [candidate.entityKey, candidate]),
+                                ).values(),
+                              );
 
                               return (
                                 <div
@@ -1004,56 +1009,33 @@ export default function MarketplaceIntakeManager() {
 
                                     {line.effectiveStatus !== 'identified' ? (
                                       <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
-                                        {(line.suggestionCandidates || []).length ? (
-                                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                            {(line.suggestionCandidates || []).map((candidate) => (
-                                              <button
-                                                key={`${lineKey}-${candidate.entityKey}`}
-                                                onClick={() => setManualSelection(order.externalOrderId, line.lineIndex, candidate)}
-                                                style={{
-                                                  padding: '6px 8px',
-                                                  borderRadius: 8,
-                                                  border: `1px solid ${selectedCandidate?.entityKey === candidate.entityKey ? '#2563eb' : 'var(--border)'}`,
-                                                  background: selectedCandidate?.entityKey === candidate.entityKey ? 'rgba(37,99,235,0.12)' : 'var(--bg)',
-                                                  color: selectedCandidate?.entityKey === candidate.entityKey ? '#93c5fd' : 'var(--text-secondary)',
-                                                  fontSize: 11,
-                                                  fontWeight: 700,
-                                                  cursor: 'pointer',
-                                                  textAlign: 'left',
-                                                }}
-                                              >
+                                        {entityOptions.length ? (
+                                          <select
+                                            value={selectedCandidate?.entityKey || ''}
+                                            onChange={(event) => {
+                                              const nextCandidate = entityOptions.find((candidate) => candidate.entityKey === event.target.value);
+                                              if (nextCandidate) {
+                                                setManualSelection(order.externalOrderId, line.lineIndex, nextCandidate);
+                                              }
+                                            }}
+                                            style={{
+                                              width: '100%',
+                                              padding: '8px 10px',
+                                              borderRadius: 8,
+                                              border: '1px solid var(--border)',
+                                              background: 'var(--card)',
+                                              color: 'var(--text)',
+                                              fontSize: 12,
+                                              outline: 'none',
+                                            }}
+                                          >
+                                            <option value="">Pilih entity Scalev…</option>
+                                            {entityOptions.map((candidate) => (
+                                              <option key={`${lineKey}-${candidate.entityKey}`} value={candidate.entityKey}>
                                                 {candidate.customId || candidate.entityLabel}
-                                              </button>
+                                              </option>
                                             ))}
-                                          </div>
-                                        ) : null}
-
-                                        {selectedCandidate?.storeCandidates?.length > 1 && !selectedCandidate?.storeName ? (
-                                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                            {selectedCandidate.storeCandidates.map((storeName) => (
-                                              <button
-                                                key={`${lineKey}-store-${storeName}`}
-                                                onClick={() => setManualSelection(order.externalOrderId, line.lineIndex, {
-                                                  ...selectedCandidate,
-                                                  storeName,
-                                                  classifierLabel: 'Manual store selection',
-                                                })}
-                                                style={{
-                                                  padding: '6px 8px',
-                                                  borderRadius: 8,
-                                                  border: '1px solid var(--border)',
-                                                  background: 'var(--bg)',
-                                                  color: 'var(--text-secondary)',
-                                                  fontSize: 11,
-                                                  fontWeight: 700,
-                                                  cursor: 'pointer',
-                                                  textAlign: 'left',
-                                                }}
-                                              >
-                                                {storeName}
-                                              </button>
-                                            ))}
-                                          </div>
+                                          </select>
                                         ) : null}
 
                                         <div style={{ display: 'flex', gap: 6 }}>
@@ -1081,26 +1063,8 @@ export default function MarketplaceIntakeManager() {
                                         </div>
 
                                         {searchResults.length ? (
-                                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                                            {searchResults.map((candidate) => (
-                                              <button
-                                                key={`${lineKey}-search-${candidate.entityKey}`}
-                                                onClick={() => setManualSelection(order.externalOrderId, line.lineIndex, candidate)}
-                                                style={{
-                                                  padding: '6px 8px',
-                                                  borderRadius: 8,
-                                                  border: `1px solid ${selectedCandidate?.entityKey === candidate.entityKey ? '#2563eb' : 'var(--border)'}`,
-                                                  background: selectedCandidate?.entityKey === candidate.entityKey ? 'rgba(37,99,235,0.12)' : 'var(--bg)',
-                                                  color: selectedCandidate?.entityKey === candidate.entityKey ? '#93c5fd' : 'var(--text-secondary)',
-                                                  fontSize: 11,
-                                                  fontWeight: 700,
-                                                  cursor: 'pointer',
-                                                  textAlign: 'left',
-                                                }}
-                                              >
-                                                {candidate.customId || candidate.entityLabel}
-                                              </button>
-                                            ))}
+                                          <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+                                            {searchResults.length} hasil search ditambahkan ke dropdown entity.
                                           </div>
                                         ) : null}
                                       </div>
@@ -1113,6 +1077,39 @@ export default function MarketplaceIntakeManager() {
                                     <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>
                                       {line.effectiveClassifierLabel || 'Belum ada store valid untuk custom_id ini'}
                                     </div>
+                                    {line.effectiveStatus !== 'identified' && selectedCandidate?.storeCandidates?.length ? (
+                                      <div style={{ marginTop: 10 }}>
+                                        <select
+                                          value={selectedCandidate?.storeName || ''}
+                                          onChange={(event) => {
+                                            const nextStoreName = String(event.target.value || '');
+                                            if (!selectedCandidate || !nextStoreName) return;
+                                            setManualSelection(order.externalOrderId, line.lineIndex, {
+                                              ...selectedCandidate,
+                                              storeName: nextStoreName,
+                                              classifierLabel: 'Manual store selection',
+                                            });
+                                          }}
+                                          style={{
+                                            width: '100%',
+                                            padding: '8px 10px',
+                                            borderRadius: 8,
+                                            border: '1px solid var(--border)',
+                                            background: 'var(--card)',
+                                            color: 'var(--text)',
+                                            fontSize: 12,
+                                            outline: 'none',
+                                          }}
+                                        >
+                                          <option value="">Pilih store…</option>
+                                          {selectedCandidate.storeCandidates.map((storeName) => (
+                                            <option key={`${lineKey}-store-${storeName}`} value={storeName}>
+                                              {storeName}
+                                            </option>
+                                          ))}
+                                        </select>
+                                      </div>
+                                    ) : null}
                                   </div>
                                   <div>
                                     <div style={{ fontWeight: 700 }}>{fmtNumber(line.quantity)} pcs</div>

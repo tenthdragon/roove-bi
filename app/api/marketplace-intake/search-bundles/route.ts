@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
 import {
-  createShopeeRltStoreResolverContext,
-  resolveShopeeRltStoreForBundle,
+  guessShopeeRltStoreFromTexts,
   SHOPEE_RLT_ALLOWED_STORE_NAMES,
 } from '@/lib/marketplace-intake-store';
 import { createServiceSupabase } from '@/lib/service-supabase';
@@ -24,7 +23,7 @@ export async function GET(req: NextRequest) {
     const svc = createServiceSupabase();
     const businessRes = await svc
       .from('scalev_webhook_businesses')
-      .select('id, business_code, api_key')
+      .select('id, business_code')
       .eq('business_code', 'RLT')
       .maybeSingle();
     if (businessRes.error || !businessRes.data) {
@@ -43,31 +42,28 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: bundlesRes.error.message || 'Gagal mencari bundle.' }, { status: 500 });
     }
 
-    const storeResolver = createShopeeRltStoreResolverContext();
-    const results = await Promise.all((bundlesRes.data || []).map(async (bundle: any) => {
+    const results = [];
+    for (const bundle of (bundlesRes.data || [])) {
       const label = bundle.display || bundle.public_name || bundle.name || bundle.custom_id || 'Bundle';
-      const storeResolution = await resolveShopeeRltStoreForBundle(
-        {
-          id: Number(business.id),
-          business_code: String(business.business_code || 'RLT'),
-          api_key: business.api_key || null,
-        },
-        Number(bundle.scalev_bundle_id || 0),
+      const storeResolution = guessShopeeRltStoreFromTexts(
+        [bundle.display, bundle.public_name, bundle.name, bundle.custom_id, query],
         SHOPEE_RLT_ALLOWED_STORE_NAMES,
-        storeResolver,
       );
-      return {
+      const storeCandidates = storeResolution.storeCandidates.length > 0
+        ? storeResolution.storeCandidates
+        : SHOPEE_RLT_ALLOWED_STORE_NAMES;
+      results.push({
         entityKey: `bundle:${bundle.scalev_bundle_id}`,
         entityLabel: label,
         customId: bundle.custom_id || null,
         scalevBundleId: Number(bundle.scalev_bundle_id || 0),
         storeName: storeResolution.storeName,
-        storeCandidates: storeResolution.storeCandidates,
-        classifierLabel: storeResolution.classifierLabel || 'Exact bundle->store lookup',
+        storeCandidates,
+        classifierLabel: storeResolution.classifierLabel || 'Pilih store manual',
         score: 0,
         source: 'manual',
-      };
-    }));
+      });
+    }
 
     return NextResponse.json({ results });
   } catch (error: any) {

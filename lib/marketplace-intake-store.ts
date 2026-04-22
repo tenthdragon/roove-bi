@@ -3,6 +3,8 @@ import { fetchStoreList } from './scalev-api';
 
 const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
 const STORE_LINK_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
+const SCALEV_MAX_RETRIES = 4;
+const SCALEV_RETRY_BASE_MS = 1500;
 
 export const SHOPEE_RLT_ALLOWED_STORE_NAMES = [
   'Roove Main Store - Marketplace',
@@ -60,6 +62,13 @@ export type ExactBundleStoreResolution = {
   resolution: 'exact_live' | 'exact_cache' | 'exact_cache_stale' | 'ambiguous' | 'missing';
 };
 
+export type GuessedStoreResolution = {
+  storeName: string | null;
+  classifierLabel: string | null;
+  storeCandidates: string[];
+  resolution: 'guessed' | 'ambiguous' | 'missing';
+};
+
 export type ShopeeRltStoreResolverContext = {
   bundleResolutionCache: Map<number, Promise<ExactBundleStoreResolution>>;
   candidateStoresPromise: Promise<CandidateStore[]> | null;
@@ -71,6 +80,124 @@ function normalizeLoose(value: string | null | undefined): string {
     .replace(/[^a-z0-9]+/g, '');
 }
 
+function normalizeReadable(value: string | null | undefined): string {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const SHOPEE_RLT_STORE_ALIASES: Array<{ storeName: string; aliases: string[] }> = [
+  {
+    storeName: 'Purvu The Secret Store - Markerplace',
+    aliases: ['purvu the secret', 'the secret'],
+  },
+  {
+    storeName: 'Roove Main Store - Marketplace',
+    aliases: ['roove'],
+  },
+  {
+    storeName: 'Globite Store - Marketplace',
+    aliases: ['globite'],
+  },
+  {
+    storeName: 'Pluve Main Store - Marketplace',
+    aliases: ['pluve'],
+  },
+  {
+    storeName: 'Purvu Store - Marketplace',
+    aliases: ['purvu'],
+  },
+  {
+    storeName: 'YUV Deodorant Serum Store - Marketplace',
+    aliases: ['yuv deodorant serum', 'yuv'],
+  },
+  {
+    storeName: 'Osgard Oil Store',
+    aliases: ['osgard oil', 'osgard'],
+  },
+  {
+    storeName: 'drHyun Main Store - Marketplace',
+    aliases: ['drhyun'],
+  },
+  {
+    storeName: 'Calmara Main Store - Marketplace',
+    aliases: ['calmara'],
+  },
+];
+
+export function guessShopeeRltStoreFromTexts(
+  texts: Array<string | null | undefined>,
+  allowedStoreNames: string[] = SHOPEE_RLT_ALLOWED_STORE_NAMES,
+): GuessedStoreResolution {
+  const allowed = new Set(allowedStoreNames);
+  const haystack = normalizeReadable(texts.filter(Boolean).join(' '));
+  if (!haystack) {
+    return {
+      storeName: null,
+      classifierLabel: null,
+      storeCandidates: [],
+      resolution: 'missing',
+    };
+  }
+
+  const matches = SHOPEE_RLT_STORE_ALIASES
+    .filter((entry) => allowed.has(entry.storeName))
+    .map((entry) => ({
+      storeName: entry.storeName,
+      matchedScore: Math.max(
+        ...entry.aliases
+          .map((alias) => normalizeReadable(alias))
+          .filter(Boolean)
+          .filter((alias) => haystack.includes(alias))
+          .map((alias) => {
+            const index = haystack.indexOf(alias);
+            let score = (alias.length * 100) - Math.max(index, 0);
+            if (index === 0) score += 10000;
+            if (haystack.startsWith(`${alias} `)) score += 3000;
+            if (index > 0 && haystack.slice(Math.max(0, index - 3), index) === 'by ') {
+              score -= 2500;
+            }
+            return score;
+          }),
+        0,
+      ),
+    }))
+    .filter((entry) => entry.matchedScore > 0);
+
+  if (matches.length === 0) {
+    return {
+      storeName: null,
+      classifierLabel: null,
+      storeCandidates: [],
+      resolution: 'missing',
+    };
+  }
+
+  const strongestAliasLength = Math.max(...matches.map((entry) => entry.matchedScore));
+  const strongestMatches = matches
+    .filter((entry) => entry.matchedScore === strongestAliasLength)
+    .map((entry) => entry.storeName)
+    .sort((left, right) => left.localeCompare(right));
+
+  if (strongestMatches.length === 1) {
+    return {
+      storeName: strongestMatches[0],
+      classifierLabel: 'Guessed from bundle/product label',
+      storeCandidates: strongestMatches,
+      resolution: 'guessed',
+    };
+  }
+
+  return {
+    storeName: null,
+    classifierLabel: 'Nama produk cocok ke lebih dari satu store',
+    storeCandidates: strongestMatches,
+    resolution: 'ambiguous',
+  };
+}
+
 function isMissingTableError(error: any): boolean {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
@@ -80,49 +207,96 @@ function isMissingTableError(error: any): boolean {
     || /schema cache/i.test(message);
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimitedError(error: any): boolean {
+  const status = Number(error?.status || error?.statusCode || 0);
+  const code = Number(error?.code || 0);
+  const message = String(error?.message || '');
+  return status === 429 || code === 429 || /429/.test(message) || /too many requests/i.test(message);
+}
+
+function parseRetryAfterMs(headerValue: string | null): number | null {
+  if (!headerValue) return null;
+
+  const seconds = Number(headerValue);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const targetMs = Date.parse(headerValue);
+  if (!Number.isFinite(targetMs)) return null;
+
+  return Math.max(0, targetMs - Date.now());
+}
+
+function getScalevRetryDelayMs(response: Response, attempt: number): number {
+  const retryAfterMs = parseRetryAfterMs(response.headers.get('retry-after'));
+  if (retryAfterMs != null && retryAfterMs > 0) {
+    return retryAfterMs;
+  }
+
+  return SCALEV_RETRY_BASE_MS * Math.max(1, attempt + 1);
+}
+
 async function fetchScalevStoreBundleAvailability(
   apiKey: string,
   scalevStoreId: number,
   bundleId: number,
 ): Promise<boolean> {
-  const response = await fetch(`${SCALEV_BASE_URL}/stores/${scalevStoreId}/bundles/${bundleId}`, {
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    cache: 'no-store',
-  });
+  for (let attempt = 0; attempt <= SCALEV_MAX_RETRIES; attempt += 1) {
+    const response = await fetch(`${SCALEV_BASE_URL}/stores/${scalevStoreId}/bundles/${bundleId}`, {
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      cache: 'no-store',
+    });
 
-  const text = await response.text();
-  let json: any = null;
-  try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    json = null;
+    const text = await response.text();
+    let json: any = null;
+    try {
+      json = text ? JSON.parse(text) : null;
+    } catch {
+      json = null;
+    }
+
+    if (response.ok && (!json || json.code == null || Number(json.code) < 400)) {
+      return true;
+    }
+
+    const errorText = String(
+      json?.status
+      || json?.message
+      || (typeof json?.error === 'string' ? json.error : '')
+      || text
+      || `HTTP ${response.status}`,
+    ).toLowerCase();
+
+    if (
+      response.status === 404
+      || Number(json?.code || 0) === 404
+      || errorText.includes('not found')
+      || errorText.includes('tidak ditemukan')
+    ) {
+      return false;
+    }
+
+    const error = new Error(`Scalev store bundle lookup gagal (${response.status}): ${text || errorText}`) as Error & { status?: number };
+    error.status = response.status;
+
+    const shouldRetry = response.status === 429 || response.status >= 500;
+    if (shouldRetry && attempt < SCALEV_MAX_RETRIES) {
+      await sleep(getScalevRetryDelayMs(response, attempt));
+      continue;
+    }
+
+    throw error;
   }
 
-  if (response.ok && (!json || json.code == null || Number(json.code) < 400)) {
-    return true;
-  }
-
-  const errorText = String(
-    json?.status
-    || json?.message
-    || (typeof json?.error === 'string' ? json.error : '')
-    || text
-    || `HTTP ${response.status}`,
-  ).toLowerCase();
-
-  if (
-    response.status === 404
-    || Number(json?.code || 0) === 404
-    || errorText.includes('not found')
-    || errorText.includes('tidak ditemukan')
-  ) {
-    return false;
-  }
-
-  throw new Error(`Scalev store bundle lookup gagal (${response.status}): ${text || errorText}`);
+  throw new Error('Scalev store bundle lookup gagal setelah retry.');
 }
 
 async function loadCandidateStores(
@@ -328,15 +502,58 @@ export async function resolveShopeeRltStoreForBundle(
       return buildResolutionFromRows(freshRows, 'exact_cache');
     }
 
+    const staleRows = candidateStores
+      .map((row) => {
+        const cached = cacheByStoreName.get(row.storeName);
+        if (!cached) return null;
+        return {
+          storeName: row.storeName,
+          scalevStoreId: cached.scalev_store_id,
+          storeUniqueId: cached.store_unique_id,
+          isAvailable: Boolean(cached.is_available),
+        };
+      })
+      .filter(Boolean) as Array<{
+        storeName: string;
+        scalevStoreId: number | null;
+        storeUniqueId: string | null;
+        isAvailable: boolean;
+      }>;
+
     const availability = new Map<string, boolean>();
     for (const row of freshRows) {
       availability.set(row.storeName, row.isAvailable);
     }
 
-    for (const store of candidateStores) {
-      if (availability.has(store.storeName)) continue;
-      const isAvailable = await fetchScalevStoreBundleAvailability(business.api_key!, store.scalevStoreId, bundleId);
-      availability.set(store.storeName, isAvailable);
+    try {
+      for (const store of candidateStores) {
+        if (availability.has(store.storeName)) continue;
+        const isAvailable = await fetchScalevStoreBundleAvailability(
+          business.api_key!,
+          store.scalevStoreId,
+          bundleId,
+        );
+        availability.set(store.storeName, isAvailable);
+
+        const availableStoreNames = Array.from(availability.entries())
+          .filter(([, value]) => value)
+          .map(([storeName]) => storeName);
+        if (availableStoreNames.length > 1) {
+          return {
+            storeName: null,
+            classifierLabel: 'Bundle tersedia di lebih dari satu store marketplace',
+            scalevStoreId: null,
+            storeUniqueId: null,
+            storeCandidates: availableStoreNames.sort((left, right) => left.localeCompare(right)),
+            resolution: 'ambiguous',
+          } satisfies ExactBundleStoreResolution;
+        }
+      }
+    } catch (error: any) {
+      if (isRateLimitedError(error) && staleRows.length === candidateStores.length) {
+        return buildResolutionFromRows(staleRows, 'exact_cache_stale');
+      }
+      throw error;
     }
 
     await saveBundleStoreLinks(business, bundleId, candidateStores, availability);
