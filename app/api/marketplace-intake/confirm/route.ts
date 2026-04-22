@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
 import { createServerSupabase } from '@/lib/supabase-server';
-import { saveMarketplaceIntakePreview, type MarketplaceIntakePreview } from '@/lib/marketplace-intake';
+import {
+  saveMarketplaceIntakePreview,
+  type MarketplaceIntakeManualSelectionInput,
+  type MarketplaceIntakePreview,
+} from '@/lib/marketplace-intake';
 
 export const maxDuration = 250;
 
@@ -16,6 +20,9 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const preview = body?.preview as MarketplaceIntakePreview | undefined;
+    const manualSelections = Array.isArray(body?.manualSelections)
+      ? body.manualSelections as MarketplaceIntakeManualSelectionInput[]
+      : [];
     if (!preview || !preview.source || !Array.isArray(preview.orders)) {
       return NextResponse.json({ error: 'Payload preview tidak valid.' }, { status: 400 });
     }
@@ -28,6 +35,7 @@ export async function POST(req: NextRequest) {
     const result = await saveMarketplaceIntakePreview({
       preview,
       uploadedByEmail: user?.email || null,
+      manualSelections,
     });
 
     return NextResponse.json({

@@ -40,6 +40,29 @@ type BundleIdentifierRow = {
   source: 'bundle.custom_id';
 };
 
+type BundleCatalogRow = {
+  business_id: number;
+  scalev_bundle_id: number;
+  name: string | null;
+  public_name: string | null;
+  display: string | null;
+  custom_id: string | null;
+};
+
+type ManualMemoryRow = {
+  id: number;
+  source_key: string;
+  business_code: string;
+  match_signature: string;
+  target_entity_key: string;
+  target_entity_label: string;
+  target_custom_id: string | null;
+  scalev_bundle_id: number;
+  mapped_store_name: string | null;
+  usage_count: number;
+  is_active: boolean;
+};
+
 type CanonicalLine = {
   sku: string | null;
   productName: string;
@@ -84,6 +107,17 @@ type PreviewLineStatus = 'identified' | 'not_identified' | 'store_unmapped' | 'e
 type PreviewOrderStatus = 'ready' | 'needs_review';
 type PreviewStoreResolution = 'single_store' | 'dominant_amount' | 'unclassified' | 'ambiguous';
 
+export type MarketplaceIntakeSuggestionCandidate = {
+  entityKey: string;
+  entityLabel: string;
+  customId: string | null;
+  scalevBundleId: number;
+  storeName: string | null;
+  classifierLabel: string | null;
+  score: number;
+  source: 'remembered' | 'catalog' | 'manual';
+};
+
 export type MarketplaceIntakePreviewLine = {
   lineIndex: number;
   lineStatus: PreviewLineStatus;
@@ -107,6 +141,9 @@ export type MarketplaceIntakePreviewLine = {
   matchedRuleLabel: string | null;
   mappedSourceStoreId: number | null;
   mappedStoreName: string | null;
+  matchSignature: string;
+  suggestionCandidates: MarketplaceIntakeSuggestionCandidate[];
+  selectedSuggestion: MarketplaceIntakeSuggestionCandidate | null;
   rawRow: Record<string, string>;
 };
 
@@ -161,6 +198,12 @@ export type MarketplaceIntakePreview = {
   generatedAt: string;
   summary: MarketplaceIntakePreviewSummary;
   orders: MarketplaceIntakePreviewOrder[];
+};
+
+export type MarketplaceIntakeManualSelectionInput = {
+  externalOrderId: string;
+  lineIndex: number;
+  scalevBundleId: number;
 };
 
 function cleanText(value: unknown): string | null {
@@ -436,6 +479,226 @@ async function loadBundleIdentifierLookup(businessId: number, normalizedIdentifi
   return lookup;
 }
 
+async function loadRltBundleCatalog(businessId: number): Promise<BundleCatalogRow[]> {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('scalev_catalog_bundles')
+    .select('business_id, scalev_bundle_id, name, public_name, display, custom_id')
+    .eq('business_id', businessId)
+    .order('scalev_bundle_id', { ascending: true });
+
+  if (error) {
+    if (isMissingTableError(error)) throw new Error(getMissingSchemaMessage());
+    throw error;
+  }
+
+  return (data || []) as BundleCatalogRow[];
+}
+
+async function loadManualMemoryMap(businessId: number): Promise<Map<string, ManualMemoryRow>> {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('marketplace_intake_manual_memory')
+    .select(`
+      id,
+      source_key,
+      business_code,
+      match_signature,
+      target_entity_key,
+      target_entity_label,
+      target_custom_id,
+      scalev_bundle_id,
+      mapped_store_name,
+      usage_count,
+      is_active
+    `)
+    .eq('source_key', SHOPEE_RLT_SOURCE.sourceKey)
+    .eq('business_id', businessId)
+    .eq('is_active', true);
+
+  if (error) {
+    if (isMissingTableError(error)) return new Map<string, ManualMemoryRow>();
+    throw error;
+  }
+
+  const map = new Map<string, ManualMemoryRow>();
+  for (const row of (data || []) as ManualMemoryRow[]) {
+    map.set(String(row.match_signature || ''), row);
+  }
+  return map;
+}
+
+function buildMatchSignature(line: Pick<CanonicalLine, 'sku' | 'productName' | 'variation'>): string {
+  return [
+    normalizeIdentifier(line.sku) || '__blank__',
+    normalizeIdentifier(line.productName) || '__blank__',
+    normalizeIdentifier(line.variation) || '__blank__',
+  ].join('|');
+}
+
+function getBundleDisplayLabel(bundle: Pick<BundleCatalogRow, 'display' | 'public_name' | 'name' | 'custom_id'>): string {
+  return bundle.display || bundle.public_name || bundle.name || bundle.custom_id || 'Bundle';
+}
+
+function buildSuggestionCandidateFromBundle(
+  bundle: BundleCatalogRow,
+  source: 'remembered' | 'catalog' | 'manual',
+  score: number,
+): MarketplaceIntakeSuggestionCandidate {
+  const classifier = classifyShopeeRltStore({
+    customId: bundle.custom_id,
+    entityLabel: getBundleDisplayLabel(bundle),
+    productName: getBundleDisplayLabel(bundle),
+  });
+
+  return {
+    entityKey: `bundle:${bundle.scalev_bundle_id}`,
+    entityLabel: getBundleDisplayLabel(bundle),
+    customId: bundle.custom_id,
+    scalevBundleId: bundle.scalev_bundle_id,
+    storeName: classifier.storeName,
+    classifierLabel: classifier.classifierLabel,
+    score,
+    source,
+  };
+}
+
+function scoreBundleCandidateForLine(line: CanonicalLine, bundle: BundleCatalogRow): number {
+  const query = normalizeIdentifier([line.productName, line.variation, line.sku].filter(Boolean).join(' '));
+  const compactQuery = normalizeLoose([line.productName, line.variation, line.sku].filter(Boolean).join(' '));
+  const label = normalizeIdentifier([bundle.display, bundle.public_name, bundle.name].filter(Boolean).join(' '));
+  const compactLabel = normalizeLoose([bundle.display, bundle.public_name, bundle.name, bundle.custom_id].filter(Boolean).join(' '));
+  const compactCustomId = normalizeLoose(bundle.custom_id);
+  const queryTokens = query.split(' ').filter(Boolean);
+  const labelTokens = new Set(label.split(' ').filter(Boolean));
+  const customIdText = String(bundle.custom_id || '').toUpperCase();
+
+  let score = 0;
+  if (!query && !compactQuery) return score;
+  if (compactCustomId && compactQuery && compactCustomId === compactQuery) score += 500;
+  if (compactCustomId && compactQuery && compactCustomId.startsWith(compactQuery)) score += 300;
+  if (compactLabel && compactQuery && compactLabel.includes(compactQuery)) score += 250;
+  if (label && query && label === query) score += 220;
+  if (label && query && label.includes(query)) score += 180;
+  if (query && label && query.includes(label)) score += 150;
+
+  for (const token of queryTokens) {
+    if (labelTokens.has(token)) score += 35;
+  }
+
+  if (queryTokens.includes('shaker')) {
+    if (label.includes('shaker')) score += 160;
+    if (compactCustomId.includes('shaker')) score += 160;
+    if (label.startsWith('shaker') || compactCustomId.startsWith('shaker')) score += 220;
+  }
+
+  if (queryTokens.includes('mini')) {
+    if (label.includes('mini')) score += 120;
+    if (compactCustomId.includes('mini')) score += 120;
+  }
+
+  const comboCount = (customIdText.match(/\+/g) || []).length;
+  if (comboCount > 0) {
+    score -= comboCount * 40;
+  }
+
+  const bundleStore = classifyShopeeRltStore({
+    customId: bundle.custom_id,
+    entityLabel: getBundleDisplayLabel(bundle),
+    productName: line.productName,
+  }).storeName;
+  if (bundleStore === 'Roove Main Store - Marketplace' && normalizeIdentifier(line.productName).includes('roove')) score += 80;
+  if (bundleStore === 'Purvu The Secret Store - Markerplace' && normalizeIdentifier(line.productName).includes('secret')) score += 80;
+
+  return score;
+}
+
+function buildSuggestionCandidates(
+  line: CanonicalLine,
+  bundleCatalog: BundleCatalogRow[],
+  remembered: ManualMemoryRow | null,
+): {
+  suggestions: MarketplaceIntakeSuggestionCandidate[];
+  selected: MarketplaceIntakeSuggestionCandidate | null;
+} {
+  const seen = new Set<string>();
+  const suggestions: MarketplaceIntakeSuggestionCandidate[] = [];
+  let selected: MarketplaceIntakeSuggestionCandidate | null = null;
+
+  if (remembered) {
+    const rememberedBundle = bundleCatalog.find((bundle) => bundle.scalev_bundle_id === remembered.scalev_bundle_id);
+    if (rememberedBundle) {
+      const candidate = buildSuggestionCandidateFromBundle(rememberedBundle, 'remembered', 10000);
+      suggestions.push(candidate);
+      selected = candidate;
+      seen.add(candidate.entityKey);
+    }
+  }
+
+  const ranked = bundleCatalog
+    .map((bundle) => ({
+      bundle,
+      score: scoreBundleCandidateForLine(line, bundle),
+    }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 8);
+
+  for (const entry of ranked) {
+    const candidate = buildSuggestionCandidateFromBundle(entry.bundle, 'catalog', entry.score);
+    if (seen.has(candidate.entityKey)) continue;
+    suggestions.push(candidate);
+    seen.add(candidate.entityKey);
+  }
+
+  return {
+    suggestions,
+    selected,
+  };
+}
+
+function buildLineFromBundleCandidate(
+  line: CanonicalLine,
+  lineIndex: number,
+  candidate: MarketplaceIntakeSuggestionCandidate,
+  source: 'direct' | 'remembered' | 'manual',
+): MarketplaceIntakePreviewLine {
+  const issueCodes = source === 'remembered'
+    ? ['remembered_manual_match']
+    : source === 'manual'
+      ? ['manual_match_confirmed']
+      : [];
+
+  return {
+    lineIndex,
+    lineStatus: 'identified',
+    issueCodes,
+    mpSku: line.sku,
+    mpProductName: line.productName,
+    mpVariation: line.variation,
+    quantity: line.quantity,
+    unitPrice: line.unitPrice,
+    lineSubtotal: line.lineSubtotal,
+    lineDiscount: line.lineDiscount,
+    detectedCustomId: candidate.customId,
+    matchedEntityType: 'bundle',
+    matchedEntityKey: candidate.entityKey,
+    matchedEntityLabel: candidate.entityLabel,
+    matchedEntitySource: source === 'direct' ? 'bundle.custom_id' : source === 'remembered' ? 'manual.memory' : 'manual.selection',
+    matchedScalevProductId: null,
+    matchedScalevVariantId: null,
+    matchedScalevBundleId: candidate.scalevBundleId,
+    matchedRuleId: null,
+    matchedRuleLabel: candidate.classifierLabel,
+    mappedSourceStoreId: null,
+    mappedStoreName: candidate.storeName,
+    matchSignature: buildMatchSignature(line),
+    suggestionCandidates: [candidate],
+    selectedSuggestion: candidate,
+    rawRow: line.rawRow,
+  };
+}
+
 function resolveBundleIdentifierForSku(
   sku: string | null,
   identifierLookup: Map<string, BundleIdentifierRow[]>,
@@ -529,134 +792,12 @@ function buildOrderCustomerLabel(order: CanonicalOrder): string | null {
   return order.customerName || order.customerUsername || null;
 }
 
-function classifyOrder(
+function summarizeOrderFromLines(
   order: CanonicalOrder,
-  identifierLookup: Map<string, BundleIdentifierRow[]>,
+  lines: MarketplaceIntakePreviewLine[],
+  extraIssueCodes: string[] = [],
 ): MarketplaceIntakePreviewOrder {
-  const issueCodes = new Set<string>();
-
-  const lines: MarketplaceIntakePreviewLine[] = order.lines.map((line, index) => {
-    const identifier = resolveBundleIdentifierForSku(line.sku, identifierLookup);
-    if (identifier.status === 'missing') {
-      issueCodes.add('custom_id_not_found');
-      return {
-        lineIndex: index,
-        lineStatus: 'not_identified',
-        issueCodes: ['custom_id_not_found'],
-        mpSku: line.sku,
-        mpProductName: line.productName,
-        mpVariation: line.variation,
-        quantity: line.quantity,
-        unitPrice: line.unitPrice,
-        lineSubtotal: line.lineSubtotal,
-        lineDiscount: line.lineDiscount,
-        detectedCustomId: line.sku,
-        matchedEntityType: null,
-        matchedEntityKey: null,
-        matchedEntityLabel: null,
-        matchedEntitySource: null,
-        matchedScalevProductId: null,
-        matchedScalevVariantId: null,
-        matchedScalevBundleId: null,
-        matchedRuleId: null,
-        matchedRuleLabel: null,
-        mappedSourceStoreId: null,
-        mappedStoreName: null,
-        rawRow: line.rawRow,
-      };
-    }
-
-    if (identifier.status === 'ambiguous') {
-      issueCodes.add('custom_id_ambiguous');
-      return {
-        lineIndex: index,
-        lineStatus: 'not_identified',
-        issueCodes: ['custom_id_ambiguous'],
-        mpSku: line.sku,
-        mpProductName: line.productName,
-        mpVariation: line.variation,
-        quantity: line.quantity,
-        unitPrice: line.unitPrice,
-        lineSubtotal: line.lineSubtotal,
-        lineDiscount: line.lineDiscount,
-        detectedCustomId: line.sku,
-        matchedEntityType: null,
-        matchedEntityKey: null,
-        matchedEntityLabel: null,
-        matchedEntitySource: null,
-        matchedScalevProductId: null,
-        matchedScalevVariantId: null,
-        matchedScalevBundleId: null,
-        matchedRuleId: null,
-        matchedRuleLabel: null,
-        mappedSourceStoreId: null,
-        mappedStoreName: null,
-        rawRow: line.rawRow,
-      };
-    }
-
-    const match = identifier.row;
-    const storeClassification = classifyShopeeRltStore({
-      customId: match.identifier,
-      entityLabel: match.entity_label,
-      productName: line.productName,
-    });
-
-    if (!storeClassification.storeName || !SHOPEE_RLT_SOURCE.allowedStores.includes(storeClassification.storeName)) {
-      issueCodes.add('store_classifier_missing');
-      return {
-        lineIndex: index,
-        lineStatus: 'store_unmapped',
-        issueCodes: ['store_classifier_missing'],
-        mpSku: line.sku,
-        mpProductName: line.productName,
-        mpVariation: line.variation,
-        quantity: line.quantity,
-        unitPrice: line.unitPrice,
-        lineSubtotal: line.lineSubtotal,
-        lineDiscount: line.lineDiscount,
-        detectedCustomId: match.identifier,
-        matchedEntityType: 'bundle',
-        matchedEntityKey: match.entity_key,
-        matchedEntityLabel: match.entity_label,
-        matchedEntitySource: match.source,
-        matchedScalevProductId: null,
-        matchedScalevVariantId: null,
-        matchedScalevBundleId: match.scalev_bundle_id,
-        matchedRuleId: null,
-        matchedRuleLabel: null,
-        mappedSourceStoreId: null,
-        mappedStoreName: null,
-        rawRow: line.rawRow,
-      };
-    }
-
-    return {
-      lineIndex: index,
-      lineStatus: 'identified',
-      issueCodes: [],
-      mpSku: line.sku,
-      mpProductName: line.productName,
-      mpVariation: line.variation,
-      quantity: line.quantity,
-      unitPrice: line.unitPrice,
-      lineSubtotal: line.lineSubtotal,
-      lineDiscount: line.lineDiscount,
-      detectedCustomId: match.identifier,
-      matchedEntityType: 'bundle',
-      matchedEntityKey: match.entity_key,
-      matchedEntityLabel: match.entity_label,
-      matchedEntitySource: match.source,
-      matchedScalevProductId: null,
-      matchedScalevVariantId: null,
-      matchedScalevBundleId: match.scalev_bundle_id,
-      matchedRuleId: null,
-      matchedRuleLabel: storeClassification.classifierLabel,
-      mappedSourceStoreId: null,
-      mappedStoreName: storeClassification.storeName,
-      rawRow: line.rawRow,
-    };
-  });
+  const issueCodes = new Set<string>(extraIssueCodes);
 
   const identifiedLineCount = lines.filter((line) => line.lineStatus !== 'not_identified').length;
   const classifiedLineCount = lines.filter((line) => line.lineStatus === 'identified').length;
@@ -664,6 +805,7 @@ function classifyOrder(
 
   const storeTotals = new Map<string, number>();
   for (const line of lines) {
+    (line.issueCodes || []).forEach((code) => issueCodes.add(code));
     if (!line.mappedStoreName || line.lineStatus !== 'identified') continue;
     storeTotals.set(line.mappedStoreName, (storeTotals.get(line.mappedStoreName) || 0) + line.lineSubtotal);
   }
@@ -740,6 +882,146 @@ function classifyOrder(
   };
 }
 
+function classifyOrder(
+  order: CanonicalOrder,
+  identifierLookup: Map<string, BundleIdentifierRow[]>,
+  bundleCatalog: BundleCatalogRow[],
+  manualMemoryMap: Map<string, ManualMemoryRow>,
+): MarketplaceIntakePreviewOrder {
+  const issueCodes = new Set<string>();
+
+  const lines: MarketplaceIntakePreviewLine[] = order.lines.map((line, index) => {
+    const matchSignature = buildMatchSignature(line);
+    const identifier = resolveBundleIdentifierForSku(line.sku, identifierLookup);
+    if (identifier.status === 'missing') {
+      const { suggestions, selected } = buildSuggestionCandidates(line, bundleCatalog, manualMemoryMap.get(matchSignature) || null);
+      if (selected && selected.storeName) {
+        return buildLineFromBundleCandidate(line, index, selected, 'remembered');
+      }
+      issueCodes.add('custom_id_not_found');
+      return {
+        lineIndex: index,
+        lineStatus: 'not_identified',
+        issueCodes: ['custom_id_not_found'],
+        mpSku: line.sku,
+        mpProductName: line.productName,
+        mpVariation: line.variation,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        lineSubtotal: line.lineSubtotal,
+        lineDiscount: line.lineDiscount,
+        detectedCustomId: line.sku,
+        matchedEntityType: null,
+        matchedEntityKey: null,
+        matchedEntityLabel: null,
+        matchedEntitySource: null,
+        matchedScalevProductId: null,
+        matchedScalevVariantId: null,
+        matchedScalevBundleId: null,
+        matchedRuleId: null,
+        matchedRuleLabel: null,
+        mappedSourceStoreId: null,
+        mappedStoreName: null,
+        matchSignature,
+        suggestionCandidates: suggestions,
+        selectedSuggestion: selected,
+        rawRow: line.rawRow,
+      };
+    }
+
+    if (identifier.status === 'ambiguous') {
+      const { suggestions, selected } = buildSuggestionCandidates(line, bundleCatalog, manualMemoryMap.get(matchSignature) || null);
+      if (selected && selected.storeName) {
+        return buildLineFromBundleCandidate(line, index, selected, 'remembered');
+      }
+      issueCodes.add('custom_id_ambiguous');
+      return {
+        lineIndex: index,
+        lineStatus: 'not_identified',
+        issueCodes: ['custom_id_ambiguous'],
+        mpSku: line.sku,
+        mpProductName: line.productName,
+        mpVariation: line.variation,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        lineSubtotal: line.lineSubtotal,
+        lineDiscount: line.lineDiscount,
+        detectedCustomId: line.sku,
+        matchedEntityType: null,
+        matchedEntityKey: null,
+        matchedEntityLabel: null,
+        matchedEntitySource: null,
+        matchedScalevProductId: null,
+        matchedScalevVariantId: null,
+        matchedScalevBundleId: null,
+        matchedRuleId: null,
+        matchedRuleLabel: null,
+        mappedSourceStoreId: null,
+        mappedStoreName: null,
+        matchSignature,
+        suggestionCandidates: suggestions,
+        selectedSuggestion: selected,
+        rawRow: line.rawRow,
+      };
+    }
+
+    const match = identifier.row;
+    const directCandidate: MarketplaceIntakeSuggestionCandidate = {
+      entityKey: match.entity_key,
+      entityLabel: match.entity_label,
+      customId: match.identifier,
+      scalevBundleId: Number(match.scalev_bundle_id || 0),
+      storeName: null,
+      classifierLabel: null,
+      score: 9999,
+      source: 'catalog',
+    };
+    const storeClassification = classifyShopeeRltStore({
+      customId: match.identifier,
+      entityLabel: match.entity_label,
+      productName: line.productName,
+    });
+    directCandidate.storeName = storeClassification.storeName;
+    directCandidate.classifierLabel = storeClassification.classifierLabel;
+
+    if (!storeClassification.storeName || !SHOPEE_RLT_SOURCE.allowedStores.includes(storeClassification.storeName)) {
+      issueCodes.add('store_classifier_missing');
+      return {
+        lineIndex: index,
+        lineStatus: 'store_unmapped',
+        issueCodes: ['store_classifier_missing'],
+        mpSku: line.sku,
+        mpProductName: line.productName,
+        mpVariation: line.variation,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        lineSubtotal: line.lineSubtotal,
+        lineDiscount: line.lineDiscount,
+        detectedCustomId: match.identifier,
+        matchedEntityType: 'bundle',
+        matchedEntityKey: match.entity_key,
+        matchedEntityLabel: match.entity_label,
+        matchedEntitySource: match.source,
+        matchedScalevProductId: null,
+        matchedScalevVariantId: null,
+        matchedScalevBundleId: match.scalev_bundle_id,
+        matchedRuleId: null,
+        matchedRuleLabel: null,
+        mappedSourceStoreId: null,
+        mappedStoreName: null,
+        matchSignature,
+        suggestionCandidates: [directCandidate],
+        selectedSuggestion: null,
+        rawRow: line.rawRow,
+      };
+    }
+
+    return buildLineFromBundleCandidate(line, index, directCandidate, 'direct');
+  });
+
+  return summarizeOrderFromLines(order, lines, Array.from(issueCodes));
+}
+
 function buildPreviewSummary(orders: MarketplaceIntakePreviewOrder[]): MarketplaceIntakePreviewSummary {
   const totalLines = orders.reduce((sum, order) => sum + order.lineCount, 0);
   const identifiedLines = orders.reduce((sum, order) => sum + order.identifiedLineCount, 0);
@@ -772,6 +1054,10 @@ export async function previewShopeeRltIntake(input: {
 }): Promise<MarketplaceIntakePreview> {
   const business = await loadRltBusiness();
   const { orders, rowCount } = await parseShopeeWorkbook(input.file);
+  const [bundleCatalog, manualMemoryMap] = await Promise.all([
+    loadRltBundleCatalog(business.id),
+    loadManualMemoryMap(business.id),
+  ]);
 
   const normalizedIdentifiers = Array.from(new Set(
     orders
@@ -781,7 +1067,7 @@ export async function previewShopeeRltIntake(input: {
   const identifierLookup = await loadBundleIdentifierLookup(business.id, normalizedIdentifiers);
 
   const previewOrders = orders
-    .map((order) => classifyOrder(order, identifierLookup))
+    .map((order) => classifyOrder(order, identifierLookup, bundleCatalog, manualMemoryMap))
     .sort((left, right) => left.externalOrderId.localeCompare(right.externalOrderId));
 
   return {
@@ -805,6 +1091,7 @@ export async function previewShopeeRltIntake(input: {
 export async function saveMarketplaceIntakePreview(input: {
   preview: MarketplaceIntakePreview;
   uploadedByEmail: string | null;
+  manualSelections?: MarketplaceIntakeManualSelectionInput[];
 }) {
   const business = await loadRltBusiness();
   const preview = input.preview;
@@ -816,7 +1103,80 @@ export async function saveMarketplaceIntakePreview(input: {
     throw new Error('Business preview berubah. Refresh preview lalu coba simpan lagi.');
   }
 
-  const summary = buildPreviewSummary(preview.orders || []);
+  const bundleCatalog = await loadRltBundleCatalog(business.id);
+  const bundleById = new Map<number, BundleCatalogRow>(bundleCatalog.map((bundle) => [bundle.scalev_bundle_id, bundle]));
+  const selectionMap = new Map<string, MarketplaceIntakeManualSelectionInput>();
+  for (const selection of input.manualSelections || []) {
+    const key = `${selection.externalOrderId}::${selection.lineIndex}`;
+    selectionMap.set(key, selection);
+  }
+
+  const normalizedOrders = (preview.orders || []).map((order) => {
+    const lines = (order.lines || []).map((line) => {
+      const selection = selectionMap.get(`${order.externalOrderId}::${line.lineIndex}`);
+      if (!selection) return line;
+
+      const bundle = bundleById.get(Number(selection.scalevBundleId || 0));
+      if (!bundle) return line;
+
+      const candidate = buildSuggestionCandidateFromBundle(bundle, 'manual', 99999);
+      if (!candidate.storeName || !SHOPEE_RLT_SOURCE.allowedStores.includes(candidate.storeName)) return line;
+
+      return buildLineFromBundleCandidate({
+        sku: line.mpSku,
+        productName: line.mpProductName,
+        variation: line.mpVariation,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        lineSubtotal: line.lineSubtotal,
+        lineDiscount: line.lineDiscount,
+        rawRow: line.rawRow,
+      }, line.lineIndex, candidate, 'manual');
+    });
+
+    return summarizeOrderFromLines({
+      platform: 'shopee',
+      externalId: order.externalOrderId,
+      status: String(order.rawMeta?.status || '') || null,
+      substatus: String(order.rawMeta?.substatus || '') || null,
+      paymentMethodLabel: order.paymentMethodLabel,
+      createdAt: String(order.rawMeta?.createdAt || '') || null,
+      paidAt: String(order.rawMeta?.paidAt || '') || null,
+      rtsAt: String(order.rawMeta?.rtsAt || '') || null,
+      deliveredAt: String(order.rawMeta?.deliveredAt || '') || null,
+      trackingNumber: order.trackingNumber,
+      shippingProvider: order.shippingProvider,
+      deliveryOption: order.deliveryOption,
+      customerUsername: String(order.rawMeta?.customerUsername || '') || null,
+      customerName: order.recipientName,
+      customerPhone: String(order.rawMeta?.customerPhone || '') || null,
+      province: String(order.rawMeta?.province || '') || null,
+      city: String(order.rawMeta?.city || '') || null,
+      district: String(order.rawMeta?.district || '') || null,
+      postalCode: String(order.rawMeta?.postalCode || '') || null,
+      address: String(order.rawMeta?.address || '') || null,
+      addressNotes: String(order.rawMeta?.addressNotes || '') || null,
+      rawAddress: String(order.rawMeta?.rawAddress || '') || null,
+      shippingCost: Number(order.rawMeta?.shippingCost || 0) || 0,
+      orderAmount: order.orderAmount,
+      lines: lines.map((line) => ({
+        sku: line.mpSku,
+        productName: line.mpProductName,
+        variation: line.mpVariation,
+        quantity: line.quantity,
+        unitPrice: line.unitPrice,
+        lineSubtotal: line.lineSubtotal,
+        lineDiscount: line.lineDiscount,
+        rawRow: line.rawRow,
+      })),
+      rawMeta: {
+        marketplaceStatus: String(order.rawMeta?.marketplaceStatus || ''),
+        cancellationStatus: String(order.rawMeta?.cancellationStatus || ''),
+      },
+    }, lines, []);
+  });
+
+  const summary = buildPreviewSummary(normalizedOrders);
   if (summary.needsReviewOrders > 0 || summary.unidentifiedLines > 0 || summary.unresolvedStoreLines > 0) {
     throw new Error('Masih ada order yang belum siap. Selesaikan identifikasi SKU dulu sebelum menyimpan.');
   }
@@ -858,7 +1218,7 @@ export async function saveMarketplaceIntakePreview(input: {
   }
 
   const batchId = Number(batchRes.data.id);
-  const orderRows = (preview.orders || []).map((order) => ({
+  const orderRows = normalizedOrders.map((order) => ({
     batch_id: batchId,
     external_order_id: order.externalOrderId,
     order_status: order.orderStatus,
@@ -893,7 +1253,7 @@ export async function saveMarketplaceIntakePreview(input: {
     orderIdByExternalId.set(String(row.external_order_id), Number(row.id));
   }
 
-  const lineRows = (preview.orders || []).flatMap((order) => {
+  const lineRows = normalizedOrders.flatMap((order) => {
     const intakeOrderId = orderIdByExternalId.get(order.externalOrderId);
     if (!intakeOrderId) return [];
     return (order.lines || []).map((line) => ({
@@ -928,6 +1288,40 @@ export async function saveMarketplaceIntakePreview(input: {
       .from('marketplace_intake_order_lines')
       .insert(lineRows);
     if (linesRes.error) throw linesRes.error;
+  }
+
+  const manualMemoryUpserts = normalizedOrders.flatMap((order) => (
+    (order.lines || [])
+      .filter((line) => (line.issueCodes || []).includes('manual_match_confirmed') || (line.issueCodes || []).includes('remembered_manual_match'))
+      .map((line) => ({
+        source_key: SHOPEE_RLT_SOURCE.sourceKey,
+        source_label: SHOPEE_RLT_SOURCE.sourceLabel,
+        platform: SHOPEE_RLT_SOURCE.platform,
+        business_id: business.id,
+        business_code: business.business_code,
+        match_signature: line.matchSignature,
+        mp_sku: line.mpSku,
+        mp_product_name: line.mpProductName,
+        mp_variation: line.mpVariation,
+        target_entity_type: 'bundle',
+        target_entity_key: line.matchedEntityKey,
+        target_entity_label: line.matchedEntityLabel,
+        target_custom_id: line.detectedCustomId,
+        scalev_bundle_id: line.matchedScalevBundleId,
+        mapped_store_name: line.mappedStoreName,
+        usage_count: 1,
+        created_by_email: input.uploadedByEmail,
+        updated_by_email: input.uploadedByEmail,
+        last_confirmed_at: new Date().toISOString(),
+        is_active: true,
+      }))
+  ));
+
+  if (manualMemoryUpserts.length > 0) {
+    const memoryRes = await svc
+      .from('marketplace_intake_manual_memory')
+      .upsert(manualMemoryUpserts, { onConflict: 'source_key,business_code,match_signature' });
+    if (memoryRes.error && !isMissingTableError(memoryRes.error)) throw memoryRes.error;
   }
 
   return {

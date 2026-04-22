@@ -101,6 +101,14 @@ export default function MarketplaceIntakeManager() {
   const [search, setSearch] = useState('');
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [expandedOrders, setExpandedOrders] = useState({});
+  const [manualSelections, setManualSelections] = useState({});
+  const [lineSearchQueries, setLineSearchQueries] = useState({});
+  const [lineSearchResults, setLineSearchResults] = useState({});
+  const [searchingLineKey, setSearchingLineKey] = useState('');
+
+  function getLineKey(orderId, lineIndex) {
+    return `${orderId}::${lineIndex}`;
+  }
 
   const visibleOrders = useMemo(() => {
     if (!preview?.orders) return [];
@@ -124,13 +132,41 @@ export default function MarketplaceIntakeManager() {
     });
   }, [issuesOnly, preview, search]);
 
+  const unresolvedSelectionCount = useMemo(() => {
+    if (!preview?.orders) return 0;
+    let missing = 0;
+    for (const order of preview.orders) {
+      for (const line of order.lines || []) {
+        if (line.lineStatus === 'not_identified' && !manualSelections[getLineKey(order.externalOrderId, line.lineIndex)]) {
+          missing += 1;
+        }
+      }
+    }
+    return missing;
+  }, [manualSelections, preview]);
+
+  const blockingOrderCount = useMemo(() => {
+    if (!preview?.orders) return 0;
+    let count = 0;
+    for (const order of preview.orders) {
+      const unresolvedLineWithoutSelection = (order.lines || []).some((line) => (
+        line.lineStatus === 'not_identified'
+        && !manualSelections[getLineKey(order.externalOrderId, line.lineIndex)]
+      ));
+      const hasBlockingIssue = (order.lines || []).some((line) => line.lineStatus === 'store_unmapped' || line.lineStatus === 'entity_mismatch')
+        || (order.issueCodes || []).includes('store_amount_tie');
+      if (unresolvedLineWithoutSelection || hasBlockingIssue) count += 1;
+    }
+    return count;
+  }, [manualSelections, preview]);
+
   const canConfirm = Boolean(
     preview
     && preview.summary
     && preview.summary.totalOrders > 0
-    && preview.summary.needsReviewOrders === 0
-    && preview.summary.unidentifiedLines === 0
     && preview.summary.unresolvedStoreLines === 0
+    && unresolvedSelectionCount === 0
+    && blockingOrderCount === 0
     && !confirming,
   );
 
@@ -154,13 +190,25 @@ export default function MarketplaceIntakeManager() {
         throw new Error(data.error || 'Gagal membaca file Shopee RLT.');
       }
 
+      const initialSelections = {};
+      for (const order of data.orders || []) {
+        for (const line of order.lines || []) {
+          if (line.selectedSuggestion) {
+            initialSelections[getLineKey(order.externalOrderId, line.lineIndex)] = line.selectedSuggestion;
+          }
+        }
+      }
+
       setPreview(data);
       setExpandedOrders({});
       setSearch('');
       setIssuesOnly(Boolean(data.summary?.needsReviewOrders));
+      setManualSelections(initialSelections);
+      setLineSearchQueries({});
+      setLineSearchResults({});
       setMessage({
         type: 'success',
-        text: `Preview selesai. ${fmtNumber(data.summary?.readyOrders || 0)} order siap dan ${fmtNumber(data.summary?.needsReviewOrders || 0)} perlu review.`,
+        text: `Preview selesai. ${fmtNumber(data.summary?.readyOrders || 0)} order siap, ${fmtNumber(data.summary?.needsReviewOrders || 0)} perlu review, ${fmtNumber(Object.keys(initialSelections).length)} line sudah preselect dari ingatan manual.`,
       });
     } catch (err) {
       console.error(err);
@@ -182,7 +230,17 @@ export default function MarketplaceIntakeManager() {
       const res = await fetch('/api/marketplace-intake/confirm', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preview }),
+        body: JSON.stringify({
+          preview,
+          manualSelections: Object.entries(manualSelections).map(([key, candidate]) => {
+            const [externalOrderId, lineIndexText] = key.split('::');
+            return {
+              externalOrderId,
+              lineIndex: Number(lineIndexText),
+              scalevBundleId: Number(candidate?.scalevBundleId || 0),
+            };
+          }).filter((row) => row.externalOrderId && Number.isFinite(row.lineIndex) && row.scalevBundleId > 0),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -206,6 +264,38 @@ export default function MarketplaceIntakeManager() {
       ...current,
       [orderId]: !current[orderId],
     }));
+  }
+
+  function setManualSelection(orderId, lineIndex, candidate) {
+    const key = getLineKey(orderId, lineIndex);
+    setManualSelections((current) => ({
+      ...current,
+      [key]: candidate,
+    }));
+  }
+
+  async function handleSearchBundles(orderId, lineIndex) {
+    const key = getLineKey(orderId, lineIndex);
+    const query = String(lineSearchQueries[key] || '').trim();
+    if (query.length < 2) return;
+
+    setSearchingLineKey(key);
+    try {
+      const res = await fetch(`/api/marketplace-intake/search-bundles?q=${encodeURIComponent(query)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal mencari bundle.');
+      }
+      setLineSearchResults((current) => ({
+        ...current,
+        [key]: data.results || [],
+      }));
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || 'Gagal mencari bundle.');
+    } finally {
+      setSearchingLineKey('');
+    }
   }
 
   return (
@@ -400,7 +490,7 @@ export default function MarketplaceIntakeManager() {
                   border: '1px solid rgba(245,158,11,0.24)',
                 }}
               >
-                Confirm akan aktif setelah semua line berhasil match ke bundle `custom_id` RLT dan semua store berhasil terklasifikasi tanpa ambiguity.
+                Confirm akan aktif setelah semua line unidentified punya bundle pilihan dan tidak ada issue order-level lain. Saat ini masih ada {fmtNumber(unresolvedSelectionCount)} line belum dipilih dan {fmtNumber(blockingOrderCount)} order masih blocking.
               </div>
             ) : null}
 
@@ -508,51 +598,152 @@ export default function MarketplaceIntakeManager() {
                               <div>Status</div>
                             </div>
 
-                            {(order.lines || []).map((line) => (
-                              <div
-                                key={`${order.externalOrderId}-${line.lineIndex}`}
-                                style={{
-                                  display: 'grid',
-                                  gridTemplateColumns: '170px 220px 220px 220px 120px 120px',
-                                  padding: '12px',
-                                  fontSize: 13,
-                                  borderBottom: '1px solid var(--border)',
-                                  alignItems: 'start',
-                                }}
-                              >
-                                <div>
-                                  <div style={{ fontWeight: 700 }}>{line.detectedCustomId || 'Kosong'}</div>
-                                  {line.mpVariation ? (
-                                    <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>{line.mpVariation}</div>
-                                  ) : null}
-                                </div>
-                                <div>
-                                  <div style={{ fontWeight: 700 }}>{line.mpProductName}</div>
-                                  {(line.issueCodes || []).length ? (
-                                    <div style={{ marginTop: 6, fontSize: 12, color: '#fca5a5' }}>
-                                      {(line.issueCodes || []).join(', ')}
+                            {(order.lines || []).map((line) => {
+                              const lineKey = getLineKey(order.externalOrderId, line.lineIndex);
+                              const selectedCandidate = manualSelections[lineKey] || line.selectedSuggestion || null;
+                              const searchResults = lineSearchResults[lineKey] || [];
+
+                              return (
+                                <div
+                                  key={`${order.externalOrderId}-${line.lineIndex}`}
+                                  style={{
+                                    display: 'grid',
+                                    gridTemplateColumns: '170px 220px 220px 220px 120px 120px',
+                                    padding: '12px',
+                                    fontSize: 13,
+                                    borderBottom: '1px solid var(--border)',
+                                    alignItems: 'start',
+                                  }}
+                                >
+                                  <div>
+                                    <div style={{ fontWeight: 700 }}>{line.detectedCustomId || 'Kosong'}</div>
+                                    {line.mpVariation ? (
+                                      <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>{line.mpVariation}</div>
+                                    ) : null}
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: 700 }}>{line.mpProductName}</div>
+                                    {(line.issueCodes || []).length ? (
+                                      <div style={{ marginTop: 6, fontSize: 12, color: (line.issueCodes || []).includes('remembered_manual_match') ? '#93c5fd' : '#fca5a5' }}>
+                                        {(line.issueCodes || []).join(', ')}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: 700 }}>
+                                      {selectedCandidate?.entityLabel || line.matchedEntityLabel || 'Belum match'}
                                     </div>
-                                  ) : null}
-                                </div>
-                                <div>
-                                  <div style={{ fontWeight: 700 }}>{line.matchedEntityLabel || 'Belum match'}</div>
-                                  <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>
-                                    {line.matchedEntityType || '-'}{line.matchedEntitySource ? ` • ${line.matchedEntitySource}` : ''}
+                                    <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>
+                                      {selectedCandidate?.customId || line.detectedCustomId || '-'}
+                                      {(selectedCandidate?.source || line.matchedEntitySource) ? ` • ${selectedCandidate?.source || line.matchedEntitySource}` : ''}
+                                    </div>
+
+                                    {line.lineStatus === 'not_identified' ? (
+                                      <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+                                        {(line.suggestionCandidates || []).length ? (
+                                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                            {(line.suggestionCandidates || []).map((candidate) => (
+                                              <button
+                                                key={`${lineKey}-${candidate.entityKey}`}
+                                                onClick={() => setManualSelection(order.externalOrderId, line.lineIndex, candidate)}
+                                                style={{
+                                                  padding: '6px 8px',
+                                                  borderRadius: 8,
+                                                  border: `1px solid ${selectedCandidate?.entityKey === candidate.entityKey ? '#2563eb' : 'var(--border)'}`,
+                                                  background: selectedCandidate?.entityKey === candidate.entityKey ? 'rgba(37,99,235,0.12)' : 'var(--bg)',
+                                                  color: selectedCandidate?.entityKey === candidate.entityKey ? '#93c5fd' : 'var(--text-secondary)',
+                                                  fontSize: 11,
+                                                  fontWeight: 700,
+                                                  cursor: 'pointer',
+                                                  textAlign: 'left',
+                                                }}
+                                              >
+                                                {candidate.customId || candidate.entityLabel}
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
+
+                                        <div style={{ display: 'flex', gap: 6 }}>
+                                          <input
+                                            value={lineSearchQueries[lineKey] || ''}
+                                            onChange={(event) => setLineSearchQueries((current) => ({
+                                              ...current,
+                                              [lineKey]: event.target.value,
+                                            }))}
+                                            placeholder="Cari bundle RLT…"
+                                            style={{
+                                              width: '100%',
+                                              padding: '7px 10px',
+                                              borderRadius: 8,
+                                              border: '1px solid var(--border)',
+                                              background: 'var(--card)',
+                                              color: 'var(--text)',
+                                              fontSize: 12,
+                                              outline: 'none',
+                                            }}
+                                          />
+                                          <button
+                                            onClick={() => handleSearchBundles(order.externalOrderId, line.lineIndex)}
+                                            style={{
+                                              padding: '7px 10px',
+                                              borderRadius: 8,
+                                              border: '1px solid var(--border)',
+                                              background: 'var(--bg)',
+                                              color: 'var(--text-secondary)',
+                                              fontSize: 12,
+                                              fontWeight: 700,
+                                              cursor: 'pointer',
+                                            }}
+                                          >
+                                            {searchingLineKey === lineKey ? '...' : 'Cari'}
+                                          </button>
+                                        </div>
+
+                                        {searchResults.length ? (
+                                          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                            {searchResults.map((candidate) => (
+                                              <button
+                                                key={`${lineKey}-search-${candidate.entityKey}`}
+                                                onClick={() => setManualSelection(order.externalOrderId, line.lineIndex, candidate)}
+                                                style={{
+                                                  padding: '6px 8px',
+                                                  borderRadius: 8,
+                                                  border: `1px solid ${selectedCandidate?.entityKey === candidate.entityKey ? '#2563eb' : 'var(--border)'}`,
+                                                  background: selectedCandidate?.entityKey === candidate.entityKey ? 'rgba(37,99,235,0.12)' : 'var(--bg)',
+                                                  color: selectedCandidate?.entityKey === candidate.entityKey ? '#93c5fd' : 'var(--text-secondary)',
+                                                  fontSize: 11,
+                                                  fontWeight: 700,
+                                                  cursor: 'pointer',
+                                                  textAlign: 'left',
+                                                }}
+                                              >
+                                                {candidate.customId || candidate.entityLabel}
+                                              </button>
+                                            ))}
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: 700 }}>
+                                      {selectedCandidate?.storeName || line.mappedStoreName || 'Belum termapping'}
+                                    </div>
+                                    <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>
+                                      {selectedCandidate?.classifierLabel || line.matchedRuleLabel || 'Classifier belum mengenali keluarga bundle ini'}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontWeight: 700 }}>{fmtNumber(line.quantity)} pcs</div>
+                                    <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>{fmtCurrency(line.lineSubtotal)}</div>
+                                  </div>
+                                  <div>
+                                    <StatusPill status={line.lineStatus === 'not_identified' && selectedCandidate ? 'identified' : line.lineStatus} />
                                   </div>
                                 </div>
-                                <div>
-                                  <div style={{ fontWeight: 700 }}>{line.mappedStoreName || 'Belum termapping'}</div>
-                                  <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>
-                                    {line.matchedRuleLabel || 'Classifier belum mengenali keluarga bundle ini'}
-                                  </div>
-                                </div>
-                                <div>
-                                  <div style={{ fontWeight: 700 }}>{fmtNumber(line.quantity)} pcs</div>
-                                  <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>{fmtCurrency(line.lineSubtotal)}</div>
-                                </div>
-                                <div><StatusPill status={line.lineStatus} /></div>
-                              </div>
-                            ))}
+                              );
+                            })}
                           </div>
                         </div>
                       ) : null}
