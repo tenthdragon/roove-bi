@@ -21,8 +21,8 @@ const REVIEW_STATUS_META = {
 };
 
 const WAREHOUSE_STATUS_META = {
-  staged: { label: 'Staged', color: '#94a3b8', bg: 'rgba(148,163,184,0.12)' },
-  scheduled: { label: 'Scheduled', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
+  staged: { label: 'Belum Dikirim', color: '#94a3b8', bg: 'rgba(148,163,184,0.12)' },
+  scheduled: { label: 'Shipped', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
   hold: { label: 'Hold', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
   canceled: { label: 'Canceled', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
 };
@@ -167,6 +167,7 @@ function DetailLineTable({ order }) {
         <span>Uploaded: <strong style={{ color: 'var(--text-secondary)' }}>{fmtDateTime(order.uploadedAt)}</strong></span>
         <span>Store: <strong style={{ color: 'var(--text-secondary)' }}>{order.finalStoreName || '-'}</strong></span>
         <span>Tracking: <strong style={{ color: 'var(--text-secondary)' }}>{order.trackingNumber || '-'}</strong></span>
+        <span>Updated: <strong style={{ color: 'var(--text-secondary)' }}>{fmtDateTime(order.warehouseUpdatedAt)}</strong></span>
       </div>
 
       {(order.issueCodes || []).length ? (
@@ -222,6 +223,49 @@ function DetailLineTable({ order }) {
   );
 }
 
+function groupOrdersByBatch(orders) {
+  const grouped = new Map();
+
+  for (const order of orders || []) {
+    const key = String(order.batchId || '');
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, {
+        batchId: order.batchId,
+        batchFilename: order.batchFilename,
+        uploadedAt: order.uploadedAt,
+        uploadedByEmail: order.uploadedByEmail,
+        orders: [order],
+        orderIds: [order.id],
+        totalOrders: 1,
+        totalLines: Number(order.lineCount || 0),
+        totalAmount: Number(order.orderAmount || 0),
+        statusCounts: {
+          staged: order.warehouseStatus === 'staged' ? 1 : 0,
+          scheduled: order.warehouseStatus === 'scheduled' ? 1 : 0,
+          hold: order.warehouseStatus === 'hold' ? 1 : 0,
+          canceled: order.warehouseStatus === 'canceled' ? 1 : 0,
+        },
+      });
+      continue;
+    }
+
+    existing.orders.push(order);
+    existing.orderIds.push(order.id);
+    existing.totalOrders += 1;
+    existing.totalLines += Number(order.lineCount || 0);
+    existing.totalAmount += Number(order.orderAmount || 0);
+    existing.statusCounts[order.warehouseStatus] = (existing.statusCounts[order.warehouseStatus] || 0) + 1;
+  }
+
+  return Array.from(grouped.values()).sort((left, right) => {
+    const leftTime = new Date(left.uploadedAt || 0).getTime();
+    const rightTime = new Date(right.uploadedAt || 0).getTime();
+    if (rightTime !== leftTime) return rightTime - leftTime;
+    return Number(right.batchId || 0) - Number(left.batchId || 0);
+  });
+}
+
 export default function MarketplaceIntakeManager() {
   const inputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
@@ -234,6 +278,7 @@ export default function MarketplaceIntakeManager() {
   const [search, setSearch] = useState('');
   const [issuesOnly, setIssuesOnly] = useState(false);
   const [expandedPreviewOrders, setExpandedPreviewOrders] = useState({});
+  const [expandedWorkspaceBatches, setExpandedWorkspaceBatches] = useState({});
   const [expandedWorkspaceOrders, setExpandedWorkspaceOrders] = useState({});
   const [manualSelections, setManualSelections] = useState({});
   const [lineSearchQueries, setLineSearchQueries] = useState({});
@@ -243,7 +288,6 @@ export default function MarketplaceIntakeManager() {
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState('');
   const [workspace, setWorkspace] = useState(null);
-  const [selectedStagedOrders, setSelectedStagedOrders] = useState({});
 
   function getLineKey(orderId, lineIndex) {
     return `${orderId}::${lineIndex}`;
@@ -313,19 +357,6 @@ export default function MarketplaceIntakeManager() {
     && !confirming,
   );
 
-  const selectedStagedOrderIds = useMemo(() => {
-    return Object.entries(selectedStagedOrders)
-      .filter(([, checked]) => Boolean(checked))
-      .map(([orderId]) => Number(orderId))
-      .filter((id) => Number.isFinite(id) && id > 0);
-  }, [selectedStagedOrders]);
-
-  const allVisibleStagedSelected = useMemo(() => {
-    const stagedOrders = workspace?.stagedOrders || [];
-    if (stagedOrders.length === 0) return false;
-    return stagedOrders.every((order) => Boolean(selectedStagedOrders[order.id]));
-  }, [selectedStagedOrders, workspace]);
-
   async function loadWorkspace(date) {
     const shipmentDate = String(date || getCurrentDateValue());
     setWorkspaceLoading(true);
@@ -339,12 +370,6 @@ export default function MarketplaceIntakeManager() {
       }
 
       setWorkspace(data);
-      setSelectedStagedOrders((current) => {
-        const allowed = new Set((data.stagedOrders || []).map((order) => Number(order.id)));
-        return Object.fromEntries(
-          Object.entries(current).filter(([orderId, checked]) => checked && allowed.has(Number(orderId))),
-        );
-      });
     } catch (err) {
       console.error(err);
       setWorkspace(null);
@@ -466,28 +491,18 @@ export default function MarketplaceIntakeManager() {
     }));
   }
 
+  function toggleWorkspaceBatch(batchKey) {
+    setExpandedWorkspaceBatches((current) => ({
+      ...current,
+      [batchKey]: !current[batchKey],
+    }));
+  }
+
   function setManualSelection(orderId, lineIndex, candidate) {
     const key = getLineKey(orderId, lineIndex);
     setManualSelections((current) => ({
       ...current,
       [key]: candidate,
-    }));
-  }
-
-  function toggleStagedSelection(orderId) {
-    setSelectedStagedOrders((current) => ({
-      ...current,
-      [orderId]: !current[orderId],
-    }));
-  }
-
-  function toggleSelectAllStaged() {
-    const stagedOrders = workspace?.stagedOrders || [];
-    if (stagedOrders.length === 0) return;
-    const shouldSelectAll = !allVisibleStagedSelected;
-    setSelectedStagedOrders((current) => ({
-      ...current,
-      ...Object.fromEntries(stagedOrders.map((order) => [order.id, shouldSelectAll])),
     }));
   }
 
@@ -537,7 +552,6 @@ export default function MarketplaceIntakeManager() {
         throw new Error(data.error || 'Gagal memperbarui workspace warehouse.');
       }
 
-      setSelectedStagedOrders({});
       await loadWorkspace(workspaceDate);
       setMessage({
         type: 'success',
@@ -551,8 +565,11 @@ export default function MarketplaceIntakeManager() {
     }
   }
 
-  const stagedOrders = workspace?.stagedOrders || [];
-  const shipmentOrders = workspace?.shipmentOrders || [];
+  const stagedOrders = useMemo(() => workspace?.stagedOrders || [], [workspace?.stagedOrders]);
+  const shipmentOrders = useMemo(() => workspace?.shipmentOrders || [], [workspace?.shipmentOrders]);
+  const stagedBatches = useMemo(() => groupOrdersByBatch(stagedOrders), [stagedOrders]);
+  const shipmentBatches = useMemo(() => groupOrdersByBatch(shipmentOrders), [shipmentOrders]);
+  const allStagedOrderIds = useMemo(() => stagedOrders.map((order) => Number(order.id)).filter((id) => Number.isFinite(id) && id > 0), [stagedOrders]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1057,8 +1074,8 @@ export default function MarketplaceIntakeManager() {
             marginBottom: 14,
           }}
         >
-          <SummaryCard label="Belum Dijadwalkan" value={workspace?.summary?.stagedCount || 0} tone={(workspace?.summary?.stagedCount || 0) > 0 ? 'warn' : 'default'} />
-          <SummaryCard label={`Scheduled ${fmtDateLabel(workspaceDate)}`} value={workspace?.summary?.scheduledCount || 0} tone="success" />
+          <SummaryCard label="Belum Dikirim" value={workspace?.summary?.stagedCount || 0} tone={(workspace?.summary?.stagedCount || 0) > 0 ? 'warn' : 'default'} />
+          <SummaryCard label={`Shipped ${fmtDateLabel(workspaceDate)}`} value={workspace?.summary?.scheduledCount || 0} tone="success" />
           <SummaryCard label={`Hold ${fmtDateLabel(workspaceDate)}`} value={workspace?.summary?.holdCount || 0} tone={(workspace?.summary?.holdCount || 0) > 0 ? 'warn' : 'default'} />
           <SummaryCard label={`Canceled ${fmtDateLabel(workspaceDate)}`} value={workspace?.summary?.canceledCount || 0} tone={(workspace?.summary?.canceledCount || 0) > 0 ? 'danger' : 'default'} />
         </div>
@@ -1067,144 +1084,165 @@ export default function MarketplaceIntakeManager() {
           <div style={{ display: 'grid', gap: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
               <div>
-                <div style={{ fontSize: 15, fontWeight: 800 }}>Belum Dijadwalkan</div>
+                <div style={{ fontSize: 15, fontWeight: 800 }}>Belum Dikirim</div>
                 <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                  Order di bawah ini masih pre-valid. Pilih semuanya lalu tetapkan shipment date <strong>{fmtDateLabel(workspaceDate)}</strong> jika sudah siap.
+                  Batch di bawah ini masih pre-valid. Warehouse bisa membuka detail batch untuk melihat order-order di dalamnya, lalu menandai seluruh batch atau order tertentu sebagai <strong>shipped {fmtDateLabel(workspaceDate)}</strong>.
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <ActionButton onClick={toggleSelectAllStaged}>
-                  {allVisibleStagedSelected ? 'Unselect All' : 'Select All'}
-                </ActionButton>
                 <ActionButton
                   onClick={() => applyWorkspaceAction({
-                    orderIds: selectedStagedOrderIds,
+                    orderIds: allStagedOrderIds,
                     warehouseStatus: 'scheduled',
                     shipmentDate: workspaceDate,
-                    successText: `${fmtNumber(selectedStagedOrderIds.length)} order dijadwalkan ke shipment ${fmtDateLabel(workspaceDate)}.`,
+                    successText: `${fmtNumber(allStagedOrderIds.length)} order yang belum dikirim ditandai shipped ${fmtDateLabel(workspaceDate)}.`,
                   })}
                   tone="primary"
-                  disabled={!selectedStagedOrderIds.length || Boolean(workspaceActionLoading)}
+                  disabled={!allStagedOrderIds.length || Boolean(workspaceActionLoading)}
                 >
-                  Jadwalkan ke {fmtDateLabel(workspaceDate)}
-                </ActionButton>
-                <ActionButton
-                  onClick={() => applyWorkspaceAction({
-                    orderIds: selectedStagedOrderIds,
-                    warehouseStatus: 'hold',
-                    shipmentDate: workspaceDate,
-                    successText: `${fmtNumber(selectedStagedOrderIds.length)} order ditandai hold untuk shipment ${fmtDateLabel(workspaceDate)}.`,
-                  })}
-                  tone="warn"
-                  disabled={!selectedStagedOrderIds.length || Boolean(workspaceActionLoading)}
-                >
-                  Hold Terpilih
-                </ActionButton>
-                <ActionButton
-                  onClick={() => applyWorkspaceAction({
-                    orderIds: selectedStagedOrderIds,
-                    warehouseStatus: 'canceled',
-                    shipmentDate: workspaceDate,
-                    successText: `${fmtNumber(selectedStagedOrderIds.length)} order ditandai canceled pada shipment ${fmtDateLabel(workspaceDate)}.`,
-                  })}
-                  tone="danger"
-                  disabled={!selectedStagedOrderIds.length || Boolean(workspaceActionLoading)}
-                >
-                  Cancel Terpilih
+                  Shipped Semua Staged
                 </ActionButton>
               </div>
             </div>
 
             <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 12 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1160 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
                 <thead>
                   <tr style={{ background: 'var(--bg)' }}>
-                    <th style={{ width: 46, padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'center' }}>
-                      <input type="checkbox" checked={allVisibleStagedSelected} onChange={toggleSelectAllStaged} />
-                    </th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Order MP</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Customer</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Batch / Uploaded</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Store Final</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Batch</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Uploaded</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Order</th>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Line</th>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Amount</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Status</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Ringkasan</th>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }} />
                   </tr>
                 </thead>
                 <tbody>
-                  {stagedOrders.map((order) => {
-                    const isOpen = Boolean(expandedWorkspaceOrders[`staged:${order.id}`]);
+                  {stagedBatches.map((batch) => {
+                    const batchKey = `staged-batch:${batch.batchId}`;
+                    const isBatchOpen = Boolean(expandedWorkspaceBatches[batchKey]);
                     return (
-                      <Fragment key={`staged-${order.id}`}>
+                      <Fragment key={batchKey}>
                         <tr>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'center' }}>
-                            <input
-                              type="checkbox"
-                              checked={Boolean(selectedStagedOrders[order.id])}
-                              onChange={() => toggleStagedSelection(order.id)}
-                            />
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700 }}>
+                            #{batch.batchId} • {batch.batchFilename}
                           </td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700 }}>{order.externalOrderId}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{order.customerLabel || order.recipientName || '-'}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                            <div style={{ fontWeight: 700 }}>{order.batchFilename}</div>
-                            <div style={{ color: 'var(--dim)', marginTop: 4 }}>{fmtDateTime(order.uploadedAt)}</div>
-                          </td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{order.finalStoreName || '-'}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(order.lineCount)}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtCurrency(order.orderAmount)}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
-                            <StatusPill status={order.warehouseStatus} warehouse />
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{fmtDateTime(batch.uploadedAt)}</td>
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(batch.totalOrders)}</td>
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(batch.totalLines)}</td>
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtCurrency(batch.totalAmount)}</td>
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--dim)' }}>
+                            {fmtNumber(batch.totalOrders)} order belum dikirim
                           </td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                               <ActionButton
                                 onClick={() => applyWorkspaceAction({
-                                  orderIds: [order.id],
+                                  orderIds: batch.orderIds,
                                   warehouseStatus: 'scheduled',
                                   shipmentDate: workspaceDate,
-                                  successText: `Order ${order.externalOrderId} dijadwalkan ke shipment ${fmtDateLabel(workspaceDate)}.`,
+                                  successText: `Batch #${batch.batchId} ditandai shipped ${fmtDateLabel(workspaceDate)}.`,
                                 })}
                                 tone="primary"
                                 disabled={Boolean(workspaceActionLoading)}
                               >
-                                Jadwalkan
+                                Shipped Semua
                               </ActionButton>
-                              <ActionButton
-                                onClick={() => applyWorkspaceAction({
-                                  orderIds: [order.id],
-                                  warehouseStatus: 'hold',
-                                  shipmentDate: workspaceDate,
-                                  successText: `Order ${order.externalOrderId} ditandai hold untuk shipment ${fmtDateLabel(workspaceDate)}.`,
-                                })}
-                                tone="warn"
-                                disabled={Boolean(workspaceActionLoading)}
-                              >
-                                Hold
-                              </ActionButton>
-                              <ActionButton
-                                onClick={() => applyWorkspaceAction({
-                                  orderIds: [order.id],
-                                  warehouseStatus: 'canceled',
-                                  shipmentDate: workspaceDate,
-                                  successText: `Order ${order.externalOrderId} ditandai canceled pada shipment ${fmtDateLabel(workspaceDate)}.`,
-                                })}
-                                tone="danger"
-                                disabled={Boolean(workspaceActionLoading)}
-                              >
-                                Cancel
-                              </ActionButton>
-                              <ActionButton onClick={() => toggleWorkspaceOrder(`staged:${order.id}`)}>
-                                {isOpen ? 'Hide' : 'Detail'}
+                              <ActionButton onClick={() => toggleWorkspaceBatch(batchKey)}>
+                                {isBatchOpen ? 'Hide' : 'Detail'}
                               </ActionButton>
                             </div>
                           </td>
                         </tr>
-                        {isOpen ? (
+                        {isBatchOpen ? (
                           <tr>
-                            <td colSpan={9} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
-                              <DetailLineTable order={order} />
+                            <td colSpan={7} style={{ padding: 12, borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+                              <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 940 }}>
+                                  <thead>
+                                    <tr style={{ background: 'var(--bg)' }}>
+                                      <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Order MP</th>
+                                      <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Customer</th>
+                                      <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Store Final</th>
+                                      <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Line</th>
+                                      <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Amount</th>
+                                      <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Status</th>
+                                      <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }} />
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {batch.orders.map((order) => {
+                                      const orderKey = `staged:${order.id}`;
+                                      const isOrderOpen = Boolean(expandedWorkspaceOrders[orderKey]);
+                                      return (
+                                        <Fragment key={orderKey}>
+                                          <tr>
+                                            <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700 }}>{order.externalOrderId}</td>
+                                            <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{order.customerLabel || order.recipientName || '-'}</td>
+                                            <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{order.finalStoreName || '-'}</td>
+                                            <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12 }}>{fmtNumber(order.lineCount)}</td>
+                                            <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12 }}>{fmtCurrency(order.orderAmount)}</td>
+                                            <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                              <StatusPill status={order.warehouseStatus} warehouse />
+                                            </td>
+                                            <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                              <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                                <ActionButton
+                                                  onClick={() => applyWorkspaceAction({
+                                                    orderIds: [order.id],
+                                                    warehouseStatus: 'scheduled',
+                                                    shipmentDate: workspaceDate,
+                                                    successText: `Order ${order.externalOrderId} ditandai shipped ${fmtDateLabel(workspaceDate)}.`,
+                                                  })}
+                                                  tone="primary"
+                                                  disabled={Boolean(workspaceActionLoading)}
+                                                >
+                                                  Shipped
+                                                </ActionButton>
+                                                <ActionButton
+                                                  onClick={() => applyWorkspaceAction({
+                                                    orderIds: [order.id],
+                                                    warehouseStatus: 'hold',
+                                                    shipmentDate: workspaceDate,
+                                                    successText: `Order ${order.externalOrderId} ditandai hold untuk shipment ${fmtDateLabel(workspaceDate)}.`,
+                                                  })}
+                                                  tone="warn"
+                                                  disabled={Boolean(workspaceActionLoading)}
+                                                >
+                                                  Hold
+                                                </ActionButton>
+                                                <ActionButton
+                                                  onClick={() => applyWorkspaceAction({
+                                                    orderIds: [order.id],
+                                                    warehouseStatus: 'canceled',
+                                                    shipmentDate: workspaceDate,
+                                                    successText: `Order ${order.externalOrderId} ditandai canceled pada shipment ${fmtDateLabel(workspaceDate)}.`,
+                                                  })}
+                                                  tone="danger"
+                                                  disabled={Boolean(workspaceActionLoading)}
+                                                >
+                                                  Cancel
+                                                </ActionButton>
+                                                <ActionButton onClick={() => toggleWorkspaceOrder(orderKey)}>
+                                                  {isOrderOpen ? 'Hide' : 'Detail'}
+                                                </ActionButton>
+                                              </div>
+                                            </td>
+                                          </tr>
+                                          {isOrderOpen ? (
+                                            <tr>
+                                              <td colSpan={7} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
+                                                <DetailLineTable order={order} />
+                                              </td>
+                                            </tr>
+                                          ) : null}
+                                        </Fragment>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
                             </td>
                           </tr>
                         ) : null}
@@ -1214,15 +1252,15 @@ export default function MarketplaceIntakeManager() {
 
                   {!workspaceLoading && stagedOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={9} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
-                        Tidak ada order staged. Semua upload yang sudah disimpan dan belum punya shipment date akan muncul di sini.
+                      <td colSpan={7} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
+                        Tidak ada batch yang belum dikirim. Semua upload yang sudah disimpan dan belum punya shipment date akan muncul di sini.
                       </td>
                     </tr>
                   ) : null}
 
                   {workspaceLoading ? (
                     <tr>
-                      <td colSpan={9} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
+                      <td colSpan={7} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
                         Memuat workspace warehouse...
                       </td>
                     </tr>
@@ -1234,113 +1272,157 @@ export default function MarketplaceIntakeManager() {
 
           <div style={{ display: 'grid', gap: 10 }}>
             <div>
-              <div style={{ fontSize: 15, fontWeight: 800 }}>Shipment {fmtDateLabel(workspaceDate)}</div>
+              <div style={{ fontSize: 15, fontWeight: 800 }}>Shipped {fmtDateLabel(workspaceDate)}</div>
               <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                Hanya order yang sudah memiliki shipment date <strong>{fmtDateLabel(workspaceDate)}</strong> yang muncul di bawah ini. Inilah data yang nanti valid untuk diteruskan downstream.
+                Batch yang sudah ditandai shipped untuk tanggal <strong>{fmtDateLabel(workspaceDate)}</strong> akan muncul di bawah ini. Buka batch untuk melihat order-order di dalamnya, lalu buka order jika perlu melihat line item.
               </div>
             </div>
 
             <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 12 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 1140 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
                 <thead>
                   <tr style={{ background: 'var(--bg)' }}>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Order MP</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Customer</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Batch / Uploaded</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Store Final</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Batch</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Uploaded</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Order</th>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Line</th>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Amount</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Status</th>
-                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Updated</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Ringkasan</th>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }} />
                   </tr>
                 </thead>
                 <tbody>
-                  {shipmentOrders.map((order) => {
-                    const isOpen = Boolean(expandedWorkspaceOrders[`shipment:${order.id}`]);
+                  {shipmentBatches.map((batch) => {
+                    const batchKey = `shipment-batch:${batch.batchId}`;
+                    const isBatchOpen = Boolean(expandedWorkspaceBatches[batchKey]);
                     return (
-                      <Fragment key={`shipment-${order.id}`}>
+                      <Fragment key={batchKey}>
                         <tr>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700 }}>{order.externalOrderId}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{order.customerLabel || order.recipientName || '-'}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                            <div style={{ fontWeight: 700 }}>{order.batchFilename}</div>
-                            <div style={{ color: 'var(--dim)', marginTop: 4 }}>{fmtDateTime(order.uploadedAt)}</div>
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13, fontWeight: 700 }}>
+                            #{batch.batchId} • {batch.batchFilename}
                           </td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>{order.finalStoreName || '-'}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(order.lineCount)}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtCurrency(order.orderAmount)}</td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
-                            <StatusPill status={order.warehouseStatus} warehouse />
-                          </td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                            {fmtDateTime(order.warehouseUpdatedAt)}
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{fmtDateTime(batch.uploadedAt)}</td>
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(batch.totalOrders)}</td>
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(batch.totalLines)}</td>
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtCurrency(batch.totalAmount)}</td>
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--dim)' }}>
+                            {fmtNumber(batch.statusCounts.scheduled || 0)} shipped • {fmtNumber(batch.statusCounts.hold || 0)} hold • {fmtNumber(batch.statusCounts.canceled || 0)} canceled
                           </td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                              {order.warehouseStatus !== 'scheduled' ? (
-                                <ActionButton
-                                  onClick={() => applyWorkspaceAction({
-                                    orderIds: [order.id],
-                                    warehouseStatus: 'scheduled',
-                                    shipmentDate: workspaceDate,
-                                    successText: `Order ${order.externalOrderId} dikembalikan ke scheduled ${fmtDateLabel(workspaceDate)}.`,
-                                  })}
-                                  tone="primary"
-                                  disabled={Boolean(workspaceActionLoading)}
-                                >
-                                  Scheduled
-                                </ActionButton>
-                              ) : null}
-                              {order.warehouseStatus !== 'hold' ? (
-                                <ActionButton
-                                  onClick={() => applyWorkspaceAction({
-                                    orderIds: [order.id],
-                                    warehouseStatus: 'hold',
-                                    shipmentDate: workspaceDate,
-                                    successText: `Order ${order.externalOrderId} ditandai hold untuk shipment ${fmtDateLabel(workspaceDate)}.`,
-                                  })}
-                                  tone="warn"
-                                  disabled={Boolean(workspaceActionLoading)}
-                                >
-                                  Hold
-                                </ActionButton>
-                              ) : null}
-                              {order.warehouseStatus !== 'canceled' ? (
-                                <ActionButton
-                                  onClick={() => applyWorkspaceAction({
-                                    orderIds: [order.id],
-                                    warehouseStatus: 'canceled',
-                                    shipmentDate: workspaceDate,
-                                    successText: `Order ${order.externalOrderId} ditandai canceled pada shipment ${fmtDateLabel(workspaceDate)}.`,
-                                  })}
-                                  tone="danger"
-                                  disabled={Boolean(workspaceActionLoading)}
-                                >
-                                  Cancel
-                                </ActionButton>
-                              ) : null}
-                              <ActionButton
-                                onClick={() => applyWorkspaceAction({
-                                  orderIds: [order.id],
-                                  warehouseStatus: 'staged',
-                                  shipmentDate: null,
-                                  successText: `Order ${order.externalOrderId} dikembalikan ke staging.`,
-                                })}
-                                disabled={Boolean(workspaceActionLoading)}
-                              >
-                                Reset
-                              </ActionButton>
-                              <ActionButton onClick={() => toggleWorkspaceOrder(`shipment:${order.id}`)}>
-                                {isOpen ? 'Hide' : 'Detail'}
+                              <ActionButton onClick={() => toggleWorkspaceBatch(batchKey)}>
+                                {isBatchOpen ? 'Hide' : 'Detail'}
                               </ActionButton>
                             </div>
                           </td>
                         </tr>
-                        {isOpen ? (
+                        {isBatchOpen ? (
                           <tr>
-                            <td colSpan={9} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
-                              <DetailLineTable order={order} />
+                            <td colSpan={7} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
+                              <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)' }}>
+                                <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 980 }}>
+                                    <thead>
+                                      <tr style={{ background: 'var(--bg)' }}>
+                                        <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Order MP</th>
+                                        <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Customer</th>
+                                        <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Store Final</th>
+                                        <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Line</th>
+                                        <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Amount</th>
+                                        <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Status</th>
+                                        <th style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }} />
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {batch.orders.map((order) => {
+                                        const orderKey = `shipment:${order.id}`;
+                                        const isOrderOpen = Boolean(expandedWorkspaceOrders[orderKey]);
+                                        return (
+                                          <Fragment key={orderKey}>
+                                            <tr>
+                                              <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12, fontWeight: 700 }}>{order.externalOrderId}</td>
+                                              <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{order.customerLabel || order.recipientName || '-'}</td>
+                                              <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{order.finalStoreName || '-'}</td>
+                                              <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12 }}>{fmtNumber(order.lineCount)}</td>
+                                              <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12 }}>{fmtCurrency(order.orderAmount)}</td>
+                                              <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                                <StatusPill status={order.warehouseStatus} warehouse />
+                                              </td>
+                                              <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                                                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                                                  {order.warehouseStatus !== 'scheduled' ? (
+                                                    <ActionButton
+                                                      onClick={() => applyWorkspaceAction({
+                                                        orderIds: [order.id],
+                                                        warehouseStatus: 'scheduled',
+                                                        shipmentDate: workspaceDate,
+                                                        successText: `Order ${order.externalOrderId} ditandai shipped ${fmtDateLabel(workspaceDate)}.`,
+                                                      })}
+                                                      tone="primary"
+                                                      disabled={Boolean(workspaceActionLoading)}
+                                                    >
+                                                      Shipped
+                                                    </ActionButton>
+                                                  ) : null}
+                                                  {order.warehouseStatus !== 'hold' ? (
+                                                    <ActionButton
+                                                      onClick={() => applyWorkspaceAction({
+                                                        orderIds: [order.id],
+                                                        warehouseStatus: 'hold',
+                                                        shipmentDate: workspaceDate,
+                                                        successText: `Order ${order.externalOrderId} ditandai hold untuk shipment ${fmtDateLabel(workspaceDate)}.`,
+                                                      })}
+                                                      tone="warn"
+                                                      disabled={Boolean(workspaceActionLoading)}
+                                                    >
+                                                      Hold
+                                                    </ActionButton>
+                                                  ) : null}
+                                                  {order.warehouseStatus !== 'canceled' ? (
+                                                    <ActionButton
+                                                      onClick={() => applyWorkspaceAction({
+                                                        orderIds: [order.id],
+                                                        warehouseStatus: 'canceled',
+                                                        shipmentDate: workspaceDate,
+                                                        successText: `Order ${order.externalOrderId} ditandai canceled pada shipment ${fmtDateLabel(workspaceDate)}.`,
+                                                      })}
+                                                      tone="danger"
+                                                      disabled={Boolean(workspaceActionLoading)}
+                                                    >
+                                                      Cancel
+                                                    </ActionButton>
+                                                  ) : null}
+                                                  <ActionButton
+                                                    onClick={() => applyWorkspaceAction({
+                                                      orderIds: [order.id],
+                                                      warehouseStatus: 'staged',
+                                                      shipmentDate: null,
+                                                      successText: `Order ${order.externalOrderId} dikembalikan ke staging.`,
+                                                    })}
+                                                    disabled={Boolean(workspaceActionLoading)}
+                                                  >
+                                                    Reset
+                                                  </ActionButton>
+                                                  <ActionButton onClick={() => toggleWorkspaceOrder(orderKey)}>
+                                                    {isOrderOpen ? 'Hide' : 'Detail'}
+                                                  </ActionButton>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                            {isOrderOpen ? (
+                                              <tr>
+                                                <td colSpan={7} style={{ padding: 0, borderBottom: '1px solid var(--border)' }}>
+                                                  <DetailLineTable order={order} />
+                                                </td>
+                                              </tr>
+                                            ) : null}
+                                          </Fragment>
+                                        );
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
                             </td>
                           </tr>
                         ) : null}
@@ -1350,8 +1432,8 @@ export default function MarketplaceIntakeManager() {
 
                   {!workspaceLoading && shipmentOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={9} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
-                        Belum ada order dengan shipment date {fmtDateLabel(workspaceDate)}.
+                      <td colSpan={7} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
+                        Belum ada batch yang ditandai shipped untuk tanggal {fmtDateLabel(workspaceDate)}.
                       </td>
                     </tr>
                   ) : null}
