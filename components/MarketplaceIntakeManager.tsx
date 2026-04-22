@@ -579,7 +579,7 @@ export default function MarketplaceIntakeManager() {
             <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Upload Shopee RLT</div>
             <div style={{ fontSize: 13, color: 'var(--dim)', maxWidth: 840, lineHeight: 1.6 }}>
               Halaman ini hanya membaca export <strong>Shopee RLT</strong>. File yang namanya mengandung <strong>SPX</strong> tetap diperlakukan sebagai Shopee.
-              App akan match exact <strong>SKU Excel</strong> ke <strong>bundle custom_id</strong> di business <strong>RLT</strong>, lalu mengklasifikasikan store secara langsung berdasarkan keluarga bundle tersebut.
+              App akan match exact <strong>SKU Excel</strong> ke <strong>bundle custom_id</strong> di business <strong>RLT</strong>, lalu mengisi store langsung dari <strong>custom_id</strong> yang sudah match exact.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -714,7 +714,7 @@ export default function MarketplaceIntakeManager() {
               <div>
                 <div style={{ fontSize: 16, fontWeight: 800 }}>Preview Mapping</div>
                 <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • classifier opinionated Shopee RLT → RLT
+                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • exact custom_id match Shopee RLT → RLT
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>

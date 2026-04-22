@@ -1,35 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { classifyShopeeRltStoreByCustomId } from '@/lib/marketplace-intake-store';
 import { createServiceSupabase } from '@/lib/service-supabase';
-
-function normalizeIdentifier(value: string | null | undefined): string {
-  return String(value || '')
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ');
-}
-
-function normalizeLoose(value: string | null | undefined): string {
-  return String(value || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '');
-}
-
-function classifyShopeeRltStore(customId: string | null, label: string | null) {
-  const normalizedCustomId = normalizeLoose(customId);
-  const normalizedLabel = normalizeIdentifier(label);
-  if (normalizedCustomId.startsWith('rov') || normalizedLabel.includes('roove')) return 'Roove Main Store - Marketplace';
-  if (normalizedCustomId.startsWith('glb') || normalizedLabel.includes('globite')) return 'Globite Store - Marketplace';
-  if (normalizedCustomId.startsWith('plv') || normalizedLabel.includes('pluve')) return 'Pluve Main Store - Marketplace';
-  if (normalizedCustomId.startsWith('ogd') || normalizedLabel.includes('osgard')) return 'Osgard Oil Store';
-  if (normalizedCustomId.startsWith('srt') || normalizedLabel.includes('secret')) return 'Purvu The Secret Store - Markerplace';
-  if (normalizedCustomId.startsWith('pam') || normalizedLabel.includes('purvu')) return 'Purvu Store - Marketplace';
-  if (normalizedCustomId.startsWith('yuv') || normalizedLabel.includes('yuv')) return 'YUV Deodorant Serum Store - Marketplace';
-  if (normalizedCustomId.startsWith('drh') || normalizedLabel.includes('drhyun') || normalizedLabel.includes('dr hyun')) return 'drHyun Main Store - Marketplace';
-  if (normalizedCustomId.startsWith('clm') || normalizedCustomId.startsWith('cal') || normalizedLabel.includes('calmara')) return 'Calmara Main Store - Marketplace';
-  return null;
-}
 
 export async function GET(req: NextRequest) {
   try {
@@ -73,7 +45,7 @@ export async function GET(req: NextRequest) {
         entityLabel: label,
         customId: bundle.custom_id || null,
         scalevBundleId: Number(bundle.scalev_bundle_id || 0),
-        storeName: classifyShopeeRltStore(bundle.custom_id || null, label),
+        storeName: classifyShopeeRltStoreByCustomId(bundle.custom_id || null).storeName,
         classifierLabel: 'Manual search',
         score: 0,
         source: 'manual',

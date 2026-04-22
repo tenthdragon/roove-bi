@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
 import * as XLSX from 'xlsx';
 import { createServiceSupabase } from './service-supabase';
+import { classifyShopeeRltStoreByCustomId } from './marketplace-intake-store';
 
 const SHOPEE_RLT_SOURCE = {
   id: null as number | null,
@@ -633,11 +634,7 @@ function buildSuggestionCandidateFromBundle(
   source: 'remembered' | 'catalog' | 'manual',
   score: number,
 ): MarketplaceIntakeSuggestionCandidate {
-  const classifier = classifyShopeeRltStore({
-    customId: bundle.custom_id,
-    entityLabel: getBundleDisplayLabel(bundle),
-    productName: getBundleDisplayLabel(bundle),
-  });
+  const classifier = classifyShopeeRltStoreByCustomId(bundle.custom_id);
 
   return {
     entityKey: `bundle:${bundle.scalev_bundle_id}`,
@@ -690,11 +687,7 @@ function scoreBundleCandidateForLine(line: CanonicalLine, bundle: BundleCatalogR
     score -= comboCount * 40;
   }
 
-  const bundleStore = classifyShopeeRltStore({
-    customId: bundle.custom_id,
-    entityLabel: getBundleDisplayLabel(bundle),
-    productName: line.productName,
-  }).storeName;
+  const bundleStore = classifyShopeeRltStoreByCustomId(bundle.custom_id).storeName;
   if (bundleStore === 'Roove Main Store - Marketplace' && normalizeIdentifier(line.productName).includes('roove')) score += 80;
   if (bundleStore === 'Purvu The Secret Store - Markerplace' && normalizeIdentifier(line.productName).includes('secret')) score += 80;
 
@@ -802,78 +795,6 @@ function resolveBundleIdentifierForSku(
   const distinctEntityKeys = Array.from(new Set(rows.map((row) => row.entity_key)));
   if (distinctEntityKeys.length === 1) return { status: 'matched', row: rows[0] };
   return { status: 'ambiguous', rows };
-}
-
-function classifyShopeeRltStore(input: {
-  customId: string | null;
-  entityLabel: string | null;
-  productName: string | null;
-}): {
-  storeName: string | null;
-  classifierLabel: string | null;
-} {
-  const customId = normalizeLoose(input.customId);
-  const label = normalizeIdentifier([input.entityLabel, input.productName].filter(Boolean).join(' '));
-
-  if (customId.startsWith('rov') || label.includes('roove')) {
-    return {
-      storeName: 'Roove Main Store - Marketplace',
-      classifierLabel: 'Classifier: ROV / Roove',
-    };
-  }
-  if (customId.startsWith('glb') || label.includes('globite')) {
-    return {
-      storeName: 'Globite Store - Marketplace',
-      classifierLabel: 'Classifier: GLB / Globite',
-    };
-  }
-  if (customId.startsWith('plv') || label.includes('pluve')) {
-    return {
-      storeName: 'Pluve Main Store - Marketplace',
-      classifierLabel: 'Classifier: PLV / Pluve',
-    };
-  }
-  if (customId.startsWith('ogd') || label.includes('osgard')) {
-    return {
-      storeName: 'Osgard Oil Store',
-      classifierLabel: 'Classifier: OGD / Osgard',
-    };
-  }
-  if (customId.startsWith('srt') || label.includes('the secret') || (label.includes('purvu') && label.includes('secret'))) {
-    return {
-      storeName: 'Purvu The Secret Store - Markerplace',
-      classifierLabel: 'Classifier: SRT / Purvu Secret',
-    };
-  }
-  if (customId.startsWith('pam') || (label.includes('purvu') && !label.includes('secret'))) {
-    return {
-      storeName: 'Purvu Store - Marketplace',
-      classifierLabel: 'Classifier: PAM / Purvu',
-    };
-  }
-  if (customId.startsWith('yuv') || label.includes('yuv')) {
-    return {
-      storeName: 'YUV Deodorant Serum Store - Marketplace',
-      classifierLabel: 'Classifier: YUV',
-    };
-  }
-  if (customId.startsWith('drh') || label.includes('drhyun') || label.includes('dr hyun')) {
-    return {
-      storeName: 'drHyun Main Store - Marketplace',
-      classifierLabel: 'Classifier: DRH / drHyun',
-    };
-  }
-  if (customId.startsWith('clm') || customId.startsWith('cal') || label.includes('calmara')) {
-    return {
-      storeName: 'Calmara Main Store - Marketplace',
-      classifierLabel: 'Classifier: CAL / Calmara',
-    };
-  }
-
-  return {
-    storeName: null,
-    classifierLabel: null,
-  };
 }
 
 function buildOrderCustomerLabel(order: CanonicalOrder): string | null {
@@ -1064,11 +985,7 @@ function classifyOrder(
       score: 9999,
       source: 'catalog',
     };
-    const storeClassification = classifyShopeeRltStore({
-      customId: match.identifier,
-      entityLabel: match.entity_label,
-      productName: line.productName,
-    });
+    const storeClassification = classifyShopeeRltStoreByCustomId(match.identifier);
     directCandidate.storeName = storeClassification.storeName;
     directCandidate.classifierLabel = storeClassification.classifierLabel;
 
