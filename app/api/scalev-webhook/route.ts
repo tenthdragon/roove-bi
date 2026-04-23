@@ -664,6 +664,10 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     synced_at: new Date().toISOString(),
   };
 
+  if (existing.order_id !== orderId) {
+    updateData.order_id = orderId;
+  }
+
   const timestampFields = [
     'draft_time', 'pending_time', 'confirmed_time',
     'paid_time', 'shipped_time', 'completed_time', 'canceled_time',
@@ -892,6 +896,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     raw_data: data,
   };
 
+  if (existing.order_id !== orderId) updateData.order_id = orderId;
   if (data.status) updateData.status = data.status;
   if (data.external_id) updateData.external_id = data.external_id;
   if (storeName) updateData.store_name = storeName;
