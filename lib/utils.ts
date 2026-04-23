@@ -299,6 +299,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'ppic',           label: 'PPIC',               icon: 'ClipboardList', group: 'Main Menu' },
   { id: 'warehouse',      label: 'Warehouse',          icon: 'Warehouse', group: 'Main Menu', children: [
     { id: 'warehouse-settings', label: 'Warehouse Settings', icon: 'Wrench' },
+    { id: 'marketplace-intake', label: 'Marketplace Intake', icon: 'Inbox', ownerOnly: true },
   ]},
   // Analysis
   { id: 'pulse',           label: 'Business Pulse',     icon: 'Activity', group: 'Analysis' },
@@ -306,7 +307,6 @@ export const ALL_TABS: TabDef[] = [
   { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers', group: 'Analysis' },
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign', group: 'Analysis' },
   // Ungrouped (bottom)
-  { id: 'marketplace-intake', label: 'Marketplace Intake', icon: 'Inbox', ownerOnly: true },
   { id: 'business-settings', label: 'Business Settings', icon: 'Building2', ownerOnly: true },
   { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true },
 ];
