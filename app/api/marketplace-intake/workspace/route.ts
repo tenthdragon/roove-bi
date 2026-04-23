@@ -22,7 +22,8 @@ export async function GET(req: NextRequest) {
     }
 
     const shipmentDate = String(req.nextUrl.searchParams.get('shipmentDate') || getCurrentDateValue());
-    const result = await listMarketplaceIntakeWorkspace({ shipmentDate });
+    const sourceKey = String(req.nextUrl.searchParams.get('sourceKey') || '').trim() || null;
+    const result = await listMarketplaceIntakeWorkspace({ shipmentDate, sourceKey });
     return NextResponse.json(result);
   } catch (error: any) {
     console.error('Marketplace intake workspace error:', error);

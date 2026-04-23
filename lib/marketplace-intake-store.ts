@@ -6,18 +6,6 @@ const STORE_LINK_CACHE_MAX_AGE_MS = 12 * 60 * 60 * 1000;
 const SCALEV_MAX_RETRIES = 4;
 const SCALEV_RETRY_BASE_MS = 1500;
 
-export const SHOPEE_RLT_ALLOWED_STORE_NAMES = [
-  'Roove Main Store - Marketplace',
-  'Globite Store - Marketplace',
-  'Pluve Main Store - Marketplace',
-  'Purvu Store - Marketplace',
-  'Purvu The Secret Store - Markerplace',
-  'YUV Deodorant Serum Store - Marketplace',
-  'Osgard Oil Store',
-  'drHyun Main Store - Marketplace',
-  'Calmara Main Store - Marketplace',
-];
-
 type IntakeBusiness = {
   id: number;
   business_code: string;
@@ -88,9 +76,13 @@ function normalizeReadable(value: string | null | undefined): string {
     .trim();
 }
 
-const SHOPEE_RLT_STORE_ALIASES: Array<{ storeName: string; aliases: string[] }> = [
+const MARKETPLACE_STORE_ALIASES: Array<{ storeName: string; aliases: string[] }> = [
   {
     storeName: 'Purvu The Secret Store - Markerplace',
+    aliases: ['purvu the secret', 'the secret'],
+  },
+  {
+    storeName: 'Purvu The Secret Store',
     aliases: ['purvu the secret', 'the secret'],
   },
   {
@@ -110,6 +102,10 @@ const SHOPEE_RLT_STORE_ALIASES: Array<{ storeName: string; aliases: string[] }> 
     aliases: ['purvu'],
   },
   {
+    storeName: 'Purvu Store',
+    aliases: ['purvu'],
+  },
+  {
     storeName: 'YUV Deodorant Serum Store - Marketplace',
     aliases: ['yuv deodorant serum', 'yuv'],
   },
@@ -119,17 +115,25 @@ const SHOPEE_RLT_STORE_ALIASES: Array<{ storeName: string; aliases: string[] }> 
   },
   {
     storeName: 'drHyun Main Store - Marketplace',
-    aliases: ['drhyun'],
+    aliases: ['drhyun', 'dr hyun'],
+  },
+  {
+    storeName: 'drHyun Main Store',
+    aliases: ['drhyun', 'dr hyun'],
   },
   {
     storeName: 'Calmara Main Store - Marketplace',
     aliases: ['calmara'],
   },
+  {
+    storeName: 'Calmara Main Store',
+    aliases: ['calmara'],
+  },
 ];
 
-export function guessShopeeRltStoreFromTexts(
+export function guessMarketplaceStoreFromTexts(
   texts: Array<string | null | undefined>,
-  allowedStoreNames: string[] = SHOPEE_RLT_ALLOWED_STORE_NAMES,
+  allowedStoreNames: string[] = [],
 ): GuessedStoreResolution {
   const allowed = new Set(allowedStoreNames);
   const haystack = normalizeReadable(texts.filter(Boolean).join(' '));
@@ -142,7 +146,7 @@ export function guessShopeeRltStoreFromTexts(
     };
   }
 
-  const matches = SHOPEE_RLT_STORE_ALIASES
+  const matches = MARKETPLACE_STORE_ALIASES
     .filter((entry) => allowed.has(entry.storeName))
     .map((entry) => ({
       storeName: entry.storeName,
@@ -197,6 +201,8 @@ export function guessShopeeRltStoreFromTexts(
     resolution: 'ambiguous',
   };
 }
+
+export const guessShopeeRltStoreFromTexts = guessMarketplaceStoreFromTexts;
 
 function isMissingTableError(error: any): boolean {
   const code = String(error?.code || '');

@@ -2,18 +2,12 @@ import { createHash } from 'crypto';
 import * as XLSX from 'xlsx';
 import { createServiceSupabase } from './service-supabase';
 import {
-  guessShopeeRltStoreFromTexts,
-  SHOPEE_RLT_ALLOWED_STORE_NAMES,
+  guessMarketplaceStoreFromTexts,
 } from './marketplace-intake-store';
-
-const SHOPEE_RLT_SOURCE = {
-  id: null as number | null,
-  sourceKey: 'shopee_rlt',
-  sourceLabel: 'Shopee RLT',
-  platform: 'shopee' as const,
-  businessCode: 'RLT',
-  allowedStores: SHOPEE_RLT_ALLOWED_STORE_NAMES,
-};
+import {
+  getMarketplaceIntakeSourceConfig,
+  type MarketplaceIntakeSourceConfig,
+} from './marketplace-intake-sources';
 
 type SheetRow = Record<string, unknown>;
 
@@ -612,12 +606,56 @@ function getMissingSchemaMessage() {
   return 'Schema marketplace intake atau katalog Scalev belum lengkap. Jalankan migration intake terbaru dan sync katalog Scalev terlebih dahulu.';
 }
 
-async function loadRltBusiness(): Promise<BusinessRow> {
+function extractMissingSchemaColumnName(error: any, tableName: string): string | null {
+  const message = String(error?.message || '');
+  const pattern = new RegExp(`Could not find the '([^']+)' column of '${tableName}' in the schema cache`, 'i');
+  const match = message.match(pattern);
+  return match?.[1] ? String(match[1]) : null;
+}
+
+async function insertRowsWithSchemaFallback<T extends Record<string, any>>(input: {
+  table: string;
+  rows: T[];
+  removableColumns: string[];
+  select?: string;
+}) {
+  const svc = createServiceSupabase();
+  const removable = new Set(input.removableColumns);
+  const removed = new Set<string>();
+  let rows = input.rows.map((row) => ({ ...row }));
+
+  while (true) {
+    let query: any = svc.from(input.table).insert(rows);
+    if (input.select) {
+      query = query.select(input.select);
+    }
+
+    const result = await query;
+    if (!result.error) return result;
+
+    const missingColumn = extractMissingSchemaColumnName(result.error, input.table);
+    if (!missingColumn || !removable.has(missingColumn) || removed.has(missingColumn)) {
+      if (isMissingTableError(result.error)) {
+        throw new Error(getMissingSchemaMessage());
+      }
+      throw result.error;
+    }
+
+    rows = rows.map((row) => {
+      const next = { ...row };
+      delete next[missingColumn];
+      return next;
+    });
+    removed.add(missingColumn);
+  }
+}
+
+async function loadBusinessForSource(source: MarketplaceIntakeSourceConfig): Promise<BusinessRow> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id, business_code, business_name, api_key, is_active')
-    .eq('business_code', SHOPEE_RLT_SOURCE.businessCode)
+    .eq('business_code', source.businessCode)
     .maybeSingle();
 
   if (error) {
@@ -625,7 +663,7 @@ async function loadRltBusiness(): Promise<BusinessRow> {
     throw error;
   }
   if (!data) {
-    throw new Error('Business RLT tidak ditemukan di konfigurasi Scalev.');
+    throw new Error(`Business ${source.businessCode} tidak ditemukan di konfigurasi Scalev.`);
   }
 
   return data as BusinessRow;
@@ -667,7 +705,7 @@ async function loadBundleIdentifierLookup(businessId: number, normalizedIdentifi
   return lookup;
 }
 
-async function loadRltBundleCatalog(businessId: number): Promise<BundleCatalogRow[]> {
+async function loadBundleCatalog(businessId: number): Promise<BundleCatalogRow[]> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_catalog_bundles')
@@ -683,7 +721,10 @@ async function loadRltBundleCatalog(businessId: number): Promise<BundleCatalogRo
   return (data || []) as BundleCatalogRow[];
 }
 
-async function loadManualMemoryMap(businessId: number): Promise<Map<string, ManualMemoryRow>> {
+async function loadManualMemoryMap(
+  businessId: number,
+  source: MarketplaceIntakeSourceConfig,
+): Promise<Map<string, ManualMemoryRow>> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('marketplace_intake_manual_memory')
@@ -700,7 +741,7 @@ async function loadManualMemoryMap(businessId: number): Promise<Map<string, Manu
       usage_count,
       is_active
     `)
-    .eq('source_key', SHOPEE_RLT_SOURCE.sourceKey)
+    .eq('source_key', source.sourceKey)
     .eq('business_id', businessId)
     .eq('is_active', true);
 
@@ -730,6 +771,7 @@ function getBundleDisplayLabel(bundle: Pick<BundleCatalogRow, 'display' | 'publi
 
 async function buildSuggestionCandidateFromBundle(
   bundle: BundleCatalogRow,
+  sourceConfig: MarketplaceIntakeSourceConfig,
   source: 'remembered' | 'catalog' | 'manual',
   score: number,
   options?: {
@@ -739,7 +781,7 @@ async function buildSuggestionCandidateFromBundle(
   },
 ): Promise<MarketplaceIntakeSuggestionCandidate> {
   const normalizedPreferredStore = String(options?.preferredStoreName || '').trim();
-  if (normalizedPreferredStore && SHOPEE_RLT_SOURCE.allowedStores.includes(normalizedPreferredStore)) {
+  if (normalizedPreferredStore && sourceConfig.allowedStores.includes(normalizedPreferredStore)) {
     return {
       entityKey: `bundle:${bundle.scalev_bundle_id}`,
       entityLabel: getBundleDisplayLabel(bundle),
@@ -753,14 +795,14 @@ async function buildSuggestionCandidateFromBundle(
     };
   }
 
-  const guessedStore = guessShopeeRltStoreFromTexts(
+  const guessedStore = guessMarketplaceStoreFromTexts(
     [
       bundle.display,
       bundle.public_name,
       bundle.name,
       ...(options?.textHints || []),
     ],
-    SHOPEE_RLT_SOURCE.allowedStores,
+    sourceConfig.allowedStores,
   );
   const fallbackStoreCandidates = Array.from(new Set((options?.fallbackStoreCandidates || []).filter(Boolean)));
   const resolvedStoreCandidates = guessedStore.storeCandidates.length > 0
@@ -828,6 +870,7 @@ async function buildSuggestionCandidates(
   line: CanonicalLine,
   bundleCatalog: BundleCatalogRow[],
   remembered: ManualMemoryRow | null,
+  sourceConfig: MarketplaceIntakeSourceConfig,
 ): Promise<{
   suggestions: MarketplaceIntakeSuggestionCandidate[];
   selected: MarketplaceIntakeSuggestionCandidate | null;
@@ -841,12 +884,13 @@ async function buildSuggestionCandidates(
     if (rememberedBundle) {
       const candidate = await buildSuggestionCandidateFromBundle(
         rememberedBundle,
+        sourceConfig,
         'remembered',
         10000,
         {
           preferredStoreName: remembered.mapped_store_name || null,
           textHints: [line.productName, line.variation],
-          fallbackStoreCandidates: SHOPEE_RLT_SOURCE.allowedStores,
+          fallbackStoreCandidates: sourceConfig.allowedStores,
         },
       );
       suggestions.push(candidate);
@@ -867,11 +911,12 @@ async function buildSuggestionCandidates(
   for (const entry of ranked) {
     const candidate = await buildSuggestionCandidateFromBundle(
       entry.bundle,
+      sourceConfig,
       'catalog',
       entry.score,
       {
         textHints: [line.productName, line.variation],
-        fallbackStoreCandidates: SHOPEE_RLT_SOURCE.allowedStores,
+        fallbackStoreCandidates: sourceConfig.allowedStores,
       },
     );
     if (seen.has(candidate.entityKey)) continue;
@@ -1098,6 +1143,7 @@ async function classifyOrder(
   bundleCatalog: BundleCatalogRow[],
   manualMemoryMap: Map<string, ManualMemoryRow>,
   business: BusinessRow,
+  sourceConfig: MarketplaceIntakeSourceConfig,
 ): Promise<MarketplaceIntakePreviewOrder> {
   const issueCodes = new Set<string>();
 
@@ -1110,6 +1156,7 @@ async function classifyOrder(
         line,
         bundleCatalog,
         manualMemoryMap.get(matchSignature) || null,
+        sourceConfig,
       );
       if (selected && selected.storeName) {
         lines.push(buildLineFromBundleCandidate(line, index, selected, 'remembered'));
@@ -1152,6 +1199,7 @@ async function classifyOrder(
         line,
         bundleCatalog,
         manualMemoryMap.get(matchSignature) || null,
+        sourceConfig,
       );
       if (selected && selected.storeName) {
         lines.push(buildLineFromBundleCandidate(line, index, selected, 'remembered'));
@@ -1200,15 +1248,16 @@ async function classifyOrder(
     };
     const directCandidate = await buildSuggestionCandidateFromBundle(
       matchedBundle,
+      sourceConfig,
       'catalog',
       9999,
       {
         textHints: [line.productName, line.variation],
-        fallbackStoreCandidates: SHOPEE_RLT_SOURCE.allowedStores,
+        fallbackStoreCandidates: sourceConfig.allowedStores,
       },
     );
 
-    if (!directCandidate.storeName || !SHOPEE_RLT_SOURCE.allowedStores.includes(directCandidate.storeName)) {
+    if (!directCandidate.storeName || !sourceConfig.allowedStores.includes(directCandidate.storeName)) {
       issueCodes.add('store_classifier_missing');
       lines.push({
         lineIndex: index,
@@ -1274,22 +1323,24 @@ function buildPreviewSummary(orders: MarketplaceIntakePreviewOrder[]): Marketpla
   };
 }
 
-export async function previewShopeeRltIntake(input: {
+export async function previewMarketplaceIntake(input: {
   file: File;
   filenameOverride?: string | null;
+  sourceKey?: string | null;
 }): Promise<MarketplaceIntakePreview> {
-  const business = await loadRltBusiness();
+  const sourceConfig = getMarketplaceIntakeSourceConfig(input.sourceKey);
+  const business = await loadBusinessForSource(sourceConfig);
   const { orders, rowCount, headers } = await parseShopeeWorkbook(input.file);
   const sourceOrderDate = inferSourceOrderDate(orders);
   const fingerprint = buildPreviewFingerprint({
-    sourceKey: SHOPEE_RLT_SOURCE.sourceKey,
+    sourceKey: sourceConfig.sourceKey,
     businessCode: business.business_code,
     sourceOrderDate,
     orders,
   });
   const [bundleCatalog, manualMemoryMap] = await Promise.all([
-    loadRltBundleCatalog(business.id),
-    loadManualMemoryMap(business.id),
+    loadBundleCatalog(business.id),
+    loadManualMemoryMap(business.id, sourceConfig),
   ]);
 
   const normalizedIdentifiers = Array.from(new Set(
@@ -1301,20 +1352,20 @@ export async function previewShopeeRltIntake(input: {
 
   const previewOrders: MarketplaceIntakePreviewOrder[] = [];
   for (const order of orders) {
-    previewOrders.push(await classifyOrder(order, identifierLookup, bundleCatalog, manualMemoryMap, business));
+    previewOrders.push(await classifyOrder(order, identifierLookup, bundleCatalog, manualMemoryMap, business, sourceConfig));
   }
   previewOrders.sort((left, right) => left.externalOrderId.localeCompare(right.externalOrderId));
 
   return {
     source: {
-      id: SHOPEE_RLT_SOURCE.id,
-      sourceKey: SHOPEE_RLT_SOURCE.sourceKey,
-      sourceLabel: SHOPEE_RLT_SOURCE.sourceLabel,
-      platform: SHOPEE_RLT_SOURCE.platform,
+      id: sourceConfig.id,
+      sourceKey: sourceConfig.sourceKey,
+      sourceLabel: sourceConfig.sourceLabel,
+      platform: sourceConfig.platform,
       businessId: business.id,
       businessCode: business.business_code,
     },
-    filename: String(input.filenameOverride || input.file.name || 'shopee-rlt-upload'),
+    filename: String(input.filenameOverride || input.file.name || `${sourceConfig.sourceKey}-upload`),
     sourceOrderDate,
     sourceHeaders: headers,
     fingerprint,
@@ -1326,22 +1377,30 @@ export async function previewShopeeRltIntake(input: {
   };
 }
 
+export async function previewShopeeRltIntake(input: {
+  file: File;
+  filenameOverride?: string | null;
+}): Promise<MarketplaceIntakePreview> {
+  return previewMarketplaceIntake({ ...input, sourceKey: 'shopee_rlt' });
+}
+
 export async function saveMarketplaceIntakePreview(input: {
   preview: MarketplaceIntakePreview;
   uploadedByEmail: string | null;
   manualSelections?: MarketplaceIntakeManualSelectionInput[];
 }) {
-  const business = await loadRltBusiness();
   const preview = input.preview;
+  const sourceConfig = getMarketplaceIntakeSourceConfig(preview?.source?.sourceKey);
+  const business = await loadBusinessForSource(sourceConfig);
 
-  if (!preview?.source || preview.source.sourceKey !== SHOPEE_RLT_SOURCE.sourceKey) {
-    throw new Error('Preview intake tidak valid untuk Shopee RLT.');
+  if (!preview?.source || preview.source.sourceKey !== sourceConfig.sourceKey) {
+    throw new Error(`Preview intake tidak valid untuk ${sourceConfig.sourceLabel}.`);
   }
   if (Number(preview.source.businessId || 0) !== business.id) {
     throw new Error('Business preview berubah. Refresh preview lalu coba simpan lagi.');
   }
 
-  const bundleCatalog = await loadRltBundleCatalog(business.id);
+  const bundleCatalog = await loadBundleCatalog(business.id);
   const bundleById = new Map<number, BundleCatalogRow>(bundleCatalog.map((bundle) => [bundle.scalev_bundle_id, bundle]));
   const selectionMap = new Map<string, MarketplaceIntakeManualSelectionInput>();
   for (const selection of input.manualSelections || []) {
@@ -1359,15 +1418,16 @@ export async function saveMarketplaceIntakePreview(input: {
 
       const candidate = await buildSuggestionCandidateFromBundle(
         bundle,
+        sourceConfig,
         'manual',
         99999,
         {
           preferredStoreName: selection.mappedStoreName || null,
           textHints: [line.mpProductName, line.mpVariation],
-          fallbackStoreCandidates: SHOPEE_RLT_SOURCE.allowedStores,
+          fallbackStoreCandidates: sourceConfig.allowedStores,
         },
       );
-      if (!candidate.storeName || !SHOPEE_RLT_SOURCE.allowedStores.includes(candidate.storeName)) return line;
+      if (!candidate.storeName || !sourceConfig.allowedStores.includes(candidate.storeName)) return line;
 
       return buildLineFromBundleCandidate({
         sku: line.mpSku,
@@ -1513,7 +1573,7 @@ export async function saveMarketplaceIntakePreview(input: {
   const duplicateRes = await createServiceSupabase()
     .from('marketplace_intake_batches')
     .select('id')
-    .eq('source_key', SHOPEE_RLT_SOURCE.sourceKey)
+    .eq('source_key', sourceConfig.sourceKey)
     .eq('business_code', business.business_code)
     .eq('batch_fingerprint', fingerprint)
     .maybeSingle();
@@ -1528,9 +1588,9 @@ export async function saveMarketplaceIntakePreview(input: {
   const svc = createServiceSupabase();
   const batchInsert = {
     source_id: null,
-    source_key: SHOPEE_RLT_SOURCE.sourceKey,
-    source_label: SHOPEE_RLT_SOURCE.sourceLabel,
-    platform: SHOPEE_RLT_SOURCE.platform,
+    source_key: sourceConfig.sourceKey,
+    source_label: sourceConfig.sourceLabel,
+    platform: sourceConfig.platform,
     business_id: business.id,
     business_code: business.business_code,
     filename: preview.filename,
@@ -1566,7 +1626,10 @@ export async function saveMarketplaceIntakePreview(input: {
   }
 
   const batchId = Number(batchRes.data.id);
-  const orderRows = normalizedOrders.map((order) => ({
+  let insertedOrderIds: number[] = [];
+
+  try {
+    const orderRows = normalizedOrders.map((order) => ({
     batch_id: batchId,
     external_order_id: order.externalOrderId,
     order_status: order.orderStatus,
@@ -1616,23 +1679,51 @@ export async function saveMarketplaceIntakePreview(input: {
     warehouse_updated_at: null,
     warehouse_updated_by_email: null,
     raw_meta: order.rawMeta || {},
-  }));
+    }));
 
-  const ordersRes = await svc
-    .from('marketplace_intake_orders')
-    .insert(orderRows)
-    .select('id, external_order_id');
-  if (ordersRes.error) throw ordersRes.error;
+    const ordersRes = await insertRowsWithSchemaFallback({
+      table: 'marketplace_intake_orders',
+      rows: orderRows,
+      select: 'id, external_order_id',
+      removableColumns: [
+        'mp_order_status',
+        'mp_cancel_return_status',
+        'mp_ship_by_deadline_at',
+        'mp_order_created_at',
+        'mp_payment_paid_at',
+        'mp_ready_to_ship_at',
+        'mp_order_completed_at',
+        'mp_customer_username',
+        'mp_customer_phone',
+        'mp_shipping_address',
+        'mp_shipping_district',
+        'mp_shipping_city',
+        'mp_shipping_province',
+        'mp_shipping_postal_code',
+        'mp_raw_shipping_address',
+        'mp_buyer_note',
+        'mp_seller_note',
+        'mp_buyer_paid_amount',
+        'mp_total_payment_amount',
+        'mp_shipping_cost_buyer',
+        'mp_estimated_shipping_cost',
+        'mp_shipping_fee_estimated_deduction',
+        'mp_return_shipping_cost',
+      ],
+    });
 
-  const orderIdByExternalId = new Map<string, number>();
-  for (const row of ordersRes.data || []) {
-    orderIdByExternalId.set(String(row.external_order_id), Number(row.id));
-  }
+    const orderIdByExternalId = new Map<string, number>();
+    insertedOrderIds = (ordersRes.data || [])
+      .map((row: any) => Number(row.id || 0))
+      .filter((id: number) => Number.isFinite(id) && id > 0);
+    for (const row of ordersRes.data || []) {
+      orderIdByExternalId.set(String(row.external_order_id), Number(row.id));
+    }
 
-  const lineRows = normalizedOrders.flatMap((order) => {
-    const intakeOrderId = orderIdByExternalId.get(order.externalOrderId);
-    if (!intakeOrderId) return [];
-    return (order.lines || []).map((line) => ({
+    const lineRows = normalizedOrders.flatMap((order) => {
+      const intakeOrderId = orderIdByExternalId.get(order.externalOrderId);
+      if (!intakeOrderId) return [];
+      return (order.lines || []).map((line) => ({
       intake_order_id: intakeOrderId,
       line_index: line.lineIndex,
       line_status: line.lineStatus,
@@ -1675,17 +1766,38 @@ export async function saveMarketplaceIntakePreview(input: {
       mapped_source_store_id: null,
       mapped_store_name: line.mappedStoreName,
       raw_row: line.rawRow || {},
-    }));
-  });
+      }));
+    });
 
-  if (lineRows.length > 0) {
-    const linesRes = await svc
-      .from('marketplace_intake_order_lines')
-      .insert(lineRows);
-    if (linesRes.error) throw linesRes.error;
-  }
+    if (lineRows.length > 0) {
+      await insertRowsWithSchemaFallback({
+        table: 'marketplace_intake_order_lines',
+        rows: lineRows,
+        removableColumns: [
+          'mp_parent_sku',
+          'mp_reference_sku',
+          'mp_price_initial',
+          'mp_price_after_discount',
+          'mp_returned_quantity',
+          'mp_total_discount',
+          'mp_discount_seller',
+          'mp_discount_shopee',
+          'mp_product_weight_grams',
+          'mp_order_product_count',
+          'mp_total_weight_grams',
+          'mp_voucher_seller',
+          'mp_cashback_coin',
+          'mp_voucher_shopee',
+          'mp_bundle_discount',
+          'mp_bundle_discount_shopee',
+          'mp_bundle_discount_seller',
+          'mp_shopee_coin_discount',
+          'mp_credit_card_discount',
+        ],
+      });
+    }
 
-  const manualMemoryUpsertMap = new Map<string, {
+    const manualMemoryUpsertMap = new Map<string, {
     source_key: string;
     source_label: string;
     platform: 'shopee';
@@ -1706,79 +1818,91 @@ export async function saveMarketplaceIntakePreview(input: {
     updated_by_email: string | null;
     last_confirmed_at: string;
     is_active: true;
-  }>();
+    }>();
 
-  for (const order of normalizedOrders) {
-    for (const line of order.lines || []) {
-      const shouldRemember = (line.issueCodes || []).includes('manual_match_confirmed')
-        || (line.issueCodes || []).includes('remembered_manual_match');
-      if (!shouldRemember || !line.matchSignature) continue;
+    for (const order of normalizedOrders) {
+      for (const line of order.lines || []) {
+        const shouldRemember = (line.issueCodes || []).includes('manual_match_confirmed')
+          || (line.issueCodes || []).includes('remembered_manual_match');
+        if (!shouldRemember || !line.matchSignature) continue;
 
-      const key = [
-        SHOPEE_RLT_SOURCE.sourceKey,
-        business.business_code,
-        line.matchSignature,
-      ].join('::');
+        const key = [
+          sourceConfig.sourceKey,
+          business.business_code,
+          line.matchSignature,
+        ].join('::');
 
-      const nextRow = {
-        source_key: SHOPEE_RLT_SOURCE.sourceKey,
-        source_label: SHOPEE_RLT_SOURCE.sourceLabel,
-        platform: SHOPEE_RLT_SOURCE.platform,
-        business_id: business.id,
-        business_code: business.business_code,
-        match_signature: line.matchSignature,
-        mp_sku: line.mpSku,
-        mp_product_name: line.mpProductName,
-        mp_variation: line.mpVariation,
-        target_entity_type: 'bundle' as const,
-        target_entity_key: line.matchedEntityKey,
-        target_entity_label: line.matchedEntityLabel,
-        target_custom_id: line.detectedCustomId,
-        scalev_bundle_id: line.matchedScalevBundleId,
-        mapped_store_name: line.mappedStoreName,
-        usage_count: 1,
-        created_by_email: input.uploadedByEmail,
-        updated_by_email: input.uploadedByEmail,
-        last_confirmed_at: new Date().toISOString(),
-        is_active: true as const,
-      };
+        const nextRow = {
+          source_key: sourceConfig.sourceKey,
+          source_label: sourceConfig.sourceLabel,
+          platform: sourceConfig.platform,
+          business_id: business.id,
+          business_code: business.business_code,
+          match_signature: line.matchSignature,
+          mp_sku: line.mpSku,
+          mp_product_name: line.mpProductName,
+          mp_variation: line.mpVariation,
+          target_entity_type: 'bundle' as const,
+          target_entity_key: line.matchedEntityKey,
+          target_entity_label: line.matchedEntityLabel,
+          target_custom_id: line.detectedCustomId,
+          scalev_bundle_id: line.matchedScalevBundleId,
+          mapped_store_name: line.mappedStoreName,
+          usage_count: 1,
+          created_by_email: input.uploadedByEmail,
+          updated_by_email: input.uploadedByEmail,
+          last_confirmed_at: new Date().toISOString(),
+          is_active: true as const,
+        };
 
-      const existing = manualMemoryUpsertMap.get(key);
-      if (!existing) {
-        manualMemoryUpsertMap.set(key, nextRow);
-        continue;
+        const existing = manualMemoryUpsertMap.get(key);
+        if (!existing) {
+          manualMemoryUpsertMap.set(key, nextRow);
+          continue;
+        }
+
+        const hasConflict = existing.scalev_bundle_id !== nextRow.scalev_bundle_id
+          || existing.target_entity_key !== nextRow.target_entity_key
+          || existing.mapped_store_name !== nextRow.mapped_store_name;
+        if (hasConflict) {
+          throw new Error(
+            `Konflik memory manual untuk item "${line.mpProductName}". Ada lebih dari satu pilihan bundle untuk pola SKU yang sama dalam satu batch. Samakan pilihannya lalu coba simpan lagi.`,
+          );
+        }
+
+        existing.usage_count += 1;
+        existing.updated_by_email = input.uploadedByEmail;
+        existing.last_confirmed_at = nextRow.last_confirmed_at;
+        if (!existing.mp_sku && nextRow.mp_sku) existing.mp_sku = nextRow.mp_sku;
+        if (!existing.mp_variation && nextRow.mp_variation) existing.mp_variation = nextRow.mp_variation;
       }
-
-      const hasConflict = existing.scalev_bundle_id !== nextRow.scalev_bundle_id
-        || existing.target_entity_key !== nextRow.target_entity_key
-        || existing.mapped_store_name !== nextRow.mapped_store_name;
-      if (hasConflict) {
-        throw new Error(
-          `Konflik memory manual untuk item "${line.mpProductName}". Ada lebih dari satu pilihan bundle untuk pola SKU yang sama dalam satu batch. Samakan pilihannya lalu coba simpan lagi.`,
-        );
-      }
-
-      existing.usage_count += 1;
-      existing.updated_by_email = input.uploadedByEmail;
-      existing.last_confirmed_at = nextRow.last_confirmed_at;
-      if (!existing.mp_sku && nextRow.mp_sku) existing.mp_sku = nextRow.mp_sku;
-      if (!existing.mp_variation && nextRow.mp_variation) existing.mp_variation = nextRow.mp_variation;
     }
+
+    const manualMemoryUpserts = Array.from(manualMemoryUpsertMap.values());
+
+    if (manualMemoryUpserts.length > 0) {
+      const memoryRes = await svc
+        .from('marketplace_intake_manual_memory')
+        .upsert(manualMemoryUpserts, { onConflict: 'source_key,business_code,match_signature' });
+      if (memoryRes.error && !isMissingTableError(memoryRes.error)) throw memoryRes.error;
+    }
+
+    return {
+      batchId,
+      summary,
+    };
+  } catch (error) {
+    try {
+      if (insertedOrderIds.length > 0) {
+        await svc.from('marketplace_intake_order_lines').delete().in('intake_order_id', insertedOrderIds);
+        await svc.from('marketplace_intake_orders').delete().in('id', insertedOrderIds);
+      }
+      await svc.from('marketplace_intake_batches').delete().eq('id', batchId);
+    } catch (cleanupError) {
+      console.error('Marketplace intake cleanup after failed save error:', cleanupError);
+    }
+    throw error;
   }
-
-  const manualMemoryUpserts = Array.from(manualMemoryUpsertMap.values());
-
-  if (manualMemoryUpserts.length > 0) {
-    const memoryRes = await svc
-      .from('marketplace_intake_manual_memory')
-      .upsert(manualMemoryUpserts, { onConflict: 'source_key,business_code,match_signature' });
-    if (memoryRes.error && !isMissingTableError(memoryRes.error)) throw memoryRes.error;
-  }
-
-  return {
-    batchId,
-    summary,
-  };
 }
 
 export type MarketplaceIntakeWarehouseStatus = 'staged' | 'scheduled' | 'hold' | 'canceled';
@@ -1803,6 +1927,17 @@ export type MarketplaceIntakeWorkspaceOrderRow = {
   batchFilename: string;
   uploadedAt: string | null;
   uploadedByEmail: string | null;
+  batchAppLastPromoteStatus: string | null;
+  batchAppLastPromoteAt: string | null;
+  batchAppLastPromoteOrderCount: number;
+  batchAppLastPromoteInsertedCount: number;
+  batchAppLastPromoteUpdatedCount: number;
+  batchAppLastPromoteSkippedCount: number;
+  batchAppLastPromoteError: string | null;
+  batchScalevLastSendStatus: string | null;
+  batchScalevLastSendAt: string | null;
+  batchScalevLastSendRowCount: number;
+  batchScalevLastSendError: string | null;
   externalOrderId: string;
   customerLabel: string | null;
   recipientName: string | null;
@@ -1836,6 +1971,7 @@ export type MarketplaceIntakeWorkspaceUpdateInput = {
   orderIds: number[];
   shipmentDate: string | null;
   warehouseStatus: MarketplaceIntakeWarehouseStatus;
+  sourceKey?: string | null;
   warehouseNote?: string | null;
   updatedByEmail: string | null;
 };
@@ -1845,6 +1981,17 @@ type MarketplaceIntakeBatchMetaRow = {
   filename: string;
   confirmedAt: string | null;
   uploadedByEmail: string | null;
+  appLastPromoteStatus: string | null;
+  appLastPromoteAt: string | null;
+  appLastPromoteOrderCount: number;
+  appLastPromoteInsertedCount: number;
+  appLastPromoteUpdatedCount: number;
+  appLastPromoteSkippedCount: number;
+  appLastPromoteError: string | null;
+  scalevLastSendStatus: string | null;
+  scalevLastSendAt: string | null;
+  scalevLastSendRowCount: number;
+  scalevLastSendError: string | null;
 };
 
 function normalizeShipmentDate(value: string): string {
@@ -1869,20 +2016,61 @@ function normalizeShipmentDate(value: string): string {
   return `${match[1]}-${match[2]}-${match[3]}`;
 }
 
-async function loadWorkspaceBatchMeta(): Promise<Map<number, MarketplaceIntakeBatchMetaRow>> {
+async function loadWorkspaceBatchMeta(
+  sourceConfig: MarketplaceIntakeSourceConfig,
+): Promise<Map<number, MarketplaceIntakeBatchMetaRow>> {
   const svc = createServiceSupabase();
-  const { data, error } = await svc
+  let data: any[] | null = null;
+  let error: any = null;
+
+  const primaryRes = await svc
     .from('marketplace_intake_batches')
     .select(`
       id,
       filename,
       confirmed_at,
-      uploaded_by_email
+      uploaded_by_email,
+      app_last_promote_status,
+      app_last_promote_at,
+      app_last_promote_order_count,
+      app_last_promote_inserted_count,
+      app_last_promote_updated_count,
+      app_last_promote_skipped_count,
+      app_last_promote_error,
+      scalev_last_send_status,
+      scalev_last_send_at,
+      scalev_last_send_row_count,
+      scalev_last_send_error
     `)
-    .eq('source_key', SHOPEE_RLT_SOURCE.sourceKey)
-    .eq('business_code', SHOPEE_RLT_SOURCE.businessCode)
+    .eq('source_key', sourceConfig.sourceKey)
+    .eq('business_code', sourceConfig.businessCode)
     .order('confirmed_at', { ascending: false })
     .order('id', { ascending: false });
+
+  data = primaryRes.data;
+  error = primaryRes.error;
+
+  if (error) {
+    const fallbackRes = await svc
+      .from('marketplace_intake_batches')
+      .select(`
+        id,
+        filename,
+        confirmed_at,
+        uploaded_by_email,
+        scalev_last_send_status,
+        scalev_last_send_at,
+        scalev_last_send_row_count,
+        scalev_last_send_error
+      `)
+      .eq('source_key', sourceConfig.sourceKey)
+      .eq('business_code', sourceConfig.businessCode)
+      .order('confirmed_at', { ascending: false })
+      .order('id', { ascending: false });
+
+    data = fallbackRes.data;
+    error = fallbackRes.error;
+  }
 
   if (error) {
     if (isMissingTableError(error)) throw new Error(getMissingSchemaMessage());
@@ -1898,6 +2086,17 @@ async function loadWorkspaceBatchMeta(): Promise<Map<number, MarketplaceIntakeBa
       filename: String((row as any).filename || ''),
       confirmedAt: (row as any).confirmed_at || null,
       uploadedByEmail: (row as any).uploaded_by_email || null,
+      appLastPromoteStatus: (row as any).app_last_promote_status || null,
+      appLastPromoteAt: (row as any).app_last_promote_at || null,
+      appLastPromoteOrderCount: Number((row as any).app_last_promote_order_count || 0),
+      appLastPromoteInsertedCount: Number((row as any).app_last_promote_inserted_count || 0),
+      appLastPromoteUpdatedCount: Number((row as any).app_last_promote_updated_count || 0),
+      appLastPromoteSkippedCount: Number((row as any).app_last_promote_skipped_count || 0),
+      appLastPromoteError: (row as any).app_last_promote_error || null,
+      scalevLastSendStatus: (row as any).scalev_last_send_status || null,
+      scalevLastSendAt: (row as any).scalev_last_send_at || null,
+      scalevLastSendRowCount: Number((row as any).scalev_last_send_row_count || 0),
+      scalevLastSendError: (row as any).scalev_last_send_error || null,
     });
   }
 
@@ -1975,6 +2174,17 @@ function mapWorkspaceOrderRow(
     batchFilename: batchMeta.filename,
     uploadedAt: batchMeta.confirmedAt,
     uploadedByEmail: batchMeta.uploadedByEmail,
+    batchAppLastPromoteStatus: batchMeta.appLastPromoteStatus,
+    batchAppLastPromoteAt: batchMeta.appLastPromoteAt,
+    batchAppLastPromoteOrderCount: batchMeta.appLastPromoteOrderCount,
+    batchAppLastPromoteInsertedCount: batchMeta.appLastPromoteInsertedCount,
+    batchAppLastPromoteUpdatedCount: batchMeta.appLastPromoteUpdatedCount,
+    batchAppLastPromoteSkippedCount: batchMeta.appLastPromoteSkippedCount,
+    batchAppLastPromoteError: batchMeta.appLastPromoteError,
+    batchScalevLastSendStatus: batchMeta.scalevLastSendStatus,
+    batchScalevLastSendAt: batchMeta.scalevLastSendAt,
+    batchScalevLastSendRowCount: batchMeta.scalevLastSendRowCount,
+    batchScalevLastSendError: batchMeta.scalevLastSendError,
     externalOrderId: String(row.external_order_id || ''),
     customerLabel: row.customer_label || null,
     recipientName: row.recipient_name || null,
@@ -2056,9 +2266,11 @@ async function loadWorkspaceOrders(input: {
 
 export async function listMarketplaceIntakeWorkspace(input: {
   shipmentDate: string;
+  sourceKey?: string | null;
 }): Promise<MarketplaceIntakeWorkspaceResponse> {
   const shipmentDate = normalizeShipmentDate(input.shipmentDate);
-  const batchMetaById = await loadWorkspaceBatchMeta();
+  const sourceConfig = getMarketplaceIntakeSourceConfig(input.sourceKey);
+  const batchMetaById = await loadWorkspaceBatchMeta(sourceConfig);
   const batchIds = Array.from(batchMetaById.keys());
 
   const [stagedOrders, shipmentOrders] = await Promise.all([
@@ -2105,7 +2317,8 @@ export async function updateMarketplaceIntakeWorkspace(input: MarketplaceIntakeW
     ? null
     : normalizeShipmentDate(String(input.shipmentDate || ''));
 
-  const batchMetaById = await loadWorkspaceBatchMeta();
+  const sourceConfig = getMarketplaceIntakeSourceConfig(input.sourceKey);
+  const batchMetaById = await loadWorkspaceBatchMeta(sourceConfig);
   const allowedBatchIds = new Set<number>(batchMetaById.keys());
   const svc = createServiceSupabase();
   const existingRes = await svc
@@ -2126,7 +2339,7 @@ export async function updateMarketplaceIntakeWorkspace(input: MarketplaceIntakeW
   for (const row of rows) {
     const batchId = Number((row as any).batch_id || 0);
     if (!allowedBatchIds.has(batchId)) {
-      throw new Error('Ada order yang tidak termasuk workspace Shopee RLT.');
+      throw new Error(`Ada order yang tidak termasuk workspace ${sourceConfig.sourceLabel}.`);
     }
   }
 

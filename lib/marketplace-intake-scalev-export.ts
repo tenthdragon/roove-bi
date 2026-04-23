@@ -134,7 +134,7 @@ function formatInteger(value: unknown): string {
 }
 
 function escapeCsv(value: string): string {
-  if (!/[",\n]/.test(value)) return value;
+  if (!/[",\r\n]/.test(value)) return value;
   return `"${value.replace(/"/g, '""')}"`;
 }
 
@@ -179,7 +179,19 @@ function resolveOpsPrice(line: IntakeLineRow): string {
   return formatInteger(price);
 }
 
-function resolveOpsWarehouse(storeName: string | null): string {
+function resolveOpsWarehouse(sourceKey: string, storeName: string | null): string {
+  if (sourceKey === 'shopee_jhn') {
+    switch (cleanText(storeName)) {
+      case 'Purvu Store':
+      case 'Purvu The Secret Store':
+      case 'drHyun Main Store':
+      case 'Calmara Main Store':
+        return "Jejak Herba Nusantara's Warehouse";
+      default:
+        return '';
+    }
+  }
+
   switch (cleanText(storeName)) {
     case 'Purvu The Secret Store - Markerplace':
       return "Jejak Herba Nusantara's Warehouse";
@@ -209,7 +221,7 @@ function resolveOpsCourier(
     return { courier: 'JNE Express Cashless', courierService: 'REG' };
   }
 
-  if (sourceKey === 'shopee_rlt') {
+  if (sourceKey === 'shopee_rlt' || sourceKey === 'shopee_jhn') {
     return { courier: 'SiCepat Express Cashless', courierService: 'REG' };
   }
 
@@ -232,7 +244,7 @@ function buildCsv(rows: ScalevOpsCsvRow[]): string {
   const dataRows = rows.map((row) => SCALEV_OPS_CSV_HEADERS
     .map((header) => escapeCsv(cleanText(row[header])))
     .join(','));
-  return [headerRow, ...dataRows].join('\n');
+  return `${[headerRow, ...dataRows].join('\r\n')}\r\n`;
 }
 
 export async function buildScalevOpsProjectionForBatch(input: {
@@ -327,7 +339,7 @@ export async function buildScalevOpsProjectionForBatch(input: {
     const timestamp = formatDate(order.shipment_date) || formatDate(batch.source_order_date);
     const customerName = resolveOpsCustomerName(order);
     const { courier, courierService } = resolveOpsCourier(batch.source_key, order.shipping_provider, order.tracking_number);
-    const warehouse = resolveOpsWarehouse(order.final_store_name);
+    const warehouse = resolveOpsWarehouse(batch.source_key, order.final_store_name);
 
     if (!cleanText(order.final_store_name)) {
       warnings.push({

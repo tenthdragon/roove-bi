@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const orderIds = Array.isArray(body?.orderIds) ? body.orderIds : [];
     const shipmentDate = body?.shipmentDate ? String(body.shipmentDate) : null;
+    const sourceKey = body?.sourceKey ? String(body.sourceKey) : null;
     const warehouseStatus = String(body?.warehouseStatus || '') as MarketplaceIntakeWarehouseStatus;
     const warehouseNote = body?.warehouseNote ? String(body.warehouseNote) : null;
 
@@ -31,6 +32,7 @@ export async function POST(req: NextRequest) {
     const result = await updateMarketplaceIntakeWorkspace({
       orderIds,
       shipmentDate,
+      sourceKey,
       warehouseStatus,
       warehouseNote,
       updatedByEmail: user?.email || null,

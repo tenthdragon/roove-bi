@@ -2,6 +2,10 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  getMarketplaceIntakeSourceConfig,
+  listMarketplaceIntakeSourceConfigs,
+} from '@/lib/marketplace-intake-sources';
 
 const panelStyle = {
   background: 'var(--card)',
@@ -27,12 +31,18 @@ const WAREHOUSE_STATUS_META = {
   canceled: { label: 'Canceled', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
 };
 
+const MARKETPLACE_SOURCE_OPTIONS = listMarketplaceIntakeSourceConfigs();
+
 function fmtNumber(value) {
   return new Intl.NumberFormat('id-ID').format(Number(value || 0));
 }
 
 function fmtCurrency(value) {
   return `Rp ${fmtNumber(Math.round(Number(value || 0)))}`;
+}
+
+function cleanText(value) {
+  return String(value ?? '').trim();
 }
 
 function getCurrentDateValue() {
@@ -56,6 +66,18 @@ function fmtDateTime(value) {
   }).format(parsed);
 }
 
+function fmtShortDateTime(value) {
+  if (!value) return '-';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return new Intl.DateTimeFormat('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(parsed);
+}
+
 function fmtDateLabel(value) {
   if (!value) return '-';
   const parsed = new Date(`${value}T00:00:00+07:00`);
@@ -63,6 +85,17 @@ function fmtDateLabel(value) {
   return new Intl.DateTimeFormat('id-ID', {
     day: '2-digit',
     month: 'long',
+    year: 'numeric',
+  }).format(parsed);
+}
+
+function fmtCompactDate(value) {
+  if (!value) return '-';
+  const parsed = new Date(`${value}T00:00:00+07:00`);
+  if (Number.isNaN(parsed.getTime())) return value || '-';
+  return new Intl.DateTimeFormat('id-ID', {
+    day: '2-digit',
+    month: 'short',
     year: 'numeric',
   }).format(parsed);
 }
@@ -82,6 +115,34 @@ function StatusPill({ status, warehouse = false }) {
         fontWeight: 700,
         background: meta.bg,
         color: meta.color,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {meta.label}
+    </span>
+  );
+}
+
+function SyncStatusPill({ status, successLabel, failedLabel, idleLabel }) {
+  const meta = status === 'success'
+    ? { label: successLabel, color: '#22c55e', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.24)' }
+    : status === 'failed'
+      ? { label: failedLabel, color: '#fca5a5', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.24)' }
+      : { label: idleLabel, color: 'var(--dim)', bg: 'rgba(148,163,184,0.10)', border: 'var(--border)' };
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '4px 9px',
+        borderRadius: 999,
+        fontSize: 11,
+        fontWeight: 700,
+        background: meta.bg,
+        color: meta.color,
+        border: `1px solid ${meta.border}`,
         whiteSpace: 'nowrap',
       }}
     >
@@ -157,6 +218,26 @@ function ActionButton({ children, onClick, tone = 'default', disabled = false })
       {children}
     </button>
   );
+}
+
+function getAppButtonMeta(status) {
+  if (status === 'success') {
+    return { label: 'Sync Ulang App', tone: 'default' };
+  }
+  if (status === 'failed') {
+    return { label: 'Coba Lagi App', tone: 'warn' };
+  }
+  return { label: 'Masuk ke App', tone: 'primary' };
+}
+
+function getScalevButtonMeta(status) {
+  if (status === 'success') {
+    return { label: 'Push Ulang Scalev', tone: 'default' };
+  }
+  if (status === 'failed') {
+    return { label: 'Coba Lagi Scalev', tone: 'warn' };
+  }
+  return { label: 'Push ke Scalev', tone: 'primary' };
 }
 
 function DetailLineTable({ order }) {
@@ -235,6 +316,17 @@ function groupOrdersByBatch(orders) {
         batchFilename: order.batchFilename,
         uploadedAt: order.uploadedAt,
         uploadedByEmail: order.uploadedByEmail,
+        appLastPromoteStatus: order.batchAppLastPromoteStatus || null,
+        appLastPromoteAt: order.batchAppLastPromoteAt || null,
+        appLastPromoteOrderCount: Number(order.batchAppLastPromoteOrderCount || 0),
+        appLastPromoteInsertedCount: Number(order.batchAppLastPromoteInsertedCount || 0),
+        appLastPromoteUpdatedCount: Number(order.batchAppLastPromoteUpdatedCount || 0),
+        appLastPromoteSkippedCount: Number(order.batchAppLastPromoteSkippedCount || 0),
+        appLastPromoteError: order.batchAppLastPromoteError || null,
+        scalevLastSendStatus: order.batchScalevLastSendStatus || null,
+        scalevLastSendAt: order.batchScalevLastSendAt || null,
+        scalevLastSendRowCount: Number(order.batchScalevLastSendRowCount || 0),
+        scalevLastSendError: order.batchScalevLastSendError || null,
         orders: [order],
         orderIds: [order.id],
         totalOrders: 1,
@@ -268,12 +360,15 @@ function groupOrdersByBatch(orders) {
 
 export default function MarketplaceIntakeManager() {
   const inputRef = useRef(null);
+  const [sourceKey, setSourceKey] = useState('shopee_rlt');
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [workspaceActionLoading, setWorkspaceActionLoading] = useState('');
+  const [scalevSendingBatchKey, setScalevSendingBatchKey] = useState('');
+  const [appPromotingBatchKey, setAppPromotingBatchKey] = useState('');
   const [error, setError] = useState('');
-  const [message, setMessage] = useState(null);
+  const [, setMessage] = useState(null);
   const [preview, setPreview] = useState(null);
   const [search, setSearch] = useState('');
   const [issuesOnly, setIssuesOnly] = useState(false);
@@ -285,17 +380,49 @@ export default function MarketplaceIntakeManager() {
   const [lineSearchResults, setLineSearchResults] = useState({});
   const [searchingLineKey, setSearchingLineKey] = useState('');
   const [workspaceDate, setWorkspaceDate] = useState(getCurrentDateValue());
+  const [batchShipmentDates, setBatchShipmentDates] = useState({});
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState('');
   const [workspace, setWorkspace] = useState(null);
+
+  const activeSource = useMemo(() => getMarketplaceIntakeSourceConfig(sourceKey), [sourceKey]);
 
   function getLineKey(orderId, lineIndex) {
     return `${orderId}::${lineIndex}`;
   }
 
+  function getBatchShipmentDate(batchId) {
+    return batchShipmentDates[String(batchId)] || workspaceDate || getCurrentDateValue();
+  }
+
+  function updateBatchShipmentDate(batchId, value) {
+    const nextDate = String(value || '').trim() || getCurrentDateValue();
+    setBatchShipmentDates((current) => ({
+      ...current,
+      [String(batchId)]: nextDate,
+    }));
+  }
+
   useEffect(() => {
     loadWorkspace(getCurrentDateValue());
-  }, []);
+  }, [sourceKey]);
+
+  useEffect(() => {
+    setPreview(null);
+    setExpandedPreviewOrders({});
+    setExpandedWorkspaceBatches({});
+    setExpandedWorkspaceOrders({});
+    setManualSelections({});
+    setLineSearchQueries({});
+    setLineSearchResults({});
+    setSearch('');
+    setIssuesOnly(false);
+    setBatchShipmentDates({});
+    setError('');
+    setWorkspaceError('');
+    setWorkspace(null);
+    setWorkspaceDate(getCurrentDateValue());
+  }, [sourceKey]);
 
   const effectivePreviewOrders = useMemo(() => {
     if (!preview?.orders) return [];
@@ -468,13 +595,35 @@ export default function MarketplaceIntakeManager() {
     && !confirming,
   );
 
+  async function fetchJsonWithTimeout(input, init = {}, timeoutMs = 30000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(input, {
+        ...init,
+        signal: controller.signal,
+      });
+      const data = await res.json();
+      return { res, data };
+    } catch (error) {
+      if (error?.name === 'AbortError') {
+        throw new Error('Request preview timeout di localhost. Coba refresh halaman lalu upload ulang.');
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async function loadWorkspace(date) {
     const shipmentDate = String(date || getCurrentDateValue());
     setWorkspaceLoading(true);
     setWorkspaceError('');
 
     try {
-      const res = await fetch(`/api/marketplace-intake/workspace?shipmentDate=${encodeURIComponent(shipmentDate)}`);
+      const res = await fetch(
+        `/api/marketplace-intake/workspace?shipmentDate=${encodeURIComponent(shipmentDate)}&sourceKey=${encodeURIComponent(sourceKey)}`,
+      );
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || 'Gagal membaca workspace warehouse.');
@@ -500,14 +649,14 @@ export default function MarketplaceIntakeManager() {
       const formData = new FormData();
       formData.append('file', file);
       formData.append('filename', file.name);
+      formData.append('sourceKey', sourceKey);
 
-      const res = await fetch('/api/marketplace-intake/preview', {
+      const { res, data } = await fetchJsonWithTimeout('/api/marketplace-intake/preview', {
         method: 'POST',
         body: formData,
-      });
-      const data = await res.json();
+      }, 45000);
       if (!res.ok) {
-        throw new Error(data.error || 'Gagal membaca file Shopee RLT.');
+        throw new Error(data.error || `Gagal membaca file ${activeSource.sourceLabel}.`);
       }
 
       const initialSelections = {};
@@ -533,7 +682,7 @@ export default function MarketplaceIntakeManager() {
     } catch (err) {
       console.error(err);
       setPreview(null);
-      setError(err?.message || 'Gagal memproses file Shopee RLT.');
+      setError(err?.message || `Gagal memproses file ${activeSource.sourceLabel}.`);
     } finally {
       setUploading(false);
     }
@@ -625,7 +774,8 @@ export default function MarketplaceIntakeManager() {
 
     setSearchingLineKey(key);
     try {
-      const res = await fetch(`/api/marketplace-intake/search-bundles?q=${encodeURIComponent(query)}`);
+      const requestUrl = `/api/marketplace-intake/search-bundles?q=${encodeURIComponent(query)}&sourceKey=${encodeURIComponent(sourceKey)}`;
+      const res = await fetch(requestUrl);
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || 'Gagal mencari bundle.');
@@ -642,7 +792,7 @@ export default function MarketplaceIntakeManager() {
     }
   }
 
-  async function applyWorkspaceAction({ orderIds, warehouseStatus, shipmentDate, successText }) {
+  async function applyWorkspaceAction({ orderIds, warehouseStatus, shipmentDate, successText, refreshDate }) {
     if (!orderIds?.length) return;
     const actionKey = `${warehouseStatus}:${orderIds.join(',')}`;
     setWorkspaceActionLoading(actionKey);
@@ -656,6 +806,7 @@ export default function MarketplaceIntakeManager() {
         body: JSON.stringify({
           orderIds,
           shipmentDate,
+          sourceKey,
           warehouseStatus,
         }),
       });
@@ -664,7 +815,9 @@ export default function MarketplaceIntakeManager() {
         throw new Error(data.error || 'Gagal memperbarui workspace warehouse.');
       }
 
-      await loadWorkspace(workspaceDate);
+      const nextWorkspaceDate = cleanText(refreshDate || shipmentDate || workspaceDate) || getCurrentDateValue();
+      setWorkspaceDate(nextWorkspaceDate);
+      await loadWorkspace(nextWorkspaceDate);
       setMessage({
         type: 'success',
         text: successText || `${fmtNumber(data.updatedCount || orderIds.length)} order berhasil diperbarui.`,
@@ -677,6 +830,81 @@ export default function MarketplaceIntakeManager() {
     }
   }
 
+  async function handlePushBatchToScalev(batchId, shipmentDate = workspaceDate) {
+    const batchKey = String(batchId || '');
+    if (!batchKey) return;
+    const targetShipmentDate = cleanText(shipmentDate) || workspaceDate || getCurrentDateValue();
+    setScalevSendingBatchKey(batchKey);
+    setWorkspaceError('');
+    setMessage(null);
+
+    try {
+      const res = await fetch('/api/marketplace-intake/scalev-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batchId,
+          shipmentDate: targetShipmentDate,
+          statuses: ['scheduled'],
+          createType: 'regular',
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal mengirim batch ke Scalev.');
+      }
+
+      setWorkspaceDate(targetShipmentDate);
+      await loadWorkspace(targetShipmentDate);
+      setMessage({
+        type: 'success',
+        text: `Batch #${batchId} berhasil dikirim ke Scalev (${fmtNumber(data.rowCount || 0)} row, shipment ${fmtDateLabel(targetShipmentDate)}).`,
+      });
+    } catch (err) {
+      console.error(err);
+      setWorkspaceError(err?.message || 'Gagal mengirim batch ke Scalev.');
+    } finally {
+      setScalevSendingBatchKey('');
+    }
+  }
+
+  async function handlePromoteBatchToApp(batchId, shipmentDate = workspaceDate) {
+    const batchKey = String(batchId || '');
+    if (!batchKey) return;
+    const targetShipmentDate = cleanText(shipmentDate) || workspaceDate || getCurrentDateValue();
+    setAppPromotingBatchKey(batchKey);
+    setWorkspaceError('');
+    setMessage(null);
+
+    try {
+      const res = await fetch('/api/marketplace-intake/promote-app', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          batchId,
+          shipmentDate: targetShipmentDate,
+          statuses: ['scheduled'],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal memasukkan batch ke app.');
+      }
+
+      setWorkspaceDate(targetShipmentDate);
+      await loadWorkspace(targetShipmentDate);
+      setMessage({
+        type: 'success',
+        text: `Batch #${batchId} masuk ke app (${fmtNumber(data.insertedCount || 0)} baru, ${fmtNumber(data.updatedCount || 0)} update, ${fmtNumber(data.skippedCount || 0)} skip).`,
+      });
+    } catch (err) {
+      console.error(err);
+      setWorkspaceError(err?.message || 'Gagal memasukkan batch ke app.');
+    } finally {
+      setAppPromotingBatchKey('');
+    }
+  }
+
   const stagedOrders = useMemo(() => workspace?.stagedOrders || [], [workspace?.stagedOrders]);
   const shipmentOrders = useMemo(() => workspace?.shipmentOrders || [], [workspace?.shipmentOrders]);
   const stagedBatches = useMemo(() => groupOrdersByBatch(stagedOrders), [stagedOrders]);
@@ -686,39 +914,42 @@ export default function MarketplaceIntakeManager() {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={panelStyle}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap', marginBottom: 14 }}>
-          <div>
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Upload Shopee RLT</div>
-            <div style={{ fontSize: 13, color: 'var(--dim)', maxWidth: 840, lineHeight: 1.6 }}>
-              Halaman ini hanya membaca export <strong>Shopee RLT</strong>. File yang namanya mengandung <strong>SPX</strong> tetap diperlakukan sebagai Shopee.
-              App akan match exact <strong>SKU Excel</strong> ke <strong>bundle custom_id</strong> di business <strong>RLT</strong>, lalu menebak store dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 14 }}>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Source Marketplace
+              </div>
+              <select
+                value={sourceKey}
+                onChange={(event) => setSourceKey(event.target.value)}
+                disabled={uploading || confirming}
+                style={{
+                  minWidth: 220,
+                  padding: '9px 12px',
+                  borderRadius: 10,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg)',
+                  color: 'var(--text)',
+                  fontSize: 13,
+                  outline: 'none',
+                }}
+              >
+                {MARKETPLACE_SOURCE_OPTIONS.map((source) => (
+                  <option key={source.sourceKey} value={source.sourceKey}>
+                    {source.sourceLabel} • {source.businessCode}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-            <span style={{ fontSize: 11, padding: '5px 10px', borderRadius: 999, background: 'rgba(238,77,45,0.12)', color: '#ee4d2d', fontWeight: 700 }}>
-              Source: Shopee RLT
-            </span>
-            <span style={{ fontSize: 11, padding: '5px 10px', borderRadius: 999, background: 'rgba(59,130,246,0.12)', color: '#60a5fa', fontWeight: 700 }}>
-              Business: RLT
-            </span>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>{activeSource.uploadTitle}</div>
+            <div style={{ fontSize: 13, color: 'var(--dim)', maxWidth: 840, lineHeight: 1.6 }}>
+              {activeSource.uploadDescription}
+            </div>
           </div>
         </div>
-
-        {message ? (
-          <div
-            style={{
-              marginBottom: 12,
-              padding: '10px 12px',
-              borderRadius: 10,
-              fontSize: 13,
-              background: message.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
-              color: message.type === 'success' ? '#6ee7b7' : '#fca5a5',
-              border: `1px solid ${message.type === 'success' ? 'rgba(16,185,129,0.24)' : 'rgba(239,68,68,0.24)'}`,
-            }}
-          >
-            {message.text}
-          </div>
-        ) : null}
 
         {error ? (
           <div
@@ -786,12 +1017,12 @@ export default function MarketplaceIntakeManager() {
                   animation: 'spin 0.8s linear infinite',
                 }}
               />
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#ee4d2d' }}>Membaca file Shopee RLT…</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#ee4d2d' }}>{activeSource.readingLabel}</div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
               <div style={{ fontSize: 30 }}>📦</div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Drag & drop file Shopee RLT di sini</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>{activeSource.dragDropTitle}</div>
               <div style={{ fontSize: 12, color: 'var(--dim)' }}>
                 Support `.xlsx`, `.xls`, atau `.csv` Shopee/SPX
               </div>
@@ -824,9 +1055,9 @@ export default function MarketplaceIntakeManager() {
           <div style={panelStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 800 }}>Preview Mapping</div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{activeSource.previewLabel}</div>
                 <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • exact bundle match + local store guess
+                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • source <strong>{activeSource.sourceLabel}</strong> • exact bundle match + local store guess
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1045,7 +1276,7 @@ export default function MarketplaceIntakeManager() {
                                               ...current,
                                               [lineKey]: event.target.value,
                                             }))}
-                                            placeholder="Cari bundle RLT…"
+                                            placeholder={activeSource.searchPlaceholder}
                                             style={{
                                               width: '100%',
                                               padding: '7px 10px',
@@ -1150,10 +1381,13 @@ export default function MarketplaceIntakeManager() {
           <div>
             <div style={{ fontSize: 16, fontWeight: 800 }}>Workspace Warehouse</div>
             <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4, maxWidth: 860, lineHeight: 1.6 }}>
-              Upload yang sudah <strong>Confirm & Save</strong> akan masuk ke workspace ini sebagai data <strong>staging</strong>. Data baru dianggap valid downstream setelah warehouse memberi <strong>shipment date</strong>. Selector di bawah selalu mengikuti tanggal shipment nyata, bukan tanggal order dan bukan jam upload.
+              Upload <strong>{activeSource.sourceLabel}</strong> yang sudah <strong>Confirm & Save</strong> akan masuk ke workspace ini sebagai data <strong>staging</strong>. Data baru dianggap valid downstream setelah warehouse memberi <strong>shipment date</strong>. Tanggal shipped utama sekarang dipilih langsung di tiap batch staged, sedangkan selector di kanan dipakai untuk <strong>melihat shipment date tertentu</strong>.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Lihat Shipment
+            </div>
             <input
               type="date"
               value={workspaceDate}
@@ -1223,7 +1457,7 @@ export default function MarketplaceIntakeManager() {
               <div>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>Belum Dikirim</div>
                 <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                  Batch di bawah ini masih pre-valid. Warehouse bisa membuka detail batch untuk melihat order-order di dalamnya, lalu menandai seluruh batch atau order tertentu sebagai <strong>shipped {fmtDateLabel(workspaceDate)}</strong>.
+                  Batch <strong>{activeSource.sourceLabel}</strong> di bawah ini masih pre-valid. Warehouse bisa memilih <strong>tanggal shipped</strong> langsung di row batch, lalu menandai batch atau order tertentu sebagai shipped.
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1248,6 +1482,7 @@ export default function MarketplaceIntakeManager() {
                   <tr style={{ background: 'var(--bg)' }}>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Batch</th>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Uploaded</th>
+                    <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'left', fontSize: 12, color: 'var(--dim)' }}>Tgl Shipped</th>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Order</th>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Line</th>
                     <th style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 12, color: 'var(--dim)' }}>Amount</th>
@@ -1259,6 +1494,9 @@ export default function MarketplaceIntakeManager() {
                   {stagedBatches.map((batch) => {
                     const batchKey = `staged-batch:${batch.batchId}`;
                     const isBatchOpen = Boolean(expandedWorkspaceBatches[batchKey]);
+                    const batchShipmentDate = getBatchShipmentDate(batch.batchId);
+                    const appButtonMeta = getAppButtonMeta(batch.appLastPromoteStatus);
+                    const scalevButtonMeta = getScalevButtonMeta(batch.scalevLastSendStatus);
                     return (
                       <Fragment key={batchKey}>
                         <tr>
@@ -1266,20 +1504,79 @@ export default function MarketplaceIntakeManager() {
                             #{batch.batchId} • {batch.batchFilename}
                           </td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{fmtDateTime(batch.uploadedAt)}</td>
+                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                            <div style={{ display: 'grid', gap: 6 }}>
+                              <input
+                                type="date"
+                                value={batchShipmentDate}
+                                onChange={(event) => updateBatchShipmentDate(batch.batchId, event.target.value)}
+                                style={{
+                                  width: 170,
+                                  padding: '8px 10px',
+                                  borderRadius: 10,
+                                  border: '1px solid var(--border)',
+                                  background: 'var(--bg)',
+                                  color: 'var(--text)',
+                                  fontSize: 12,
+                                  outline: 'none',
+                                  colorScheme: 'dark',
+                                }}
+                              />
+                              <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+                                Tanggal saat ini: <strong style={{ color: 'var(--text-secondary)' }}>{fmtCompactDate(batchShipmentDate)}</strong>. Ubah di sini sebelum klik <strong>Shipped Semua</strong>.
+                              </div>
+                            </div>
+                          </td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(batch.totalOrders)}</td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(batch.totalLines)}</td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtCurrency(batch.totalAmount)}</td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--dim)' }}>
-                            {fmtNumber(batch.totalOrders)} order belum dikirim
+                            <div>{fmtNumber(batch.totalOrders)} order belum dikirim</div>
+                            <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+                              <div style={{ display: 'grid', gap: 4 }}>
+                                <SyncStatusPill
+                                  status={batch.appLastPromoteStatus}
+                                  successLabel="Sudah Masuk App"
+                                  failedLabel="Gagal Masuk App"
+                                  idleLabel="Belum Masuk App"
+                                />
+                                <div style={{ fontSize: 11 }}>
+                                  {batch.appLastPromoteStatus === 'success'
+                                    ? `${fmtShortDateTime(batch.appLastPromoteAt)}`
+                                    : batch.appLastPromoteStatus === 'failed'
+                                      ? (batch.appLastPromoteError || 'Promosi ke app gagal.')
+                                      : 'Batch ini belum pernah dipromosikan ke app.'}
+                                </div>
+                              </div>
+                              <div style={{ display: 'grid', gap: 4 }}>
+                                <SyncStatusPill
+                                  status={batch.scalevLastSendStatus}
+                                  successLabel="Sudah Pernah Push"
+                                  failedLabel="Push Scalev Gagal"
+                                  idleLabel="Belum Pernah Push"
+                                />
+                                <div style={{ fontSize: 11 }}>
+                                  {batch.scalevLastSendStatus === 'success'
+                                    ? `${fmtShortDateTime(batch.scalevLastSendAt)}`
+                                    : batch.scalevLastSendStatus === 'failed'
+                                      ? (batch.scalevLastSendError || 'Push ke Scalev gagal.')
+                                      : 'Belum ada percobaan push ke Scalev.'}
+                                </div>
+                              </div>
+                            </div>
                           </td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                              <ActionButton tone={scalevButtonMeta.tone} disabled>
+                                {scalevButtonMeta.label}
+                              </ActionButton>
                               <ActionButton
                                 onClick={() => applyWorkspaceAction({
                                   orderIds: batch.orderIds,
                                   warehouseStatus: 'scheduled',
-                                  shipmentDate: workspaceDate,
-                                  successText: `Batch #${batch.batchId} ditandai shipped ${fmtDateLabel(workspaceDate)}.`,
+                                  shipmentDate: batchShipmentDate,
+                                  refreshDate: batchShipmentDate,
+                                  successText: `Batch #${batch.batchId} ditandai shipped ${fmtDateLabel(batchShipmentDate)}.`,
                                 })}
                                 tone="primary"
                                 disabled={Boolean(workspaceActionLoading)}
@@ -1294,7 +1591,7 @@ export default function MarketplaceIntakeManager() {
                         </tr>
                         {isBatchOpen ? (
                           <tr>
-                            <td colSpan={7} style={{ padding: 12, borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
+                            <td colSpan={8} style={{ padding: 12, borderBottom: '1px solid var(--border)', background: 'rgba(255,255,255,0.02)' }}>
                               <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
                                 <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 940 }}>
                                   <thead>
@@ -1329,8 +1626,9 @@ export default function MarketplaceIntakeManager() {
                                                   onClick={() => applyWorkspaceAction({
                                                     orderIds: [order.id],
                                                     warehouseStatus: 'scheduled',
-                                                    shipmentDate: workspaceDate,
-                                                    successText: `Order ${order.externalOrderId} ditandai shipped ${fmtDateLabel(workspaceDate)}.`,
+                                                    shipmentDate: batchShipmentDate,
+                                                    refreshDate: batchShipmentDate,
+                                                    successText: `Order ${order.externalOrderId} ditandai shipped ${fmtDateLabel(batchShipmentDate)}.`,
                                                   })}
                                                   tone="primary"
                                                   disabled={Boolean(workspaceActionLoading)}
@@ -1341,8 +1639,9 @@ export default function MarketplaceIntakeManager() {
                                                   onClick={() => applyWorkspaceAction({
                                                     orderIds: [order.id],
                                                     warehouseStatus: 'hold',
-                                                    shipmentDate: workspaceDate,
-                                                    successText: `Order ${order.externalOrderId} ditandai hold untuk shipment ${fmtDateLabel(workspaceDate)}.`,
+                                                    shipmentDate: batchShipmentDate,
+                                                    refreshDate: batchShipmentDate,
+                                                    successText: `Order ${order.externalOrderId} ditandai hold untuk shipment ${fmtDateLabel(batchShipmentDate)}.`,
                                                   })}
                                                   tone="warn"
                                                   disabled={Boolean(workspaceActionLoading)}
@@ -1353,8 +1652,9 @@ export default function MarketplaceIntakeManager() {
                                                   onClick={() => applyWorkspaceAction({
                                                     orderIds: [order.id],
                                                     warehouseStatus: 'canceled',
-                                                    shipmentDate: workspaceDate,
-                                                    successText: `Order ${order.externalOrderId} ditandai canceled pada shipment ${fmtDateLabel(workspaceDate)}.`,
+                                                    shipmentDate: batchShipmentDate,
+                                                    refreshDate: batchShipmentDate,
+                                                    successText: `Order ${order.externalOrderId} ditandai canceled pada shipment ${fmtDateLabel(batchShipmentDate)}.`,
                                                   })}
                                                   tone="danger"
                                                   disabled={Boolean(workspaceActionLoading)}
@@ -1389,7 +1689,7 @@ export default function MarketplaceIntakeManager() {
 
                   {!workspaceLoading && stagedOrders.length === 0 ? (
                     <tr>
-                      <td colSpan={7} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
+                      <td colSpan={8} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
                         Tidak ada batch yang belum dikirim. Semua upload yang sudah disimpan dan belum punya shipment date akan muncul di sini.
                       </td>
                     </tr>
@@ -1397,7 +1697,7 @@ export default function MarketplaceIntakeManager() {
 
                   {workspaceLoading ? (
                     <tr>
-                      <td colSpan={7} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
+                      <td colSpan={8} style={{ padding: 18, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
                         Memuat workspace warehouse...
                       </td>
                     </tr>
@@ -1411,7 +1711,7 @@ export default function MarketplaceIntakeManager() {
             <div>
               <div style={{ fontSize: 15, fontWeight: 800 }}>Shipped {fmtDateLabel(workspaceDate)}</div>
               <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                Batch yang sudah ditandai shipped untuk tanggal <strong>{fmtDateLabel(workspaceDate)}</strong> akan muncul di bawah ini. Buka batch untuk melihat order-order di dalamnya, lalu buka order jika perlu melihat line item.
+                Batch <strong>{activeSource.sourceLabel}</strong> yang sudah ditandai shipped untuk tanggal <strong>{fmtDateLabel(workspaceDate)}</strong> akan muncul di bawah ini. Buka batch untuk melihat order-order di dalamnya, lalu buka order jika perlu melihat line item.
               </div>
             </div>
 
@@ -1432,6 +1732,8 @@ export default function MarketplaceIntakeManager() {
                   {shipmentBatches.map((batch) => {
                     const batchKey = `shipment-batch:${batch.batchId}`;
                     const isBatchOpen = Boolean(expandedWorkspaceBatches[batchKey]);
+                    const appButtonMeta = getAppButtonMeta(batch.appLastPromoteStatus);
+                    const scalevButtonMeta = getScalevButtonMeta(batch.scalevLastSendStatus);
                     return (
                       <Fragment key={batchKey}>
                         <tr>
@@ -1443,10 +1745,56 @@ export default function MarketplaceIntakeManager() {
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtNumber(batch.totalLines)}</td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', textAlign: 'right', fontSize: 13 }}>{fmtCurrency(batch.totalAmount)}</td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12, color: 'var(--dim)' }}>
-                            {fmtNumber(batch.statusCounts.scheduled || 0)} shipped • {fmtNumber(batch.statusCounts.hold || 0)} hold • {fmtNumber(batch.statusCounts.canceled || 0)} canceled
+                            <div>{fmtNumber(batch.statusCounts.scheduled || 0)} shipped • {fmtNumber(batch.statusCounts.hold || 0)} hold • {fmtNumber(batch.statusCounts.canceled || 0)} canceled</div>
+                            <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>
+                              <div style={{ display: 'grid', gap: 4 }}>
+                                <SyncStatusPill
+                                  status={batch.appLastPromoteStatus}
+                                  successLabel="Sudah Masuk App"
+                                  failedLabel="Gagal Masuk App"
+                                  idleLabel="Belum Masuk App"
+                                />
+                                <div style={{ fontSize: 11 }}>
+                                  {batch.appLastPromoteStatus === 'success'
+                                    ? `${fmtShortDateTime(batch.appLastPromoteAt)} • ${fmtNumber(batch.appLastPromoteInsertedCount || 0)} baru • ${fmtNumber(batch.appLastPromoteUpdatedCount || 0)} update`
+                                    : batch.appLastPromoteStatus === 'failed'
+                                      ? (batch.appLastPromoteError || 'Promosi ke app gagal.')
+                                      : 'Batch shipped ini belum pernah dipromosikan ke app.'}
+                                </div>
+                              </div>
+                              <div style={{ display: 'grid', gap: 4 }}>
+                                <SyncStatusPill
+                                  status={batch.scalevLastSendStatus}
+                                  successLabel="Sudah Pernah Push"
+                                  failedLabel="Push Scalev Gagal"
+                                  idleLabel="Belum Pernah Push"
+                                />
+                                <div style={{ fontSize: 11 }}>
+                                  {batch.scalevLastSendStatus === 'success'
+                                    ? `${fmtShortDateTime(batch.scalevLastSendAt)} • ${fmtNumber(batch.scalevLastSendRowCount || 0)} row`
+                                    : batch.scalevLastSendStatus === 'failed'
+                                      ? (batch.scalevLastSendError || 'Push ke Scalev gagal.')
+                                      : 'Belum ada percobaan push ke Scalev.'}
+                                </div>
+                              </div>
+                            </div>
                           </td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                              <ActionButton
+                                onClick={() => handlePromoteBatchToApp(batch.batchId)}
+                                tone={appButtonMeta.tone}
+                                disabled={Boolean(appPromotingBatchKey) || Boolean(scalevSendingBatchKey) || Number(batch.statusCounts.scheduled || 0) === 0}
+                              >
+                                {appPromotingBatchKey === String(batch.batchId) ? 'Memasukkan…' : appButtonMeta.label}
+                              </ActionButton>
+                              <ActionButton
+                                onClick={() => handlePushBatchToScalev(batch.batchId)}
+                                tone={scalevButtonMeta.tone}
+                                disabled={Boolean(scalevSendingBatchKey) || Boolean(appPromotingBatchKey) || Number(batch.statusCounts.scheduled || 0) === 0}
+                              >
+                                {scalevSendingBatchKey === String(batch.batchId) ? 'Mengirim…' : scalevButtonMeta.label}
+                              </ActionButton>
                               <ActionButton onClick={() => toggleWorkspaceBatch(batchKey)}>
                                 {isBatchOpen ? 'Hide' : 'Detail'}
                               </ActionButton>

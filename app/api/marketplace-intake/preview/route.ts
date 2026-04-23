@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
-import { previewShopeeRltIntake } from '@/lib/marketplace-intake';
+import { previewMarketplaceIntake } from '@/lib/marketplace-intake';
 
 export const maxDuration = 250;
 
@@ -43,9 +43,11 @@ export async function POST(req: NextRequest) {
     }
 
     const filename = (formData.get('filename') as string | null) || file.name;
-    const preview = await previewShopeeRltIntake({
+    const sourceKey = (formData.get('sourceKey') as string | null) || null;
+    const preview = await previewMarketplaceIntake({
       file,
       filenameOverride: filename,
+      sourceKey,
     });
 
     return NextResponse.json(preview);

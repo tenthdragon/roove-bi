@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
       success: true,
       batchId: result.batchId,
       summary: result.summary,
-      message: `Preview Shopee RLT berhasil disimpan sebagai batch #${result.batchId} dan masuk ke workspace warehouse.`,
+      message: `Preview ${preview.source.sourceLabel} berhasil disimpan sebagai batch #${result.batchId} dan masuk ke workspace warehouse.`,
     });
   } catch (error: any) {
     console.error('Marketplace intake confirm error:', error);

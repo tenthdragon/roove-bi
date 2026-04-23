@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
 import {
-  guessShopeeRltStoreFromTexts,
-  SHOPEE_RLT_ALLOWED_STORE_NAMES,
+  guessMarketplaceStoreFromTexts,
 } from '@/lib/marketplace-intake-store';
+import { getMarketplaceIntakeSourceConfig } from '@/lib/marketplace-intake-sources';
 import { createServiceSupabase } from '@/lib/service-supabase';
 
 export async function GET(req: NextRequest) {
@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
     }
 
     const query = String(req.nextUrl.searchParams.get('q') || '').trim();
+    const sourceConfig = getMarketplaceIntakeSourceConfig(req.nextUrl.searchParams.get('sourceKey'));
     if (query.length < 2) {
       return NextResponse.json({ results: [] });
     }
@@ -24,12 +25,11 @@ export async function GET(req: NextRequest) {
     const businessRes = await svc
       .from('scalev_webhook_businesses')
       .select('id, business_code')
-      .eq('business_code', 'RLT')
+      .eq('business_code', sourceConfig.businessCode)
       .maybeSingle();
     if (businessRes.error || !businessRes.data) {
-      return NextResponse.json({ error: 'Business RLT tidak ditemukan.' }, { status: 500 });
+      return NextResponse.json({ error: `Business ${sourceConfig.businessCode} tidak ditemukan.` }, { status: 500 });
     }
-    const business = businessRes.data;
 
     const bundlesRes = await svc
       .from('scalev_catalog_bundles')
@@ -45,13 +45,13 @@ export async function GET(req: NextRequest) {
     const results = [];
     for (const bundle of (bundlesRes.data || [])) {
       const label = bundle.display || bundle.public_name || bundle.name || bundle.custom_id || 'Bundle';
-      const storeResolution = guessShopeeRltStoreFromTexts(
+      const storeResolution = guessMarketplaceStoreFromTexts(
         [bundle.display, bundle.public_name, bundle.name, bundle.custom_id, query],
-        SHOPEE_RLT_ALLOWED_STORE_NAMES,
+        sourceConfig.allowedStores,
       );
       const storeCandidates = storeResolution.storeCandidates.length > 0
         ? storeResolution.storeCandidates
-        : SHOPEE_RLT_ALLOWED_STORE_NAMES;
+        : sourceConfig.allowedStores;
       results.push({
         entityKey: `bundle:${bundle.scalev_bundle_id}`,
         entityLabel: label,
