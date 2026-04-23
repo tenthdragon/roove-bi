@@ -60,6 +60,8 @@ type ManualMemoryRow = {
 };
 
 type CanonicalLine = {
+  parentSku?: string | null;
+  referenceSku?: string | null;
   sku: string | null;
   productName: string;
   variation: string | null;
@@ -67,6 +69,23 @@ type CanonicalLine = {
   unitPrice: number;
   lineSubtotal: number;
   lineDiscount: number;
+  priceInitial?: number;
+  priceAfterDiscount?: number;
+  returnedQuantity?: number;
+  totalDiscount?: number;
+  discountSeller?: number;
+  discountShopee?: number;
+  productWeightGrams?: number;
+  orderProductCount?: number;
+  totalWeightGrams?: number;
+  voucherSeller?: number;
+  cashbackCoin?: number;
+  voucherShopee?: number;
+  bundleDiscount?: number;
+  bundleDiscountShopee?: number;
+  bundleDiscountSeller?: number;
+  shopeeCoinDiscount?: number;
+  creditCardDiscount?: number;
   rawRow: Record<string, string>;
 };
 
@@ -76,6 +95,7 @@ type CanonicalOrder = {
   status: string | null;
   substatus: string | null;
   paymentMethodLabel: string | null;
+  shipByDeadlineAt?: string | null;
   createdAt: string | null;
   paidAt: string | null;
   rtsAt: string | null;
@@ -92,11 +112,17 @@ type CanonicalOrder = {
   postalCode: string | null;
   address: string | null;
   addressNotes: string | null;
+  buyerNote?: string | null;
   rawAddress: string | null;
   shippingCost: number;
   orderAmount: number;
+  buyerPaidAmount?: number;
+  totalPaymentAmount?: number;
+  estimatedShippingCost?: number;
+  shippingFeeEstimatedDeduction?: number;
+  returnShippingCost?: number;
   lines: CanonicalLine[];
-  rawMeta: Record<string, string>;
+  rawMeta: Record<string, unknown>;
 };
 
 type PreviewLineStatus = 'identified' | 'not_identified' | 'store_unmapped' | 'entity_mismatch';
@@ -191,6 +217,7 @@ export type MarketplaceIntakePreview = {
   };
   filename: string;
   sourceOrderDate: string | null;
+  sourceHeaders: string[];
   fingerprint: string;
   rowCount: number;
   platform: 'shopee';
@@ -413,7 +440,7 @@ function aggregateCanonicalLines(lines: CanonicalLine[]): CanonicalLine[] {
   const grouped = new Map<string, CanonicalLine>();
   for (const line of lines) {
     const key = [
-      normalizeIdentifier(line.sku),
+      normalizeIdentifier(line.referenceSku || line.sku),
       normalizeIdentifier(line.productName),
       normalizeIdentifier(line.variation),
     ].join('|');
@@ -425,7 +452,23 @@ function aggregateCanonicalLines(lines: CanonicalLine[]): CanonicalLine[] {
     existing.quantity += line.quantity;
     existing.lineSubtotal += line.lineSubtotal;
     existing.lineDiscount += line.lineDiscount;
+    existing.returnedQuantity = (existing.returnedQuantity || 0) + (line.returnedQuantity || 0);
+    existing.totalDiscount = (existing.totalDiscount || 0) + (line.totalDiscount || 0);
+    existing.discountSeller = (existing.discountSeller || 0) + (line.discountSeller || 0);
+    existing.discountShopee = (existing.discountShopee || 0) + (line.discountShopee || 0);
+    existing.productWeightGrams = (existing.productWeightGrams || 0) + (line.productWeightGrams || 0);
+    existing.orderProductCount = (existing.orderProductCount || 0) + (line.orderProductCount || 0);
+    existing.totalWeightGrams = (existing.totalWeightGrams || 0) + (line.totalWeightGrams || 0);
+    existing.voucherSeller = (existing.voucherSeller || 0) + (line.voucherSeller || 0);
+    existing.cashbackCoin = (existing.cashbackCoin || 0) + (line.cashbackCoin || 0);
+    existing.voucherShopee = (existing.voucherShopee || 0) + (line.voucherShopee || 0);
+    existing.bundleDiscount = (existing.bundleDiscount || 0) + (line.bundleDiscount || 0);
+    existing.bundleDiscountShopee = (existing.bundleDiscountShopee || 0) + (line.bundleDiscountShopee || 0);
+    existing.bundleDiscountSeller = (existing.bundleDiscountSeller || 0) + (line.bundleDiscountSeller || 0);
+    existing.shopeeCoinDiscount = (existing.shopeeCoinDiscount || 0) + (line.shopeeCoinDiscount || 0);
+    existing.creditCardDiscount = (existing.creditCardDiscount || 0) + (line.creditCardDiscount || 0);
     existing.unitPrice = existing.quantity > 0 ? existing.lineSubtotal / existing.quantity : existing.unitPrice;
+    existing.priceAfterDiscount = existing.unitPrice;
   }
   return Array.from(grouped.values());
 }
@@ -442,15 +485,38 @@ function parseShopeeOrders(rows: Record<string, string>[]): CanonicalOrder[] {
     const parsedAddress = parseShopeeAddress(cleanText(row['Alamat Pengiriman']), city, province);
     const existing = orders.get(externalId);
     const quantity = Math.max(parseInteger(row.Jumlah) || 1, 1);
-    const discountedUnitPrice = parseNumber(row['Harga Setelah Diskon']) || parseNumber(row['Harga Awal']);
+    const initialUnitPrice = parseNumber(row['Harga Awal']);
+    const discountedUnitPrice = parseNumber(row['Harga Setelah Diskon']) || initialUnitPrice;
+    const totalDiscount = parseNumber(row['Total Diskon']);
+    const discountSeller = parseNumber(row['Diskon Dari Penjual']);
+    const discountShopee = parseNumber(row['Diskon Dari Shopee']);
     const line: CanonicalLine = {
+      parentSku: cleanText(row['SKU Induk']),
+      referenceSku: cleanText(row['Nomor Referensi SKU']),
       sku: cleanText(row['Nomor Referensi SKU']) || cleanText(row['SKU Induk']),
       productName: cleanText(row['Nama Produk']) || 'Produk Marketplace',
       variation: cleanText(row['Nama Variasi']),
       quantity,
       unitPrice: discountedUnitPrice,
       lineSubtotal: discountedUnitPrice * quantity,
-      lineDiscount: parseNumber(row['Diskon Dari Penjual']) + parseNumber(row['Diskon Dari Shopee']),
+      lineDiscount: discountSeller + discountShopee,
+      priceInitial: initialUnitPrice,
+      priceAfterDiscount: discountedUnitPrice,
+      returnedQuantity: parseInteger(row['Returned quantity']),
+      totalDiscount,
+      discountSeller,
+      discountShopee,
+      productWeightGrams: parseNumber(row['Berat Produk']),
+      orderProductCount: parseInteger(row['Jumlah Produk di Pesan']),
+      totalWeightGrams: parseNumber(row['Total Berat']),
+      voucherSeller: parseNumber(row['Voucher Ditanggung Penjual']),
+      cashbackCoin: parseNumber(row['Cashback Koin']),
+      voucherShopee: parseNumber(row['Voucher Ditanggung Shopee']),
+      bundleDiscount: parseNumber(row['Paket Diskon']),
+      bundleDiscountShopee: parseNumber(row['Paket Diskon (Diskon dari Shopee)']),
+      bundleDiscountSeller: parseNumber(row['Paket Diskon (Diskon dari Penjual)']),
+      shopeeCoinDiscount: parseNumber(row['Potongan Koin Shopee']),
+      creditCardDiscount: parseNumber(row['Diskon Kartu Kredit']),
       rawRow: row,
     };
 
@@ -465,6 +531,7 @@ function parseShopeeOrders(rows: Record<string, string>[]): CanonicalOrder[] {
       status: cleanText(row['Status Pesanan']),
       substatus: cleanText(row['Status Pembatalan/ Pengembalian']),
       paymentMethodLabel: cleanText(row['Metode Pembayaran']),
+      shipByDeadlineAt: parseDateTime(row['Pesanan Harus Dikirimkan Sebelum (Menghindari keterlambatan)']),
       createdAt: parseDateTime(row['Waktu Pesanan Dibuat']),
       paidAt: parseDateTime(row['Waktu Pembayaran Dilakukan']),
       rtsAt: parseDateTime(row['Waktu Pengiriman Diatur']),
@@ -481,9 +548,15 @@ function parseShopeeOrders(rows: Record<string, string>[]): CanonicalOrder[] {
       postalCode: parsedAddress.postalCode,
       address: parsedAddress.address,
       addressNotes: cleanText(row.Catatan) || cleanText(row['Catatan dari Pembeli']),
+      buyerNote: cleanText(row['Catatan dari Pembeli']),
       rawAddress: cleanText(row['Alamat Pengiriman']),
       shippingCost: parseNumber(row['Ongkos Kirim Dibayar oleh Pembeli']) || parseNumber(row['Perkiraan Ongkos Kirim']),
       orderAmount: parseNumber(row['Total Pembayaran']) || parseNumber(row['Dibayar Pembeli']),
+      buyerPaidAmount: parseNumber(row['Dibayar Pembeli']),
+      totalPaymentAmount: parseNumber(row['Total Pembayaran']),
+      estimatedShippingCost: parseNumber(row['Perkiraan Ongkos Kirim']),
+      shippingFeeEstimatedDeduction: parseNumber(row['Estimasi Potongan Biaya Pengiriman']),
+      returnShippingCost: parseNumber(row['Ongkos Kirim Pengembalian Barang']),
       lines: [line],
       rawMeta: {
         marketplaceStatus: cleanText(row['Status Pesanan']) || '',
@@ -498,7 +571,7 @@ function parseShopeeOrders(rows: Record<string, string>[]): CanonicalOrder[] {
   }));
 }
 
-async function parseShopeeWorkbook(file: File): Promise<{ orders: CanonicalOrder[]; rowCount: number }> {
+async function parseShopeeWorkbook(file: File): Promise<{ orders: CanonicalOrder[]; rowCount: number; headers: string[] }> {
   const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('Workbook tidak memiliki sheet yang bisa dibaca.');
@@ -520,6 +593,7 @@ async function parseShopeeWorkbook(file: File): Promise<{ orders: CanonicalOrder
   return {
     orders: parseShopeeOrders(stringRows),
     rowCount: stringRows.length,
+    headers,
   };
 }
 
@@ -990,6 +1064,7 @@ function summarizeOrderFromLines(
       platform: order.platform,
       status: order.status,
       substatus: order.substatus,
+      shipByDeadlineAt: order.shipByDeadlineAt,
       createdAt: order.createdAt,
       paidAt: order.paidAt,
       rtsAt: order.rtsAt,
@@ -1001,9 +1076,16 @@ function summarizeOrderFromLines(
       district: order.district,
       postalCode: order.postalCode,
       address: order.address,
+      buyerNote: order.buyerNote,
       addressNotes: order.addressNotes,
       rawAddress: order.rawAddress,
       shippingCost: order.shippingCost,
+      shippingCostBuyer: order.shippingCost,
+      buyerPaidAmount: order.buyerPaidAmount,
+      totalPaymentAmount: order.totalPaymentAmount,
+      estimatedShippingCost: order.estimatedShippingCost,
+      shippingFeeEstimatedDeduction: order.shippingFeeEstimatedDeduction,
+      returnShippingCost: order.returnShippingCost,
       ...order.rawMeta,
     },
     lines,
@@ -1197,7 +1279,7 @@ export async function previewShopeeRltIntake(input: {
   filenameOverride?: string | null;
 }): Promise<MarketplaceIntakePreview> {
   const business = await loadRltBusiness();
-  const { orders, rowCount } = await parseShopeeWorkbook(input.file);
+  const { orders, rowCount, headers } = await parseShopeeWorkbook(input.file);
   const sourceOrderDate = inferSourceOrderDate(orders);
   const fingerprint = buildPreviewFingerprint({
     sourceKey: SHOPEE_RLT_SOURCE.sourceKey,
@@ -1234,6 +1316,7 @@ export async function previewShopeeRltIntake(input: {
     },
     filename: String(input.filenameOverride || input.file.name || 'shopee-rlt-upload'),
     sourceOrderDate,
+    sourceHeaders: headers,
     fingerprint,
     rowCount,
     platform: 'shopee',
@@ -1336,6 +1419,12 @@ export async function saveMarketplaceIntakePreview(input: {
       rawMeta: {
         marketplaceStatus: String(order.rawMeta?.marketplaceStatus || ''),
         cancellationStatus: String(order.rawMeta?.cancellationStatus || ''),
+        shipByDeadlineAt: String(order.rawMeta?.shipByDeadlineAt || ''),
+        buyerPaidAmount: Number(order.rawMeta?.buyerPaidAmount || 0) || 0,
+        totalPaymentAmount: Number(order.rawMeta?.totalPaymentAmount || 0) || 0,
+        estimatedShippingCost: Number(order.rawMeta?.estimatedShippingCost || 0) || 0,
+        shippingFeeEstimatedDeduction: Number(order.rawMeta?.shippingFeeEstimatedDeduction || 0) || 0,
+        returnShippingCost: Number(order.rawMeta?.returnShippingCost || 0) || 0,
       },
     }, lines, []);
   }));
@@ -1374,11 +1463,47 @@ export async function saveMarketplaceIntakePreview(input: {
     rawMeta: {
       marketplaceStatus: String(order.rawMeta?.marketplaceStatus || ''),
       cancellationStatus: String(order.rawMeta?.cancellationStatus || ''),
+      shipByDeadlineAt: String(order.rawMeta?.shipByDeadlineAt || ''),
+      buyerPaidAmount: Number(order.rawMeta?.buyerPaidAmount || 0) || 0,
+      totalPaymentAmount: Number(order.rawMeta?.totalPaymentAmount || 0) || 0,
+      estimatedShippingCost: Number(order.rawMeta?.estimatedShippingCost || 0) || 0,
+      shippingFeeEstimatedDeduction: Number(order.rawMeta?.shippingFeeEstimatedDeduction || 0) || 0,
+      returnShippingCost: Number(order.rawMeta?.returnShippingCost || 0) || 0,
     },
   })));
   if (!sourceOrderDate) {
     throw new Error('Tanggal order file tidak bisa ditentukan. Pastikan file Shopee memiliki waktu order yang valid.');
   }
+
+  const sourceHeaders = Array.from(new Set(
+    Array.isArray(preview.sourceHeaders)
+      ? preview.sourceHeaders.map((header) => String(header || '').trim()).filter(Boolean)
+      : normalizedOrders.flatMap((order) => order.lines.flatMap((line) => Object.keys(line.rawRow || {}))),
+  ));
+
+  const rawSnapshot = {
+    kind: 'marketplace_intake_raw_snapshot',
+    version: 1,
+    source: preview.source,
+    filename: preview.filename,
+    sourceOrderDate,
+    sourceHeaders,
+    fingerprint: preview.fingerprint,
+    rowCount: preview.rowCount,
+    generatedAt: preview.generatedAt,
+    summary,
+    orders: normalizedOrders.map((order) => ({
+      externalOrderId: order.externalOrderId,
+      customerLabel: order.customerLabel,
+      recipientName: order.recipientName,
+      trackingNumber: order.trackingNumber,
+      rawMeta: order.rawMeta || {},
+      lines: (order.lines || []).map((line) => ({
+        lineIndex: line.lineIndex,
+        rawRow: line.rawRow || {},
+      })),
+    })),
+  };
 
   const fingerprint = String(preview.fingerprint || '').trim();
   if (!fingerprint) {
@@ -1411,6 +1536,7 @@ export async function saveMarketplaceIntakePreview(input: {
     filename: preview.filename,
     source_order_date: sourceOrderDate,
     batch_fingerprint: fingerprint,
+    source_headers: sourceHeaders,
     file_size_bytes: null,
     review_status: 'confirmed',
     total_orders: summary.totalOrders,
@@ -1424,6 +1550,7 @@ export async function saveMarketplaceIntakePreview(input: {
     unresolved_store_lines: summary.unresolvedStoreLines,
     uploaded_by_email: input.uploadedByEmail,
     summary,
+    raw_snapshot: rawSnapshot,
     confirmed_at: new Date().toISOString(),
   };
 
@@ -1460,6 +1587,29 @@ export async function saveMarketplaceIntakePreview(input: {
     shipping_provider: order.shippingProvider,
     delivery_option: order.deliveryOption,
     order_amount: order.orderAmount,
+    mp_order_status: String(order.rawMeta?.marketplaceStatus || order.rawMeta?.status || '') || null,
+    mp_cancel_return_status: String(order.rawMeta?.cancellationStatus || order.rawMeta?.substatus || '') || null,
+    mp_ship_by_deadline_at: String(order.rawMeta?.shipByDeadlineAt || '') || null,
+    mp_order_created_at: String(order.rawMeta?.createdAt || '') || null,
+    mp_payment_paid_at: String(order.rawMeta?.paidAt || '') || null,
+    mp_ready_to_ship_at: String(order.rawMeta?.rtsAt || '') || null,
+    mp_order_completed_at: String(order.rawMeta?.deliveredAt || '') || null,
+    mp_customer_username: String(order.rawMeta?.customerUsername || '') || null,
+    mp_customer_phone: String(order.rawMeta?.customerPhone || '') || null,
+    mp_shipping_address: String(order.rawMeta?.address || '') || null,
+    mp_shipping_district: String(order.rawMeta?.district || '') || null,
+    mp_shipping_city: String(order.rawMeta?.city || '') || null,
+    mp_shipping_province: String(order.rawMeta?.province || '') || null,
+    mp_shipping_postal_code: String(order.rawMeta?.postalCode || '') || null,
+    mp_raw_shipping_address: String(order.rawMeta?.rawAddress || '') || null,
+    mp_buyer_note: String(order.rawMeta?.buyerNote || '') || null,
+    mp_seller_note: String(order.rawMeta?.addressNotes || '') || null,
+    mp_buyer_paid_amount: Number(order.rawMeta?.buyerPaidAmount || 0) || 0,
+    mp_total_payment_amount: Number(order.rawMeta?.totalPaymentAmount || 0) || 0,
+    mp_shipping_cost_buyer: Number(order.rawMeta?.shippingCostBuyer || order.rawMeta?.shippingCost || 0) || 0,
+    mp_estimated_shipping_cost: Number(order.rawMeta?.estimatedShippingCost || 0) || 0,
+    mp_shipping_fee_estimated_deduction: Number(order.rawMeta?.shippingFeeEstimatedDeduction || 0) || 0,
+    mp_return_shipping_cost: Number(order.rawMeta?.returnShippingCost || 0) || 0,
     shipment_date: null,
     warehouse_status: 'staged',
     warehouse_note: null,
@@ -1490,10 +1640,29 @@ export async function saveMarketplaceIntakePreview(input: {
       mp_sku: line.mpSku,
       mp_product_name: line.mpProductName,
       mp_variation: line.mpVariation,
+      mp_parent_sku: String(line.rawRow?.['SKU Induk'] || '') || null,
+      mp_reference_sku: String(line.rawRow?.['Nomor Referensi SKU'] || '') || null,
       quantity: line.quantity,
       unit_price: line.unitPrice,
       line_subtotal: line.lineSubtotal,
       line_discount: line.lineDiscount,
+      mp_price_initial: parseNumber(line.rawRow?.['Harga Awal']),
+      mp_price_after_discount: parseNumber(line.rawRow?.['Harga Setelah Diskon']) || line.unitPrice,
+      mp_returned_quantity: parseInteger(line.rawRow?.['Returned quantity']),
+      mp_total_discount: parseNumber(line.rawRow?.['Total Diskon']),
+      mp_discount_seller: parseNumber(line.rawRow?.['Diskon Dari Penjual']),
+      mp_discount_shopee: parseNumber(line.rawRow?.['Diskon Dari Shopee']),
+      mp_product_weight_grams: parseNumber(line.rawRow?.['Berat Produk']),
+      mp_order_product_count: parseInteger(line.rawRow?.['Jumlah Produk di Pesan']),
+      mp_total_weight_grams: parseNumber(line.rawRow?.['Total Berat']),
+      mp_voucher_seller: parseNumber(line.rawRow?.['Voucher Ditanggung Penjual']),
+      mp_cashback_coin: parseNumber(line.rawRow?.['Cashback Koin']),
+      mp_voucher_shopee: parseNumber(line.rawRow?.['Voucher Ditanggung Shopee']),
+      mp_bundle_discount: parseNumber(line.rawRow?.['Paket Diskon']),
+      mp_bundle_discount_shopee: parseNumber(line.rawRow?.['Paket Diskon (Diskon dari Shopee)']),
+      mp_bundle_discount_seller: parseNumber(line.rawRow?.['Paket Diskon (Diskon dari Penjual)']),
+      mp_shopee_coin_discount: parseNumber(line.rawRow?.['Potongan Koin Shopee']),
+      mp_credit_card_discount: parseNumber(line.rawRow?.['Diskon Kartu Kredit']),
       detected_custom_id: line.detectedCustomId,
       matched_entity_type: line.matchedEntityType,
       matched_entity_key: line.matchedEntityKey,
