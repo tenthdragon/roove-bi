@@ -788,6 +788,100 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
     }];
   };
 
+  const getPreferredBatchId = (productId: number, fallbackBatchId?: number | null) => {
+    if (fallbackBatchId != null) return Number(fallbackBatchId);
+    const batches = batchOptionsByProduct[productId] || [];
+    const preferredBatch = batches.find((batch: any) => batch.is_active) || batches[0] || null;
+    return preferredBatch?.id ? Number(preferredBatch.id) : null;
+  };
+
+  const buildVerificationSubmissionItems = (row: any, form: any) => {
+    return (row.items || []).map((item: any) => {
+      const itemId = Number(item.id);
+      const sourceProductId = Number(item.warehouse_product_id);
+      const state = form.items?.[itemId] || {};
+      const mode = state.mode || item.return_mode || 'same_product';
+      const fallbackAllocations = Array.isArray(item.allocations)
+        ? item.allocations.map((allocation: any) => ({
+            targetProductId: Number(allocation.warehouse_product_id || allocation.targetProductId || 0),
+            targetBatchId: allocation.target_batch_id == null
+              ? (allocation.targetBatchId == null ? null : Number(allocation.targetBatchId))
+              : Number(allocation.target_batch_id),
+            quantity: Number(allocation.quantity || 0),
+            notes: allocation.notes || '',
+          }))
+        : [];
+      const allocations = Array.isArray(state.allocations) && state.allocations.length > 0
+        ? state.allocations
+        : fallbackAllocations;
+
+      return {
+        itemId,
+        mode,
+        restockQty: Number(state.restockQty ?? item.restock_qty ?? item.expected_qty ?? 0),
+        targetBatchId: state.targetBatchId != null
+          ? Number(state.targetBatchId)
+          : getPreferredBatchId(sourceProductId, item.target_batch_id),
+        notes: state.notes != null ? state.notes : (item.notes || ''),
+        allocationDefaultNotes: state.allocationDefaultNotes || '',
+        allocations: (allocations || []).map((allocation: any) => ({
+          targetProductId: Number(allocation.targetProductId || 0),
+          quantity: Number(allocation.quantity || 0),
+          targetBatchId: allocation.targetBatchId == null ? null : Number(allocation.targetBatchId),
+          notes: allocation.notes || '',
+        })),
+      };
+    });
+  };
+
+  const validateVerificationSubmission = (row: any, submissionItems: any[]) => {
+    for (const item of (row.items || [])) {
+      const itemId = Number(item.id);
+      const sourceProductId = Number(item.warehouse_product_id);
+      const expectedQty = Number(item.expected_qty || 0);
+      const submission = submissionItems.find((candidate: any) => Number(candidate.itemId) === itemId);
+      if (!submission) return 'Item RTS tidak lengkap. Coba reload lalu ulangi verifikasi.';
+
+      if (submission.mode === 'same_product') {
+        if (!Number.isFinite(submission.restockQty) || submission.restockQty < 0) {
+          return `Qty layak untuk ${item.warehouse_products?.name || `produk #${sourceProductId}`} tidak valid.`;
+        }
+        if (submission.restockQty - expectedQty > 0.000001) {
+          return `Qty layak untuk ${item.warehouse_products?.name || `produk #${sourceProductId}`} tidak boleh melebihi qty expected.`;
+        }
+        if (submission.restockQty > 0 && !submission.targetBatchId) {
+          const hasBatchOptions = (batchOptionsByProduct[sourceProductId] || []).length > 0;
+          return hasBatchOptions
+            ? `Pilih batch tujuan untuk ${item.warehouse_products?.name || `produk #${sourceProductId}`}.`
+            : `Belum ada batch aktif untuk ${item.warehouse_products?.name || `produk #${sourceProductId}`}.`;
+        }
+        continue;
+      }
+
+      const allocations = Array.isArray(submission.allocations) ? submission.allocations : [];
+      let allocatedTotal = 0;
+      for (const allocation of allocations) {
+        if (!Number.isFinite(allocation.quantity) || allocation.quantity < 0) {
+          return `Qty alokasi untuk ${item.warehouse_products?.name || `produk #${sourceProductId}`} tidak valid.`;
+        }
+        if (allocation.quantity <= 0) continue;
+        if (!allocation.targetProductId) {
+          return `Pilih produk tujuan alokasi untuk ${item.warehouse_products?.name || `produk #${sourceProductId}`}.`;
+        }
+        if (!allocation.targetBatchId) {
+          return `Pilih batch tujuan alokasi untuk ${item.warehouse_products?.name || `produk #${sourceProductId}`}.`;
+        }
+        allocatedTotal += Number(allocation.quantity || 0);
+      }
+
+      if (allocatedTotal - expectedQty > 0.000001) {
+        return `Total alokasi untuk ${item.warehouse_products?.name || `produk #${sourceProductId}`} tidak boleh melebihi qty expected.`;
+      }
+    }
+
+    return null;
+  };
+
   const loadVerificationContext = async (row: any) => {
     const verificationId = Number(row.id);
     const sourceProductIds = (row.items || []).map((item: any) => Number(item.warehouse_product_id)).filter(Boolean);
@@ -1048,29 +1142,50 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
   const handleComplete = async (row: any) => {
     const verificationId = Number(row.id);
     const form = formByVerification[verificationId] || { notes: '', items: {} };
+    if (loadingContextByVerification[verificationId]) {
+      setErrorByVerification((current) => ({
+        ...current,
+        [verificationId]: 'Tunggu kandidat produk dan batch selesai dimuat, lalu coba lagi.',
+      }));
+      return;
+    }
+
+    const submissionItems = buildVerificationSubmissionItems(row, form);
+    const validationError = validateVerificationSubmission(row, submissionItems);
+    if (validationError) {
+      setErrorByVerification((current) => ({
+        ...current,
+        [verificationId]: validationError,
+      }));
+      return;
+    }
 
     setSubmittingId(verificationId);
     setErrorByVerification((current) => ({ ...current, [verificationId]: '' }));
     try {
-      await completeWarehouseRTSVerification(verificationId, {
+      const result = await completeWarehouseRTSVerification(verificationId, {
         notes: form.notes || '',
-        items: (row.items || []).map((item: any) => {
-          const state = form.items?.[Number(item.id)] || {};
-          return {
-            itemId: Number(item.id),
-            mode: state.mode || 'same_product',
-            restockQty: Number(state.restockQty || 0),
-            targetBatchId: state.targetBatchId ? Number(state.targetBatchId) : null,
-            notes: state.notes || '',
-            allocations: (state.allocations || []).map((allocation: any) => ({
-              targetProductId: Number(allocation.targetProductId || 0),
-              quantity: Number(allocation.quantity || 0),
-              targetBatchId: allocation.targetBatchId ? Number(allocation.targetBatchId) : null,
-              notes: allocation.notes || state.allocationDefaultNotes || '',
-            })),
-          };
-        }),
+        items: submissionItems.map((item: any) => ({
+          itemId: Number(item.itemId),
+          mode: item.mode || 'same_product',
+          restockQty: Number(item.restockQty || 0),
+          targetBatchId: item.targetBatchId ? Number(item.targetBatchId) : null,
+          notes: item.notes || '',
+          allocations: (item.allocations || []).map((allocation: any) => ({
+            targetProductId: Number(allocation.targetProductId || 0),
+            quantity: Number(allocation.quantity || 0),
+            targetBatchId: allocation.targetBatchId ? Number(allocation.targetBatchId) : null,
+            notes: allocation.notes || item.allocationDefaultNotes || '',
+          })),
+        })),
       });
+      if (!result?.success) {
+        setErrorByVerification((current) => ({
+          ...current,
+          [verificationId]: result?.error || 'Gagal menyelesaikan verifikasi RTS.',
+        }));
+        return;
+      }
       setExpandedId(null);
       onRefresh();
     } catch (e: any) {
@@ -1620,11 +1735,11 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                           ) : (
                             <button
                               onClick={() => handleComplete(row)}
-                              disabled={submittingId === verificationId}
-                              style={{ padding: '9px 20px', background: reviewGreen, border: 'none', borderRadius: 5, color: '#071a0e', fontSize: 13, fontWeight: 700, cursor: submittingId === verificationId ? 'wait' : 'pointer', opacity: submittingId === verificationId ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', justifySelf: 'end' }}
+                              disabled={submittingId === verificationId || loadingContextByVerification[verificationId]}
+                              style={{ padding: '9px 20px', background: reviewGreen, border: 'none', borderRadius: 5, color: '#071a0e', fontSize: 13, fontWeight: 700, cursor: submittingId === verificationId || loadingContextByVerification[verificationId] ? 'wait' : 'pointer', opacity: submittingId === verificationId || loadingContextByVerification[verificationId] ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', justifySelf: 'end' }}
                             >
                               <RtsCheckIcon color="#071a0e" size={14} />
-                              {submittingId === verificationId ? 'Menyimpan...' : 'Selesaikan Verifikasi RTS'}
+                              {loadingContextByVerification[verificationId] ? 'Memuat Batch...' : (submittingId === verificationId ? 'Menyimpan...' : 'Selesaikan Verifikasi RTS')}
                             </button>
                           )}
                         </div>

@@ -4641,224 +4641,234 @@ export async function completeWarehouseRTSVerification(
     }>;
     notes?: string | null;
   },
-) {
-  await requireWarehousePermission('wh:stock_masuk', 'Verifikasi RTS');
-  const svc = createServiceSupabase();
-  const userId = await getCurrentUserId();
-  const now = new Date().toISOString();
+) : Promise<WarehouseMutationResult<{ verificationId: number }>> {
+  try {
+    await requireWarehousePermission('wh:stock_masuk', 'Verifikasi RTS');
+    const svc = createServiceSupabase();
+    const userId = await getCurrentUserId();
+    const now = new Date().toISOString();
 
-  const { data: verification, error: verificationErr } = await svc
-    .from('warehouse_rts_verifications')
-    .select('id, order_id, business_code, order_status, scope, status')
-    .eq('id', verificationId)
-    .single();
-  if (verificationErr || !verification) throw new Error('Verifikasi RTS tidak ditemukan.');
-  if (verification.status !== 'pending') {
-    throw new Error('Verifikasi RTS ini tidak lagi berstatus pending.');
-  }
+    const { data: verification, error: verificationErr } = await svc
+      .from('warehouse_rts_verifications')
+      .select('id, order_id, business_code, order_status, scope, status')
+      .eq('id', verificationId)
+      .single();
+    if (verificationErr || !verification) throw new Error('Verifikasi RTS tidak ditemukan.');
+    if (verification.status !== 'pending') {
+      throw new Error('Verifikasi RTS ini tidak lagi berstatus pending.');
+    }
 
-  const { data: itemRows, error: itemsErr } = await svc
-    .from('warehouse_rts_verification_items')
-    .select(`
-      id,
-      warehouse_product_id,
-      expected_qty,
-      warehouse_products(id, name, category, entity, warehouse, unit)
-    `)
-    .eq('verification_id', verificationId)
-    .order('id', { ascending: true });
-  if (itemsErr) throw itemsErr;
+    const { data: itemRows, error: itemsErr } = await svc
+      .from('warehouse_rts_verification_items')
+      .select(`
+        id,
+        warehouse_product_id,
+        expected_qty,
+        warehouse_products(id, name, category, entity, warehouse, unit)
+      `)
+      .eq('verification_id', verificationId)
+      .order('id', { ascending: true });
+    if (itemsErr) throw itemsErr;
 
-  const submittedById = new Map<number, {
-    mode: WarehouseRtsReturnMode;
-    restockQty: number;
-    targetBatchId?: number | null;
-    notes?: string | null;
-    allocations: Array<{
-      targetProductId: number;
-      quantity: number;
+    const submittedById = new Map<number, {
+      mode: WarehouseRtsReturnMode;
+      restockQty: number;
       targetBatchId?: number | null;
       notes?: string | null;
-    }>;
-  }>();
-  for (const item of payload.items || []) {
-    submittedById.set(Number(item.itemId), {
-      mode: sanitizeWarehouseRtsReturnMode(item.mode),
-      restockQty: Number(item.restockQty || 0),
-      targetBatchId: item.targetBatchId == null ? null : Number(item.targetBatchId),
-      notes: item.notes?.trim() || null,
-      allocations: Array.isArray(item.allocations)
-        ? item.allocations.map((allocation) => ({
-            targetProductId: Number(allocation.targetProductId || 0),
-            quantity: Number(allocation.quantity || 0),
-            targetBatchId: allocation.targetBatchId == null ? null : Number(allocation.targetBatchId),
+      allocations: Array<{
+        targetProductId: number;
+        quantity: number;
+        targetBatchId?: number | null;
+        notes?: string | null;
+      }>;
+    }>();
+    for (const item of payload.items || []) {
+      submittedById.set(Number(item.itemId), {
+        mode: sanitizeWarehouseRtsReturnMode(item.mode),
+        restockQty: Number(item.restockQty || 0),
+        targetBatchId: item.targetBatchId == null ? null : Number(item.targetBatchId),
+        notes: item.notes?.trim() || null,
+        allocations: Array.isArray(item.allocations)
+          ? item.allocations.map((allocation) => ({
+              targetProductId: Number(allocation.targetProductId || 0),
+              quantity: Number(allocation.quantity || 0),
+              targetBatchId: allocation.targetBatchId == null ? null : Number(allocation.targetBatchId),
+              notes: allocation.notes?.trim() || null,
+            }))
+          : [],
+      });
+    }
+
+    const verificationItems = itemRows || [];
+    const requestedTargetProductIds = new Set<number>();
+    for (const submitted of Array.from(submittedById.values())) {
+      if (submitted.mode === 'same_product') continue;
+      for (const allocation of submitted.allocations) {
+        if (allocation.targetProductId > 0 && allocation.quantity > QUANTITY_EPSILON) {
+          requestedTargetProductIds.add(Number(allocation.targetProductId));
+        }
+      }
+    }
+
+    const targetProducts = await loadWarehouseProductsByIds(svc, Array.from(requestedTargetProductIds));
+    for (const item of verificationItems) {
+      const sourceProduct = item.warehouse_products as any;
+      if (!sourceProduct) throw new Error('Produk sumber RTS tidak ditemukan.');
+
+      const submitted = submittedById.get(Number(item.id)) || {
+        mode: 'same_product' as WarehouseRtsReturnMode,
+        restockQty: 0,
+        targetBatchId: null,
+        notes: null,
+        allocations: [],
+      };
+      const expectedQty = Number(item.expected_qty || 0);
+      const mode = sanitizeWarehouseRtsReturnMode(submitted.mode);
+      const persistedAllocations: WarehouseRtsAllocationSnapshot[] = [];
+      let restockQty = 0;
+      let targetBatchCodeSnapshot: string | null = null;
+      let targetBatchId: number | null = null;
+
+      if (mode === 'same_product') {
+        restockQty = Number(submitted.restockQty || 0);
+        if (restockQty < 0) {
+          throw new Error('Qty layak masuk tidak boleh negatif.');
+        }
+        if (restockQty - expectedQty > QUANTITY_EPSILON) {
+          throw new Error('Qty layak masuk tidak boleh melebihi qty expected.');
+        }
+        if (restockQty > QUANTITY_EPSILON && !submitted.targetBatchId) {
+          throw new Error('Batch tujuan wajib dipilih jika ada qty yang dikembalikan ke stok.');
+        }
+
+        if (restockQty > QUANTITY_EPSILON && submitted.targetBatchId) {
+          const batch = await getBatchOrThrow(svc, Number(submitted.targetBatchId), Number(item.warehouse_product_id));
+          targetBatchCodeSnapshot = batch.batch_code || null;
+          targetBatchId = Number(submitted.targetBatchId);
+          await recordStockInInternal(
+            Number(item.warehouse_product_id),
+            Number(submitted.targetBatchId),
+            restockQty,
+            'rts',
+            String(verification.order_id),
+            [
+              `RTS verified untuk order ${verification.order_id}`,
+              verification.business_code ? `business ${verification.business_code}` : null,
+              submitted.notes?.trim() || null,
+            ].filter(Boolean).join(' • '),
+          );
+
+          persistedAllocations.push({
+            warehouse_product_id: Number(item.warehouse_product_id),
+            warehouse_product_name: sourceProduct.name || null,
+            warehouse_product_category: sourceProduct.category || null,
+            quantity: restockQty,
+            target_batch_id: Number(submitted.targetBatchId),
+            target_batch_code_snapshot: targetBatchCodeSnapshot,
+            notes: submitted.notes?.trim() || null,
+          });
+        }
+      } else {
+        for (const allocation of submitted.allocations || []) {
+          const quantity = Number(allocation.quantity || 0);
+          if (quantity < 0) {
+            throw new Error('Qty alokasi RTS tidak boleh negatif.');
+          }
+          if (quantity <= QUANTITY_EPSILON) continue;
+          if (!allocation.targetProductId) {
+            throw new Error('Produk tujuan alokasi RTS wajib dipilih.');
+          }
+          if (!allocation.targetBatchId) {
+            throw new Error('Batch tujuan wajib dipilih untuk setiap alokasi RTS.');
+          }
+
+          const targetProduct = targetProducts.get(Number(allocation.targetProductId));
+          if (!targetProduct) {
+            throw new Error('Produk tujuan alokasi RTS tidak ditemukan.');
+          }
+          if (
+            targetProduct.entity !== sourceProduct.entity
+            || targetProduct.warehouse !== sourceProduct.warehouse
+          ) {
+            throw new Error('Produk tujuan alokasi RTS harus berada di gudang/entity yang sama.');
+          }
+
+          const batch = await getBatchOrThrow(svc, Number(allocation.targetBatchId), Number(allocation.targetProductId));
+          await recordStockInInternal(
+            Number(allocation.targetProductId),
+            Number(allocation.targetBatchId),
+            quantity,
+            'rts',
+            String(verification.order_id),
+            [
+              `RTS decomposed untuk order ${verification.order_id}`,
+              verification.business_code ? `business ${verification.business_code}` : null,
+              `source ${sourceProduct.name || item.warehouse_product_id}`,
+              allocation.notes?.trim() || submitted.notes?.trim() || null,
+            ].filter(Boolean).join(' • '),
+          );
+
+          persistedAllocations.push({
+            warehouse_product_id: Number(allocation.targetProductId),
+            warehouse_product_name: targetProduct.name || null,
+            warehouse_product_category: targetProduct.category || null,
+            quantity,
+            target_batch_id: Number(allocation.targetBatchId),
+            target_batch_code_snapshot: batch.batch_code || null,
             notes: allocation.notes?.trim() || null,
-          }))
-        : [],
-    });
-  }
+          });
+          restockQty += quantity;
+        }
 
-  const verificationItems = itemRows || [];
-  const requestedTargetProductIds = new Set<number>();
-  for (const submitted of Array.from(submittedById.values())) {
-    if (submitted.mode === 'same_product') continue;
-    for (const allocation of submitted.allocations) {
-      if (allocation.targetProductId > 0 && allocation.quantity > QUANTITY_EPSILON) {
-        requestedTargetProductIds.add(Number(allocation.targetProductId));
-      }
-    }
-  }
-
-  const targetProducts = await loadWarehouseProductsByIds(svc, Array.from(requestedTargetProductIds));
-  for (const item of verificationItems) {
-    const sourceProduct = item.warehouse_products as any;
-    if (!sourceProduct) throw new Error('Produk sumber RTS tidak ditemukan.');
-
-    const submitted = submittedById.get(Number(item.id)) || {
-      mode: 'same_product' as WarehouseRtsReturnMode,
-      restockQty: 0,
-      targetBatchId: null,
-      notes: null,
-      allocations: [],
-    };
-    const expectedQty = Number(item.expected_qty || 0);
-    const mode = sanitizeWarehouseRtsReturnMode(submitted.mode);
-    const persistedAllocations: WarehouseRtsAllocationSnapshot[] = [];
-    let restockQty = 0;
-    let targetBatchCodeSnapshot: string | null = null;
-    let targetBatchId: number | null = null;
-
-    if (mode === 'same_product') {
-      restockQty = Number(submitted.restockQty || 0);
-      if (restockQty < 0) {
-        throw new Error('Qty layak masuk tidak boleh negatif.');
-      }
-      if (restockQty - expectedQty > QUANTITY_EPSILON) {
-        throw new Error('Qty layak masuk tidak boleh melebihi qty expected.');
-      }
-      if (restockQty > QUANTITY_EPSILON && !submitted.targetBatchId) {
-        throw new Error('Batch tujuan wajib dipilih jika ada qty yang dikembalikan ke stok.');
+        if (restockQty - expectedQty > QUANTITY_EPSILON) {
+          throw new Error('Total alokasi RTS tidak boleh melebihi qty expected.');
+        }
       }
 
-      if (restockQty > QUANTITY_EPSILON && submitted.targetBatchId) {
-        const batch = await getBatchOrThrow(svc, Number(submitted.targetBatchId), Number(item.warehouse_product_id));
-        targetBatchCodeSnapshot = batch.batch_code || null;
-        targetBatchId = Number(submitted.targetBatchId);
-        await recordStockInInternal(
-          Number(item.warehouse_product_id),
-          Number(submitted.targetBatchId),
-          restockQty,
-          'rts',
-          String(verification.order_id),
-          [
-            `RTS verified untuk order ${verification.order_id}`,
-            verification.business_code ? `business ${verification.business_code}` : null,
-            submitted.notes?.trim() || null,
-          ].filter(Boolean).join(' • '),
-        );
+      const damagedQty = expectedQty - restockQty;
+      const storedNotes = buildWarehouseRtsItemStoredNotes({
+        userNotes: submitted.notes?.trim() || null,
+        mode,
+        allocations: persistedAllocations,
+      });
 
-        persistedAllocations.push({
-          warehouse_product_id: Number(item.warehouse_product_id),
-          warehouse_product_name: sourceProduct.name || null,
-          warehouse_product_category: sourceProduct.category || null,
-          quantity: restockQty,
-          target_batch_id: Number(submitted.targetBatchId),
+      const { error: itemUpdateErr } = await svc
+        .from('warehouse_rts_verification_items')
+        .update({
+          restock_qty: restockQty,
+          damaged_qty: damagedQty < QUANTITY_EPSILON ? 0 : damagedQty,
+          target_batch_id: targetBatchId,
           target_batch_code_snapshot: targetBatchCodeSnapshot,
-          notes: submitted.notes?.trim() || null,
-        });
-      }
-    } else {
-      for (const allocation of submitted.allocations || []) {
-        const quantity = Number(allocation.quantity || 0);
-        if (quantity < 0) {
-          throw new Error('Qty alokasi RTS tidak boleh negatif.');
-        }
-        if (quantity <= QUANTITY_EPSILON) continue;
-        if (!allocation.targetProductId) {
-          throw new Error('Produk tujuan alokasi RTS wajib dipilih.');
-        }
-        if (!allocation.targetBatchId) {
-          throw new Error('Batch tujuan wajib dipilih untuk setiap alokasi RTS.');
-        }
-
-        const targetProduct = targetProducts.get(Number(allocation.targetProductId));
-        if (!targetProduct) {
-          throw new Error('Produk tujuan alokasi RTS tidak ditemukan.');
-        }
-        if (
-          targetProduct.entity !== sourceProduct.entity
-          || targetProduct.warehouse !== sourceProduct.warehouse
-        ) {
-          throw new Error('Produk tujuan alokasi RTS harus berada di gudang/entity yang sama.');
-        }
-
-        const batch = await getBatchOrThrow(svc, Number(allocation.targetBatchId), Number(allocation.targetProductId));
-        await recordStockInInternal(
-          Number(allocation.targetProductId),
-          Number(allocation.targetBatchId),
-          quantity,
-          'rts',
-          String(verification.order_id),
-          [
-            `RTS decomposed untuk order ${verification.order_id}`,
-            verification.business_code ? `business ${verification.business_code}` : null,
-            `source ${sourceProduct.name || item.warehouse_product_id}`,
-            allocation.notes?.trim() || submitted.notes?.trim() || null,
-          ].filter(Boolean).join(' • '),
-        );
-
-        persistedAllocations.push({
-          warehouse_product_id: Number(allocation.targetProductId),
-          warehouse_product_name: targetProduct.name || null,
-          warehouse_product_category: targetProduct.category || null,
-          quantity,
-          target_batch_id: Number(allocation.targetBatchId),
-          target_batch_code_snapshot: batch.batch_code || null,
-          notes: allocation.notes?.trim() || null,
-        });
-        restockQty += quantity;
-      }
-
-      if (restockQty - expectedQty > QUANTITY_EPSILON) {
-        throw new Error('Total alokasi RTS tidak boleh melebihi qty expected.');
-      }
+          notes: storedNotes,
+          updated_at: now,
+        })
+        .eq('id', Number(item.id));
+      if (itemUpdateErr) throw itemUpdateErr;
     }
 
-    const damagedQty = expectedQty - restockQty;
-    const storedNotes = buildWarehouseRtsItemStoredNotes({
-      userNotes: submitted.notes?.trim() || null,
-      mode,
-      allocations: persistedAllocations,
-    });
-
-    const { error: itemUpdateErr } = await svc
-      .from('warehouse_rts_verification_items')
+    const { error: headerUpdateErr } = await svc
+      .from('warehouse_rts_verifications')
       .update({
-        restock_qty: restockQty,
-        damaged_qty: damagedQty < QUANTITY_EPSILON ? 0 : damagedQty,
-        target_batch_id: targetBatchId,
-        target_batch_code_snapshot: targetBatchCodeSnapshot,
-        notes: storedNotes,
+        status: 'completed',
+        notes: payload.notes?.trim() || null,
+        reviewed_by: userId,
+        completed_at: now,
         updated_at: now,
+        order_status: verification.order_status || null,
       })
-      .eq('id', Number(item.id));
-    if (itemUpdateErr) throw itemUpdateErr;
+      .eq('id', verificationId);
+    if (headerUpdateErr) throw headerUpdateErr;
+
+    return {
+      success: true,
+      data: { verificationId },
+    };
+  } catch (error) {
+    return {
+      success: false,
+      error: getWarehouseMutationErrorMessage(error, 'Gagal menyelesaikan verifikasi RTS.'),
+    };
   }
-
-  const { error: headerUpdateErr } = await svc
-    .from('warehouse_rts_verifications')
-    .update({
-      status: 'completed',
-      notes: payload.notes?.trim() || null,
-      reviewed_by: userId,
-      completed_at: now,
-      updated_at: now,
-      order_status: verification.order_status || null,
-    })
-    .eq('id', verificationId);
-  if (headerUpdateErr) throw headerUpdateErr;
-
-  return { verificationId };
 }
 
 // ============================================================
