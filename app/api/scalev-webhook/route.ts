@@ -5,6 +5,17 @@ import crypto from 'crypto';
 
 import { deriveChannelFromStoreType, guessStoreType, type StoreType } from '@/lib/scalev-api';
 import { reconcileScalevOrderWarehouse } from '@/lib/warehouse-ledger-actions';
+import {
+  extractScalevLineItemNameRaw,
+  extractScalevLineItemOwnerRaw,
+  extractScalevOrderBusinessNameRaw,
+  extractScalevOrderOriginBusinessNameRaw,
+  extractScalevOrderOriginRaw,
+  fetchWarehouseBusinessDirectoryRows,
+  fetchWarehouseOriginRegistryRows,
+  resolveWarehouseBusinessCode,
+  resolveWarehouseOrigin,
+} from '@/lib/warehouse-domain-helpers';
 
 function getServiceSupabase() {
   return createClient(
@@ -227,6 +238,43 @@ function getBusinessName(code: string): string {
   if (!cachedSecrets) return code;
   const found = cachedSecrets.find((s) => s.code === code);
   return found?.name || code;
+}
+
+async function resolveWarehouseOrderContext(svc: ReturnType<typeof getServiceSupabase>, data: any, businessCode: string) {
+  const [businessDirectoryRows, originRegistryRows] = await Promise.all([
+    fetchWarehouseBusinessDirectoryRows(svc as any),
+    fetchWarehouseOriginRegistryRows(svc as any),
+  ]);
+
+  const businessNameRaw = extractScalevOrderBusinessNameRaw(data, businessCode);
+  const originBusinessNameRaw = extractScalevOrderOriginBusinessNameRaw(data);
+  const originRaw = extractScalevOrderOriginRaw(data);
+
+  const seller = resolveWarehouseBusinessCode({
+    rawValue: businessNameRaw,
+    fallbackBusinessCode: businessCode,
+    directoryRows: businessDirectoryRows,
+  });
+  const originOperator = resolveWarehouseBusinessCode({
+    rawValue: originBusinessNameRaw,
+    fallbackBusinessCode: null,
+    directoryRows: businessDirectoryRows,
+  });
+  const originRegistry = resolveWarehouseOrigin({
+    rawOriginBusinessName: originBusinessNameRaw,
+    rawOriginName: originRaw,
+    registryRows: originRegistryRows,
+  });
+
+  return {
+    businessDirectoryRows,
+    businessNameRaw,
+    originBusinessNameRaw,
+    originRaw,
+    sellerBusinessCode: seller.business_code || businessCode || null,
+    originOperatorBusinessCode: originRegistry.operator_business_code || originOperator.business_code || null,
+    originRegistryId: originRegistry.id || null,
+  };
 }
 
 // ── Helpers ──
@@ -453,7 +501,14 @@ function derivePlatformFromStore(storeName: string, externalId?: string, webhook
 }
 
 // ── Build enriched order lines from webhook orderlines payload ──
-async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any, businessId: number, taxRateName = 'PPN'): Promise<any[]> {
+async function buildEnrichedLines(
+  orderId: string,
+  dbOrderId: number,
+  data: any,
+  businessId: number,
+  taxRateName = 'PPN',
+  businessDirectoryRows?: Awaited<ReturnType<typeof fetchWarehouseBusinessDirectoryRows>>,
+): Promise<any[]> {
   if (!data.orderlines || !Array.isArray(data.orderlines) || data.orderlines.length === 0) {
     return [];
   }
@@ -465,20 +520,31 @@ async function buildEnrichedLines(orderId: string, dbOrderId: number, data: any,
     : await getTaxRate(taxRateName || 'PPN');
 
   const lines: any[] = [];
+  const directoryRows = businessDirectoryRows || [];
   for (const line of data.orderlines) {
     const qty = line.quantity || 1;
     const productPrice = num(line.product_price);
     const discount = num(line.discount);
     const cogs = num(line.cogs || line.variant_cogs);
-    const brand = await deriveBrandFromProduct(line.product_name || '');
+    const itemNameRaw = extractScalevLineItemNameRaw(line);
+    const itemOwnerRaw = extractScalevLineItemOwnerRaw(line);
+    const brand = await deriveBrandFromProduct(line.product_name || itemNameRaw || '');
+    const ownerResolution = resolveWarehouseBusinessCode({
+      rawValue: itemOwnerRaw,
+      fallbackBusinessCode: null,
+      directoryRows,
+    });
 
     lines.push({
       scalev_order_id: dbOrderId,
       order_id: orderId,
-      product_name: line.product_name || null,
+      product_name: line.product_name || itemNameRaw || null,
       product_type: brand,
       variant_sku: line.variant_unique_id || null,
       quantity: qty,
+      item_name_raw: itemNameRaw || line.product_name || null,
+      item_owner_raw: itemOwnerRaw,
+      stock_owner_business_code: ownerResolution.business_code || null,
       // Financial fields: all values from webhook are line totals incl. tax
       product_price_bt: calcBeforeTax(productPrice, tax),
       discount_bt: calcBeforeTax(discount, tax),
@@ -521,6 +587,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   const dest = data.destination_address || {};
   const storeName = data.store?.name || null;
   const financialEntity = data.financial_entity?.name || data.financial_entity?.code || null;
+  const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
 
   // Build order row
   const derivedPlatform = derivePlatformFromStore(storeName || '', data.external_id, data);
@@ -559,6 +626,12 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
     canceled_time: ts(data.canceled_time),
     source: 'webhook',
     business_code: businessCode,
+    business_name_raw: warehouseOrderContext.businessNameRaw,
+    origin_business_name_raw: warehouseOrderContext.originBusinessNameRaw,
+    origin_raw: warehouseOrderContext.originRaw,
+    seller_business_code: warehouseOrderContext.sellerBusinessCode,
+    origin_operator_business_code: warehouseOrderContext.originOperatorBusinessCode,
+    origin_registry_id: warehouseOrderContext.originRegistryId,
     raw_data: data,
     synced_at: new Date().toISOString(),
   };
@@ -580,7 +653,14 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
 
   // Insert enriched order lines (with financial data) if present
   if (inserted) {
-    const lines = await buildEnrichedLines(orderId, inserted.id, data, businessId, taxRateName);
+    const lines = await buildEnrichedLines(
+      orderId,
+      inserted.id,
+      data,
+      businessId,
+      taxRateName,
+      warehouseOrderContext.businessDirectoryRows,
+    );
     if (lines.length > 0) {
       const { error: lineErr } = await svc.from('scalev_order_lines').upsert(lines, { onConflict: 'scalev_order_id,product_name' });
       if (lineErr) {
@@ -658,9 +738,16 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
   }
 
   // Build update
+  const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
   const updateData: Record<string, any> = {
     status: newStatus,
     business_code: businessCode,
+    business_name_raw: warehouseOrderContext.businessNameRaw,
+    origin_business_name_raw: warehouseOrderContext.originBusinessNameRaw,
+    origin_raw: warehouseOrderContext.originRaw,
+    seller_business_code: warehouseOrderContext.sellerBusinessCode,
+    origin_operator_business_code: warehouseOrderContext.originOperatorBusinessCode,
+    origin_registry_id: warehouseOrderContext.originRegistryId,
     synced_at: new Date().toISOString(),
   };
 
@@ -787,7 +874,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
             is_purchase_fb: orderData.is_purchase_fb,
             is_purchase_tiktok: orderData.is_purchase_tiktok,
             is_purchase_kwai: orderData.is_purchase_kwai,
-          }, businessId, taxRateName);
+          }, businessId, taxRateName, warehouseOrderContext.businessDirectoryRows);
           if (enrichedLines.length > 0) {
             const { error: reInsertErr } = await svc.from('scalev_order_lines').upsert(enrichedLines, { onConflict: 'scalev_order_id,product_name' });
             if (reInsertErr) {
@@ -812,7 +899,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
             is_purchase_fb: orderData.is_purchase_fb,
             is_purchase_tiktok: orderData.is_purchase_tiktok,
             is_purchase_kwai: orderData.is_purchase_kwai,
-          }, businessId, taxRateName);
+          }, businessId, taxRateName, warehouseOrderContext.businessDirectoryRows);
           if (newLines.length > 0) {
             const { error: insertErr } = await svc.from('scalev_order_lines').upsert(newLines, { onConflict: 'scalev_order_id,product_name' });
             if (insertErr) {
@@ -889,10 +976,17 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   const dest = data.destination_address || {};
   const storeName = data.store?.name || null;
   const financialEntity = data.financial_entity?.name || data.financial_entity?.code || null;
+  const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
 
   const updateData: Record<string, any> = {
     synced_at: new Date().toISOString(),
     business_code: businessCode,
+    business_name_raw: warehouseOrderContext.businessNameRaw,
+    origin_business_name_raw: warehouseOrderContext.originBusinessNameRaw,
+    origin_raw: warehouseOrderContext.originRaw,
+    seller_business_code: warehouseOrderContext.sellerBusinessCode,
+    origin_operator_business_code: warehouseOrderContext.originOperatorBusinessCode,
+    origin_registry_id: warehouseOrderContext.originRegistryId,
     raw_data: data,
   };
 
@@ -952,7 +1046,14 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     // Delete old lines
     await svc.from('scalev_order_lines').delete().eq('scalev_order_id', existing.id);
 
-    const lines = await buildEnrichedLines(orderId, existing.id, data, businessId, taxRateName);
+    const lines = await buildEnrichedLines(
+      orderId,
+      existing.id,
+      data,
+      businessId,
+      taxRateName,
+      warehouseOrderContext.businessDirectoryRows,
+    );
     if (lines.length > 0) {
       const { error: lineErr } = await svc.from('scalev_order_lines').upsert(lines, { onConflict: 'scalev_order_id,product_name' });
       if (lineErr) {

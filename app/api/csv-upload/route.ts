@@ -3,6 +3,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { createServerSupabase } from '@/lib/supabase-server';
+import {
+  cleanWarehouseDomainText,
+  fetchWarehouseBusinessDirectoryRows,
+  fetchWarehouseOriginRegistryRows,
+  resolveWarehouseBusinessCode,
+  resolveWarehouseOrigin,
+} from '@/lib/warehouse-domain-helpers';
 
 
 function getServiceSupabase() {
@@ -267,6 +274,10 @@ async function handleOpsUpload(
   uploadedBy: string | null
 ) {
   const svc = getServiceSupabase();
+  const [businessDirectoryRows, originRegistryRows] = await Promise.all([
+    fetchWarehouseBusinessDirectoryRows(svc as any),
+    fetchWarehouseOriginRegistryRows(svc as any),
+  ]);
 
   const stats = {
     totalRows: 0,
@@ -646,6 +657,10 @@ async function handleScalevUpload(
   uploadedBy: string | null
 ) {
   const svc = getServiceSupabase();
+  const [businessDirectoryRows, originRegistryRows] = await Promise.all([
+    fetchWarehouseBusinessDirectoryRows(svc as any),
+    fetchWarehouseOriginRegistryRows(svc as any),
+  ]);
 
   const requiredCols = ['order_id', 'store', 'order_status', 'name'];
   const missing = requiredCols.filter(c => !headers.includes(c));
@@ -762,6 +777,24 @@ async function handleScalevUpload(
     const salesChannel = deriveSalesChannel(firstRow);
     const shippedTime = ts(firstRow.shipped_time) || ts(firstRow.completed_time) || null;
     const completedTime = ts(firstRow.completed_time) || null;
+    const businessNameRaw = cleanWarehouseDomainText(firstRow.business_name || null);
+    const originBusinessNameRaw = cleanWarehouseDomainText(firstRow.origin_business_name || null);
+    const originRaw = cleanWarehouseDomainText(firstRow.origin || null);
+    const sellerResolution = resolveWarehouseBusinessCode({
+      rawValue: businessNameRaw,
+      fallbackBusinessCode: null,
+      directoryRows: businessDirectoryRows,
+    });
+    const originOperatorResolution = resolveWarehouseBusinessCode({
+      rawValue: originBusinessNameRaw,
+      fallbackBusinessCode: null,
+      directoryRows: businessDirectoryRows,
+    });
+    const originRegistryResolution = resolveWarehouseOrigin({
+      rawOriginBusinessName: originBusinessNameRaw,
+      rawOriginName: originRaw,
+      registryRows: originRegistryRows,
+    });
 
     // ── Build line items ──
     const lineItems: any[] = [];
@@ -771,12 +804,20 @@ async function handleScalevUpload(
         const itemOwner = row.item_owner || '';
         if (!itemName) continue;
         const brand = deriveBrandFromItem(itemName, itemOwner);
+        const ownerResolution = resolveWarehouseBusinessCode({
+          rawValue: cleanWarehouseDomainText(itemOwner || null),
+          fallbackBusinessCode: null,
+          directoryRows: businessDirectoryRows,
+        });
         lineItems.push({
           order_id: orderId,
           product_name: itemName,
           product_type: brand,
           variant_sku: null,
           quantity: parseInt(row.item_quantity || '0') || 0,
+          item_name_raw: itemName,
+          item_owner_raw: cleanWarehouseDomainText(itemOwner || null),
+          stock_owner_business_code: ownerResolution.business_code || null,
           product_price_bt: num(row.item_product_price_bt),
           discount_bt: num(row.item_product_discount_bt),
           cogs_bt: num(row.item_cogs_bt),
@@ -796,6 +837,9 @@ async function handleScalevUpload(
         product_type: brand,
         variant_sku: null,
         quantity: parseInt(firstRow.quantity || '0') || 0,
+        item_name_raw: brand,
+        item_owner_raw: null,
+        stock_owner_business_code: null,
         product_price_bt: num(firstRow.product_price_bt),
         discount_bt: num(firstRow.product_discount_bt),
         cogs_bt: num(firstRow.cogs_bt),
@@ -854,6 +898,12 @@ async function handleScalevUpload(
       // Platform info (ops might not have this)
       if (firstRow.platform) d.platform = firstRow.platform;
       if (firstRow.store) d.store_name = firstRow.store;
+      d.business_name_raw = businessNameRaw;
+      d.origin_business_name_raw = originBusinessNameRaw;
+      d.origin_raw = originRaw;
+      d.seller_business_code = sellerResolution.business_code || null;
+      d.origin_operator_business_code = originRegistryResolution.operator_business_code || originOperatorResolution.business_code || null;
+      d.origin_registry_id = originRegistryResolution.id || null;
       if (firstRow.utm_source) d.utm_source = firstRow.utm_source;
 
       // Purchase flags — CSV is source of truth, always update
@@ -882,6 +932,12 @@ async function handleScalevUpload(
         shipped_time: shippedTime,
         platform: firstRow.platform || null,
         store_name: firstRow.store || null,
+        business_name_raw: businessNameRaw,
+        origin_business_name_raw: originBusinessNameRaw,
+        origin_raw: originRaw,
+        seller_business_code: sellerResolution.business_code || null,
+        origin_operator_business_code: originRegistryResolution.operator_business_code || originOperatorResolution.business_code || null,
+        origin_registry_id: originRegistryResolution.id || null,
         utm_source: firstRow.utm_source || null,
         financial_entity: firstRow.financial_entity || null,
         payment_method: firstRow.payment_method || null,

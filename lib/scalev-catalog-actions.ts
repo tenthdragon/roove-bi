@@ -6,6 +6,13 @@ import {
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
 import { recordWarehouseActivityLog } from '@/lib/warehouse-activity-log-actions';
+import {
+  extractVisibleCatalogMetadata,
+  type ScalevVisibilityKind,
+} from '@/lib/scalev-visible-entity-helpers';
+import {
+  syncScalevCatalogBundleLinesUntilComplete,
+} from '@/lib/scalev-catalog-bundle-actions';
 
 const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
 const SCALEV_PAGE_SIZE = 50;
@@ -14,13 +21,16 @@ const SCALEV_REQUEST_SPACING_MS = 250;
 const SCALEV_ENDPOINT_SPACING_MS = 750;
 const SCALEV_MAX_RETRIES = 4;
 const SCALEV_RETRY_BASE_MS = 1_500;
+const CATALOG_SYNC_BUSINESS_CONCURRENCY = 2;
+const VISIBLE_CUTOVER_BUNDLE_BUSINESS_CONCURRENCY = 2;
+const VISIBLE_CUTOVER_BUNDLE_BATCH_SIZE = 160;
 
 export type ScalevCatalogView = 'products' | 'variants' | 'bundles' | 'identifiers';
 
-export type ScalevCrossBusinessSummary = {
-  is_shared: boolean;
-  business_codes: string[];
-  other_business_codes: string[];
+type ScalevCatalogVisibilityFields = {
+  visibility_kind: ScalevVisibilityKind;
+  owner_business_code: string;
+  processor_business_code: string;
 };
 
 export type ScalevCatalogBusinessSummary = {
@@ -40,6 +50,61 @@ export type ScalevCatalogBusinessSummary = {
   identifiers_count: number;
 };
 
+type ScalevVisibleCatalogCutoverProgressStatus =
+  | 'pending'
+  | 'running'
+  | 'success'
+  | 'warning'
+  | 'failed'
+  | 'skipped';
+
+export type ScalevVisibleCatalogCutoverBusinessProgress = {
+  business_id: number;
+  business_code: string;
+  business_name: string;
+  catalog_status: ScalevVisibleCatalogCutoverProgressStatus;
+  catalog_updated_at: string | null;
+  bundle_status: ScalevVisibleCatalogCutoverProgressStatus;
+  bundle_updated_at: string | null;
+  bundles_total: number;
+  bundles_processed: number;
+  bundle_failed_count: number;
+  latest_error: string | null;
+};
+
+export type ScalevVisibleCatalogCutoverProgress = {
+  schema_ready: boolean;
+  schema_message: string | null;
+  active: boolean;
+  phase: 'idle' | 'catalog' | 'bundle' | 'completed' | 'failed';
+  started_at: string | null;
+  finished_at: string | null;
+  total_businesses: number;
+  catalog_finished_count: number;
+  catalog_success_count: number;
+  catalog_failed_count: number;
+  bundle_finished_count: number;
+  bundle_success_count: number;
+  bundle_warning_count: number;
+  bundle_failed_count: number;
+  total_bundles: number;
+  processed_bundles: number;
+  current_business_code: string | null;
+  current_business_name: string | null;
+  last_event_at: string | null;
+  summary: string;
+  businesses: ScalevVisibleCatalogCutoverBusinessProgress[];
+};
+
+type WarehouseActivityLogLite = {
+  created_at: string;
+  action: string;
+  business_code: string | null;
+  summary: string;
+  after_state: Record<string, any>;
+  context: Record<string, any>;
+};
+
 type ScalevCatalogProductRow = {
   id: number;
   scalev_product_id: number;
@@ -54,8 +119,7 @@ type ScalevCatalogProductRow = {
   variants_count: number;
   scalev_last_updated_at: string | null;
   last_synced_at: string;
-  sharing: ScalevCrossBusinessSummary | null;
-};
+} & ScalevCatalogVisibilityFields;
 
 type ScalevCatalogVariantRow = {
   id: number;
@@ -70,8 +134,7 @@ type ScalevCatalogVariantRow = {
   option3_value: string | null;
   item_type: string | null;
   last_synced_at: string;
-  sharing: ScalevCrossBusinessSummary | null;
-};
+} & ScalevCatalogVisibilityFields;
 
 type ScalevCatalogBundleRow = {
   id: number;
@@ -83,7 +146,7 @@ type ScalevCatalogBundleRow = {
   is_bundle_sharing: boolean;
   price_options_count: number;
   last_synced_at: string;
-};
+} & ScalevCatalogVisibilityFields;
 
 type ScalevCatalogIdentifierRow = {
   id: number;
@@ -92,7 +155,7 @@ type ScalevCatalogIdentifierRow = {
   entity_type: 'product' | 'variant' | 'bundle';
   entity_label: string;
   last_synced_at: string;
-};
+} & ScalevCatalogVisibilityFields;
 
 export type ScalevCatalogEntryRow =
   | ScalevCatalogProductRow
@@ -121,6 +184,14 @@ type ScalevProductApi = {
   is_listed_at_marketplace?: boolean | null;
   created_at?: string | null;
   last_updated_at?: string | null;
+  visibility_kind?: string | null;
+  is_shared?: boolean | null;
+  owner_business_id?: number | null;
+  owner_business_code?: string | null;
+  owner_business?: { id?: number | null; business_code?: string | null; code?: string | null } | null;
+  processor_business_id?: number | null;
+  processor_business_code?: string | null;
+  processor_business?: { id?: number | null; business_code?: string | null; code?: string | null } | null;
   variants?: ScalevVariantApi[] | null;
 };
 
@@ -135,6 +206,14 @@ type ScalevVariantApi = {
   option2_value?: string | null;
   option3_value?: string | null;
   item_type?: string | null;
+  visibility_kind?: string | null;
+  is_shared?: boolean | null;
+  owner_business_id?: number | null;
+  owner_business_code?: string | null;
+  owner_business?: { id?: number | null; business_code?: string | null; code?: string | null } | null;
+  processor_business_id?: number | null;
+  processor_business_code?: string | null;
+  processor_business?: { id?: number | null; business_code?: string | null; code?: string | null } | null;
 };
 
 type ScalevBundlePriceOptionApi = {
@@ -150,6 +229,14 @@ type ScalevBundleApi = {
   custom_id?: string | null;
   weight_bump?: number | string | null;
   is_bundle_sharing?: boolean | null;
+  visibility_kind?: string | null;
+  is_shared?: boolean | null;
+  owner_business_id?: number | null;
+  owner_business_code?: string | null;
+  owner_business?: { id?: number | null; business_code?: string | null; code?: string | null } | null;
+  processor_business_id?: number | null;
+  processor_business_code?: string | null;
+  processor_business?: { id?: number | null; business_code?: string | null; code?: string | null } | null;
   bundle_price_options?: ScalevBundlePriceOptionApi[] | null;
 };
 
@@ -166,6 +253,11 @@ type IdentifierSeed = {
   identifier_normalized: string;
   source: string;
   last_synced_at: string;
+  visibility_kind: ScalevVisibilityKind;
+  owner_business_id: number;
+  owner_business_code: string;
+  processor_business_id: number;
+  processor_business_code: string;
 };
 
 async function requireScalevCatalogAccess(label = 'Katalog Scalev') {
@@ -184,8 +276,80 @@ function isCatalogSchemaMissingError(error: any): boolean {
   );
 }
 
+function isActivityLogSchemaMissingError(error: any): boolean {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '');
+  return code === 'PGRST205' || code === '42P01' || /does not exist/i.test(message) || /schema cache/i.test(message);
+}
+
+function cleanRecord(value: unknown): Record<string, any> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return value as Record<string, any>;
+}
+
+function parseNumber(value: unknown, fallback = 0): number {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseText(value: unknown): string | null {
+  const text = String(value ?? '').trim();
+  return text || null;
+}
+
+function parseIsoDate(value: unknown): number | null {
+  const text = parseText(value);
+  if (!text) return null;
+  const time = new Date(text).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function pickLaterDate(current: string | null, candidate: string | null) {
+  const currentTime = parseIsoDate(current);
+  const candidateTime = parseIsoDate(candidate);
+
+  if (candidateTime == null) return current;
+  if (currentTime == null || candidateTime > currentTime) return candidate;
+  return current;
+}
+
+function buildCutoverSummary(progress: {
+  active: boolean;
+  phase: ScalevVisibleCatalogCutoverProgress['phase'];
+  totalBusinesses: number;
+  catalogFinishedCount: number;
+  bundleFinishedCount: number;
+  totalBundles: number;
+  processedBundles: number;
+  currentBusinessCode: string | null;
+  bundleWarningCount: number;
+  bundleFailedCount: number;
+}) {
+  if (progress.phase === 'idle') {
+    return 'Belum ada bulk sync visible catalog yang tercatat.';
+  }
+
+  if (progress.active) {
+    if (progress.phase === 'catalog') {
+      return `Fase katalog berjalan: ${progress.catalogFinishedCount}/${progress.totalBusinesses} business selesai.`;
+    }
+    const currentBusiness = progress.currentBusinessCode ? ` Business aktif: ${progress.currentBusinessCode}.` : '';
+    return `Fase bundle berjalan: ${progress.bundleFinishedCount}/${progress.totalBusinesses} business selesai, ${progress.processedBundles}/${progress.totalBundles} bundle diproses.${currentBusiness}`;
+  }
+
+  if (progress.phase === 'failed') {
+    return `Bulk sync berhenti dengan error setelah ${progress.catalogFinishedCount}/${progress.totalBusinesses} business katalog selesai.`;
+  }
+
+  if (progress.bundleWarningCount > 0 || progress.bundleFailedCount > 0) {
+    return `Bulk sync selesai dengan catatan: ${progress.bundleFinishedCount}/${progress.totalBusinesses} business bundle selesai, ${progress.bundleWarningCount + progress.bundleFailedCount} business memiliki masalah bundle.`;
+  }
+
+  return `Bulk sync selesai: ${progress.totalBusinesses}/${progress.totalBusinesses} business katalog dan bundle selesai.`;
+}
+
 function getCatalogSchemaMissingMessage(): string {
-  return 'Tabel katalog Scalev belum tersedia untuk API Supabase. Jalankan migration tahap 1 lalu refresh schema cache Supabase.';
+  return "Schema katalog visible Scalev belum terbaca oleh API Supabase. Pastikan migration 129 sudah jalan, lalu refresh schema cache dengan `NOTIFY pgrst, 'reload schema';`.";
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -194,6 +358,33 @@ function chunkArray<T>(items: T[], size: number): T[][] {
     chunks.push(items.slice(i, i + size));
   }
   return chunks;
+}
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+
+  const runners = Array.from(
+    { length: Math.min(Math.max(concurrency, 1), items.length) },
+    async () => {
+      while (true) {
+        const currentIndex = cursor;
+        cursor += 1;
+        if (currentIndex >= items.length) return;
+
+        results[currentIndex] = await worker(items[currentIndex], currentIndex);
+      }
+    },
+  );
+
+  await Promise.all(runners);
+  return results;
 }
 
 function cleanString(value: unknown): string | null {
@@ -250,114 +441,35 @@ function getScalevRetryDelayMs(response: Response, attempt: number): number {
   return SCALEV_RETRY_BASE_MS * Math.max(1, attempt + 1);
 }
 
-function buildCrossBusinessSummary(
-  businessCode: string,
-  presenceRows: Array<{ business_code: string | null | undefined }>,
-): ScalevCrossBusinessSummary | null {
-  const businessCodes = Array.from(new Set(
-    presenceRows
-      .map((row) => String(row.business_code || '').trim())
-      .filter(Boolean),
-  )).sort();
-
-  if (businessCodes.length === 0) return null;
-
-  const selectedCode = String(businessCode || '').trim();
-  const sortedCodes = selectedCode && businessCodes.includes(selectedCode)
-    ? [selectedCode, ...businessCodes.filter((code) => code !== selectedCode)]
-    : businessCodes;
-  const otherBusinessCodes = sortedCodes.filter((code) => code !== selectedCode);
-
-  return {
-    is_shared: otherBusinessCodes.length > 0,
-    business_codes: sortedCodes,
-    other_business_codes: otherBusinessCodes,
-  };
-}
-
-async function buildCatalogEntrySharingLookup(
-  svc: ReturnType<typeof createServiceSupabase>,
-  businessCode: string,
-  input: {
-    products?: Array<{ scalev_product_id: number }>;
-    variants?: Array<{ scalev_variant_id: number }>;
-  },
-) {
-  const productSharingById = new Map<number, ScalevCrossBusinessSummary | null>();
-  const variantSharingById = new Map<number, ScalevCrossBusinessSummary | null>();
-
-  const productIds = Array.from(new Set(
-    (input.products || [])
-      .map((row) => Number(row.scalev_product_id || 0))
-      .filter((value) => Number.isFinite(value) && value > 0),
-  ));
-  const variantIds = Array.from(new Set(
-    (input.variants || [])
-      .map((row) => Number(row.scalev_variant_id || 0))
-      .filter((value) => Number.isFinite(value) && value > 0),
-  ));
-
-  const productPresenceById = new Map<number, Array<{ business_code: string }>>();
-  for (const chunk of chunkArray(productIds, 500)) {
-    if (chunk.length === 0) continue;
-    const { data, error } = await svc
-      .from('scalev_catalog_products')
-      .select('business_code, scalev_product_id')
-      .in('scalev_product_id', chunk);
-    if (error) throw error;
-    for (const row of (data || []) as any[]) {
-      const productId = Number(row.scalev_product_id || 0);
-      if (!productId) continue;
-      if (!productPresenceById.has(productId)) productPresenceById.set(productId, []);
-      productPresenceById.get(productId)!.push({ business_code: row.business_code });
-    }
-  }
-
-  const variantPresenceById = new Map<number, Array<{ business_code: string }>>();
-  for (const chunk of chunkArray(variantIds, 500)) {
-    if (chunk.length === 0) continue;
-    const { data, error } = await svc
-      .from('scalev_catalog_variants')
-      .select('business_code, scalev_variant_id')
-      .in('scalev_variant_id', chunk);
-    if (error) throw error;
-    for (const row of (data || []) as any[]) {
-      const variantId = Number(row.scalev_variant_id || 0);
-      if (!variantId) continue;
-      if (!variantPresenceById.has(variantId)) variantPresenceById.set(variantId, []);
-      variantPresenceById.get(variantId)!.push({ business_code: row.business_code });
-    }
-  }
-
-  for (const productId of productIds) {
-    productSharingById.set(productId, buildCrossBusinessSummary(businessCode, productPresenceById.get(productId) || []));
-  }
-  for (const variantId of variantIds) {
-    variantSharingById.set(variantId, buildCrossBusinessSummary(businessCode, variantPresenceById.get(variantId) || []));
-  }
-
-  return {
-    productSharingById,
-    variantSharingById,
-  };
-}
-
 async function getCatalogSchemaState(): Promise<{ ready: boolean; message: string | null }> {
   const svc = createServiceSupabase();
-  const { error } = await svc
+  const { error: productError } = await svc
     .from('scalev_catalog_products')
-    .select('id')
+    .select('id, owner_business_code, processor_business_code')
     .limit(1);
 
-  if (!error) {
+  if (productError) {
+    if (isCatalogSchemaMissingError(productError)) {
+      return { ready: false, message: getCatalogSchemaMissingMessage() };
+    }
+
+    throw productError;
+  }
+
+  const { error: bundleError } = await svc
+    .from('scalev_catalog_bundles')
+    .select('id, owner_business_code, processor_business_code')
+    .limit(1);
+
+  if (!bundleError) {
     return { ready: true, message: null };
   }
 
-  if (isCatalogSchemaMissingError(error)) {
+  if (isCatalogSchemaMissingError(bundleError)) {
     return { ready: false, message: getCatalogSchemaMissingMessage() };
   }
 
-  throw error;
+  throw bundleError;
 }
 
 async function fetchScalevPaginatedResults<T>(
@@ -480,6 +592,11 @@ function pushIdentifier(
     identifier_normalized: normalized,
     source: seed.source,
     last_synced_at: seed.last_synced_at,
+    visibility_kind: seed.visibility_kind,
+    owner_business_id: seed.owner_business_id,
+    owner_business_code: seed.owner_business_code,
+    processor_business_id: seed.processor_business_id,
+    processor_business_code: seed.processor_business_code,
   });
 }
 
@@ -500,6 +617,11 @@ function buildCatalogPayload(
     const productDisplay = cleanString(product.display);
     const productSlug = cleanString(product.slug);
     const productLabel = productDisplay || productPublicName || productName;
+    const productVisibility = extractVisibleCatalogMetadata({
+      viewerBusinessId: business.id,
+      viewerBusinessCode: business.business_code,
+      source: product,
+    });
 
     productRows.push({
       business_id: business.id,
@@ -518,6 +640,11 @@ function buildCatalogPayload(
       scalev_created_at: cleanString(product.created_at),
       scalev_last_updated_at: cleanString(product.last_updated_at),
       last_synced_at: syncAt,
+      visibility_kind: productVisibility.visibility_kind,
+      owner_business_id: productVisibility.owner_business_id,
+      owner_business_code: productVisibility.owner_business_code,
+      processor_business_id: productVisibility.processor_business_id,
+      processor_business_code: productVisibility.processor_business_code,
     });
 
     pushIdentifier(identifierMap, {
@@ -532,6 +659,11 @@ function buildCatalogPayload(
       value: productName,
       source: 'product.name',
       last_synced_at: syncAt,
+      visibility_kind: productVisibility.visibility_kind,
+      owner_business_id: productVisibility.owner_business_id,
+      owner_business_code: productVisibility.owner_business_code,
+      processor_business_id: productVisibility.processor_business_id,
+      processor_business_code: productVisibility.processor_business_code,
     });
     pushIdentifier(identifierMap, {
       business_id: business.id,
@@ -545,6 +677,11 @@ function buildCatalogPayload(
       value: productPublicName,
       source: 'product.public_name',
       last_synced_at: syncAt,
+      visibility_kind: productVisibility.visibility_kind,
+      owner_business_id: productVisibility.owner_business_id,
+      owner_business_code: productVisibility.owner_business_code,
+      processor_business_id: productVisibility.processor_business_id,
+      processor_business_code: productVisibility.processor_business_code,
     });
     pushIdentifier(identifierMap, {
       business_id: business.id,
@@ -558,6 +695,11 @@ function buildCatalogPayload(
       value: productDisplay,
       source: 'product.display',
       last_synced_at: syncAt,
+      visibility_kind: productVisibility.visibility_kind,
+      owner_business_id: productVisibility.owner_business_id,
+      owner_business_code: productVisibility.owner_business_code,
+      processor_business_id: productVisibility.processor_business_id,
+      processor_business_code: productVisibility.processor_business_code,
     });
     pushIdentifier(identifierMap, {
       business_id: business.id,
@@ -571,12 +713,23 @@ function buildCatalogPayload(
       value: productSlug,
       source: 'product.slug',
       last_synced_at: syncAt,
+      visibility_kind: productVisibility.visibility_kind,
+      owner_business_id: productVisibility.owner_business_id,
+      owner_business_code: productVisibility.owner_business_code,
+      processor_business_id: productVisibility.processor_business_id,
+      processor_business_code: productVisibility.processor_business_code,
     });
 
     for (const variant of product.variants || []) {
       const variantName = cleanString(variant.name) || productLabel;
       const variantProductName = cleanString(variant.product_name) || productName;
       const variantLabel = variantName || variantProductName || productLabel;
+      const variantVisibility = extractVisibleCatalogMetadata({
+        viewerBusinessId: business.id,
+        viewerBusinessCode: business.business_code,
+        source: variant,
+        fallback: productVisibility,
+      });
 
       variantRows.push({
         business_id: business.id,
@@ -593,6 +746,11 @@ function buildCatalogPayload(
         option3_value: cleanString(variant.option3_value),
         item_type: cleanString(variant.item_type),
         last_synced_at: syncAt,
+        visibility_kind: variantVisibility.visibility_kind,
+        owner_business_id: variantVisibility.owner_business_id,
+        owner_business_code: variantVisibility.owner_business_code,
+        processor_business_id: variantVisibility.processor_business_id,
+        processor_business_code: variantVisibility.processor_business_code,
       });
 
       pushIdentifier(identifierMap, {
@@ -607,6 +765,11 @@ function buildCatalogPayload(
         value: variantName,
         source: 'variant.name',
         last_synced_at: syncAt,
+        visibility_kind: variantVisibility.visibility_kind,
+        owner_business_id: variantVisibility.owner_business_id,
+        owner_business_code: variantVisibility.owner_business_code,
+        processor_business_id: variantVisibility.processor_business_id,
+        processor_business_code: variantVisibility.processor_business_code,
       });
       pushIdentifier(identifierMap, {
         business_id: business.id,
@@ -620,6 +783,11 @@ function buildCatalogPayload(
         value: variantProductName,
         source: 'variant.product_name',
         last_synced_at: syncAt,
+        visibility_kind: variantVisibility.visibility_kind,
+        owner_business_id: variantVisibility.owner_business_id,
+        owner_business_code: variantVisibility.owner_business_code,
+        processor_business_id: variantVisibility.processor_business_id,
+        processor_business_code: variantVisibility.processor_business_code,
       });
       pushIdentifier(identifierMap, {
         business_id: business.id,
@@ -633,6 +801,11 @@ function buildCatalogPayload(
         value: cleanString(variant.sku),
         source: 'variant.sku',
         last_synced_at: syncAt,
+        visibility_kind: variantVisibility.visibility_kind,
+        owner_business_id: variantVisibility.owner_business_id,
+        owner_business_code: variantVisibility.owner_business_code,
+        processor_business_id: variantVisibility.processor_business_id,
+        processor_business_code: variantVisibility.processor_business_code,
       });
       pushIdentifier(identifierMap, {
         business_id: business.id,
@@ -646,6 +819,11 @@ function buildCatalogPayload(
         value: cleanString(variant.unique_id),
         source: 'variant.unique_id',
         last_synced_at: syncAt,
+        visibility_kind: variantVisibility.visibility_kind,
+        owner_business_id: variantVisibility.owner_business_id,
+        owner_business_code: variantVisibility.owner_business_code,
+        processor_business_id: variantVisibility.processor_business_id,
+        processor_business_code: variantVisibility.processor_business_code,
       });
       pushIdentifier(identifierMap, {
         business_id: business.id,
@@ -659,6 +837,11 @@ function buildCatalogPayload(
         value: cleanString(variant.uuid),
         source: 'variant.uuid',
         last_synced_at: syncAt,
+        visibility_kind: variantVisibility.visibility_kind,
+        owner_business_id: variantVisibility.owner_business_id,
+        owner_business_code: variantVisibility.owner_business_code,
+        processor_business_id: variantVisibility.processor_business_id,
+        processor_business_code: variantVisibility.processor_business_code,
       });
     }
   }
@@ -669,6 +852,11 @@ function buildCatalogPayload(
     const bundleDisplay = cleanString(bundle.display);
     const bundleCustomId = cleanString(bundle.custom_id);
     const bundleLabel = bundleDisplay || bundlePublicName || bundleName;
+    const bundleVisibility = extractVisibleCatalogMetadata({
+      viewerBusinessId: business.id,
+      viewerBusinessCode: business.business_code,
+      source: bundle,
+    });
 
     bundleRows.push({
       business_id: business.id,
@@ -684,6 +872,11 @@ function buildCatalogPayload(
         ? bundle.bundle_price_options.length
         : 0,
       last_synced_at: syncAt,
+      visibility_kind: bundleVisibility.visibility_kind,
+      owner_business_id: bundleVisibility.owner_business_id,
+      owner_business_code: bundleVisibility.owner_business_code,
+      processor_business_id: bundleVisibility.processor_business_id,
+      processor_business_code: bundleVisibility.processor_business_code,
     });
 
     pushIdentifier(identifierMap, {
@@ -698,6 +891,11 @@ function buildCatalogPayload(
       value: bundleName,
       source: 'bundle.name',
       last_synced_at: syncAt,
+      visibility_kind: bundleVisibility.visibility_kind,
+      owner_business_id: bundleVisibility.owner_business_id,
+      owner_business_code: bundleVisibility.owner_business_code,
+      processor_business_id: bundleVisibility.processor_business_id,
+      processor_business_code: bundleVisibility.processor_business_code,
     });
     pushIdentifier(identifierMap, {
       business_id: business.id,
@@ -711,6 +909,11 @@ function buildCatalogPayload(
       value: bundlePublicName,
       source: 'bundle.public_name',
       last_synced_at: syncAt,
+      visibility_kind: bundleVisibility.visibility_kind,
+      owner_business_id: bundleVisibility.owner_business_id,
+      owner_business_code: bundleVisibility.owner_business_code,
+      processor_business_id: bundleVisibility.processor_business_id,
+      processor_business_code: bundleVisibility.processor_business_code,
     });
     pushIdentifier(identifierMap, {
       business_id: business.id,
@@ -724,6 +927,11 @@ function buildCatalogPayload(
       value: bundleDisplay,
       source: 'bundle.display',
       last_synced_at: syncAt,
+      visibility_kind: bundleVisibility.visibility_kind,
+      owner_business_id: bundleVisibility.owner_business_id,
+      owner_business_code: bundleVisibility.owner_business_code,
+      processor_business_id: bundleVisibility.processor_business_id,
+      processor_business_code: bundleVisibility.processor_business_code,
     });
     pushIdentifier(identifierMap, {
       business_id: business.id,
@@ -737,6 +945,11 @@ function buildCatalogPayload(
       value: bundleCustomId,
       source: 'bundle.custom_id',
       last_synced_at: syncAt,
+      visibility_kind: bundleVisibility.visibility_kind,
+      owner_business_id: bundleVisibility.owner_business_id,
+      owner_business_code: bundleVisibility.owner_business_code,
+      processor_business_id: bundleVisibility.processor_business_id,
+      processor_business_code: bundleVisibility.processor_business_code,
     });
 
     for (const priceOption of bundle.bundle_price_options || []) {
@@ -752,6 +965,11 @@ function buildCatalogPayload(
         value: cleanString(priceOption.unique_id),
         source: 'bundle.price_option_unique_id',
         last_synced_at: syncAt,
+        visibility_kind: bundleVisibility.visibility_kind,
+        owner_business_id: bundleVisibility.owner_business_id,
+        owner_business_code: bundleVisibility.owner_business_code,
+        processor_business_id: bundleVisibility.processor_business_id,
+        processor_business_code: bundleVisibility.processor_business_code,
       });
       pushIdentifier(identifierMap, {
         business_id: business.id,
@@ -765,6 +983,11 @@ function buildCatalogPayload(
         value: cleanString(priceOption.slug),
         source: 'bundle.price_option_slug',
         last_synced_at: syncAt,
+        visibility_kind: bundleVisibility.visibility_kind,
+        owner_business_id: bundleVisibility.owner_business_id,
+        owner_business_code: bundleVisibility.owner_business_code,
+        processor_business_id: bundleVisibility.processor_business_id,
+        processor_business_code: bundleVisibility.processor_business_code,
       });
     }
   }
@@ -818,6 +1041,108 @@ async function getBusinessById(businessId: number): Promise<ScalevBusinessConfig
   }
 
   return data as ScalevBusinessConfig;
+}
+
+async function getActiveScalevBusinessesForSync() {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('scalev_webhook_businesses')
+    .select('id, business_code, business_name, api_key, is_active')
+    .eq('is_active', true)
+    .not('api_key', 'is', null)
+    .order('business_code', { ascending: true });
+
+  if (error) throw error;
+  return (data || []) as ScalevBusinessConfig[];
+}
+
+async function getLatestVisibleCutoverRunMetadata() {
+  const svc = createServiceSupabase();
+
+  const { data: startedRow, error: startedError } = await svc
+    .from('warehouse_activity_log')
+    .select('created_at, action, summary, business_code, after_state, context')
+    .eq('scope', 'scalev_catalog_sync')
+    .eq('action', 'sync_visible_cutover_started')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (startedError) {
+    if (isActivityLogSchemaMissingError(startedError)) {
+      return {
+        schemaReady: false,
+        schemaMessage: 'Audit log warehouse belum tersedia. Jalankan migration 109 terlebih dahulu.',
+        startedLog: null as WarehouseActivityLogLite | null,
+        terminalLog: null as WarehouseActivityLogLite | null,
+        active: false,
+      };
+    }
+    throw startedError;
+  }
+
+  const normalizedStarted = startedRow
+    ? {
+      created_at: startedRow.created_at,
+      action: startedRow.action,
+      business_code: startedRow.business_code || null,
+      summary: startedRow.summary || '',
+      after_state: cleanRecord(startedRow.after_state),
+      context: cleanRecord(startedRow.context),
+    }
+    : null;
+
+  if (!normalizedStarted) {
+    return {
+      schemaReady: true,
+      schemaMessage: null,
+      startedLog: null as WarehouseActivityLogLite | null,
+      terminalLog: null as WarehouseActivityLogLite | null,
+      active: false,
+    };
+  }
+
+  const { data: terminalRow, error: terminalError } = await svc
+    .from('warehouse_activity_log')
+    .select('created_at, action, summary, business_code, after_state, context')
+    .eq('scope', 'scalev_catalog_sync')
+    .in('action', ['sync_visible_cutover', 'sync_visible_cutover_failed'])
+    .gte('created_at', normalizedStarted.created_at)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (terminalError) {
+    if (isActivityLogSchemaMissingError(terminalError)) {
+      return {
+        schemaReady: false,
+        schemaMessage: 'Audit log warehouse belum tersedia. Jalankan migration 109 terlebih dahulu.',
+        startedLog: null as WarehouseActivityLogLite | null,
+        terminalLog: null as WarehouseActivityLogLite | null,
+        active: false,
+      };
+    }
+    throw terminalError;
+  }
+
+  const normalizedTerminal = terminalRow
+    ? {
+      created_at: terminalRow.created_at,
+      action: terminalRow.action,
+      business_code: terminalRow.business_code || null,
+      summary: terminalRow.summary || '',
+      after_state: cleanRecord(terminalRow.after_state),
+      context: cleanRecord(terminalRow.context),
+    }
+    : null;
+
+  return {
+    schemaReady: true,
+    schemaMessage: null,
+    startedLog: normalizedStarted,
+    terminalLog: normalizedTerminal,
+    active: !normalizedTerminal,
+  };
 }
 
 async function performScalevCatalogSync(
@@ -1023,32 +1348,26 @@ export async function syncScalevCatalogBusiness(businessId: number) {
   return performScalevCatalogSync(business, 'single');
 }
 
-export async function syncScalevCatalogAllBusinesses() {
+export async function syncScalevCatalogAllBusinesses(preloadedBusinesses?: ScalevBusinessConfig[]) {
   await requireScalevCatalogAccess();
-  const svc = createServiceSupabase();
-  const { data, error } = await svc
-    .from('scalev_webhook_businesses')
-    .select('id, business_code, business_name, api_key, is_active')
-    .eq('is_active', true)
-    .not('api_key', 'is', null)
-    .order('business_code', { ascending: true });
-
-  if (error) throw error;
-
-  const results: Array<Record<string, any>> = [];
-  for (const business of (data || []) as ScalevBusinessConfig[]) {
-    try {
-      results.push(await performScalevCatalogSync(business, 'bulk'));
-    } catch (syncError: any) {
-      results.push({
-        success: false,
-        business_id: business.id,
-        business_code: business.business_code,
-        business_name: business.business_name,
-        error: syncError?.message || 'Gagal sync katalog Scalev.',
-      });
-    }
-  }
+  const activeBusinesses = preloadedBusinesses || await getActiveScalevBusinessesForSync();
+  const results = await mapWithConcurrency(
+    activeBusinesses,
+    CATALOG_SYNC_BUSINESS_CONCURRENCY,
+    async (business) => {
+      try {
+        return await performScalevCatalogSync(business, 'bulk');
+      } catch (syncError: any) {
+        return {
+          success: false,
+          business_id: business.id,
+          business_code: business.business_code,
+          business_name: business.business_name,
+          error: syncError?.message || 'Gagal sync katalog Scalev.',
+        };
+      }
+    },
+  );
 
   await recordWarehouseActivityLog({
     scope: 'scalev_catalog_sync',
@@ -1077,6 +1396,513 @@ export async function syncScalevCatalogAllBusinesses() {
   return results;
 }
 
+export async function getScalevVisibleCatalogCutoverProgress(): Promise<ScalevVisibleCatalogCutoverProgress> {
+  await requireScalevCatalogAccess();
+
+  const schema = await getCatalogSchemaState();
+  const activeBusinesses = await getActiveScalevBusinessesForSync();
+  const idleBusinesses: ScalevVisibleCatalogCutoverBusinessProgress[] = activeBusinesses.map((business) => ({
+    business_id: business.id,
+    business_code: business.business_code,
+    business_name: business.business_name,
+    catalog_status: 'pending',
+    catalog_updated_at: null,
+    bundle_status: 'pending',
+    bundle_updated_at: null,
+    bundles_total: 0,
+    bundles_processed: 0,
+    bundle_failed_count: 0,
+    latest_error: null,
+  }));
+
+  if (!schema.ready) {
+    return {
+      schema_ready: false,
+      schema_message: schema.message,
+      active: false,
+      phase: 'idle',
+      started_at: null,
+      finished_at: null,
+      total_businesses: idleBusinesses.length,
+      catalog_finished_count: 0,
+      catalog_success_count: 0,
+      catalog_failed_count: 0,
+      bundle_finished_count: 0,
+      bundle_success_count: 0,
+      bundle_warning_count: 0,
+      bundle_failed_count: 0,
+      total_bundles: 0,
+      processed_bundles: 0,
+      current_business_code: null,
+      current_business_name: null,
+      last_event_at: null,
+      summary: schema.message || 'Schema katalog Scalev belum siap dipakai.',
+      businesses: idleBusinesses,
+    };
+  }
+
+  const run = await getLatestVisibleCutoverRunMetadata();
+  if (!run.schemaReady) {
+    return {
+      schema_ready: false,
+      schema_message: run.schemaMessage,
+      active: false,
+      phase: 'idle',
+      started_at: null,
+      finished_at: null,
+      total_businesses: idleBusinesses.length,
+      catalog_finished_count: 0,
+      catalog_success_count: 0,
+      catalog_failed_count: 0,
+      bundle_finished_count: 0,
+      bundle_success_count: 0,
+      bundle_warning_count: 0,
+      bundle_failed_count: 0,
+      total_bundles: 0,
+      processed_bundles: 0,
+      current_business_code: null,
+      current_business_name: null,
+      last_event_at: null,
+      summary: run.schemaMessage || 'Audit log warehouse belum siap dipakai.',
+      businesses: idleBusinesses,
+    };
+  }
+
+  if (!run.startedLog) {
+    return {
+      schema_ready: true,
+      schema_message: null,
+      active: false,
+      phase: 'idle',
+      started_at: null,
+      finished_at: null,
+      total_businesses: idleBusinesses.length,
+      catalog_finished_count: 0,
+      catalog_success_count: 0,
+      catalog_failed_count: 0,
+      bundle_finished_count: 0,
+      bundle_success_count: 0,
+      bundle_warning_count: 0,
+      bundle_failed_count: 0,
+      total_bundles: 0,
+      processed_bundles: 0,
+      current_business_code: null,
+      current_business_name: null,
+      last_event_at: null,
+      summary: 'Belum ada bulk sync visible catalog yang tercatat.',
+      businesses: idleBusinesses,
+    };
+  }
+
+  const startedAt = run.startedLog.created_at;
+  const svc = createServiceSupabase();
+  const [syncStateRes, catalogLogRes, bundleLogRes] = await Promise.all([
+    svc
+      .from('scalev_catalog_sync_state')
+      .select('business_id, business_code, sync_status, last_synced_at, last_error, bundles_count')
+      .order('business_code', { ascending: true }),
+    svc
+      .from('warehouse_activity_log')
+      .select('created_at, action, business_code, summary, after_state, context')
+      .eq('scope', 'scalev_catalog_sync')
+      .in('action', ['sync_success', 'sync_failed'])
+      .gte('created_at', startedAt)
+      .order('created_at', { ascending: false })
+      .limit(200),
+    svc
+      .from('warehouse_activity_log')
+      .select('created_at, action, business_code, summary, after_state, context')
+      .eq('scope', 'scalev_bundle_sync')
+      .in('action', ['sync_success', 'sync_partial', 'sync_failed'])
+      .gte('created_at', startedAt)
+      .order('created_at', { ascending: false })
+      .limit(2000),
+  ]);
+
+  if (syncStateRes.error) throw syncStateRes.error;
+  if (catalogLogRes.error) {
+    if (isActivityLogSchemaMissingError(catalogLogRes.error)) {
+      return {
+        schema_ready: false,
+        schema_message: 'Audit log warehouse belum tersedia. Jalankan migration 109 terlebih dahulu.',
+        active: false,
+        phase: 'idle',
+        started_at: null,
+        finished_at: null,
+        total_businesses: idleBusinesses.length,
+        catalog_finished_count: 0,
+        catalog_success_count: 0,
+        catalog_failed_count: 0,
+        bundle_finished_count: 0,
+        bundle_success_count: 0,
+        bundle_warning_count: 0,
+        bundle_failed_count: 0,
+        total_bundles: 0,
+        processed_bundles: 0,
+        current_business_code: null,
+        current_business_name: null,
+        last_event_at: null,
+        summary: 'Audit log warehouse belum siap dipakai.',
+        businesses: idleBusinesses,
+      };
+    }
+    throw catalogLogRes.error;
+  }
+  if (bundleLogRes.error) {
+    if (isActivityLogSchemaMissingError(bundleLogRes.error)) {
+      return {
+        schema_ready: false,
+        schema_message: 'Audit log warehouse belum tersedia. Jalankan migration 109 terlebih dahulu.',
+        active: false,
+        phase: 'idle',
+        started_at: null,
+        finished_at: null,
+        total_businesses: idleBusinesses.length,
+        catalog_finished_count: 0,
+        catalog_success_count: 0,
+        catalog_failed_count: 0,
+        bundle_finished_count: 0,
+        bundle_success_count: 0,
+        bundle_warning_count: 0,
+        bundle_failed_count: 0,
+        total_bundles: 0,
+        processed_bundles: 0,
+        current_business_code: null,
+        current_business_name: null,
+        last_event_at: null,
+        summary: 'Audit log warehouse belum siap dipakai.',
+        businesses: idleBusinesses,
+      };
+    }
+    throw bundleLogRes.error;
+  }
+
+  const syncStates = (syncStateRes.data || []) as any[];
+  const catalogLogs = ((catalogLogRes.data || []) as any[])
+    .filter((row) => String(cleanRecord(row.context)?.trigger || '') === 'bulk')
+    .map((row) => ({
+      created_at: row.created_at,
+      action: row.action,
+      business_code: row.business_code || null,
+      summary: row.summary || '',
+      after_state: cleanRecord(row.after_state),
+      context: cleanRecord(row.context),
+    })) as WarehouseActivityLogLite[];
+  const bundleLogs = ((bundleLogRes.data || []) as any[]).map((row) => ({
+    created_at: row.created_at,
+    action: row.action,
+    business_code: row.business_code || null,
+    summary: row.summary || '',
+    after_state: cleanRecord(row.after_state),
+    context: cleanRecord(row.context),
+  })) as WarehouseActivityLogLite[];
+
+  const syncStateByBusinessId = new Map<number, any>(
+    syncStates.map((row) => [Number(row.business_id), row]),
+  );
+  const latestCatalogLogByCode = new Map<string, WarehouseActivityLogLite>();
+  for (const row of catalogLogs) {
+    const businessCode = parseText(row.business_code);
+    if (!businessCode || latestCatalogLogByCode.has(businessCode)) continue;
+    latestCatalogLogByCode.set(businessCode, row);
+  }
+
+  const latestBundleLogByCode = new Map<string, WarehouseActivityLogLite>();
+  const bundleFailedByCode = new Map<string, number>();
+  for (const row of bundleLogs) {
+    const businessCode = parseText(row.business_code);
+    if (!businessCode) continue;
+    if (!latestBundleLogByCode.has(businessCode)) {
+      latestBundleLogByCode.set(businessCode, row);
+    }
+    bundleFailedByCode.set(
+      businessCode,
+      Number(bundleFailedByCode.get(businessCode) || 0) + parseNumber(row.after_state?.failed_count),
+    );
+  }
+
+  let catalogFinishedCount = 0;
+  let catalogSuccessCount = 0;
+  let catalogFailedCount = 0;
+  let bundleFinishedCount = 0;
+  let bundleSuccessCount = 0;
+  let bundleWarningCount = 0;
+  let bundleFailedCount = 0;
+  let totalBundles = 0;
+  let processedBundles = 0;
+  let lastEventAt = pickLaterDate(startedAt, run.terminalLog?.created_at || null);
+
+  const businesses = activeBusinesses.map((business) => {
+    const syncState = syncStateByBusinessId.get(Number(business.id));
+    const latestCatalogLog = latestCatalogLogByCode.get(business.business_code);
+    const latestBundleLog = latestBundleLogByCode.get(business.business_code);
+
+    let catalogStatus: ScalevVisibleCatalogCutoverProgressStatus = 'pending';
+    if (latestCatalogLog?.action === 'sync_success') {
+      catalogStatus = 'success';
+    } else if (latestCatalogLog?.action === 'sync_failed') {
+      catalogStatus = 'failed';
+    } else if (syncState?.sync_status === 'running') {
+      catalogStatus = 'running';
+    }
+
+    if (catalogStatus === 'success' || catalogStatus === 'failed') {
+      catalogFinishedCount += 1;
+    }
+    if (catalogStatus === 'success') catalogSuccessCount += 1;
+    if (catalogStatus === 'failed') catalogFailedCount += 1;
+
+    const bundlesTotal = Math.max(
+      parseNumber(latestBundleLog?.context?.total_bundles),
+      parseNumber(syncState?.bundles_count),
+    );
+    totalBundles += bundlesTotal;
+
+    let bundleStatus: ScalevVisibleCatalogCutoverProgressStatus = 'pending';
+    let bundlesProcessed = 0;
+    let latestError = catalogStatus === 'failed'
+      ? parseText(syncState?.last_error) || parseText(latestCatalogLog?.summary)
+      : null;
+
+    if (latestBundleLog) {
+      const nextOffset = Math.max(
+        parseNumber(latestBundleLog.context?.next_offset),
+        parseNumber(latestBundleLog.after_state?.offset) + parseNumber(latestBundleLog.after_state?.bundles_scanned),
+      );
+      bundlesProcessed = Math.min(nextOffset, bundlesTotal || nextOffset);
+      const batchFailedCount = Number(bundleFailedByCode.get(business.business_code) || 0);
+      if (latestBundleLog.action === 'sync_failed') {
+        bundleStatus = 'failed';
+        latestError = parseText(latestBundleLog.context?.error) || parseText(latestBundleLog.summary);
+      } else if (latestBundleLog.after_state?.completed) {
+        bundleStatus = batchFailedCount > 0 || latestBundleLog.action === 'sync_partial' ? 'warning' : 'success';
+      } else {
+        bundleStatus = 'running';
+      }
+    } else if (catalogStatus === 'failed') {
+      bundleStatus = 'skipped';
+    }
+
+    if (bundleStatus === 'success' || bundleStatus === 'warning' || bundleStatus === 'failed') {
+      bundleFinishedCount += 1;
+    }
+    if (bundleStatus === 'success') bundleSuccessCount += 1;
+    if (bundleStatus === 'warning') bundleWarningCount += 1;
+    if (bundleStatus === 'failed') bundleFailedCount += 1;
+
+    processedBundles += bundlesProcessed;
+    lastEventAt = pickLaterDate(lastEventAt, latestCatalogLog?.created_at || null);
+    lastEventAt = pickLaterDate(lastEventAt, latestBundleLog?.created_at || null);
+
+    return {
+      business_id: business.id,
+      business_code: business.business_code,
+      business_name: business.business_name,
+      catalog_status: catalogStatus,
+      catalog_updated_at: latestCatalogLog?.created_at || null,
+      bundle_status: bundleStatus,
+      bundle_updated_at: latestBundleLog?.created_at || null,
+      bundles_total: bundlesTotal,
+      bundles_processed: bundlesProcessed,
+      bundle_failed_count: Number(bundleFailedByCode.get(business.business_code) || 0),
+      latest_error: latestError,
+    };
+  });
+
+  const activePhase: ScalevVisibleCatalogCutoverProgress['phase'] = run.active
+    ? businesses.some((business) => business.catalog_status === 'pending' || business.catalog_status === 'running')
+      ? 'catalog'
+      : 'bundle'
+    : run.terminalLog?.action === 'sync_visible_cutover_failed'
+      ? 'failed'
+      : 'completed';
+
+  const currentBusiness = activePhase === 'catalog'
+    ? businesses.find((business) => business.catalog_status === 'running')
+      || businesses.find((business) => business.catalog_status === 'pending')
+      || null
+    : activePhase === 'bundle'
+      ? businesses.find((business) => business.bundle_status === 'running')
+        || businesses.find((business) => business.bundle_status === 'pending')
+        || null
+      : null;
+
+  const summary = buildCutoverSummary({
+    active: run.active,
+    phase: activePhase,
+    totalBusinesses: businesses.length,
+    catalogFinishedCount,
+    bundleFinishedCount,
+    totalBundles,
+    processedBundles,
+    currentBusinessCode: currentBusiness?.business_code || null,
+    bundleWarningCount,
+    bundleFailedCount,
+  });
+
+  return {
+    schema_ready: true,
+    schema_message: null,
+    active: run.active,
+    phase: activePhase,
+    started_at: startedAt,
+    finished_at: run.terminalLog?.created_at || null,
+    total_businesses: businesses.length,
+    catalog_finished_count: catalogFinishedCount,
+    catalog_success_count: catalogSuccessCount,
+    catalog_failed_count: catalogFailedCount,
+    bundle_finished_count: bundleFinishedCount,
+    bundle_success_count: bundleSuccessCount,
+    bundle_warning_count: bundleWarningCount,
+    bundle_failed_count: bundleFailedCount,
+    total_bundles: totalBundles,
+    processed_bundles: processedBundles,
+    current_business_code: currentBusiness?.business_code || null,
+    current_business_name: currentBusiness?.business_name || null,
+    last_event_at: lastEventAt,
+    summary,
+    businesses,
+  };
+}
+
+export async function syncScalevVisibleCatalogCutoverAllBusinesses() {
+  await requireScalevCatalogAccess();
+  const existingRun = await getLatestVisibleCutoverRunMetadata();
+  if (existingRun.active) {
+    throw new Error('Sync Semua Business + Bundle masih berjalan. Tunggu run aktif selesai atau refresh progress terlebih dahulu.');
+  }
+
+  const activeBusinesses = await getActiveScalevBusinessesForSync();
+  const startedAt = new Date().toISOString();
+
+  await recordWarehouseActivityLog({
+    scope: 'scalev_catalog_sync',
+    action: 'sync_visible_cutover_started',
+    screen: 'Katalog Scalev',
+    summary: 'Memulai sync visible catalog dan bundle lines untuk cutover deduction baru',
+    targetType: 'batch',
+    targetId: 'visible-cutover',
+    targetLabel: 'Visible Catalog Cutover',
+    changedFields: ['phase', 'total_businesses'],
+    beforeState: {},
+    afterState: {
+      phase: 'catalog',
+      total_businesses: activeBusinesses.length,
+    },
+    context: {
+      started_at: startedAt,
+      business_ids: activeBusinesses.map((business) => business.id),
+      business_codes: activeBusinesses.map((business) => business.business_code),
+    },
+    createdAt: startedAt,
+  });
+
+  try {
+    const catalogResults = await syncScalevCatalogAllBusinesses(activeBusinesses);
+    const successfulCatalogResults = catalogResults.filter((result) => result?.success && result.business_id);
+    const bundleResults = await mapWithConcurrency(
+      successfulCatalogResults,
+      VISIBLE_CUTOVER_BUNDLE_BUSINESS_CONCURRENCY,
+      async (result) => {
+        try {
+          return await syncScalevCatalogBundleLinesUntilComplete(Number(result.business_id), {
+            batchSize: VISIBLE_CUTOVER_BUNDLE_BATCH_SIZE,
+          });
+        } catch (bundleError: any) {
+          await recordWarehouseActivityLog({
+            scope: 'scalev_bundle_sync',
+            action: 'sync_failed',
+            screen: 'Bundle Mapping Scalev',
+            summary: `Sync isi bundle ${result.business_code} gagal`,
+            targetType: 'business',
+            targetId: String(result.business_id),
+            targetLabel: `${result.business_code} • ${result.business_name || result.business_code}`,
+            businessCode: result.business_code,
+            changedFields: ['failed_count'],
+            beforeState: {},
+            afterState: {
+              completed: false,
+              failed_count: 1,
+            },
+            context: {
+              error: bundleError?.message || 'Gagal sync isi bundle.',
+            },
+          });
+          return {
+            success: false,
+            business_id: result.business_id,
+            business_code: result.business_code,
+            business_name: result.business_name,
+            error: bundleError?.message || 'Gagal sync isi bundle.',
+          };
+        }
+      },
+    );
+
+    await recordWarehouseActivityLog({
+      scope: 'scalev_catalog_sync',
+      action: 'sync_visible_cutover',
+      screen: 'Katalog Scalev',
+      summary: 'Menjalankan sync visible catalog dan bundle lines untuk cutover deduction baru',
+      targetType: 'batch',
+      targetId: 'visible-cutover',
+      targetLabel: 'Visible Catalog Cutover',
+      changedFields: ['catalog_success_count', 'catalog_failed_count', 'bundle_success_count', 'bundle_failed_count'],
+      beforeState: {
+        phase: 'bundle',
+      },
+      afterState: {
+        catalog_success_count: catalogResults.filter((row) => row.success).length,
+        catalog_failed_count: catalogResults.filter((row) => !row.success).length,
+        bundle_success_count: bundleResults.filter((row) => row.success).length,
+        bundle_failed_count: bundleResults.filter((row) => !row.success).length,
+      },
+      context: {
+        started_at: startedAt,
+        catalog_results: catalogResults.map((row) => ({
+          business_id: row.business_id,
+          business_code: row.business_code,
+          success: Boolean(row.success),
+        })),
+        bundle_results: bundleResults.map((row) => ({
+          business_id: row.business_id,
+          business_code: row.business_code,
+          success: Boolean(row.success),
+        })),
+      },
+    });
+
+    return {
+      catalog_results: catalogResults,
+      bundle_results: bundleResults,
+      catalog_success_count: catalogResults.filter((row) => row.success).length,
+      catalog_failed_count: catalogResults.filter((row) => !row.success).length,
+      bundle_success_count: bundleResults.filter((row) => row.success).length,
+      bundle_failed_count: bundleResults.filter((row) => !row.success).length,
+    };
+  } catch (error: any) {
+    await recordWarehouseActivityLog({
+      scope: 'scalev_catalog_sync',
+      action: 'sync_visible_cutover_failed',
+      screen: 'Katalog Scalev',
+      summary: 'Bulk sync visible catalog berhenti karena error',
+      targetType: 'batch',
+      targetId: 'visible-cutover',
+      targetLabel: 'Visible Catalog Cutover',
+      changedFields: ['error'],
+      beforeState: {},
+      afterState: {
+        error: error?.message || 'Gagal menjalankan sync visible catalog.',
+      },
+      context: {
+        started_at: startedAt,
+        business_codes: activeBusinesses.map((business) => business.business_code),
+      },
+    });
+    throw error;
+  }
+}
+
 export async function getScalevCatalogEntries(input: {
   businessId: number;
   view: ScalevCatalogView;
@@ -1093,7 +1919,25 @@ export async function getScalevCatalogEntries(input: {
   if (input.view === 'products') {
     let query = svc
       .from('scalev_catalog_products')
-      .select('id, business_code, scalev_product_id, name, public_name, display, slug, item_type, is_inventory, is_multiple, is_listed_at_marketplace, variants_count, scalev_last_updated_at, last_synced_at')
+      .select(`
+        id,
+        business_code,
+        scalev_product_id,
+        name,
+        public_name,
+        display,
+        slug,
+        item_type,
+        is_inventory,
+        is_multiple,
+        is_listed_at_marketplace,
+        variants_count,
+        scalev_last_updated_at,
+        last_synced_at,
+        visibility_kind,
+        owner_business_code,
+        processor_business_code
+      `)
       .eq('business_id', input.businessId)
       .order('name', { ascending: true })
       .limit(limit);
@@ -1107,21 +1951,30 @@ export async function getScalevCatalogEntries(input: {
       if (isCatalogSchemaMissingError(error)) return [];
       throw error;
     }
-    const rows = (data || []) as any[];
-    const currentBusinessCode = String(rows[0]?.business_code || '').trim();
-    const { productSharingById } = await buildCatalogEntrySharingLookup(svc, currentBusinessCode, {
-      products: rows.map((row) => ({ scalev_product_id: Number(row.scalev_product_id) })),
-    });
-    return rows.map((row) => ({
-      ...row,
-      sharing: productSharingById.get(Number(row.scalev_product_id)) || null,
-    })) as ScalevCatalogProductRow[];
+    return (data || []) as ScalevCatalogProductRow[];
   }
 
   if (input.view === 'variants') {
     let query = svc
       .from('scalev_catalog_variants')
-      .select('id, business_code, scalev_variant_id, name, product_name, sku, scalev_variant_unique_id, scalev_variant_uuid, option1_value, option2_value, option3_value, item_type, last_synced_at')
+      .select(`
+        id,
+        business_code,
+        scalev_variant_id,
+        name,
+        product_name,
+        sku,
+        scalev_variant_unique_id,
+        scalev_variant_uuid,
+        option1_value,
+        option2_value,
+        option3_value,
+        item_type,
+        last_synced_at,
+        visibility_kind,
+        owner_business_code,
+        processor_business_code
+      `)
       .eq('business_id', input.businessId)
       .order('product_name', { ascending: true })
       .order('name', { ascending: true })
@@ -1136,21 +1989,26 @@ export async function getScalevCatalogEntries(input: {
       if (isCatalogSchemaMissingError(error)) return [];
       throw error;
     }
-    const rows = (data || []) as any[];
-    const currentBusinessCode = String(rows[0]?.business_code || '').trim();
-    const { variantSharingById } = await buildCatalogEntrySharingLookup(svc, currentBusinessCode, {
-      variants: rows.map((row) => ({ scalev_variant_id: Number(row.scalev_variant_id) })),
-    });
-    return rows.map((row) => ({
-      ...row,
-      sharing: variantSharingById.get(Number(row.scalev_variant_id)) || null,
-    })) as ScalevCatalogVariantRow[];
+    return (data || []) as ScalevCatalogVariantRow[];
   }
 
   if (input.view === 'bundles') {
     let query = svc
       .from('scalev_catalog_bundles')
-      .select('id, name, public_name, display, custom_id, weight_bump, is_bundle_sharing, price_options_count, last_synced_at')
+      .select(`
+        id,
+        name,
+        public_name,
+        display,
+        custom_id,
+        weight_bump,
+        is_bundle_sharing,
+        price_options_count,
+        last_synced_at,
+        visibility_kind,
+        owner_business_code,
+        processor_business_code
+      `)
       .eq('business_id', input.businessId)
       .order('name', { ascending: true })
       .limit(limit);
@@ -1169,7 +2027,17 @@ export async function getScalevCatalogEntries(input: {
 
   let query = svc
     .from('scalev_catalog_identifiers')
-    .select('id, identifier, source, entity_type, entity_label, last_synced_at')
+    .select(`
+      id,
+      identifier,
+      source,
+      entity_type,
+      entity_label,
+      last_synced_at,
+      visibility_kind,
+      owner_business_code,
+      processor_business_code
+    `)
     .eq('business_id', input.businessId)
     .order('identifier', { ascending: true })
     .limit(limit);

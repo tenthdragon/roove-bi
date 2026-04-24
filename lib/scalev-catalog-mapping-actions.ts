@@ -7,10 +7,18 @@ import {
 } from '@/lib/dashboard-access';
 import { recordWarehouseActivityLog } from '@/lib/warehouse-activity-log-actions';
 import { getWarehouseActivityLogChangedFields } from '@/lib/warehouse-activity-log-utils';
+import {
+  buildCanonicalMappingLookupKey,
+  fetchCanonicalCatalogMappingsByRequests,
+  fetchVisibleDirectCatalogEntities,
+  type CanonicalCatalogMappingRow,
+  type ScalevVisibilityKind,
+  type VisibleDirectCatalogEntityRow,
+} from '@/lib/scalev-visible-entity-helpers';
 
 type WarehouseProductLite = {
   id: number;
-  name: string;
+  name: string | null;
   category: string | null;
   entity: string | null;
   warehouse: string | null;
@@ -25,25 +33,7 @@ type BusinessTarget = {
   notes: string | null;
 };
 
-export type ScalevCrossBusinessSummary = {
-  is_shared: boolean;
-  business_codes: string[];
-  other_business_codes: string[];
-};
-
-type CatalogEntityRow = {
-  business_id: number;
-  business_code: string;
-  entity_type: 'product' | 'variant';
-  entity_key: string;
-  scalev_product_id: number;
-  scalev_variant_id: number | null;
-  label: string;
-  secondary_label: string | null;
-  sku: string | null;
-  item_type: string | null;
-  identifiers: string[];
-};
+type CatalogEntityRow = VisibleDirectCatalogEntityRow;
 
 type RecommendationCandidate = {
   product: WarehouseProductLite;
@@ -73,6 +63,17 @@ export type ScalevCatalogMappingRow = {
   entity_key: string;
   scalev_product_id: number;
   scalev_variant_id: number | null;
+  viewer_business_id: number;
+  viewer_business_code: string;
+  visibility_kind: ScalevVisibilityKind;
+  owner_business_id: number;
+  owner_business_code: string;
+  processor_business_id: number;
+  processor_business_code: string;
+  mapping_business_id: number | null;
+  mapping_business_code: string | null;
+  processor_business_target: BusinessTarget | null;
+  processor_business_targets: BusinessTarget[];
   label: string;
   secondary_label: string | null;
   sku: string | null;
@@ -84,7 +85,6 @@ export type ScalevCatalogMappingRow = {
   warehouse_product: WarehouseProductLite | null;
   mapping_source: string | null;
   notes: string | null;
-  sharing: ScalevCrossBusinessSummary | null;
   status: 'mapped' | 'recommended' | 'unmapped';
   recommendation: ScalevCatalogMappingRecommendation | null;
 };
@@ -103,14 +103,6 @@ function normalizeIdentifier(value: string): string {
     .trim()
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ');
-}
-
-function chunkArray<T>(items: T[], size: number): T[][] {
-  const chunks: T[][] = [];
-  for (let index = 0; index < items.length; index += size) {
-    chunks.push(items.slice(index, index + size));
-  }
-  return chunks;
 }
 
 function tokenize(value: string): string[] {
@@ -168,49 +160,23 @@ function getMissingMappingSchemaMessage() {
   return 'Tabel product mapping Scalev belum tersedia. Jalankan migration 107 terlebih dahulu.';
 }
 
-function normalizeBusinessTargetRow(row: any): BusinessTarget {
-  return {
-    deduct_entity: row?.deduct_entity || null,
-    deduct_warehouse: row?.deduct_warehouse || null,
-    is_active: Boolean(row?.is_active),
-    is_primary: Boolean(row?.is_primary),
-    notes: row?.notes || null,
-  };
-}
-
-function pickPrimaryBusinessTarget(targets: BusinessTarget[]): BusinessTarget | null {
-  return targets.find((target) => target.is_primary && target.is_active)
-    || targets.find((target) => target.is_active)
-    || targets[0]
-    || null;
-}
-
-function getBusinessTargetBoost(
+function getOwnerBusinessBoost(
   product: WarehouseProductLite,
-  targets: BusinessTarget[],
-  primaryTarget: BusinessTarget | null,
+  ownerBusinessCode: string | null,
 ): number {
-  const allowedBoost = targets.reduce((best, target) => {
-    if (!target?.is_active) return best;
-    let current = 0;
-    if (target.deduct_entity && product.entity === target.deduct_entity) current += 0.95;
-    if (target.deduct_warehouse && product.warehouse === target.deduct_warehouse) current += 0.35;
-    return Math.max(best, current);
-  }, 0);
+  const ownerCode = String(ownerBusinessCode || '').trim();
+  if (!ownerCode) return 0;
 
-  let primaryBoost = 0;
-  if (primaryTarget?.is_active) {
-    if (primaryTarget.deduct_entity && product.entity === primaryTarget.deduct_entity) primaryBoost += 0.3;
-    if (primaryTarget.deduct_warehouse && product.warehouse === primaryTarget.deduct_warehouse) primaryBoost += 0.15;
-  }
-
-  return allowedBoost + primaryBoost;
+  let boost = 0;
+  if (product.entity === ownerCode) boost += 1.1;
+  if (product.warehouse === 'BTN') boost += 0.1;
+  return boost;
 }
 
 function buildRecommendationSummary(
   candidate: RecommendationCandidate,
   runnerUp: RecommendationCandidate | null,
-  target: BusinessTarget | null,
+  ownerBusinessCode: string | null,
 ): ScalevCatalogMappingRecommendation | null {
   const hasStructuredEvidence = candidate.exactEvidenceCount > 0;
   const margin = candidate.score - (runnerUp?.score || 0);
@@ -256,13 +222,13 @@ function buildRecommendationSummary(
   if (!hasStructuredEvidence && candidate.fuzzyScore > 0) {
     reasons.push(`nama mirip ${Math.round(candidate.fuzzyScore * 100)}%`);
   }
-  if (target?.is_active && target.deduct_entity && candidate.product.entity === target.deduct_entity) {
-    reasons.push(`entity ${target.deduct_entity}`);
+  if (ownerBusinessCode && candidate.product.entity === ownerBusinessCode) {
+    reasons.push(`owner ${ownerBusinessCode}`);
   }
 
   return {
     warehouse_product_id: candidate.product.id,
-    warehouse_product_name: candidate.product.name,
+    warehouse_product_name: candidate.product.name || `Product ${candidate.product.id}`,
     category: candidate.product.category,
     entity: candidate.product.entity,
     warehouse: candidate.product.warehouse,
@@ -275,8 +241,7 @@ function buildRecommendationSummary(
 
 function buildRecommendationForEntity(input: {
   entity: CatalogEntityRow;
-  businessTarget: BusinessTarget | null;
-  businessTargets: BusinessTarget[];
+  ownerBusinessCode: string | null;
   legacyByNormalized: Map<string, Array<{ scalev_product_name: string; warehouse_product: WarehouseProductLite | null }>>;
   aliasByNormalized: Map<string, WarehouseProductLite[]>;
   warehouseProducts: WarehouseProductLite[];
@@ -311,7 +276,7 @@ function buildRecommendationForEntity(input: {
     }
 
     const candidate = candidates.get(product.id)!;
-    candidate.score += mutation.score + getBusinessTargetBoost(product, input.businessTargets, input.businessTarget);
+    candidate.score += mutation.score + getOwnerBusinessBoost(product, input.ownerBusinessCode);
     if (mutation.exactEvidence) {
       candidate.legacyMatches.add(mutation.exactEvidence);
       candidate.exactEvidenceCount += 1;
@@ -374,12 +339,12 @@ function buildRecommendationForEntity(input: {
   const ranked = Array.from(candidates.values()).sort((left, right) => {
     if (right.score !== left.score) return right.score - left.score;
     if (right.exactEvidenceCount !== left.exactEvidenceCount) return right.exactEvidenceCount - left.exactEvidenceCount;
-    return left.product.name.localeCompare(right.product.name);
+    return String(left.product.name || '').localeCompare(String(right.product.name || ''));
   });
 
   if (ranked.length === 0) return null;
 
-  return buildRecommendationSummary(ranked[0], ranked[1] || null, input.businessTarget);
+  return buildRecommendationSummary(ranked[0], ranked[1] || null, input.ownerBusinessCode);
 }
 
 function dedupeIdentifiers(values: Array<string | null | undefined>): string[] {
@@ -396,170 +361,9 @@ function dedupeIdentifiers(values: Array<string | null | undefined>): string[] {
   return result;
 }
 
-function buildCrossBusinessSummary(
-  businessCode: string,
-  presenceRows: Array<{ business_code: string | null | undefined }>,
-): ScalevCrossBusinessSummary | null {
-  const businessCodes = Array.from(new Set(
-    presenceRows
-      .map((row) => String(row.business_code || '').trim())
-      .filter(Boolean),
-  )).sort();
-
-  if (businessCodes.length === 0) return null;
-
-  const selectedCode = String(businessCode || '').trim();
-  const sortedCodes = selectedCode && businessCodes.includes(selectedCode)
-    ? [selectedCode, ...businessCodes.filter((code) => code !== selectedCode)]
-    : businessCodes;
-  const otherBusinessCodes = sortedCodes.filter((code) => code !== selectedCode);
-
-  return {
-    is_shared: otherBusinessCodes.length > 0,
-    business_codes: sortedCodes,
-    other_business_codes: otherBusinessCodes,
-  };
-}
-
-async function buildEntitySharingLookup(
-  svc: ReturnType<typeof createServiceSupabase>,
-  businessCode: string,
-  rows: CatalogEntityRow[],
-) {
-  const sharingByEntityKey = new Map<string, ScalevCrossBusinessSummary | null>();
-  const variantIds = Array.from(new Set(
-    rows
-      .filter((row) => row.entity_type === 'variant' && Number.isFinite(row.scalev_variant_id || 0) && Number(row.scalev_variant_id || 0) > 0)
-      .map((row) => Number(row.scalev_variant_id || 0)),
-  ));
-  const productIds = Array.from(new Set(
-    rows
-      .filter((row) => row.entity_type === 'product' && Number.isFinite(row.scalev_product_id) && Number(row.scalev_product_id) > 0)
-      .map((row) => Number(row.scalev_product_id)),
-  ));
-
-  const variantsById = new Map<number, Array<{ business_code: string }>>();
-  for (const chunk of chunkArray(variantIds, 500)) {
-    if (chunk.length === 0) continue;
-    const { data, error } = await svc
-      .from('scalev_catalog_variants')
-      .select('business_code, scalev_variant_id')
-      .in('scalev_variant_id', chunk);
-    if (error) throw error;
-    for (const row of (data || []) as any[]) {
-      const variantId = Number(row.scalev_variant_id || 0);
-      if (!variantId) continue;
-      if (!variantsById.has(variantId)) variantsById.set(variantId, []);
-      variantsById.get(variantId)!.push({ business_code: row.business_code });
-    }
-  }
-
-  const productsById = new Map<number, Array<{ business_code: string }>>();
-  for (const chunk of chunkArray(productIds, 500)) {
-    if (chunk.length === 0) continue;
-    const { data, error } = await svc
-      .from('scalev_catalog_products')
-      .select('business_code, scalev_product_id')
-      .in('scalev_product_id', chunk);
-    if (error) throw error;
-    for (const row of (data || []) as any[]) {
-      const productId = Number(row.scalev_product_id || 0);
-      if (!productId) continue;
-      if (!productsById.has(productId)) productsById.set(productId, []);
-      productsById.get(productId)!.push({ business_code: row.business_code });
-    }
-  }
-
-  for (const row of rows) {
-    const presenceRows = row.entity_type === 'variant'
-      ? variantsById.get(Number(row.scalev_variant_id || 0)) || []
-      : productsById.get(Number(row.scalev_product_id || 0)) || [];
-    sharingByEntityKey.set(row.entity_key, buildCrossBusinessSummary(businessCode, presenceRows));
-  }
-
-  return sharingByEntityKey;
-}
-
 async function getCatalogEntityRows(businessId: number): Promise<{ businessCode: string; rows: CatalogEntityRow[] }> {
   const svc = createServiceSupabase();
-  const [{ data: products, error: productError }, { data: variants, error: variantError }] = await Promise.all([
-    svc
-      .from('scalev_catalog_products')
-      .select('business_id, business_code, scalev_product_id, name, public_name, display, slug, item_type, variants_count')
-      .eq('business_id', businessId)
-      .order('name', { ascending: true }),
-    svc
-      .from('scalev_catalog_variants')
-      .select('business_id, business_code, scalev_product_id, scalev_variant_id, name, product_name, sku, scalev_variant_unique_id, scalev_variant_uuid, item_type')
-      .eq('business_id', businessId)
-      .order('product_name', { ascending: true })
-      .order('name', { ascending: true }),
-  ]);
-
-  if (productError) throw productError;
-  if (variantError) throw variantError;
-
-  const rows: CatalogEntityRow[] = [];
-  let businessCode = '';
-
-  for (const variant of (variants || []) as any[]) {
-    businessCode = businessCode || variant.business_code || '';
-    rows.push({
-      business_id: Number(variant.business_id),
-      business_code: variant.business_code,
-      entity_type: 'variant',
-      entity_key: `variant:${variant.scalev_variant_id}`,
-      scalev_product_id: Number(variant.scalev_product_id),
-      scalev_variant_id: Number(variant.scalev_variant_id),
-      label: variant.name,
-      secondary_label: variant.product_name || null,
-      sku: variant.sku || null,
-      item_type: variant.item_type || null,
-      identifiers: dedupeIdentifiers([
-        variant.name,
-        variant.product_name,
-        variant.sku,
-        variant.scalev_variant_unique_id,
-        variant.scalev_variant_uuid,
-      ]),
-    });
-  }
-
-  for (const product of (products || []) as any[]) {
-    businessCode = businessCode || product.business_code || '';
-    if (Number(product.variants_count || 0) > 0) continue;
-
-    const label = product.display || product.public_name || product.name;
-    rows.push({
-      business_id: Number(product.business_id),
-      business_code: product.business_code,
-      entity_type: 'product',
-      entity_key: `product:${product.scalev_product_id}`,
-      scalev_product_id: Number(product.scalev_product_id),
-      scalev_variant_id: null,
-      label,
-      secondary_label: product.display && product.display !== product.name ? product.name : product.public_name || null,
-      sku: null,
-      item_type: product.item_type || null,
-      identifiers: dedupeIdentifiers([
-        product.name,
-        product.public_name,
-        product.display,
-        product.slug,
-      ]),
-    });
-  }
-
-  rows.sort((left, right) => {
-    const leftKey = `${left.secondary_label || left.label} ${left.label}`;
-    const rightKey = `${right.secondary_label || right.label} ${right.label}`;
-    return leftKey.localeCompare(rightKey);
-  });
-
-  return {
-    businessCode,
-    rows,
-  };
+  return fetchVisibleDirectCatalogEntities(svc, businessId);
 }
 
 export async function getScalevCatalogProductMappings(businessId: number): Promise<ScalevCatalogMappingPayload> {
@@ -567,37 +371,20 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
   const svc = createServiceSupabase();
 
   const { businessCode, rows } = await getCatalogEntityRows(businessId);
-  const sharingByEntityKey = await buildEntitySharingLookup(svc, businessCode, rows);
+  const mappingRequestsByBusinessId = new Map<number, Set<string>>();
+  for (const row of rows) {
+    if (!mappingRequestsByBusinessId.has(row.owner_business_id)) {
+      mappingRequestsByBusinessId.set(row.owner_business_id, new Set<string>());
+    }
+    mappingRequestsByBusinessId.get(row.owner_business_id)!.add(row.entity_key);
+  }
 
-  const [{ data: identifiers, error: identifierError }, { data: mappings, error: mappingError }, { data: businessTargetRows, error: targetError }, { data: legacyMappings, error: legacyError }, { data: warehouseProducts, error: productError }, { data: frequencies }] = await Promise.all([
+  const [{ data: identifiers, error: identifierError }, mappings, { data: legacyMappings, error: legacyError }, { data: warehouseProducts, error: productError }, { data: frequencies }] = await Promise.all([
     svc
       .from('scalev_catalog_identifiers')
       .select('entity_key, identifier, identifier_normalized')
       .eq('business_id', businessId),
-    svc
-      .from('warehouse_scalev_catalog_mapping')
-      .select(`
-        id,
-        business_id,
-        scalev_entity_type,
-        scalev_entity_key,
-        scalev_product_id,
-        scalev_variant_id,
-        scalev_entity_label,
-        warehouse_product_id,
-        mapping_source,
-        notes,
-        warehouse_products(id, name, category, entity, warehouse)
-      `)
-      .eq('business_id', businessId),
-    businessCode
-      ? svc
-          .from('warehouse_business_mapping')
-          .select('deduct_entity, deduct_warehouse, is_active, is_primary, notes')
-          .eq('business_code', businessCode)
-          .order('is_primary', { ascending: false })
-          .order('id', { ascending: true })
-      : Promise.resolve({ data: [], error: null }),
+    fetchCanonicalCatalogMappingsByRequests(svc, mappingRequestsByBusinessId),
     svc
       .from('warehouse_scalev_mapping')
       .select(`
@@ -617,18 +404,8 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
   ]);
 
   if (identifierError) throw identifierError;
-  if (mappingError) {
-    if (isMissingTableError(mappingError)) {
-      throw new Error(getMissingMappingSchemaMessage());
-    }
-    throw mappingError;
-  }
-  if (targetError) throw targetError;
   if (legacyError) throw legacyError;
   if (productError) throw productError;
-
-  const businessTargets = ((businessTargetRows || []) as any[]).map((row) => normalizeBusinessTargetRow(row));
-  const businessTarget = pickPrimaryBusinessTarget(businessTargets);
 
   const identifiersByEntityKey = new Map<string, string[]>();
   for (const row of (identifiers || []) as any[]) {
@@ -637,9 +414,9 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
     identifiersByEntityKey.get(key)!.push(row.identifier);
   }
 
-  const mappingByEntityKey = new Map<string, any>();
-  for (const row of (mappings || []) as any[]) {
-    mappingByEntityKey.set(row.scalev_entity_key, row);
+  const mappingByCanonicalKey = new Map<string, CanonicalCatalogMappingRow>();
+  for (const row of mappings || []) {
+    mappingByCanonicalKey.set(buildCanonicalMappingLookupKey(row.business_id, row.scalev_entity_key), row);
   }
 
   const legacyByNormalized = new Map<string, Array<{ scalev_product_name: string; warehouse_product: WarehouseProductLite | null }>>();
@@ -696,17 +473,20 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
       ...entity.identifiers,
       ...(identifiersByEntityKey.get(entity.entity_key) || []),
     ]);
-    const existingMapping = mappingByEntityKey.get(entity.entity_key) || null;
+    const existingMapping = mappingByCanonicalKey.get(
+      buildCanonicalMappingLookupKey(entity.owner_business_id, entity.entity_key),
+    ) || null;
     const recommendation = buildRecommendationForEntity({
       entity: {
         ...entity,
         identifiers: identifierValues,
       },
-      businessTarget,
-      businessTargets,
+      ownerBusinessCode: entity.owner_business_code,
       legacyByNormalized,
       aliasByNormalized: normalizedAliasMap,
-      warehouseProducts: warehouseProductRows,
+      warehouseProducts: warehouseProductRows.filter((product) => (
+        !entity.owner_business_code || product.entity === entity.owner_business_code
+      )),
       frequencyByNormalized,
     });
 
@@ -725,6 +505,17 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
       entity_key: entity.entity_key,
       scalev_product_id: entity.scalev_product_id,
       scalev_variant_id: entity.scalev_variant_id,
+      viewer_business_id: entity.viewer_business_id,
+      viewer_business_code: entity.viewer_business_code,
+      visibility_kind: entity.visibility_kind,
+      owner_business_id: entity.owner_business_id,
+      owner_business_code: entity.owner_business_code,
+      processor_business_id: entity.processor_business_id,
+      processor_business_code: entity.processor_business_code,
+      mapping_business_id: existingMapping?.business_id ?? null,
+      mapping_business_code: existingMapping?.business_code || entity.owner_business_code || null,
+      processor_business_target: null,
+      processor_business_targets: [],
       label: entity.label,
       secondary_label: entity.secondary_label,
       sku: entity.sku,
@@ -736,7 +527,6 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
       warehouse_product: warehouseProduct,
       mapping_source: existingMapping?.mapping_source || null,
       notes: existingMapping?.notes || null,
-      sharing: sharingByEntityKey.get(entity.entity_key) || null,
       status: existingMapping?.warehouse_product_id
         ? 'mapped'
         : recommendation
@@ -749,8 +539,8 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
   return {
     business_id: businessId,
     business_code: businessCode,
-    business_target: businessTarget,
-    business_targets: businessTargets,
+    business_target: null,
+    business_targets: [],
     rows: finalRows,
   };
 }
@@ -777,36 +567,22 @@ export async function saveScalevCatalogProductMapping(input: {
     throw new Error('Entity Scalev tidak valid.');
   }
 
-  let entityRow: any = null;
-  if (entityType === 'variant') {
-    const { data, error } = await svc
-      .from('scalev_catalog_variants')
-      .select('business_id, business_code, scalev_product_id, scalev_variant_id, name, product_name')
-      .eq('business_id', input.businessId)
-      .eq('scalev_variant_id', entityId)
-      .maybeSingle();
-    if (error) throw error;
-    entityRow = data;
-  } else if (entityType === 'product') {
-    const { data, error } = await svc
-      .from('scalev_catalog_products')
-      .select('business_id, business_code, scalev_product_id, name, public_name, display')
-      .eq('business_id', input.businessId)
-      .eq('scalev_product_id', entityId)
-      .maybeSingle();
-    if (error) throw error;
-    entityRow = data;
-  } else {
+  if (entityType !== 'variant' && entityType !== 'product') {
     throw new Error('Tipe entity Scalev tidak didukung.');
   }
 
+  const { rows } = await fetchVisibleDirectCatalogEntities(svc, input.businessId, {
+    entityKeys: [entityKey],
+    includeProductsWithVariants: true,
+  });
+  const entityRow = rows.find((row) => row.entity_key === entityKey) || null;
   if (!entityRow) {
     throw new Error('Entity Scalev tidak ditemukan di katalog tersimpan.');
   }
 
-  const scalevEntityLabel = entityType === 'variant'
-    ? (entityRow.name || entityRow.product_name || `Variant ${entityId}`)
-    : (entityRow.display || entityRow.public_name || entityRow.name || `Product ${entityId}`);
+  const scalevEntityLabel = entityRow.label || entityRow.secondary_label || `${entityType === 'variant' ? 'Variant' : 'Product'} ${entityId}`;
+  const canonicalBusinessId = Number(entityRow.owner_business_id);
+  const canonicalBusinessCode = entityRow.owner_business_code || entityRow.viewer_business_code;
 
   const { data: beforeMapping, error: beforeMappingError } = await svc
     .from('warehouse_scalev_catalog_mapping')
@@ -822,7 +598,7 @@ export async function saveScalevCatalogProductMapping(input: {
       notes,
       warehouse_products(id, name, category, entity, warehouse)
     `)
-    .eq('business_id', input.businessId)
+    .eq('business_id', canonicalBusinessId)
     .eq('scalev_entity_key', entityKey)
     .maybeSingle();
   if (beforeMappingError) {
@@ -834,7 +610,7 @@ export async function saveScalevCatalogProductMapping(input: {
     const { error } = await svc
       .from('warehouse_scalev_catalog_mapping')
       .delete()
-      .eq('business_id', input.businessId)
+      .eq('business_id', canonicalBusinessId)
       .eq('scalev_entity_key', entityKey);
     if (error) {
       if (isMissingTableError(error)) throw new Error(getMissingMappingSchemaMessage());
@@ -843,7 +619,7 @@ export async function saveScalevCatalogProductMapping(input: {
 
     if (beforeMapping) {
       const beforeState = {
-        business_code: beforeMapping.business_code || entityRow.business_code,
+        business_code: beforeMapping.business_code || canonicalBusinessCode,
         scalev_entity_type: beforeMapping.scalev_entity_type || entityType,
         scalev_entity_key: beforeMapping.scalev_entity_key,
         scalev_entity_label: beforeMapping.scalev_entity_label || null,
@@ -860,11 +636,11 @@ export async function saveScalevCatalogProductMapping(input: {
         targetType: entityType,
         targetId: entityKey,
         targetLabel: scalevEntityLabel,
-        businessCode: entityRow.business_code,
+        businessCode: canonicalBusinessCode,
         changedFields: ['warehouse_product_id', 'notes'],
         beforeState,
         afterState: {
-          business_code: entityRow.business_code,
+          business_code: canonicalBusinessCode,
           scalev_entity_type: entityType,
           scalev_entity_key: entityKey,
           scalev_entity_label: scalevEntityLabel,
@@ -873,7 +649,13 @@ export async function saveScalevCatalogProductMapping(input: {
           mapping_source: null,
           notes: null,
         },
-        context: {},
+        context: {
+          viewer_business_id: entityRow.viewer_business_id,
+          viewer_business_code: entityRow.viewer_business_code,
+          processor_business_id: entityRow.processor_business_id,
+          processor_business_code: entityRow.processor_business_code,
+          visibility_kind: entityRow.visibility_kind,
+        },
       });
     }
 
@@ -881,8 +663,8 @@ export async function saveScalevCatalogProductMapping(input: {
   }
 
   const payload = {
-    business_id: Number(entityRow.business_id),
-    business_code: entityRow.business_code,
+    business_id: canonicalBusinessId,
+    business_code: canonicalBusinessCode,
     scalev_entity_type: entityType,
     scalev_entity_key: entityKey,
     scalev_product_id: Number(entityRow.scalev_product_id),
@@ -915,7 +697,7 @@ export async function saveScalevCatalogProductMapping(input: {
       notes,
       warehouse_products(id, name, category, entity, warehouse)
     `)
-    .eq('business_id', input.businessId)
+    .eq('business_id', canonicalBusinessId)
     .eq('scalev_entity_key', entityKey)
     .maybeSingle();
   if (afterMappingError) {
@@ -924,7 +706,7 @@ export async function saveScalevCatalogProductMapping(input: {
   }
 
   const beforeState = {
-    business_code: beforeMapping?.business_code || entityRow.business_code,
+    business_code: beforeMapping?.business_code || canonicalBusinessCode,
     scalev_entity_type: beforeMapping?.scalev_entity_type || entityType,
     scalev_entity_key: entityKey,
     scalev_entity_label: beforeMapping?.scalev_entity_label || scalevEntityLabel,
@@ -934,7 +716,7 @@ export async function saveScalevCatalogProductMapping(input: {
     notes: beforeMapping?.notes || null,
   };
   const afterState = {
-    business_code: afterMapping?.business_code || entityRow.business_code,
+    business_code: afterMapping?.business_code || canonicalBusinessCode,
     scalev_entity_type: afterMapping?.scalev_entity_type || entityType,
     scalev_entity_key: entityKey,
     scalev_entity_label: afterMapping?.scalev_entity_label || scalevEntityLabel,
@@ -979,12 +761,17 @@ export async function saveScalevCatalogProductMapping(input: {
       targetType: entityType,
       targetId: entityKey,
       targetLabel: scalevEntityLabel,
-      businessCode: entityRow.business_code,
+      businessCode: canonicalBusinessCode,
       changedFields,
       beforeState,
       afterState,
       context: {
-        business_id: Number(entityRow.business_id),
+        business_id: canonicalBusinessId,
+        viewer_business_id: Number(entityRow.viewer_business_id),
+        viewer_business_code: entityRow.viewer_business_code,
+        processor_business_id: Number(entityRow.processor_business_id),
+        processor_business_code: entityRow.processor_business_code,
+        visibility_kind: entityRow.visibility_kind,
         scalev_product_id: Number(entityRow.scalev_product_id),
         scalev_variant_id: entityType === 'variant' ? Number(entityRow.scalev_variant_id) : null,
       },

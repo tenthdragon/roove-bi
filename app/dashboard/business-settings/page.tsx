@@ -571,6 +571,9 @@ export default function BusinessSettingsPage() {
                       {/* Gudang */}
                       <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', marginBottom: 10, textTransform: 'uppercase' }}>Gudang</div>
+                        <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.22)', color: '#fde68a', fontSize: 11, lineHeight: 1.6 }}>
+                          Menu ini sedang dipensiunkan dari deduction live ScaleV. Source of truth baru untuk order owner-aware pindah ke Warehouse Settings &gt; Business Directory dan Warehouse Registry.
+                        </div>
                         <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6, marginBottom: 10 }}>
                           Gudang yang diizinkan untuk business ini. Resolver akan tetap strict dan hanya menerima produk yang jatuh ke salah satu target di bawah.
                         </div>

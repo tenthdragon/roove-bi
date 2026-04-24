@@ -89,9 +89,7 @@ function renderEntityTypeBadge(type: ScalevCatalogMappingRow['entity_type']) {
   );
 }
 
-function renderSharingBadge(sharing: ScalevCatalogMappingRow['sharing']) {
-  if (!sharing?.is_shared) return null;
-
+function renderVisibilityBadge(visibilityKind: ScalevCatalogMappingRow['visibility_kind']) {
   return (
     <span
       style={{
@@ -99,15 +97,16 @@ function renderSharingBadge(sharing: ScalevCatalogMappingRow['sharing']) {
         alignItems: 'center',
         padding: '2px 7px',
         borderRadius: 999,
-        background: 'rgba(59,130,246,0.12)',
-        border: '1px solid rgba(96,165,250,0.22)',
-        color: '#93c5fd',
+        background: visibilityKind === 'shared' ? 'rgba(59,130,246,0.12)' : 'rgba(148,163,184,0.08)',
+        border: visibilityKind === 'shared' ? '1px solid rgba(96,165,250,0.22)' : '1px solid rgba(148,163,184,0.16)',
+        color: visibilityKind === 'shared' ? '#93c5fd' : 'var(--dim)',
         fontSize: 9,
         fontWeight: 700,
         whiteSpace: 'nowrap',
+        textTransform: 'uppercase',
       }}
     >
-      Shared
+      {visibilityKind}
     </span>
   );
 }
@@ -159,20 +158,6 @@ function renderCatalogReadyBadge(isReady: boolean) {
       {palette.label}
     </span>
   );
-}
-
-function formatBusinessTarget(target: ScalevCatalogMappingPayload['business_target']) {
-  if (!target?.is_active || !target.deduct_entity) return 'Belum ada target deduct';
-  return `${target.deduct_entity}${target.deduct_warehouse ? ` • ${target.deduct_warehouse}` : ''}`;
-}
-
-function formatBusinessTargets(targets: ScalevCatalogMappingPayload['business_targets'] | undefined) {
-  const activeTargets = (targets || []).filter((target) => target?.is_active && target.deduct_entity);
-  if (activeTargets.length === 0) return 'Belum ada target deduct';
-
-  const primaryTarget = activeTargets.find((target) => target.is_primary) || activeTargets[0];
-  const label = formatBusinessTarget(primaryTarget);
-  return activeTargets.length > 1 ? `${label} +${activeTargets.length - 1}` : label;
 }
 
 function toWarehouseProductLite(product: any) {
@@ -286,6 +271,10 @@ export default function ScalevProductMappingSettingsTab() {
     () => businesses.find((business) => business.id === selectedBusinessId) || null,
     [businesses, selectedBusinessId],
   );
+  const editingRow = useMemo(
+    () => mappingData?.rows.find((row) => row.entity_key === editingEntityKey) || null,
+    [editingEntityKey, mappingData?.rows],
+  );
 
   const filteredRows = useMemo(() => {
     const rows = mappingData?.rows || [];
@@ -299,12 +288,15 @@ export default function ScalevProductMappingSettingsTab() {
         const haystack = [
           row.label,
           row.secondary_label,
-            row.sku,
-            row.warehouse_product?.name,
-            row.recommendation?.warehouse_product_name,
-            ...(row.identifiers_preview || []),
-            ...((row.sharing?.business_codes || []).map((code) => `shared ${code}`)),
-          ]
+          row.sku,
+          row.viewer_business_code,
+          row.owner_business_code,
+          row.processor_business_code,
+          row.mapping_business_code,
+          row.warehouse_product?.name,
+          row.recommendation?.warehouse_product_name,
+          ...(row.identifiers_preview || []),
+        ]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
@@ -331,11 +323,11 @@ export default function ScalevProductMappingSettingsTab() {
   const filteredProducts = useMemo(() => {
     const query = productSearch.trim().toLowerCase();
     if (!query) return [];
-
-    const targets = mappingData?.business_targets || [];
+    const preferredOwnerCode = editingRow?.owner_business_code || null;
 
     return [...products]
       .filter((product) => {
+        if (preferredOwnerCode && product.entity !== preferredOwnerCode) return false;
         const haystack = [
           product.name,
           product.category,
@@ -350,21 +342,15 @@ export default function ScalevProductMappingSettingsTab() {
       })
       .sort((left, right) => {
         const getBoost = (product: any) => (
-          targets.reduce((best, target) => {
-            const allowedBoost = (product.entity === target.deduct_entity ? 2 : 0) + (product.warehouse === target.deduct_warehouse ? 1 : 0);
-            const primaryBoost = target.is_primary
-              ? (product.entity === target.deduct_entity ? 0.5 : 0) + (product.warehouse === target.deduct_warehouse ? 0.25 : 0)
-              : 0;
-            return Math.max(best, allowedBoost + primaryBoost);
-          }, 0)
-        );
+          product.entity === preferredOwnerCode ? 2 : 0
+        ) + (product.warehouse === 'BTN' ? 0.1 : 0);
         const leftBoost = getBoost(left);
         const rightBoost = getBoost(right);
         if (rightBoost !== leftBoost) return rightBoost - leftBoost;
         return left.name.localeCompare(right.name);
       })
       .slice(0, 12);
-  }, [mappingData?.business_targets, productSearch, products]);
+  }, [editingRow?.owner_business_code, productSearch, products]);
 
   const warehouseProductById = useMemo(() => {
     const nextMap = new Map<number, ReturnType<typeof toWarehouseProductLite>>();
@@ -393,6 +379,8 @@ export default function ScalevProductMappingSettingsTab() {
               ...currentRow,
               warehouse_product_id: warehouseProductId,
               warehouse_product: nextWarehouseProduct,
+              mapping_business_id: warehouseProductId != null ? currentRow.owner_business_id : null,
+              mapping_business_code: warehouseProductId != null ? currentRow.owner_business_code : null,
               mapping_source: warehouseProductId != null ? 'manual' : null,
               status: warehouseProductId != null
                 ? 'mapped'
@@ -502,13 +490,13 @@ export default function ScalevProductMappingSettingsTab() {
       >
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 12 }}>
           <div style={{ flex: 1, minWidth: 260 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Product Mapping Scalev</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Owner Item Mapping</div>
             <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
-              Halaman ini memetakan entity catalog Scalev ke master produk warehouse. Rekomendasi diambil dari mapping lama yang sudah terjadi,
-              alias `scalev_product_names`, dan kemiripan nama sebagai fallback.
+              Halaman ini memetakan direct entity ScaleV yang visible di business terpilih ke master produk warehouse milik `item_owner`.
+              Untuk row shared, mapping yang disimpan akan menulis ke owner business sebagai sumber kebenaran stok.
             </div>
             <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.6, marginTop: 6 }}>
-              Badge `Shared` berarti entity Scalev yang sama juga muncul di business lain. Ini membantu tim operasional membedakan produk lokal vs lintas business.
+              Rekomendasi tetap memakai histori legacy, alias `scalev_product_names`, dan kemiripan nama, tetapi ranking produk sekarang memprioritaskan owner business dari entity tersebut.
             </div>
           </div>
           <div
@@ -520,21 +508,13 @@ export default function ScalevProductMappingSettingsTab() {
               border: '1px solid var(--border)',
             }}
           >
-            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 4 }}>Gudang diizinkan</div>
+            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 4 }}>Model Baru</div>
             <div style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13 }}>
-              {formatBusinessTargets(mappingData?.business_targets)}
+              owner-aware mapping
             </div>
-            {mappingData?.business_target?.notes ? (
-              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4 }}>{mappingData.business_target.notes}</div>
-            ) : null}
-            {mappingData?.business_targets && mappingData.business_targets.length > 1 ? (
-              <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4, lineHeight: 1.5 }}>
-                {mappingData.business_targets
-                  .filter((target) => target?.is_active && target.deduct_entity)
-                  .map((target) => `${target.is_primary ? 'Utama' : 'Tambahan'}: ${formatBusinessTarget(target)}`)
-                  .join(' • ')}
-              </div>
-            ) : null}
+            <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4, lineHeight: 1.5 }}>
+              Deduction live tidak lagi mengambil keputusan dari `Business Settings &gt; Gudang`. Origin fisik akan dibaca dari `Warehouse Registry`.
+            </div>
           </div>
         </div>
 
@@ -688,7 +668,7 @@ export default function ScalevProductMappingSettingsTab() {
                     <td style={{ padding: '8px 8px', minWidth: 260 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                         {renderEntityTypeBadge(row.entity_type)}
-                        {renderSharingBadge(row.sharing)}
+                        {renderVisibilityBadge(row.visibility_kind)}
                         <span style={{ color: 'var(--text)', fontWeight: 700 }}>{row.label}</span>
                       </div>
                       {row.secondary_label ? (
@@ -709,9 +689,12 @@ export default function ScalevProductMappingSettingsTab() {
                           {row.identifiers_preview.slice(0, 3).join(' • ')}
                         </div>
                       ) : null}
-                      {row.sharing?.is_shared ? (
-                        <div style={{ marginTop: 6, color: '#93c5fd', fontSize: 10, lineHeight: 1.6 }}>
-                          Juga ada di {row.sharing.other_business_codes.join(', ')}
+                      <div style={{ marginTop: 6, color: row.visibility_kind === 'shared' ? '#93c5fd' : 'var(--dim)', fontSize: 10, lineHeight: 1.6 }}>
+                        viewer: {row.viewer_business_code} • owner: {row.owner_business_code} • processor: {row.processor_business_code}
+                      </div>
+                      {row.mapping_business_code ? (
+                        <div style={{ marginTop: 2, color: 'var(--dim)', fontSize: 10, lineHeight: 1.6 }}>
+                          mapping tersimpan di {row.mapping_business_code}
                         </div>
                       ) : null}
                     </td>
@@ -806,6 +789,9 @@ export default function ScalevProductMappingSettingsTab() {
                           </div>
                           <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 4, lineHeight: 1.6 }}>
                             {row.recommendation.reason}
+                          </div>
+                          <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 4 }}>
+                            Mapping canonical owner: {row.owner_business_code}
                           </div>
                         </div>
                       ) : (

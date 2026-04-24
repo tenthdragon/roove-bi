@@ -1,6 +1,13 @@
 // lib/csv-actions.ts
 'use server';
 import { createServiceSupabase } from '@/lib/supabase-server';
+import {
+  cleanWarehouseDomainText,
+  fetchWarehouseBusinessDirectoryRows,
+  fetchWarehouseOriginRegistryRows,
+  resolveWarehouseBusinessCode,
+  resolveWarehouseOrigin,
+} from '@/lib/warehouse-domain-helpers';
 
 // ── Brand keyword type ──
 type BrandKeyword = { name: string; keywords: string[] };
@@ -89,6 +96,10 @@ export async function uploadCsvOrders(formData: FormData) {
 
   const isProductBased = headers.includes('item_name');
   const svc = createServiceSupabase();
+  const [businessDirectoryRows, originRegistryRows] = await Promise.all([
+    fetchWarehouseBusinessDirectoryRows(svc),
+    fetchWarehouseOriginRegistryRows(svc),
+  ]);
 
   // Fetch brand keywords from DB for dynamic detection
   const brandKeywords = await fetchBrandKeywords();
@@ -171,17 +182,44 @@ export async function uploadCsvOrders(formData: FormData) {
     const salesChannel = deriveSalesChannel(firstRow);
     const shippedTime = ts(firstRow.shipped_time) || ts(firstRow.completed_time) || null;
     const completedTime = ts(firstRow.completed_time) || null;
+    const businessNameRaw = cleanWarehouseDomainText(firstRow.business_name || null);
+    const originBusinessNameRaw = cleanWarehouseDomainText(firstRow.origin_business_name || null);
+    const originRaw = cleanWarehouseDomainText(firstRow.origin || null);
+    const sellerResolution = resolveWarehouseBusinessCode({
+      rawValue: businessNameRaw,
+      fallbackBusinessCode: null,
+      directoryRows: businessDirectoryRows,
+    });
+    const originOperatorResolution = resolveWarehouseBusinessCode({
+      rawValue: originBusinessNameRaw,
+      fallbackBusinessCode: null,
+      directoryRows: businessDirectoryRows,
+    });
+    const originRegistryResolution = resolveWarehouseOrigin({
+      rawOriginBusinessName: originBusinessNameRaw,
+      rawOriginName: originRaw,
+      registryRows: originRegistryRows,
+    });
 
     // ── Build line items ──
     const lineItems: any[] = [];
     if (isProductBased) {
       for (const row of rows) {
         const itemName = row.item_name || '';
+        const itemOwnerRaw = cleanWarehouseDomainText(row.item_owner || null);
         if (!itemName) continue;
         const brand = deriveBrandFromItem(itemName, row.item_owner || '', brandKeywords);
+        const ownerResolution = resolveWarehouseBusinessCode({
+          rawValue: itemOwnerRaw,
+          fallbackBusinessCode: null,
+          directoryRows: businessDirectoryRows,
+        });
         lineItems.push({
           order_id: orderId, product_name: itemName, product_type: brand,
           variant_sku: null, quantity: parseInt(row.item_quantity || '0') || 0,
+          item_name_raw: itemName,
+          item_owner_raw: itemOwnerRaw,
+          stock_owner_business_code: ownerResolution.business_code || null,
           product_price_bt: num(row.item_product_price_bt),
           discount_bt: num(row.item_product_discount_bt),
           cogs_bt: num(row.item_cogs_bt),
@@ -198,6 +236,9 @@ export async function uploadCsvOrders(formData: FormData) {
       lineItems.push({
         order_id: orderId, product_name: brand, product_type: brand,
         variant_sku: null, quantity: parseInt(firstRow.quantity || '0') || 0,
+        item_name_raw: brand,
+        item_owner_raw: null,
+        stock_owner_business_code: null,
         product_price_bt: num(firstRow.product_price_bt),
         discount_bt: num(firstRow.product_discount_bt),
         cogs_bt: num(firstRow.cogs_bt),
@@ -244,6 +285,12 @@ export async function uploadCsvOrders(formData: FormData) {
       d.is_purchase_kwai = firstRow.is_purchase_kwai === 'true';
       if (firstRow.platform) d.platform = firstRow.platform;
       if (firstRow.store) d.store_name = firstRow.store;
+      d.business_name_raw = businessNameRaw;
+      d.origin_business_name_raw = originBusinessNameRaw;
+      d.origin_raw = originRaw;
+      d.seller_business_code = sellerResolution.business_code || null;
+      d.origin_operator_business_code = originRegistryResolution.operator_business_code || originOperatorResolution.business_code || null;
+      d.origin_registry_id = originRegistryResolution.id || null;
       if (firstRow.utm_source) d.utm_source = firstRow.utm_source;
       if (firstRow.customer_type) d.customer_type = firstRow.customer_type;
       if (firstRow.province) d.province = firstRow.province;
@@ -275,6 +322,12 @@ export async function uploadCsvOrders(formData: FormData) {
         customer_type: firstRow.customer_type || null,
         status: firstRow.order_status || 'unknown', shipped_time: shippedTime,
         platform: firstRow.platform || null, store_name: firstRow.store || null,
+        business_name_raw: businessNameRaw,
+        origin_business_name_raw: originBusinessNameRaw,
+        origin_raw: originRaw,
+        seller_business_code: sellerResolution.business_code || null,
+        origin_operator_business_code: originRegistryResolution.operator_business_code || originOperatorResolution.business_code || null,
+        origin_registry_id: originRegistryResolution.id || null,
         utm_source: firstRow.utm_source || null, financial_entity: firstRow.financial_entity || null,
         payment_method: firstRow.payment_method || null,
         unique_code_discount: num(firstRow.unique_code_discount),

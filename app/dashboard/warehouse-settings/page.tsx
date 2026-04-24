@@ -26,18 +26,21 @@ import ScalevCatalogSettingsTab from '@/components/ScalevCatalogSettingsTab';
 import ScalevBundleMappingSettingsTab from '@/components/ScalevBundleMappingSettingsTab';
 import ScalevProductMappingSettingsTab from '@/components/ScalevProductMappingSettingsTab';
 import WarehouseActivityLogTab from '@/components/WarehouseActivityLogTab';
+import WarehouseBusinessDirectoryTab from '@/components/WarehouseBusinessDirectoryTab';
+import WarehouseOriginRegistryTab from '@/components/WarehouseOriginRegistryTab';
 import { usePermissions } from '@/lib/PermissionsContext';
 
 const SUB_TABS = [
   { id: 'brands', label: 'Brand' },
   { id: 'vendors', label: 'Vendor' },
   { id: 'products', label: 'Master Produk' },
-  { id: 'warehouses', label: 'Active Warehouse' },
+  { id: 'warehouses', label: 'Warehouse Registry', permissionKey: 'whs:warehouses' },
+  { id: 'business-directory', label: 'Business Directory', permissionKey: 'whs:mapping' },
   { id: 'catalog', label: 'Katalog Scalev', permissionKey: 'whs:mapping' },
-  { id: 'catalog-mapping', label: 'Product Mapping Scalev', permissionKey: 'whs:mapping' },
-  { id: 'bundle-mapping', label: 'Bundle Mapping Scalev', permissionKey: 'whs:mapping' },
+  { id: 'catalog-mapping', label: 'Owner Item Mapping', permissionKey: 'whs:mapping' },
+  { id: 'bundle-mapping', label: 'Bundle Decomposition', permissionKey: 'whs:mapping' },
   { id: 'activity-log', label: 'Log Aktivitas', permissionKey: 'whs:mapping' },
-  { id: 'mapping', label: 'Mapping Scalev' },
+  { id: 'mapping', label: 'Mapping Scalev Legacy', permissionKey: 'whs:mapping' },
 ];
 
 const DEFAULT_CATEGORIES = ['fg', 'sachet', 'packaging', 'bonus', 'wip', 'wip_material', 'other'];
@@ -104,7 +107,8 @@ export default function WarehouseSettingsPage() {
       {effectiveTab === 'products' && <MasterProdukTab />}
       {effectiveTab === 'brands' && <BrandTab />}
       {effectiveTab === 'vendors' && <VendorTab />}
-      {effectiveTab === 'warehouses' && <ActiveWarehouseTab />}
+      {effectiveTab === 'warehouses' && <WarehouseOriginRegistryTab />}
+      {effectiveTab === 'business-directory' && <WarehouseBusinessDirectoryTab />}
       {effectiveTab === 'catalog' && <ScalevCatalogSettingsTab />}
       {effectiveTab === 'catalog-mapping' && <ScalevProductMappingSettingsTab />}
       {effectiveTab === 'bundle-mapping' && <ScalevBundleMappingSettingsTab />}

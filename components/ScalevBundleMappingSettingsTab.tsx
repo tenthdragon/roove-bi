@@ -283,9 +283,10 @@ export default function ScalevBundleMappingSettingsTab() {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Bundle Mapping Scalev</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Bundle Decomposition</div>
             <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4, maxWidth: 780, lineHeight: 1.6 }}>
-              Tab ini membaca isi bundle dari Scalev lalu mencoba me-resolve setiap komponen ke produk warehouse lewat mapping produk Scalev. Untuk komponen shared, sistem akan mencoba memakai mapping dari business pemilik produk lebih dulu.
+              Tab ini membaca bundle yang visible di business terpilih lalu me-resolve setiap komponen lewat Owner Item Mapping yang kanonik di owner business.
+              Jadi bundle bisa dijual oleh satu business, tetapi ownership tiap komponennya tetap mengikuti sumber stok yang ditetapkan upstream.
             </div>
           </div>
 
@@ -430,7 +431,7 @@ export default function ScalevBundleMappingSettingsTab() {
             />
           </div>
           <div style={{ fontSize: 11, color: 'var(--dim)' }}>
-            Partial/unresolved di sini biasanya selesai setelah variannya dimap di tab Product Mapping Scalev.
+            Partial/unresolved di sini biasanya selesai setelah variannya dimap di tab Owner Item Mapping.
           </div>
         </div>
 
@@ -478,6 +479,9 @@ export default function ScalevBundleMappingSettingsTab() {
                           {row.custom_id ? (
                             <div style={{ marginTop: 6, fontSize: 10, color: '#93c5fd', fontFamily: 'monospace' }}>{row.custom_id}</div>
                           ) : null}
+                          <div style={{ marginTop: 6, fontSize: 10, color: row.visibility_kind === 'shared' ? '#93c5fd' : 'var(--dim)' }}>
+                            {row.visibility_kind.toUpperCase()} • owner: {row.owner_business_code} • processor: {row.processor_business_code}
+                          </div>
                         </td>
 
                         <td style={{ padding: '12px 8px', minWidth: 220 }}>
@@ -552,7 +556,7 @@ export default function ScalevBundleMappingSettingsTab() {
                               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                 <thead>
                                   <tr style={{ borderBottom: '1px solid rgba(148,163,184,0.12)' }}>
-                                    {['Qty', 'Komponen Scalev', 'SKU / UID', 'Produk Warehouse', 'Source'].map((header) => (
+                                    {['Qty', 'Komponen Scalev', 'SKU / UID', 'Produk Warehouse', 'Ownership'].map((header) => (
                                       <th
                                         key={header}
                                         style={{
@@ -595,9 +599,9 @@ export default function ScalevBundleMappingSettingsTab() {
                                           </>
                                         ) : (
                                           <div style={{ color: '#fca5a5', fontSize: 10, fontWeight: 700 }}>
-                                            {component.source_business_code && component.source_business_code !== payload?.business_code
-                                              ? `Belum ada Product Mapping Scalev di business sumber ${component.source_business_code}`
-                                              : 'Belum terhubung ke Product Mapping Scalev'}
+                                            {component.processor_business_code && component.processor_business_code !== payload?.business_code
+                                              ? `Belum ada Owner Item Mapping di owner ${component.owner_business_code || component.processor_business_code}`
+                                              : 'Belum terhubung ke Owner Item Mapping'}
                                           </div>
                                         )}
                                       </td>
@@ -609,10 +613,17 @@ export default function ScalevBundleMappingSettingsTab() {
                                               ? 'product'
                                               : '-'}
                                         </div>
-                                        {component.source_business_code ? (
+                                        <div style={{ color: component.visibility_kind === 'shared' ? '#93c5fd' : 'var(--dim)', marginTop: 3 }}>
+                                          {component.visibility_kind.toUpperCase()}
+                                        </div>
+                                        {component.owner_business_code ? (
                                           <div style={{ color: 'var(--dim)', marginTop: 3 }}>
-                                            source: {component.source_business_code}
-                                            {component.is_shared_component ? ' shared' : ''}
+                                            owner: {component.owner_business_code}
+                                          </div>
+                                        ) : null}
+                                        {component.processor_business_code ? (
+                                          <div style={{ color: 'var(--dim)', marginTop: 3 }}>
+                                            processor: {component.processor_business_code}
                                           </div>
                                         ) : null}
                                         {component.mapping_business_code ? (
