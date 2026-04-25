@@ -8,6 +8,7 @@ import {
   resolveWarehouseBusinessCode,
   resolveWarehouseOrigin,
 } from '@/lib/warehouse-domain-helpers';
+import { buildScalevSourceClassFields } from '@/lib/scalev-source-class';
 
 // ── Brand keyword type ──
 type BrandKeyword = { name: string; keywords: string[] };
@@ -291,6 +292,14 @@ export async function uploadCsvOrders(formData: FormData) {
       d.seller_business_code = sellerResolution.business_code || null;
       d.origin_operator_business_code = originRegistryResolution.operator_business_code || originOperatorResolution.business_code || null;
       d.origin_registry_id = originRegistryResolution.id || null;
+      Object.assign(d, buildScalevSourceClassFields({
+        source: existing.source || 'csv_upload',
+        platform: firstRow.platform || null,
+        externalId: firstRow.external_id || null,
+        financialEntity: firstRow.financial_entity || null,
+        rawData: firstRow,
+        storeName: firstRow.store || null,
+      }));
       if (firstRow.utm_source) d.utm_source = firstRow.utm_source;
       if (firstRow.customer_type) d.customer_type = firstRow.customer_type;
       if (firstRow.province) d.province = firstRow.province;
@@ -328,6 +337,14 @@ export async function uploadCsvOrders(formData: FormData) {
         seller_business_code: sellerResolution.business_code || null,
         origin_operator_business_code: originRegistryResolution.operator_business_code || originOperatorResolution.business_code || null,
         origin_registry_id: originRegistryResolution.id || null,
+        ...buildScalevSourceClassFields({
+          source: 'csv_upload',
+          platform: firstRow.platform || null,
+          externalId: firstRow.external_id || null,
+          financialEntity: firstRow.financial_entity || null,
+          rawData: firstRow,
+          storeName: firstRow.store || null,
+        }),
         utm_source: firstRow.utm_source || null, financial_entity: firstRow.financial_entity || null,
         payment_method: firstRow.payment_method || null,
         unique_code_discount: num(firstRow.unique_code_discount),

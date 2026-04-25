@@ -6,6 +6,7 @@ import {
   clearProductMappingCache,
   type StoreType,
 } from './scalev-api';
+import { buildScalevSourceClassFields } from './scalev-source-class';
 import { reverseWarehouseDeductions } from './warehouse-ledger-actions';
 import { createServiceSupabase } from './service-supabase';
 
@@ -41,6 +42,30 @@ function getSyncLogType(syncMode: ScalevSyncMode) {
 
 function shouldReverseWarehouseForStatusChange(oldStatus?: string | null, newStatus?: string | null) {
   return TERMINAL_SCALEV_STATUSES.has(oldStatus || '') && !!newStatus && !TERMINAL_SCALEV_STATUSES.has(newStatus);
+}
+
+function buildSyncSourceClassFields(args: {
+  apiOrder: any;
+  dbOrder: any;
+  businessId: number;
+  storeTypeMap: Map<string, StoreType>;
+}) {
+  const storeName = String(args.apiOrder?.store?.name || args.dbOrder?.store_name || '').trim();
+  const storeType = storeName
+    ? args.storeTypeMap.get(`${args.businessId}:${storeName.toLowerCase()}`) ?? null
+    : null;
+
+  return buildScalevSourceClassFields({
+    source: args.dbOrder?.source || 'webhook',
+    platform: args.apiOrder?.platform ?? args.dbOrder?.platform ?? null,
+    externalId: args.apiOrder?.external_id ?? args.dbOrder?.external_id ?? null,
+    financialEntity: args.apiOrder?.financial_entity ?? args.dbOrder?.financial_entity ?? null,
+    rawData: args.apiOrder || args.dbOrder?.raw_data || null,
+    courierService: args.apiOrder?.courier_service ?? args.dbOrder?.raw_data?.courier_service ?? null,
+    courier: args.apiOrder?.courier ?? args.dbOrder?.raw_data?.courier ?? null,
+    storeName: storeName || null,
+    storeType,
+  });
 }
 
 export async function runScalevSync(options: ScalevSyncOptions = {}): Promise<ScalevSyncResult> {
@@ -96,7 +121,7 @@ export async function runScalevSync(options: ScalevSyncOptions = {}): Promise<Sc
     }
 
     let pendingOrders: any[] = [];
-    const lightCols = 'id, order_id, scalev_id, status, store_name, business_code';
+    const lightCols = 'id, order_id, scalev_id, status, store_name, business_code, source, platform, external_id, financial_entity, raw_data';
 
     if (syncMode === 'order_id' && targetOrderIds && targetOrderIds.length > 0) {
       const { data, error } = await svc
@@ -419,6 +444,13 @@ async function processOrder(
 ): Promise<'updated' | 'still_pending'> {
   const newStatus = apiOrder.status;
   let reversedCount = 0;
+  const businessId = bizCodeToId.get(dbOrder.business_code) || 0;
+  const sourceClassFields = buildSyncSourceClassFields({
+    apiOrder,
+    dbOrder,
+    businessId,
+    storeTypeMap,
+  });
 
   if (newStatus === dbOrder.status && !forceUpdate) {
     return 'still_pending';
@@ -429,6 +461,7 @@ async function processOrder(
 
     await svc.from('scalev_orders').update({
       status: newStatus,
+      ...sourceClassFields,
       raw_data: apiOrder,
       synced_at: new Date().toISOString(),
     }).eq('id', dbOrder.id);
@@ -442,7 +475,6 @@ async function processOrder(
     }
 
     if (!lightweight) {
-      const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
       const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
       await enrichLineItems(
         svc,
@@ -450,7 +482,7 @@ async function processOrder(
         dbOrder.order_id,
         apiOrder,
         storeTypeMap,
-        bizId,
+        businessId,
         taxRateName,
         taxRatesMap,
         channelOverrideMap
@@ -472,6 +504,7 @@ async function processOrder(
   const now = new Date().toISOString();
   const updateData: Record<string, any> = {
     status: newStatus,
+    ...sourceClassFields,
     synced_at: now,
     raw_data: apiOrder,
   };
@@ -488,7 +521,6 @@ async function processOrder(
   await svc.from('scalev_orders').update(updateData).eq('id', dbOrder.id);
 
   if (!lightweight && (newStatus === 'shipped' || newStatus === 'completed')) {
-    const bizId = bizCodeToId.get(dbOrder.business_code) || 0;
     const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
     await enrichLineItems(
       svc,
@@ -496,7 +528,7 @@ async function processOrder(
       dbOrder.order_id,
       apiOrder,
       storeTypeMap,
-      bizId,
+      businessId,
       taxRateName,
       taxRatesMap,
       channelOverrideMap

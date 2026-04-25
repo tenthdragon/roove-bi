@@ -10,6 +10,7 @@ import {
   resolveWarehouseBusinessCode,
   resolveWarehouseOrigin,
 } from '@/lib/warehouse-domain-helpers';
+import { buildScalevSourceClassFields } from '@/lib/scalev-source-class';
 
 
 function getServiceSupabase() {
@@ -487,6 +488,13 @@ async function handleOpsUpload(
       const d: any = {
         customer_name: firstRow.username || firstRow.name || null,
         source: 'ops_upload', // mark as ops-uploaded so Scalev won't overwrite customer
+        ...buildScalevSourceClassFields({
+          source: 'ops_upload',
+          platform,
+          externalId: extId,
+          rawData: firstRow,
+          storeName: firstRow.store || null,
+        }),
         synced_at: new Date().toISOString(),
       };
       
@@ -535,6 +543,13 @@ async function handleOpsUpload(
         paid_time: shippedTime,
         canceled_time: null,
         source: 'ops_upload',
+        ...buildScalevSourceClassFields({
+          source: 'ops_upload',
+          platform,
+          externalId: extId,
+          rawData: firstRow,
+          storeName: firstRow.store || null,
+        }),
         raw_data: firstRow,
         synced_at: new Date().toISOString(),
       });
@@ -904,6 +919,14 @@ async function handleScalevUpload(
       d.seller_business_code = sellerResolution.business_code || null;
       d.origin_operator_business_code = originRegistryResolution.operator_business_code || originOperatorResolution.business_code || null;
       d.origin_registry_id = originRegistryResolution.id || null;
+      Object.assign(d, buildScalevSourceClassFields({
+        source: existing.source || 'csv_upload',
+        platform: firstRow.platform || null,
+        externalId: csvExtId || null,
+        financialEntity: firstRow.financial_entity || null,
+        rawData: firstRow,
+        storeName: firstRow.store || null,
+      }));
       if (firstRow.utm_source) d.utm_source = firstRow.utm_source;
 
       // Purchase flags — CSV is source of truth, always update
@@ -938,6 +961,14 @@ async function handleScalevUpload(
         seller_business_code: sellerResolution.business_code || null,
         origin_operator_business_code: originRegistryResolution.operator_business_code || originOperatorResolution.business_code || null,
         origin_registry_id: originRegistryResolution.id || null,
+        ...buildScalevSourceClassFields({
+          source: 'csv_upload',
+          platform: firstRow.platform || null,
+          externalId: (firstRow.external_id || '').replace('#', '') || null,
+          financialEntity: firstRow.financial_entity || null,
+          rawData: firstRow,
+          storeName: firstRow.store || null,
+        }),
         utm_source: firstRow.utm_source || null,
         financial_entity: firstRow.financial_entity || null,
         payment_method: firstRow.payment_method || null,

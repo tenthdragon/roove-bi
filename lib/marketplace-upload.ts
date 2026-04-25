@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { createServiceSupabase } from './service-supabase';
 import { fetchStoreList } from './scalev-api';
+import { buildScalevSourceClassFields } from './scalev-source-class';
 
 const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
 const MARKETPLACE_API_SOURCE = 'marketplace_api_upload';
@@ -1505,6 +1506,19 @@ async function upsertLocalMarketplaceOrder(
     seller_business_code: business.business_code,
     origin_operator_business_code: null,
     origin_registry_id: null,
+    ...buildScalevSourceClassFields({
+      source: MARKETPLACE_API_SOURCE,
+      platform: platformSlug(order.platform),
+      externalId: order.externalId,
+      financialEntity: salesChannelForPlatform(order.platform),
+      rawData: {
+        marketplace_upload: order,
+        scalev_payload: payload,
+        scalev_response: responseData,
+      },
+      storeName: store.row.store_name,
+      storeType: store.row.store_type,
+    }),
     raw_data: {
       marketplace_upload: order,
       scalev_payload: payload,

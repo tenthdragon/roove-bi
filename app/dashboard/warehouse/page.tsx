@@ -51,6 +51,7 @@ import { getPurchaseOrders as getPOs, receivePOItems } from '@/lib/ppic-actions'
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { getCurrentProfile } from '@/lib/actions';
 import { usePermissions } from '@/lib/PermissionsContext';
+import ScalevSourceClassBackfillTool from '@/components/ScalevSourceClassBackfillTool';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
 
 // ── Types ──
@@ -329,6 +330,7 @@ function KPICard({ label, value, color = 'var(--accent)', sub }: { label: string
 // ============================================================
 
 export default function WarehousePage() {
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('daily-summary');
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string>('');
@@ -374,6 +376,7 @@ export default function WarehousePage() {
   const [deductionLogError, setDeductionLogError] = useState('');
   const refreshData = () => setRefreshKey(k => k + 1);
   const warehouseGoLiveKey = warehouseGoLive.goLiveAt || 'pending';
+  const canUseSourceClassBackfillTool = can('admin:sync') || can('whs:mapping');
 
   // Load profile on mount
   useEffect(() => {
@@ -556,6 +559,8 @@ export default function WarehousePage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Gudang</h2>
       </div>
+
+      {canUseSourceClassBackfillTool ? <ScalevSourceClassBackfillTool /> : null}
 
       {/* Sub-tab navigation */}
       <div style={{

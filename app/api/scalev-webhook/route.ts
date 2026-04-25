@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
 import { deriveChannelFromStoreType, guessStoreType, type StoreType } from '@/lib/scalev-api';
+import { buildScalevSourceClassFields } from '@/lib/scalev-source-class';
 import { reconcileScalevOrderWarehouse } from '@/lib/warehouse-ledger-actions';
 import {
   extractScalevLineItemNameRaw,
@@ -77,6 +78,38 @@ function lookupStoreType(storeTypes: Map<string, StoreType>, businessId: number,
 // Lookup channel override by business_id + store_name
 function lookupChannelOverride(businessId: number, storeName: string): string | undefined {
   return cachedChannelOverrides?.get(`${businessId}:${storeName.toLowerCase()}`);
+}
+
+async function buildOrderSourceClassFields(args: {
+  data?: any;
+  existing?: {
+    source?: string | null;
+    platform?: string | null;
+    external_id?: string | null;
+    financial_entity?: string | null;
+    store_name?: string | null;
+    raw_data?: any;
+  } | null;
+  businessId: number;
+  source?: string | null;
+}) {
+  const storeTypes = await getStoreTypeMap();
+  const storeName = args.data?.store?.name || args.data?.store_name || args.existing?.store_name || null;
+  const storeType = storeName
+    ? lookupStoreType(storeTypes, args.businessId, storeName) ?? null
+    : null;
+
+  return buildScalevSourceClassFields({
+    source: args.source ?? args.existing?.source ?? null,
+    platform: args.data?.platform ?? args.existing?.platform ?? null,
+    externalId: args.data?.external_id ?? args.existing?.external_id ?? null,
+    financialEntity: args.data?.financial_entity ?? args.existing?.financial_entity ?? null,
+    rawData: args.data || args.existing?.raw_data || null,
+    courierService: args.data?.courier_service ?? args.existing?.raw_data?.courier_service ?? null,
+    courier: args.data?.courier ?? args.existing?.raw_data?.courier ?? null,
+    storeName,
+    storeType,
+  });
 }
 
 // ── Derive channel using store_type from DB, fallback to guessed store_type ──
@@ -588,6 +621,11 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   const storeName = data.store?.name || null;
   const financialEntity = data.financial_entity?.name || data.financial_entity?.code || null;
   const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
+  const sourceClassFields = await buildOrderSourceClassFields({
+    data,
+    businessId,
+    source: 'webhook',
+  });
 
   // Build order row
   const derivedPlatform = derivePlatformFromStore(storeName || '', data.external_id, data);
@@ -632,6 +670,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
     seller_business_code: warehouseOrderContext.sellerBusinessCode,
     origin_operator_business_code: warehouseOrderContext.originOperatorBusinessCode,
     origin_registry_id: warehouseOrderContext.originRegistryId,
+    ...sourceClassFields,
     raw_data: data,
     synced_at: new Date().toISOString(),
   };
@@ -713,7 +752,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     orderId,
     businessCode,
     data.external_id,
-    'id, order_id, status',
+    'id, order_id, status, source, store_name, platform, external_id, financial_entity, raw_data',
   );
 
   if (lookupErr) {
@@ -739,6 +778,11 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 
   // Build update
   const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
+  const sourceClassFields = await buildOrderSourceClassFields({
+    data,
+    existing,
+    businessId,
+  });
   const updateData: Record<string, any> = {
     status: newStatus,
     business_code: businessCode,
@@ -748,6 +792,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     seller_business_code: warehouseOrderContext.sellerBusinessCode,
     origin_operator_business_code: warehouseOrderContext.originOperatorBusinessCode,
     origin_registry_id: warehouseOrderContext.originRegistryId,
+    ...sourceClassFields,
     synced_at: new Date().toISOString(),
   };
 
@@ -958,7 +1003,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     orderId,
     businessCode,
     data.external_id,
-    'id, order_id, status, source',
+    'id, order_id, status, source, store_name, platform, external_id, financial_entity, raw_data',
   );
 
   if (lookupErr) {
@@ -977,6 +1022,11 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   const storeName = data.store?.name || null;
   const financialEntity = data.financial_entity?.name || data.financial_entity?.code || null;
   const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
+  const sourceClassFields = await buildOrderSourceClassFields({
+    data,
+    existing,
+    businessId,
+  });
 
   const updateData: Record<string, any> = {
     synced_at: new Date().toISOString(),
@@ -987,6 +1037,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     seller_business_code: warehouseOrderContext.sellerBusinessCode,
     origin_operator_business_code: warehouseOrderContext.originOperatorBusinessCode,
     origin_registry_id: warehouseOrderContext.originRegistryId,
+    ...sourceClassFields,
     raw_data: data,
   };
 
@@ -1128,7 +1179,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
 }
 
 // ── Handle order.deleted: soft-delete by marking as canceled ──
-async function handleOrderDeleted(data: any, businessCode: string) {
+async function handleOrderDeleted(data: any, businessCode: string, businessId: number) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -1136,7 +1187,12 @@ async function handleOrderDeleted(data: any, businessCode: string) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, order_id, status');
+  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(
+    svc,
+    orderId,
+    businessCode,
+    'id, order_id, status, source, store_name, platform, external_id, financial_entity, raw_data',
+  );
 
   if (lookupErr) {
     console.error(`[scalev-webhook][${businessCode}] order.deleted lookup error for ${orderId}:`, lookupErr.message);
@@ -1148,12 +1204,19 @@ async function handleOrderDeleted(data: any, businessCode: string) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
   }
 
+  const sourceClassFields = await buildOrderSourceClassFields({
+    data,
+    existing,
+    businessId,
+  });
+
   // Soft-delete: mark status as 'deleted' and record the timestamp
   const { error: updateErr } = await svc
     .from('scalev_orders')
     .update({
       status: 'deleted',
       business_code: businessCode,
+      ...sourceClassFields,
       canceled_time: new Date().toISOString(),
       synced_at: new Date().toISOString(),
     })
@@ -1191,7 +1254,7 @@ async function handleOrderDeleted(data: any, businessCode: string) {
 }
 
 // ── Handle order.payment_status_changed: update payment-related fields ──
-async function handlePaymentStatusChanged(data: any, businessCode: string) {
+async function handlePaymentStatusChanged(data: any, businessCode: string, businessId: number) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -1199,7 +1262,12 @@ async function handlePaymentStatusChanged(data: any, businessCode: string) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, order_id, status');
+  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(
+    svc,
+    orderId,
+    businessCode,
+    'id, order_id, status, source, store_name, platform, external_id, financial_entity, raw_data',
+  );
 
   if (lookupErr) {
     console.error(`[scalev-webhook][${businessCode}] payment_status_changed lookup error for ${orderId}:`, lookupErr.message);
@@ -1211,8 +1279,14 @@ async function handlePaymentStatusChanged(data: any, businessCode: string) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
   }
 
+  const sourceClassFields = await buildOrderSourceClassFields({
+    data,
+    existing,
+    businessId,
+  });
   const updateData: Record<string, any> = {
     business_code: businessCode,
+    ...sourceClassFields,
     synced_at: new Date().toISOString(),
   };
 
@@ -1260,7 +1334,7 @@ async function handlePaymentStatusChanged(data: any, businessCode: string) {
 }
 
 // ── Handle order.e_payment_created: record e-payment info on order ──
-async function handleEPaymentCreated(data: any, businessCode: string) {
+async function handleEPaymentCreated(data: any, businessCode: string, businessId: number) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -1268,7 +1342,12 @@ async function handleEPaymentCreated(data: any, businessCode: string) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(svc, orderId, businessCode, 'id, order_id');
+  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(
+    svc,
+    orderId,
+    businessCode,
+    'id, order_id, source, store_name, platform, external_id, financial_entity, raw_data',
+  );
 
   if (lookupErr) {
     console.error(`[scalev-webhook][${businessCode}] e_payment_created lookup error for ${orderId}:`, lookupErr.message);
@@ -1280,8 +1359,14 @@ async function handleEPaymentCreated(data: any, businessCode: string) {
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
   }
 
+  const sourceClassFields = await buildOrderSourceClassFields({
+    data,
+    existing,
+    businessId,
+  });
   const updateData: Record<string, any> = {
     business_code: businessCode,
+    ...sourceClassFields,
     synced_at: new Date().toISOString(),
   };
 
@@ -1368,16 +1453,16 @@ export async function POST(req: NextRequest) {
         return handleOrderUpdated(data, businessCode, businessId, taxRateName);
 
       case 'order.deleted':
-        return handleOrderDeleted(data, businessCode);
+        return handleOrderDeleted(data, businessCode, businessId);
 
       case 'order.status_changed':
         return handleStatusChanged(data, businessCode, businessId, taxRateName);
 
       case 'order.payment_status_changed':
-        return handlePaymentStatusChanged(data, businessCode);
+        return handlePaymentStatusChanged(data, businessCode, businessId);
 
       case 'order.e_payment_created':
-        return handleEPaymentCreated(data, businessCode);
+        return handleEPaymentCreated(data, businessCode, businessId);
 
       default:
         console.log(`[scalev-webhook][${businessCode}] unhandled event: ${event}`);

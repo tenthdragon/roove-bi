@@ -7,8 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:source-class": "tsx --test tests/scalev-source-class.test.ts",
     "typecheck:app": "tsc --project tsconfig.json --noEmit",
     "check:app": "npm run typecheck:app && npm run lint && npm run build",
+    "backfill:scalev-source-class": "tsx scripts/backfill-scalev-source-class.ts",
     "check:mcp": "npm --prefix mcp-server run build",
     "sync-jobs:once": "tsx scripts/sync-jobs-worker.ts",
     "sync-jobs:loop": "tsx scripts/sync-jobs-worker.ts --loop"

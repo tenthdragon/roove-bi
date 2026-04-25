@@ -3,6 +3,7 @@ import {
   buildScalevOpsProjectionForBatch,
   type ScalevOpsCsvRow,
 } from './marketplace-intake-scalev-export';
+import { buildScalevSourceClassFields } from './scalev-source-class';
 
 const MARKETPLACE_APP_SOURCE = 'marketplace_api_upload';
 const DEFAULT_TAX_RATE = 11;
@@ -576,6 +577,26 @@ export async function promoteMarketplaceIntakeBatchToApp(
         canceled_time: null,
         source: MARKETPLACE_APP_SOURCE,
         business_code: batch.business_code,
+        ...buildScalevSourceClassFields({
+          source: MARKETPLACE_APP_SOURCE,
+          platform: cleanText(headerRow.platform) || 'shopee',
+          externalId: group.externalId,
+          financialEntity: 'shopee',
+          rawData: {
+            kind: 'marketplace_intake_promote',
+            version: 1,
+            promoted_at: promotedAt,
+            marketplace_intake_batch_id: batch.id,
+            marketplace_intake_order_id: intakeOrder.id,
+            source_key: batch.source_key,
+            source_label: batch.source_label,
+            include_warehouse_statuses: includeWarehouseStatuses,
+            shipment_date: targetShipmentDate,
+            raw_meta: intakeOrder.raw_meta || {},
+            projection_rows: group.rows,
+          },
+          storeName: cleanText(headerRow.store) || intakeOrder.final_store_name || null,
+        }),
         raw_data: {
           kind: 'marketplace_intake_promote',
           version: 1,
