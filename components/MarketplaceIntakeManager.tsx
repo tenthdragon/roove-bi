@@ -123,9 +123,11 @@ function StatusPill({ status, warehouse = false }) {
   );
 }
 
-function SyncStatusPill({ status, successLabel, failedLabel, idleLabel }) {
+function SyncStatusPill({ status, successLabel, failedLabel, idleLabel, partialLabel }) {
   const meta = status === 'success'
     ? { label: successLabel, color: '#22c55e', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.24)' }
+    : status === 'partial'
+      ? { label: partialLabel || 'Sebagian', color: '#fcd34d', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.24)' }
     : status === 'failed'
       ? { label: failedLabel, color: '#fca5a5', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.24)' }
       : { label: idleLabel, color: 'var(--dim)', bg: 'rgba(148,163,184,0.10)', border: 'var(--border)' };
@@ -240,6 +242,69 @@ function getScalevButtonMeta(status) {
   return { label: 'Push ke Scalev', tone: 'primary' };
 }
 
+function getScalevReconcileButtonMeta(status) {
+  if (status === 'success') {
+    return { label: 'Tarik Ulang ID', tone: 'default' };
+  }
+  if (status === 'partial') {
+    return { label: 'Lanjut Tarik ID', tone: 'warn' };
+  }
+  if (status === 'failed') {
+    return { label: 'Coba Lagi ID', tone: 'warn' };
+  }
+  return { label: 'Tarik ID Scalev', tone: 'primary' };
+}
+
+function formatReconcileStatusText(batch) {
+  if (batch.scalevLastReconcileStatus === 'success') {
+    return `${fmtShortDateTime(batch.scalevLastReconcileAt)} • ${fmtNumber(batch.scalevLastReconcileMatchedCount || 0)} cocok • ${fmtNumber(batch.scalevLastReconcileUpdatedCount || 0)} update • ${fmtNumber(batch.scalevLastReconcileAlreadyLinkedCount || 0)} sudah linked`;
+  }
+  if (batch.scalevLastReconcileStatus === 'partial') {
+    return `${fmtShortDateTime(batch.scalevLastReconcileAt)} • ${fmtNumber(batch.scalevLastReconcileMatchedCount || 0)} cocok • ${fmtNumber(batch.scalevLastReconcileUnmatchedCount || 0)} belum ketemu • ${fmtNumber(batch.scalevLastReconcileConflictCount || 0)} conflict`;
+  }
+  if (batch.scalevLastReconcileStatus === 'failed') {
+    return batch.scalevLastReconcileError || 'Tarik Scalev ID gagal.';
+  }
+  return 'Belum ada percobaan tarik Scalev ID.';
+}
+
+function formatAppPromoteStatusText(batch) {
+  if (batch.appLastPromoteStatus === 'success') {
+    const parts = [
+      fmtShortDateTime(batch.appLastPromoteAt),
+      `${fmtNumber(batch.appLastPromoteInsertedCount || 0)} baru`,
+      `${fmtNumber(batch.appLastPromoteUpdatedCount || 0)} update`,
+    ];
+
+    const detailParts = [];
+    if (Number(batch.appLastPromoteUpdatedWebhookCount || 0) > 0) {
+      detailParts.push(`${fmtNumber(batch.appLastPromoteUpdatedWebhookCount || 0)} bind webhook`);
+    }
+    if (Number(batch.appLastPromoteUpdatedAuthoritativeCount || 0) > 0) {
+      detailParts.push(`${fmtNumber(batch.appLastPromoteUpdatedAuthoritativeCount || 0)} update authoritative`);
+    }
+    if (Number(batch.appLastPromoteMatchedTrackingCount || 0) > 0) {
+      detailParts.push(`${fmtNumber(batch.appLastPromoteMatchedTrackingCount || 0)} via tracking`);
+    }
+    if (Number(batch.appLastPromoteMatchedExternalIdCount || 0) > 0) {
+      detailParts.push(`${fmtNumber(batch.appLastPromoteMatchedExternalIdCount || 0)} via external ID`);
+    }
+
+    return detailParts.length ? `${parts.join(' • ')} • ${detailParts.join(' • ')}` : parts.join(' • ');
+  }
+  if (batch.appLastPromoteStatus === 'failed') {
+    return batch.appLastPromoteError || 'Promosi ke app gagal.';
+  }
+  return 'Batch ini belum pernah dipromosikan ke app.';
+}
+
+function formatReconcileSuccessText(summary) {
+  if (!summary) return '';
+  const base = `${fmtNumber(summary.matchedCount || 0)} cocok • ${fmtNumber(summary.updatedCount || 0)} update • ${fmtNumber(summary.alreadyLinkedCount || 0)} sudah linked`;
+  if (summary.status === 'success') return base;
+  return `${base} • ${fmtNumber(summary.unmatchedCount || 0)} belum ketemu • ${fmtNumber(summary.conflictCount || 0)} conflict`;
+}
+
 function DetailLineTable({ order }) {
   return (
     <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', display: 'grid', gap: 10 }}>
@@ -321,12 +386,26 @@ function groupOrdersByBatch(orders) {
         appLastPromoteOrderCount: Number(order.batchAppLastPromoteOrderCount || 0),
         appLastPromoteInsertedCount: Number(order.batchAppLastPromoteInsertedCount || 0),
         appLastPromoteUpdatedCount: Number(order.batchAppLastPromoteUpdatedCount || 0),
+        appLastPromoteUpdatedWebhookCount: Number(order.batchAppLastPromoteUpdatedWebhookCount || 0),
+        appLastPromoteUpdatedAuthoritativeCount: Number(order.batchAppLastPromoteUpdatedAuthoritativeCount || 0),
+        appLastPromoteMatchedExternalIdCount: Number(order.batchAppLastPromoteMatchedExternalIdCount || 0),
+        appLastPromoteMatchedTrackingCount: Number(order.batchAppLastPromoteMatchedTrackingCount || 0),
         appLastPromoteSkippedCount: Number(order.batchAppLastPromoteSkippedCount || 0),
         appLastPromoteError: order.batchAppLastPromoteError || null,
         scalevLastSendStatus: order.batchScalevLastSendStatus || null,
         scalevLastSendAt: order.batchScalevLastSendAt || null,
         scalevLastSendRowCount: Number(order.batchScalevLastSendRowCount || 0),
         scalevLastSendError: order.batchScalevLastSendError || null,
+        scalevLastReconcileStatus: order.batchScalevLastReconcileStatus || null,
+        scalevLastReconcileAt: order.batchScalevLastReconcileAt || null,
+        scalevLastReconcileTargetCount: Number(order.batchScalevLastReconcileTargetCount || 0),
+        scalevLastReconcileMatchedCount: Number(order.batchScalevLastReconcileMatchedCount || 0),
+        scalevLastReconcileUpdatedCount: Number(order.batchScalevLastReconcileUpdatedCount || 0),
+        scalevLastReconcileAlreadyLinkedCount: Number(order.batchScalevLastReconcileAlreadyLinkedCount || 0),
+        scalevLastReconcileUnmatchedCount: Number(order.batchScalevLastReconcileUnmatchedCount || 0),
+        scalevLastReconcileConflictCount: Number(order.batchScalevLastReconcileConflictCount || 0),
+        scalevLastReconcileErrorCount: Number(order.batchScalevLastReconcileErrorCount || 0),
+        scalevLastReconcileError: order.batchScalevLastReconcileError || null,
         orders: [order],
         orderIds: [order.id],
         totalOrders: 1,
@@ -366,6 +445,7 @@ export default function MarketplaceIntakeManager() {
   const [confirming, setConfirming] = useState(false);
   const [workspaceActionLoading, setWorkspaceActionLoading] = useState('');
   const [scalevSendingBatchKey, setScalevSendingBatchKey] = useState('');
+  const [scalevReconcilingBatchKey, setScalevReconcilingBatchKey] = useState('');
   const [appPromotingBatchKey, setAppPromotingBatchKey] = useState('');
   const [error, setError] = useState('');
   const [, setMessage] = useState(null);
@@ -858,13 +938,48 @@ export default function MarketplaceIntakeManager() {
       await loadWorkspace(targetShipmentDate);
       setMessage({
         type: 'success',
-        text: `Batch #${batchId} berhasil dikirim ke Scalev (${fmtNumber(data.rowCount || 0)} row, shipment ${fmtDateLabel(targetShipmentDate)}).`,
+        text: data.reconcile
+          ? `Batch #${batchId} berhasil dikirim ke Scalev (${fmtNumber(data.rowCount || 0)} row, shipment ${fmtDateLabel(targetShipmentDate)}). Tarik ID: ${formatReconcileSuccessText(data.reconcile)}.`
+          : data.reconcileError
+            ? `Batch #${batchId} berhasil dikirim ke Scalev (${fmtNumber(data.rowCount || 0)} row, shipment ${fmtDateLabel(targetShipmentDate)}). Tarik ID belum beres: ${data.reconcileError}`
+            : `Batch #${batchId} berhasil dikirim ke Scalev (${fmtNumber(data.rowCount || 0)} row, shipment ${fmtDateLabel(targetShipmentDate)}).`,
       });
     } catch (err) {
       console.error(err);
       setWorkspaceError(err?.message || 'Gagal mengirim batch ke Scalev.');
     } finally {
       setScalevSendingBatchKey('');
+    }
+  }
+
+  async function handleReconcileBatchScalev(batchId) {
+    const batchKey = String(batchId || '');
+    if (!batchKey) return;
+    setScalevReconcilingBatchKey(batchKey);
+    setWorkspaceError('');
+    setMessage(null);
+
+    try {
+      const res = await fetch('/api/marketplace-intake/scalev-reconcile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal menarik Scalev ID untuk batch ini.');
+      }
+
+      await loadWorkspace(workspaceDate);
+      setMessage({
+        type: 'success',
+        text: `Batch #${batchId} selesai tarik Scalev ID: ${formatReconcileSuccessText(data)}.`,
+      });
+    } catch (err) {
+      console.error(err);
+      setWorkspaceError(err?.message || 'Gagal menarik Scalev ID untuk batch ini.');
+    } finally {
+      setScalevReconcilingBatchKey('');
     }
   }
 
@@ -895,7 +1010,7 @@ export default function MarketplaceIntakeManager() {
       await loadWorkspace(targetShipmentDate);
       setMessage({
         type: 'success',
-        text: `Batch #${batchId} masuk ke app (${fmtNumber(data.insertedCount || 0)} baru, ${fmtNumber(data.updatedCount || 0)} update, ${fmtNumber(data.skippedCount || 0)} skip).`,
+        text: `Batch #${batchId} masuk ke app (${fmtNumber(data.insertedCount || 0)} baru, ${fmtNumber(data.updatedCount || 0)} update, ${fmtNumber(data.updatedWebhookCount || 0)} bind webhook, ${fmtNumber(data.matchedTrackingCount || 0)} via tracking, ${fmtNumber(data.skippedCount || 0)} skip).`,
       });
     } catch (err) {
       console.error(err);
@@ -1497,6 +1612,7 @@ export default function MarketplaceIntakeManager() {
                     const batchShipmentDate = getBatchShipmentDate(batch.batchId);
                     const appButtonMeta = getAppButtonMeta(batch.appLastPromoteStatus);
                     const scalevButtonMeta = getScalevButtonMeta(batch.scalevLastSendStatus);
+                    const reconcileButtonMeta = getScalevReconcileButtonMeta(batch.scalevLastReconcileStatus);
                     return (
                       <Fragment key={batchKey}>
                         <tr>
@@ -1541,11 +1657,7 @@ export default function MarketplaceIntakeManager() {
                                   idleLabel="Belum Masuk App"
                                 />
                                 <div style={{ fontSize: 11 }}>
-                                  {batch.appLastPromoteStatus === 'success'
-                                    ? `${fmtShortDateTime(batch.appLastPromoteAt)}`
-                                    : batch.appLastPromoteStatus === 'failed'
-                                      ? (batch.appLastPromoteError || 'Promosi ke app gagal.')
-                                      : 'Batch ini belum pernah dipromosikan ke app.'}
+                                  {formatAppPromoteStatusText(batch)}
                                 </div>
                               </div>
                               <div style={{ display: 'grid', gap: 4 }}>
@@ -1563,12 +1675,27 @@ export default function MarketplaceIntakeManager() {
                                       : 'Belum ada percobaan push ke Scalev.'}
                                 </div>
                               </div>
+                              <div style={{ display: 'grid', gap: 4 }}>
+                                <SyncStatusPill
+                                  status={batch.scalevLastReconcileStatus}
+                                  successLabel="ID Scalev Terkunci"
+                                  failedLabel="Tarik ID Gagal"
+                                  idleLabel="Belum Tarik ID"
+                                  partialLabel="ID Sebagian"
+                                />
+                                <div style={{ fontSize: 11 }}>
+                                  {formatReconcileStatusText(batch)}
+                                </div>
+                              </div>
                             </div>
                           </td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
                             <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                               <ActionButton tone={scalevButtonMeta.tone} disabled>
                                 {scalevButtonMeta.label}
+                              </ActionButton>
+                              <ActionButton tone={reconcileButtonMeta.tone} disabled>
+                                {reconcileButtonMeta.label}
                               </ActionButton>
                               <ActionButton
                                 onClick={() => applyWorkspaceAction({
@@ -1734,6 +1861,7 @@ export default function MarketplaceIntakeManager() {
                     const isBatchOpen = Boolean(expandedWorkspaceBatches[batchKey]);
                     const appButtonMeta = getAppButtonMeta(batch.appLastPromoteStatus);
                     const scalevButtonMeta = getScalevButtonMeta(batch.scalevLastSendStatus);
+                    const reconcileButtonMeta = getScalevReconcileButtonMeta(batch.scalevLastReconcileStatus);
                     return (
                       <Fragment key={batchKey}>
                         <tr>
@@ -1756,7 +1884,7 @@ export default function MarketplaceIntakeManager() {
                                 />
                                 <div style={{ fontSize: 11 }}>
                                   {batch.appLastPromoteStatus === 'success'
-                                    ? `${fmtShortDateTime(batch.appLastPromoteAt)} • ${fmtNumber(batch.appLastPromoteInsertedCount || 0)} baru • ${fmtNumber(batch.appLastPromoteUpdatedCount || 0)} update`
+                                    ? formatAppPromoteStatusText(batch)
                                     : batch.appLastPromoteStatus === 'failed'
                                       ? (batch.appLastPromoteError || 'Promosi ke app gagal.')
                                       : 'Batch shipped ini belum pernah dipromosikan ke app.'}
@@ -1777,6 +1905,18 @@ export default function MarketplaceIntakeManager() {
                                       : 'Belum ada percobaan push ke Scalev.'}
                                 </div>
                               </div>
+                              <div style={{ display: 'grid', gap: 4 }}>
+                                <SyncStatusPill
+                                  status={batch.scalevLastReconcileStatus}
+                                  successLabel="ID Scalev Terkunci"
+                                  failedLabel="Tarik ID Gagal"
+                                  idleLabel="Belum Tarik ID"
+                                  partialLabel="ID Sebagian"
+                                />
+                                <div style={{ fontSize: 11 }}>
+                                  {formatReconcileStatusText(batch)}
+                                </div>
+                              </div>
                             </div>
                           </td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
@@ -1784,16 +1924,29 @@ export default function MarketplaceIntakeManager() {
                               <ActionButton
                                 onClick={() => handlePromoteBatchToApp(batch.batchId)}
                                 tone={appButtonMeta.tone}
-                                disabled={Boolean(appPromotingBatchKey) || Boolean(scalevSendingBatchKey) || Number(batch.statusCounts.scheduled || 0) === 0}
+                                disabled={Boolean(appPromotingBatchKey) || Boolean(scalevSendingBatchKey) || Boolean(scalevReconcilingBatchKey) || Number(batch.statusCounts.scheduled || 0) === 0}
                               >
                                 {appPromotingBatchKey === String(batch.batchId) ? 'Memasukkan…' : appButtonMeta.label}
                               </ActionButton>
                               <ActionButton
                                 onClick={() => handlePushBatchToScalev(batch.batchId)}
                                 tone={scalevButtonMeta.tone}
-                                disabled={Boolean(scalevSendingBatchKey) || Boolean(appPromotingBatchKey) || Number(batch.statusCounts.scheduled || 0) === 0}
+                                disabled={Boolean(scalevSendingBatchKey) || Boolean(appPromotingBatchKey) || Boolean(scalevReconcilingBatchKey) || Number(batch.statusCounts.scheduled || 0) === 0}
                               >
                                 {scalevSendingBatchKey === String(batch.batchId) ? 'Mengirim…' : scalevButtonMeta.label}
+                              </ActionButton>
+                              <ActionButton
+                                onClick={() => handleReconcileBatchScalev(batch.batchId)}
+                                tone={reconcileButtonMeta.tone}
+                                disabled={
+                                  Boolean(scalevReconcilingBatchKey)
+                                  || Boolean(scalevSendingBatchKey)
+                                  || Boolean(appPromotingBatchKey)
+                                  || batch.scalevLastSendStatus !== 'success'
+                                  || batch.appLastPromoteStatus !== 'success'
+                                }
+                              >
+                                {scalevReconcilingBatchKey === String(batch.batchId) ? 'Menarik…' : reconcileButtonMeta.label}
                               </ActionButton>
                               <ActionButton onClick={() => toggleWorkspaceBatch(batchKey)}>
                                 {isBatchOpen ? 'Hide' : 'Detail'}

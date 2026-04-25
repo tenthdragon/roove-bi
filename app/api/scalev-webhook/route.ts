@@ -5,6 +5,10 @@ import crypto from 'crypto';
 
 import { deriveChannelFromStoreType, guessStoreType, type StoreType } from '@/lib/scalev-api';
 import { buildScalevSourceClassFields } from '@/lib/scalev-source-class';
+import {
+  extractMarketplaceTrackingFromScalevOrderRawData,
+  extractMarketplaceTrackingFromWebhookData,
+} from '@/lib/marketplace-tracking';
 import { reconcileScalevOrderWarehouse } from '@/lib/warehouse-ledger-actions';
 import {
   extractScalevLineItemNameRaw,
@@ -404,6 +408,8 @@ async function maybeQuarantineMarketplaceWebhook(args: {
   businessId: number;
   businessCode: string;
   data: any;
+  trackingNumber?: string | null;
+  lookupError?: { message?: string | null } | null;
   sourceClassFields: {
     source_class?: string | null;
     source_class_reason?: string | null;
@@ -411,7 +417,78 @@ async function maybeQuarantineMarketplaceWebhook(args: {
   existing?: ExistingScalevWebhookOrder | null;
 }) {
   if (!isMarketplaceSourceClass(args.sourceClassFields)) return null;
-  if (args.existing && isMarketplaceAuthoritativeSource(args.existing.source)) return null;
+
+  const trackingNumber = extractMarketplaceTrackingFromWebhookData({
+    tracking_number: args.trackingNumber,
+  }) || extractMarketplaceTrackingFromWebhookData(args.data);
+
+  const lookupMessage = txt(args.lookupError?.message).toLowerCase();
+  if (lookupMessage.includes('matched tracking') || lookupMessage.includes('multiple marketplace')) {
+    const reason = 'marketplace_webhook_ambiguous_tracking';
+    await recordMarketplaceWebhookQuarantine({
+      ...args,
+      reason,
+    });
+
+    console.log(
+      `[scalev-webhook][${args.businessCode}] ${args.eventType}: quarantined marketplace webhook for ${args.data?.order_id || '-'} (${reason})`,
+    );
+
+    return NextResponse.json({
+      ok: true,
+      quarantined: true,
+      business_code: args.businessCode,
+      event: args.eventType,
+      order_id: txt(args.data?.order_id) || null,
+      external_id: txt(args.data?.external_id) || null,
+      source_class: args.sourceClassFields.source_class ?? null,
+      source_class_reason: args.sourceClassFields.source_class_reason ?? null,
+      matched_scalev_order_id: args.existing?.id ?? null,
+      matched_source: args.existing?.source ?? null,
+      reason,
+    });
+  }
+
+  if (args.lookupError) return null;
+
+  if (!trackingNumber) {
+    const reason = 'marketplace_webhook_missing_tracking';
+    await recordMarketplaceWebhookQuarantine({
+      ...args,
+      reason,
+    });
+
+    console.log(
+      `[scalev-webhook][${args.businessCode}] ${args.eventType}: quarantined marketplace webhook for ${args.data?.order_id || '-'} (${reason})`,
+    );
+
+    return NextResponse.json({
+      ok: true,
+      quarantined: true,
+      business_code: args.businessCode,
+      event: args.eventType,
+      order_id: txt(args.data?.order_id) || null,
+      external_id: txt(args.data?.external_id) || null,
+      source_class: args.sourceClassFields.source_class ?? null,
+      source_class_reason: args.sourceClassFields.source_class_reason ?? null,
+      matched_scalev_order_id: args.existing?.id ?? null,
+      matched_source: args.existing?.source ?? null,
+      reason,
+    });
+  }
+
+  if (args.existing) {
+    const existingSource = txt(args.existing.source);
+    if (
+      existingSource === 'webhook'
+      || existingSource === 'marketplace_api_upload'
+      || existingSource === 'ops_upload'
+    ) {
+      return null;
+    }
+  } else {
+    return null;
+  }
 
   const reason = args.existing
     ? 'marketplace_webhook_non_authoritative_match'
@@ -555,6 +632,89 @@ async function lookupOrderForBusinessOrExternal(
     .eq('external_id', externalId)
     .is('business_code', null)
     .maybeSingle();
+}
+
+async function lookupMarketplaceOrderForBusinessTracking(
+  svc: any,
+  businessCode: string,
+  storeName: string | null | undefined,
+  trackingNumber: string | null | undefined,
+  columns: string,
+) {
+  const normalizedTracking = extractMarketplaceTrackingFromWebhookData({
+    tracking_number: trackingNumber,
+  });
+  if (!normalizedTracking) return { data: null, error: null };
+
+  const selectColumns = columns.includes('raw_data')
+    ? columns
+    : `${columns}, raw_data`;
+
+  let query = svc
+    .from('scalev_orders')
+    .select(selectColumns)
+    .eq('business_code', businessCode)
+    .in('source', ['marketplace_api_upload', 'webhook', 'ops_upload'])
+    .limit(1000);
+
+  const storeNameText = txt(storeName);
+  if (storeNameText) {
+    query = query.eq('store_name', storeNameText);
+  }
+
+  const { data, error } = await query;
+  if (error) return { data: null, error };
+
+  const matches = (data || []).filter((row: any) =>
+    extractMarketplaceTrackingFromScalevOrderRawData(row.raw_data) === normalizedTracking);
+
+  if (matches.length > 1) {
+    return {
+      data: null,
+      error: { message: `multiple marketplace rows matched tracking ${normalizedTracking}` },
+    };
+  }
+
+  return {
+    data: (matches[0] as ExistingScalevWebhookOrder | undefined) || null,
+    error: null,
+  };
+}
+
+async function lookupOrderForBusinessConnector(
+  svc: any,
+  args: {
+    orderId: string;
+    businessCode: string;
+    externalId: string | null | undefined;
+    trackingNumber: string | null | undefined;
+    storeName: string | null | undefined;
+    columns: string;
+    sourceClassFields: {
+      source_class?: string | null;
+    };
+  },
+) {
+  const byOrderId = await lookupOrderForBusiness(svc, args.orderId, args.businessCode, args.columns);
+  if (byOrderId.error || byOrderId.data) return byOrderId;
+
+  if (isMarketplaceSourceClass(args.sourceClassFields)) {
+    return lookupMarketplaceOrderForBusinessTracking(
+      svc,
+      args.businessCode,
+      args.storeName,
+      args.trackingNumber,
+      args.columns,
+    );
+  }
+
+  return lookupOrderForBusinessOrExternal(
+    svc,
+    args.orderId,
+    args.businessCode,
+    args.externalId,
+    args.columns,
+  );
 }
 
 // ── Brand detection from product name (dynamic from DB, cached) ──
@@ -761,15 +921,18 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
     businessId,
     source: 'webhook',
   });
+  const trackingNumber = extractMarketplaceTrackingFromWebhookData(data);
 
   // Check if order already exists
-  const { data: existing } = await lookupOrderForBusinessOrExternal(
-    svc,
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
-    data.external_id,
-    'id, business_code, order_id, external_id, source, scalev_id',
-  );
+    externalId: data.external_id,
+    trackingNumber,
+    storeName: data.store?.name || data.store_name || null,
+    columns: 'id, business_code, order_id, external_id, source, scalev_id',
+    sourceClassFields,
+  });
 
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
@@ -777,12 +940,19 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
     businessId,
     businessCode,
     data,
+    trackingNumber,
+    lookupError: lookupErr,
     sourceClassFields,
     existing,
   });
 
   if (quarantineResponse) {
     return quarantineResponse;
+  }
+
+  if (lookupErr) {
+    console.error(`[scalev-webhook][${businessCode}] order.created lookup error for ${orderId}:`, lookupErr.message);
+    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (existing) {
@@ -915,19 +1085,23 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     return NextResponse.json({ error: 'Missing order_id or status' }, { status: 400 });
   }
 
+  const preliminarySourceClassFields = await buildOrderSourceClassFields({
+    data,
+    businessId,
+    source: 'webhook',
+  });
+  const trackingNumber = extractMarketplaceTrackingFromWebhookData(data);
+
   // Lookup order
-  const { data: existing, error: lookupErr } = await lookupOrderForBusinessOrExternal(
-    svc,
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
-    data.external_id,
-    'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
-  );
-
-  if (lookupErr) {
-    console.error(`[scalev-webhook][${businessCode}] status_changed lookup error for ${orderId}:`, lookupErr.message);
-    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
-  }
+    externalId: data.external_id,
+    trackingNumber,
+    storeName: data.store?.name || data.store_name || null,
+    columns: 'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
+    sourceClassFields: preliminarySourceClassFields,
+  });
 
   const sourceClassFields = await buildOrderSourceClassFields({
     data,
@@ -940,12 +1114,19 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     businessId,
     businessCode,
     data,
+    trackingNumber,
+    lookupError: lookupErr,
     sourceClassFields,
     existing,
   });
 
   if (quarantineResponse) {
     return quarantineResponse;
+  }
+
+  if (lookupErr) {
+    console.error(`[scalev-webhook][${businessCode}] status_changed lookup error for ${orderId}:`, lookupErr.message);
+    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (!existing) {
@@ -1240,18 +1421,22 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   }
 
   // Lookup existing order
-  const { data: existing, error: lookupErr } = await lookupOrderForBusinessOrExternal(
-    svc,
+  const preliminarySourceClassFields = await buildOrderSourceClassFields({
+    data,
+    businessId,
+    source: 'webhook',
+  });
+  const trackingNumber = extractMarketplaceTrackingFromWebhookData(data);
+
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
-    data.external_id,
-    'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
-  );
-
-  if (lookupErr) {
-    console.error(`[scalev-webhook][${businessCode}] order.updated lookup error for ${orderId}:`, lookupErr.message);
-    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
-  }
+    externalId: data.external_id,
+    trackingNumber,
+    storeName: data.store?.name || data.store_name || null,
+    columns: 'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
+    sourceClassFields: preliminarySourceClassFields,
+  });
 
   if (!existing) {
     const sourceClassFields = await buildOrderSourceClassFields({
@@ -1265,12 +1450,19 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
       businessId,
       businessCode,
       data,
+      trackingNumber,
+      lookupError: lookupErr,
       sourceClassFields,
       existing,
     });
 
     if (quarantineResponse) {
       return quarantineResponse;
+    }
+
+    if (lookupErr) {
+      console.error(`[scalev-webhook][${businessCode}] order.updated lookup error for ${orderId}:`, lookupErr.message);
+      return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
     }
 
     // Order not in DB yet — treat as create
@@ -1294,12 +1486,19 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     businessId,
     businessCode,
     data,
+    trackingNumber,
+    lookupError: lookupErr,
     sourceClassFields,
     existing,
   });
 
   if (quarantineResponse) {
     return quarantineResponse;
+  }
+
+  if (lookupErr) {
+    console.error(`[scalev-webhook][${businessCode}] order.updated lookup error for ${orderId}:`, lookupErr.message);
+    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (isMarketplaceAuthoritativeSource(existing.source)) {
@@ -1523,18 +1722,22 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await lookupOrderForBusinessOrExternal(
-    svc,
+  const preliminarySourceClassFields = await buildOrderSourceClassFields({
+    data,
+    businessId,
+    source: 'webhook',
+  });
+  const trackingNumber = extractMarketplaceTrackingFromWebhookData(data);
+
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
-    data.external_id,
-    'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
-  );
-
-  if (lookupErr) {
-    console.error(`[scalev-webhook][${businessCode}] order.deleted lookup error for ${orderId}:`, lookupErr.message);
-    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
-  }
+    externalId: data.external_id,
+    trackingNumber,
+    storeName: data.store?.name || data.store_name || null,
+    columns: 'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
+    sourceClassFields: preliminarySourceClassFields,
+  });
 
   const sourceClassFields = await buildOrderSourceClassFields({
     data,
@@ -1547,12 +1750,19 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
     businessId,
     businessCode,
     data,
+    trackingNumber,
+    lookupError: lookupErr,
     sourceClassFields,
     existing,
   });
 
   if (quarantineResponse) {
     return quarantineResponse;
+  }
+
+  if (lookupErr) {
+    console.error(`[scalev-webhook][${businessCode}] order.deleted lookup error for ${orderId}:`, lookupErr.message);
+    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (!existing) {
@@ -1625,18 +1835,22 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await lookupOrderForBusinessOrExternal(
-    svc,
+  const preliminarySourceClassFields = await buildOrderSourceClassFields({
+    data,
+    businessId,
+    source: 'webhook',
+  });
+  const trackingNumber = extractMarketplaceTrackingFromWebhookData(data);
+
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
-    data.external_id,
-    'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
-  );
-
-  if (lookupErr) {
-    console.error(`[scalev-webhook][${businessCode}] payment_status_changed lookup error for ${orderId}:`, lookupErr.message);
-    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
-  }
+    externalId: data.external_id,
+    trackingNumber,
+    storeName: data.store?.name || data.store_name || null,
+    columns: 'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
+    sourceClassFields: preliminarySourceClassFields,
+  });
 
   const sourceClassFields = await buildOrderSourceClassFields({
     data,
@@ -1649,12 +1863,19 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
     businessId,
     businessCode,
     data,
+    trackingNumber,
+    lookupError: lookupErr,
     sourceClassFields,
     existing,
   });
 
   if (quarantineResponse) {
     return quarantineResponse;
+  }
+
+  if (lookupErr) {
+    console.error(`[scalev-webhook][${businessCode}] payment_status_changed lookup error for ${orderId}:`, lookupErr.message);
+    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (!existing) {
@@ -1728,18 +1949,22 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await lookupOrderForBusinessOrExternal(
-    svc,
+  const preliminarySourceClassFields = await buildOrderSourceClassFields({
+    data,
+    businessId,
+    source: 'webhook',
+  });
+  const trackingNumber = extractMarketplaceTrackingFromWebhookData(data);
+
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
-    data.external_id,
-    'id, order_id, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
-  );
-
-  if (lookupErr) {
-    console.error(`[scalev-webhook][${businessCode}] e_payment_created lookup error for ${orderId}:`, lookupErr.message);
-    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
-  }
+    externalId: data.external_id,
+    trackingNumber,
+    storeName: data.store?.name || data.store_name || null,
+    columns: 'id, order_id, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
+    sourceClassFields: preliminarySourceClassFields,
+  });
 
   const sourceClassFields = await buildOrderSourceClassFields({
     data,
@@ -1752,12 +1977,19 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
     businessId,
     businessCode,
     data,
+    trackingNumber,
+    lookupError: lookupErr,
     sourceClassFields,
     existing,
   });
 
   if (quarantineResponse) {
     return quarantineResponse;
+  }
+
+  if (lookupErr) {
+    console.error(`[scalev-webhook][${businessCode}] e_payment_created lookup error for ${orderId}:`, lookupErr.message);
+    return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
   if (!existing) {

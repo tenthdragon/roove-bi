@@ -4,6 +4,10 @@ import {
   SCALEV_OPS_CSV_HEADERS,
   type ScalevOpsProjectionResult,
 } from './marketplace-intake-scalev-export';
+import {
+  reconcileMarketplaceIntakeBatchScalevIdentity,
+  type MarketplaceIntakeScalevReconcileResult,
+} from './marketplace-intake-scalev-reconcile';
 
 const SCALEV_API_BASE_URL = 'https://api.scalev.id/v2';
 const DEFAULT_SCALEV_UPLOAD_TZ = 'Asia/Jakarta';
@@ -44,6 +48,8 @@ export type MarketplaceIntakeScalevSendResult = {
   responseBody: unknown;
   csvFilename: string;
   sentAt: string;
+  reconcile: MarketplaceIntakeScalevReconcileResult | null;
+  reconcileError: string | null;
 };
 
 function cleanText(value: unknown): string {
@@ -280,6 +286,17 @@ export async function sendMarketplaceIntakeBatchToScalev(
       errorMessage: null,
     });
 
+    let reconcile: MarketplaceIntakeScalevReconcileResult | null = null;
+    let reconcileError: string | null = null;
+    try {
+      reconcile = await reconcileMarketplaceIntakeBatchScalevIdentity({
+        batchId,
+        reconciledByEmail: input.sentByEmail || null,
+      });
+    } catch (error: any) {
+      reconcileError = error?.message || 'Reconcile Scalev ID gagal.';
+    }
+
     return {
       batchId,
       businessCode: business.business_code,
@@ -292,6 +309,8 @@ export async function sendMarketplaceIntakeBatchToScalev(
       responseBody: uploadResult.body,
       csvFilename,
       sentAt,
+      reconcile,
+      reconcileError,
     };
   } catch (error: any) {
     await persistScalevSendResult(batchId, {

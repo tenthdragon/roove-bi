@@ -1,4 +1,5 @@
 import * as XLSX from 'xlsx';
+import util from 'node:util';
 import { createServiceSupabase } from './service-supabase';
 import { fetchStoreList } from './scalev-api';
 import { buildScalevSourceClassFields } from './scalev-source-class';
@@ -7,6 +8,7 @@ const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
 const MARKETPLACE_API_SOURCE = 'marketplace_api_upload';
 const MARKETPLACE_API_SYNC_TYPE = 'marketplace_api_upload';
 const PHYSICAL_PAYMENT_METHOD = 'marketplace';
+const SCALEV_FALLBACK_CUSTOMER_PHONE = '6281234567890';
 
 type MarketplacePlatform = 'tiktok' | 'shopee' | 'lazada';
 
@@ -107,6 +109,7 @@ type ExistingOrderRow = {
   external_id: string | null;
   source: string | null;
   business_code: string | null;
+  store_name?: string | null;
 };
 
 type ProductMappingRow = {
@@ -231,6 +234,16 @@ type ImportResult = {
   message: string;
 };
 
+export type SingleMarketplaceOrderImportResult = {
+  externalId: string;
+  businessCode: string;
+  storeName: string;
+  localState: 'inserted' | 'updated';
+  scalevOrderId: string | null;
+  scalevId: string | null;
+  responseStatus: string | null;
+};
+
 type ImportContext = {
   svc: ReturnType<typeof createServiceSupabase>;
   businesses: BusinessRow[];
@@ -245,6 +258,49 @@ type ImportContext = {
   locationSearchCache: Map<string, LocationRow[]>;
   variantCache: Map<string, CatalogVariantRow | null>;
   bundleIdentifiersCache: Map<string, CatalogIdentifierRow[]>;
+};
+
+type IntakeOrderCreateRow = {
+  id: number;
+  external_order_id: string;
+  recipient_name: string | null;
+  customer_label: string | null;
+  tracking_number: string | null;
+  payment_method_label: string | null;
+  shipping_provider: string | null;
+  delivery_option: string | null;
+  order_amount: number | null;
+  raw_meta: Record<string, unknown> | null;
+  mp_order_status: string | null;
+  mp_cancel_return_status: string | null;
+  mp_order_created_at: string | null;
+  mp_payment_paid_at: string | null;
+  mp_ready_to_ship_at: string | null;
+  mp_order_completed_at: string | null;
+  mp_customer_username: string | null;
+  mp_customer_phone: string | null;
+  mp_shipping_address: string | null;
+  mp_shipping_district: string | null;
+  mp_shipping_city: string | null;
+  mp_shipping_province: string | null;
+  mp_shipping_postal_code: string | null;
+  mp_raw_shipping_address: string | null;
+  mp_buyer_note: string | null;
+  mp_shipping_cost_buyer: number | null;
+  mp_estimated_shipping_cost: number | null;
+};
+
+type IntakeLineCreateRow = {
+  intake_order_id: number;
+  mp_sku: string | null;
+  mp_product_name: string;
+  mp_variation: string | null;
+  quantity: number;
+  unit_price: number | null;
+  line_subtotal: number | null;
+  line_discount: number | null;
+  mp_price_after_discount: number | null;
+  raw_row: Record<string, string> | null;
 };
 
 function cleanText(value: unknown): string | null {
@@ -316,6 +372,12 @@ function normalizePhone(value: string | null): string | null {
   if (digits.startsWith('0')) return `62${digits.slice(1)}`;
   if (digits.startsWith('8')) return `62${digits}`;
   return digits;
+}
+
+function normalizeScalevCustomerPhone(value: string | null): string {
+  const normalized = normalizePhone(value);
+  if (normalized && normalized.length >= 10 && normalized.length <= 15) return normalized;
+  return SCALEV_FALLBACK_CUSTOMER_PHONE;
 }
 
 function toRawStringRow(row: SheetRow): Record<string, string> {
@@ -749,17 +811,12 @@ async function loadImportContext(
 
   const externalIds = orders.map((order) => order.externalId);
 
-  const [businessesRes, storesRes, identifiersRes, existingRes, productMappingsRes] = await Promise.all([
+  const [businessesRes, identifiersRes, existingRes, productMappingsRes] = await Promise.all([
     svc
       .from('scalev_webhook_businesses')
       .select('id, business_code, business_name, api_key, tax_rate_name')
       .eq('is_active', true)
       .not('api_key', 'is', null),
-    svc
-      .from('scalev_store_channels')
-      .select('id, business_id, store_name, store_type, channel_override, scalev_store_id, store_unique_id')
-      .eq('is_active', true)
-      .eq('store_type', 'marketplace'),
     identifierCandidates.length > 0
       ? svc
           .from('scalev_catalog_identifiers')
@@ -781,7 +838,7 @@ async function loadImportContext(
     externalIds.length > 0
       ? svc
           .from('scalev_orders')
-          .select('id, order_id, external_id, source, business_code')
+          .select('id, order_id, external_id, source, business_code, store_name')
           .in('external_id', externalIds)
       : Promise.resolve({ data: [], error: null }),
     svc
@@ -789,14 +846,41 @@ async function loadImportContext(
       .select('sku, product_name, cogs, brand, product_type'),
   ]);
 
+  let storesData: StoreChannelRow[] | null = null;
+  let storesError: any = null;
+  {
+    const fullStoresRes = await svc
+      .from('scalev_store_channels')
+      .select('id, business_id, store_name, store_type, channel_override, scalev_store_id, store_unique_id')
+      .eq('is_active', true)
+      .eq('store_type', 'marketplace');
+
+    if (fullStoresRes.error) {
+      const legacyStoresRes = await svc
+        .from('scalev_store_channels')
+        .select('id, business_id, store_name, store_type, channel_override')
+        .eq('is_active', true)
+        .eq('store_type', 'marketplace');
+
+      storesError = legacyStoresRes.error;
+      storesData = (legacyStoresRes.data || []).map((row: any) => ({
+        ...row,
+        scalev_store_id: null,
+        store_unique_id: null,
+      })) as StoreChannelRow[];
+    } else {
+      storesData = (fullStoresRes.data || []) as StoreChannelRow[];
+    }
+  }
+
   if (businessesRes.error) throw businessesRes.error;
-  if (storesRes.error) throw storesRes.error;
+  if (storesError) throw storesError;
   if (identifiersRes.error) throw identifiersRes.error;
   if (existingRes.error) throw existingRes.error;
   if (productMappingsRes.error) throw productMappingsRes.error;
 
   const businesses = (businessesRes.data || []) as BusinessRow[];
-  const stores = (storesRes.data || []) as StoreChannelRow[];
+  const stores = (storesData || []) as StoreChannelRow[];
   const identifiers = (identifiersRes.data || []) as CatalogIdentifierRow[];
   const existingOrders = (existingRes.data || []) as ExistingOrderRow[];
   const productMappings = (productMappingsRes.data || []) as ProductMappingRow[];
@@ -840,7 +924,10 @@ async function getStoreUsageCount(context: ImportContext, businessCode: string, 
     .eq('business_code', businessCode)
     .eq('store_name', storeName);
 
-  if (error) throw error;
+  if (error) {
+    context.storeUsageCache.set(cacheKey, 0);
+    return 0;
+  }
   const value = Number(count || 0);
   context.storeUsageCache.set(cacheKey, value);
   return value;
@@ -850,7 +937,12 @@ async function getLiveStoresForBusiness(context: ImportContext, business: Busine
   const cached = context.liveStoreCache.get(business.id);
   if (cached) return cached;
 
-  const stores = await fetchStoreList(business.api_key, SCALEV_BASE_URL);
+  let stores: Awaited<ReturnType<typeof fetchStoreList>>;
+  try {
+    stores = await fetchStoreList(business.api_key, SCALEV_BASE_URL);
+  } catch (error) {
+    throw new Error(`fetch live stores gagal untuk business ${business.business_code}: ${describeUnknownError(error)}`);
+  }
   const normalized = stores.map((store) => ({
     id: Number(store.id),
     name: String(store.name || ''),
@@ -951,36 +1043,44 @@ async function resolveOrderBusinessAndStore(
     resolvedLines: ResolvedLine[];
     score: number;
   }> = [];
+  const failures: string[] = [];
 
   for (const business of context.businesses) {
-    const resolvedLines: ResolvedLine[] = [];
-    let priorityScore = 0;
-    let failed = false;
+    try {
+      const resolvedLines: ResolvedLine[] = [];
+      let priorityScore = 0;
+      let failed = false;
 
-    for (const line of order.lines) {
-      const resolved = chooseBestIdentifierForLine(line, business.id, context.identifiersByBusinessId);
-      if (!resolved) {
-        failed = true;
-        break;
+      for (const line of order.lines) {
+        const resolved = chooseBestIdentifierForLine(line, business.id, context.identifiersByBusinessId);
+        if (!resolved) {
+          failed = true;
+          break;
+        }
+        resolvedLines.push(resolved);
+        priorityScore += resolved.priority;
       }
-      resolvedLines.push(resolved);
-      priorityScore += resolved.priority;
-    }
 
-    if (failed) continue;
-    const store = await pickStoreForBusiness(context, business, order, brandTokens);
-    if (!store) continue;
-    candidates.push({
-      business,
-      store,
-      resolvedLines,
-      score: priorityScore + store.score,
-    });
+      if (failed) continue;
+      const store = await pickStoreForBusiness(context, business, order, brandTokens);
+      if (!store) continue;
+      candidates.push({
+        business,
+        store,
+        resolvedLines,
+        score: priorityScore + store.score,
+      });
+    } catch (error) {
+      failures.push(`${business.business_code}: ${describeUnknownError(error)}`);
+    }
   }
 
   candidates.sort((left, right) => right.score - left.score);
   const best = candidates[0];
   if (!best) {
+    if (failures.length > 0) {
+      throw new Error(`Order ${order.externalId} tidak bisa dipetakan ke business/store Scalev aktif. Kegagalan kandidat: ${failures.join(' | ')}`);
+    }
     throw new Error(`Order ${order.externalId} tidak bisa dipetakan ke business/store Scalev aktif.`);
   }
 
@@ -992,6 +1092,56 @@ async function resolveOrderBusinessAndStore(
     business: best.business,
     store: best.store,
     resolvedLines: best.resolvedLines,
+  };
+}
+
+async function resolveFromExistingAuthoritativeOrder(
+  context: ImportContext,
+  order: CanonicalOrder,
+): Promise<{ business: BusinessRow; store: ResolvedStore; resolvedLines: ResolvedLine[] } | null> {
+  const existing = context.existingByExternalId.get(order.externalId);
+  if (!existing || existing.source !== MARKETPLACE_API_SOURCE) return null;
+  const businessCode = cleanText(existing.business_code);
+  const storeName = cleanText(existing.store_name);
+  if (!businessCode || !storeName) return null;
+
+  const business = context.businesses.find((row) => row.business_code === businessCode) || null;
+  if (!business) return null;
+
+  const { data: storeRows, error } = await context.svc
+    .from('scalev_store_channels')
+    .select('id, business_id, store_name, store_type, channel_override')
+    .eq('is_active', true)
+    .eq('business_id', business.id)
+    .eq('store_name', storeName)
+    .limit(1);
+  if (error) {
+    throw new Error(`Store authoritative ${businessCode}/${storeName} tidak bisa dibaca: ${describeUnknownError(error)}`);
+  }
+  const storeRow = ((storeRows || [])[0] || null) as StoreChannelRow | null;
+  if (!storeRow) return null;
+
+  const resolvedLines: ResolvedLine[] = [];
+  for (const line of order.lines) {
+    const resolved = chooseBestIdentifierForLine(line, business.id, context.identifiersByBusinessId);
+    if (!resolved) return null;
+    resolvedLines.push(resolved);
+  }
+
+  const liveStores = await getLiveStoresForBusiness(context, business);
+  const live = liveStores.find((row) => normalizeLoose(row.name) === normalizeLoose(storeRow.store_name)) || null;
+  if (!live) {
+    throw new Error(`Store live authoritative ${businessCode}/${storeName} tidak ditemukan di akun ScaleV.`);
+  }
+
+  return {
+    business,
+    store: {
+      row: storeRow,
+      live,
+      score: 9999,
+    },
+    resolvedLines,
   };
 }
 
@@ -1370,8 +1520,6 @@ async function buildScalevPayload(
     store_unique_id: store.live.unique_id,
     external_id: order.externalId,
     customer_name: order.customerName || order.customerUsername || 'Marketplace Customer',
-    customer_phone: order.customerPhone,
-    customer_email: order.customerEmail,
     payment_method: PHYSICAL_PAYMENT_METHOD,
     address,
     location_id: location.id,
@@ -1382,6 +1530,8 @@ async function buildScalevPayload(
     shipment_provider_code: courier.shipment_provider_code || undefined,
     notes: `Imported from ${salesChannelForPlatform(order.platform)} via app`,
   };
+  payload.customer_phone = normalizeScalevCustomerPhone(order.customerPhone);
+  if (order.customerEmail) payload.customer_email = order.customerEmail;
 
   if (orderVariants.size > 0) {
     payload.ordervariants = Array.from(orderVariants.entries()).map(([variant_unique_id, item]) => ({
@@ -1407,6 +1557,13 @@ async function createScalevOrder(apiKey: string, payload: ScalevCreatePayload): 
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+function describeUnknownError(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message || util.inspect(error, { depth: 6, breakLength: 120 });
+  }
+  return util.inspect(error, { depth: 6, breakLength: 120 });
 }
 
 function buildProductMappingIndexes(rows: ProductMappingRow[]) {
@@ -1596,6 +1753,309 @@ async function upsertLocalMarketplaceOrder(
   }
 
   return state;
+}
+
+export async function importSingleMarketplaceOrderFromWorkbook(input: {
+  file: File;
+  externalId: string;
+  uploadedBy: string | null;
+  filenameOverride?: string | null;
+}): Promise<SingleMarketplaceOrderImportResult> {
+  const svc = createServiceSupabase();
+  const targetExternalId = cleanText(input.externalId);
+  if (!targetExternalId) {
+    throw new Error('externalId wajib diisi.');
+  }
+
+  const parsed = await parseMarketplaceWorkbook(input.file);
+  const order = parsed.orders.find((candidate) => candidate.externalId === targetExternalId);
+  if (!order) {
+    throw new Error(`Order ${targetExternalId} tidak ditemukan di workbook.`);
+  }
+
+  const context = await loadImportContext(svc, [order]);
+  const resolved = await resolveOrderBusinessAndStore(context, order);
+  await maybePersistResolvedStore(context, resolved.store);
+  const built = await buildScalevPayload(context, resolved.business, resolved.store, order, resolved.resolvedLines);
+  const created = await createScalevOrder(resolved.business.api_key, built.payload);
+  const localState = await upsertLocalMarketplaceOrder(
+    context,
+    resolved.business,
+    resolved.store,
+    order,
+    created,
+    built.payload,
+  );
+
+  const responseData = created.data || created;
+  await svc.from('scalev_sync_log').insert({
+    status: 'success',
+    sync_type: `${MARKETPLACE_API_SYNC_TYPE}_single`,
+    business_code: resolved.business.business_code,
+    orders_fetched: 1,
+    orders_inserted: localState === 'inserted' ? 1 : 0,
+    orders_updated: localState === 'updated' ? 1 : 0,
+    uploaded_by: input.uploadedBy,
+    filename: cleanText(input.filenameOverride) || input.file.name,
+    error_message: null,
+    completed_at: new Date().toISOString(),
+  });
+
+  return {
+    externalId: targetExternalId,
+    businessCode: resolved.business.business_code,
+    storeName: resolved.store.row.store_name,
+    localState,
+    scalevOrderId: cleanText(responseData?.order_id),
+    scalevId: cleanText(responseData?.id),
+    responseStatus: cleanText(responseData?.status),
+  };
+}
+
+function buildCanonicalOrderFromMarketplaceIntake(
+  order: IntakeOrderCreateRow,
+  lines: IntakeLineCreateRow[],
+): CanonicalOrder {
+  const rawMeta = (order.raw_meta || {}) as Record<string, string>;
+  const normalizedLines: CanonicalLine[] = lines.map((line) => {
+    const quantity = Math.max(Number(line.quantity || 0), 1);
+    const unitPrice = Number(line.mp_price_after_discount || line.unit_price || 0);
+    const lineSubtotal = Number(line.line_subtotal || 0) || (unitPrice * quantity);
+    const rawWeight = parseWeightGrams((line.raw_row || {})['Total Berat']) || parseWeightGrams((line.raw_row || {})['Berat Produk']);
+    const weightGrams = rawWeight || null;
+    return {
+      sku: cleanText(line.mp_sku),
+      productName: cleanText(line.mp_product_name) || 'Produk Marketplace',
+      variation: cleanText(line.mp_variation),
+      quantity,
+      unitPrice,
+      lineSubtotal,
+      lineDiscount: Number(line.line_discount || 0),
+      weightGrams,
+      rawRow: line.raw_row || {},
+    };
+  });
+
+  const totalWeightGrams = normalizedLines.reduce((sum, line) => sum + Number(line.weightGrams || 0), 0) || null;
+
+  return {
+    platform: 'shopee',
+    externalId: cleanText(order.external_order_id) || '',
+    status: cleanText(order.mp_order_status),
+    substatus: cleanText(order.mp_cancel_return_status),
+    paymentMethodLabel: cleanText(order.payment_method_label),
+    createdAt: cleanText(order.mp_order_created_at),
+    paidAt: cleanText(order.mp_payment_paid_at),
+    rtsAt: cleanText(order.mp_ready_to_ship_at),
+    shippedAt: null,
+    deliveredAt: cleanText(order.mp_order_completed_at),
+    canceledAt: null,
+    trackingNumber: cleanText(order.tracking_number),
+    shippingProvider: cleanText(order.shipping_provider),
+    deliveryOption: cleanText(order.delivery_option),
+    customerUsername: cleanText(order.mp_customer_username),
+    customerName: cleanText(order.recipient_name) || cleanText(order.customer_label) || cleanText(order.mp_customer_username),
+    customerPhone: normalizePhone(cleanText(order.mp_customer_phone)),
+    customerEmail: null,
+    postalCode: cleanText(order.mp_shipping_postal_code),
+    country: 'Indonesia',
+    province: cleanText(order.mp_shipping_province),
+    city: cleanText(order.mp_shipping_city),
+    district: cleanText(order.mp_shipping_district),
+    village: null,
+    address: cleanText(order.mp_shipping_address),
+    addressNotes: cleanText(order.mp_buyer_note),
+    rawAddress: cleanText(order.mp_raw_shipping_address),
+    shippingCost: Number(order.mp_shipping_cost_buyer || order.mp_estimated_shipping_cost || 0),
+    orderAmount: Number(order.order_amount || 0),
+    totalWeightGrams,
+    lines: aggregateCanonicalLines(normalizedLines),
+    rawMeta,
+  };
+}
+
+export async function importSingleMarketplaceIntakeOrder(input: {
+  intakeOrderId: number;
+  uploadedBy: string | null;
+  debug?: boolean;
+  dryRun?: boolean;
+}): Promise<SingleMarketplaceOrderImportResult> {
+  const svc = createServiceSupabase();
+  const intakeOrderId = Number(input.intakeOrderId || 0);
+  if (!Number.isFinite(intakeOrderId) || intakeOrderId <= 0) {
+    throw new Error('intakeOrderId tidak valid.');
+  }
+
+  const { data: orderRow, error: orderError } = await svc
+    .from('marketplace_intake_orders')
+    .select(`
+      id,
+      external_order_id,
+      recipient_name,
+      customer_label,
+      tracking_number,
+      payment_method_label,
+      shipping_provider,
+      delivery_option,
+      order_amount,
+      raw_meta,
+      mp_order_status,
+      mp_cancel_return_status,
+      mp_order_created_at,
+      mp_payment_paid_at,
+      mp_ready_to_ship_at,
+      mp_order_completed_at,
+      mp_customer_username,
+      mp_customer_phone,
+      mp_shipping_address,
+      mp_shipping_district,
+      mp_shipping_city,
+      mp_shipping_province,
+      mp_shipping_postal_code,
+      mp_raw_shipping_address,
+      mp_buyer_note,
+      mp_shipping_cost_buyer,
+      mp_estimated_shipping_cost
+    `)
+    .eq('id', intakeOrderId)
+    .single<IntakeOrderCreateRow>();
+  if (orderError) throw orderError;
+
+  const { data: lineRows, error: lineError } = await svc
+    .from('marketplace_intake_order_lines')
+    .select(`
+      intake_order_id,
+      mp_sku,
+      mp_product_name,
+      mp_variation,
+      quantity,
+      unit_price,
+      line_subtotal,
+      line_discount,
+      mp_price_after_discount,
+      raw_row
+    `)
+    .eq('intake_order_id', intakeOrderId)
+    .order('line_index', { ascending: true });
+  if (lineError) throw lineError;
+
+  const canonicalOrder = buildCanonicalOrderFromMarketplaceIntake(
+    orderRow as IntakeOrderCreateRow,
+    (lineRows || []) as IntakeLineCreateRow[],
+  );
+  if (input.debug) {
+    console.log('[single-intake] canonical-order', JSON.stringify({
+      intakeOrderId,
+      externalId: canonicalOrder.externalId,
+      platform: canonicalOrder.platform,
+      lineCount: canonicalOrder.lines.length,
+      shippingProvider: canonicalOrder.shippingProvider,
+      orderAmount: canonicalOrder.orderAmount,
+    }));
+  }
+  let context: ImportContext;
+  try {
+    context = await loadImportContext(svc, [canonicalOrder]);
+  } catch (error) {
+    throw new Error(`Load import context gagal untuk order ${canonicalOrder.externalId}: ${describeUnknownError(error)}`);
+  }
+  if (input.debug) {
+    console.log('[single-intake] context-loaded', JSON.stringify({
+      businessCount: context.businesses.length,
+      existingOrderCount: context.existingByExternalId.size,
+      productMappingCount: context.productMappings.length,
+    }));
+  }
+  let resolved: { business: BusinessRow; store: ResolvedStore; resolvedLines: ResolvedLine[] };
+  try {
+    resolved = (await resolveFromExistingAuthoritativeOrder(context, canonicalOrder))
+      || await resolveOrderBusinessAndStore(context, canonicalOrder);
+  } catch (error) {
+    throw new Error(`Resolve business/store gagal untuk order ${canonicalOrder.externalId}: ${describeUnknownError(error)}`);
+  }
+  if (input.debug) {
+    console.log('[single-intake] resolved-store', JSON.stringify({
+      businessCode: resolved.business.business_code,
+      storeName: resolved.store.row.store_name,
+      storeType: resolved.store.row.store_type,
+      lineCount: resolved.resolvedLines.length,
+    }));
+  }
+  await maybePersistResolvedStore(context, resolved.store);
+  const built = await buildScalevPayload(context, resolved.business, resolved.store, canonicalOrder, resolved.resolvedLines);
+  if (input.debug) {
+    const orderVariants = Array.isArray((built.payload as any).ordervariants)
+      ? (built.payload as any).ordervariants
+      : [];
+    const orderBundles = Array.isArray((built.payload as any).orderbundles)
+      ? (built.payload as any).orderbundles
+      : [];
+    console.log('[single-intake] payload-summary', JSON.stringify({
+      externalId: canonicalOrder.externalId,
+      orderVariantCount: orderVariants.length,
+      orderBundleCount: orderBundles.length,
+      totalWeightGrams: built.totalWeightGrams,
+      storeId: built.payload.store_id,
+      courierCode: built.payload.courier_code,
+    }));
+  }
+  if (input.dryRun) {
+    return {
+      externalId: canonicalOrder.externalId,
+      businessCode: resolved.business.business_code,
+      storeName: resolved.store.row.store_name,
+      localState: context.existingByExternalId.has(canonicalOrder.externalId) ? 'updated' : 'inserted',
+      scalevOrderId: null,
+      scalevId: null,
+      responseStatus: 'dry_run',
+    };
+  }
+  let created: ScalevCreateResponse;
+  try {
+    created = await createScalevOrder(resolved.business.api_key, built.payload);
+  } catch (error) {
+    throw new Error(`ScaleV create gagal untuk order ${canonicalOrder.externalId}: ${describeUnknownError(error)}`);
+  }
+  if (input.debug) {
+    const responseData = created.data || created;
+    console.log('[single-intake] create-response', JSON.stringify({
+      orderId: cleanText(responseData?.order_id),
+      scalevId: cleanText(responseData?.id),
+      status: cleanText(responseData?.status),
+    }));
+  }
+  const localState = await upsertLocalMarketplaceOrder(
+    context,
+    resolved.business,
+    resolved.store,
+    canonicalOrder,
+    created,
+    built.payload,
+  );
+
+  const responseData = created.data || created;
+  await svc.from('scalev_sync_log').insert({
+    status: 'success',
+    sync_type: `${MARKETPLACE_API_SYNC_TYPE}_single_intake`,
+    business_code: resolved.business.business_code,
+    orders_fetched: 1,
+    orders_inserted: localState === 'inserted' ? 1 : 0,
+    orders_updated: localState === 'updated' ? 1 : 0,
+    uploaded_by: input.uploadedBy,
+    filename: `marketplace_intake_order:${intakeOrderId}`,
+    error_message: null,
+    completed_at: new Date().toISOString(),
+  });
+
+  return {
+    externalId: canonicalOrder.externalId,
+    businessCode: resolved.business.business_code,
+    storeName: resolved.store.row.store_name,
+    localState,
+    scalevOrderId: cleanText(responseData?.order_id),
+    scalevId: cleanText(responseData?.id),
+    responseStatus: cleanText(responseData?.status),
+  };
 }
 
 export async function importMarketplaceWorkbook(input: {

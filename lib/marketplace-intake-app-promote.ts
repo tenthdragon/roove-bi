@@ -4,6 +4,11 @@ import {
   type ScalevOpsCsvRow,
 } from './marketplace-intake-scalev-export';
 import { buildScalevSourceClassFields } from './scalev-source-class';
+import {
+  extractMarketplaceTrackingFromProjectionRows,
+  extractMarketplaceTrackingFromScalevOrderRawData,
+  normalizeMarketplaceTracking,
+} from './marketplace-tracking';
 
 const MARKETPLACE_APP_SOURCE = 'marketplace_api_upload';
 const DEFAULT_TAX_RATE = 11;
@@ -52,6 +57,8 @@ type ExistingScalevOrderRow = {
   source: string | null;
   business_code: string | null;
   scalev_id: string | null;
+  store_name?: string | null;
+  raw_data?: any;
 };
 
 type ProductMappingRow = {
@@ -82,6 +89,10 @@ export type MarketplaceIntakePromoteToAppResult = {
   orderCount: number;
   insertedCount: number;
   updatedCount: number;
+  updatedWebhookCount: number;
+  updatedAuthoritativeCount: number;
+  matchedExternalIdCount: number;
+  matchedTrackingCount: number;
   skippedCount: number;
   promotedAt: string;
 };
@@ -123,6 +134,32 @@ function isMissingColumnError(error: any): boolean {
 
 function buildShipmentTimestamp(shipmentDate: string): string {
   return `${shipmentDate}T07:00:00+07:00`;
+}
+
+function buildShipmentDayBounds(shipmentDate: string) {
+  const dayStart = `${shipmentDate}T00:00:00+07:00`;
+  const match = shipmentDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    throw new Error(`shipmentDate tidak valid untuk day bounds: ${shipmentDate}`);
+  }
+  const nextDate = new Date(Date.UTC(
+    Number(match[1]),
+    Number(match[2]) - 1,
+    Number(match[3]) + 1,
+  ));
+  const nextYear = nextDate.getUTCFullYear();
+  const nextMonth = String(nextDate.getUTCMonth() + 1).padStart(2, '0');
+  const nextDay = String(nextDate.getUTCDate()).padStart(2, '0');
+  const dayEnd = `${nextYear}-${nextMonth}-${nextDay}T00:00:00+07:00`;
+  return { dayStart, dayEnd };
+}
+
+function chunkValues<T>(values: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
 }
 
 function groupProjectionRows(rows: ScalevOpsCsvRow[]): ProjectionOrderGroup[] {
@@ -333,33 +370,98 @@ async function loadPromoteOrdersAndLines(input: {
   };
 }
 
-async function loadExistingScalevOrders(externalIds: string[], businessCode: string) {
-  if (!externalIds.length) return new Map<string, ExistingScalevOrderRow>();
+async function loadExistingScalevOrders(input: {
+  externalIds: string[];
+  businessCode: string;
+  shipmentDate: string | null;
+}) {
+  const rowsByExternalId = new Map<string, ExistingScalevOrderRow>();
+  const rowsByTracking = new Map<string, ExistingScalevOrderRow>();
+  if (!input.externalIds.length) {
+    return { rowsByExternalId, rowsByTracking };
+  }
 
   const svc = createServiceSupabase();
-  const { data, error } = await svc
-    .from('scalev_orders')
-    .select('id, order_id, external_id, source, business_code, scalev_id')
-    .in('external_id', externalIds);
+  for (const chunk of chunkValues(input.externalIds, 25)) {
+    const { data, error } = await svc
+      .from('scalev_orders')
+      .select('id, order_id, external_id, source, business_code, scalev_id, store_name, raw_data')
+      .eq('business_code', input.businessCode)
+      .eq('source', MARKETPLACE_APP_SOURCE)
+      .in('external_id', chunk);
 
-  if (error) throw error;
+    if (error) throw error;
 
-  const rowsByExternalId = new Map<string, ExistingScalevOrderRow>();
-  for (const row of (data || []) as any[]) {
-    const externalId = cleanText((row as any).external_id);
-    if (!externalId) continue;
-    const rowBusinessCode = cleanText((row as any).business_code);
-    if (rowBusinessCode && rowBusinessCode !== businessCode) continue;
-    const current = rowsByExternalId.get(externalId);
-    if (!current) {
-      rowsByExternalId.set(externalId, row as ExistingScalevOrderRow);
-      continue;
-    }
-    if (!cleanText(current.business_code) && rowBusinessCode === businessCode) {
+    for (const row of (data || []) as any[]) {
+      const externalId = cleanText((row as any).external_id);
+      if (!externalId || rowsByExternalId.has(externalId)) continue;
       rowsByExternalId.set(externalId, row as ExistingScalevOrderRow);
     }
   }
-  return rowsByExternalId;
+
+  if (!input.shipmentDate) {
+    return { rowsByExternalId, rowsByTracking };
+  }
+
+  const { dayStart, dayEnd } = buildShipmentDayBounds(input.shipmentDate);
+
+  const { data: webhookRows, error: webhookError } = await svc
+    .from('scalev_orders')
+    .select('id, order_id, external_id, source, business_code, scalev_id, store_name, raw_data, shipped_time')
+    .eq('business_code', input.businessCode)
+    .eq('source', 'webhook')
+    .gte('shipped_time', dayStart)
+    .lt('shipped_time', dayEnd)
+    .limit(500);
+  if (webhookError) throw webhookError;
+
+  for (const row of (webhookRows || []) as any[]) {
+    const tracking = extractMarketplaceTrackingFromScalevOrderRawData((row as any).raw_data);
+    if (!tracking) continue;
+    if (!rowsByTracking.has(tracking)) {
+      rowsByTracking.set(tracking, row as ExistingScalevOrderRow);
+      continue;
+    }
+    rowsByTracking.delete(tracking);
+  }
+
+  return { rowsByExternalId, rowsByTracking };
+}
+
+async function findExistingWebhookOrderByTracking(input: {
+  businessCode: string;
+  shipmentDate: string;
+  trackingNumber: string;
+  storeName: string | null;
+}) {
+  const svc = createServiceSupabase();
+  const { dayStart, dayEnd } = buildShipmentDayBounds(input.shipmentDate);
+
+  let query = svc
+    .from('scalev_orders')
+    .select('id, order_id, external_id, source, business_code, scalev_id, store_name, raw_data, shipped_time')
+    .eq('business_code', input.businessCode)
+    .eq('source', 'webhook')
+    .gte('shipped_time', dayStart)
+    .lt('shipped_time', dayEnd)
+    .limit(500);
+
+  const normalizedStoreName = cleanText(input.storeName);
+  if (normalizedStoreName) {
+    query = query.eq('store_name', normalizedStoreName);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+
+  const matches = (data || []).filter((row: any) =>
+    extractMarketplaceTrackingFromScalevOrderRawData((row as any).raw_data) === input.trackingNumber);
+
+  if (matches.length > 1) {
+    throw new Error(`Tracking ${input.trackingNumber} cocok ke lebih dari satu webhook row.`);
+  }
+
+  return (matches[0] as ExistingScalevOrderRow | undefined) || null;
 }
 
 async function loadProductMappings() {
@@ -431,13 +533,28 @@ async function replaceOrderLines(input: {
 
 async function persistBatchPromoteResult(batchId: number, payload: Record<string, unknown>) {
   const svc = createServiceSupabase();
-  const { error } = await svc
+  const promoteAuditKeys = new Set([
+    'app_last_promote_updated_webhook_count',
+    'app_last_promote_updated_authoritative_count',
+    'app_last_promote_matched_external_id_count',
+    'app_last_promote_matched_tracking_count',
+  ]);
+  const runUpdate = async (nextPayload: Record<string, unknown>) => svc
     .from('marketplace_intake_batches')
-    .update(payload)
+    .update(nextPayload)
     .eq('id', batchId);
 
+  let { error } = await runUpdate(payload);
+
   if (error) {
-    if (isMissingColumnError(error)) return;
+    if (isMissingColumnError(error)) {
+      const legacyPayload = Object.fromEntries(
+        Object.entries(payload).filter(([key]) => !promoteAuditKeys.has(key)),
+      );
+      ({ error } = await runUpdate(legacyPayload));
+      if (!error) return;
+      if (isMissingColumnError(error)) return;
+    }
     throw error;
   }
 }
@@ -497,9 +614,13 @@ export async function promoteMarketplaceIntakeBatchToApp(
     throw new Error('Batch ini belum memiliki row operasional yang siap dipromosikan ke app.');
   }
 
-  const [{ ordersByExternalId, linesByOrderId }, existingByExternalId, mappingIndexes] = await Promise.all([
+  const [{ ordersByExternalId, linesByOrderId }, existingRows, mappingIndexes] = await Promise.all([
     loadPromoteOrdersAndLines({ batchId, statuses: includeWarehouseStatuses, shipmentDate }),
-    loadExistingScalevOrders(groupedOrders.map((row) => row.externalId), batch.business_code),
+    loadExistingScalevOrders({
+      externalIds: groupedOrders.map((row) => row.externalId),
+      businessCode: batch.business_code,
+      shipmentDate,
+    }),
     loadProductMappings(),
   ]);
 
@@ -507,6 +628,10 @@ export async function promoteMarketplaceIntakeBatchToApp(
   const promotedAt = new Date().toISOString();
   let insertedCount = 0;
   let updatedCount = 0;
+  let updatedWebhookCount = 0;
+  let updatedAuthoritativeCount = 0;
+  let matchedExternalIdCount = 0;
+  let matchedTrackingCount = 0;
   let skippedCount = 0;
 
   try {
@@ -517,30 +642,64 @@ export async function promoteMarketplaceIntakeBatchToApp(
         continue;
       }
 
-      const existing = existingByExternalId.get(group.externalId) || null;
-      const hasWebhookIdentity = Boolean(cleanText(existing?.scalev_id))
-        || (existing ? cleanText(existing.order_id) !== group.externalId : false);
-
-      if (existing && existing.source && existing.source !== MARKETPLACE_APP_SOURCE) {
-        skippedCount += 1;
-        continue;
-      }
-
-      if (existing && hasWebhookIdentity) {
-        skippedCount += 1;
-        continue;
-      }
-
       const headerRow = group.headerRow;
-      const orderId = cleanText(existing?.order_id) || group.externalId;
       const targetShipmentDate = normalizeShipmentDate(
         cleanText(intakeOrder.shipment_date)
         || cleanText(headerRow.timestamp)
         || shipmentDate
         || cleanText(projection.batch.sourceOrderDate),
       );
+      const trackingNumber = extractMarketplaceTrackingFromProjectionRows(group.rows)
+        || normalizeMarketplaceTracking(intakeOrder.tracking_number);
+      let matchedBy: 'external_id' | 'tracking' | null = null;
+      let existing = existingRows.rowsByExternalId.get(group.externalId) || null;
+      if (existing) {
+        matchedBy = 'external_id';
+      } else if (trackingNumber) {
+        existing = existingRows.rowsByTracking.get(trackingNumber) || null;
+        if (existing) matchedBy = 'tracking';
+      }
+
+      if (!existing && trackingNumber) {
+        existing = await findExistingWebhookOrderByTracking({
+          businessCode: batch.business_code,
+          shipmentDate: targetShipmentDate,
+          trackingNumber,
+          storeName: cleanText(headerRow.store) || intakeOrder.final_store_name || null,
+        });
+
+        if (existing) {
+          existingRows.rowsByTracking.set(trackingNumber, existing);
+          matchedBy = 'tracking';
+        }
+      }
+
+      if (!existing) {
+        const contextLabel = trackingNumber
+          ? `tracking ${trackingNumber}`
+          : `external_id ${group.externalId}`;
+        throw new Error(
+          `Order marketplace ${group.externalId} tidak bisa diikat ke row webhook existing (${contextLabel}). Promote dihentikan untuk mencegah duplicate order.`,
+        );
+      }
+
+      if (existing && existing.source && existing.source !== MARKETPLACE_APP_SOURCE && existing.source !== 'webhook') {
+        skippedCount += 1;
+        continue;
+      }
+
+      if (matchedBy === 'external_id') matchedExternalIdCount += 1;
+      if (matchedBy === 'tracking') matchedTrackingCount += 1;
+      if (existing.source === 'webhook') updatedWebhookCount += 1;
+      if (existing.source === MARKETPLACE_APP_SOURCE) updatedAuthoritativeCount += 1;
+
+      const orderId = cleanText(existing?.order_id) || group.externalId;
       const shippedTime = buildShipmentTimestamp(targetShipmentDate);
-      const totalRevenue = group.rows.reduce((sum, row) => sum + parseInteger(row.price), 0);
+      const totalRevenue = group.rows.reduce((sum, row) => {
+        const unitPrice = parseInteger(row.price);
+        const quantity = parseInteger(row.quantity) || 1;
+        return sum + (unitPrice * quantity);
+      }, 0);
       const totalQuantity = group.rows.reduce((sum, row) => sum + parseInteger(row.quantity), 0);
       const orderPayload: Record<string, unknown> = {
         order_id: orderId,
@@ -614,23 +773,24 @@ export async function promoteMarketplaceIntakeBatchToApp(
       };
 
       let dbOrderId = Number(existing?.id || 0);
-      if (existing) {
-        const { error } = await svc
-          .from('scalev_orders')
-          .update(orderPayload)
-          .eq('id', existing.id);
-        if (error) throw error;
-        updatedCount += 1;
-      } else {
-        const { data, error } = await svc
-          .from('scalev_orders')
-          .insert(orderPayload)
-          .select('id, external_id, order_id, source, business_code, scalev_id')
-          .single();
-        if (error) throw error;
-        dbOrderId = Number((data as any).id || 0);
-        existingByExternalId.set(group.externalId, data as ExistingScalevOrderRow);
-        insertedCount += 1;
+      const { error } = await svc
+        .from('scalev_orders')
+        .update(orderPayload)
+        .eq('id', existing.id);
+      if (error) throw error;
+      updatedCount += 1;
+
+      existingRows.rowsByExternalId.set(group.externalId, {
+        ...existing,
+        ...orderPayload,
+        id: existing.id,
+      } as ExistingScalevOrderRow);
+      if (trackingNumber) {
+        existingRows.rowsByTracking.set(trackingNumber, {
+          ...existing,
+          ...orderPayload,
+          id: existing.id,
+        } as ExistingScalevOrderRow);
       }
 
       if (!Number.isFinite(dbOrderId) || dbOrderId <= 0) {
@@ -653,6 +813,10 @@ export async function promoteMarketplaceIntakeBatchToApp(
       app_last_promote_order_count: groupedOrders.length,
       app_last_promote_inserted_count: insertedCount,
       app_last_promote_updated_count: updatedCount,
+      app_last_promote_updated_webhook_count: updatedWebhookCount,
+      app_last_promote_updated_authoritative_count: updatedAuthoritativeCount,
+      app_last_promote_matched_external_id_count: matchedExternalIdCount,
+      app_last_promote_matched_tracking_count: matchedTrackingCount,
       app_last_promote_skipped_count: skippedCount,
       app_last_promote_error: null,
     });
@@ -672,6 +836,10 @@ export async function promoteMarketplaceIntakeBatchToApp(
       orderCount: groupedOrders.length,
       insertedCount,
       updatedCount,
+      updatedWebhookCount,
+      updatedAuthoritativeCount,
+      matchedExternalIdCount,
+      matchedTrackingCount,
       skippedCount,
       promotedAt,
     };
@@ -682,6 +850,10 @@ export async function promoteMarketplaceIntakeBatchToApp(
       app_last_promote_order_count: groupedOrders.length,
       app_last_promote_inserted_count: insertedCount,
       app_last_promote_updated_count: updatedCount,
+      app_last_promote_updated_webhook_count: updatedWebhookCount,
+      app_last_promote_updated_authoritative_count: updatedAuthoritativeCount,
+      app_last_promote_matched_external_id_count: matchedExternalIdCount,
+      app_last_promote_matched_tracking_count: matchedTrackingCount,
       app_last_promote_skipped_count: skippedCount,
       app_last_promote_error: error?.message || 'Promosi batch intake ke app gagal.',
     });

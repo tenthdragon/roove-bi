@@ -1932,12 +1932,26 @@ export type MarketplaceIntakeWorkspaceOrderRow = {
   batchAppLastPromoteOrderCount: number;
   batchAppLastPromoteInsertedCount: number;
   batchAppLastPromoteUpdatedCount: number;
+  batchAppLastPromoteUpdatedWebhookCount: number;
+  batchAppLastPromoteUpdatedAuthoritativeCount: number;
+  batchAppLastPromoteMatchedExternalIdCount: number;
+  batchAppLastPromoteMatchedTrackingCount: number;
   batchAppLastPromoteSkippedCount: number;
   batchAppLastPromoteError: string | null;
   batchScalevLastSendStatus: string | null;
   batchScalevLastSendAt: string | null;
   batchScalevLastSendRowCount: number;
   batchScalevLastSendError: string | null;
+  batchScalevLastReconcileStatus: string | null;
+  batchScalevLastReconcileAt: string | null;
+  batchScalevLastReconcileTargetCount: number;
+  batchScalevLastReconcileMatchedCount: number;
+  batchScalevLastReconcileUpdatedCount: number;
+  batchScalevLastReconcileAlreadyLinkedCount: number;
+  batchScalevLastReconcileUnmatchedCount: number;
+  batchScalevLastReconcileConflictCount: number;
+  batchScalevLastReconcileErrorCount: number;
+  batchScalevLastReconcileError: string | null;
   externalOrderId: string;
   customerLabel: string | null;
   recipientName: string | null;
@@ -1986,12 +2000,26 @@ type MarketplaceIntakeBatchMetaRow = {
   appLastPromoteOrderCount: number;
   appLastPromoteInsertedCount: number;
   appLastPromoteUpdatedCount: number;
+  appLastPromoteUpdatedWebhookCount: number;
+  appLastPromoteUpdatedAuthoritativeCount: number;
+  appLastPromoteMatchedExternalIdCount: number;
+  appLastPromoteMatchedTrackingCount: number;
   appLastPromoteSkippedCount: number;
   appLastPromoteError: string | null;
   scalevLastSendStatus: string | null;
   scalevLastSendAt: string | null;
   scalevLastSendRowCount: number;
   scalevLastSendError: string | null;
+  scalevLastReconcileStatus: string | null;
+  scalevLastReconcileAt: string | null;
+  scalevLastReconcileTargetCount: number;
+  scalevLastReconcileMatchedCount: number;
+  scalevLastReconcileUpdatedCount: number;
+  scalevLastReconcileAlreadyLinkedCount: number;
+  scalevLastReconcileUnmatchedCount: number;
+  scalevLastReconcileConflictCount: number;
+  scalevLastReconcileErrorCount: number;
+  scalevLastReconcileError: string | null;
 };
 
 function normalizeShipmentDate(value: string): string {
@@ -2035,12 +2063,26 @@ async function loadWorkspaceBatchMeta(
       app_last_promote_order_count,
       app_last_promote_inserted_count,
       app_last_promote_updated_count,
+      app_last_promote_updated_webhook_count,
+      app_last_promote_updated_authoritative_count,
+      app_last_promote_matched_external_id_count,
+      app_last_promote_matched_tracking_count,
       app_last_promote_skipped_count,
       app_last_promote_error,
       scalev_last_send_status,
       scalev_last_send_at,
       scalev_last_send_row_count,
-      scalev_last_send_error
+      scalev_last_send_error,
+      scalev_last_reconcile_status,
+      scalev_last_reconcile_at,
+      scalev_last_reconcile_target_count,
+      scalev_last_reconcile_matched_count,
+      scalev_last_reconcile_updated_count,
+      scalev_last_reconcile_already_linked_count,
+      scalev_last_reconcile_unmatched_count,
+      scalev_last_reconcile_conflict_count,
+      scalev_last_reconcile_error_count,
+      scalev_last_reconcile_error
     `)
     .eq('source_key', sourceConfig.sourceKey)
     .eq('business_code', sourceConfig.businessCode)
@@ -2049,6 +2091,39 @@ async function loadWorkspaceBatchMeta(
 
   data = primaryRes.data;
   error = primaryRes.error;
+
+  if (error) {
+    const fallbackRes = await svc
+      .from('marketplace_intake_batches')
+      .select(`
+        id,
+        filename,
+        confirmed_at,
+        uploaded_by_email,
+        app_last_promote_status,
+        app_last_promote_at,
+        app_last_promote_order_count,
+        app_last_promote_inserted_count,
+        app_last_promote_updated_count,
+        app_last_promote_updated_webhook_count,
+        app_last_promote_updated_authoritative_count,
+        app_last_promote_matched_external_id_count,
+        app_last_promote_matched_tracking_count,
+        app_last_promote_skipped_count,
+        app_last_promote_error,
+        scalev_last_send_status,
+        scalev_last_send_at,
+        scalev_last_send_row_count,
+        scalev_last_send_error
+      `)
+      .eq('source_key', sourceConfig.sourceKey)
+      .eq('business_code', sourceConfig.businessCode)
+      .order('confirmed_at', { ascending: false })
+      .order('id', { ascending: false });
+
+    data = fallbackRes.data;
+    error = fallbackRes.error;
+  }
 
   if (error) {
     const fallbackRes = await svc
@@ -2091,12 +2166,26 @@ async function loadWorkspaceBatchMeta(
       appLastPromoteOrderCount: Number((row as any).app_last_promote_order_count || 0),
       appLastPromoteInsertedCount: Number((row as any).app_last_promote_inserted_count || 0),
       appLastPromoteUpdatedCount: Number((row as any).app_last_promote_updated_count || 0),
+      appLastPromoteUpdatedWebhookCount: Number((row as any).app_last_promote_updated_webhook_count || 0),
+      appLastPromoteUpdatedAuthoritativeCount: Number((row as any).app_last_promote_updated_authoritative_count || 0),
+      appLastPromoteMatchedExternalIdCount: Number((row as any).app_last_promote_matched_external_id_count || 0),
+      appLastPromoteMatchedTrackingCount: Number((row as any).app_last_promote_matched_tracking_count || 0),
       appLastPromoteSkippedCount: Number((row as any).app_last_promote_skipped_count || 0),
       appLastPromoteError: (row as any).app_last_promote_error || null,
       scalevLastSendStatus: (row as any).scalev_last_send_status || null,
       scalevLastSendAt: (row as any).scalev_last_send_at || null,
       scalevLastSendRowCount: Number((row as any).scalev_last_send_row_count || 0),
       scalevLastSendError: (row as any).scalev_last_send_error || null,
+      scalevLastReconcileStatus: (row as any).scalev_last_reconcile_status || null,
+      scalevLastReconcileAt: (row as any).scalev_last_reconcile_at || null,
+      scalevLastReconcileTargetCount: Number((row as any).scalev_last_reconcile_target_count || 0),
+      scalevLastReconcileMatchedCount: Number((row as any).scalev_last_reconcile_matched_count || 0),
+      scalevLastReconcileUpdatedCount: Number((row as any).scalev_last_reconcile_updated_count || 0),
+      scalevLastReconcileAlreadyLinkedCount: Number((row as any).scalev_last_reconcile_already_linked_count || 0),
+      scalevLastReconcileUnmatchedCount: Number((row as any).scalev_last_reconcile_unmatched_count || 0),
+      scalevLastReconcileConflictCount: Number((row as any).scalev_last_reconcile_conflict_count || 0),
+      scalevLastReconcileErrorCount: Number((row as any).scalev_last_reconcile_error_count || 0),
+      scalevLastReconcileError: (row as any).scalev_last_reconcile_error || null,
     });
   }
 
@@ -2179,12 +2268,26 @@ function mapWorkspaceOrderRow(
     batchAppLastPromoteOrderCount: batchMeta.appLastPromoteOrderCount,
     batchAppLastPromoteInsertedCount: batchMeta.appLastPromoteInsertedCount,
     batchAppLastPromoteUpdatedCount: batchMeta.appLastPromoteUpdatedCount,
+    batchAppLastPromoteUpdatedWebhookCount: batchMeta.appLastPromoteUpdatedWebhookCount,
+    batchAppLastPromoteUpdatedAuthoritativeCount: batchMeta.appLastPromoteUpdatedAuthoritativeCount,
+    batchAppLastPromoteMatchedExternalIdCount: batchMeta.appLastPromoteMatchedExternalIdCount,
+    batchAppLastPromoteMatchedTrackingCount: batchMeta.appLastPromoteMatchedTrackingCount,
     batchAppLastPromoteSkippedCount: batchMeta.appLastPromoteSkippedCount,
     batchAppLastPromoteError: batchMeta.appLastPromoteError,
     batchScalevLastSendStatus: batchMeta.scalevLastSendStatus,
     batchScalevLastSendAt: batchMeta.scalevLastSendAt,
     batchScalevLastSendRowCount: batchMeta.scalevLastSendRowCount,
     batchScalevLastSendError: batchMeta.scalevLastSendError,
+    batchScalevLastReconcileStatus: batchMeta.scalevLastReconcileStatus,
+    batchScalevLastReconcileAt: batchMeta.scalevLastReconcileAt,
+    batchScalevLastReconcileTargetCount: batchMeta.scalevLastReconcileTargetCount,
+    batchScalevLastReconcileMatchedCount: batchMeta.scalevLastReconcileMatchedCount,
+    batchScalevLastReconcileUpdatedCount: batchMeta.scalevLastReconcileUpdatedCount,
+    batchScalevLastReconcileAlreadyLinkedCount: batchMeta.scalevLastReconcileAlreadyLinkedCount,
+    batchScalevLastReconcileUnmatchedCount: batchMeta.scalevLastReconcileUnmatchedCount,
+    batchScalevLastReconcileConflictCount: batchMeta.scalevLastReconcileConflictCount,
+    batchScalevLastReconcileErrorCount: batchMeta.scalevLastReconcileErrorCount,
+    batchScalevLastReconcileError: batchMeta.scalevLastReconcileError,
     externalOrderId: String(row.external_order_id || ''),
     customerLabel: row.customer_label || null,
     recipientName: row.recipient_name || null,

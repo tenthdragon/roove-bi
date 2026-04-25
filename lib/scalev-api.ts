@@ -18,6 +18,17 @@ export interface ScalevConfig {
   last_sync_id: number;
 }
 
+export type FetchOrderListOptions = {
+  lastId?: number;
+  pageSize?: number;
+  search?: string;
+  externalId?: string;
+  status?: string;
+  platform?: string;
+  businessId?: string | number;
+  storeId?: string | number;
+};
+
 // ── Get Scalev config from DB ──
 export async function getScalevConfig(): Promise<ScalevConfig | null> {
   const svc = getServiceSupabase();
@@ -40,10 +51,37 @@ export async function fetchOrderList(
   lastId: number = 0,
   pageSize: number = 25
 ): Promise<{ results: any[]; hasNext: boolean; lastId: number }> {
-  let url = `${baseUrl}/order?page_size=${pageSize}`;
-  if (lastId > 0) {
-    url += `&last_id=${lastId}`;
+  return fetchOrderListWithFilters(apiKey, baseUrl, {
+    lastId,
+    pageSize,
+  });
+}
+
+export async function fetchOrderListWithFilters(
+  apiKey: string,
+  baseUrl: string,
+  options: FetchOrderListOptions = {},
+): Promise<{ results: any[]; hasNext: boolean; lastId: number }> {
+  const params = new URLSearchParams();
+  params.set('page_size', String(Math.max(1, Math.min(25, Number(options.pageSize || 25)))));
+  if (Number(options.lastId || 0) > 0) {
+    params.set('last_id', String(Number(options.lastId)));
   }
+
+  const optionalParams: Array<[string, string | number | undefined]> = [
+    ['search', options.search],
+    ['external_id', options.externalId],
+    ['status', options.status],
+    ['platform', options.platform],
+    ['business_id', options.businessId],
+    ['store_id', options.storeId],
+  ];
+  for (const [key, value] of optionalParams) {
+    const txt = String(value ?? '').trim();
+    if (txt) params.set(key, txt);
+  }
+
+  const url = `${baseUrl}/order?${params.toString()}`;
 
   const res = await fetch(url, {
     headers: { 'Authorization': `Bearer ${apiKey}` },
@@ -63,6 +101,59 @@ export async function fetchOrderList(
     hasNext: json.data?.has_next || false,
     lastId: json.data?.last_id || 0,
   };
+}
+
+export async function fetchOrdersByExternalId(
+  apiKey: string,
+  baseUrl: string,
+  externalId: string,
+): Promise<any[]> {
+  const normalized = String(externalId || '').trim();
+  if (!normalized) return [];
+  try {
+    const response = await fetchOrderListWithFilters(apiKey, baseUrl, {
+      externalId: normalized,
+      pageSize: 25,
+    });
+    return Array.isArray(response.results) ? response.results : [];
+  } catch {
+    const matches: any[] = [];
+    const seenDetailIds = new Set<string>();
+    let lastId = 0;
+    let guard = 0;
+    while (guard < 20) {
+      guard += 1;
+      const response = await fetchOrderListWithFilters(apiKey, baseUrl, {
+        search: normalized,
+        pageSize: 25,
+        lastId,
+      });
+      const current = Array.isArray(response.results) ? response.results : [];
+      for (const row of current) {
+        const rowExternalId = String(row?.external_id || row?.externalId || '').trim();
+        if (rowExternalId === normalized) {
+          matches.push(row);
+          continue;
+        }
+
+        const detailId = String(row?.id || row?.order_id || '').trim();
+        if (!detailId || seenDetailIds.has(detailId)) continue;
+        seenDetailIds.add(detailId);
+        try {
+          const detail = await fetchOrderDetail(apiKey, baseUrl, detailId);
+          const detailExternalId = String(detail?.external_id || detail?.externalId || '').trim();
+          if (detailExternalId === normalized) {
+            matches.push(detail);
+          }
+        } catch {
+          // ignore detail fetch failure for candidate fallback
+        }
+      }
+      if (!response.hasNext || !response.lastId || response.lastId === lastId) break;
+      lastId = response.lastId;
+    }
+    return matches;
+  }
 }
 
 // ── Fetch single order detail ──
