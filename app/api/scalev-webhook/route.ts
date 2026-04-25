@@ -310,15 +310,169 @@ async function resolveWarehouseOrderContext(svc: ReturnType<typeof getServiceSup
   };
 }
 
+type ExistingScalevWebhookOrder = {
+  id: number;
+  order_id?: string | null;
+  external_id?: string | null;
+  status?: string | null;
+  source?: string | null;
+  scalev_id?: string | null;
+  store_name?: string | null;
+  platform?: string | null;
+  financial_entity?: string | null;
+  raw_data?: any;
+};
+
 // ── Helpers ──
 const ts = (v: any): string | null =>
   v && typeof v === 'string' && v.trim() ? v.trim() : null;
+
+const txt = (v: any): string => String(v ?? '').trim();
 
 const num = (v: any): number => {
   if (v == null) return 0;
   const n = parseFloat(String(v).replace(/,/g, ''));
   return isNaN(n) ? 0 : n;
 };
+
+function isMarketplaceSourceClass(sourceClassFields: {
+  source_class?: string | null;
+}) {
+  return sourceClassFields.source_class === 'marketplace';
+}
+
+function isMarketplaceAuthoritativeSource(source: string | null | undefined) {
+  return txt(source) === 'marketplace_api_upload';
+}
+
+function extractWebhookScalevId(data: any): string | null {
+  return ts(
+    data?.id
+    ?? data?.scalev_id
+    ?? data?.raw_data?.id
+    ?? null,
+  );
+}
+
+async function recordMarketplaceWebhookQuarantine(args: {
+  svc: ReturnType<typeof getServiceSupabase>;
+  eventType: string;
+  businessId: number;
+  businessCode: string;
+  data: any;
+  sourceClassFields: {
+    source_class?: string | null;
+    source_class_reason?: string | null;
+  };
+  existing?: ExistingScalevWebhookOrder | null;
+  reason: string;
+}) {
+  const payload = {
+    event: args.eventType,
+    data: args.data,
+  };
+
+  const { error } = await args.svc
+    .from('scalev_marketplace_webhook_quarantine')
+    .insert({
+      business_id: args.businessId,
+      business_code: args.businessCode,
+      event_type: args.eventType,
+      order_id: txt(args.data?.order_id) || null,
+      external_id: txt(args.data?.external_id) || null,
+      scalev_id: extractWebhookScalevId(args.data),
+      source_class: args.sourceClassFields.source_class ?? null,
+      source_class_reason: args.sourceClassFields.source_class_reason ?? null,
+      matched_scalev_order_id: args.existing?.id ?? null,
+      reason: args.reason,
+      payload,
+    });
+
+  if (error) {
+    const message = txt(error.message).toLowerCase();
+    if (message.includes('schema cache') || message.includes('does not exist') || txt(error.code) === '42P01') {
+      console.warn(`[scalev-webhook][${args.businessCode}] quarantine table unavailable for ${args.eventType}/${args.data?.order_id || '-'}: ${error.message}`);
+      return;
+    }
+    throw error;
+  }
+}
+
+async function maybeQuarantineMarketplaceWebhook(args: {
+  svc: ReturnType<typeof getServiceSupabase>;
+  eventType: string;
+  businessId: number;
+  businessCode: string;
+  data: any;
+  sourceClassFields: {
+    source_class?: string | null;
+    source_class_reason?: string | null;
+  };
+  existing?: ExistingScalevWebhookOrder | null;
+}) {
+  if (!isMarketplaceSourceClass(args.sourceClassFields)) return null;
+  if (args.existing && isMarketplaceAuthoritativeSource(args.existing.source)) return null;
+
+  const reason = args.existing
+    ? 'marketplace_webhook_non_authoritative_match'
+    : 'marketplace_webhook_unmatched';
+
+  await recordMarketplaceWebhookQuarantine({
+    ...args,
+    reason,
+  });
+
+  console.log(
+    `[scalev-webhook][${args.businessCode}] ${args.eventType}: quarantined marketplace webhook for ${args.data?.order_id || '-'} (${reason})`,
+  );
+
+  return NextResponse.json({
+    ok: true,
+    quarantined: true,
+    business_code: args.businessCode,
+    event: args.eventType,
+    order_id: txt(args.data?.order_id) || null,
+    external_id: txt(args.data?.external_id) || null,
+    source_class: args.sourceClassFields.source_class ?? null,
+    source_class_reason: args.sourceClassFields.source_class_reason ?? null,
+    matched_scalev_order_id: args.existing?.id ?? null,
+    matched_source: args.existing?.source ?? null,
+    reason,
+  });
+}
+
+function buildMarketplaceAuthoritativeUpdateBase(args: {
+  existing: ExistingScalevWebhookOrder;
+  orderId: string;
+  data: any;
+  businessCode: string;
+  sourceClassFields: {
+    source_class?: string | null;
+    source_class_reason?: string | null;
+  };
+}) {
+  const updateData: Record<string, any> = {
+    business_code: args.businessCode,
+    ...args.sourceClassFields,
+    synced_at: new Date().toISOString(),
+  };
+
+  if (txt(args.existing.order_id) !== txt(args.orderId)) {
+    updateData.order_id = args.orderId;
+  }
+
+  const webhookScalevId = extractWebhookScalevId(args.data);
+  if (webhookScalevId && webhookScalevId !== txt(args.existing.scalev_id)) {
+    updateData.scalev_id = webhookScalevId;
+  }
+
+  const externalId = txt(args.data?.external_id);
+  if (externalId && !txt(args.existing.external_id)) {
+    updateData.external_id = externalId;
+  }
+
+  return updateData;
+}
 
 // ── PPN Tax Rate (dynamic from DB, cached) ──
 const DEFAULT_TAX_RATE = 11;
@@ -602,14 +756,34 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
+  const sourceClassFields = await buildOrderSourceClassFields({
+    data,
+    businessId,
+    source: 'webhook',
+  });
+
   // Check if order already exists
   const { data: existing } = await lookupOrderForBusinessOrExternal(
     svc,
     orderId,
     businessCode,
     data.external_id,
-    'id, business_code, order_id, external_id, source',
+    'id, business_code, order_id, external_id, source, scalev_id',
   );
+
+  const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
+    svc,
+    eventType: 'order.created',
+    businessId,
+    businessCode,
+    data,
+    sourceClassFields,
+    existing,
+  });
+
+  if (quarantineResponse) {
+    return quarantineResponse;
+  }
 
   if (existing) {
     console.log(`[scalev-webhook][${businessCode}] order.created: ${orderId} already exists, treating as upsert`);
@@ -621,11 +795,6 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   const storeName = data.store?.name || null;
   const financialEntity = data.financial_entity?.name || data.financial_entity?.code || null;
   const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
-  const sourceClassFields = await buildOrderSourceClassFields({
-    data,
-    businessId,
-    source: 'webhook',
-  });
 
   // Build order row
   const derivedPlatform = derivePlatformFromStore(storeName || '', data.external_id, data);
@@ -752,7 +921,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     orderId,
     businessCode,
     data.external_id,
-    'id, order_id, status, source, store_name, platform, external_id, financial_entity, raw_data',
+    'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
   );
 
   if (lookupErr) {
@@ -760,9 +929,87 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
+  const sourceClassFields = await buildOrderSourceClassFields({
+    data,
+    existing,
+    businessId,
+  });
+  const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
+    svc,
+    eventType: 'order.status_changed',
+    businessId,
+    businessCode,
+    data,
+    sourceClassFields,
+    existing,
+  });
+
+  if (quarantineResponse) {
+    return quarantineResponse;
+  }
+
   if (!existing) {
     console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} not found in DB, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
+  }
+
+  if (isMarketplaceAuthoritativeSource(existing.source)) {
+    const updateData = buildMarketplaceAuthoritativeUpdateBase({
+      existing,
+      orderId,
+      data,
+      businessCode,
+      sourceClassFields,
+    });
+    updateData.status = newStatus;
+
+    const timestampFields = [
+      'draft_time', 'pending_time', 'confirmed_time',
+      'paid_time', 'shipped_time', 'completed_time', 'canceled_time',
+    ];
+
+    for (const field of timestampFields) {
+      if (field in data) {
+        updateData[field] = ts(data[field]);
+      }
+    }
+
+    const { error: updateErr } = await svc
+      .from('scalev_orders')
+      .update(updateData)
+      .eq('id', existing.id);
+
+    if (updateErr) {
+      console.error(`[scalev-webhook][${businessCode}] status_changed marketplace update error for ${orderId}:`, updateErr.message);
+      return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
+    }
+
+    const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+
+    await svc.from('scalev_sync_log').insert({
+      status: 'success',
+      sync_type: 'webhook_status_changed',
+      business_code: businessCode,
+      orders_fetched: 1,
+      orders_updated: 1,
+      orders_inserted: 0,
+      error_message: null,
+      completed_at: new Date().toISOString(),
+    });
+
+    console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} applied as marketplace authoritative update`);
+
+    return NextResponse.json({
+      ok: true,
+      order_id: orderId,
+      business_code: businessCode,
+      action: 'status_changed_marketplace_authoritative',
+      old_status: existing.status,
+      new_status: newStatus,
+      warehouse_action: warehouseResult.action,
+      ...(warehouseResult.reversed > 0 && { warehouse_reversed: warehouseResult.reversed }),
+      ...(warehouseResult.deducted > 0 && { warehouse_deducted: warehouseResult.deducted }),
+    });
   }
 
   // Skip if status hasn't actually changed
@@ -778,11 +1025,6 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 
   // Build update
   const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
-  const sourceClassFields = await buildOrderSourceClassFields({
-    data,
-    existing,
-    businessId,
-  });
   const updateData: Record<string, any> = {
     status: newStatus,
     business_code: businessCode,
@@ -1003,7 +1245,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     orderId,
     businessCode,
     data.external_id,
-    'id, order_id, status, source, store_name, platform, external_id, financial_entity, raw_data',
+    'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
   );
 
   if (lookupErr) {
@@ -1012,6 +1254,25 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   }
 
   if (!existing) {
+    const sourceClassFields = await buildOrderSourceClassFields({
+      data,
+      existing,
+      businessId,
+    });
+    const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
+      svc,
+      eventType: 'order.updated',
+      businessId,
+      businessCode,
+      data,
+      sourceClassFields,
+      existing,
+    });
+
+    if (quarantineResponse) {
+      return quarantineResponse;
+    }
+
     // Order not in DB yet — treat as create
     console.log(`[scalev-webhook][${businessCode}] order.updated: ${orderId} not found, treating as create`);
     return handleOrderCreated(data, businessCode, businessId, taxRateName);
@@ -1027,6 +1288,81 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     existing,
     businessId,
   });
+  const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
+    svc,
+    eventType: 'order.updated',
+    businessId,
+    businessCode,
+    data,
+    sourceClassFields,
+    existing,
+  });
+
+  if (quarantineResponse) {
+    return quarantineResponse;
+  }
+
+  if (isMarketplaceAuthoritativeSource(existing.source)) {
+    const updateData = buildMarketplaceAuthoritativeUpdateBase({
+      existing,
+      orderId,
+      data,
+      businessCode,
+      sourceClassFields,
+    });
+
+    if (data.status) updateData.status = data.status;
+    if (data.payment_method) updateData.payment_method = data.payment_method;
+    if (financialEntity) updateData.financial_entity = financialEntity;
+    if (data.gross_revenue != null) updateData.gross_revenue = num(data.gross_revenue);
+    if (data.net_revenue != null) updateData.net_revenue = num(data.net_revenue);
+    if (data.shipping_cost != null) updateData.shipping_cost = num(data.shipping_cost);
+    if (data.total_quantity != null) updateData.total_quantity = data.total_quantity;
+    if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
+
+    const timestampFields = [
+      'draft_time', 'pending_time', 'confirmed_time',
+      'paid_time', 'shipped_time', 'completed_time', 'canceled_time',
+    ];
+    for (const field of timestampFields) {
+      if (field in data) updateData[field] = ts(data[field]);
+    }
+
+    const { error: updateErr } = await svc
+      .from('scalev_orders')
+      .update(updateData)
+      .eq('id', existing.id);
+
+    if (updateErr) {
+      console.error(`[scalev-webhook][${businessCode}] order.updated marketplace update error for ${orderId}:`, updateErr.message);
+      return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
+    }
+
+    const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+
+    await svc.from('scalev_sync_log').insert({
+      status: 'success',
+      sync_type: 'webhook_updated',
+      business_code: businessCode,
+      orders_fetched: 1,
+      orders_updated: 1,
+      orders_inserted: 0,
+      error_message: null,
+      completed_at: new Date().toISOString(),
+    });
+
+    console.log(`[scalev-webhook][${businessCode}] order.updated: ${orderId} applied as marketplace authoritative update`);
+
+    return NextResponse.json({
+      ok: true,
+      order_id: orderId,
+      business_code: businessCode,
+      action: 'updated_marketplace_authoritative',
+      warehouse_action: warehouseResult.action,
+      ...(warehouseResult.reversed > 0 && { warehouse_reversed: warehouseResult.reversed }),
+      ...(warehouseResult.deducted > 0 && { warehouse_deducted: warehouseResult.deducted }),
+    });
+  }
 
   const updateData: Record<string, any> = {
     synced_at: new Date().toISOString(),
@@ -1187,11 +1523,12 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessOrExternal(
     svc,
     orderId,
     businessCode,
-    'id, order_id, status, source, store_name, platform, external_id, financial_entity, raw_data',
+    data.external_id,
+    'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
   );
 
   if (lookupErr) {
@@ -1199,27 +1536,53 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
     return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
-  if (!existing) {
-    console.log(`[scalev-webhook][${businessCode}] order.deleted: ${orderId} not found in DB, skipping`);
-    return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
-  }
-
   const sourceClassFields = await buildOrderSourceClassFields({
     data,
     existing,
     businessId,
   });
+  const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
+    svc,
+    eventType: 'order.deleted',
+    businessId,
+    businessCode,
+    data,
+    sourceClassFields,
+    existing,
+  });
+
+  if (quarantineResponse) {
+    return quarantineResponse;
+  }
+
+  if (!existing) {
+    console.log(`[scalev-webhook][${businessCode}] order.deleted: ${orderId} not found in DB, skipping`);
+    return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
+  }
+
+  const updateData = isMarketplaceAuthoritativeSource(existing.source)
+    ? buildMarketplaceAuthoritativeUpdateBase({
+        existing,
+        orderId,
+        data,
+        businessCode,
+        sourceClassFields,
+      })
+    : {
+        status: 'deleted',
+        business_code: businessCode,
+        ...sourceClassFields,
+        canceled_time: new Date().toISOString(),
+        synced_at: new Date().toISOString(),
+      };
+
+  updateData.status = 'deleted';
+  updateData.canceled_time = new Date().toISOString();
 
   // Soft-delete: mark status as 'deleted' and record the timestamp
   const { error: updateErr } = await svc
     .from('scalev_orders')
-    .update({
-      status: 'deleted',
-      business_code: businessCode,
-      ...sourceClassFields,
-      canceled_time: new Date().toISOString(),
-      synced_at: new Date().toISOString(),
-    })
+    .update(updateData)
     .eq('id', existing.id);
 
   if (updateErr) {
@@ -1262,11 +1625,12 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessOrExternal(
     svc,
     orderId,
     businessCode,
-    'id, order_id, status, source, store_name, platform, external_id, financial_entity, raw_data',
+    data.external_id,
+    'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
   );
 
   if (lookupErr) {
@@ -1274,21 +1638,43 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
     return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
-  if (!existing) {
-    console.log(`[scalev-webhook][${businessCode}] payment_status_changed: ${orderId} not found, skipping`);
-    return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
-  }
-
   const sourceClassFields = await buildOrderSourceClassFields({
     data,
     existing,
     businessId,
   });
-  const updateData: Record<string, any> = {
-    business_code: businessCode,
-    ...sourceClassFields,
-    synced_at: new Date().toISOString(),
-  };
+  const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
+    svc,
+    eventType: 'order.payment_status_changed',
+    businessId,
+    businessCode,
+    data,
+    sourceClassFields,
+    existing,
+  });
+
+  if (quarantineResponse) {
+    return quarantineResponse;
+  }
+
+  if (!existing) {
+    console.log(`[scalev-webhook][${businessCode}] payment_status_changed: ${orderId} not found, skipping`);
+    return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
+  }
+
+  const updateData: Record<string, any> = isMarketplaceAuthoritativeSource(existing.source)
+    ? buildMarketplaceAuthoritativeUpdateBase({
+        existing,
+        orderId,
+        data,
+        businessCode,
+        sourceClassFields,
+      })
+    : {
+        business_code: businessCode,
+        ...sourceClassFields,
+        synced_at: new Date().toISOString(),
+      };
 
   if (data.payment_method) updateData.payment_method = data.payment_method;
   if (data.status) updateData.status = data.status;
@@ -1342,11 +1728,12 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
     return NextResponse.json({ ok: true, skipped: true, reason: 'no_order_id' });
   }
 
-  const { data: existing, error: lookupErr } = await lookupOrderForBusiness(
+  const { data: existing, error: lookupErr } = await lookupOrderForBusinessOrExternal(
     svc,
     orderId,
     businessCode,
-    'id, order_id, source, store_name, platform, external_id, financial_entity, raw_data',
+    data.external_id,
+    'id, order_id, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
   );
 
   if (lookupErr) {
@@ -1354,21 +1741,43 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
     return NextResponse.json({ error: 'DB lookup failed' }, { status: 500 });
   }
 
-  if (!existing) {
-    console.log(`[scalev-webhook][${businessCode}] e_payment_created: ${orderId} not found, skipping`);
-    return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
-  }
-
   const sourceClassFields = await buildOrderSourceClassFields({
     data,
     existing,
     businessId,
   });
-  const updateData: Record<string, any> = {
-    business_code: businessCode,
-    ...sourceClassFields,
-    synced_at: new Date().toISOString(),
-  };
+  const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
+    svc,
+    eventType: 'order.e_payment_created',
+    businessId,
+    businessCode,
+    data,
+    sourceClassFields,
+    existing,
+  });
+
+  if (quarantineResponse) {
+    return quarantineResponse;
+  }
+
+  if (!existing) {
+    console.log(`[scalev-webhook][${businessCode}] e_payment_created: ${orderId} not found, skipping`);
+    return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
+  }
+
+  const updateData: Record<string, any> = isMarketplaceAuthoritativeSource(existing.source)
+    ? buildMarketplaceAuthoritativeUpdateBase({
+        existing,
+        orderId,
+        data,
+        businessCode,
+        sourceClassFields,
+      })
+    : {
+        business_code: businessCode,
+        ...sourceClassFields,
+        synced_at: new Date().toISOString(),
+      };
 
   if (data.payment_method) updateData.payment_method = data.payment_method;
   if (data.financial_entity) {
