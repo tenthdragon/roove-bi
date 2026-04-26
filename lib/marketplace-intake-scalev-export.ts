@@ -72,6 +72,7 @@ type IntakeLineRow = {
   matched_entity_type: string | null;
   matched_entity_key: string | null;
   detected_custom_id: string | null;
+  normalized_sku?: string | null;
   mp_sku: string | null;
   unit_price: number | null;
   mp_price_after_discount: number | null;
@@ -169,10 +170,21 @@ function resolveOpsSku(line: IntakeLineRow): string {
   }
   return rawString(line, 'Nomor Referensi SKU')
     || entityKey
+    || cleanText(line.normalized_sku)
     || cleanText(line.mp_sku);
 }
 
-function resolveOpsPrice(line: IntakeLineRow): string {
+function resolveOpsPrice(sourceKey: string, line: IntakeLineRow): string {
+  if (sourceKey === 'tiktok_rti') {
+    const sellerSkuDiscount = parseLocalizedNumber(rawString(line, 'SKU Seller Discount'));
+    const tiktokOriginalUnitPrice = parseLocalizedNumber(rawString(line, 'SKU Unit Original Price'));
+    const quantity = Math.max(Number(line.quantity || 0), 1);
+    const sellerDiscountPerUnit = sellerSkuDiscount > 0 ? sellerSkuDiscount / quantity : 0;
+    if (tiktokOriginalUnitPrice > 0) {
+      return formatInteger(tiktokOriginalUnitPrice - sellerDiscountPerUnit);
+    }
+  }
+
   const price = Number(line.mp_price_after_discount || 0)
     || parseLocalizedNumber(rawString(line, 'Harga Setelah Diskon'))
     || Number(line.unit_price || 0);
@@ -180,6 +192,26 @@ function resolveOpsPrice(line: IntakeLineRow): string {
 }
 
 function resolveOpsWarehouse(sourceKey: string, storeName: string | null): string {
+  if (sourceKey === 'tiktok_rti') {
+    switch (cleanText(storeName)) {
+      case 'Purvu The Secret Store - Markerplace':
+      case 'Purvu The Secret Store - Marketplace':
+      case 'Purvu The Secret Store':
+        return "Jejak Herba Nusantara's Warehouse";
+      case 'Roove Main Store - Marketplace':
+      case 'Globite Store - Marketplace':
+      case 'Pluve Main Store - Marketplace':
+      case 'Purvu Store - Marketplace':
+      case 'YUV Deodorant Serum Store - Marketplace':
+      case 'Osgard Oil Store - Marketplace':
+      case 'drHyun Main Store - Marketplace':
+      case 'Osgard Oil Store':
+        return "Roove Lautan Barat's Warehouse";
+      default:
+        return '';
+    }
+  }
+
   if (sourceKey === 'shopee_jhn') {
     switch (cleanText(storeName)) {
       case 'Purvu Store':
@@ -214,6 +246,10 @@ function resolveOpsCourier(
   shippingProvider: string | null,
   trackingNumber: string | null,
 ): { courier: string; courierService: string } {
+  if (sourceKey === 'tiktok_rti') {
+    return { courier: 'J&T Express Cashless', courierService: 'EZ' };
+  }
+
   const text = cleanText(shippingProvider).toLowerCase();
   const tracking = cleanText(trackingNumber).toUpperCase();
 
@@ -237,6 +273,16 @@ function resolveOpsCourier(
     courier: cleanText(shippingProvider),
     courierService: '',
   };
+}
+
+function resolveOpsPlatform(sourceKey: string): string {
+  if (sourceKey === 'tiktok_rti') return 'tiktokshop';
+  return 'shopee';
+}
+
+function resolveOpsBank(sourceKey: string): string {
+  if (sourceKey === 'tiktok_rti') return 'tiktokshop';
+  return 'shopee';
 }
 
 function buildCsv(rows: ScalevOpsCsvRow[]): string {
@@ -291,7 +337,7 @@ export async function buildScalevOpsProjectionForBatch(input: {
   if (ordersError) throw ordersError;
 
   const orderIds = (orders || []).map((row: any) => Number(row.id)).filter((id) => Number.isFinite(id));
-  const { data: lines, error: linesError } = orderIds.length === 0
+  let linesRes = orderIds.length === 0
     ? { data: [] as IntakeLineRow[], error: null }
     : await svc
         .from('marketplace_intake_order_lines')
@@ -301,6 +347,7 @@ export async function buildScalevOpsProjectionForBatch(input: {
           'matched_entity_type',
           'matched_entity_key',
           'detected_custom_id',
+          'normalized_sku',
           'mp_sku',
           'unit_price',
           'mp_price_after_discount',
@@ -310,6 +357,27 @@ export async function buildScalevOpsProjectionForBatch(input: {
         .in('intake_order_id', orderIds)
         .order('intake_order_id', { ascending: true })
         .order('line_index', { ascending: true });
+
+  if (linesRes.error && String(linesRes.error?.message || '').toLowerCase().includes('column')) {
+    linesRes = await svc
+      .from('marketplace_intake_order_lines')
+      .select([
+        'intake_order_id',
+        'line_index',
+        'matched_entity_type',
+        'matched_entity_key',
+        'detected_custom_id',
+        'mp_sku',
+        'unit_price',
+        'mp_price_after_discount',
+        'quantity',
+        'raw_row',
+      ].join(','))
+      .in('intake_order_id', orderIds)
+      .order('intake_order_id', { ascending: true })
+      .order('line_index', { ascending: true });
+  }
+  const { data: lines, error: linesError } = linesRes;
   if (linesError) throw linesError;
 
   const linesByOrderId = new Map<number, IntakeLineRow[]>();
@@ -371,7 +439,7 @@ export async function buildScalevOpsProjectionForBatch(input: {
 
       rows.push({
         external_id: index === 0 ? order.external_order_id : '',
-        platform: index === 0 ? 'shopee' : '',
+        platform: index === 0 ? resolveOpsPlatform(batch.source_key) : '',
         id: String(rowNumber),
         timestamp: index === 0 ? timestamp : '',
         store: index === 0 ? cleanText(order.final_store_name) : '',
@@ -383,12 +451,12 @@ export async function buildScalevOpsProjectionForBatch(input: {
         subdistrict: '',
         city: '',
         payment_method: index === 0 ? 'marketplace' : '',
-        bank: index === 0 ? 'shopee' : '',
+        bank: index === 0 ? resolveOpsBank(batch.source_key) : '',
         account_holder: '',
         account_number: '',
         item_type: resolveOpsItemType(line),
         sku,
-        price: resolveOpsPrice(line),
+        price: resolveOpsPrice(batch.source_key, line),
         quantity: formatInteger(line.quantity),
         shipping_cost: '0',
         other_income: '0',

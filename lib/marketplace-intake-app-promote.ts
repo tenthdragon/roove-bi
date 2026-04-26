@@ -45,6 +45,7 @@ type PromoteLineRow = {
   quantity: number;
   matched_entity_label: string | null;
   detected_custom_id: string | null;
+  normalized_sku?: string | null;
   mp_sku: string | null;
   mapped_store_name: string | null;
   raw_row: Record<string, string> | null;
@@ -328,7 +329,7 @@ async function loadPromoteOrdersAndLines(input: {
     .map((row: any) => Number(row.id || 0))
     .filter((value) => Number.isFinite(value) && value > 0);
 
-  const { data: lines, error: linesError } = orderIds.length === 0
+  let linesRes = orderIds.length === 0
     ? { data: [] as PromoteLineRow[], error: null }
     : await svc
         .from('marketplace_intake_order_lines')
@@ -339,6 +340,7 @@ async function loadPromoteOrdersAndLines(input: {
           'quantity',
           'matched_entity_label',
           'detected_custom_id',
+          'normalized_sku',
           'mp_sku',
           'mapped_store_name',
           'raw_row',
@@ -347,6 +349,26 @@ async function loadPromoteOrdersAndLines(input: {
         .order('intake_order_id', { ascending: true })
         .order('line_index', { ascending: true });
 
+  if (linesRes.error && String(linesRes.error?.message || '').toLowerCase().includes('column')) {
+    linesRes = await svc
+      .from('marketplace_intake_order_lines')
+      .select([
+        'intake_order_id',
+        'line_index',
+        'mp_product_name',
+        'quantity',
+        'matched_entity_label',
+        'detected_custom_id',
+        'mp_sku',
+        'mapped_store_name',
+        'raw_row',
+      ].join(','))
+      .in('intake_order_id', orderIds)
+      .order('intake_order_id', { ascending: true })
+      .order('line_index', { ascending: true });
+  }
+
+  const { data: lines, error: linesError } = linesRes;
   if (linesError) throw linesError;
 
   const ordersByExternalId = new Map<string, PromoteOrderRow>();
@@ -491,6 +513,7 @@ async function replaceOrderLines(input: {
     const intakeLine = input.intakeLines[index] || null;
     const sku = cleanText(projectionRow.sku)
       || cleanText(intakeLine?.detected_custom_id)
+      || cleanText(intakeLine?.normalized_sku)
       || cleanText(intakeLine?.mp_sku);
     const quantity = parseInteger(projectionRow.quantity) || Number(intakeLine?.quantity || 0) || 1;
     const price = parseInteger(projectionRow.price);

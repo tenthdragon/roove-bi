@@ -292,6 +292,7 @@ type IntakeOrderCreateRow = {
 
 type IntakeLineCreateRow = {
   intake_order_id: number;
+  normalized_sku?: string | null;
   mp_sku: string | null;
   mp_product_name: string;
   mp_variation: string | null;
@@ -1824,7 +1825,7 @@ function buildCanonicalOrderFromMarketplaceIntake(
     const rawWeight = parseWeightGrams((line.raw_row || {})['Total Berat']) || parseWeightGrams((line.raw_row || {})['Berat Produk']);
     const weightGrams = rawWeight || null;
     return {
-      sku: cleanText(line.mp_sku),
+      sku: cleanText(line.normalized_sku || line.mp_sku),
       productName: cleanText(line.mp_product_name) || 'Produk Marketplace',
       variation: cleanText(line.mp_variation),
       quantity,
@@ -1921,10 +1922,11 @@ export async function importSingleMarketplaceIntakeOrder(input: {
     .single<IntakeOrderCreateRow>();
   if (orderError) throw orderError;
 
-  const { data: lineRows, error: lineError } = await svc
+  let lineRes: any = await svc
     .from('marketplace_intake_order_lines')
     .select(`
       intake_order_id,
+      normalized_sku,
       mp_sku,
       mp_product_name,
       mp_variation,
@@ -1937,6 +1939,25 @@ export async function importSingleMarketplaceIntakeOrder(input: {
     `)
     .eq('intake_order_id', intakeOrderId)
     .order('line_index', { ascending: true });
+  if (lineRes.error && String(lineRes.error?.message || '').toLowerCase().includes('column')) {
+    lineRes = await svc
+      .from('marketplace_intake_order_lines')
+      .select(`
+        intake_order_id,
+        mp_sku,
+        mp_product_name,
+        mp_variation,
+        quantity,
+        unit_price,
+        line_subtotal,
+        line_discount,
+        mp_price_after_discount,
+        raw_row
+      `)
+      .eq('intake_order_id', intakeOrderId)
+      .order('line_index', { ascending: true });
+  }
+  const { data: lineRows, error: lineError } = lineRes;
   if (lineError) throw lineError;
 
   const canonicalOrder = buildCanonicalOrderFromMarketplaceIntake(

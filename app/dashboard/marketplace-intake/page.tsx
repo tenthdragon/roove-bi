@@ -4,6 +4,8 @@
 import { useMemo, useState } from 'react';
 
 import MarketplaceIntakeManager from '@/components/MarketplaceIntakeManager';
+import MarketplaceStoreScopePanel from '@/components/MarketplaceStoreScopePanel';
+import MarketplaceSkuAliasPanel from '@/components/MarketplaceSkuAliasPanel';
 import MarketplaceWebhookQuarantinePanel from '@/components/MarketplaceWebhookQuarantinePanel';
 
 const subMenuStyle = {
@@ -29,6 +31,14 @@ export default function MarketplaceIntakePage() {
     quarantine: {
       title: 'Webhook Quarantine',
       helper: 'Inbox webhook marketplace yang ditahan agar tidak mengoverride source of truth dari Marketplace Intake.',
+    },
+    store_scope: {
+      title: 'Store Scope',
+      helper: 'Atur store mana saja di tiap business yang boleh dipakai sebagai destinasi atribusi sales untuk source marketplace tertentu.',
+    },
+    sku_alias: {
+      title: 'Resolver Rules',
+      helper: 'Pusatkan semua aturan resolver di sini: SKU normalization, entity binding, dan store override permanen untuk line marketplace.',
     },
   }), []);
 
@@ -65,6 +75,28 @@ export default function MarketplaceIntakePage() {
         >
           Webhook Quarantine
         </button>
+        <button
+          onClick={() => setSubMenu('store_scope')}
+          style={{
+            ...subMenuStyle,
+            background: subMenu === 'store_scope' ? 'rgba(14,165,233,0.14)' : 'var(--bg)',
+            color: subMenu === 'store_scope' ? '#7dd3fc' : 'var(--text-secondary)',
+            borderColor: subMenu === 'store_scope' ? 'rgba(14,165,233,0.28)' : 'var(--border)',
+          }}
+        >
+          Store Scope
+        </button>
+        <button
+          onClick={() => setSubMenu('sku_alias')}
+          style={{
+            ...subMenuStyle,
+            background: subMenu === 'sku_alias' ? 'rgba(34,197,94,0.14)' : 'var(--bg)',
+            color: subMenu === 'sku_alias' ? '#86efac' : 'var(--text-secondary)',
+            borderColor: subMenu === 'sku_alias' ? 'rgba(34,197,94,0.28)' : 'var(--border)',
+          }}
+        >
+          Resolver Rules
+        </button>
       </div>
 
       <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 18, maxWidth: 980, lineHeight: 1.6 }}>
@@ -75,8 +107,12 @@ export default function MarketplaceIntakePage() {
 
       {subMenu === 'workspace' ? (
         <MarketplaceIntakeManager />
-      ) : (
+      ) : subMenu === 'quarantine' ? (
         <MarketplaceWebhookQuarantinePanel />
+      ) : subMenu === 'store_scope' ? (
+        <MarketplaceStoreScopePanel />
+      ) : (
+        <MarketplaceSkuAliasPanel />
       )}
     </div>
   );

@@ -193,6 +193,64 @@ function SummaryCard({ label, value, tone = 'default', helper }) {
   );
 }
 
+function formatIssueDetailValues(values = [], fallback = '-') {
+  const cleaned = Array.from(new Set((values || []).map((value) => cleanText(value)).filter(Boolean)));
+  if (cleaned.length === 0) return fallback;
+  if (cleaned.length === 1) return cleaned[0];
+  if (cleaned.length <= 3) return cleaned.join(' • ');
+  return `${cleaned.slice(0, 3).join(' • ')} • +${fmtNumber(cleaned.length - 3)} lainnya`;
+}
+
+function describeIssueField(cluster, field) {
+  const hasSellerSku = Array.isArray(cluster.sellerSkus) && cluster.sellerSkus.length > 0;
+  const hasMpSku = Array.isArray(cluster.mpSkus) && cluster.mpSkus.length > 0;
+  const hasPlatformSkuId = Array.isArray(cluster.platformSkuIds) && cluster.platformSkuIds.length > 0;
+  const hasVariation = Array.isArray(cluster.variations) && cluster.variations.length > 0;
+  const hasEntity = Array.isArray(cluster.currentEntities) && cluster.currentEntities.length > 0;
+  const hasStore = Array.isArray(cluster.currentStores) && cluster.currentStores.length > 0;
+
+  if (field === 'sellerSku') {
+    if (hasSellerSku) return { text: formatIssueDetailValues(cluster.sellerSkus), tone: 'ok' };
+    if (hasPlatformSkuId || hasMpSku) return { text: 'Kosong, wajar karena matcher lain masih tersedia', tone: 'ok' };
+    return { text: 'Kosong, butuh matcher lain untuk dinormalisasi', tone: 'problem' };
+  }
+
+  if (field === 'mpSku') {
+    if (hasMpSku) return { text: formatIssueDetailValues(cluster.mpSkus), tone: 'ok' };
+    if (hasSellerSku || hasPlatformSkuId) return { text: 'Kosong, wajar karena matcher lain sudah tersedia', tone: 'ok' };
+    return { text: 'Kosong, butuh dibantu dari nama produk', tone: 'problem' };
+  }
+
+  if (field === 'platformSkuId') {
+    if (hasPlatformSkuId) return { text: formatIssueDetailValues(cluster.platformSkuIds), tone: 'ok' };
+    if (hasSellerSku || hasMpSku) return { text: 'Kosong, wajar karena matcher SKU lain sudah tersedia', tone: 'ok' };
+    return { text: 'Kosong, butuh matcher lain', tone: 'problem' };
+  }
+
+  if (field === 'variation') {
+    if (hasVariation) return { text: formatIssueDetailValues(cluster.variations), tone: 'ok' };
+    return { text: 'Kosong, wajar kalau produk ini memang tidak punya varian', tone: 'ok' };
+  }
+
+  if (field === 'entity') {
+    if (hasEntity) return { text: formatIssueDetailValues(cluster.currentEntities), tone: 'ok' };
+    return { text: 'Belum match, butuh dipilih', tone: 'problem' };
+  }
+
+  if (field === 'store') {
+    if (hasStore) return { text: formatIssueDetailValues(cluster.currentStores), tone: 'ok' };
+    return cluster.issueKind === 'store_attribution'
+      ? { text: 'Belum termapping, butuh dipilih', tone: 'problem' }
+      : { text: 'Belum termapping, akan mengikuti hasil bundle dan store attribusi', tone: 'problem' };
+  }
+
+  return { text: '-', tone: 'ok' };
+}
+
+function getIssueFieldToneColor(tone) {
+  return tone === 'problem' ? '#fca5a5' : '#86efac';
+}
+
 function ActionButton({ children, onClick, tone = 'default', disabled = false }) {
   const palette = tone === 'primary'
     ? { bg: '#2563eb', color: '#fff', border: '#2563eb' }
@@ -347,7 +405,15 @@ function DetailLineTable({ order }) {
             {(order.lines || []).map((line) => (
               <tr key={`${order.id}-${line.lineIndex}`}>
                 <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{line.lineIndex + 1}</td>
-                <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>{line.mpSku || '-'}</td>
+                <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
+                  <div>{line.rawSellerSku || line.mpSku || line.rawPlatformSkuId || '-'}</div>
+                  {line.normalizedSku && line.normalizedSku !== (line.rawSellerSku || line.mpSku || '') ? (
+                    <div style={{ marginTop: 4, color: '#93c5fd' }}>Normalized → {line.normalizedSku}</div>
+                  ) : null}
+                  {line.skuNormalizationReason ? (
+                    <div style={{ marginTop: 4, color: 'var(--dim)' }}>{line.skuNormalizationReason}</div>
+                  ) : null}
+                </td>
                 <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
                   {line.mpProductName}
                   {line.mpVariation ? ` / ${line.mpVariation}` : ''}
@@ -447,8 +513,10 @@ export default function MarketplaceIntakeManager() {
   const [scalevSendingBatchKey, setScalevSendingBatchKey] = useState('');
   const [scalevReconcilingBatchKey, setScalevReconcilingBatchKey] = useState('');
   const [appPromotingBatchKey, setAppPromotingBatchKey] = useState('');
+  const [savingResolverRuleKey, setSavingResolverRuleKey] = useState('');
+  const [savingInlineFixKey, setSavingInlineFixKey] = useState('');
   const [error, setError] = useState('');
-  const [, setMessage] = useState(null);
+  const [message, setMessage] = useState(null);
   const [preview, setPreview] = useState(null);
   const [search, setSearch] = useState('');
   const [issuesOnly, setIssuesOnly] = useState(false);
@@ -456,6 +524,12 @@ export default function MarketplaceIntakeManager() {
   const [expandedWorkspaceBatches, setExpandedWorkspaceBatches] = useState({});
   const [expandedWorkspaceOrders, setExpandedWorkspaceOrders] = useState({});
   const [manualSelections, setManualSelections] = useState({});
+  const [issueSelections, setIssueSelections] = useState({});
+  const [issueSearchQueries, setIssueSearchQueries] = useState({});
+  const [issueSearchResults, setIssueSearchResults] = useState({});
+  const [searchingIssueKey, setSearchingIssueKey] = useState('');
+  const [inlineFixOpen, setInlineFixOpen] = useState({});
+  const [inlineFixForms, setInlineFixForms] = useState({});
   const [lineSearchQueries, setLineSearchQueries] = useState({});
   const [lineSearchResults, setLineSearchResults] = useState({});
   const [searchingLineKey, setSearchingLineKey] = useState('');
@@ -466,6 +540,12 @@ export default function MarketplaceIntakeManager() {
   const [workspace, setWorkspace] = useState(null);
 
   const activeSource = useMemo(() => getMarketplaceIntakeSourceConfig(sourceKey), [sourceKey]);
+  const activeAllowedStores = useMemo(() => {
+    const previewStores = preview?.source?.sourceKey === sourceKey
+      ? (preview?.source?.allowedStores || []).filter(Boolean)
+      : [];
+    return previewStores.length > 0 ? previewStores : activeSource.allowedStores;
+  }, [activeSource.allowedStores, preview?.source?.allowedStores, preview?.source?.sourceKey, sourceKey]);
 
   function getLineKey(orderId, lineIndex) {
     return `${orderId}::${lineIndex}`;
@@ -493,6 +573,11 @@ export default function MarketplaceIntakeManager() {
     setExpandedWorkspaceBatches({});
     setExpandedWorkspaceOrders({});
     setManualSelections({});
+    setIssueSelections({});
+    setIssueSearchQueries({});
+    setIssueSearchResults({});
+    setInlineFixOpen({});
+    setInlineFixForms({});
     setLineSearchQueries({});
     setLineSearchResults({});
     setSearch('');
@@ -610,6 +695,141 @@ export default function MarketplaceIntakeManager() {
     });
   }, [manualSelections, preview]);
 
+  function getDefaultInlineFixNormalizedSku(line, candidate) {
+    const candidateCustomId = cleanText(candidate?.customId);
+    if (candidateCustomId) return candidateCustomId;
+
+    const effectiveCustomId = cleanText(line.effectiveCustomId);
+    if (effectiveCustomId && effectiveCustomId !== cleanText(line.rawPlatformSkuId)) return effectiveCustomId;
+
+    const rawSellerSku = cleanText(line.rawSellerSku);
+    if (rawSellerSku) return rawSellerSku;
+
+    const normalizedSku = cleanText(line.normalizedSku);
+    if (normalizedSku && normalizedSku !== cleanText(line.rawPlatformSkuId)) return normalizedSku;
+
+    return '';
+  }
+
+  function getDefaultInlineFixReason(line) {
+    return cleanText(line.skuNormalizationReason)
+      || (
+        line.rawPlatformSkuId
+          ? 'Seller SKU kosong atau tidak stabil; intake memakai platform SKU ID sebagai matcher normalisasi.'
+          : line.rawSellerSku
+            ? 'SKU marketplace perlu dinormalisasi ke SKU internal sebelum klasifikasi.'
+            : 'Seller SKU dan platform SKU ID kosong; intake memakai nama produk marketplace sebagai matcher normalisasi.'
+      );
+  }
+
+  function getInlineFixMatcherSummary(line) {
+    if (cleanText(line.rawPlatformSkuId)) {
+      return `Matcher utama: Platform SKU ID ${line.rawPlatformSkuId}`;
+    }
+    if (cleanText(line.rawSellerSku)) {
+      return `Matcher utama: Seller SKU ${line.rawSellerSku}`;
+    }
+    if (cleanText(line.mpSku)) {
+      return `Matcher utama: SKU marketplace ${line.mpSku}`;
+    }
+    if (cleanText(line.mpProductName)) {
+      return cleanText(line.mpVariation)
+        ? `Matcher utama: Nama produk + variation (${line.mpProductName} • ${line.mpVariation})`
+        : `Matcher utama: Nama produk (${line.mpProductName})`;
+    }
+    return 'Matcher utama akan mengikuti field mentah yang tersedia pada line ini.';
+  }
+
+  function getInlineFixMatcherPayload(line) {
+    if (cleanText(line.rawPlatformSkuId)) {
+      return {
+        rawPlatformSkuId: line.rawPlatformSkuId,
+        rawSellerSku: null,
+        rawProductName: null,
+        rawVariation: null,
+      };
+    }
+
+    if (cleanText(line.rawSellerSku)) {
+      return {
+        rawPlatformSkuId: null,
+        rawSellerSku: line.rawSellerSku,
+        rawProductName: null,
+        rawVariation: null,
+      };
+    }
+
+    if (cleanText(line.mpSku)) {
+      return {
+        rawPlatformSkuId: null,
+        rawSellerSku: line.mpSku,
+        rawProductName: null,
+        rawVariation: null,
+      };
+    }
+
+    return {
+      rawPlatformSkuId: null,
+      rawSellerSku: null,
+      rawProductName: line.mpProductName || null,
+      rawVariation: line.mpVariation || null,
+    };
+  }
+
+  function openInlineFixForLine(orderId, lineIndex, line, candidate) {
+    const lineKey = getLineKey(orderId, lineIndex);
+    setInlineFixOpen((current) => ({
+      ...current,
+      [lineKey]: true,
+    }));
+    setInlineFixForms((current) => ({
+      ...current,
+      [lineKey]: current[lineKey] || {
+        normalizedSku: getDefaultInlineFixNormalizedSku(line, candidate),
+        reason: getDefaultInlineFixReason(line),
+      },
+    }));
+  }
+
+  function closeInlineFixForLine(orderId, lineIndex) {
+    const lineKey = getLineKey(orderId, lineIndex);
+    setInlineFixOpen((current) => ({
+      ...current,
+      [lineKey]: false,
+    }));
+  }
+
+  function setInlineFixField(orderId, lineIndex, field, value) {
+    const lineKey = getLineKey(orderId, lineIndex);
+    setInlineFixForms((current) => ({
+      ...current,
+      [lineKey]: {
+        normalizedSku: current[lineKey]?.normalizedSku || '',
+        reason: current[lineKey]?.reason || '',
+        [field]: value,
+      },
+    }));
+  }
+
+  function updatePreviewLineLocally(orderId, lineIndex, updater) {
+    setPreview((current) => {
+      if (!current?.orders) return current;
+      return {
+        ...current,
+        orders: current.orders.map((order) => {
+          if (order.externalOrderId !== orderId) return order;
+          return {
+            ...order,
+            lines: (order.lines || []).map((line) => {
+              if (Number(line.lineIndex) !== Number(lineIndex)) return line;
+              return updater(line);
+            }),
+          };
+        }),
+      };
+    });
+  }
+
   const effectivePreviewSummary = useMemo(() => {
     const totalLines = effectivePreviewOrders.reduce((sum, order) => sum + Number(order.lineCount || 0), 0);
     const identifiedLines = effectivePreviewOrders.reduce((sum, order) => sum + Number(order.identifiedLineCount || 0), 0);
@@ -636,6 +856,152 @@ export default function MarketplaceIntakeManager() {
     };
   }, [effectivePreviewOrders]);
 
+  const issueClusters = useMemo(() => {
+    const clusters = new Map();
+
+    for (const order of effectivePreviewOrders) {
+      for (const line of order.lines || []) {
+        const meaningfulIssueCodes = (line.effectiveIssueCodes || []).filter((code) => code !== 'remembered_manual_match');
+        const needsReview = line.effectiveStatus !== 'identified' || meaningfulIssueCodes.length > 0;
+        if (!needsReview) continue;
+
+        const issueKind = line.effectiveStatus === 'not_identified'
+          ? 'entity_missing'
+          : 'store_attribution';
+
+        const matcherKind = cleanText(line.rawPlatformSkuId)
+          ? 'platform_sku_id'
+          : cleanText(line.rawSellerSku)
+            ? 'seller_sku'
+            : cleanText(line.mpSku)
+              ? 'marketplace_sku'
+              : 'product_name';
+
+        const matcherValue = cleanText(line.rawPlatformSkuId)
+          || cleanText(line.rawSellerSku)
+          || cleanText(line.mpSku)
+          || cleanText(line.mpProductName)
+          || 'unknown';
+
+        const issueKey = issueKind === 'entity_missing'
+          ? [
+            issueKind,
+            matcherKind,
+            cleanText(matcherValue).toLowerCase(),
+            cleanText(line.mpProductName).toLowerCase(),
+            cleanText(line.mpVariation).toLowerCase(),
+          ].join('::')
+          : [
+            issueKind,
+            cleanText(line.effectiveEntityLabel || line.matchedEntityLabel || line.effectiveCustomId || line.detectedCustomId || line.mpProductName).toLowerCase(),
+            cleanText(line.mpVariation).toLowerCase(),
+          ].join('::');
+
+        const existing = clusters.get(issueKey) || {
+          key: issueKey,
+          issueKind,
+          matcherKind,
+          matcherValue,
+          issueCodes: new Set(),
+          members: [],
+          orderIds: new Set(),
+          productNames: new Set(),
+          sellerSkus: new Set(),
+          mpSkus: new Set(),
+          platformSkuIds: new Set(),
+          variations: new Set(),
+          currentEntities: new Set(),
+          currentStores: new Set(),
+          amount: 0,
+          representativeOrder: order,
+          representativeLine: line,
+        };
+
+        existing.members.push({
+          orderId: order.externalOrderId,
+          order,
+          line,
+        });
+        existing.orderIds.add(order.externalOrderId);
+        if (cleanText(line.mpProductName)) existing.productNames.add(cleanText(line.mpProductName));
+        if (cleanText(line.rawSellerSku)) existing.sellerSkus.add(cleanText(line.rawSellerSku));
+        if (cleanText(line.mpSku)) existing.mpSkus.add(cleanText(line.mpSku));
+        if (cleanText(line.rawPlatformSkuId)) existing.platformSkuIds.add(cleanText(line.rawPlatformSkuId));
+        if (cleanText(line.mpVariation)) existing.variations.add(cleanText(line.mpVariation));
+        if (cleanText(line.effectiveEntityLabel || line.matchedEntityLabel)) existing.currentEntities.add(cleanText(line.effectiveEntityLabel || line.matchedEntityLabel));
+        if (cleanText(line.effectiveStoreName || line.mappedStoreName)) existing.currentStores.add(cleanText(line.effectiveStoreName || line.mappedStoreName));
+        existing.amount += Number(line.lineSubtotal || 0);
+        meaningfulIssueCodes.forEach((code) => existing.issueCodes.add(code));
+        clusters.set(issueKey, existing);
+      }
+    }
+
+    return Array.from(clusters.values())
+      .map((cluster) => {
+        const line = cluster.representativeLine;
+        let title = '';
+        let description = '';
+
+        if (cluster.issueKind === 'entity_missing') {
+          if (!cleanText(line.rawSellerSku) && !cleanText(line.rawPlatformSkuId)) {
+            title = 'Nama produk belum punya matcher SKU yang jelas';
+            description = `Saya hanya punya nama produk "${line.mpProductName}"${cleanText(line.mpVariation) ? ` dengan variation "${line.mpVariation}"` : ''}. Mau dipasangkan ke bundle apa ini?`;
+          } else if (!cleanText(line.rawSellerSku) && cleanText(line.rawPlatformSkuId)) {
+            title = 'Seller SKU kosong, tinggal Platform SKU ID';
+            description = `Saya hanya menemukan Platform SKU ID "${line.rawPlatformSkuId}" untuk "${line.mpProductName}". Mau dinormalisasi ke SKU internal apa dan dipasangkan ke bundle apa?`;
+          } else {
+            title = 'Matcher intake belum terhubung ke bundle';
+            description = `Matcher "${cluster.matcherValue}" untuk "${line.mpProductName}" belum bisa saya sambungkan ke bundle internal. Mau dipasangkan ke bundle apa?`;
+          }
+        } else {
+          title = 'Bundle sudah ketemu, store sales belum jelas';
+          description = `Saya sudah ketemu bundle "${line.effectiveEntityLabel || line.matchedEntityLabel || line.mpProductName}", tapi sales order-nya belum tahu harus diatribusikan ke store mana. Mau masuk ke store apa?`;
+        }
+
+        return {
+          ...cluster,
+          issueCodes: Array.from(cluster.issueCodes),
+          productNames: Array.from(cluster.productNames),
+          sellerSkus: Array.from(cluster.sellerSkus),
+          mpSkus: Array.from(cluster.mpSkus),
+          platformSkuIds: Array.from(cluster.platformSkuIds),
+          variations: Array.from(cluster.variations),
+          currentEntities: Array.from(cluster.currentEntities),
+          currentStores: Array.from(cluster.currentStores),
+          lineCount: cluster.members.length,
+          orderCount: cluster.orderIds.size,
+          title,
+          description,
+        };
+      })
+      .sort((left, right) => {
+        if (right.lineCount !== left.lineCount) return right.lineCount - left.lineCount;
+        return right.amount - left.amount;
+      });
+  }, [effectivePreviewOrders]);
+
+  const visibleIssueClusters = useMemo(() => {
+    const query = cleanText(search).toLowerCase();
+    return issueClusters.filter((cluster) => {
+      if (!query) return true;
+      const haystack = [
+        cluster.matcherValue,
+        cluster.representativeLine?.mpProductName,
+        cluster.representativeLine?.mpVariation,
+        cluster.representativeLine?.effectiveEntityLabel,
+        ...(cluster.issueCodes || []),
+        ...(cluster.productNames || []),
+        ...(cluster.sellerSkus || []),
+        ...(cluster.mpSkus || []),
+        ...(cluster.platformSkuIds || []),
+        ...(cluster.currentEntities || []),
+        ...(cluster.currentStores || []),
+        ...cluster.members.map((member) => member.orderId),
+      ].join(' ').toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [issueClusters, search]);
+
   const visibleOrders = useMemo(() => {
     if (!effectivePreviewOrders.length) return [];
     const query = String(search || '').trim().toLowerCase();
@@ -657,6 +1023,79 @@ export default function MarketplaceIntakeManager() {
       return haystack.includes(query);
     });
   }, [effectivePreviewOrders, issuesOnly, search]);
+
+  const sharedIssueCandidates = useMemo(() => {
+    const rememberedCandidates = Object.values(manualSelections || {}).filter(Boolean);
+    const clusterSelections = Object.values(issueSelections || {}).filter(Boolean);
+    const previewCandidates = effectivePreviewOrders.flatMap((order) => (
+      (order.lines || []).flatMap((line) => [
+        line.selectedCandidate,
+        line.selectedSuggestion,
+      ].filter(Boolean))
+    ));
+
+    return Array.from(
+      new Map(
+        [
+          ...rememberedCandidates,
+          ...clusterSelections,
+          ...previewCandidates,
+        ].map((candidate) => [candidate.entityKey, candidate]),
+      ).values(),
+    );
+  }, [effectivePreviewOrders, issueSelections, manualSelections]);
+
+  function getIssueSelectedCandidate(cluster) {
+    return issueSelections[cluster.key]
+      || cluster.representativeLine.selectedCandidate
+      || cluster.representativeLine.selectedSuggestion
+      || null;
+  }
+
+  function getIssueCandidateOptions(cluster) {
+    const issueSearchEntries = issueSearchResults[cluster.key] || [];
+    return Array.from(
+      new Map(
+        [
+          ...sharedIssueCandidates,
+          ...cluster.members.flatMap((member) => member.line.suggestionCandidates || []),
+          ...issueSearchEntries,
+        ].map((candidate) => [candidate.entityKey, candidate]),
+      ).values(),
+    );
+  }
+
+  function setIssueSelection(clusterKey, candidate) {
+    setIssueSelections((current) => ({
+      ...current,
+      [clusterKey]: candidate,
+    }));
+  }
+
+  async function handleSearchIssueBundles(cluster) {
+    const clusterKey = cluster.key;
+    const query = String(issueSearchQueries[clusterKey] || '').trim();
+    if (query.length < 2) return;
+
+    setSearchingIssueKey(clusterKey);
+    try {
+      const requestUrl = `/api/marketplace-intake/search-bundles?q=${encodeURIComponent(query)}&sourceKey=${encodeURIComponent(sourceKey)}`;
+      const res = await fetch(requestUrl);
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal mencari bundle untuk issue ini.');
+      }
+      setIssueSearchResults((current) => ({
+        ...current,
+        [clusterKey]: data.results || [],
+      }));
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || 'Gagal mencari bundle untuk issue ini.');
+    } finally {
+      setSearchingIssueKey('');
+    }
+  }
 
   const unresolvedSelectionCount = useMemo(() => {
     return effectivePreviewSummary.unidentifiedLines;
@@ -753,6 +1192,11 @@ export default function MarketplaceIntakeManager() {
       setSearch('');
       setIssuesOnly(Boolean(data.summary?.needsReviewOrders));
       setManualSelections(initialSelections);
+      setIssueSelections({});
+      setIssueSearchQueries({});
+      setIssueSearchResults({});
+      setInlineFixOpen({});
+      setInlineFixForms({});
       setLineSearchQueries({});
       setLineSearchResults({});
       setMessage({
@@ -800,6 +1244,11 @@ export default function MarketplaceIntakeManager() {
       setPreview(null);
       setExpandedPreviewOrders({});
       setManualSelections({});
+      setIssueSelections({});
+      setIssueSearchQueries({});
+      setIssueSearchResults({});
+      setInlineFixOpen({});
+      setInlineFixForms({});
       setLineSearchQueries({});
       setLineSearchResults({});
       setSearch('');
@@ -869,6 +1318,317 @@ export default function MarketplaceIntakeManager() {
       setError(err?.message || 'Gagal mencari bundle.');
     } finally {
       setSearchingLineKey('');
+    }
+  }
+
+  async function handleSaveResolverRule(order, line) {
+    const lineKey = getLineKey(order.externalOrderId, line.lineIndex);
+    const candidate = manualSelections[lineKey] || line.selectedCandidate || line.selectedSuggestion || null;
+    if (!candidate?.entityKey || !Number(candidate?.scalevBundleId || 0)) return;
+
+    setSavingResolverRuleKey(lineKey);
+    setError('');
+    setWorkspaceError('');
+    setMessage(null);
+
+    try {
+      const res = await fetch('/api/marketplace-intake/manual-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceKey,
+          mpSku: line.normalizedSku || line.mpSku || null,
+          mpProductName: line.mpProductName,
+          mpVariation: line.mpVariation || null,
+          targetEntityKey: candidate.entityKey,
+          targetEntityLabel: candidate.entityLabel,
+          targetCustomId: candidate.customId || line.effectiveCustomId || null,
+          scalevBundleId: Number(candidate.scalevBundleId || 0),
+          mappedStoreName: candidate.storeName || line.effectiveStoreName || null,
+          isActive: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Gagal menyimpan rule resolver.');
+      }
+
+      setManualSelection(order.externalOrderId, line.lineIndex, {
+        ...candidate,
+        customId: data?.item?.targetCustomId || candidate.customId || null,
+        storeName: data?.item?.mappedStoreName || candidate.storeName || null,
+        classifierLabel: data?.item?.mappedStoreName
+          ? 'Resolver rule tersimpan'
+          : candidate.classifierLabel || 'Resolver rule tersimpan',
+        source: 'manual',
+      });
+      setMessage({
+        type: 'success',
+        text: `Rule permanen tersimpan untuk "${line.mpProductName}". Line serupa sekarang bisa dipetakan lagi dari tab Resolver Rules.`,
+      });
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || 'Gagal menyimpan rule resolver.');
+    } finally {
+      setSavingResolverRuleKey('');
+    }
+  }
+
+  async function handleApplyInlineFix(order, line) {
+    const lineKey = getLineKey(order.externalOrderId, line.lineIndex);
+    const candidate = manualSelections[lineKey] || line.selectedCandidate || line.selectedSuggestion || null;
+    const form = inlineFixForms[lineKey] || {};
+    const normalizedSku = cleanText(form.normalizedSku) || cleanText(candidate?.customId) || cleanText(line.effectiveCustomId);
+    const reason = cleanText(form.reason) || getDefaultInlineFixReason(line);
+
+    if (!candidate?.entityKey || !Number(candidate?.scalevBundleId || 0)) {
+      setError('Pilih entity Scalev dulu sebelum menyimpan perbaikan inline.');
+      return;
+    }
+    if (!candidate?.storeName) {
+      setError('Pilih store atribusi dulu sebelum menyimpan perbaikan inline.');
+      return;
+    }
+    if (!normalizedSku) {
+      setError('Normalized SKU wajib diisi untuk menyimpan perbaikan inline.');
+      return;
+    }
+
+    setSavingInlineFixKey(lineKey);
+    setError('');
+    setWorkspaceError('');
+    setMessage(null);
+
+    try {
+      const matcherPayload = getInlineFixMatcherPayload(line);
+      const shouldSaveAlias = Boolean(
+        matcherPayload.rawPlatformSkuId
+        || matcherPayload.rawSellerSku
+        || matcherPayload.rawProductName
+      ) && (
+        !cleanText(line.normalizedSku)
+        || cleanText(line.normalizedSku) !== normalizedSku
+        || (line.effectiveIssueCodes || []).includes('custom_id_not_found')
+        || (line.effectiveIssueCodes || []).includes('custom_id_ambiguous')
+      );
+
+      if (shouldSaveAlias) {
+        const aliasRes = await fetch('/api/marketplace-intake/sku-aliases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceKey,
+            normalizedSku,
+            reason,
+            isActive: true,
+            ...matcherPayload,
+          }),
+        });
+        const aliasData = await aliasRes.json();
+        if (!aliasRes.ok) {
+          throw new Error(aliasData.error || 'Gagal menyimpan SKU normalization inline.');
+        }
+      }
+
+      const ruleRes = await fetch('/api/marketplace-intake/manual-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceKey,
+          mpSku: normalizedSku,
+          mpProductName: line.mpProductName,
+          mpVariation: line.mpVariation || null,
+          targetEntityKey: candidate.entityKey,
+          targetEntityLabel: candidate.entityLabel,
+          targetCustomId: candidate.customId || normalizedSku,
+          scalevBundleId: Number(candidate.scalevBundleId || 0),
+          mappedStoreName: candidate.storeName || null,
+          isActive: true,
+        }),
+      });
+      const ruleData = await ruleRes.json();
+      if (!ruleRes.ok) {
+        throw new Error(ruleData.error || 'Gagal menyimpan rule entity/store inline.');
+      }
+
+      setManualSelection(order.externalOrderId, line.lineIndex, {
+        ...candidate,
+        customId: ruleData?.item?.targetCustomId || candidate.customId || normalizedSku,
+        storeName: ruleData?.item?.mappedStoreName || candidate.storeName || null,
+        classifierLabel: 'Inline fix tersimpan',
+        source: 'manual',
+      });
+
+      updatePreviewLineLocally(order.externalOrderId, line.lineIndex, (currentLine) => ({
+        ...currentLine,
+        normalizedSku,
+        skuNormalizationSource: shouldSaveAlias
+          ? (
+            matcherPayload.rawPlatformSkuId
+              ? 'platform_sku_alias'
+              : matcherPayload.rawSellerSku
+                ? 'seller_sku_alias'
+                : 'product_name_alias'
+          )
+          : (currentLine.skuNormalizationSource || 'manual_inline_fix'),
+        skuNormalizationReason: reason,
+      }));
+
+      setInlineFixOpen((current) => ({
+        ...current,
+        [lineKey]: false,
+      }));
+      setMessage({
+        type: 'success',
+        text: `Perbaikan inline tersimpan untuk "${line.mpProductName}". SKU normalization dan atribusi entity/store sekarang tersimpan permanen.`,
+      });
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || 'Gagal menyimpan perbaikan inline.');
+    } finally {
+      setSavingInlineFixKey('');
+    }
+  }
+
+  async function handleResolveIssueCluster(cluster) {
+    const clusterKey = cluster.key;
+    const representativeLine = cluster.representativeLine;
+    const issueFormKey = getLineKey(cluster.representativeOrder.externalOrderId, representativeLine.lineIndex);
+    const candidate = getIssueSelectedCandidate(cluster);
+    const form = inlineFixForms[issueFormKey] || {};
+    const normalizedSku = cleanText(form.normalizedSku) || getDefaultInlineFixNormalizedSku(representativeLine, candidate);
+    const reason = cleanText(form.reason) || getDefaultInlineFixReason(representativeLine);
+
+    if (!candidate?.entityKey || !Number(candidate?.scalevBundleId || 0)) {
+      setError('Pilih bundle/entity dulu untuk menyelesaikan isu ini.');
+      return;
+    }
+    if (!candidate?.storeName) {
+      setError('Pilih store atribusi dulu untuk menyelesaikan isu ini.');
+      return;
+    }
+    if (cluster.issueKind === 'entity_missing' && !normalizedSku) {
+      setError('Normalized SKU wajib diisi untuk isu yang belum punya matcher entity.');
+      return;
+    }
+
+    setSavingInlineFixKey(clusterKey);
+    setError('');
+    setWorkspaceError('');
+    setMessage(null);
+
+    try {
+      const matcherPayload = getInlineFixMatcherPayload(representativeLine);
+      const shouldSaveAlias = cluster.issueKind === 'entity_missing'
+        && Boolean(
+          matcherPayload.rawPlatformSkuId
+          || matcherPayload.rawSellerSku
+          || matcherPayload.rawProductName,
+        );
+
+      if (shouldSaveAlias) {
+        const aliasRes = await fetch('/api/marketplace-intake/sku-aliases', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sourceKey,
+            normalizedSku,
+            reason,
+            isActive: true,
+            ...matcherPayload,
+          }),
+        });
+        const aliasData = await aliasRes.json();
+        if (!aliasRes.ok) {
+          throw new Error(aliasData.error || 'Gagal menyimpan SKU normalization untuk isu ini.');
+        }
+      }
+
+      const ruleRes = await fetch('/api/marketplace-intake/manual-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceKey,
+          mpSku: normalizedSku || representativeLine.normalizedSku || representativeLine.mpSku || null,
+          mpProductName: representativeLine.mpProductName,
+          mpVariation: representativeLine.mpVariation || null,
+          targetEntityKey: candidate.entityKey,
+          targetEntityLabel: candidate.entityLabel,
+          targetCustomId: candidate.customId || normalizedSku || representativeLine.effectiveCustomId || null,
+          scalevBundleId: Number(candidate.scalevBundleId || 0),
+          mappedStoreName: candidate.storeName || null,
+          isActive: true,
+        }),
+      });
+      const ruleData = await ruleRes.json();
+      if (!ruleRes.ok) {
+        throw new Error(ruleData.error || 'Gagal menyimpan rule entity/store untuk isu ini.');
+      }
+
+      setManualSelections((current) => {
+        const next = { ...current };
+        for (const member of cluster.members) {
+          next[getLineKey(member.orderId, member.line.lineIndex)] = {
+            ...candidate,
+            customId: ruleData?.item?.targetCustomId || candidate.customId || normalizedSku || null,
+            storeName: ruleData?.item?.mappedStoreName || candidate.storeName || null,
+            classifierLabel: 'Rule issue tersimpan',
+            source: 'manual',
+          };
+        }
+        return next;
+      });
+
+      setIssueSelections((current) => {
+        const next = { ...current };
+        delete next[clusterKey];
+        return next;
+      });
+      setIssueSearchQueries((current) => {
+        const next = { ...current };
+        delete next[clusterKey];
+        return next;
+      });
+      setIssueSearchResults((current) => {
+        const next = { ...current };
+        delete next[clusterKey];
+        return next;
+      });
+      setInlineFixOpen((current) => {
+        const next = { ...current };
+        delete next[clusterKey];
+        return next;
+      });
+      setInlineFixForms((current) => {
+        const next = { ...current };
+        delete next[issueFormKey];
+        return next;
+      });
+
+      updatePreviewLineLocally(cluster.representativeOrder.externalOrderId, representativeLine.lineIndex, (line) => ({
+        ...line,
+        normalizedSku: normalizedSku || line.normalizedSku,
+        skuNormalizationSource: shouldSaveAlias
+          ? (
+            matcherPayload.rawPlatformSkuId
+              ? 'platform_sku_alias'
+              : matcherPayload.rawSellerSku
+                ? 'seller_sku_alias'
+                : 'product_name_alias'
+          )
+          : (line.skuNormalizationSource || 'issue_resolver'),
+        skuNormalizationReason: reason || line.skuNormalizationReason,
+      }));
+
+      setMessage({
+        type: 'success',
+        text: `Isu "${cluster.title}" tersimpan. ${fmtNumber(cluster.lineCount)} line di ${fmtNumber(cluster.orderCount)} order sekarang memakai rule yang sama.`,
+      });
+    } catch (err) {
+      console.error(err);
+      setError(err?.message || 'Gagal menyimpan penyelesaian isu.');
+    } finally {
+      setSavingInlineFixKey('');
     }
   }
 
@@ -1082,6 +1842,22 @@ export default function MarketplaceIntakeManager() {
           </div>
         ) : null}
 
+        {message?.text ? (
+          <div
+            style={{
+              marginBottom: 12,
+              padding: '10px 12px',
+              borderRadius: 10,
+              fontSize: 13,
+              background: message.type === 'success' ? 'rgba(34,197,94,0.12)' : 'rgba(148,163,184,0.12)',
+              color: message.type === 'success' ? '#86efac' : 'var(--text-secondary)',
+              border: `1px solid ${message.type === 'success' ? 'rgba(34,197,94,0.24)' : 'var(--border)'}`,
+            }}
+          >
+            {message.text}
+          </div>
+        ) : null}
+
         <input
           ref={inputRef}
           type="file"
@@ -1179,7 +1955,7 @@ export default function MarketplaceIntakeManager() {
                 <input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Cari order, SKU, store, atau issue…"
+                  placeholder="Cari issue, matcher, bundle, store, atau order…"
                   style={{
                     minWidth: 260,
                     padding: '9px 12px',
@@ -1191,12 +1967,6 @@ export default function MarketplaceIntakeManager() {
                     outline: 'none',
                   }}
                 />
-                <ActionButton
-                  onClick={() => setIssuesOnly((value) => !value)}
-                  tone={issuesOnly ? 'warn' : 'default'}
-                >
-                  {issuesOnly ? 'Menampilkan Issue Saja' : 'Filter Issue'}
-                </ActionButton>
               </div>
             </div>
 
@@ -1216,7 +1986,286 @@ export default function MarketplaceIntakeManager() {
               </div>
             ) : null}
 
-            <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 12 }}>
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  background: 'var(--bg)',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(280px, 1.3fr) minmax(220px, 1fr) minmax(220px, 1fr) 120px 110px',
+                    gap: 0,
+                    padding: '10px 12px',
+                    fontSize: 11,
+                    fontWeight: 800,
+                    color: 'var(--dim)',
+                    background: 'var(--bg)',
+                    borderBottom: '1px solid var(--border)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  <div>Issue</div>
+                  <div>Matcher Intake</div>
+                  <div>Penyelesaian</div>
+                  <div>Dampak</div>
+                  <div>Aksi</div>
+                </div>
+
+                {visibleIssueClusters.map((cluster) => {
+                  const candidate = getIssueSelectedCandidate(cluster);
+                  const candidateOptions = getIssueCandidateOptions(cluster);
+                  const issueFormKey = getLineKey(cluster.representativeOrder.externalOrderId, cluster.representativeLine.lineIndex);
+                  const issueForm = inlineFixForms[issueFormKey] || {};
+                  const normalizedSku = issueForm.normalizedSku || getDefaultInlineFixNormalizedSku(cluster.representativeLine, candidate);
+                  const reason = issueForm.reason || getDefaultInlineFixReason(cluster.representativeLine);
+                  const productMeta = Array.isArray(cluster.productNames) && cluster.productNames.length > 0
+                    ? { text: formatIssueDetailValues(cluster.productNames), tone: 'ok' }
+                    : { text: 'Kosong, butuh dibaca dari file marketplace', tone: 'problem' };
+                  const sellerSkuMeta = describeIssueField(cluster, 'sellerSku');
+                  const mpSkuMeta = describeIssueField(cluster, 'mpSku');
+                  const platformSkuIdMeta = describeIssueField(cluster, 'platformSkuId');
+                  const variationMeta = describeIssueField(cluster, 'variation');
+                  const entityMeta = describeIssueField(cluster, 'entity');
+                  const storeMeta = describeIssueField(cluster, 'store');
+                  const storeOptions = candidate?.storeCandidates?.length
+                    ? candidate.storeCandidates
+                    : candidate?.storeName
+                      ? [candidate.storeName, ...activeAllowedStores.filter((storeName) => storeName !== candidate.storeName)]
+                      : activeAllowedStores;
+                  const canSaveIssue = Boolean(
+                    candidate?.entityKey
+                    && Number(candidate?.scalevBundleId || 0) > 0
+                    && candidate?.storeName
+                    && (cluster.issueKind !== 'entity_missing' || cleanText(normalizedSku))
+                  );
+
+                  return (
+                    <div
+                      key={cluster.key}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(280px, 1.3fr) minmax(220px, 1fr) minmax(220px, 1fr) 120px 110px',
+                        gap: 0,
+                        padding: '14px 12px',
+                        borderBottom: '1px solid var(--border)',
+                        alignItems: 'start',
+                      }}
+                    >
+                      <div style={{ display: 'grid', gap: 8, paddingRight: 12 }}>
+                        <div
+                          style={{
+                            display: 'grid',
+                            gap: 6,
+                            padding: 10,
+                            borderRadius: 10,
+                            border: '1px solid var(--border)',
+                            background: 'rgba(148,163,184,0.06)',
+                          }}
+                        >
+                          <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+                            <strong style={{ color: 'var(--text-secondary)' }}>Produk MP:</strong>{' '}
+                            <span style={{ color: getIssueFieldToneColor(productMeta.tone) }}>{productMeta.text}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+                            <strong style={{ color: 'var(--text-secondary)' }}>Seller SKU:</strong>{' '}
+                            <span style={{ color: getIssueFieldToneColor(sellerSkuMeta.tone) }}>{sellerSkuMeta.text}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+                            <strong style={{ color: 'var(--text-secondary)' }}>SKU MP:</strong>{' '}
+                            <span style={{ color: getIssueFieldToneColor(mpSkuMeta.tone) }}>{mpSkuMeta.text}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+                            <strong style={{ color: 'var(--text-secondary)' }}>Platform SKU ID:</strong>{' '}
+                            <span style={{ color: getIssueFieldToneColor(platformSkuIdMeta.tone) }}>{platformSkuIdMeta.text}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+                            <strong style={{ color: 'var(--text-secondary)' }}>Variation:</strong>{' '}
+                            <span style={{ color: getIssueFieldToneColor(variationMeta.tone) }}>{variationMeta.text}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+                            <strong style={{ color: 'var(--text-secondary)' }}>Bundle saat ini:</strong>{' '}
+                            <span style={{ color: getIssueFieldToneColor(entityMeta.tone) }}>{entityMeta.text}</span>
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+                            <strong style={{ color: 'var(--text-secondary)' }}>Store atribusi saat ini:</strong>{' '}
+                            <span style={{ color: getIssueFieldToneColor(storeMeta.tone) }}>{storeMeta.text}</span>
+                          </div>
+                        </div>
+                        <details style={{ marginTop: 4 }}>
+                          <summary style={{ cursor: 'pointer', fontSize: 12, color: '#93c5fd' }}>
+                            Lihat order yang terdampak ({fmtNumber(cluster.orderCount)} order)
+                          </summary>
+                          <div style={{ marginTop: 8, fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
+                            {cluster.members.slice(0, 8).map((member) => member.orderId).join(', ')}
+                            {cluster.members.length > 8 ? `, +${fmtNumber(cluster.members.length - 8)} lainnya` : ''}
+                          </div>
+                        </details>
+                      </div>
+
+                      <div style={{ display: 'grid', gap: 8, paddingRight: 12 }}>
+                        <div style={{ fontSize: 12, fontWeight: 700 }}>{getInlineFixMatcherSummary(cluster.representativeLine)}</div>
+                        {cluster.issueKind === 'entity_missing' ? (
+                          <>
+                            <input
+                              value={normalizedSku}
+                              onChange={(event) => setInlineFixField(cluster.representativeOrder.externalOrderId, cluster.representativeLine.lineIndex, 'normalizedSku', event.target.value)}
+                              placeholder="Normalized SKU"
+                              style={{
+                                width: '100%',
+                                padding: '8px 10px',
+                                borderRadius: 8,
+                                border: '1px solid var(--border)',
+                                background: 'var(--card)',
+                                color: 'var(--text)',
+                                fontSize: 12,
+                                outline: 'none',
+                              }}
+                            />
+                            <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
+                              Catatan otomatis: {reason}
+                            </div>
+                          </>
+                        ) : (
+                          <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
+                            Bundle sudah ketemu. Yang perlu Anda tentukan tinggal store attribusinya.
+                          </div>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'grid', gap: 8, paddingRight: 12 }}>
+                        <select
+                          value={candidate?.entityKey || ''}
+                          onChange={(event) => {
+                            const nextCandidate = candidateOptions.find((item) => item.entityKey === event.target.value);
+                            if (!nextCandidate) return;
+                            setIssueSelection(cluster.key, nextCandidate);
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            border: '1px solid var(--border)',
+                            background: 'var(--card)',
+                            color: 'var(--text)',
+                            fontSize: 12,
+                            outline: 'none',
+                          }}
+                        >
+                          <option value="">Pilih bundle/entity…</option>
+                          {candidateOptions.map((item) => (
+                            <option key={`${cluster.key}-${item.entityKey}`} value={item.entityKey}>
+                              {item.customId || item.entityLabel}
+                            </option>
+                          ))}
+                        </select>
+
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          <input
+                            value={issueSearchQueries[cluster.key] || ''}
+                            onChange={(event) => setIssueSearchQueries((current) => ({
+                              ...current,
+                              [cluster.key]: event.target.value,
+                            }))}
+                            placeholder={activeSource.searchPlaceholder}
+                            style={{
+                              width: '100%',
+                              padding: '8px 10px',
+                              borderRadius: 8,
+                              border: '1px solid var(--border)',
+                              background: 'var(--card)',
+                              color: 'var(--text)',
+                              fontSize: 12,
+                              outline: 'none',
+                            }}
+                          />
+                          <ActionButton onClick={() => handleSearchIssueBundles(cluster)}>
+                            {searchingIssueKey === cluster.key ? '...' : 'Cari'}
+                          </ActionButton>
+                        </div>
+
+                        <select
+                          value={candidate?.storeName || ''}
+                          onChange={(event) => {
+                            const nextStoreName = String(event.target.value || '');
+                            if (!candidate || !nextStoreName) return;
+                            setIssueSelection(cluster.key, {
+                              ...candidate,
+                              storeName: nextStoreName,
+                              classifierLabel: 'Manual store attribution',
+                            });
+                          }}
+                          style={{
+                            width: '100%',
+                            padding: '8px 10px',
+                            borderRadius: 8,
+                            border: '1px solid var(--border)',
+                            background: 'var(--card)',
+                            color: 'var(--text)',
+                            fontSize: 12,
+                            outline: 'none',
+                          }}
+                        >
+                          <option value="">Pilih store atribusi…</option>
+                          {storeOptions.map((storeName) => (
+                            <option key={`${cluster.key}-store-${storeName}`} value={storeName}>
+                              {storeName}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div style={{ display: 'grid', gap: 4 }}>
+                        <div style={{ fontWeight: 800 }}>{fmtNumber(cluster.lineCount)} line</div>
+                        <div style={{ fontSize: 12, color: 'var(--dim)' }}>{fmtNumber(cluster.orderCount)} order</div>
+                        <div style={{ fontSize: 12, color: 'var(--dim)' }}>{fmtCurrency(cluster.amount)}</div>
+                      </div>
+
+                      <div style={{ display: 'grid', gap: 8 }}>
+                        <ActionButton
+                          onClick={() => handleResolveIssueCluster(cluster)}
+                          tone="primary"
+                          disabled={!canSaveIssue || savingInlineFixKey === cluster.key}
+                        >
+                          {savingInlineFixKey === cluster.key ? 'Menyimpan…' : 'Simpan'}
+                        </ActionButton>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {visibleIssueClusters.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: 'center', color: 'var(--dim)', fontSize: 13 }}>
+                    Tidak ada issue yang cocok dengan filter saat ini.
+                  </div>
+                ) : null}
+              </div>
+
+              <details
+                style={{
+                  border: '1px solid var(--border)',
+                  borderRadius: 12,
+                  overflow: 'hidden',
+                  background: 'var(--bg)',
+                }}
+              >
+                <summary
+                  style={{
+                    cursor: 'pointer',
+                    padding: '12px 14px',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    background: 'rgba(148,163,184,0.06)',
+                  }}
+                >
+                  Lihat detail per order
+                </summary>
+                <div style={{ overflowX: 'auto', borderTop: '1px solid var(--border)' }}>
               <div style={{ minWidth: 1080 }}>
                 <div
                   style={{
@@ -1300,7 +2349,7 @@ export default function MarketplaceIntakeManager() {
                                 borderBottom: '1px solid var(--border)',
                               }}
                             >
-                              <div>Custom ID / SKU</div>
+                              <div>SKU MP</div>
                               <div>Produk MP</div>
                               <div>Entity Scalev</div>
                               <div>Store Mapping</div>
@@ -1311,6 +2360,24 @@ export default function MarketplaceIntakeManager() {
                               {(order.lines || []).map((line) => {
                               const lineKey = getLineKey(order.externalOrderId, line.lineIndex);
                               const selectedCandidate = line.selectedCandidate || null;
+                              const manualSelectedCandidate = manualSelections[lineKey] || null;
+                              const persistCandidate = manualSelectedCandidate || (line.lineStatus !== 'identified' ? selectedCandidate : null);
+                              const inlineFixCandidate = manualSelectedCandidate || selectedCandidate || line.selectedSuggestion || null;
+                              const inlineFixState = inlineFixForms[lineKey] || {};
+                              const inlineFixNormalizedSku = inlineFixState.normalizedSku || getDefaultInlineFixNormalizedSku(line, inlineFixCandidate);
+                              const inlineFixReason = inlineFixState.reason || getDefaultInlineFixReason(line);
+                              const inlineFixEnabled = Boolean(
+                                cleanText(inlineFixNormalizedSku)
+                                && inlineFixCandidate?.entityKey
+                                && Number(inlineFixCandidate?.scalevBundleId || 0) > 0
+                                && inlineFixCandidate?.storeName,
+                              );
+                              const shouldShowInlineFix = line.effectiveStatus !== 'identified'
+                                || (line.effectiveIssueCodes || []).some((code) => code !== 'remembered_manual_match');
+                              const canPersistResolverRule = Boolean(
+                                persistCandidate?.entityKey
+                                && Number(persistCandidate?.scalevBundleId || 0) > 0,
+                              );
                               const searchResults = lineSearchResults[lineKey] || [];
                               const entityOptions = Array.from(
                                 new Map(
@@ -1331,7 +2398,24 @@ export default function MarketplaceIntakeManager() {
                                   }}
                                 >
                                   <div>
-                                    <div style={{ fontWeight: 700 }}>{line.detectedCustomId || 'Kosong'}</div>
+                                    <div style={{ fontWeight: 700 }}>
+                                      {line.rawSellerSku || line.mpSku || line.rawPlatformSkuId || 'Kosong'}
+                                    </div>
+                                    {line.normalizedSku && line.normalizedSku !== (line.rawSellerSku || line.mpSku || '') ? (
+                                      <div style={{ marginTop: 4, fontSize: 12, color: '#93c5fd' }}>
+                                        Normalized → {line.normalizedSku}
+                                      </div>
+                                    ) : null}
+                                    {line.skuNormalizationReason ? (
+                                      <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>
+                                        {line.skuNormalizationReason}
+                                      </div>
+                                    ) : null}
+                                    {!line.rawSellerSku && line.rawPlatformSkuId ? (
+                                      <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>
+                                        SKU ID: {line.rawPlatformSkuId}
+                                      </div>
+                                    ) : null}
                                     {line.mpVariation ? (
                                       <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>{line.mpVariation}</div>
                                     ) : null}
@@ -1456,6 +2540,103 @@ export default function MarketplaceIntakeManager() {
                                         </select>
                                       </div>
                                     ) : null}
+                                    {shouldShowInlineFix ? (
+                                      <div style={{ marginTop: 10, display: 'grid', gap: 6 }}>
+                                        <ActionButton
+                                          onClick={() => {
+                                            if (inlineFixOpen[lineKey]) {
+                                              closeInlineFixForLine(order.externalOrderId, line.lineIndex);
+                                              return;
+                                            }
+                                            openInlineFixForLine(order.externalOrderId, line.lineIndex, line, inlineFixCandidate);
+                                          }}
+                                          tone="warn"
+                                        >
+                                          {inlineFixOpen[lineKey] ? 'Tutup Perbaikan' : 'Perbaiki di tempat'}
+                                        </ActionButton>
+                                        <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
+                                          Selesaikan normalisasi SKU dan atribusi entity/store langsung dari line ini, tanpa pindah ke tab rule.
+                                        </div>
+                                        {inlineFixOpen[lineKey] ? (
+                                          <div
+                                            style={{
+                                              display: 'grid',
+                                              gap: 8,
+                                              padding: 10,
+                                              borderRadius: 10,
+                                              border: '1px solid var(--border)',
+                                              background: 'rgba(148,163,184,0.06)',
+                                            }}
+                                          >
+                                            <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
+                                              {getInlineFixMatcherSummary(line)}
+                                            </div>
+                                            <div style={{ display: 'grid', gap: 4 }}>
+                                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                                Normalized SKU
+                                              </div>
+                                              <input
+                                                value={inlineFixNormalizedSku}
+                                                onChange={(event) => setInlineFixField(order.externalOrderId, line.lineIndex, 'normalizedSku', event.target.value)}
+                                                placeholder="Contoh: PLV20-245"
+                                                style={{
+                                                  width: '100%',
+                                                  padding: '8px 10px',
+                                                  borderRadius: 8,
+                                                  border: '1px solid var(--border)',
+                                                  background: 'var(--card)',
+                                                  color: 'var(--text)',
+                                                  fontSize: 12,
+                                                  outline: 'none',
+                                                }}
+                                              />
+                                            </div>
+                                            <div style={{ display: 'grid', gap: 4 }}>
+                                              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                                Reason
+                                              </div>
+                                              <textarea
+                                                value={inlineFixReason}
+                                                onChange={(event) => setInlineFixField(order.externalOrderId, line.lineIndex, 'reason', event.target.value)}
+                                                rows={3}
+                                                placeholder="Kenapa matcher ini perlu dinormalisasi atau diatribusi manual?"
+                                                style={{
+                                                  width: '100%',
+                                                  padding: '8px 10px',
+                                                  borderRadius: 8,
+                                                  border: '1px solid var(--border)',
+                                                  background: 'var(--card)',
+                                                  color: 'var(--text)',
+                                                  fontSize: 12,
+                                                  outline: 'none',
+                                                  resize: 'vertical',
+                                                }}
+                                              />
+                                            </div>
+                                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                              <ActionButton
+                                                onClick={() => handleApplyInlineFix(order, line)}
+                                                tone="primary"
+                                                disabled={!inlineFixEnabled || savingInlineFixKey === lineKey}
+                                              >
+                                                {savingInlineFixKey === lineKey ? 'Menyimpan…' : 'Simpan Perbaikan'}
+                                              </ActionButton>
+                                              {canPersistResolverRule ? (
+                                                <ActionButton
+                                                  onClick={() => handleSaveResolverRule(order, line)}
+                                                  disabled={savingResolverRuleKey === lineKey}
+                                                >
+                                                  {savingResolverRuleKey === lineKey ? 'Menyimpan…' : 'Hanya Simpan Rule'}
+                                                </ActionButton>
+                                              ) : null}
+                                            </div>
+                                            <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.5 }}>
+                                              Tombol ini menyimpan `SKU normalization` bila dibutuhkan, lalu menyimpan `Entity & Store Attribution` untuk matcher yang sama.
+                                            </div>
+                                          </div>
+                                        ) : null}
+                                      </div>
+                                    ) : null}
                                   </div>
                                   <div>
                                     <div style={{ fontWeight: 700 }}>{fmtNumber(line.quantity)} pcs</div>
@@ -1480,6 +2661,8 @@ export default function MarketplaceIntakeManager() {
                   </div>
                 ) : null}
               </div>
+                </div>
+              </details>
             </div>
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14 }}>

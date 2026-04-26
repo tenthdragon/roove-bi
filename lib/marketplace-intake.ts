@@ -5,9 +5,10 @@ import {
   guessMarketplaceStoreFromTexts,
 } from './marketplace-intake-store';
 import {
-  getMarketplaceIntakeSourceConfig,
+  type MarketplaceIntakePlatform,
   type MarketplaceIntakeSourceConfig,
 } from './marketplace-intake-sources';
+import { resolveMarketplaceIntakeSourceConfig } from './marketplace-intake-source-store-scopes';
 
 type SheetRow = Record<string, unknown>;
 
@@ -53,10 +54,29 @@ type ManualMemoryRow = {
   is_active: boolean;
 };
 
+type SkuAliasRuleRow = {
+  id: number;
+  source_key: string;
+  business_code: string;
+  platform: MarketplaceIntakePlatform;
+  raw_platform_sku_id: string | null;
+  raw_seller_sku: string | null;
+  raw_product_name: string | null;
+  raw_variation: string | null;
+  normalized_sku: string;
+  reason: string | null;
+  is_active: boolean;
+};
+
 type CanonicalLine = {
+  rawPlatformSkuId?: string | null;
+  rawSellerSku?: string | null;
   parentSku?: string | null;
   referenceSku?: string | null;
   sku: string | null;
+  normalizedSku?: string | null;
+  skuNormalizationSource?: string | null;
+  skuNormalizationReason?: string | null;
   productName: string;
   variation: string | null;
   quantity: number;
@@ -84,7 +104,7 @@ type CanonicalLine = {
 };
 
 type CanonicalOrder = {
-  platform: 'shopee';
+  platform: MarketplaceIntakePlatform;
   externalId: string;
   status: string | null;
   substatus: string | null;
@@ -93,16 +113,21 @@ type CanonicalOrder = {
   createdAt: string | null;
   paidAt: string | null;
   rtsAt: string | null;
+  shippedAt?: string | null;
   deliveredAt: string | null;
+  canceledAt?: string | null;
   trackingNumber: string | null;
   shippingProvider: string | null;
   deliveryOption: string | null;
   customerUsername: string | null;
   customerName: string | null;
   customerPhone: string | null;
+  customerEmail?: string | null;
+  country?: string | null;
   province: string | null;
   city: string | null;
   district: string | null;
+  village?: string | null;
   postalCode: string | null;
   address: string | null;
   addressNotes: string | null;
@@ -110,6 +135,7 @@ type CanonicalOrder = {
   rawAddress: string | null;
   shippingCost: number;
   orderAmount: number;
+  totalWeightGrams?: number | null;
   buyerPaidAmount?: number;
   totalPaymentAmount?: number;
   estimatedShippingCost?: number;
@@ -139,7 +165,12 @@ export type MarketplaceIntakePreviewLine = {
   lineIndex: number;
   lineStatus: PreviewLineStatus;
   issueCodes: string[];
+  rawPlatformSkuId: string | null;
+  rawSellerSku: string | null;
   mpSku: string | null;
+  normalizedSku: string | null;
+  skuNormalizationSource: string | null;
+  skuNormalizationReason: string | null;
   mpProductName: string;
   mpVariation: string | null;
   quantity: number;
@@ -205,16 +236,17 @@ export type MarketplaceIntakePreview = {
     id: number | null;
     sourceKey: string;
     sourceLabel: string;
-    platform: 'shopee';
+    platform: MarketplaceIntakePlatform;
     businessId: number;
     businessCode: string;
+    allowedStores: string[];
   };
   filename: string;
   sourceOrderDate: string | null;
   sourceHeaders: string[];
   fingerprint: string;
   rowCount: number;
-  platform: 'shopee';
+  platform: MarketplaceIntakePlatform;
   generatedAt: string;
   summary: MarketplaceIntakePreviewSummary;
   orders: MarketplaceIntakePreviewOrder[];
@@ -300,6 +332,12 @@ function parseDateTime(value: unknown): string | null {
   const parsed = new Date(normalized);
   if (Number.isNaN(parsed.getTime())) return null;
   return parsed.toISOString();
+}
+
+function parseWeightGrams(value: unknown): number | null {
+  const parsed = parseNumber(value);
+  if (parsed <= 0) return null;
+  return Math.round(parsed * 1000);
 }
 
 function toJakartaDateKey(value: string | null | undefined): string | null {
@@ -467,6 +505,139 @@ function aggregateCanonicalLines(lines: CanonicalLine[]): CanonicalLine[] {
   return Array.from(grouped.values());
 }
 
+function inferTikTokSku(row: Record<string, string>): string | null {
+  const sellerSku = cleanText(row['Seller SKU']);
+  if (sellerSku) return sellerSku;
+
+  const productName = normalizeIdentifier(row['Product Name']);
+  const variation = normalizeIdentifier(row.Variation);
+
+  if (productName.includes('shaker mini roove collagen')) {
+    return 'SMini-0';
+  }
+
+  if (productName.includes('roove collagen drink kemasan 20 sachet') || productName.includes('roove collagen drink 20 sachet')) {
+    if (variation.includes('strawberry')) return 'ROVSTR20-295';
+    if (variation.includes('kurma')) return 'ROVKRM20-295';
+    if (variation.includes('cafe')) return 'ROVCF20-295';
+    if (variation.includes('blueberry')) return 'ROV20-295';
+  }
+
+  if (productName.includes('roove collagen drink 10 sachet')) {
+    return 'ROV10-155';
+  }
+
+  return cleanText(row['SKU ID']);
+}
+
+function parseTikTokOrders(rows: Record<string, string>[]): CanonicalOrder[] {
+  const orders = new Map<string, CanonicalOrder>();
+
+  for (const row of rows) {
+    const externalId = cleanText(row['Order ID']);
+    if (!externalId || externalId.toLowerCase().includes('platform unique')) continue;
+
+    const existing = orders.get(externalId);
+    const rawPlatformSkuId = cleanText(row['SKU ID']);
+    const rawSellerSku = cleanText(row['Seller SKU']);
+    const effectiveSku = inferTikTokSku(row);
+    const quantity = Math.max(parseInteger(row.Quantity) || 1, 1);
+    const sellerDiscount = parseNumber(row['SKU Seller Discount']);
+    const platformDiscount = parseNumber(row['SKU Platform Discount']);
+    const afterDiscountSubtotal = parseNumber(row['SKU Subtotal After Discount']) || parseNumber(row['SKU Subtotal Before Discount']);
+    const unitAfterDiscount = afterDiscountSubtotal > 0
+      ? afterDiscountSubtotal / Math.max(quantity, 1)
+      : parseNumber(row['SKU Unit Original Price']);
+
+    const line: CanonicalLine = {
+      rawPlatformSkuId,
+      rawSellerSku,
+      sku: rawSellerSku || effectiveSku,
+      normalizedSku: effectiveSku,
+      skuNormalizationSource: rawSellerSku ? 'marketplace_seller_sku' : 'tiktok_fallback_inference',
+      skuNormalizationReason: rawSellerSku ? null : 'Seller SKU kosong; intake memakai fallback inference untuk melanjutkan klasifikasi.',
+      productName: cleanText(row['Product Name']) || cleanText(row.Variation) || 'Produk Marketplace',
+      variation: cleanText(row.Variation),
+      quantity,
+      unitPrice: unitAfterDiscount,
+      lineSubtotal: afterDiscountSubtotal,
+      lineDiscount: sellerDiscount + platformDiscount,
+      priceInitial: parseNumber(row['SKU Unit Original Price']),
+      priceAfterDiscount: unitAfterDiscount,
+      totalDiscount: sellerDiscount + platformDiscount,
+      discountSeller: sellerDiscount,
+      discountShopee: platformDiscount,
+      productWeightGrams: parseWeightGrams(row['Weight(kg)']) || undefined,
+      totalWeightGrams: parseWeightGrams(row['Weight(kg)']) || undefined,
+      rawRow: row,
+    };
+
+    if (existing) {
+      existing.lines.push(line);
+      if (!existing.totalWeightGrams && line.totalWeightGrams) {
+        existing.totalWeightGrams = line.totalWeightGrams;
+      }
+      continue;
+    }
+
+    orders.set(externalId, {
+      platform: 'tiktok',
+      externalId,
+      status: cleanText(row['Order Status']),
+      substatus: cleanText(row['Order Substatus']),
+      paymentMethodLabel: cleanText(row['Payment Method']),
+      createdAt: parseDateTime(row['Created Time']),
+      paidAt: parseDateTime(row['Paid Time']),
+      rtsAt: parseDateTime(row['RTS Time']),
+      shippedAt: parseDateTime(row['Shipped Time']),
+      deliveredAt: parseDateTime(row['Delivered Time']),
+      canceledAt: parseDateTime(row['Cancelled Time']),
+      trackingNumber: cleanText(row['Tracking ID']),
+      shippingProvider: cleanText(row['Shipping Provider Name']),
+      deliveryOption: cleanText(row['Delivery Option']),
+      customerUsername: cleanText(row['Buyer Username']),
+      customerName: cleanText(row.Recipient) || cleanText(row['Buyer Username']),
+      customerPhone: normalizePhone(cleanText(row['Phone #'])),
+      customerEmail: null,
+      country: cleanText(row.Country),
+      province: cleanText(row.Province),
+      city: cleanText(row['Regency and City']),
+      district: cleanText(row.Districts),
+      village: cleanText(row.Villages),
+      postalCode: cleanText(row.Zipcode),
+      address: cleanText(row['Detail Address']),
+      addressNotes: cleanText(row['Additional address information']),
+      rawAddress: [row['Detail Address'], row['Additional address information']]
+        .map((value) => cleanText(value))
+        .filter((value): value is string => Boolean(value))
+        .join(', ') || null,
+      shippingCost: parseNumber(row['Shipping Fee After Discount']),
+      orderAmount: parseNumber(row['Order Amount']),
+      totalWeightGrams: parseWeightGrams(row['Weight(kg)']),
+      lines: [line],
+      rawMeta: {
+        warehouseName: cleanText(row['Warehouse Name']) || '',
+        packageId: cleanText(row['Package ID']) || '',
+        purchaseChannel: cleanText(row['Purchase Channel']) || '',
+        shippingProviderName: cleanText(row['Shipping Provider Name']) || '',
+        buyerServiceFee: parseNumber(row['Buyer Service Fee']),
+        handlingFee: parseNumber(row['Handling Fee']),
+        shippingInsurance: parseNumber(row['Shipping Insurance']),
+        itemInsurance: parseNumber(row['Item Insurance']),
+        originalShippingFee: parseNumber(row['Original Shipping Fee']),
+        shippingFeeAfterDiscount: parseNumber(row['Shipping Fee After Discount']),
+        shippingFeeSellerDiscount: parseNumber(row['Shipping Fee Seller Discount']),
+        shippingFeePlatformDiscount: parseNumber(row['Shipping Fee Platform Discount']),
+      },
+    });
+  }
+
+  return Array.from(orders.values()).map((order) => ({
+    ...order,
+    lines: aggregateCanonicalLines(order.lines),
+  }));
+}
+
 function parseShopeeOrders(rows: Record<string, string>[]): CanonicalOrder[] {
   const orders = new Map<string, CanonicalOrder>();
 
@@ -484,10 +655,15 @@ function parseShopeeOrders(rows: Record<string, string>[]): CanonicalOrder[] {
     const totalDiscount = parseNumber(row['Total Diskon']);
     const discountSeller = parseNumber(row['Diskon Dari Penjual']);
     const discountShopee = parseNumber(row['Diskon Dari Shopee']);
+    const rawSellerSku = cleanText(row['Nomor Referensi SKU']) || cleanText(row['SKU Induk']);
     const line: CanonicalLine = {
       parentSku: cleanText(row['SKU Induk']),
       referenceSku: cleanText(row['Nomor Referensi SKU']),
-      sku: cleanText(row['Nomor Referensi SKU']) || cleanText(row['SKU Induk']),
+      rawSellerSku,
+      sku: rawSellerSku,
+      normalizedSku: rawSellerSku,
+      skuNormalizationSource: rawSellerSku ? 'marketplace_seller_sku' : null,
+      skuNormalizationReason: null,
       productName: cleanText(row['Nama Produk']) || 'Produk Marketplace',
       variation: cleanText(row['Nama Variasi']),
       quantity,
@@ -565,8 +741,11 @@ function parseShopeeOrders(rows: Record<string, string>[]): CanonicalOrder[] {
   }));
 }
 
-async function parseShopeeWorkbook(file: File): Promise<{ orders: CanonicalOrder[]; rowCount: number; headers: string[] }> {
-  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+async function parseMarketplaceWorkbook(input: {
+  file: File;
+  sourceConfig: MarketplaceIntakeSourceConfig;
+}): Promise<{ orders: CanonicalOrder[]; rowCount: number; headers: string[] }> {
+  const workbook = XLSX.read(await input.file.arrayBuffer(), { type: 'array' });
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('Workbook tidak memiliki sheet yang bisa dibaca.');
 
@@ -580,13 +759,29 @@ async function parseShopeeWorkbook(file: File): Promise<{ orders: CanonicalOrder
   if (stringRows.length === 0) throw new Error('Workbook tidak memiliki baris data.');
 
   const headers = Object.keys(stringRows[0]);
-  if (!headers.includes('No. Pesanan')) {
-    throw new Error('Halaman ini saat ini hanya menerima export Shopee/SPX yang memiliki kolom "No. Pesanan".');
+  if (input.sourceConfig.platform === 'shopee') {
+    if (!headers.includes('No. Pesanan')) {
+      throw new Error('Halaman ini saat ini hanya menerima export Shopee/SPX yang memiliki kolom "No. Pesanan".');
+    }
+    return {
+      orders: parseShopeeOrders(stringRows),
+      rowCount: stringRows.length,
+      headers,
+    };
   }
 
+  if (!headers.includes('Order ID')) {
+    throw new Error('Halaman ini saat ini hanya menerima export TikTok/Tokopedia seller center yang memiliki kolom "Order ID".');
+  }
+
+  const dataRows = stringRows.filter((row) => {
+    const orderId = cleanText(row['Order ID']);
+    return !orderId || !orderId.toLowerCase().includes('platform unique');
+  });
+
   return {
-    orders: parseShopeeOrders(stringRows),
-    rowCount: stringRows.length,
+    orders: parseTikTokOrders(dataRows),
+    rowCount: dataRows.length,
     headers,
   };
 }
@@ -757,9 +952,141 @@ async function loadManualMemoryMap(
   return map;
 }
 
-function buildMatchSignature(line: Pick<CanonicalLine, 'sku' | 'productName' | 'variation'>): string {
+async function loadSkuAliasRules(
+  source: MarketplaceIntakeSourceConfig,
+  business: BusinessRow,
+): Promise<SkuAliasRuleRow[]> {
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('marketplace_intake_sku_aliases')
+    .select(`
+      id,
+      source_key,
+      business_code,
+      platform,
+      raw_platform_sku_id,
+      raw_seller_sku,
+      raw_product_name,
+      raw_variation,
+      normalized_sku,
+      reason,
+      is_active
+    `)
+    .eq('source_key', source.sourceKey)
+    .eq('business_code', business.business_code)
+    .eq('platform', source.platform)
+    .eq('is_active', true)
+    .order('id', { ascending: true });
+
+  if (error) {
+    if (isMissingTableError(error)) return [];
+    throw error;
+  }
+
+  return (data || []) as SkuAliasRuleRow[];
+}
+
+function countDefinedAliasMatchers(rule: SkuAliasRuleRow): number {
   return [
-    normalizeIdentifier(line.sku) || '__blank__',
+    rule.raw_platform_sku_id,
+    rule.raw_seller_sku,
+    rule.raw_product_name,
+    rule.raw_variation,
+  ].filter((value) => normalizeIdentifier(value).length > 0).length;
+}
+
+function matchSkuAliasRule(
+  line: CanonicalLine,
+  rule: SkuAliasRuleRow,
+): { matched: boolean; specificity: number } {
+  const checks: Array<[string | null | undefined, string | null | undefined]> = [
+    [rule.raw_platform_sku_id, line.rawPlatformSkuId],
+    [rule.raw_seller_sku, line.rawSellerSku || line.sku],
+    [rule.raw_product_name, line.productName],
+    [rule.raw_variation, line.variation],
+  ];
+
+  let specificity = 0;
+  for (const [expected, actual] of checks) {
+    const expectedNormalized = normalizeIdentifier(expected);
+    if (!expectedNormalized) continue;
+    const actualNormalized = normalizeIdentifier(actual);
+    if (!actualNormalized || actualNormalized !== expectedNormalized) {
+      return { matched: false, specificity: 0 };
+    }
+    specificity += 1;
+  }
+
+  return { matched: specificity > 0, specificity };
+}
+
+function applySkuAliasesToOrders(
+  orders: CanonicalOrder[],
+  aliasRules: SkuAliasRuleRow[],
+): CanonicalOrder[] {
+  if (aliasRules.length === 0) return orders;
+
+  return orders.map((order) => ({
+    ...order,
+    lines: order.lines.map((line) => {
+      const rankedMatches = aliasRules
+        .map((rule) => {
+          const result = matchSkuAliasRule(line, rule);
+          return result.matched ? { rule, specificity: result.specificity } : null;
+        })
+        .filter((entry): entry is { rule: SkuAliasRuleRow; specificity: number } => Boolean(entry))
+        .sort((left, right) => {
+          if (right.specificity !== left.specificity) return right.specificity - left.specificity;
+          return countDefinedAliasMatchers(right.rule) - countDefinedAliasMatchers(left.rule);
+        });
+
+      if (rankedMatches.length === 0) return line;
+
+      const strongestSpecificity = rankedMatches[0].specificity;
+      const strongestMatches = rankedMatches.filter((entry) => entry.specificity === strongestSpecificity);
+      const distinctNormalizedSkus = Array.from(new Set(
+        strongestMatches.map((entry) => cleanText(entry.rule.normalized_sku)).filter(Boolean),
+      ));
+
+      if (distinctNormalizedSkus.length > 1) {
+        throw new Error(
+          `Konflik SKU alias untuk "${line.productName}". Ada lebih dari satu normalized SKU aktif untuk matcher yang sama.`,
+        );
+      }
+
+      const winner = strongestMatches[0]?.rule;
+      const normalizedSku = cleanText(winner?.normalized_sku);
+      if (!winner || !normalizedSku) return line;
+
+      const previousNormalizedSku = cleanText(line.normalizedSku) || cleanText(line.sku);
+      const aliasReason = cleanText(winner.reason);
+      const nextSource = normalizeIdentifier(winner.raw_platform_sku_id) && normalizeIdentifier(line.rawPlatformSkuId) === normalizeIdentifier(winner.raw_platform_sku_id)
+        ? 'platform_sku_alias'
+        : normalizeIdentifier(winner.raw_seller_sku)
+          ? 'seller_sku_alias'
+          : 'product_name_alias';
+
+      if (normalizedSku === previousNormalizedSku) {
+        return {
+          ...line,
+          skuNormalizationSource: line.skuNormalizationSource || nextSource,
+          skuNormalizationReason: line.skuNormalizationReason || aliasReason,
+        };
+      }
+
+      return {
+        ...line,
+        normalizedSku,
+        skuNormalizationSource: nextSource,
+        skuNormalizationReason: aliasReason,
+      };
+    }),
+  }));
+}
+
+function buildMatchSignature(line: Pick<CanonicalLine, 'sku' | 'normalizedSku' | 'productName' | 'variation'>): string {
+  return [
+    normalizeIdentifier(line.normalizedSku || line.sku) || '__blank__',
     normalizeIdentifier(line.productName) || '__blank__',
     normalizeIdentifier(line.variation) || '__blank__',
   ].join('|');
@@ -825,8 +1152,9 @@ async function buildSuggestionCandidateFromBundle(
 }
 
 function scoreBundleCandidateForLine(line: CanonicalLine, bundle: BundleCatalogRow): number {
-  const query = normalizeIdentifier([line.productName, line.variation, line.sku].filter(Boolean).join(' '));
-  const compactQuery = normalizeLoose([line.productName, line.variation, line.sku].filter(Boolean).join(' '));
+  const skuHint = line.normalizedSku || line.sku;
+  const query = normalizeIdentifier([line.productName, line.variation, skuHint].filter(Boolean).join(' '));
+  const compactQuery = normalizeLoose([line.productName, line.variation, skuHint].filter(Boolean).join(' '));
   const label = normalizeIdentifier([bundle.display, bundle.public_name, bundle.name].filter(Boolean).join(' '));
   const compactLabel = normalizeLoose([bundle.display, bundle.public_name, bundle.name, bundle.custom_id].filter(Boolean).join(' '));
   const compactCustomId = normalizeLoose(bundle.custom_id);
@@ -930,23 +1258,37 @@ async function buildSuggestionCandidates(
   };
 }
 
+function buildSkuNormalizationIssueCodes(line: Pick<CanonicalLine, 'skuNormalizationSource'>): string[] {
+  return String(line.skuNormalizationSource || '').includes('alias')
+    ? ['sku_alias_applied']
+    : [];
+}
+
 function buildLineFromBundleCandidate(
   line: CanonicalLine,
   lineIndex: number,
   candidate: MarketplaceIntakeSuggestionCandidate,
   source: 'direct' | 'remembered' | 'manual' | 'companion',
 ): MarketplaceIntakePreviewLine {
-  const issueCodes = source === 'remembered'
-    ? ['remembered_manual_match']
-    : source === 'manual'
-      ? ['manual_match_confirmed']
-      : [];
+  const issueCodes = [
+    ...buildSkuNormalizationIssueCodes(line),
+    ...(source === 'remembered'
+      ? ['remembered_manual_match']
+      : source === 'manual'
+        ? ['manual_match_confirmed']
+        : []),
+  ];
 
   return {
     lineIndex,
     lineStatus: 'identified',
     issueCodes,
+    rawPlatformSkuId: line.rawPlatformSkuId || null,
+    rawSellerSku: line.rawSellerSku || null,
     mpSku: line.sku,
+    normalizedSku: line.normalizedSku || line.sku,
+    skuNormalizationSource: line.skuNormalizationSource || null,
+    skuNormalizationReason: line.skuNormalizationReason || null,
     mpProductName: line.productName,
     mpVariation: line.variation,
     quantity: line.quantity,
@@ -1001,7 +1343,12 @@ function inheritCompanionStoreForOrder(
     if (!candidate.storeCandidates.includes(companionStoreName)) return line;
 
     return buildLineFromBundleCandidate({
+      rawPlatformSkuId: line.rawPlatformSkuId,
+      rawSellerSku: line.rawSellerSku,
       sku: line.mpSku,
+      normalizedSku: line.normalizedSku,
+      skuNormalizationSource: line.skuNormalizationSource,
+      skuNormalizationReason: line.skuNormalizationReason,
       productName: line.mpProductName,
       variation: line.mpVariation,
       quantity: line.quantity,
@@ -1113,12 +1460,17 @@ function summarizeOrderFromLines(
       createdAt: order.createdAt,
       paidAt: order.paidAt,
       rtsAt: order.rtsAt,
+      shippedAt: order.shippedAt,
       deliveredAt: order.deliveredAt,
+      canceledAt: order.canceledAt,
       customerUsername: order.customerUsername,
       customerPhone: order.customerPhone,
+      customerEmail: order.customerEmail,
+      country: order.country,
       province: order.province,
       city: order.city,
       district: order.district,
+      village: order.village,
       postalCode: order.postalCode,
       address: order.address,
       buyerNote: order.buyerNote,
@@ -1150,7 +1502,9 @@ async function classifyOrder(
   const lines: MarketplaceIntakePreviewLine[] = [];
   for (const [index, line] of order.lines.entries()) {
     const matchSignature = buildMatchSignature(line);
-    const identifier = resolveBundleIdentifierForSku(line.sku, identifierLookup);
+    const normalizedSku = line.normalizedSku || line.sku;
+    const baseIssueCodes = buildSkuNormalizationIssueCodes(line);
+    const identifier = resolveBundleIdentifierForSku(normalizedSku, identifierLookup);
     if (identifier.status === 'missing') {
       const { suggestions, selected } = await buildSuggestionCandidates(
         line,
@@ -1166,15 +1520,20 @@ async function classifyOrder(
       lines.push({
         lineIndex: index,
         lineStatus: 'not_identified',
-        issueCodes: ['custom_id_not_found'],
+        issueCodes: [...baseIssueCodes, 'custom_id_not_found'],
+        rawPlatformSkuId: line.rawPlatformSkuId || null,
+        rawSellerSku: line.rawSellerSku || null,
         mpSku: line.sku,
+        normalizedSku,
+        skuNormalizationSource: line.skuNormalizationSource || null,
+        skuNormalizationReason: line.skuNormalizationReason || null,
         mpProductName: line.productName,
         mpVariation: line.variation,
         quantity: line.quantity,
         unitPrice: line.unitPrice,
         lineSubtotal: line.lineSubtotal,
         lineDiscount: line.lineDiscount,
-        detectedCustomId: line.sku,
+        detectedCustomId: normalizedSku,
         matchedEntityType: null,
         matchedEntityKey: null,
         matchedEntityLabel: null,
@@ -1209,15 +1568,20 @@ async function classifyOrder(
       lines.push({
         lineIndex: index,
         lineStatus: 'not_identified',
-        issueCodes: ['custom_id_ambiguous'],
+        issueCodes: [...baseIssueCodes, 'custom_id_ambiguous'],
+        rawPlatformSkuId: line.rawPlatformSkuId || null,
+        rawSellerSku: line.rawSellerSku || null,
         mpSku: line.sku,
+        normalizedSku,
+        skuNormalizationSource: line.skuNormalizationSource || null,
+        skuNormalizationReason: line.skuNormalizationReason || null,
         mpProductName: line.productName,
         mpVariation: line.variation,
         quantity: line.quantity,
         unitPrice: line.unitPrice,
         lineSubtotal: line.lineSubtotal,
         lineDiscount: line.lineDiscount,
-        detectedCustomId: line.sku,
+        detectedCustomId: normalizedSku,
         matchedEntityType: null,
         matchedEntityKey: null,
         matchedEntityLabel: null,
@@ -1262,8 +1626,13 @@ async function classifyOrder(
       lines.push({
         lineIndex: index,
         lineStatus: 'store_unmapped',
-        issueCodes: ['store_classifier_missing'],
+        issueCodes: [...baseIssueCodes, 'store_classifier_missing'],
+        rawPlatformSkuId: line.rawPlatformSkuId || null,
+        rawSellerSku: line.rawSellerSku || null,
         mpSku: line.sku,
+        normalizedSku,
+        skuNormalizationSource: line.skuNormalizationSource || null,
+        skuNormalizationReason: line.skuNormalizationReason || null,
         mpProductName: line.productName,
         mpVariation: line.variation,
         quantity: line.quantity,
@@ -1328,9 +1697,12 @@ export async function previewMarketplaceIntake(input: {
   filenameOverride?: string | null;
   sourceKey?: string | null;
 }): Promise<MarketplaceIntakePreview> {
-  const sourceConfig = getMarketplaceIntakeSourceConfig(input.sourceKey);
+  const sourceConfig = await resolveMarketplaceIntakeSourceConfig(input.sourceKey);
   const business = await loadBusinessForSource(sourceConfig);
-  const { orders, rowCount, headers } = await parseShopeeWorkbook(input.file);
+  const { orders, rowCount, headers } = await parseMarketplaceWorkbook({
+    file: input.file,
+    sourceConfig,
+  });
   const sourceOrderDate = inferSourceOrderDate(orders);
   const fingerprint = buildPreviewFingerprint({
     sourceKey: sourceConfig.sourceKey,
@@ -1338,20 +1710,22 @@ export async function previewMarketplaceIntake(input: {
     sourceOrderDate,
     orders,
   });
-  const [bundleCatalog, manualMemoryMap] = await Promise.all([
+  const [bundleCatalog, manualMemoryMap, skuAliasRules] = await Promise.all([
     loadBundleCatalog(business.id),
     loadManualMemoryMap(business.id, sourceConfig),
+    loadSkuAliasRules(sourceConfig, business),
   ]);
+  const normalizedOrders = applySkuAliasesToOrders(orders, skuAliasRules);
 
   const normalizedIdentifiers = Array.from(new Set(
-    orders
-      .flatMap((order) => order.lines.map((line) => normalizeIdentifier(line.sku)))
+    normalizedOrders
+      .flatMap((order) => order.lines.map((line) => normalizeIdentifier(line.normalizedSku || line.sku)))
       .filter(Boolean),
   ));
   const identifierLookup = await loadBundleIdentifierLookup(business.id, normalizedIdentifiers);
 
   const previewOrders: MarketplaceIntakePreviewOrder[] = [];
-  for (const order of orders) {
+  for (const order of normalizedOrders) {
     previewOrders.push(await classifyOrder(order, identifierLookup, bundleCatalog, manualMemoryMap, business, sourceConfig));
   }
   previewOrders.sort((left, right) => left.externalOrderId.localeCompare(right.externalOrderId));
@@ -1364,13 +1738,14 @@ export async function previewMarketplaceIntake(input: {
       platform: sourceConfig.platform,
       businessId: business.id,
       businessCode: business.business_code,
+      allowedStores: sourceConfig.allowedStores,
     },
     filename: String(input.filenameOverride || input.file.name || `${sourceConfig.sourceKey}-upload`),
     sourceOrderDate,
     sourceHeaders: headers,
     fingerprint,
     rowCount,
-    platform: 'shopee',
+    platform: sourceConfig.platform,
     generatedAt: new Date().toISOString(),
     summary: buildPreviewSummary(previewOrders),
     orders: previewOrders,
@@ -1390,7 +1765,7 @@ export async function saveMarketplaceIntakePreview(input: {
   manualSelections?: MarketplaceIntakeManualSelectionInput[];
 }) {
   const preview = input.preview;
-  const sourceConfig = getMarketplaceIntakeSourceConfig(preview?.source?.sourceKey);
+  const sourceConfig = await resolveMarketplaceIntakeSourceConfig(preview?.source?.sourceKey);
   const business = await loadBusinessForSource(sourceConfig);
 
   if (!preview?.source || preview.source.sourceKey !== sourceConfig.sourceKey) {
@@ -1430,7 +1805,12 @@ export async function saveMarketplaceIntakePreview(input: {
       if (!candidate.storeName || !sourceConfig.allowedStores.includes(candidate.storeName)) return line;
 
       return buildLineFromBundleCandidate({
+        rawPlatformSkuId: line.rawPlatformSkuId,
+        rawSellerSku: line.rawSellerSku,
         sku: line.mpSku,
+        normalizedSku: line.normalizedSku,
+        skuNormalizationSource: line.skuNormalizationSource,
+        skuNormalizationReason: line.skuNormalizationReason,
         productName: line.mpProductName,
         variation: line.mpVariation,
         quantity: line.quantity,
@@ -1442,7 +1822,7 @@ export async function saveMarketplaceIntakePreview(input: {
     }));
 
     return summarizeOrderFromLines({
-      platform: 'shopee',
+      platform: sourceConfig.platform,
       externalId: order.externalOrderId,
       status: String(order.rawMeta?.status || '') || null,
       substatus: String(order.rawMeta?.substatus || '') || null,
@@ -1450,16 +1830,21 @@ export async function saveMarketplaceIntakePreview(input: {
       createdAt: String(order.rawMeta?.createdAt || '') || null,
       paidAt: String(order.rawMeta?.paidAt || '') || null,
       rtsAt: String(order.rawMeta?.rtsAt || '') || null,
+      shippedAt: String(order.rawMeta?.shippedAt || '') || null,
       deliveredAt: String(order.rawMeta?.deliveredAt || '') || null,
+      canceledAt: String(order.rawMeta?.canceledAt || '') || null,
       trackingNumber: order.trackingNumber,
       shippingProvider: order.shippingProvider,
       deliveryOption: order.deliveryOption,
       customerUsername: String(order.rawMeta?.customerUsername || '') || null,
       customerName: order.recipientName,
       customerPhone: String(order.rawMeta?.customerPhone || '') || null,
+      customerEmail: String(order.rawMeta?.customerEmail || '') || null,
+      country: String(order.rawMeta?.country || '') || null,
       province: String(order.rawMeta?.province || '') || null,
       city: String(order.rawMeta?.city || '') || null,
       district: String(order.rawMeta?.district || '') || null,
+      village: String(order.rawMeta?.village || '') || null,
       postalCode: String(order.rawMeta?.postalCode || '') || null,
       address: String(order.rawMeta?.address || '') || null,
       addressNotes: String(order.rawMeta?.addressNotes || '') || null,
@@ -1467,7 +1852,12 @@ export async function saveMarketplaceIntakePreview(input: {
       shippingCost: Number(order.rawMeta?.shippingCost || 0) || 0,
       orderAmount: order.orderAmount,
       lines: lines.map((line) => ({
+        rawPlatformSkuId: line.rawPlatformSkuId,
+        rawSellerSku: line.rawSellerSku,
         sku: line.mpSku,
+        normalizedSku: line.normalizedSku,
+        skuNormalizationSource: line.skuNormalizationSource,
+        skuNormalizationReason: line.skuNormalizationReason,
         productName: line.mpProductName,
         variation: line.mpVariation,
         quantity: line.quantity,
@@ -1495,7 +1885,7 @@ export async function saveMarketplaceIntakePreview(input: {
   }
 
   const sourceOrderDate = preview.sourceOrderDate || inferSourceOrderDate(normalizedOrders.map((order) => ({
-    platform: 'shopee',
+    platform: sourceConfig.platform,
     externalId: order.externalOrderId,
     status: String(order.rawMeta?.status || '') || null,
     substatus: String(order.rawMeta?.substatus || '') || null,
@@ -1503,16 +1893,21 @@ export async function saveMarketplaceIntakePreview(input: {
     createdAt: String(order.rawMeta?.createdAt || '') || null,
     paidAt: String(order.rawMeta?.paidAt || '') || null,
     rtsAt: String(order.rawMeta?.rtsAt || '') || null,
+    shippedAt: String(order.rawMeta?.shippedAt || '') || null,
     deliveredAt: String(order.rawMeta?.deliveredAt || '') || null,
+    canceledAt: String(order.rawMeta?.canceledAt || '') || null,
     trackingNumber: order.trackingNumber,
     shippingProvider: order.shippingProvider,
     deliveryOption: order.deliveryOption,
     customerUsername: String(order.rawMeta?.customerUsername || '') || null,
     customerName: order.recipientName,
     customerPhone: String(order.rawMeta?.customerPhone || '') || null,
+    customerEmail: String(order.rawMeta?.customerEmail || '') || null,
+    country: String(order.rawMeta?.country || '') || null,
     province: String(order.rawMeta?.province || '') || null,
     city: String(order.rawMeta?.city || '') || null,
     district: String(order.rawMeta?.district || '') || null,
+    village: String(order.rawMeta?.village || '') || null,
     postalCode: String(order.rawMeta?.postalCode || '') || null,
     address: String(order.rawMeta?.address || '') || null,
     addressNotes: String(order.rawMeta?.addressNotes || '') || null,
@@ -1532,7 +1927,7 @@ export async function saveMarketplaceIntakePreview(input: {
     },
   })));
   if (!sourceOrderDate) {
-    throw new Error('Tanggal order file tidak bisa ditentukan. Pastikan file Shopee memiliki waktu order yang valid.');
+    throw new Error(`Tanggal order file tidak bisa ditentukan. Pastikan file ${sourceConfig.sourceLabel} memiliki waktu order yang valid.`);
   }
 
   const sourceHeaders = Array.from(new Set(
@@ -1728,7 +2123,12 @@ export async function saveMarketplaceIntakePreview(input: {
       line_index: line.lineIndex,
       line_status: line.lineStatus,
       issue_codes: line.issueCodes || [],
+      raw_platform_sku_id: line.rawPlatformSkuId,
+      raw_seller_sku: line.rawSellerSku,
       mp_sku: line.mpSku,
+      normalized_sku: line.normalizedSku,
+      sku_normalization_source: line.skuNormalizationSource,
+      sku_normalization_reason: line.skuNormalizationReason,
       mp_product_name: line.mpProductName,
       mp_variation: line.mpVariation,
       mp_parent_sku: String(line.rawRow?.['SKU Induk'] || '') || null,
@@ -1737,15 +2137,22 @@ export async function saveMarketplaceIntakePreview(input: {
       unit_price: line.unitPrice,
       line_subtotal: line.lineSubtotal,
       line_discount: line.lineDiscount,
-      mp_price_initial: parseNumber(line.rawRow?.['Harga Awal']),
-      mp_price_after_discount: parseNumber(line.rawRow?.['Harga Setelah Diskon']) || line.unitPrice,
+      mp_price_initial: parseNumber(line.rawRow?.['Harga Awal']) || parseNumber(line.rawRow?.['SKU Unit Original Price']),
+      mp_price_after_discount: parseNumber(line.rawRow?.['Harga Setelah Diskon'])
+        || (
+          parseNumber(line.rawRow?.['SKU Subtotal After Discount']) > 0
+            ? parseNumber(line.rawRow?.['SKU Subtotal After Discount']) / Math.max(line.quantity, 1)
+            : 0
+        )
+        || line.unitPrice,
       mp_returned_quantity: parseInteger(line.rawRow?.['Returned quantity']),
-      mp_total_discount: parseNumber(line.rawRow?.['Total Diskon']),
-      mp_discount_seller: parseNumber(line.rawRow?.['Diskon Dari Penjual']),
-      mp_discount_shopee: parseNumber(line.rawRow?.['Diskon Dari Shopee']),
-      mp_product_weight_grams: parseNumber(line.rawRow?.['Berat Produk']),
-      mp_order_product_count: parseInteger(line.rawRow?.['Jumlah Produk di Pesan']),
-      mp_total_weight_grams: parseNumber(line.rawRow?.['Total Berat']),
+      mp_total_discount: parseNumber(line.rawRow?.['Total Diskon'])
+        || parseNumber(line.rawRow?.['SKU Seller Discount']) + parseNumber(line.rawRow?.['SKU Platform Discount']),
+      mp_discount_seller: parseNumber(line.rawRow?.['Diskon Dari Penjual']) || parseNumber(line.rawRow?.['SKU Seller Discount']),
+      mp_discount_shopee: parseNumber(line.rawRow?.['Diskon Dari Shopee']) || parseNumber(line.rawRow?.['SKU Platform Discount']),
+      mp_product_weight_grams: parseNumber(line.rawRow?.['Berat Produk']) || parseWeightGrams(line.rawRow?.['Weight(kg)']) || 0,
+      mp_order_product_count: parseInteger(line.rawRow?.['Jumlah Produk di Pesan']) || parseInteger(line.rawRow?.Quantity),
+      mp_total_weight_grams: parseNumber(line.rawRow?.['Total Berat']) || parseWeightGrams(line.rawRow?.['Weight(kg)']) || 0,
       mp_voucher_seller: parseNumber(line.rawRow?.['Voucher Ditanggung Penjual']),
       mp_cashback_coin: parseNumber(line.rawRow?.['Cashback Koin']),
       mp_voucher_shopee: parseNumber(line.rawRow?.['Voucher Ditanggung Shopee']),
@@ -1774,6 +2181,11 @@ export async function saveMarketplaceIntakePreview(input: {
         table: 'marketplace_intake_order_lines',
         rows: lineRows,
         removableColumns: [
+          'raw_platform_sku_id',
+          'raw_seller_sku',
+          'normalized_sku',
+          'sku_normalization_source',
+          'sku_normalization_reason',
           'mp_parent_sku',
           'mp_reference_sku',
           'mp_price_initial',
@@ -1800,7 +2212,7 @@ export async function saveMarketplaceIntakePreview(input: {
     const manualMemoryUpsertMap = new Map<string, {
     source_key: string;
     source_label: string;
-    platform: 'shopee';
+    platform: MarketplaceIntakePlatform;
     business_id: number;
     business_code: string;
     match_signature: string;
@@ -1909,7 +2321,12 @@ export type MarketplaceIntakeWarehouseStatus = 'staged' | 'scheduled' | 'hold' |
 
 export type MarketplaceIntakeWorkspaceLineRow = {
   lineIndex: number;
+  rawPlatformSkuId: string | null;
+  rawSellerSku: string | null;
   mpSku: string | null;
+  normalizedSku: string | null;
+  skuNormalizationSource: string | null;
+  skuNormalizationReason: string | null;
   mpProductName: string;
   mpVariation: string | null;
   quantity: number;
@@ -2195,7 +2612,12 @@ async function loadWorkspaceBatchMeta(
 function mapWorkspaceLineRow(row: any): MarketplaceIntakeWorkspaceLineRow {
   return {
     lineIndex: Number(row.line_index || 0),
+    rawPlatformSkuId: row.raw_platform_sku_id || null,
+    rawSellerSku: row.raw_seller_sku || null,
     mpSku: row.mp_sku || null,
+    normalizedSku: row.normalized_sku || null,
+    skuNormalizationSource: row.sku_normalization_source || null,
+    skuNormalizationReason: row.sku_normalization_reason || null,
     mpProductName: String(row.mp_product_name || ''),
     mpVariation: row.mp_variation || null,
     quantity: Number(row.quantity || 0),
@@ -2213,12 +2635,17 @@ async function loadWorkspaceLinesByOrderIds(orderIds: number[]): Promise<Map<num
   if (orderIds.length === 0) return linesByOrderId;
 
   const svc = createServiceSupabase();
-  const linesRes = await svc
+  let linesRes: any = await svc
     .from('marketplace_intake_order_lines')
     .select(`
       intake_order_id,
       line_index,
+      raw_platform_sku_id,
+      raw_seller_sku,
       mp_sku,
+      normalized_sku,
+      sku_normalization_source,
+      sku_normalization_reason,
       mp_product_name,
       mp_variation,
       quantity,
@@ -2232,6 +2659,28 @@ async function loadWorkspaceLinesByOrderIds(orderIds: number[]): Promise<Map<num
     .in('intake_order_id', orderIds)
     .order('intake_order_id', { ascending: true })
     .order('line_index', { ascending: true });
+
+  if (linesRes.error && isMissingTableError(linesRes.error)) {
+    linesRes = await svc
+      .from('marketplace_intake_order_lines')
+      .select(`
+        intake_order_id,
+        line_index,
+        mp_sku,
+        mp_product_name,
+        mp_variation,
+        quantity,
+        line_subtotal,
+        detected_custom_id,
+        matched_entity_label,
+        mapped_store_name,
+        line_status,
+        issue_codes
+      `)
+      .in('intake_order_id', orderIds)
+      .order('intake_order_id', { ascending: true })
+      .order('line_index', { ascending: true });
+  }
 
   if (linesRes.error) {
     if (isMissingTableError(linesRes.error)) throw new Error(getMissingSchemaMessage());
@@ -2372,7 +2821,7 @@ export async function listMarketplaceIntakeWorkspace(input: {
   sourceKey?: string | null;
 }): Promise<MarketplaceIntakeWorkspaceResponse> {
   const shipmentDate = normalizeShipmentDate(input.shipmentDate);
-  const sourceConfig = getMarketplaceIntakeSourceConfig(input.sourceKey);
+  const sourceConfig = await resolveMarketplaceIntakeSourceConfig(input.sourceKey);
   const batchMetaById = await loadWorkspaceBatchMeta(sourceConfig);
   const batchIds = Array.from(batchMetaById.keys());
 
@@ -2420,7 +2869,7 @@ export async function updateMarketplaceIntakeWorkspace(input: MarketplaceIntakeW
     ? null
     : normalizeShipmentDate(String(input.shipmentDate || ''));
 
-  const sourceConfig = getMarketplaceIntakeSourceConfig(input.sourceKey);
+  const sourceConfig = await resolveMarketplaceIntakeSourceConfig(input.sourceKey);
   const batchMetaById = await loadWorkspaceBatchMeta(sourceConfig);
   const allowedBatchIds = new Set<number>(batchMetaById.keys());
   const svc = createServiceSupabase();

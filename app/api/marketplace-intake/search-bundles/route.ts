@@ -3,7 +3,7 @@ import { requireDashboardRoles } from '@/lib/dashboard-access';
 import {
   guessMarketplaceStoreFromTexts,
 } from '@/lib/marketplace-intake-store';
-import { getMarketplaceIntakeSourceConfig } from '@/lib/marketplace-intake-sources';
+import { resolveMarketplaceIntakeSourceConfig } from '@/lib/marketplace-intake-source-store-scopes';
 import { createServiceSupabase } from '@/lib/service-supabase';
 
 export async function GET(req: NextRequest) {
@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
     }
 
     const query = String(req.nextUrl.searchParams.get('q') || '').trim();
-    const sourceConfig = getMarketplaceIntakeSourceConfig(req.nextUrl.searchParams.get('sourceKey'));
+    const sourceConfig = await resolveMarketplaceIntakeSourceConfig(req.nextUrl.searchParams.get('sourceKey'));
     if (query.length < 2) {
       return NextResponse.json({ results: [] });
     }
