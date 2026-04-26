@@ -659,7 +659,6 @@ const BRAND_COLORS = useMemo(() => {
 
   return (
     <div className="fade-in">
-      <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Marketing</h2>
 
       {/* ── KPI Cards ── */}
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 20 }}>

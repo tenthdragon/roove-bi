@@ -1,0 +1,1319 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Visualisasi Deduksi Produk Warehouse</title>
+  <style>
+    :root {
+      --bg: #081018;
+      --bg-soft: #0c1823;
+      --panel: rgba(10, 19, 29, 0.88);
+      --panel-strong: rgba(8, 16, 24, 0.96);
+      --border: rgba(148, 163, 184, 0.18);
+      --border-strong: rgba(148, 163, 184, 0.28);
+      --text: #ecf5ff;
+      --dim: #99adbf;
+      --teal: #2dd4bf;
+      --cyan: #38bdf8;
+      --amber: #fbbf24;
+      --red: #f87171;
+      --green: #34d399;
+      --blue: #60a5fa;
+      --ink: #062235;
+      --shadow: 0 24px 72px rgba(0, 0, 0, 0.42);
+      --radius: 22px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      background:
+        radial-gradient(circle at top left, rgba(56, 189, 248, 0.15), transparent 26%),
+        radial-gradient(circle at top right, rgba(45, 212, 191, 0.12), transparent 22%),
+        linear-gradient(180deg, #061018 0%, #081018 42%, #07111a 100%);
+      color: var(--text);
+      font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+    }
+
+    body {
+      padding: 28px;
+    }
+
+    .page {
+      max-width: 1600px;
+      margin: 0 auto;
+      display: grid;
+      gap: 18px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+      gap: 18px;
+      align-items: stretch;
+    }
+
+    .hero-card,
+    .panel,
+    .footer-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .hero-card {
+      padding: 22px 24px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--teal);
+      margin-bottom: 10px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.04;
+      letter-spacing: -0.04em;
+    }
+
+    .subtitle {
+      margin: 14px 0 0;
+      max-width: 900px;
+      color: var(--dim);
+      line-height: 1.72;
+      font-size: 14px;
+    }
+
+    .chip-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+    }
+
+    .chip {
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      background: rgba(15, 23, 42, 0.56);
+      color: #d7e6f3;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      height: 100%;
+    }
+
+    .stat {
+      padding: 18px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(17, 24, 39, 0.9), rgba(7, 13, 20, 0.92));
+    }
+
+    .stat-label {
+      color: var(--dim);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-weight: 700;
+    }
+
+    .stat-value {
+      margin-top: 10px;
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .stat-desc {
+      margin-top: 8px;
+      font-size: 13px;
+      line-height: 1.55;
+      color: #c5d5e5;
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .summary {
+      padding: 16px 18px;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      background: rgba(9, 17, 25, 0.84);
+    }
+
+    .summary h3 {
+      margin: 0;
+      font-size: 15px;
+      letter-spacing: -0.02em;
+    }
+
+    .summary p {
+      margin: 10px 0 0;
+      color: var(--dim);
+      font-size: 13px;
+      line-height: 1.65;
+    }
+
+    .summary .accent {
+      display: inline-flex;
+      margin-bottom: 10px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .accent-input { background: rgba(96, 165, 250, 0.14); color: #9bc5ff; }
+    .accent-resolver { background: rgba(45, 212, 191, 0.14); color: #7ff0df; }
+    .accent-stock { background: rgba(251, 191, 36, 0.14); color: #ffd971; }
+    .accent-monitor { background: rgba(248, 113, 113, 0.14); color: #fda4a4; }
+
+    .panel {
+      overflow: hidden;
+    }
+
+    .panel-head {
+      padding: 18px 20px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: flex-start;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+      background: linear-gradient(180deg, rgba(11, 20, 30, 0.98), rgba(8, 16, 24, 0.9));
+    }
+
+    .panel-copy h2 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: -0.03em;
+    }
+
+    .panel-copy p {
+      margin: 8px 0 0;
+      color: var(--dim);
+      line-height: 1.65;
+      font-size: 13px;
+      max-width: 880px;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: 280px;
+    }
+
+    .tool-btn {
+      border: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.72);
+      color: #dceafb;
+      border-radius: 12px;
+      padding: 9px 12px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 120ms ease, border-color 120ms ease, background 120ms ease;
+    }
+
+    .tool-btn:hover {
+      transform: translateY(-1px);
+      border-color: var(--border-strong);
+      background: rgba(22, 32, 48, 0.88);
+    }
+
+    .zoom-indicator {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 72px;
+      padding: 9px 12px;
+      border-radius: 12px;
+      background: rgba(10, 22, 34, 0.92);
+      border: 1px solid var(--border);
+      color: var(--teal);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .diagram-shell {
+      position: relative;
+      height: min(78vh, 900px);
+      min-height: 620px;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(6, 13, 20, 0.98), rgba(7, 13, 21, 0.98));
+    }
+
+    .diagram-shell.dragging {
+      cursor: grabbing;
+    }
+
+    .diagram-shell svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+      touch-action: none;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .diagram-hint {
+      position: absolute;
+      right: 18px;
+      bottom: 18px;
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: rgba(7, 14, 21, 0.82);
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      color: var(--dim);
+      font-size: 12px;
+      backdrop-filter: blur(14px);
+    }
+
+    .panel--fullscreen {
+      position: fixed;
+      inset: 16px;
+      z-index: 40;
+      background: var(--panel-strong);
+    }
+
+    .panel--fullscreen .diagram-shell {
+      height: calc(100vh - 116px);
+      min-height: calc(100vh - 116px);
+    }
+
+    .footer-card {
+      padding: 18px 20px;
+    }
+
+    .footer-card h3 {
+      margin: 0;
+      font-size: 17px;
+      letter-spacing: -0.02em;
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 18px;
+      margin-top: 12px;
+    }
+
+    .footer-card p,
+    .footer-card li {
+      color: var(--dim);
+      line-height: 1.65;
+      font-size: 13px;
+    }
+
+    .source-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .source-item {
+      padding: 8px 11px;
+      border-radius: 12px;
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      background: rgba(15, 23, 42, 0.54);
+      color: #cfe0f0;
+      font-size: 12px;
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+    }
+
+    .node {
+      height: 100%;
+      padding: 12px 14px;
+      border-radius: 18px;
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      background: rgba(9, 16, 25, 0.92);
+      color: var(--text);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+    }
+
+    .node h4 {
+      margin: 0;
+      font-size: 17px;
+      line-height: 1.18;
+      letter-spacing: -0.02em;
+    }
+
+    .node .node-tag {
+      display: inline-flex;
+      margin-bottom: 9px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .node p {
+      margin: 9px 0 0;
+      font-size: 12px;
+      line-height: 1.54;
+      color: #d5e2ef;
+    }
+
+    .node ul {
+      margin: 10px 0 0;
+      padding-left: 18px;
+      color: #bed0df;
+      font-size: 11.5px;
+      line-height: 1.48;
+    }
+
+    .node code {
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 11px;
+      color: #f1fbff;
+      background: rgba(255, 255, 255, 0.06);
+      padding: 1px 4px;
+      border-radius: 6px;
+    }
+
+    .node.input { border-color: rgba(96, 165, 250, 0.28); background: linear-gradient(180deg, rgba(11, 27, 46, 0.94), rgba(8, 18, 32, 0.94)); }
+    .node.resolver { border-color: rgba(45, 212, 191, 0.26); background: linear-gradient(180deg, rgba(7, 34, 35, 0.94), rgba(8, 24, 28, 0.94)); }
+    .node.stock { border-color: rgba(251, 191, 36, 0.28); background: linear-gradient(180deg, rgba(45, 31, 8, 0.94), rgba(29, 20, 6, 0.94)); }
+    .node.monitor { border-color: rgba(248, 113, 113, 0.28); background: linear-gradient(180deg, rgba(45, 15, 15, 0.94), rgba(25, 10, 12, 0.94)); }
+    .node.neutral { border-color: rgba(148, 163, 184, 0.18); }
+
+    .tag-input { background: rgba(96, 165, 250, 0.14); color: #9bc5ff; }
+    .tag-resolver { background: rgba(45, 212, 191, 0.14); color: #80f2e3; }
+    .tag-stock { background: rgba(251, 191, 36, 0.16); color: #ffde84; }
+    .tag-monitor { background: rgba(248, 113, 113, 0.16); color: #fda4a4; }
+    .tag-neutral { background: rgba(148, 163, 184, 0.14); color: #d7e2ed; }
+
+    .lane-label {
+      font-size: 26px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      fill: rgba(236, 245, 255, 0.9);
+    }
+
+    .lane-copy {
+      font-size: 13px;
+      fill: rgba(180, 197, 214, 0.84);
+    }
+
+    .edge-label {
+      fill: #dceafb;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+
+    .group-title {
+      fill: rgba(226, 238, 250, 0.92);
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+    }
+
+    .group-copy {
+      fill: rgba(170, 187, 203, 0.84);
+      font-size: 13px;
+    }
+
+    .legend-chip {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      margin-right: 12px;
+      color: var(--dim);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .kbd {
+      padding: 2px 6px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+      font-size: 11px;
+      color: #f4fbff;
+    }
+
+    @media (max-width: 1180px) {
+      .hero,
+      .footer-grid,
+      .summary-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .panel-head {
+        flex-direction: column;
+      }
+
+      .toolbar {
+        justify-content: flex-start;
+        min-width: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <div class="hero-card">
+        <div class="eyebrow">Warehouse Deduction Map</div>
+        <h1 class="title">Visualisasi HTML untuk schema dan flow deduksi produk</h1>
+        <p class="subtitle">
+          Halaman ini merangkum jalur utama yang dipakai app saat order Scalev masuk, dipetakan ke master produk warehouse,
+          lalu dikurangi dengan FIFO ke batch dan ledger. Diagram bisa di-drag, di-zoom dengan mouse wheel, dan di-fit ulang
+          tanpa bergantung ke zoom browser.
+        </p>
+        <div class="chip-row">
+          <span class="chip">Input: <code>scalev_orders</code> + <code>scalev_order_lines</code></span>
+          <span class="chip">Resolver: catalog mapping + legacy fallback</span>
+          <span class="chip">Eksekusi: <code>warehouse_deduct_fifo()</code></span>
+          <span class="chip">Monitoring: summary, anomaly queue, RTS</span>
+        </div>
+      </div>
+
+      <div class="hero-card">
+        <div class="stat-grid">
+          <div class="stat">
+            <div class="stat-label">Sumber</div>
+            <div class="stat-value">2</div>
+            <div class="stat-desc">Order header dan order lines dari webhook/sync Scalev.</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Lapisan Resolver</div>
+            <div class="stat-value">4</div>
+            <div class="stat-desc">Business target, catalog identifiers, curated mapping, legacy fallback.</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Eksekusi Stok</div>
+            <div class="stat-value">3</div>
+            <div class="stat-desc">Master produk, batch FIFO, lalu ledger sebagai jejak final.</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Recovery</div>
+            <div class="stat-value">3</div>
+            <div class="stat-desc">Reversal, anomaly queue, dan RTS verification untuk retur.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="summary-grid">
+      <article class="summary">
+        <div class="accent accent-input">Input</div>
+        <h3>Order masuk lebih dulu</h3>
+        <p>Webhook membuat atau mengupdate <code>scalev_orders</code> lalu mengisi <code>scalev_order_lines</code> yang jadi bahan deduksi.</p>
+      </article>
+      <article class="summary">
+        <div class="accent accent-resolver">Resolver</div>
+        <h3>Pemetaan tidak lagi satu jalur</h3>
+        <p>Runtime sekarang mengutamakan katalog Scalev dan bundle expansion, lalu turun ke mapping legacy bila perlu.</p>
+      </article>
+      <article class="summary">
+        <div class="accent accent-stock">Stock</div>
+        <h3>FIFO tetap jadi eksekutor akhir</h3>
+        <p>Begitu target produk ketemu, <code>warehouse_deduct_fifo()</code> mengurangi batch dan menulis <code>OUT</code> ke ledger.</p>
+      </article>
+      <article class="summary">
+        <div class="accent accent-monitor">Monitor</div>
+        <h3>Mismatch bisa dipantau</h3>
+        <p>Dashboard membaca summary dan backlog anomaly dari RPC SQL supaya order yang belum sinkron cepat terlihat.</p>
+      </article>
+    </section>
+
+    <section class="panel" data-diagram-panel>
+      <div class="panel-head">
+        <div class="panel-copy">
+          <h2>Flow Runtime Deduksi Produk</h2>
+          <p>
+            Ini menunjukkan urutan eksekusi runtime yang aktif sekarang: webhook menulis order, fungsi reconcile membaca status,
+            lalu resolver memilih target produk warehouse sebelum RPC FIFO mengurangi stok dan menulis ledger.
+          </p>
+        </div>
+        <div class="toolbar">
+          <span class="zoom-indicator" data-zoom-label>100%</span>
+          <button class="tool-btn" type="button" data-action="fit">Fit</button>
+          <button class="tool-btn" type="button" data-action="actual">100%</button>
+          <button class="tool-btn" type="button" data-action="zoom-out">-</button>
+          <button class="tool-btn" type="button" data-action="zoom-in">+</button>
+          <button class="tool-btn" type="button" data-action="fullscreen">Maximalkan</button>
+        </div>
+      </div>
+
+      <div class="diagram-shell" data-panzoom>
+        <svg viewBox="0 0 2300 1420" aria-label="Flow runtime deduksi produk warehouse">
+          <defs>
+            <marker id="arrow-flow" markerWidth="16" markerHeight="16" refX="12" refY="8" orient="auto" markerUnits="strokeWidth">
+              <path d="M 0 0 L 16 8 L 0 16 z" fill="#7dd3fc"></path>
+            </marker>
+            <marker id="arrow-flow-warm" markerWidth="16" markerHeight="16" refX="12" refY="8" orient="auto" markerUnits="strokeWidth">
+              <path d="M 0 0 L 16 8 L 0 16 z" fill="#fbbf24"></path>
+            </marker>
+            <marker id="arrow-flow-red" markerWidth="16" markerHeight="16" refX="12" refY="8" orient="auto" markerUnits="strokeWidth">
+              <path d="M 0 0 L 16 8 L 0 16 z" fill="#f87171"></path>
+            </marker>
+            <pattern id="flow-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+              <path d="M 40 0 L 0 0 0 40" fill="none" stroke="rgba(148,163,184,0.08)" stroke-width="1"></path>
+            </pattern>
+          </defs>
+
+          <rect x="0" y="0" width="2300" height="1420" fill="url(#flow-grid)"></rect>
+
+          <g data-viewport>
+            <rect x="34" y="52" width="2232" height="1236" rx="34" fill="rgba(255,255,255,0.02)" stroke="rgba(148,163,184,0.08)" stroke-width="1.5"></rect>
+
+            <rect x="54" y="88" width="560" height="1140" rx="28" fill="rgba(22,61,106,0.08)" stroke="rgba(96,165,250,0.14)"></rect>
+            <text x="84" y="128" class="lane-label">Input Order</text>
+            <text x="84" y="154" class="lane-copy">Sumber data dari webhook atau sync yang menyalakan reconcile.</text>
+
+            <rect x="646" y="88" width="956" height="1140" rx="28" fill="rgba(10,78,73,0.07)" stroke="rgba(45,212,191,0.14)"></rect>
+            <text x="676" y="128" class="lane-label">Resolver & Keputusan</text>
+            <text x="676" y="154" class="lane-copy">Status order, target business, mapping catalog, bundle expansion, dan fallback lookup.</text>
+
+            <rect x="1634" y="88" width="592" height="1140" rx="28" fill="rgba(107,72,12,0.07)" stroke="rgba(251,191,36,0.14)"></rect>
+            <text x="1664" y="128" class="lane-label">Eksekusi & Monitoring</text>
+            <text x="1664" y="154" class="lane-copy">FIFO batch deduction, ledger, summary harian, anomaly queue, reversal, dan RTS.</text>
+
+            <path d="M 500 328 C 620 328, 650 328, 790 328" stroke="#7dd3fc" stroke-width="4" fill="none" marker-end="url(#arrow-flow)"></path>
+            <path d="M 500 498 C 620 498, 650 498, 790 392" stroke="#7dd3fc" stroke-width="4" fill="none" marker-end="url(#arrow-flow)"></path>
+            <path d="M 1030 420 C 1120 420, 1130 420, 1210 420" stroke="#7dd3fc" stroke-width="4" fill="none" marker-end="url(#arrow-flow)"></path>
+
+            <path d="M 1388 420 C 1516 420, 1536 420, 1670 420" stroke="#7dd3fc" stroke-width="4" fill="none" marker-end="url(#arrow-flow)"></path>
+            <path d="M 1748 494 C 1748 550, 1748 560, 1748 628" stroke="#fbbf24" stroke-width="4" fill="none" marker-end="url(#arrow-flow-warm)"></path>
+            <path d="M 1748 770 C 1748 834, 1748 834, 1748 884" stroke="#fbbf24" stroke-width="4" fill="none" marker-end="url(#arrow-flow-warm)"></path>
+            <path d="M 1748 770 C 1884 770, 1908 770, 2020 770" stroke="#fbbf24" stroke-width="4" fill="none" marker-end="url(#arrow-flow-warm)"></path>
+            <path d="M 1748 978 C 1748 1040, 1748 1040, 1748 1088" stroke="#7dd3fc" stroke-width="4" fill="none" marker-end="url(#arrow-flow)"></path>
+            <path d="M 2098 978 C 2098 1040, 2098 1040, 2098 1088" stroke="#f87171" stroke-width="4" fill="none" marker-end="url(#arrow-flow-red)"></path>
+
+            <path d="M 1010 500 C 1110 560, 1140 620, 1228 702" stroke="#fbbf24" stroke-width="4" fill="none" marker-end="url(#arrow-flow-warm)"></path>
+            <path d="M 1010 500 C 1088 648, 1088 770, 1228 896" stroke="#f87171" stroke-width="4" fill="none" marker-end="url(#arrow-flow-red)"></path>
+
+            <path d="M 1276 294 C 1360 250, 1450 240, 1548 240" stroke="#38bdf8" stroke-width="3.5" fill="none" marker-end="url(#arrow-flow)"></path>
+            <path d="M 1276 294 C 1360 300, 1460 340, 1548 404" stroke="#2dd4bf" stroke-width="3.5" fill="none" marker-end="url(#arrow-flow)"></path>
+            <path d="M 1276 294 C 1378 346, 1454 438, 1548 572" stroke="#2dd4bf" stroke-width="3.5" fill="none" marker-end="url(#arrow-flow)"></path>
+            <path d="M 1276 294 C 1362 358, 1448 516, 1548 736" stroke="#2dd4bf" stroke-width="3.5" fill="none" marker-end="url(#arrow-flow)"></path>
+
+            <path d="M 1540 456 C 1640 456, 1650 456, 1670 456" stroke="#2dd4bf" stroke-width="3.5" fill="none" marker-end="url(#arrow-flow)"></path>
+            <path d="M 1540 624 C 1628 610, 1650 578, 1670 510" stroke="#2dd4bf" stroke-width="3.5" fill="none" marker-end="url(#arrow-flow)"></path>
+            <path d="M 1540 794 C 1626 724, 1650 652, 1670 564" stroke="#2dd4bf" stroke-width="3.5" fill="none" marker-end="url(#arrow-flow)"></path>
+
+            <path d="M 1454 702 C 1580 792, 1636 864, 1668 882" stroke="#fbbf24" stroke-width="3.5" fill="none" stroke-dasharray="10 8" marker-end="url(#arrow-flow-warm)"></path>
+            <path d="M 1454 896 C 1592 926, 1664 928, 2018 928" stroke="#f87171" stroke-width="3.5" fill="none" stroke-dasharray="10 8" marker-end="url(#arrow-flow-red)"></path>
+
+            <text x="626" y="314" class="edge-label">write / update</text>
+            <text x="623" y="474" class="edge-label">line items</text>
+            <text x="1084" y="408" class="edge-label">status + lines</text>
+            <text x="1800" y="606" class="edge-label">FIFO execute</text>
+            <text x="1780" y="860" class="edge-label">stok batch turun</text>
+            <text x="1968" y="746" class="edge-label">jejak final</text>
+            <text x="1772" y="1078" class="edge-label">read model</text>
+            <text x="2015" y="1078" class="edge-label">backlog / mismatch</text>
+            <text x="1092" y="684" class="edge-label">jika returned</text>
+            <text x="1080" y="880" class="edge-label">jika status batal / non-terminal</text>
+
+            <foreignObject x="110" y="248" width="390" height="160">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node input">
+                <div class="node-tag tag-input">Webhook / Sync</div>
+                <h4>Scalev inbound event</h4>
+                <p>Payload order masuk dari webhook atau sync runner, lalu dipakai untuk menyusun header order dan line item.</p>
+                <ul>
+                  <li><code>order_id</code>, <code>external_id</code>, <code>status</code></li>
+                  <li><code>business_code</code>, <code>shipped_time</code>, <code>completed_time</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="110" y="430" width="390" height="136">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node input">
+                <div class="node-tag tag-input">Source Table</div>
+                <h4><code>scalev_order_lines</code></h4>
+                <p>Baris produk yang dipakai runtime untuk menghitung qty deduksi per nama produk atau SKU varian.</p>
+                <ul>
+                  <li><code>product_name</code></li>
+                  <li><code>variant_sku</code></li>
+                  <li><code>quantity</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="110" y="596" width="390" height="160">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node input">
+                <div class="node-tag tag-input">Source Table</div>
+                <h4><code>scalev_orders</code></h4>
+                <p>Header order yang menyimpan konteks business dan status. Reconcile membaca tabel ini untuk memutuskan deduct, reverse, atau queue RTS.</p>
+                <ul>
+                  <li><code>id</code>, <code>order_id</code>, <code>business_code</code></li>
+                  <li><code>status</code>, <code>shipped_time</code>, <code>completed_time</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="790" y="282" width="420" height="220">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Server Action</div>
+                <h4><code>reconcileScalevOrderWarehouse()</code></h4>
+                <p>Fungsi utama runtime. Ia memuat order, mengecek go-live gudang, membaca status order, lalu memilih apakah order harus dideduct, direverse, atau masuk verifikasi retur.</p>
+                <ul>
+                  <li><code>shipped/completed</code> → lanjut ke resolver target</li>
+                  <li><code>returned/rts</code> → queue verifikasi</li>
+                  <li>status turun / batal → reversal outstanding deduction</li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="808" y="548" width="370" height="132">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node neutral">
+                <div class="node-tag tag-neutral">Gate Operasional</div>
+                <h4><code>warehouse_stock_opname_sessions</code></h4>
+                <p>Dipakai untuk menentukan go-live gudang. Sebelum go-live aktif, deduction normal belum dijalankan penuh.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1228" y="212" width="330" height="128">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Business Target</div>
+                <h4><code>warehouse_business_mapping</code></h4>
+                <p>Menentukan entity/warehouse yang diizinkan untuk business tertentu, termasuk target utama <code>is_primary</code>.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1548" y="174" width="360" height="118">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Catalog Lookup</div>
+                <h4><code>scalev_catalog_identifiers</code></h4>
+                <p>Registry identifier normal untuk product, variant, atau bundle.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1548" y="338" width="360" height="140">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Curated Mapping</div>
+                <h4><code>warehouse_scalev_catalog_mapping</code></h4>
+                <p>Mapping manual antar entity catalog Scalev ke master <code>warehouse_products</code>.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1548" y="524" width="360" height="132">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Bundle Expansion</div>
+                <h4><code>scalev_catalog_bundle_lines</code></h4>
+                <p>Kalau identifier adalah bundle, komponen item dipecah menjadi target warehouse konkret.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1228" y="660" width="326" height="148">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Legacy Fallback</div>
+                <h4><code>warehouse_scalev_mapping</code></h4>
+                <p>Mapping lama berbasis <code>scalev_product_name</code> dengan <code>deduct_qty_multiplier</code> dan <code>is_ignored</code>.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1228" y="856" width="326" height="150">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Name Fallback RPC</div>
+                <h4><code>warehouse_find_product_for_deduction()</code></h4>
+                <p>Mencocokkan <code>product_name</code> ke <code>warehouse_products.scalev_product_names</code> pada target gudang yang diizinkan.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1670" y="348" width="328" height="148">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Resolved Target</div>
+                <h4><code>warehouse_product_id</code> + qty final</h4>
+                <p>Output resolver berisi produk warehouse yang valid, qty final setelah multiplier, dan konteks note untuk ledger.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1670" y="628" width="328" height="142">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node stock">
+                <div class="node-tag tag-stock">RPC Eksekusi</div>
+                <h4><code>warehouse_deduct_fifo()</code></h4>
+                <p>Mengurangi stok batch FIFO berdasarkan expiry tertua, lalu menulis <code>OUT</code> ke ledger dengan <code>scalev_order_id</code>.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1670" y="884" width="328" height="138">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node stock">
+                <div class="node-tag tag-stock">Stock Batch</div>
+                <h4><code>warehouse_batches</code></h4>
+                <p>Stok fisik per batch. Kolom <code>current_qty</code> turun saat deduction dan naik saat reversal.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="2020" y="694" width="160" height="284">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node stock">
+                <div class="node-tag tag-stock">Final Trail</div>
+                <h4><code>warehouse_stock_ledger</code></h4>
+                <p>Semua gerak stok masuk ke sini sebagai jejak final.</p>
+                <ul>
+                  <li><code>movement_type</code>: IN / OUT / ADJUST / transfer / rts</li>
+                  <li><code>reference_type</code>: scalev_order, rts, manual</li>
+                  <li><code>reference_id</code> + <code>scalev_order_id</code></li>
+                  <li><code>running_balance</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1670" y="1088" width="328" height="128">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node monitor">
+                <div class="node-tag tag-monitor">Read Model</div>
+                <h4><code>warehouse_daily_deduction_summary()</code></h4>
+                <p>Ringkasan harian deduction warehouse yang dipakai dashboard untuk membaca volume dan pasangan produk.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="2020" y="1088" width="160" height="128">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node monitor">
+                <div class="node-tag tag-monitor">Anomaly Queue</div>
+                <h4><code>warehouse_daily_undeducted_orders()</code></h4>
+                <p>Membandingkan target canonical deduction dengan net ledger aktual.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1230" y="660" width="324" height="148">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node monitor">
+                <div class="node-tag tag-monitor">Retur</div>
+                <h4><code>warehouse_rts_verifications</code></h4>
+                <p>Order dengan status <code>returned</code>, <code>rts</code>, atau <code>shipped_rts</code> tidak langsung restock; ia masuk queue verifikasi fisik.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1230" y="856" width="324" height="144">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node monitor">
+                <div class="node-tag tag-monitor">Reversal</div>
+                <h4><code>reverseOutstandingWarehouseDeductions()</code></h4>
+                <p>Jika order tidak lagi terminal, outstanding <code>OUT</code> dibalik menjadi <code>IN</code> dan qty batch dipulihkan.</p>
+              </div>
+            </foreignObject>
+          </g>
+        </svg>
+        <div class="diagram-hint">
+          <span>Drag untuk pan</span>
+          <span class="kbd">Wheel</span>
+          <span>untuk zoom</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" data-diagram-panel>
+      <div class="panel-head">
+        <div class="panel-copy">
+          <h2>Schema Map dan Relasi Utama</h2>
+          <p>
+            Ini bukan ERD formal lengkap seluruh app, tetapi peta relasi yang memang relevan ke proses deduksi produk:
+            sumber order, layer mapping, core warehouse, lalu area monitoring dan recovery.
+          </p>
+        </div>
+        <div class="toolbar">
+          <span class="zoom-indicator" data-zoom-label>100%</span>
+          <button class="tool-btn" type="button" data-action="fit">Fit</button>
+          <button class="tool-btn" type="button" data-action="actual">100%</button>
+          <button class="tool-btn" type="button" data-action="zoom-out">-</button>
+          <button class="tool-btn" type="button" data-action="zoom-in">+</button>
+          <button class="tool-btn" type="button" data-action="fullscreen">Maximalkan</button>
+        </div>
+      </div>
+
+      <div class="diagram-shell" data-panzoom>
+        <svg viewBox="0 0 2480 1560" aria-label="Schema map deduksi produk">
+          <defs>
+            <marker id="arrow-schema" markerWidth="16" markerHeight="16" refX="12" refY="8" orient="auto" markerUnits="strokeWidth">
+              <path d="M 0 0 L 16 8 L 0 16 z" fill="#93c5fd"></path>
+            </marker>
+            <pattern id="schema-grid" width="44" height="44" patternUnits="userSpaceOnUse">
+              <path d="M 44 0 L 0 0 0 44" fill="none" stroke="rgba(148,163,184,0.08)" stroke-width="1"></path>
+            </pattern>
+          </defs>
+
+          <rect x="0" y="0" width="2480" height="1560" fill="url(#schema-grid)"></rect>
+
+          <g data-viewport>
+            <rect x="34" y="50" width="2412" height="1450" rx="34" fill="rgba(255,255,255,0.02)" stroke="rgba(148,163,184,0.08)" stroke-width="1.5"></rect>
+
+            <rect x="56" y="86" width="640" height="632" rx="28" fill="rgba(22,61,106,0.08)" stroke="rgba(96,165,250,0.16)"></rect>
+            <text x="86" y="128" class="group-title">1. Sumber Order</text>
+            <text x="86" y="154" class="group-copy">Tabel yang membawa order header, order lines, dan master business Scalev.</text>
+
+            <rect x="744" y="86" width="880" height="960" rx="28" fill="rgba(10,78,73,0.07)" stroke="rgba(45,212,191,0.16)"></rect>
+            <text x="774" y="128" class="group-title">2. Layer Mapping</text>
+            <text x="774" y="154" class="group-copy">Gabungan whitelist gudang, katalog Scalev, curated mapping, dan fallback legacy.</text>
+
+            <rect x="1672" y="86" width="746" height="960" rx="28" fill="rgba(107,72,12,0.07)" stroke="rgba(251,191,36,0.16)"></rect>
+            <text x="1702" y="128" class="group-title">3. Core Warehouse</text>
+            <text x="1702" y="154" class="group-copy">Master produk, batch, dan ledger sebagai sumber kebenaran stok yang bergerak.</text>
+
+            <rect x="56" y="1088" width="2362" height="372" rx="28" fill="rgba(61,22,22,0.06)" stroke="rgba(248,113,113,0.16)"></rect>
+            <text x="86" y="1128" class="group-title">4. Monitoring, Recovery, dan Audit</text>
+            <text x="86" y="1154" class="group-copy">Read model dashboard, anomaly queue, verifikasi RTS, log aktivitas, dan gate go-live.</text>
+
+            <path d="M 412 308 C 496 308, 500 308, 516 308" stroke="#93c5fd" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 318 530 C 412 530, 454 530, 516 402" stroke="#93c5fd" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 412 530 C 574 530, 618 530, 790 250" stroke="#93c5fd" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 412 530 C 612 530, 650 530, 790 520" stroke="#93c5fd" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+
+            <path d="M 1078 272 C 1176 272, 1210 272, 1264 272" stroke="#2dd4bf" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 1080 520 C 1194 520, 1210 520, 1264 366" stroke="#2dd4bf" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 1450 434 C 1600 434, 1620 434, 1718 308" stroke="#2dd4bf" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 1080 760 C 1242 760, 1348 760, 1718 372" stroke="#2dd4bf" stroke-width="4" fill="none" stroke-dasharray="10 8" marker-end="url(#arrow-schema)"></path>
+            <path d="M 1460 662 C 1588 662, 1630 662, 1718 428" stroke="#2dd4bf" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 1078 882 C 1284 882, 1480 882, 1718 492" stroke="#2dd4bf" stroke-width="4" fill="none" stroke-dasharray="10 8" marker-end="url(#arrow-schema)"></path>
+
+            <path d="M 1900 414 C 2040 414, 2060 414, 2140 414" stroke="#fbbf24" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 1900 414 C 2000 502, 2032 576, 2140 650" stroke="#fbbf24" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 1900 592 C 2012 592, 2050 592, 2140 650" stroke="#fbbf24" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+
+            <path d="M 2300 726 C 2300 860, 2300 884, 2168 1216" stroke="#f87171" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 2300 726 C 2160 794, 2040 844, 1788 1216" stroke="#f87171" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 520 1276 C 650 1276, 680 1276, 780 1276" stroke="#f87171" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 1114 1276 C 1246 1276, 1268 1276, 1408 1276" stroke="#f87171" stroke-width="4" fill="none" marker-end="url(#arrow-schema)"></path>
+            <path d="M 1646 1276 C 1768 1276, 1788 1276, 2148 726" stroke="#f87171" stroke-width="4" fill="none" stroke-dasharray="10 8" marker-end="url(#arrow-schema)"></path>
+            <path d="M 520 1378 C 660 1378, 744 1378, 944 946" stroke="#f87171" stroke-width="4" fill="none" stroke-dasharray="10 8" marker-end="url(#arrow-schema)"></path>
+            <path d="M 1114 1378 C 1218 1378, 1242 1378, 1460 946" stroke="#f87171" stroke-width="4" fill="none" stroke-dasharray="10 8" marker-end="url(#arrow-schema)"></path>
+
+            <text x="438" y="292" class="edge-label">business_code</text>
+            <text x="432" y="510" class="edge-label">scalev_order_id</text>
+            <text x="600" y="510" class="edge-label">resolver input</text>
+            <text x="1120" y="254" class="edge-label">entity lookup</text>
+            <text x="1120" y="502" class="edge-label">identifier → mapping</text>
+            <text x="1492" y="418" class="edge-label">warehouse_product_id</text>
+            <text x="1490" y="648" class="edge-label">bundle expansion</text>
+            <text x="1098" y="862" class="edge-label">legacy fallback</text>
+            <text x="2016" y="394" class="edge-label">product</text>
+            <text x="2008" y="570" class="edge-label">batch + ledger</text>
+            <text x="2218" y="1198" class="edge-label">daily summary</text>
+            <text x="1756" y="1198" class="edge-label">anomaly queue</text>
+            <text x="678" y="1260" class="edge-label">per order</text>
+            <text x="1262" y="1260" class="edge-label">per item</text>
+
+            <foreignObject x="90" y="190" width="322" height="118">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node input">
+                <div class="node-tag tag-input">Business Master</div>
+                <h4><code>scalev_webhook_businesses</code></h4>
+                <p><code>id</code>, <code>business_code</code>, <code>business_name</code>, <code>webhook_secret</code></p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="90" y="342" width="422" height="188">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node input">
+                <div class="node-tag tag-input">Order Header</div>
+                <h4><code>scalev_orders</code></h4>
+                <ul>
+                  <li><code>id</code>, <code>order_id</code>, <code>business_code</code></li>
+                  <li><code>status</code>, <code>external_id</code>, <code>platform</code></li>
+                  <li><code>shipped_time</code>, <code>completed_time</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="90" y="566" width="322" height="150">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node input">
+                <div class="node-tag tag-input">Order Lines</div>
+                <h4><code>scalev_order_lines</code></h4>
+                <ul>
+                  <li><code>scalev_order_id</code></li>
+                  <li><code>product_name</code></li>
+                  <li><code>variant_sku</code></li>
+                  <li><code>quantity</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="790" y="184" width="290" height="140">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Allowed Target</div>
+                <h4><code>warehouse_business_mapping</code></h4>
+                <ul>
+                  <li><code>business_code</code></li>
+                  <li><code>deduct_entity</code></li>
+                  <li><code>deduct_warehouse</code></li>
+                  <li><code>is_primary</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="790" y="418" width="290" height="160">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Catalog Registry</div>
+                <h4><code>scalev_catalog_identifiers</code></h4>
+                <ul>
+                  <li><code>business_id</code></li>
+                  <li><code>entity_type</code></li>
+                  <li><code>entity_key</code></li>
+                  <li><code>identifier_normalized</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1264" y="184" width="312" height="146">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Catalog Mapping</div>
+                <h4><code>warehouse_scalev_catalog_mapping</code></h4>
+                <ul>
+                  <li><code>business_id</code></li>
+                  <li><code>scalev_entity_key</code></li>
+                  <li><code>warehouse_product_id</code></li>
+                  <li><code>mapping_source</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1264" y="354" width="312" height="160">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Catalog Cache</div>
+                <h4><code>scalev_catalog_products</code> / <code>variants</code> / <code>bundles</code></h4>
+                <p>Cache entity katalog per business yang memberi sumber <code>entity_key</code> stabil.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1264" y="584" width="312" height="156">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Bundle Composition</div>
+                <h4><code>scalev_catalog_bundle_lines</code></h4>
+                <ul>
+                  <li><code>scalev_bundle_id</code></li>
+                  <li><code>scalev_product_id</code></li>
+                  <li><code>scalev_variant_id</code></li>
+                  <li><code>quantity</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="790" y="792" width="290" height="154">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node resolver">
+                <div class="node-tag tag-resolver">Legacy Mapping</div>
+                <h4><code>warehouse_scalev_mapping</code></h4>
+                <ul>
+                  <li><code>scalev_product_name</code></li>
+                  <li><code>warehouse_product_id</code></li>
+                  <li><code>deduct_qty_multiplier</code></li>
+                  <li><code>is_ignored</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1718" y="218" width="340" height="196">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node stock">
+                <div class="node-tag tag-stock">Master Produk</div>
+                <h4><code>warehouse_products</code></h4>
+                <ul>
+                  <li><code>id</code>, <code>name</code>, <code>sku</code></li>
+                  <li><code>entity</code>, <code>warehouse</code>, <code>category</code></li>
+                  <li><code>scalev_product_names[]</code></li>
+                  <li><code>is_active</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1718" y="492" width="340" height="136">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node stock">
+                <div class="node-tag tag-stock">Batch FIFO</div>
+                <h4><code>warehouse_batches</code></h4>
+                <ul>
+                  <li><code>warehouse_product_id</code></li>
+                  <li><code>batch_code</code></li>
+                  <li><code>expired_date</code></li>
+                  <li><code>current_qty</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="2140" y="562" width="248" height="164">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node stock">
+                <div class="node-tag tag-stock">Ledger</div>
+                <h4><code>warehouse_stock_ledger</code></h4>
+                <ul>
+                  <li><code>warehouse_product_id</code></li>
+                  <li><code>batch_id</code></li>
+                  <li><code>quantity</code></li>
+                  <li><code>reference_id</code></li>
+                  <li><code>scalev_order_id</code></li>
+                </ul>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="90" y="1208" width="430" height="134">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node monitor">
+                <div class="node-tag tag-monitor">Daily Read Model</div>
+                <h4><code>warehouse_daily_deduction_summary()</code></h4>
+                <p>Menarik pasangan produk Scalev vs warehouse product dan total qty/order per hari.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="780" y="1208" width="334" height="148">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node monitor">
+                <div class="node-tag tag-monitor">Mismatch Queue</div>
+                <h4><code>warehouse_daily_undeducted_orders()</code></h4>
+                <p>Menandai <code>no_business_mapping</code>, <code>no_product_mapping</code>, <code>no_order_lines</code>, atau mismatch ledger.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1408" y="1208" width="238" height="148">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node monitor">
+                <div class="node-tag tag-monitor">RTS Header</div>
+                <h4><code>warehouse_rts_verifications</code></h4>
+                <p>Queue per order retur yang butuh verifikasi fisik sebelum restock.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="1778" y="1208" width="330" height="148">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node monitor">
+                <div class="node-tag tag-monitor">RTS Items</div>
+                <h4><code>warehouse_rts_verification_items</code></h4>
+                <p>Baris item retur: expected qty, restock qty, damaged qty, dan target batch.</p>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="90" y="1356" width="430" height="88">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node neutral">
+                <div class="node-tag tag-neutral">Go-Live Gate</div>
+                <h4><code>warehouse_stock_opname_sessions</code></h4>
+              </div>
+            </foreignObject>
+
+            <foreignObject x="780" y="1356" width="334" height="88">
+              <div xmlns="http://www.w3.org/1999/xhtml" class="node neutral">
+                <div class="node-tag tag-neutral">Audit Trail</div>
+                <h4><code>warehouse_activity_log</code></h4>
+              </div>
+            </foreignObject>
+          </g>
+        </svg>
+        <div class="diagram-hint">
+          <span class="legend-chip"><span class="legend-dot" style="background:#60a5fa"></span>Input</span>
+          <span class="legend-chip"><span class="legend-dot" style="background:#2dd4bf"></span>Mapping</span>
+          <span class="legend-chip"><span class="legend-dot" style="background:#fbbf24"></span>Warehouse</span>
+          <span class="legend-chip"><span class="legend-dot" style="background:#f87171"></span>Monitoring</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="footer-card">
+      <h3>Catatan Baca</h3>
+      <div class="footer-grid">
+        <div>
+          <p>
+            Diagram ini disederhanakan agar fokus pada proses deduksi produk. Saya sengaja tidak memasukkan seluruh tabel app,
+            hanya yang memang ikut mengambil keputusan atau merekam efek akhirnya.
+          </p>
+          <p>
+            Jalur resolver yang digambar di sini mengikuti runtime saat ini: katalog Scalev dulu, baru turun ke
+            mapping legacy atau fallback name lookup. Jadi kalau tim melihat perilaku deduction yang berbeda dari mapping lama,
+            biasanya sumbernya ada di layer katalog atau whitelist business target.
+          </p>
+        </div>
+        <div>
+          <p>
+            Kontrol cepat: drag untuk pan, wheel untuk zoom, tombol <span class="kbd">Fit</span> untuk kembali muat penuh,
+            dan <span class="kbd">Maximalkan</span> kalau ingin satu diagram memenuhi layar.
+          </p>
+          <div class="source-list">
+            <span class="source-item">064_warehouse_redesign.sql</span>
+            <span class="source-item">067_business_warehouse_mapping.sql</span>
+            <span class="source-item">074_scalev_product_mapping.sql</span>
+            <span class="source-item">099_scalev_ledger_link_and_meta_waba_rbac.sql</span>
+            <span class="source-item">101_warehouse_daily_read_models.sql</span>
+            <span class="source-item">106_scalev_catalog_stage1.sql</span>
+            <span class="source-item">107_scalev_catalog_product_mapping.sql</span>
+            <span class="source-item">108_scalev_catalog_bundle_lines.sql</span>
+            <span class="source-item">111_business_multi_warehouse_mapping.sql</span>
+            <span class="source-item">112_warehouse_daily_undeducted_orders_multi_wh.sql</span>
+            <span class="source-item">116_warehouse_rts_verification_queue.sql</span>
+            <span class="source-item">app/api/scalev-webhook/route.ts</span>
+            <span class="source-item">lib/warehouse-ledger-actions.ts</span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    (function () {
+      const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+      function svgPoint(svg, clientX, clientY) {
+        const point = svg.createSVGPoint();
+        point.x = clientX;
+        point.y = clientY;
+        return point.matrixTransform(svg.getScreenCTM().inverse());
+      }
+
+      function initPanZoom(shell) {
+        const panel = shell.closest("[data-diagram-panel]");
+        const svg = shell.querySelector("svg");
+        const viewport = shell.querySelector("[data-viewport]");
+        const zoomLabel = panel.querySelector("[data-zoom-label]");
+        const buttons = panel.querySelectorAll("[data-action]");
+        const viewBox = svg.viewBox.baseVal;
+        const state = {
+          scale: 1,
+          x: 0,
+          y: 0,
+          minScale: 0.35,
+          maxScale: 2.9,
+          dragging: false,
+          startClientX: 0,
+          startClientY: 0,
+          startX: 0,
+          startY: 0,
+        };
+
+        function apply() {
+          viewport.setAttribute("transform", `matrix(${state.scale} 0 0 ${state.scale} ${state.x} ${state.y})`);
+          zoomLabel.textContent = `${Math.round(state.scale * 100)}%`;
+        }
+
+        function contentBounds() {
+          const box = viewport.getBBox();
+          return { x: box.x, y: box.y, width: box.width, height: box.height };
+        }
+
+        function fit() {
+          const box = contentBounds();
+          const padding = 80;
+          const sx = (viewBox.width - padding * 2) / box.width;
+          const sy = (viewBox.height - padding * 2) / box.height;
+          state.scale = clamp(Math.min(sx, sy), state.minScale, state.maxScale);
+          state.x = (viewBox.width - box.width * state.scale) / 2 - box.x * state.scale;
+          state.y = (viewBox.height - box.height * state.scale) / 2 - box.y * state.scale;
+          apply();
+        }
+
+        function centerAtActualScale() {
+          const box = contentBounds();
+          state.scale = 1;
+          state.x = (viewBox.width - box.width) / 2 - box.x;
+          state.y = (viewBox.height - box.height) / 2 - box.y;
+          apply();
+        }
+
+        function zoomAt(newScale, clientX, clientY) {
+          const cursor = svgPoint(svg, clientX, clientY);
+          const worldX = (cursor.x - state.x) / state.scale;
+          const worldY = (cursor.y - state.y) / state.scale;
+          state.scale = clamp(newScale, state.minScale, state.maxScale);
+          state.x = cursor.x - worldX * state.scale;
+          state.y = cursor.y - worldY * state.scale;
+          apply();
+        }
+
+        function zoomFromCenter(factor) {
+          const rect = svg.getBoundingClientRect();
+          zoomAt(state.scale * factor, rect.left + rect.width / 2, rect.top + rect.height / 2);
+        }
+
+        svg.addEventListener("wheel", (event) => {
+          event.preventDefault();
+          const factor = event.deltaY < 0 ? 1.1 : 0.9;
+          zoomAt(state.scale * factor, event.clientX, event.clientY);
+        }, { passive: false });
+
+        svg.addEventListener("pointerdown", (event) => {
+          if (event.button !== 0) return;
+          state.dragging = true;
+          shell.classList.add("dragging");
+          state.startClientX = event.clientX;
+          state.startClientY = event.clientY;
+          state.startX = state.x;
+          state.startY = state.y;
+          svg.setPointerCapture(event.pointerId);
+        });
+
+        svg.addEventListener("pointermove", (event) => {
+          if (!state.dragging) return;
+          const rect = svg.getBoundingClientRect();
+          const dx = ((event.clientX - state.startClientX) / rect.width) * viewBox.width;
+          const dy = ((event.clientY - state.startClientY) / rect.height) * viewBox.height;
+          state.x = state.startX + dx;
+          state.y = state.startY + dy;
+          apply();
+        });
+
+        function stopDragging(event) {
+          if (!state.dragging) return;
+          state.dragging = false;
+          shell.classList.remove("dragging");
+          if (event && event.pointerId != null) {
+            try {
+              svg.releasePointerCapture(event.pointerId);
+            } catch (_) {}
+          }
+        }
+
+        svg.addEventListener("pointerup", stopDragging);
+        svg.addEventListener("pointerleave", stopDragging);
+        svg.addEventListener("pointercancel", stopDragging);
+
+        buttons.forEach((button) => {
+          button.addEventListener("click", () => {
+            const action = button.getAttribute("data-action");
+            if (action === "fit") fit();
+            if (action === "actual") centerAtActualScale();
+            if (action === "zoom-in") zoomFromCenter(1.12);
+            if (action === "zoom-out") zoomFromCenter(0.88);
+            if (action === "fullscreen") {
+              const expanded = panel.classList.toggle("panel--fullscreen");
+              button.textContent = expanded ? "Kecilkan" : "Maximalkan";
+              window.setTimeout(fit, 120);
+            }
+          });
+        });
+
+        window.addEventListener("keydown", (event) => {
+          if (event.key === "Escape" && panel.classList.contains("panel--fullscreen")) {
+            panel.classList.remove("panel--fullscreen");
+            const fullButton = panel.querySelector('[data-action="fullscreen"]');
+            if (fullButton) fullButton.textContent = "Maximalkan";
+            window.setTimeout(fit, 120);
+          }
+        });
+
+        fit();
+      }
+
+      document.querySelectorAll("[data-panzoom]").forEach(initPanZoom);
+    })();
+  </script>
+</body>
+</html>

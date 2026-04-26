@@ -914,7 +914,6 @@ export default function FinancePage() {
     <div style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 24 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#fff', margin: 0 }}>📊 Finance</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginTop: 4 }}>
             Laporan Keuangan — Delivered Basis &nbsp;|&nbsp; Latest: {latestPL ? monthLabel(latestPL.month) : '-'}
           </p>

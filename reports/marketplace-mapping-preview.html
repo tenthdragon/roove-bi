@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Marketplace Mapping Preview</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --card: rgba(15, 23, 42, 0.92);
+      --card-soft: rgba(15, 23, 42, 0.76);
+      --border: rgba(148, 163, 184, 0.18);
+      --text: #e5eef8;
+      --dim: #93a4bb;
+      --green: #10b981;
+      --blue: #60a5fa;
+      --orange: #ee4d2d;
+      --cyan: #00d2c6;
+      --purple: #a855f7;
+      --danger: #f87171;
+      --shadow: 0 24px 60px rgba(0, 0, 0, 0.42);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, rgba(96, 165, 250, 0.18), transparent 28%),
+        radial-gradient(circle at top right, rgba(16, 185, 129, 0.12), transparent 24%),
+        linear-gradient(180deg, #09111d 0%, #0b1220 100%);
+      color: var(--text);
+    }
+
+    .shell {
+      padding: 28px;
+    }
+
+    .page-title {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .page-subtitle {
+      font-size: 14px;
+      color: var(--dim);
+      max-width: 980px;
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+
+    .section-title {
+      font-size: 17px;
+      font-weight: 800;
+      margin: 0;
+    }
+
+    .section-subtitle {
+      font-size: 12px;
+      color: var(--dim);
+      margin-top: 4px;
+      line-height: 1.5;
+    }
+
+    .top-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .refresh {
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--dim);
+      font-size: 12px;
+      padding: 8px 12px;
+      border-radius: 10px;
+    }
+
+    .source-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .source-card {
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      background: var(--card-soft);
+    }
+
+    .source-card.active {
+      border-color: rgba(96, 165, 250, 0.48);
+      background: rgba(59, 130, 246, 0.12);
+      box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.08);
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+    }
+
+    .pill.orange { background: rgba(238, 77, 45, 0.14); color: #ff8f77; }
+    .pill.cyan { background: rgba(0, 210, 198, 0.14); color: #6cfdf5; }
+    .pill.blue { background: rgba(59, 130, 246, 0.14); color: #8ec5ff; }
+    .pill.gray { background: rgba(148, 163, 184, 0.14); color: #cad7e6; }
+    .pill.green { background: rgba(16, 185, 129, 0.14); color: #6ee7b7; }
+    .pill.purple { background: rgba(168, 85, 247, 0.14); color: #d9a8ff; }
+    .pill.red { background: rgba(248, 113, 113, 0.14); color: #fca5a5; }
+
+    .source-name {
+      font-size: 15px;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+
+    .source-desc {
+      font-size: 12px;
+      color: var(--dim);
+      line-height: 1.5;
+    }
+
+    .source-meta {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 10px;
+      font-size: 12px;
+      color: var(--dim);
+    }
+
+    .hero {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: start;
+      flex-wrap: wrap;
+    }
+
+    .hero-title {
+      font-size: 24px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin: 0;
+    }
+
+    .primary-btn {
+      border: none;
+      background: linear-gradient(135deg, #10b981, #0d9f72);
+      color: white;
+      font-size: 13px;
+      font-weight: 800;
+      border-radius: 12px;
+      padding: 10px 14px;
+      box-shadow: 0 12px 28px rgba(16, 185, 129, 0.24);
+    }
+
+    .allowed-stores {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .chip {
+      border: 1px solid var(--border);
+      background: rgba(148, 163, 184, 0.08);
+      color: var(--text);
+      border-radius: 999px;
+      font-size: 12px;
+      padding: 6px 10px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 12px;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .label {
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--dim);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .input,
+    .textarea {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(7, 12, 22, 0.9);
+      color: var(--text);
+      padding: 11px 12px;
+      font-size: 13px;
+    }
+
+    .textarea {
+      min-height: 92px;
+    }
+
+    .catalog-toolbar {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .toolbar-btn {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: rgba(7, 12, 22, 0.9);
+      color: var(--text);
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .entity-card {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 14px;
+      border: 1px solid rgba(59, 130, 246, 0.22);
+      background: rgba(59, 130, 246, 0.08);
+    }
+
+    .entity-results {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .entity-result {
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(7, 12, 22, 0.84);
+      padding: 12px;
+    }
+
+    .entity-result.active {
+      border-color: rgba(96, 165, 250, 0.48);
+      background: rgba(59, 130, 246, 0.12);
+    }
+
+    .entity-name {
+      font-size: 13px;
+      font-weight: 800;
+      margin-top: 8px;
+      line-height: 1.45;
+    }
+
+    .entity-sub {
+      color: var(--dim);
+      font-size: 12px;
+      margin-top: 2px;
+    }
+
+    .token-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+
+    .token {
+      font-size: 11px;
+      padding: 4px 7px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--dim);
+      background: rgba(148, 163, 184, 0.08);
+    }
+
+    .actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .checkbox {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .action-buttons {
+      display: flex;
+      gap: 10px;
+    }
+
+    .ghost-btn {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--dim);
+      padding: 10px 14px;
+      font-size: 13px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 12px;
+      min-width: 920px;
+    }
+
+    th {
+      text-align: left;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--dim);
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    td {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+      font-size: 13px;
+    }
+
+    .lookup {
+      font-weight: 800;
+      margin-top: 6px;
+    }
+
+    .td-dim {
+      color: var(--dim);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .row-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .small-btn {
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      padding: 6px 10px;
+      font-size: 12px;
+    }
+
+    .small-btn.warn {
+      color: #fbbf24;
+    }
+
+    .small-btn.danger {
+      color: var(--danger);
+      border-color: rgba(248, 113, 113, 0.22);
+    }
+
+    @media (max-width: 1200px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .form-grid,
+      .entity-results {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="page-title">Marketplace Mapping</div>
+    <div class="page-subtitle">
+      Halaman ini menyimpan rule deterministik untuk mengubah identifier marketplace menjadi alokasi store Scalev yang tepat, sekaligus optional decode ke bundle, variant, atau product di business yang sudah terkunci oleh source account.
+    </div>
+
+    <div class="layout">
+      <div class="panel">
+        <div class="top-row">
+          <div>
+            <div class="section-title">Source Account</div>
+            <div class="section-subtitle">Deterministic box untuk uploader marketplace.</div>
+          </div>
+          <button class="refresh">Refresh</button>
+        </div>
+
+        <div class="source-list">
+          <div class="source-card active">
+            <div class="pill-row">
+              <span class="pill orange">Shopee</span>
+              <span class="pill gray">RLT</span>
+            </div>
+            <div class="source-name">Shopee RLT</div>
+            <div class="source-desc">Akun Shopee milik entitas RLT.</div>
+            <div class="source-meta"><span>9 store</span><span>12 rule</span></div>
+          </div>
+
+          <div class="source-card">
+            <div class="pill-row">
+              <span class="pill orange">Shopee</span>
+              <span class="pill gray">JHN</span>
+            </div>
+            <div class="source-name">Shopee JHN</div>
+            <div class="source-desc">Akun Shopee milik entitas JHN.</div>
+            <div class="source-meta"><span>4 store</span><span>5 rule</span></div>
+          </div>
+
+          <div class="source-card">
+            <div class="pill-row">
+              <span class="pill cyan">TikTok Shop</span>
+              <span class="pill gray">RTI</span>
+            </div>
+            <div class="source-name">TikTok RTI</div>
+            <div class="source-desc">Akun TikTok Shop milik entitas RTI.</div>
+            <div class="source-meta"><span>8 store</span><span>11 rule</span></div>
+          </div>
+
+          <div class="source-card">
+            <div class="pill-row">
+              <span class="pill cyan">TikTok Shop</span>
+              <span class="pill gray">JHN</span>
+            </div>
+            <div class="source-name">TikTok JHN</div>
+            <div class="source-desc">Akun TikTok Shop milik entitas JHN.</div>
+            <div class="source-meta"><span>4 store</span><span>4 rule</span></div>
+          </div>
+
+          <div class="source-card">
+            <div class="pill-row">
+              <span class="pill blue">Lazada</span>
+              <span class="pill gray">RLT</span>
+            </div>
+            <div class="source-name">Lazada RLT</div>
+            <div class="source-desc">Akun Lazada milik entitas RLT.</div>
+            <div class="source-meta"><span>6 store</span><span>7 rule</span></div>
+          </div>
+
+          <div class="source-card">
+            <div class="pill-row">
+              <span class="pill blue">BliBli</span>
+              <span class="pill gray">RTI</span>
+            </div>
+            <div class="source-name">BliBli RTI</div>
+            <div class="source-desc">Akun BliBli milik entitas RTI.</div>
+            <div class="source-meta"><span>5 store</span><span>3 rule</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel">
+          <div class="hero">
+            <div>
+              <div class="pill-row">
+                <span class="pill orange">Shopee</span>
+                <span class="pill gray">Business RLT</span>
+              </div>
+              <h1 class="hero-title">Shopee RLT</h1>
+              <div class="section-subtitle" style="max-width: 820px; margin-top: 8px;">
+                Rule di bawah source ini akan menentukan item marketplace dialokasikan ke store mana, dan bila perlu didecode ke entity Scalev tertentu di business yang sudah terkunci.
+              </div>
+            </div>
+            <button class="primary-btn">+ Tambah Rule</button>
+          </div>
+
+          <div style="margin-top: 14px;">
+            <div class="label" style="margin-bottom: 8px;">Allowed Store</div>
+            <div class="allowed-stores">
+              <span class="chip">Roove Main Store - Marketplace</span>
+              <span class="chip">Globite Store - Marketplace</span>
+              <span class="chip">Pluve Main Store - Marketplace</span>
+              <span class="chip">Purvu Store - Marketplace</span>
+              <span class="chip">Purvu The Secret Store - Markerplace</span>
+              <span class="chip">YUV Deodorant Serum Store - Marketplace</span>
+              <span class="chip">Osgard Oil Store</span>
+              <span class="chip">drHyun Main Store - Marketplace</span>
+              <span class="chip">Calmara Main Store - Marketplace</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 16px;">
+          <div class="top-row">
+            <div>
+              <div class="section-title">Tambah Rule Mapping</div>
+              <div class="section-subtitle">Rule bisa memetakan SKU/nama produk marketplace ke store tertentu dan optional decode ke bundle, variant, atau product Scalev.</div>
+            </div>
+            <button class="refresh">Tutup</button>
+          </div>
+
+          <div class="form-grid">
+            <div class="field">
+              <div class="label">Field</div>
+              <div class="input">SKU Marketplace</div>
+            </div>
+            <div class="field">
+              <div class="label">Tipe Match</div>
+              <div class="input">Prefix</div>
+            </div>
+            <div class="field">
+              <div class="label">Store Tujuan</div>
+              <div class="input">Roove Main Store - Marketplace</div>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top: 12px;">
+            <div class="label">Nilai Match</div>
+            <div class="input">ROV</div>
+          </div>
+
+          <div style="margin-top: 16px;">
+            <div class="label">Decode Entity Scalev (Opsional)</div>
+            <div class="catalog-toolbar">
+              <div class="input" style="flex: 1;">Cari bundle / variant / product di katalog Scalev...</div>
+              <button class="toolbar-btn">Cari Katalog</button>
+              <button class="ghost-btn">Clear</button>
+            </div>
+
+            <div class="entity-card">
+              <div class="pill-row">
+                <span class="pill purple">BUNDLE</span>
+                <span class="section-subtitle" style="margin: 0;">bundle:25</span>
+              </div>
+              <div class="source-name" style="font-size: 14px;">Roove 50 - New (Roove Lautan Barat)</div>
+            </div>
+
+            <div class="entity-results">
+              <div class="entity-result active">
+                <div class="pill-row">
+                  <span class="pill purple">BUNDLE</span>
+                  <span class="section-subtitle" style="margin: 0;">bundle:25</span>
+                </div>
+                <div class="entity-name">Roove 50 - New (Roove Lautan Barat)</div>
+                <div class="entity-sub">[ROV20+ROV01-590]</div>
+                <div class="token-row">
+                  <span class="token">ROV20+ROV01-590</span>
+                  <span class="token">Roove 50 - New</span>
+                  <span class="token">bundle.custom_id</span>
+                </div>
+              </div>
+
+              <div class="entity-result">
+                <div class="pill-row">
+                  <span class="pill green">VARIANT</span>
+                  <span class="section-subtitle" style="margin: 0;">variant:9342</span>
+                </div>
+                <div class="entity-name">Roove 10 - 155</div>
+                <div class="entity-sub">Roove Lautan Barat • [ROV10-155]</div>
+                <div class="token-row">
+                  <span class="token">ROV10-155</span>
+                  <span class="token">Roove 10</span>
+                  <span class="token">scalev_variant_unique_id</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="field" style="margin-top: 14px;">
+            <div class="label">Catatan</div>
+            <div class="textarea">Decode ke bundle Scalev karena export marketplace memakai seller SKU bundle, bukan variant tunggal.</div>
+          </div>
+
+          <div class="actions">
+            <label class="checkbox">
+              <input type="checkbox" checked />
+              Rule aktif
+            </label>
+            <div class="action-buttons">
+              <button class="ghost-btn">Batal</button>
+              <button class="primary-btn">Simpan Rule</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 16px;">
+          <div class="top-row">
+            <div>
+              <div class="section-title">Rule Mapping</div>
+              <div class="section-subtitle">Total 12 rule untuk source ini.</div>
+            </div>
+            <div class="input" style="width: 240px;">Filter rule...</div>
+          </div>
+
+          <div style="overflow: hidden; border-radius: 14px; border: 1px solid rgba(148, 163, 184, 0.12);">
+            <table>
+              <thead>
+                <tr>
+                  <th>Lookup</th>
+                  <th>Store</th>
+                  <th>Decode</th>
+                  <th>Catatan</th>
+                  <th>Status</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>
+                    <div class="pill-row" style="margin-bottom: 0;">
+                      <span class="pill blue">SKU</span>
+                      <span class="pill gray">PREFIX</span>
+                    </div>
+                    <div class="lookup">ROV</div>
+                  </td>
+                  <td>Roove Main Store - Marketplace</td>
+                  <td>
+                    <div class="pill-row" style="margin-bottom: 6px;">
+                      <span class="pill purple">BUNDLE</span>
+                      <span class="section-subtitle" style="margin: 0;">bundle:25</span>
+                    </div>
+                    <div class="lookup" style="margin-top: 0;">Roove 50 - New (Roove Lautan Barat)</div>
+                  </td>
+                  <td class="td-dim">Fallback decode untuk seller SKU bundle Roove agar bisa langsung diterjemahkan sebelum create order.</td>
+                  <td><span class="pill green">Aktif</span></td>
+                  <td>
+                    <div class="row-actions">
+                      <button class="small-btn">Edit</button>
+                      <button class="small-btn warn">Nonaktifkan</button>
+                      <button class="small-btn danger">Hapus</button>
+                    </div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td>
+                    <div class="pill-row" style="margin-bottom: 0;">
+                      <span class="pill blue">SKU</span>
+                      <span class="pill gray">PREFIX</span>
+                    </div>
+                    <div class="lookup">SRT</div>
+                  </td>
+                  <td>Purvu The Secret Store - Markerplace</td>
+                  <td>
+                    <div class="pill-row" style="margin-bottom: 6px;">
+                      <span class="pill purple">BUNDLE</span>
+                      <span class="section-subtitle" style="margin: 0;">bundle:3129</span>
+                    </div>
+                    <div class="lookup" style="margin-top: 0;">The Secret Arum</div>
+                  </td>
+                  <td class="td-dim">Semua SKU keluarga Secret diarahkan ke store Secret di RLT.</td>
+                  <td><span class="pill green">Aktif</span></td>
+                  <td>
+                    <div class="row-actions">
+                      <button class="small-btn">Edit</button>
+                      <button class="small-btn warn">Nonaktifkan</button>
+                      <button class="small-btn danger">Hapus</button>
+                    </div>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td>
+                    <div class="pill-row" style="margin-bottom: 0;">
+                      <span class="pill blue">PRODUCT</span>
+                      <span class="pill gray">CONTAINS</span>
+                    </div>
+                    <div class="lookup">drhyun</div>
+                  </td>
+                  <td>drHyun Main Store - Marketplace</td>
+                  <td><span class="td-dim">Store-only rule</span></td>
+                  <td class="td-dim">Dipakai kalau file MP kosong di kolom seller SKU dan hanya ada nama produk.</td>
+                  <td><span class="pill gray">Nonaktif</span></td>
+                  <td>
+                    <div class="row-actions">
+                      <button class="small-btn">Edit</button>
+                      <button class="small-btn" style="color: #22c55e;">Aktifkan</button>
+                      <button class="small-btn danger">Hapus</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

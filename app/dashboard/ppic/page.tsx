@@ -128,7 +128,6 @@ export default function PPICPage() {
 
   return (
     <div style={{ padding: '0 0 40px', position: 'relative' }}>
-      <h2 style={{ margin: '0 0 16px', fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Product Planning &amp; Inventory Control</h2>
 
       {/* Tab bar */}
       <div className="no-scrollbar" style={{ display: 'flex', gap: 4, marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 0, overflowX: 'auto', overflowY: 'hidden', WebkitOverflowScrolling: 'touch' }}>

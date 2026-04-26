@@ -286,7 +286,6 @@ export default function CustomersPage() {
       {/* ═══ HEADER + DATE PICKER ═══ */}
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700 }}>Customer Analytics</h2>
           <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>New vs Repeat vs Unidentified</p>
         </div>
         {subTab === 'overview' && dateRange.from ? (

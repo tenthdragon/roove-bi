@@ -531,7 +531,6 @@ export default function ChannelsPage() {
   if (error) {
     return (
       <div className="fade-in">
-        <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Channel</h2>
         <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Data Sales Channel Gagal Dimuat</div>
           <div style={{ fontSize: 13 }}>{error}</div>
@@ -543,7 +542,6 @@ export default function ChannelsPage() {
   if (activeBrandsError) {
     return (
       <div className="fade-in">
-        <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Channel</h2>
         <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Filter Brand Gagal Dimuat</div>
           <div style={{ fontSize: 13 }}>{activeBrandsError}</div>
@@ -555,7 +553,6 @@ export default function ChannelsPage() {
   if (channelData.length === 0 && !loading) {
     return (
       <div className="fade-in">
-        <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Channel</h2>
         <div style={{ textAlign: 'center', padding: 60, color: 'var(--dim)', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12 }}>
           <div style={{ fontSize: 48, marginBottom: 16 }}>📡</div>
           <div style={{ fontSize: 18, fontWeight: 600, marginBottom: 8 }}>Belum Ada Data untuk Periode Ini</div>
@@ -569,7 +566,6 @@ export default function ChannelsPage() {
     <div className="fade-in">
       {/* Header + Product Filter */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Channel</h2>
         <select
           value={selectedProduct}
           onChange={e => setSelectedProduct(e.target.value)}

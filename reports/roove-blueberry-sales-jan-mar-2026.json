@@ -1,0 +1,556 @@
+{
+  "generated_at": "2026-04-21T06:59:31.865Z",
+  "timezone": "Asia/Jakarta",
+  "assumption": "shipment = jumlah order unik yang mengandung item Roove Blueberry pada tanggal ship (WIB); unit_terjual = total quantity item Roove Blueberry.",
+  "product_names": {
+    "Roove Blueberry - 1 Sc": 158006,
+    "Roove Blueberry - 10 Sc": 4040,
+    "Roove Blueberry - 20 Sc": 42555
+  },
+  "totals": {
+    "shipment": 30417,
+    "unit_terjual": 204601
+  },
+  "rows": [
+    {
+      "tanggal": "2026-01-01",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-02",
+      "shipment": 791,
+      "unit_terjual": 5795,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-03",
+      "shipment": 456,
+      "unit_terjual": 2861,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-04",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-05",
+      "shipment": 648,
+      "unit_terjual": 3923,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-06",
+      "shipment": 334,
+      "unit_terjual": 3020,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-07",
+      "shipment": 359,
+      "unit_terjual": 2344,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-08",
+      "shipment": 373,
+      "unit_terjual": 2430,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-09",
+      "shipment": 344,
+      "unit_terjual": 2348,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-10",
+      "shipment": 343,
+      "unit_terjual": 3651,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-11",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-12",
+      "shipment": 699,
+      "unit_terjual": 3830,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-13",
+      "shipment": 321,
+      "unit_terjual": 2065,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-14",
+      "shipment": 358,
+      "unit_terjual": 2162,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-15",
+      "shipment": 422,
+      "unit_terjual": 2727,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-16",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-17",
+      "shipment": 658,
+      "unit_terjual": 3157,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-18",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-19",
+      "shipment": 580,
+      "unit_terjual": 3746,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-20",
+      "shipment": 332,
+      "unit_terjual": 1967,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-21",
+      "shipment": 355,
+      "unit_terjual": 2139,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-22",
+      "shipment": 319,
+      "unit_terjual": 2182,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-23",
+      "shipment": 297,
+      "unit_terjual": 3883,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-24",
+      "shipment": 450,
+      "unit_terjual": 3547,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-25",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-26",
+      "shipment": 680,
+      "unit_terjual": 5438,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-27",
+      "shipment": 399,
+      "unit_terjual": 2892,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-28",
+      "shipment": 405,
+      "unit_terjual": 3071,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-29",
+      "shipment": 426,
+      "unit_terjual": 2722,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-30",
+      "shipment": 370,
+      "unit_terjual": 1879,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-01-31",
+      "shipment": 360,
+      "unit_terjual": 1609,
+      "bulan": "2026-01"
+    },
+    {
+      "tanggal": "2026-02-01",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-02",
+      "shipment": 988,
+      "unit_terjual": 5703,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-03",
+      "shipment": 669,
+      "unit_terjual": 4372,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-04",
+      "shipment": 464,
+      "unit_terjual": 2809,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-05",
+      "shipment": 355,
+      "unit_terjual": 2111,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-06",
+      "shipment": 338,
+      "unit_terjual": 2185,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-07",
+      "shipment": 355,
+      "unit_terjual": 2239,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-08",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-09",
+      "shipment": 596,
+      "unit_terjual": 3628,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-10",
+      "shipment": 399,
+      "unit_terjual": 2443,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-11",
+      "shipment": 422,
+      "unit_terjual": 2719,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-12",
+      "shipment": 426,
+      "unit_terjual": 3402,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-13",
+      "shipment": 390,
+      "unit_terjual": 2347,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-14",
+      "shipment": 225,
+      "unit_terjual": 1397,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-15",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-16",
+      "shipment": 587,
+      "unit_terjual": 4064,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-17",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-18",
+      "shipment": 615,
+      "unit_terjual": 3985,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-19",
+      "shipment": 400,
+      "unit_terjual": 3014,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-20",
+      "shipment": 353,
+      "unit_terjual": 2029,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-21",
+      "shipment": 353,
+      "unit_terjual": 2156,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-22",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-23",
+      "shipment": 533,
+      "unit_terjual": 2996,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-24",
+      "shipment": 394,
+      "unit_terjual": 3274,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-25",
+      "shipment": 398,
+      "unit_terjual": 2935,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-26",
+      "shipment": 366,
+      "unit_terjual": 2726,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-27",
+      "shipment": 365,
+      "unit_terjual": 3223,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-02-28",
+      "shipment": 315,
+      "unit_terjual": 2259,
+      "bulan": "2026-02"
+    },
+    {
+      "tanggal": "2026-03-01",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-02",
+      "shipment": 615,
+      "unit_terjual": 4096,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-03",
+      "shipment": 407,
+      "unit_terjual": 3970,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-04",
+      "shipment": 479,
+      "unit_terjual": 3814,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-05",
+      "shipment": 357,
+      "unit_terjual": 2748,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-06",
+      "shipment": 274,
+      "unit_terjual": 1651,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-07",
+      "shipment": 316,
+      "unit_terjual": 1893,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-08",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-09",
+      "shipment": 582,
+      "unit_terjual": 4098,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-10",
+      "shipment": 336,
+      "unit_terjual": 2206,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-11",
+      "shipment": 282,
+      "unit_terjual": 1604,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-12",
+      "shipment": 263,
+      "unit_terjual": 1559,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-13",
+      "shipment": 225,
+      "unit_terjual": 1314,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-14",
+      "shipment": 221,
+      "unit_terjual": 1632,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-15",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-16",
+      "shipment": 448,
+      "unit_terjual": 2406,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-17",
+      "shipment": 189,
+      "unit_terjual": 1190,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-18",
+      "shipment": 187,
+      "unit_terjual": 1153,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-19",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-20",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-21",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-22",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-23",
+      "shipment": 1075,
+      "unit_terjual": 8803,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-24",
+      "shipment": 301,
+      "unit_terjual": 2485,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-25",
+      "shipment": 433,
+      "unit_terjual": 3193,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-26",
+      "shipment": 375,
+      "unit_terjual": 2210,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-27",
+      "shipment": 448,
+      "unit_terjual": 2366,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-28",
+      "shipment": 295,
+      "unit_terjual": 1471,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-29",
+      "shipment": 0,
+      "unit_terjual": 0,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-30",
+      "shipment": 555,
+      "unit_terjual": 3062,
+      "bulan": "2026-03"
+    },
+    {
+      "tanggal": "2026-03-31",
+      "shipment": 369,
+      "unit_terjual": 2273,
+      "bulan": "2026-03"
+    }
+  ]
+}

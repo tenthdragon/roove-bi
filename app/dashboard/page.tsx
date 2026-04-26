@@ -481,7 +481,6 @@ export default function OverviewPage() {
   if (dailyData.length === 0 && !loading) {
     return (
       <div className="fade-in">
-        <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
         <div style={{ textAlign:'center', padding:60, color:'var(--dim)', background:'var(--card)', border:'1px solid var(--border)', borderRadius:12 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>📊</div>
           <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
@@ -493,7 +492,6 @@ export default function OverviewPage() {
 
   return (
     <div className="fade-in">
-      <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
 
       {feeError && (
         <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:12, fontSize:12, color:'#fcd34d' }}>
