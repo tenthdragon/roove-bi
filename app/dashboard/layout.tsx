@@ -810,7 +810,7 @@ export default function DashboardLayout({ children }) {
           </header>
 
           {/* Content */}
-          <main className="dashboard-content" style={{ padding:'16px 20px', maxWidth:1400, width:'100%', overflowX:'hidden' }}>
+          <main className="dashboard-content" style={{ padding:'16px 20px', maxWidth:1400, width:'100%', overflowX:'hidden', margin:'0 auto' }}>
             {children}
           </main>
         </div>
