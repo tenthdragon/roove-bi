@@ -452,7 +452,7 @@ export default function DashboardLayout({ children }) {
   }
 
 
-  const sidebarW = sidebarCollapsed ? 64 : 220;
+  const sidebarW = sidebarCollapsed ? 64 : 250;
 
   // ── Shared sidebar content (used by both desktop and mobile) ──
   function SidebarNav({ isMobile = false }) {
