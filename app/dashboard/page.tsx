@@ -94,6 +94,34 @@ export default function OverviewPage() {
   const [userRole, setUserRole] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showTren, setShowTren] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640);
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
+
+  const Sparkline = ({ data, color = 'var(--accent)', height = 28, width = 72 }: { data: number[]; color?: string; height?: number; width?: number }) => {
+    if (!data || data.length < 2) return null;
+    const min = Math.min(...data);
+    const max = Math.max(...data);
+    const range = max - min || 1;
+    const pts = data.map((v, i) => {
+      const x = (i / (data.length - 1)) * width;
+      const y = height - ((v - min) / range) * (height - 4) - 2;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    }).join(' ');
+    const lastY = height - ((data[data.length - 1] - min) / range) * (height - 4) - 2;
+    const lastX = width;
+    return (
+      <svg width={width} height={height} style={{ opacity: 0.75, flexShrink: 0 }}>
+        <polyline points={pts} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx={lastX} cy={lastY} r={2.5} fill={color} />
+      </svg>
+    );
+  };
 
   function getPrevRange(from: string, to: string) {
     return {
@@ -409,7 +437,7 @@ export default function OverviewPage() {
     </div>
   );
   const KPI = ({ label, val, sub, color='var(--accent)', delta, delta2 }: { label: string; val: string; sub?: string; color?: string; delta?: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }; delta2?: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string } }) => (
-    <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 18px', flex:'1 1 160px', minWidth:150, maxWidth:320, position:'relative', overflow:'hidden' }}>
+    <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 18px', position:'relative', overflow:'hidden' }}>
       <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:color }} />
       <div style={{ fontSize:11, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:6, fontWeight:600 }}>{label}</div>
       <div style={{ fontSize:20, fontWeight:700, fontFamily:'monospace', lineHeight:1.1 }}>{val}</div>
@@ -465,38 +493,55 @@ export default function OverviewPage() {
 
   return (
     <div className="fade-in">
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:12 }}>
-        <div><h2 style={{ margin:0, fontSize:18, fontWeight:700 }}>Overview</h2><div style={{ fontSize:12, color:'var(--dim)' }}>{kpi.ad} active days</div></div>
-      </div>
+      <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
 
       {feeError && (
-        <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:12, color:'#fcd34d' }}>
+        <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:12, fontSize:12, color:'#fcd34d' }}>
           Data biaya marketing gagal dimuat penuh: {feeError}
         </div>
       )}
 
-      {/* ── KPI Cards — Row 1: Revenue & Profit ── */}
-      <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:12 }}>
-        <KPI label="Net Sales" val={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg: ${fmtRupiah(kpi.avg)}/hari`}
-          delta={prevKpi && prevKpi.ts > 0 ? { value: ((kpi.ts - prevKpi.ts) / prevKpi.ts) * 100 } : undefined} />
-        <KPI label="Gross Profit" val={`Rp ${fmtCompact(kpi.tg)}`} sub={`GP Margin: ${kpi.gpM.toFixed(1)}%`} color="var(--green)"
-          delta={prevKpi && prevKpi.tg > 0 ? { value: ((kpi.tg - prevKpi.tg) / prevKpi.tg) * 100 } : undefined}
-          delta2={prevKpi && prevKpi.gpM > 0 ? { value: kpi.gpM - prevKpi.gpM, suffix: 'pp', label: 'margin' } : undefined} />
-        <KPI label="Net Profit" val={`Rp ${fmtCompact(kpi.tNetProfit)}`} sub={`NP Margin: ${kpi.npM.toFixed(1)}%`} color={kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)'}
-          delta={!shippingError && !prevShippingError && prevKpi && prevKpi.tNetProfit !== 0 ? { value: prevKpi.tNetProfit !== 0 ? ((kpi.tNetProfit - prevKpi.tNetProfit) / Math.abs(prevKpi.tNetProfit)) * 100 : 0 } : undefined}
-          delta2={!shippingError && !prevShippingError && prevKpi ? { value: kpi.npM - prevKpi.npM, suffix: 'pp', label: 'margin' } : undefined} />
-      </div>
-      {/* ── KPI Cards — Row 2: Cost Breakdown ── */}
-      <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
-        <KPI label="COGS" val={`Rp ${fmtCompact(kpi.tCogs)}`} sub={`${kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--dim)" />
-        <KPI label="Marketing Fee" val={feeError ? '—' : `Rp ${fmtCompact(kpi.tAds)}`} sub={feeError ? 'Data ads tidak tersedia' : `${kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--yellow)"
-          delta={prevKpi && prevKpi.tAds > 0 ? { value: ((kpi.tAds - prevKpi.tAds) / prevKpi.tAds) * 100, higherIsBetter: false } : undefined} />
-        <KPI label="MP Fee" val={feeError ? '—' : `Rp ${fmtCompact(kpi.tMp)}`} sub={feeError ? 'Data channel tidak tersedia' : `${kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--yellow)"
-          delta={prevKpi && prevKpi.tMp > 0 ? { value: ((kpi.tMp - prevKpi.tMp) / prevKpi.tMp) * 100, higherIsBetter: false } : undefined} />
-        <KPI label="Shipping Fee" val={shippingError ? '—' : `Rp ${fmtCompact(kpi.tShipping)}`} sub={shippingError ? 'Data shipping tidak tersedia' : `${kpi.ts > 0 ? (kpi.tShipping / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="#0ea5e9"
-          delta={!shippingError && !prevShippingError && prevKpi && prevKpi.tShipping > 0 ? { value: ((kpi.tShipping - prevKpi.tShipping) / prevKpi.tShipping) * 100, higherIsBetter: false } : undefined} />
-        {kpi.hasOverhead && <KPI label="Overhead" val={`Rp ${fmtCompact(kpi.tOverhead)}`} sub="estimated" color="#a78bfa" />}
-      </div>
+      {/* ── KPI Cards ── */}
+      {(() => {
+        const prevCogs = prevKpi ? prevKpi.ts - prevKpi.tg : null;
+        const npColor = kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)';
+        const cols = isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)';
+        const Card = ({ label, value, sub, color, deltaVal, lowerBetter }: any) => {
+          const hasD = deltaVal != null && !isNaN(deltaVal) && deltaVal !== 0;
+          return (
+            <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px', position:'relative', overflow:'hidden' }}>
+              <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background:color }} />
+              <div style={{ fontSize:10, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:600, marginBottom:5, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{label}</div>
+              <div style={{ fontSize:16, fontWeight:700, fontFamily:'monospace', lineHeight:1.2, color }}>{value}</div>
+              {sub && <div style={{ fontSize:10, color:'var(--dim)', marginTop:3, lineHeight:1.3 }}>{sub}</div>}
+              {hasD && (
+                <div style={{ fontSize:9, marginTop:3, color: ((deltaVal>0) === !lowerBetter) ? '#5b8a7a' : '#9b6b6b' }}>
+                  {deltaVal>0?'▲':'▼'} {deltaVal>=0?'+':''}{deltaVal.toFixed(1)}% vs {prevMonthLabel}
+                </div>
+              )}
+            </div>
+          );
+        };
+        const dNs  = prevKpi?.ts > 0 ? (kpi.ts - prevKpi.ts) / prevKpi.ts * 100 : null;
+        const dGp  = prevKpi?.tg > 0 ? (kpi.tg - prevKpi.tg) / prevKpi.tg * 100 : null;
+        const dNp  = prevKpi?.tNetProfit ? (kpi.tNetProfit - prevKpi.tNetProfit) / Math.abs(prevKpi.tNetProfit) * 100 : null;
+        const dCogs= prevCogs > 0 ? (kpi.tCogs - prevCogs) / prevCogs * 100 : null;
+        const dAds = prevKpi?.tAds > 0 ? (kpi.tAds - prevKpi.tAds) / prevKpi.tAds * 100 : null;
+        const dMp  = prevKpi?.tMp > 0 ? (kpi.tMp - prevKpi.tMp) / prevKpi.tMp * 100 : null;
+        const dShip= !shippingError && !prevShippingError && prevKpi?.tShipping > 0 ? (kpi.tShipping - prevKpi.tShipping) / prevKpi.tShipping * 100 : null;
+        return (
+          <div style={{ display:'grid', gridTemplateColumns:cols, gap:10, marginBottom:16 }}>
+            <Card label="Net Sales" value={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg Rp ${fmtCompact(kpi.avg)}/hari · ${kpi.tShipment.toLocaleString('id-ID')} shipment`} color="var(--accent)" deltaVal={dNs} />
+            <Card label={`Gross Profit · ${kpi.gpM.toFixed(1)}%`} value={`Rp ${fmtCompact(kpi.tg)}`} color="var(--green)" deltaVal={dGp} />
+            <Card label={`Net Profit · ${kpi.npM.toFixed(1)}%`} value={`Rp ${fmtCompact(kpi.tNetProfit)}`} color={npColor} deltaVal={dNp} />
+            <Card label={`COGS · ${kpi.ts>0?(kpi.tCogs/kpi.ts*100).toFixed(1):0}%`} value={`Rp ${fmtCompact(kpi.tCogs)}`} color="var(--dim)" deltaVal={dCogs} lowerBetter />
+            <Card label={`Mkt Fee · ${kpi.ts>0?(kpi.tAds/kpi.ts*100).toFixed(1):0}%`} value={feeError?'—':`Rp ${fmtCompact(kpi.tAds)}`} color="var(--yellow)" deltaVal={feeError?null:dAds} lowerBetter />
+            <Card label={`MP Fee · ${kpi.ts>0?(kpi.tMp/kpi.ts*100).toFixed(1):0}%`} value={feeError?'—':`Rp ${fmtCompact(kpi.tMp)}`} color="var(--text-secondary)" deltaVal={feeError?null:dMp} lowerBetter />
+            <Card label={`Shipping · ${kpi.ts>0?(kpi.tShipping/kpi.ts*100).toFixed(1):0}%`} value={shippingError?'—':`Rp ${fmtCompact(kpi.tShipping)}`} color="var(--text-secondary)" deltaVal={dShip} lowerBetter />
+            {kpi.hasOverhead && <Card label={`Overhead · ${kpi.ts>0?(kpi.tOverhead/kpi.ts*100).toFixed(1):0}% est.`} value={`Rp ${fmtCompact(kpi.tOverhead)}`} color="var(--text-secondary)" deltaVal={null} />}
+          </div>
+        );
+      })()}
 
       {/* ── Cash Flow Status (owner/admin) ── */}
       {isOwnerOrAdmin && cashFlowPeriodStart && (
@@ -543,10 +588,15 @@ export default function OverviewPage() {
               </tr>
             </thead>
             <tbody>
-              {kpi.chart.map((row, i) => (
-                <tr key={i} style={{ borderBottom:'1px solid var(--bg-deep)' }}>
-                  <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>{row.date}</td>
-                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--text-secondary)' }}>{row.shipment > 0 ? row.shipment.toLocaleString('id-ID') : '—'}</td>
+              {kpi.chart.map((row, i) => {
+                const rowNpM = row['Net Sales'] > 0 ? row['Net Profit'] / row['Net Sales'] * 100 : null;
+                const rowBg = rowNpM === null ? 'transparent' : rowNpM >= 15 ? 'rgba(16,185,129,0.04)' : rowNpM >= 0 ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.05)';
+                return (
+                <tr key={i} style={{ borderBottom:'1px solid var(--bg-deep)', background: rowBg }}>
+                  <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap', position:'sticky', left:0, background: rowBg === 'transparent' ? 'var(--card)' : rowBg, zIndex:1 }}>{row.date}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--text-secondary)' }}>
+                    {row.shipment > 0 ? <span style={{ background:'var(--bg-deep)', padding:'1px 6px', borderRadius:10, fontSize:10 }}>{row.shipment.toLocaleString('id-ID')}</span> : '—'}
+                  </td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(row['Net Sales'])}</td>
                   {showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--dim)' }}>{fmtRupiah(row['COGS'])}</td>}
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--green)' }}>{fmtRupiah(row['Gross Profit'])}</td>
@@ -556,7 +606,8 @@ export default function OverviewPage() {
                   {showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#a78bfa' }}>{fmtRupiah(row['Overhead'])}</td>}
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['Net Profit'] >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtRupiah(row['Net Profit'])}</td>
                 </tr>
-              ))}
+                );
+              })}
               {/* TOTAL row with % of net sales */}
               <tr style={{ borderTop:'2px solid var(--border)', fontWeight:700 }}>
                 <td style={{ padding:'10px 10px', position:'sticky', left:0, background:'var(--card)', zIndex:1, textTransform:'uppercase', fontSize:11, letterSpacing:'0.05em' }}>Total</td>
@@ -621,7 +672,14 @@ export default function OverviewPage() {
                   <span style={{ display:'inline-block', width:8, height:8, borderRadius:2, background: getBrandColor(p.sku, activeBrands) || PRODUCT_COLORS[p.sku] || 'var(--dim)', marginRight:8, verticalAlign:'middle' }} />{p.sku}
                 </td>
                 <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11 }}>{fmtRupiah(p.sales)}</td>
-                <td style={{ padding:'8px 10px', textAlign:'right', color:'var(--dim)' }}>{p.sp.toFixed(1)}%</td>
+                <td style={{ padding:'8px 10px', textAlign:'right' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:6, justifyContent:'flex-end' }}>
+                    <div style={{ width:50, height:4, background:'var(--bg-deep)', borderRadius:2, overflow:'hidden' }}>
+                      <div style={{ width:`${p.sp}%`, height:'100%', background: getBrandColor(p.sku, activeBrands) || 'var(--accent)', borderRadius:2 }} />
+                    </div>
+                    <span style={{ fontSize:10, color:'var(--dim)', fontFamily:'monospace', minWidth:32, textAlign:'right' }}>{p.sp.toFixed(1)}%</span>
+                  </div>
+                </td>
                 <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--dim)' }}>{fmtRupiah(p.cogs)}</td>
                 <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(p.adsFee)}</td>
                 <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--dim)' }}>{fmtRupiah(p.mpFee)}</td>
