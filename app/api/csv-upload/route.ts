@@ -529,6 +529,8 @@ async function handleOpsUpload(
         gross_revenue: totalPrice,
         net_revenue: totalPrice,
         shipping_cost: num(firstRow.shipping_cost),
+        shipping_discount: null,
+        discount_code_discount: null,
         total_quantity: totalQty,
         customer_name: firstRow.username || firstRow.name || null,
         customer_phone: firstRow.phone || null,
@@ -979,6 +981,8 @@ async function handleScalevUpload(
         gross_revenue: num(firstRow.gross_revenue),
         net_revenue: num(firstRow.net_revenue),
         shipping_cost: num(firstRow.shipping_cost),
+        shipping_discount: null,
+        discount_code_discount: null,
         total_quantity: parseInt(firstRow.quantity || '0') || 0,
         customer_name: (() => {
                 const cs = (firstRow.courier_service || '').toLowerCase();

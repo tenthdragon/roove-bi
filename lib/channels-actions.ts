@@ -15,6 +15,20 @@ function unwrap<T>(result: { data: T | null; error: { message: string } | null }
   return (result.data ?? ([] as unknown as T));
 }
 
+function unwrapOptional<T>(result: { data: T | null; error: { message: string } | null }, label: string) {
+  if (result.error) {
+    console.error(`[Channels] optional load error: ${label}`, result.error.message);
+    return {
+      data: [] as unknown as T,
+      error: `${label}: ${result.error.message}`,
+    };
+  }
+  return {
+    data: (result.data ?? ([] as unknown as T)),
+    error: null as string | null,
+  };
+}
+
 export async function getChannelsPageData({
   from,
   to,
@@ -28,10 +42,12 @@ export async function getChannelsPageData({
   const [
     channelRes,
     adsRes,
+    shippingRes,
     mappingRes,
     shipmentRes,
     prevChannelRes,
     prevAdsRes,
+    prevShippingRes,
   ] = await Promise.all([
     svc.from('daily_channel_data')
       .select('date, product, channel, net_sales, gross_profit, mp_admin_cost')
@@ -41,6 +57,7 @@ export async function getChannelsPageData({
       .select('date, source, spent, store, data_source, impressions, cpm')
       .gte('date', from)
       .lte('date', to),
+    svc.rpc('get_daily_shipping_charge_data', { p_from: from, p_to: to }),
     svc.from('ads_store_brand_mapping')
       .select('store_pattern, brand'),
     svc.rpc('get_daily_shipment_counts', { p_from: from, p_to: to }),
@@ -52,14 +69,22 @@ export async function getChannelsPageData({
       .select('date, source, spent, store')
       .gte('date', prevFrom)
       .lte('date', prevTo),
+    svc.rpc('get_daily_shipping_charge_data', { p_from: prevFrom, p_to: prevTo }),
   ]);
+
+  const shipping = unwrapOptional(shippingRes, 'Gagal memuat shipping charges Sales Channel');
+  const prevShipping = unwrapOptional(prevShippingRes, 'Gagal memuat shipping charges bulan sebelumnya');
 
   return {
     channel: unwrap(channelRes, 'Gagal memuat data Sales Channel'),
     ads: unwrap(adsRes, 'Gagal memuat biaya iklan Sales Channel'),
+    shipping: shipping.data,
+    shippingError: shipping.error,
     brandMapping: unwrap(mappingRes, 'Gagal memuat mapping brand iklan'),
     shipmentCounts: unwrap(shipmentRes, 'Gagal memuat data shipment Sales Channel'),
     prevChannel: unwrap(prevChannelRes, 'Gagal memuat channel bulan sebelumnya'),
     prevAds: unwrap(prevAdsRes, 'Gagal memuat ads bulan sebelumnya'),
+    prevShipping: prevShipping.data,
+    prevShippingError: prevShipping.error,
   };
 }

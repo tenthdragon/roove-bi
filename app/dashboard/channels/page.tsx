@@ -78,6 +78,7 @@ export default function ChannelsPage() {
   const { dateRange, loading: dateLoading } = useDateRange();
   const [channelData, setChannelData] = useState([]);
   const [adsData, setAdsData] = useState([]);
+  const [shippingData, setShippingData] = useState<any[]>([]);
   const [brandMapping, setBrandMapping] = useState([]);
   const [shipmentCounts, setShipmentCounts] = useState<{ date: string; product: string; channel: string; order_count: number }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,6 +89,9 @@ export default function ChannelsPage() {
   const [hiddenChannels, setHiddenChannels] = useState<Set<string>>(new Set());
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
+  const [prevShippingData, setPrevShippingData] = useState<any[]>([]);
+  const [shippingError, setShippingError] = useState('');
+  const [prevShippingError, setPrevShippingError] = useState('');
   const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
@@ -96,15 +100,19 @@ export default function ChannelsPage() {
     const pf = shiftIsoDateByMonthsClamped(from, -1);
     const pt = shiftIsoDateByMonthsClamped(to, -1);
 
-    const cached = getCached<any>('channels_page_data', from, to, `${pf}|${pt}`);
+    const cached = getCached<any>('channels_page_data_v5', from, to, `${pf}|${pt}`);
 
     if (cached) {
       setChannelData(cached.channel.filter(row => isActiveBrand(row.product)));
       setAdsData(cached.ads);
+      setShippingData((cached.shipping || []).filter(row => isActiveBrand(row.product)));
       setBrandMapping(cached.brandMapping);
       setShipmentCounts(cached.shipmentCounts.filter(row => isActiveBrand(row.product)));
       setPrevChannelData(cached.prevChannel.filter(row => isActiveBrand(row.product)));
       setPrevAdsData(cached.prevAds);
+      setPrevShippingData((cached.prevShipping || []).filter(row => isActiveBrand(row.product)));
+      setShippingError(cached.shippingError || '');
+      setPrevShippingError(cached.prevShippingError || '');
       setError('');
       setLoading(false);
       return;
@@ -117,13 +125,17 @@ export default function ChannelsPage() {
     getChannelsPageData({ from, to, prevFrom: pf, prevTo: pt })
       .then((data) => {
         if (cancelled) return;
-        setCache('channels_page_data', from, to, data, `${pf}|${pt}`);
+        setCache('channels_page_data_v5', from, to, data, `${pf}|${pt}`);
         setChannelData(data.channel.filter(row => isActiveBrand(row.product)));
         setAdsData(data.ads);
+        setShippingData(data.shipping.filter(row => isActiveBrand(row.product)));
         setBrandMapping(data.brandMapping);
         setShipmentCounts(data.shipmentCounts.filter(row => isActiveBrand(row.product)));
         setPrevChannelData(data.prevChannel.filter(row => isActiveBrand(row.product)));
         setPrevAdsData(data.prevAds);
+        setPrevShippingData(data.prevShipping.filter(row => isActiveBrand(row.product)));
+        setShippingError(data.shippingError || '');
+        setPrevShippingError(data.prevShippingError || '');
         setError('');
         setLoading(false);
       })
@@ -132,10 +144,14 @@ export default function ChannelsPage() {
         console.error('[Channels] load error:', e);
         setChannelData([]);
         setAdsData([]);
+        setShippingData([]);
         setBrandMapping([]);
         setShipmentCounts([]);
         setPrevChannelData([]);
         setPrevAdsData([]);
+        setPrevShippingData([]);
+        setShippingError('');
+        setPrevShippingError('');
         setError(e?.message || 'Gagal memuat data Sales Channel.');
         setLoading(false);
       });
@@ -262,6 +278,24 @@ export default function ChannelsPage() {
     return result;
   }, [adsByPlatform, channelData, selectedProduct]);
 
+  const shippingByChannel = useMemo(() => {
+    const byC = {};
+    shippingData.forEach((d) => {
+      if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
+      byC[d.channel] = (byC[d.channel] || 0) + (Number(d.shipping_charge) || 0);
+    });
+    return byC;
+  }, [shippingData, selectedProduct]);
+
+  const shippingByProduct = useMemo(() => {
+    const byP = {};
+    shippingData.forEach((d) => {
+      if (selectedProduct !== 'all' && d.product !== selectedProduct) return;
+      byP[d.product] = (byP[d.product] || 0) + (Number(d.shipping_charge) || 0);
+    });
+    return byP;
+  }, [shippingData, selectedProduct]);
+
   // Aggregate channel data — all metrics from single source (daily_channel_data) + ads
   const channels = useMemo(() => {
     const byC = {};
@@ -278,6 +312,7 @@ export default function ChannelsPage() {
     return Object.entries(byC)
       .map(([ch, v]) => {
         const adsCost = adsPerChannel[ch] || 0;
+        const shippingCharge = shippingByChannel[ch] || 0;
         const totalCost = v.mpAdmin + adsCost;
         const profitAfterAll = v.gp - totalCost;
         return {
@@ -286,6 +321,7 @@ export default function ChannelsPage() {
           gp: v.gp,
           mpAdmin: v.mpAdmin,
           adsCost,
+          shippingCharge,
           totalCost,
           profitAfterAll,
           pct: totalRevenue > 0 ? (v.revenue / totalRevenue) * 100 : 0,
@@ -305,7 +341,7 @@ export default function ChannelsPage() {
         if (bPin !== -1) return 1;
         return b.revenue - a.revenue;
       });
-  }, [channelData, selectedProduct, adsPerChannel]);
+  }, [channelData, selectedProduct, adsPerChannel, shippingByChannel]);
 
   // ── Combined Daily Sales + Shipments pivot: date × channel → { orders, revenue } + Mkt Fee + MP Fee ──
   const dailyCombined = useMemo(() => {
@@ -382,6 +418,9 @@ export default function ChannelsPage() {
     const total = filtered.reduce((sum, d) => sum + (Number(d.net_sales) || 0), 0);
     const gp = filtered.reduce((sum, d) => sum + (Number(d.gross_profit) || 0), 0);
     const mpAdmin = filtered.reduce((sum, d) => sum + Math.abs(Number(d.mp_admin_cost) || 0), 0);
+    const shipping = prevShippingData
+      .filter(d => selectedProduct === 'all' || d.product === selectedProduct)
+      .reduce((sum, d) => sum + (Number(d.shipping_charge) || 0), 0);
     // Compute prev ads cost
     let adsCost = 0;
     resolvedPrevAdsData.forEach(d => {
@@ -396,12 +435,15 @@ export default function ChannelsPage() {
     filtered.forEach(d => {
       if (d.channel) byChannel[d.channel] = (byChannel[d.channel] || 0) + (Number(d.net_sales) || 0);
     });
-    return { total, gp, mpAdmin, adsCost, totalCost, profitAfterAll, byChannel };
-  }, [prevChannelData, resolvedPrevAdsData, selectedProduct]);
+    return { total, gp, mpAdmin, shipping, adsCost, totalCost, profitAfterAll, byChannel };
+  }, [prevChannelData, prevShippingData, resolvedPrevAdsData, selectedProduct]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
   const totalGP = channels.reduce((a, c) => a + c.gp, 0);
   const totalMpAdmin = channels.reduce((a, c) => a + c.mpAdmin, 0);
+  const totalShippingCharges = shippingData
+    .filter(d => selectedProduct === 'all' || d.product === selectedProduct)
+    .reduce((sum, d) => sum + (Number(d.shipping_charge) || 0), 0);
   const totalAdsCost = channels.reduce((a, c) => a + c.adsCost, 0);
   const totalCost = channels.reduce((a, c) => a + c.totalCost, 0);
   const totalProfitAfterAll = channels.reduce((a, c) => a + c.profitAfterAll, 0);
@@ -431,6 +473,7 @@ export default function ChannelsPage() {
     return Object.entries(byP)
       .map(([product, v]) => {
         const adsCost = adsByProduct[product] || 0;
+        const shippingCharge = shippingByProduct[product] || 0;
         const totalCostP = v.mpAdmin + adsCost;
         const profitAfterAll = v.gp - totalCostP;
         return {
@@ -439,6 +482,7 @@ export default function ChannelsPage() {
           gp: v.gp,
           mpAdmin: v.mpAdmin,
           adsCost,
+          shippingCharge,
           totalCost: totalCostP,
           profitAfterAll,
           pct: totalRevenue > 0 ? (v.revenue / totalRevenue) * 100 : 0,
@@ -449,7 +493,7 @@ export default function ChannelsPage() {
       })
       .filter(p => p.revenue > 0)
       .sort((a, b) => b.revenue - a.revenue);
-  }, [channelData, resolvedAdsData, selectedProduct, totalRevenue]);
+  }, [channelData, resolvedAdsData, selectedProduct, totalRevenue, shippingByProduct]);
 
 
   const prevMonthLabel = useMemo(() => {
@@ -593,6 +637,13 @@ export default function ChannelsPage() {
           sub={`${totalRevenue > 0 ? (totalAdsCost / totalRevenue * 100).toFixed(1) : 0}% of revenue`}
           color="var(--yellow)"
           delta={prevRevenue && prevRevenue.adsCost > 0 ? { value: ((totalAdsCost - prevRevenue.adsCost) / prevRevenue.adsCost) * 100, higherIsBetter: false } : undefined}
+        />
+        <KPI
+          label="Shipping Fee"
+          val={shippingError ? '—' : `Rp ${fmtCompact(totalShippingCharges)}`}
+          sub={shippingError ? 'Data shipping tidak tersedia' : `${totalRevenue > 0 ? (totalShippingCharges / totalRevenue * 100).toFixed(1) : 0}% of revenue`}
+          color="#0ea5e9"
+          delta={!shippingError && !prevShippingError && prevRevenue && prevRevenue.shipping > 0 ? { value: ((totalShippingCharges - prevRevenue.shipping) / prevRevenue.shipping) * 100, higherIsBetter: false } : undefined}
         />
         <KPI
           label="GP After Mkt + Adm"
@@ -742,7 +793,7 @@ export default function ChannelsPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--border)' }}>
-              {['Channel', 'Net Sales', '% Share', 'Admin Fee', 'Mkt Cost', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
+              {['Channel', 'Net Sales', '% Share', 'Admin Fee', 'Mkt Cost', 'Shipping Fee', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
@@ -759,6 +810,7 @@ export default function ChannelsPage() {
                 gp: scalevGroup.reduce((a, c) => a + c.gp, 0),
                 mpAdmin: scalevGroup.reduce((a, c) => a + c.mpAdmin, 0),
                 adsCost: scalevGroup.reduce((a, c) => a + c.adsCost, 0),
+                shippingCharge: scalevGroup.reduce((a, c) => a + c.shippingCharge, 0),
               };
               const svTotalCost = sv.mpAdmin + sv.adsCost;
               const svProfit = sv.gp - svTotalCost;
@@ -778,6 +830,9 @@ export default function ChannelsPage() {
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
                     {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                  </td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#0ea5e9' }}>
+                    {c.shippingCharge > 0 ? fmtRupiah(c.shippingCharge) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                     {c.totalCost > 0 ? (
@@ -825,6 +880,9 @@ export default function ChannelsPage() {
                         <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
                           {sv.adsCost > 0 ? fmtRupiah(sv.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                         </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#0ea5e9' }}>
+                          {sv.shippingCharge > 0 ? fmtRupiah(sv.shippingCharge) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                        </td>
                         <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                           {svTotalCost > 0 ? (
                             <span style={{
@@ -859,6 +917,9 @@ export default function ChannelsPage() {
                           <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: '#d97706' }}>
                             {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           </td>
+                          <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 10, color: '#0ea5e9' }}>
+                            {c.shippingCharge > 0 ? fmtRupiah(c.shippingCharge) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                          </td>
                           <td style={{ padding: '6px 10px', textAlign: 'right' }}>
                             {c.totalCost > 0 ? (
                               <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 9, fontWeight: 700, background: c.costRatio > 40 ? 'var(--badge-red-bg)' : c.costRatio > 25 ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)', color: c.costRatio > 40 ? 'var(--red)' : c.costRatio > 25 ? 'var(--yellow)' : 'var(--green)' }}>{c.costRatio.toFixed(1)}%</span>
@@ -884,6 +945,7 @@ export default function ChannelsPage() {
               <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>{fmtRupiah(totalMpAdmin)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(totalAdsCost)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#0ea5e9' }}>{fmtRupiah(totalShippingCharges)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                 <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--border)', color: 'var(--text)' }}>
                   {totalRevenue > 0 ? (totalCost / totalRevenue * 100).toFixed(1) : 0}%
@@ -908,7 +970,7 @@ export default function ChannelsPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--border)' }}>
-              {['Product', 'Net Sales', '% Share', 'Admin Fee', 'Mkt Cost', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
+              {['Product', 'Net Sales', '% Share', 'Admin Fee', 'Mkt Cost', 'Shipping Fee', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Product' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
@@ -926,6 +988,9 @@ export default function ChannelsPage() {
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
                   {p.adsCost > 0 ? fmtRupiah(p.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#0ea5e9' }}>
+                  {p.shippingCharge > 0 ? fmtRupiah(p.shippingCharge) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                   {p.totalCost > 0 ? (
@@ -955,6 +1020,7 @@ export default function ChannelsPage() {
               <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>{fmtRupiah(totalMpAdmin)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(totalAdsCost)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#0ea5e9' }}>{fmtRupiah(totalShippingCharges)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                 <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--border)', color: 'var(--text)' }}>
                   {totalRevenue > 0 ? (totalCost / totalRevenue * 100).toFixed(1) : 0}%

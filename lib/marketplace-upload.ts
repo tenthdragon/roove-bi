@@ -1641,6 +1641,8 @@ async function upsertLocalMarketplaceOrder(
     gross_revenue: order.orderAmount,
     net_revenue: order.orderAmount,
     shipping_cost: order.shippingCost,
+    shipping_discount: null,
+    discount_code_discount: null,
     total_quantity: order.lines.reduce((sum, line) => sum + line.quantity, 0),
     customer_name: order.customerName,
     customer_phone: order.customerPhone,

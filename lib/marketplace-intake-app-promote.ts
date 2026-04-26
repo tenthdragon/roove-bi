@@ -742,6 +742,8 @@ export async function promoteMarketplaceIntakeBatchToApp(
         gross_revenue: totalRevenue,
         net_revenue: totalRevenue,
         shipping_cost: parseInteger(headerRow.shipping_cost),
+        shipping_discount: null,
+        discount_code_discount: null,
         total_quantity: totalQuantity,
         customer_name: cleanText(headerRow.username) || cleanText(headerRow.name) || intakeOrder.recipient_name || intakeOrder.customer_label || null,
         customer_phone: null,

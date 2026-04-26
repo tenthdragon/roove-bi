@@ -6,6 +6,7 @@ import {
   clearProductMappingCache,
   type StoreType,
 } from './scalev-api';
+import { parseScalevHeaderFinancialFields } from './scalev-header-financials';
 import { buildScalevSourceClassFields } from './scalev-source-class';
 import { reverseWarehouseDeductions } from './warehouse-ledger-actions';
 import { createServiceSupabase } from './service-supabase';
@@ -451,6 +452,7 @@ async function processOrder(
     businessId,
     storeTypeMap,
   });
+  const parsedHeaderFinancials = parseScalevHeaderFinancialFields(apiOrder);
 
   if (newStatus === dbOrder.status && !forceUpdate) {
     return 'still_pending';
@@ -462,6 +464,8 @@ async function processOrder(
     await svc.from('scalev_orders').update({
       status: newStatus,
       ...sourceClassFields,
+      ...(parsedHeaderFinancials.shippingDiscountPresent ? { shipping_discount: parsedHeaderFinancials.shippingDiscount } : {}),
+      ...(parsedHeaderFinancials.discountCodeDiscountPresent ? { discount_code_discount: parsedHeaderFinancials.discountCodeDiscount } : {}),
       raw_data: apiOrder,
       synced_at: new Date().toISOString(),
     }).eq('id', dbOrder.id);
@@ -517,6 +521,10 @@ async function processOrder(
   }
   if (apiOrder.gross_revenue != null) updateData.gross_revenue = apiOrder.gross_revenue;
   if (apiOrder.net_revenue != null) updateData.net_revenue = apiOrder.net_revenue;
+  if (apiOrder.shipping_cost != null) updateData.shipping_cost = apiOrder.shipping_cost;
+  if (apiOrder.unique_code_discount != null) updateData.unique_code_discount = apiOrder.unique_code_discount;
+  if (parsedHeaderFinancials.shippingDiscountPresent) updateData.shipping_discount = parsedHeaderFinancials.shippingDiscount;
+  if (parsedHeaderFinancials.discountCodeDiscountPresent) updateData.discount_code_discount = parsedHeaderFinancials.discountCodeDiscount;
 
   await svc.from('scalev_orders').update(updateData).eq('id', dbOrder.id);
 

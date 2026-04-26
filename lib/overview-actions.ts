@@ -15,6 +15,20 @@ function unwrap<T>(result: { data: T | null; error: { message: string } | null }
   return (result.data ?? ([] as unknown as T));
 }
 
+function unwrapOptional<T>(result: { data: T | null; error: { message: string } | null }, label: string) {
+  if (result.error) {
+    console.error(`[Overview] optional load error: ${label}`, result.error.message);
+    return {
+      data: [] as unknown as T,
+      error: `${label}: ${result.error.message}`,
+    };
+  }
+  return {
+    data: (result.data ?? ([] as unknown as T)),
+    error: null as string | null,
+  };
+}
+
 export async function getOverviewCoreData({
   from,
   to,
@@ -70,7 +84,7 @@ export async function getOverviewFeeData({
 
   const svc = createServiceSupabase();
 
-  const [adsRes, channelRes, prevAdsRes, prevChannelRes] = await Promise.all([
+  const [adsRes, channelRes, shippingRes, prevAdsRes, prevChannelRes, prevShippingRes] = await Promise.all([
     svc.from('daily_ads_spend')
       .select('date, source, spent, store')
       .gte('date', from)
@@ -79,6 +93,7 @@ export async function getOverviewFeeData({
       .select('date, channel, product, mp_admin_cost')
       .gte('date', from)
       .lte('date', to),
+    svc.rpc('get_daily_shipping_charge_data', { p_from: from, p_to: to }),
     svc.from('daily_ads_spend')
       .select('date, source, spent, store')
       .gte('date', prevFrom)
@@ -87,12 +102,20 @@ export async function getOverviewFeeData({
       .select('date, channel, product, mp_admin_cost')
       .gte('date', prevFrom)
       .lte('date', prevTo),
+    svc.rpc('get_daily_shipping_charge_data', { p_from: prevFrom, p_to: prevTo }),
   ]);
+
+  const shipping = unwrapOptional(shippingRes, 'Gagal memuat shipping charges Overview');
+  const prevShipping = unwrapOptional(prevShippingRes, 'Gagal memuat shipping charges bulan sebelumnya');
 
   return {
     ads: unwrap(adsRes, 'Gagal memuat marketing fee Overview'),
     channel: unwrap(channelRes, 'Gagal memuat MP fee Overview'),
+    shipping: shipping.data,
+    shippingError: shipping.error,
     prevAds: unwrap(prevAdsRes, 'Gagal memuat marketing fee bulan sebelumnya'),
     prevChannel: unwrap(prevChannelRes, 'Gagal memuat MP fee bulan sebelumnya'),
+    prevShipping: prevShipping.data,
+    prevShippingError: prevShipping.error,
   };
 }

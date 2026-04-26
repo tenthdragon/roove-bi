@@ -82,10 +82,14 @@ export default function OverviewPage() {
   const [prevOverheadData, setPrevOverheadData] = useState([]);
   const [adsData, setAdsData] = useState<any[]>([]);
   const [channelData, setChannelData] = useState<any[]>([]);
+  const [shippingData, setShippingData] = useState<any[]>([]);
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
+  const [prevShippingData, setPrevShippingData] = useState<any[]>([]);
   const [feeLoading, setFeeLoading] = useState(true);
   const [feeError, setFeeError] = useState('');
+  const [shippingError, setShippingError] = useState('');
+  const [prevShippingError, setPrevShippingError] = useState('');
   const { activeBrands, error: activeBrandsError, isActiveBrand } = useActiveBrands();
   const [userRole, setUserRole] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
@@ -177,17 +181,25 @@ export default function OverviewPage() {
     if (!dateRange.from || !dateRange.to || !prevRange) return;
     const { prevFrom, prevTo } = prevRange;
 
-    const cachedAds = getCached<any[]>('overview_ads_spend', dateRange.from, dateRange.to);
-    const cachedCh = getCached<any[]>('overview_channel_data', dateRange.from, dateRange.to);
-    const cachedPrevAds = getCached<any[]>('overview_ads_spend_prev', prevFrom, prevTo);
-    const cachedPrevCh = getCached<any[]>('overview_channel_data_prev', prevFrom, prevTo);
+    const cachedAds = getCached<any[]>('overview_ads_spend_v2', dateRange.from, dateRange.to);
+    const cachedCh = getCached<any[]>('overview_channel_data_v2', dateRange.from, dateRange.to);
+    const cachedShipping = getCached<any[]>('overview_shipping_charge_data_v4', dateRange.from, dateRange.to);
+    const cachedShippingError = getCached<string>('overview_shipping_charge_error_v4', dateRange.from, dateRange.to) || '';
+    const cachedPrevAds = getCached<any[]>('overview_ads_spend_prev_v2', prevFrom, prevTo);
+    const cachedPrevCh = getCached<any[]>('overview_channel_data_prev_v2', prevFrom, prevTo);
+    const cachedPrevShipping = getCached<any[]>('overview_shipping_charge_data_prev_v4', prevFrom, prevTo);
+    const cachedPrevShippingError = getCached<string>('overview_shipping_charge_prev_error_v4', prevFrom, prevTo) || '';
 
-    if (cachedAds && cachedCh && cachedPrevAds && cachedPrevCh) {
+    if (cachedAds && cachedCh && cachedShipping && cachedPrevAds && cachedPrevCh && cachedPrevShipping) {
       setAdsData(cachedAds);
       setChannelData(cachedCh);
+      setShippingData(cachedShipping.filter(row => isActiveBrand(row.product)));
       setPrevAdsData(cachedPrevAds);
       setPrevChannelData(cachedPrevCh);
+      setPrevShippingData(cachedPrevShipping.filter(row => isActiveBrand(row.product)));
       setFeeError('');
+      setShippingError(cachedShippingError);
+      setPrevShippingError(cachedPrevShippingError);
       setFeeLoading(false);
       return;
     }
@@ -204,15 +216,23 @@ export default function OverviewPage() {
     })
       .then((data) => {
         if (cancelled) return;
-        setCache('overview_ads_spend', dateRange.from, dateRange.to, data.ads);
-        setCache('overview_channel_data', dateRange.from, dateRange.to, data.channel);
-        setCache('overview_ads_spend_prev', prevFrom, prevTo, data.prevAds);
-        setCache('overview_channel_data_prev', prevFrom, prevTo, data.prevChannel);
+        setCache('overview_ads_spend_v2', dateRange.from, dateRange.to, data.ads);
+        setCache('overview_channel_data_v2', dateRange.from, dateRange.to, data.channel);
+        setCache('overview_shipping_charge_data_v4', dateRange.from, dateRange.to, data.shipping);
+        setCache('overview_shipping_charge_error_v4', dateRange.from, dateRange.to, data.shippingError || '');
+        setCache('overview_ads_spend_prev_v2', prevFrom, prevTo, data.prevAds);
+        setCache('overview_channel_data_prev_v2', prevFrom, prevTo, data.prevChannel);
+        setCache('overview_shipping_charge_data_prev_v4', prevFrom, prevTo, data.prevShipping);
+        setCache('overview_shipping_charge_prev_error_v4', prevFrom, prevTo, data.prevShippingError || '');
         setAdsData(data.ads);
         setChannelData(data.channel);
+        setShippingData(data.shipping.filter(row => isActiveBrand(row.product)));
         setPrevAdsData(data.prevAds);
         setPrevChannelData(data.prevChannel);
+        setPrevShippingData(data.prevShipping.filter(row => isActiveBrand(row.product)));
         setFeeError('');
+        setShippingError(data.shippingError || '');
+        setPrevShippingError(data.prevShippingError || '');
         setFeeLoading(false);
       })
       .catch((e: any) => {
@@ -221,13 +241,17 @@ export default function OverviewPage() {
         setFeeError(e?.message || 'Gagal memuat biaya marketing Overview.');
         setAdsData([]);
         setChannelData([]);
+        setShippingData([]);
         setPrevAdsData([]);
         setPrevChannelData([]);
+        setPrevShippingData([]);
         setFeeLoading(false);
+        setShippingError('');
+        setPrevShippingError('');
       });
 
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to, prevRange]);
+  }, [dateRange.from, dateRange.to, prevRange, activeBrands, activeBrandsError, isActiveBrand]);
 
   // Build overhead per-day lookup: date (YYYY-MM-DD) → daily overhead amount
   const overheadPerDay = useMemo(() => {
@@ -265,6 +289,15 @@ export default function OverviewPage() {
     return map;
   }, [channelData, activeBrands, activeBrandsError, isActiveBrand]);
 
+  const shippingByDate = useMemo(() => {
+    const map: Record<string, number> = {};
+    shippingData.forEach(d => {
+      if (!isActiveBrand(d.product)) return;
+      map[d.date] = (map[d.date] || 0) + Number(d.shipping_charge || 0);
+    });
+    return map;
+  }, [shippingData, activeBrands, activeBrandsError, isActiveBrand]);
+
   const kpi = useMemo(() => {
     // Build all dates in the selected range so days with only overhead/ads still appear
     const byDate: Record<string, { s:number; g:number }> = {};
@@ -283,17 +316,19 @@ export default function OverviewPage() {
     // Explicit totals from dedicated tables
     const tAds = adsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
     const tMp = channelData.filter(d => isActiveBrand(d.product)).reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost) || 0), 0);
+    const tShipping = shippingData.reduce((s, d) => s + Number(d.shipping_charge || 0), 0);
     const ad = dates.filter(d => byDate[d].s > 0).length;
     const hasOverhead = overheadData.length > 0;
     const tOverheadRaw = dates.reduce((a, d) => a + (overheadPerDay[d] || 0), 0);
-    const tNetProfit = tg - tAds - tMp - tOverheadRaw;
+    const tNetProfit = tg - tAds - tMp - tShipping - tOverheadRaw;
     const npM = ts > 0 ? tNetProfit / ts * 100 : 0;
     const chart = dates.map(d => {
       const adsFee = adsByDate[d] || 0;
       const mpFee = mpByDate[d] || 0;
+      const shippingFee = shippingByDate[d] || 0;
       const cogs = byDate[d].s - byDate[d].g;
       const overhead = overheadPerDay[d] || 0;
-      const estNetProfit = byDate[d].g - adsFee - mpFee - overhead;
+      const estNetProfit = byDate[d].g - adsFee - mpFee - shippingFee - overhead;
       const gpM = byDate[d].s > 0 ? byDate[d].g / byDate[d].s * 100 : 0;
       const npMd = byDate[d].s > 0 ? estNetProfit / byDate[d].s * 100 : 0;
       return {
@@ -305,14 +340,15 @@ export default function OverviewPage() {
         'COGS': cogs,
         'Mkt Fee': adsFee,
         'MP Fee': mpFee,
+        'Shipping Fee': shippingFee,
         'Overhead': overhead,
         'Net Profit': estNetProfit,
         gpM, npM: npMd,
       };
     });
     const tShipment = chart.reduce((a,r) => a + r.shipment, 0);
-    return { ts, tg, tCogs, tAds, tMp, tOverhead: tOverheadRaw, tNetProfit, tShipment, npM, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, mR: ts>0?(tAds+tMp)/ts*100:0, avg: ad>0?ts/ad:0 };
-  }, [dailyData, adsData, channelData, overheadPerDay, overheadData, shipPerDay, rangeDates, adsByDate, mpByDate, activeBrands, activeBrandsError, isActiveBrand]);
+    return { ts, tg, tCogs, tAds, tMp, tShipping, tOverhead: tOverheadRaw, tNetProfit, tShipment, npM, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, mR: ts>0?(tAds+tMp)/ts*100:0, avg: ad>0?ts/ad:0 };
+  }, [dailyData, adsData, channelData, shippingData, overheadPerDay, overheadData, shipPerDay, rangeDates, adsByDate, mpByDate, shippingByDate, activeBrands, activeBrandsError, isActiveBrand]);
 
   // ── Previous month KPIs (for delta comparison) ──
   const prevKpi = useMemo(() => {
@@ -321,10 +357,11 @@ export default function OverviewPage() {
     prevDailyData.forEach(d => { ts += Number(d.net_sales); tg += Number(d.gross_profit); });
     const tAds = prevAdsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
     const tMp = prevChannelData.filter(d => isActiveBrand(d.product)).reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost) || 0), 0);
+    const tShipping = prevShippingData.reduce((s, d) => s + Number(d.shipping_charge || 0), 0);
     const prevOH = prevRangeDates.reduce((sum, dateKey) => sum + (prevOverheadPerDay[dateKey] || 0), 0);
-    const tNetProfit = tg - tAds - tMp - prevOH;
-    return { ts, tg, tAds, tMp, tNetProfit, gpM: ts>0?tg/ts*100:0, npM: ts>0?tNetProfit/ts*100:0 };
-  }, [prevDailyData, prevAdsData, prevChannelData, prevRangeDates, prevOverheadPerDay, activeBrands, activeBrandsError, isActiveBrand]);
+    const tNetProfit = tg - tAds - tMp - tShipping - prevOH;
+    return { ts, tg, tAds, tMp, tShipping, tNetProfit, gpM: ts>0?tg/ts*100:0, npM: ts>0?tNetProfit/ts*100:0 };
+  }, [prevDailyData, prevAdsData, prevChannelData, prevShippingData, prevRangeDates, prevOverheadPerDay, activeBrands, activeBrandsError, isActiveBrand]);
 
   const prevMonthLabel = useMemo(() => {
     if (!dateRange.from) return '';
@@ -446,8 +483,8 @@ export default function OverviewPage() {
           delta={prevKpi && prevKpi.tg > 0 ? { value: ((kpi.tg - prevKpi.tg) / prevKpi.tg) * 100 } : undefined}
           delta2={prevKpi && prevKpi.gpM > 0 ? { value: kpi.gpM - prevKpi.gpM, suffix: 'pp', label: 'margin' } : undefined} />
         <KPI label="Net Profit" val={`Rp ${fmtCompact(kpi.tNetProfit)}`} sub={`NP Margin: ${kpi.npM.toFixed(1)}%`} color={kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)'}
-          delta={prevKpi && prevKpi.tNetProfit !== 0 ? { value: prevKpi.tNetProfit !== 0 ? ((kpi.tNetProfit - prevKpi.tNetProfit) / Math.abs(prevKpi.tNetProfit)) * 100 : 0 } : undefined}
-          delta2={prevKpi ? { value: kpi.npM - prevKpi.npM, suffix: 'pp', label: 'margin' } : undefined} />
+          delta={!shippingError && !prevShippingError && prevKpi && prevKpi.tNetProfit !== 0 ? { value: prevKpi.tNetProfit !== 0 ? ((kpi.tNetProfit - prevKpi.tNetProfit) / Math.abs(prevKpi.tNetProfit)) * 100 : 0 } : undefined}
+          delta2={!shippingError && !prevShippingError && prevKpi ? { value: kpi.npM - prevKpi.npM, suffix: 'pp', label: 'margin' } : undefined} />
       </div>
       {/* ── KPI Cards — Row 2: Cost Breakdown ── */}
       <div style={{ display:'flex', gap:12, flexWrap:'wrap', marginBottom:20 }}>
@@ -456,6 +493,8 @@ export default function OverviewPage() {
           delta={prevKpi && prevKpi.tAds > 0 ? { value: ((kpi.tAds - prevKpi.tAds) / prevKpi.tAds) * 100, higherIsBetter: false } : undefined} />
         <KPI label="MP Fee" val={feeError ? '—' : `Rp ${fmtCompact(kpi.tMp)}`} sub={feeError ? 'Data channel tidak tersedia' : `${kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="var(--yellow)"
           delta={prevKpi && prevKpi.tMp > 0 ? { value: ((kpi.tMp - prevKpi.tMp) / prevKpi.tMp) * 100, higherIsBetter: false } : undefined} />
+        <KPI label="Shipping Fee" val={shippingError ? '—' : `Rp ${fmtCompact(kpi.tShipping)}`} sub={shippingError ? 'Data shipping tidak tersedia' : `${kpi.ts > 0 ? (kpi.tShipping / kpi.ts * 100).toFixed(1) : '0'}% of sales`} color="#0ea5e9"
+          delta={!shippingError && !prevShippingError && prevKpi && prevKpi.tShipping > 0 ? { value: ((kpi.tShipping - prevKpi.tShipping) / prevKpi.tShipping) * 100, higherIsBetter: false } : undefined} />
         {kpi.hasOverhead && <KPI label="Overhead" val={`Rp ${fmtCompact(kpi.tOverhead)}`} sub="estimated" color="#a78bfa" />}
       </div>
 
@@ -488,7 +527,7 @@ export default function OverviewPage() {
               </button>
             )}
           </div>
-          {showTren && <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? 1100 : 820 }}>
+          {showTren && <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? 1210 : 930 }}>
             <thead>
               <tr style={{ borderBottom:'2px solid var(--border)' }}>
                 <th style={{ padding:'8px 10px', textAlign:'left', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>Tanggal</th>
@@ -498,6 +537,7 @@ export default function OverviewPage() {
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--green)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Gross Profit</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--yellow)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Mkt Fee</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--yellow)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>MP Fee</th>
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'#0ea5e9', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Shipping Fee</th>
                 {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'#a78bfa', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Overhead</th>}
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--green)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Net Profit</th>
               </tr>
@@ -512,6 +552,7 @@ export default function OverviewPage() {
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--green)' }}>{fmtRupiah(row['Gross Profit'])}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(row['Mkt Fee'])}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(row['MP Fee'])}</td>
+                  <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#0ea5e9' }}>{fmtRupiah(row['Shipping Fee'])}</td>
                   {showDetail && <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'#a78bfa' }}>{fmtRupiah(row['Overhead'])}</td>}
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: row['Net Profit'] >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtRupiah(row['Net Profit'])}</td>
                 </tr>
@@ -543,6 +584,10 @@ export default function OverviewPage() {
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
                   <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--yellow)' }}>{fmtRupiah(kpi.tMp)}</div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : 0}%</div>
+                </td>
+                <td style={{ padding:'10px 10px', textAlign:'right' }}>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:'#0ea5e9' }}>{fmtRupiah(kpi.tShipping)}</div>
+                  <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tShipping / kpi.ts * 100).toFixed(1) : 0}%</div>
                 </td>
                 {showDetail && (
                   <td style={{ padding:'10px 10px', textAlign:'right' }}>

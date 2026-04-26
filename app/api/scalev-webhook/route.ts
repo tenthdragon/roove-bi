@@ -4,6 +4,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
 import { deriveChannelFromStoreType, guessStoreType, type StoreType } from '@/lib/scalev-api';
+import { parseScalevHeaderFinancialFields } from '@/lib/scalev-header-financials';
 import { buildScalevSourceClassFields } from '@/lib/scalev-source-class';
 import {
   extractMarketplaceTrackingFromScalevOrderRawData,
@@ -965,6 +966,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   const storeName = data.store?.name || null;
   const financialEntity = data.financial_entity?.name || data.financial_entity?.code || null;
   const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
+  const parsedHeaderFinancials = parseScalevHeaderFinancialFields(data);
 
   // Build order row
   const derivedPlatform = derivePlatformFromStore(storeName || '', data.external_id, data);
@@ -986,6 +988,8 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
     gross_revenue: num(data.gross_revenue),
     net_revenue: num(data.net_revenue),
     shipping_cost: num(data.shipping_cost),
+    shipping_discount: parsedHeaderFinancials.shippingDiscountPresent ? parsedHeaderFinancials.shippingDiscount : null,
+    discount_code_discount: parsedHeaderFinancials.discountCodeDiscountPresent ? parsedHeaderFinancials.discountCodeDiscount : null,
     total_quantity: data.total_quantity || 0,
     customer_name: dest.name || null,
     customer_phone: dest.phone || null,
@@ -1108,6 +1112,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     existing,
     businessId,
   });
+  const parsedHeaderFinancials = parseScalevHeaderFinancialFields(data);
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
     eventType: 'order.status_changed',
@@ -1154,6 +1159,13 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
         updateData[field] = ts(data[field]);
       }
     }
+
+    if (data.gross_revenue != null) updateData.gross_revenue = num(data.gross_revenue);
+    if (data.net_revenue != null) updateData.net_revenue = num(data.net_revenue);
+    if (data.shipping_cost != null) updateData.shipping_cost = num(data.shipping_cost);
+    if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
+    if (parsedHeaderFinancials.shippingDiscountPresent) updateData.shipping_discount = parsedHeaderFinancials.shippingDiscount;
+    if (parsedHeaderFinancials.discountCodeDiscountPresent) updateData.discount_code_discount = parsedHeaderFinancials.discountCodeDiscount;
 
     const { error: updateErr } = await svc
       .from('scalev_orders')
@@ -1233,6 +1245,13 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
       updateData[field] = ts(data[field]);
     }
   }
+
+  if (data.gross_revenue != null) updateData.gross_revenue = num(data.gross_revenue);
+  if (data.net_revenue != null) updateData.net_revenue = num(data.net_revenue);
+  if (data.shipping_cost != null) updateData.shipping_cost = num(data.shipping_cost);
+  if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
+  if (parsedHeaderFinancials.shippingDiscountPresent) updateData.shipping_discount = parsedHeaderFinancials.shippingDiscount;
+  if (parsedHeaderFinancials.discountCodeDiscountPresent) updateData.discount_code_discount = parsedHeaderFinancials.discountCodeDiscount;
 
   // Update order
   const { error: updateErr } = await svc
@@ -1480,6 +1499,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     existing,
     businessId,
   });
+  const parsedHeaderFinancials = parseScalevHeaderFinancialFields(data);
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
     eventType: 'order.updated',
@@ -1518,6 +1538,8 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     if (data.shipping_cost != null) updateData.shipping_cost = num(data.shipping_cost);
     if (data.total_quantity != null) updateData.total_quantity = data.total_quantity;
     if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
+    if (parsedHeaderFinancials.shippingDiscountPresent) updateData.shipping_discount = parsedHeaderFinancials.shippingDiscount;
+    if (parsedHeaderFinancials.discountCodeDiscountPresent) updateData.discount_code_discount = parsedHeaderFinancials.discountCodeDiscount;
 
     const timestampFields = [
       'draft_time', 'pending_time', 'confirmed_time',
@@ -1587,6 +1609,8 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   if (data.shipping_cost != null) updateData.shipping_cost = num(data.shipping_cost);
   if (data.total_quantity != null) updateData.total_quantity = data.total_quantity;
   if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
+  if (parsedHeaderFinancials.shippingDiscountPresent) updateData.shipping_discount = parsedHeaderFinancials.shippingDiscount;
+  if (parsedHeaderFinancials.discountCodeDiscountPresent) updateData.discount_code_discount = parsedHeaderFinancials.discountCodeDiscount;
   // Derive platform from store name if not already set
   if (storeName) updateData.platform = derivePlatformFromStore(storeName, data.external_id, data);
   // Update purchase flags from webhook data (only if explicitly sent).
@@ -1857,6 +1881,7 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
     existing,
     businessId,
   });
+  const parsedHeaderFinancials = parseScalevHeaderFinancialFields(data);
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
     eventType: 'order.payment_status_changed',
@@ -1902,6 +1927,10 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
   if (data.paid_time) updateData.paid_time = ts(data.paid_time);
   if (data.gross_revenue != null) updateData.gross_revenue = num(data.gross_revenue);
   if (data.net_revenue != null) updateData.net_revenue = num(data.net_revenue);
+  if (data.shipping_cost != null) updateData.shipping_cost = num(data.shipping_cost);
+  if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
+  if (parsedHeaderFinancials.shippingDiscountPresent) updateData.shipping_discount = parsedHeaderFinancials.shippingDiscount;
+  if (parsedHeaderFinancials.discountCodeDiscountPresent) updateData.discount_code_discount = parsedHeaderFinancials.discountCodeDiscount;
 
   const { error: updateErr } = await svc
     .from('scalev_orders')
@@ -1971,6 +2000,7 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
     existing,
     businessId,
   });
+  const parsedHeaderFinancials = parseScalevHeaderFinancialFields(data);
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
     eventType: 'order.e_payment_created',
@@ -2017,7 +2047,10 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
   }
   if (data.gross_revenue != null) updateData.gross_revenue = num(data.gross_revenue);
   if (data.net_revenue != null) updateData.net_revenue = num(data.net_revenue);
+  if (data.shipping_cost != null) updateData.shipping_cost = num(data.shipping_cost);
   if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
+  if (parsedHeaderFinancials.shippingDiscountPresent) updateData.shipping_discount = parsedHeaderFinancials.shippingDiscount;
+  if (parsedHeaderFinancials.discountCodeDiscountPresent) updateData.discount_code_discount = parsedHeaderFinancials.discountCodeDiscount;
 
   const { error: updateErr } = await svc
     .from('scalev_orders')

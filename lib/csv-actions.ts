@@ -353,6 +353,8 @@ export async function uploadCsvOrders(formData: FormData) {
         is_purchase_kwai: firstRow.is_purchase_kwai === 'true',
         gross_revenue: num(firstRow.gross_revenue), net_revenue: num(firstRow.net_revenue),
         shipping_cost: num(firstRow.shipping_cost),
+        shipping_discount: null,
+        discount_code_discount: null,
         total_quantity: parseInt(firstRow.quantity || '0') || 0,
         customer_name: firstRow.name || null, customer_phone: firstRow.phone || null,
         customer_email: firstRow.email || null, province: firstRow.province || null,

@@ -2,6 +2,7 @@
 // Scalev API client for fetching order data
 
 import { createClient } from '@supabase/supabase-js';
+import { parseScalevHeaderFinancialFields } from './scalev-header-financials';
 
 function getServiceSupabase() {
   return createClient(
@@ -459,6 +460,7 @@ export async function parseOrderForDb(order: any) {
   const salesChannel = deriveSalesChannel(order);
   const shippedTime = order.shipped_time || order.completed_time || null;
   const completedTime = order.completed_time || null;
+  const parsedHeaderFinancials = parseScalevHeaderFinancialFields(order);
 
   // Parse order header
   const orderHeader = {
@@ -479,6 +481,8 @@ export async function parseOrderForDb(order: any) {
     gross_revenue: order.gross_revenue || 0,
     net_revenue: order.net_revenue || 0,
     shipping_cost: order.shipping_cost || 0,
+    shipping_discount: parsedHeaderFinancials.shippingDiscountPresent ? parsedHeaderFinancials.shippingDiscount : null,
+    discount_code_discount: parsedHeaderFinancials.discountCodeDiscountPresent ? parsedHeaderFinancials.discountCodeDiscount : null,
     total_quantity: order.total_quantity || 0,
     customer_name: order.customer_name || order.address?.name || null,
     customer_phone: order.customer_phone || order.address?.phone || null,

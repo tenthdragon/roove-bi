@@ -145,6 +145,138 @@ export async function getPendingOrders(): Promise<PendingOrder[]> {
   }));
 }
 
+export type ScalevFinancialsV2ReconciliationSummary = {
+  total_orders: number;
+  shipping_discount_unknown_orders: number;
+  discount_code_discount_unknown_orders: number;
+  header_net_matches_line_product_net_orders: number;
+  header_net_differs_from_line_product_net_orders: number;
+  shipping_discount_missing_with_shipping_orders: number;
+};
+
+export type ScalevFinancialsV2GapBucket = {
+  gap_amount: number | null;
+  order_count: number;
+};
+
+export type ScalevFinancialsV2SampleOrder = {
+  scalev_order_id: number;
+  order_id: string;
+  business_code: string | null;
+  source: string | null;
+  status: string | null;
+  scalev_final_net_revenue: number | null;
+  line_product_net_amount: number | null;
+  shipping_gross_amount: number | null;
+  shipping_discount_amount: number | null;
+  audit_header_minus_line_product_net: number | null;
+};
+
+function normalizeScalevFinancialsV2SampleOrders(rows: any[] | null | undefined): ScalevFinancialsV2SampleOrder[] {
+  return (rows || []).map((row: any) => ({
+    scalev_order_id: Number(row.scalev_order_id),
+    order_id: row.order_id,
+    business_code: row.business_code ?? null,
+    source: row.source ?? null,
+    status: row.status ?? null,
+    scalev_final_net_revenue: row.scalev_final_net_revenue == null ? null : Number(row.scalev_final_net_revenue),
+    line_product_net_amount: row.line_product_net_amount == null ? null : Number(row.line_product_net_amount),
+    shipping_gross_amount: row.shipping_gross_amount == null ? null : Number(row.shipping_gross_amount),
+    shipping_discount_amount: row.shipping_discount_amount == null ? null : Number(row.shipping_discount_amount),
+    audit_header_minus_line_product_net: row.audit_header_minus_line_product_net == null ? null : Number(row.audit_header_minus_line_product_net),
+  }));
+}
+
+export async function getScalevOrderFinancialsV2Reconciliation(sampleLimit = 20): Promise<{
+  summary: ScalevFinancialsV2ReconciliationSummary;
+  gapDistribution: ScalevFinancialsV2GapBucket[];
+  samples: {
+    headerMatchesLineProductNet: ScalevFinancialsV2SampleOrder[];
+    headerDiffersFromLineProductNet: ScalevFinancialsV2SampleOrder[];
+    shippingDiscountUnknownWithShipping: ScalevFinancialsV2SampleOrder[];
+  };
+}> {
+  await requireAdminSyncAccess('Admin Sync');
+
+  const svc = createServiceSupabase();
+  const safeLimit = Math.min(Math.max(Math.trunc(sampleLimit) || 20, 1), 100);
+  const sampleColumns = [
+    'scalev_order_id',
+    'order_id',
+    'business_code',
+    'source',
+    'status',
+    'scalev_final_net_revenue',
+    'line_product_net_amount',
+    'shipping_gross_amount',
+    'shipping_discount_amount',
+    'audit_header_minus_line_product_net',
+  ].join(', ');
+
+  const [
+    { data: summary, error: summaryError },
+    { data: gapDistribution, error: gapDistributionError },
+    { data: headerMatchesLineProductNet, error: headerMatchesError },
+    { data: headerDiffersFromLineProductNet, error: headerDiffersError },
+    { data: shippingDiscountUnknownWithShipping, error: shippingUnknownError },
+  ] = await Promise.all([
+    svc
+      .from('v_scalev_order_financials_v2_reconciliation')
+      .select('*')
+      .maybeSingle(),
+    svc
+      .from('v_scalev_order_financials_v2_gap_distribution')
+      .select('*')
+      .order('gap_amount', { ascending: true }),
+    svc
+      .from('v_scalev_order_financials_v2')
+      .select(sampleColumns)
+      .eq('audit_header_minus_line_product_net', 0)
+      .order('scalev_order_id', { ascending: false })
+      .limit(safeLimit),
+    svc
+      .from('v_scalev_order_financials_v2')
+      .select(sampleColumns)
+      .not('audit_header_minus_line_product_net', 'is', null)
+      .neq('audit_header_minus_line_product_net', 0)
+      .order('scalev_order_id', { ascending: false })
+      .limit(safeLimit),
+    svc
+      .from('v_scalev_order_financials_v2')
+      .select(sampleColumns)
+      .gt('shipping_gross_amount', 0)
+      .is('shipping_discount_amount', null)
+      .order('scalev_order_id', { ascending: false })
+      .limit(safeLimit),
+  ]);
+
+  if (summaryError) throw summaryError;
+  if (gapDistributionError) throw gapDistributionError;
+  if (headerMatchesError) throw headerMatchesError;
+  if (headerDiffersError) throw headerDiffersError;
+  if (shippingUnknownError) throw shippingUnknownError;
+
+  return {
+    summary: {
+      total_orders: Number(summary?.total_orders || 0),
+      shipping_discount_unknown_orders: Number(summary?.shipping_discount_unknown_orders || 0),
+      discount_code_discount_unknown_orders: Number(summary?.discount_code_discount_unknown_orders || 0),
+      header_net_matches_line_product_net_orders: Number(summary?.header_net_matches_line_product_net_orders || 0),
+      header_net_differs_from_line_product_net_orders: Number(summary?.header_net_differs_from_line_product_net_orders || 0),
+      shipping_discount_missing_with_shipping_orders: Number(summary?.shipping_discount_missing_with_shipping_orders || 0),
+    },
+    gapDistribution: (gapDistribution || []).map((row: any) => ({
+      gap_amount: row.gap_amount == null ? null : Number(row.gap_amount),
+      order_count: Number(row.order_count || 0),
+    })),
+    samples: {
+      headerMatchesLineProductNet: normalizeScalevFinancialsV2SampleOrders(headerMatchesLineProductNet),
+      headerDiffersFromLineProductNet: normalizeScalevFinancialsV2SampleOrders(headerDiffersFromLineProductNet),
+      shippingDiscountUnknownWithShipping: normalizeScalevFinancialsV2SampleOrders(shippingDiscountUnknownWithShipping),
+    },
+  };
+}
+
 // ── Save Scalev API key (owner only) ──
 export async function saveScalevApiKey(apiKey: string) {
   const supabase = createServerSupabase();
