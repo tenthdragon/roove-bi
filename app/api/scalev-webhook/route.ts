@@ -7,7 +7,6 @@ import { deriveChannelFromStoreType, guessStoreType, type StoreType } from '@/li
 import { parseScalevHeaderFinancialFields } from '@/lib/scalev-header-financials';
 import { buildScalevSourceClassFields } from '@/lib/scalev-source-class';
 import {
-  extractMarketplaceTrackingFromScalevOrderRawData,
   extractMarketplaceTrackingFromWebhookData,
 } from '@/lib/marketplace-tracking';
 import { resolveWarehouseOrderContext } from '@/lib/warehouse-order-context';
@@ -296,6 +295,7 @@ type ExistingScalevWebhookOrder = {
   id: number;
   order_id?: string | null;
   external_id?: string | null;
+  marketplace_tracking_number?: string | null;
   status?: string | null;
   source?: string | null;
   scalev_id?: string | null;
@@ -501,6 +501,7 @@ function buildMarketplaceAuthoritativeUpdateBase(args: {
   orderId: string;
   data: any;
   businessCode: string;
+  trackingNumber?: string | null;
   sourceClassFields: {
     source_class?: string | null;
     source_class_reason?: string | null;
@@ -524,6 +525,10 @@ function buildMarketplaceAuthoritativeUpdateBase(args: {
   const externalId = txt(args.data?.external_id);
   if (externalId && !txt(args.existing.external_id)) {
     updateData.external_id = externalId;
+  }
+
+  if (args.trackingNumber) {
+    updateData.marketplace_tracking_number = args.trackingNumber;
   }
 
   return updateData;
@@ -649,16 +654,13 @@ async function lookupMarketplaceOrderForBusinessTracking(
   });
   if (!normalizedTracking) return { data: null, error: null };
 
-  const selectColumns = columns.includes('raw_data')
-    ? columns
-    : `${columns}, raw_data`;
-
   let query = svc
     .from('scalev_orders')
-    .select(selectColumns)
+    .select(columns)
     .eq('business_code', businessCode)
+    .eq('marketplace_tracking_number', normalizedTracking)
     .in('source', ['marketplace_api_upload', 'webhook', 'ops_upload'])
-    .limit(1000);
+    .limit(2);
 
   const storeNameText = txt(storeName);
   if (storeNameText) {
@@ -668,9 +670,7 @@ async function lookupMarketplaceOrderForBusinessTracking(
   const { data, error } = await query;
   if (error) return { data: null, error };
 
-  const matches = (data || []).filter((row: any) =>
-    extractMarketplaceTrackingFromScalevOrderRawData(row.raw_data) === normalizedTracking);
-
+  const matches = data || [];
   if (matches.length > 1) {
     return {
       data: null,
@@ -984,6 +984,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
     scalev_id: null,
     order_id: orderId,
     external_id: data.external_id || null,
+    marketplace_tracking_number: trackingNumber,
     customer_type: null,
     status: data.status || 'pending',
     platform: derivedPlatform,
@@ -1155,6 +1156,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
       orderId,
       data,
       businessCode,
+      trackingNumber,
       sourceClassFields,
     });
     updateData.status = newStatus;
@@ -1240,6 +1242,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     ...sourceClassFields,
     synced_at: new Date().toISOString(),
   };
+  if (trackingNumber) updateData.marketplace_tracking_number = trackingNumber;
 
   if (existing.order_id !== orderId) {
     updateData.order_id = orderId;
@@ -1537,6 +1540,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
       orderId,
       data,
       businessCode,
+      trackingNumber,
       sourceClassFields,
     });
 
@@ -1607,6 +1611,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     ...sourceClassFields,
     raw_data: data,
   };
+  if (trackingNumber) updateData.marketplace_tracking_number = trackingNumber;
 
   if (existing.order_id !== orderId) updateData.order_id = orderId;
   if (data.status) updateData.status = data.status;
@@ -1810,6 +1815,7 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
         orderId,
         data,
         businessCode,
+        trackingNumber,
         sourceClassFields,
       })
     : {
@@ -1819,6 +1825,7 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
         canceled_time: new Date().toISOString(),
         synced_at: new Date().toISOString(),
       };
+  if (trackingNumber) updateData.marketplace_tracking_number = trackingNumber;
 
   updateData.status = 'deleted';
   updateData.canceled_time = new Date().toISOString();
@@ -1924,6 +1931,7 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
         orderId,
         data,
         businessCode,
+        trackingNumber,
         sourceClassFields,
       })
     : {
@@ -1931,6 +1939,7 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
         ...sourceClassFields,
         synced_at: new Date().toISOString(),
       };
+  if (trackingNumber) updateData.marketplace_tracking_number = trackingNumber;
 
   if (data.payment_method) updateData.payment_method = data.payment_method;
   if (data.status) updateData.status = data.status;
@@ -2043,6 +2052,7 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
         orderId,
         data,
         businessCode,
+        trackingNumber,
         sourceClassFields,
       })
     : {
@@ -2050,6 +2060,7 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
         ...sourceClassFields,
         synced_at: new Date().toISOString(),
       };
+  if (trackingNumber) updateData.marketplace_tracking_number = trackingNumber;
 
   if (data.payment_method) updateData.payment_method = data.payment_method;
   if (data.financial_entity) {

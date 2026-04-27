@@ -3,6 +3,7 @@ import util from 'node:util';
 import { createServiceSupabase } from './service-supabase';
 import { fetchStoreList } from './scalev-api';
 import { buildScalevSourceClassFields } from './scalev-source-class';
+import { normalizeMarketplaceTracking } from './marketplace-tracking';
 
 const SCALEV_BASE_URL = 'https://api.scalev.id/v2';
 const MARKETPLACE_API_SOURCE = 'marketplace_api_upload';
@@ -1626,6 +1627,7 @@ async function upsertLocalMarketplaceOrder(
   const rowPayload: Record<string, any> = {
     order_id: orderId,
     external_id: order.externalId,
+    marketplace_tracking_number: normalizeMarketplaceTracking(order.trackingNumber),
     scalev_id: cleanText(responseData?.id) || null,
     customer_type: null,
     status,

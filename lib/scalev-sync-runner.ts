@@ -10,6 +10,7 @@ import { parseScalevHeaderFinancialFields } from './scalev-header-financials';
 import { buildScalevSourceClassFields } from './scalev-source-class';
 import { reconcileScalevOrderWarehouse } from './warehouse-ledger-actions';
 import { resolveWarehouseOrderContext } from './warehouse-order-context';
+import { extractMarketplaceTrackingFromWebhookData } from './marketplace-tracking';
 import { createServiceSupabase } from './service-supabase';
 
 export type ScalevSyncMode = 'full' | 'date' | 'order_id' | 'repair';
@@ -449,6 +450,7 @@ async function processOrder(
     storeTypeMap,
   });
   const parsedHeaderFinancials = parseScalevHeaderFinancialFields(apiOrder);
+  const marketplaceTrackingNumber = extractMarketplaceTrackingFromWebhookData(apiOrder);
 
   if (newStatus === dbOrder.status && !forceUpdate) {
     return 'still_pending';
@@ -465,6 +467,7 @@ async function processOrder(
       seller_business_code: warehouseOrderContext.sellerBusinessCode,
       origin_operator_business_code: warehouseOrderContext.originOperatorBusinessCode,
       origin_registry_id: warehouseOrderContext.originRegistryId,
+      ...(marketplaceTrackingNumber ? { marketplace_tracking_number: marketplaceTrackingNumber } : {}),
       ...sourceClassFields,
       ...(parsedHeaderFinancials.shippingDiscountPresent ? { shipping_discount: parsedHeaderFinancials.shippingDiscount } : {}),
       ...(parsedHeaderFinancials.discountCodeDiscountPresent ? { discount_code_discount: parsedHeaderFinancials.discountCodeDiscount } : {}),
@@ -516,6 +519,7 @@ async function processOrder(
     synced_at: now,
     raw_data: apiOrder,
   };
+  if (marketplaceTrackingNumber) updateData.marketplace_tracking_number = marketplaceTrackingNumber;
 
   const tsFields = ['draft_time', 'pending_time', 'confirmed_time', 'paid_time', 'shipped_time', 'completed_time', 'canceled_time'];
   for (const field of tsFields) {

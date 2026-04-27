@@ -58,6 +58,16 @@ export function extractMarketplaceTrackingFromScalevOrderRawData(rawData: any): 
   );
 }
 
+export function extractMarketplaceTrackingFromScalevOrder(row: {
+  marketplace_tracking_number?: unknown;
+  raw_data?: any;
+} | null | undefined): string | null {
+  return (
+    normalizeMarketplaceTracking(row?.marketplace_tracking_number)
+    || extractMarketplaceTrackingFromScalevOrderRawData(row?.raw_data)
+  );
+}
+
 export function shipmentDateToScalevOrderPrefix(value: string | null | undefined): string | null {
   const text = cleanText(value);
   const match = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);

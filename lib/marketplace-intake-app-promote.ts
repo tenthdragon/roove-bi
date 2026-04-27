@@ -6,7 +6,7 @@ import {
 import { buildScalevSourceClassFields } from './scalev-source-class';
 import {
   extractMarketplaceTrackingFromProjectionRows,
-  extractMarketplaceTrackingFromScalevOrderRawData,
+  extractMarketplaceTrackingFromScalevOrder,
   normalizeMarketplaceTracking,
 } from './marketplace-tracking';
 
@@ -55,6 +55,7 @@ type ExistingScalevOrderRow = {
   id: number;
   order_id: string;
   external_id: string | null;
+  marketplace_tracking_number?: string | null;
   source: string | null;
   business_code: string | null;
   scalev_id: string | null;
@@ -407,7 +408,7 @@ async function loadExistingScalevOrders(input: {
   for (const chunk of chunkValues(input.externalIds, 25)) {
     const { data, error } = await svc
       .from('scalev_orders')
-      .select('id, order_id, external_id, source, business_code, scalev_id, store_name, raw_data')
+      .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, store_name')
       .eq('business_code', input.businessCode)
       .eq('source', MARKETPLACE_APP_SOURCE)
       .in('external_id', chunk);
@@ -429,7 +430,7 @@ async function loadExistingScalevOrders(input: {
 
   const { data: webhookRows, error: webhookError } = await svc
     .from('scalev_orders')
-    .select('id, order_id, external_id, source, business_code, scalev_id, store_name, raw_data, shipped_time')
+    .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, store_name, shipped_time')
     .eq('business_code', input.businessCode)
     .eq('source', 'webhook')
     .gte('shipped_time', dayStart)
@@ -438,7 +439,7 @@ async function loadExistingScalevOrders(input: {
   if (webhookError) throw webhookError;
 
   for (const row of (webhookRows || []) as any[]) {
-    const tracking = extractMarketplaceTrackingFromScalevOrderRawData((row as any).raw_data);
+    const tracking = extractMarketplaceTrackingFromScalevOrder(row as ExistingScalevOrderRow);
     if (!tracking) continue;
     if (!rowsByTracking.has(tracking)) {
       rowsByTracking.set(tracking, row as ExistingScalevOrderRow);
@@ -461,12 +462,13 @@ async function findExistingWebhookOrderByTracking(input: {
 
   let query = svc
     .from('scalev_orders')
-    .select('id, order_id, external_id, source, business_code, scalev_id, store_name, raw_data, shipped_time')
+    .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, store_name, shipped_time')
     .eq('business_code', input.businessCode)
     .eq('source', 'webhook')
+    .eq('marketplace_tracking_number', input.trackingNumber)
     .gte('shipped_time', dayStart)
     .lt('shipped_time', dayEnd)
-    .limit(500);
+    .limit(2);
 
   const normalizedStoreName = cleanText(input.storeName);
   if (normalizedStoreName) {
@@ -476,9 +478,7 @@ async function findExistingWebhookOrderByTracking(input: {
   const { data, error } = await query;
   if (error) throw error;
 
-  const matches = (data || []).filter((row: any) =>
-    extractMarketplaceTrackingFromScalevOrderRawData((row as any).raw_data) === input.trackingNumber);
-
+  const matches = data || [];
   if (matches.length > 1) {
     throw new Error(`Tracking ${input.trackingNumber} cocok ke lebih dari satu webhook row.`);
   }
@@ -727,6 +727,7 @@ export async function promoteMarketplaceIntakeBatchToApp(
       const orderPayload: Record<string, unknown> = {
         order_id: orderId,
         external_id: group.externalId,
+        marketplace_tracking_number: trackingNumber,
         scalev_id: cleanText(existing?.scalev_id) || null,
         customer_type: null,
         status: 'shipped',
