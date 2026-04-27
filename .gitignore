@@ -40,6 +40,7 @@ supabase/migrations/007_validation_queries.sql
 # temp scripts
 scripts/*
 !scripts/sync-jobs-worker.ts
+!scripts/backfill-marketplace-tracking.ts
 
 # docs
 docs/

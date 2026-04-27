@@ -12,6 +12,7 @@
     "check:app": "npm run typecheck:app && npm run lint && npm run build",
     "backfill:scalev-source-class": "tsx scripts/backfill-scalev-source-class.ts",
     "backfill:scalev-header-financials": "tsx scripts/backfill-scalev-header-financials.ts",
+    "backfill:marketplace-tracking": "tsx scripts/backfill-marketplace-tracking.ts",
     "check:mcp": "npm --prefix mcp-server run build",
     "sync-jobs:once": "tsx scripts/sync-jobs-worker.ts",
     "sync-jobs:loop": "tsx scripts/sync-jobs-worker.ts --loop"
