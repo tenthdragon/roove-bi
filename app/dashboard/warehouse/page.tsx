@@ -2774,6 +2774,8 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
   const [targetEntity, setTargetEntity] = useState('');
   // Stock Masuk specific
   const [inType] = useState<'new'>('new');
+  const [productSearch, setProductSearch] = useState('');
+  const [productDropdownOpen, setProductDropdownOpen] = useState(false);
   const [selectedPO, setSelectedPO] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -2839,6 +2841,8 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
       if (poItem) {
         setSelectedProduct(String(poItem.warehouse_product_id));
         setQuantity(String(poItem.remaining));
+        const prod = products.find(p => p.id === poItem.warehouse_product_id);
+        if (prod) setProductSearch(prod.name);
       }
     }
   };
@@ -2918,12 +2922,43 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
             )}
 
             {/* Produk */}
-            <div style={{ marginBottom: 14 }}>
+            <div style={{ marginBottom: 14, position: 'relative' }}>
               <label style={labelStyle}>Produk *</label>
-              <select value={selectedProduct} onChange={(e) => { setSelectedProduct(e.target.value); setSelectedBatch(''); }} style={inputStyle}>
-                <option value="">-- Pilih Produk --</option>
-                {products.map(p => <option key={p.id} value={p.id}>{p.name} ({p.category}) [{p.warehouse}-{p.entity}]</option>)}
-              </select>
+              <input
+                type="text"
+                placeholder="Cari produk..."
+                value={productSearch}
+                autoComplete="off"
+                onChange={(e) => { setProductSearch(e.target.value); setProductDropdownOpen(true); if (!e.target.value) { setSelectedProduct(''); } }}
+                onFocus={() => setProductDropdownOpen(true)}
+                onBlur={() => setTimeout(() => setProductDropdownOpen(false), 150)}
+                style={{ ...inputStyle, borderColor: selectedProduct ? 'var(--green)' : 'var(--border)' }}
+              />
+              {selectedProduct && (
+                <div style={{ fontSize: 11, color: 'var(--green)', marginTop: 4 }}>
+                  ✓ {products.find(p => String(p.id) === selectedProduct)?.name}
+                </div>
+              )}
+              {productDropdownOpen && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, zIndex: 50, maxHeight: 220, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.3)', marginTop: 2 }}>
+                  {products
+                    .filter(p => !productSearch || p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.category.toLowerCase().includes(productSearch.toLowerCase()) || p.entity?.toLowerCase().includes(productSearch.toLowerCase()))
+                    .map(p => (
+                      <div
+                        key={p.id}
+                        onMouseDown={() => { setSelectedProduct(String(p.id)); setSelectedBatch(''); setProductSearch(p.name); setProductDropdownOpen(false); }}
+                        style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--border)', background: String(p.id) === selectedProduct ? 'var(--accent-subtle)' : 'transparent' }}
+                      >
+                        <span style={{ fontWeight: 600 }}>{p.name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--dim)', marginLeft: 8 }}>({p.category}) [{p.warehouse}-{p.entity}]</span>
+                      </div>
+                    ))
+                  }
+                  {products.filter(p => !productSearch || p.name.toLowerCase().includes(productSearch.toLowerCase()) || p.category.toLowerCase().includes(productSearch.toLowerCase()) || p.entity?.toLowerCase().includes(productSearch.toLowerCase())).length === 0 && (
+                    <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--dim)' }}>Produk tidak ditemukan</div>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Barang Baru: batch code + expired (wajib) */}
