@@ -20,6 +20,54 @@ export type ResolvedWarehouseOrderContext = {
   originRegistryId: number | null;
 };
 
+const WAREHOUSE_LOOKUP_CACHE_TTL_MS = 60_000;
+let cachedBusinessDirectoryRows: Awaited<ReturnType<typeof fetchWarehouseBusinessDirectoryRows>> | null = null;
+let cachedBusinessDirectoryExpiry = 0;
+let cachedBusinessDirectoryPromise: Promise<Awaited<ReturnType<typeof fetchWarehouseBusinessDirectoryRows>>> | null = null;
+let cachedOriginRegistryRows: Awaited<ReturnType<typeof fetchWarehouseOriginRegistryRows>> | null = null;
+let cachedOriginRegistryExpiry = 0;
+let cachedOriginRegistryPromise: Promise<Awaited<ReturnType<typeof fetchWarehouseOriginRegistryRows>>> | null = null;
+
+async function getCachedWarehouseBusinessDirectoryRows(
+  svc: ReturnType<typeof createServiceSupabase>,
+) {
+  if (cachedBusinessDirectoryRows && Date.now() < cachedBusinessDirectoryExpiry) {
+    return cachedBusinessDirectoryRows;
+  }
+  if (cachedBusinessDirectoryPromise) return cachedBusinessDirectoryPromise;
+
+  cachedBusinessDirectoryPromise = (async () => {
+    const rows = await fetchWarehouseBusinessDirectoryRows(svc as any);
+    cachedBusinessDirectoryRows = rows;
+    cachedBusinessDirectoryExpiry = Date.now() + WAREHOUSE_LOOKUP_CACHE_TTL_MS;
+    return rows;
+  })().finally(() => {
+    cachedBusinessDirectoryPromise = null;
+  });
+
+  return cachedBusinessDirectoryPromise;
+}
+
+async function getCachedWarehouseOriginRegistryRows(
+  svc: ReturnType<typeof createServiceSupabase>,
+) {
+  if (cachedOriginRegistryRows && Date.now() < cachedOriginRegistryExpiry) {
+    return cachedOriginRegistryRows;
+  }
+  if (cachedOriginRegistryPromise) return cachedOriginRegistryPromise;
+
+  cachedOriginRegistryPromise = (async () => {
+    const rows = await fetchWarehouseOriginRegistryRows(svc as any);
+    cachedOriginRegistryRows = rows;
+    cachedOriginRegistryExpiry = Date.now() + WAREHOUSE_LOOKUP_CACHE_TTL_MS;
+    return rows;
+  })().finally(() => {
+    cachedOriginRegistryPromise = null;
+  });
+
+  return cachedOriginRegistryPromise;
+}
+
 export function resolveWarehouseOrderContextFromLookups(args: {
   data: any,
   businessCode: string,
@@ -66,8 +114,8 @@ export async function resolveWarehouseOrderContext(
   businessCode: string,
 ): Promise<ResolvedWarehouseOrderContext> {
   const [businessDirectoryRows, originRegistryRows] = await Promise.all([
-    fetchWarehouseBusinessDirectoryRows(svc as any),
-    fetchWarehouseOriginRegistryRows(svc as any),
+    getCachedWarehouseBusinessDirectoryRows(svc),
+    getCachedWarehouseOriginRegistryRows(svc),
   ]);
 
   return resolveWarehouseOrderContextFromLookups({

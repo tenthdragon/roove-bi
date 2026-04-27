@@ -38,38 +38,48 @@ type BusinessSecret = { id: number; code: string; name: string; secret: string; 
 let cachedSecrets: BusinessSecret[] | null = null;
 let cacheExpiry = 0;
 const CACHE_TTL_MS = 60_000; // 60 seconds
+let cachedSecretsPromise: Promise<BusinessSecret[]> | null = null;
 
 // ── Store type + channel override cache (DB-based lookup) ──
 // Keyed by "businessId:storeName" to avoid collisions across businesses
 let cachedStoreTypes: Map<string, StoreType> | null = null;
 let cachedChannelOverrides: Map<string, string> | null = null;
 let storeTypeCacheExpiry = 0;
+let cachedStoreTypesPromise: Promise<Map<string, StoreType>> | null = null;
 
 async function getStoreTypeMap(): Promise<Map<string, StoreType>> {
   if (cachedStoreTypes && cachedChannelOverrides && Date.now() < storeTypeCacheExpiry) {
     return cachedStoreTypes;
   }
-  try {
-    const svc = getServiceSupabase();
-    const { data } = await svc
-      .from('scalev_store_channels')
-      .select('store_name, store_type, business_id, channel_override')
-      .eq('is_active', true);
+  if (cachedStoreTypesPromise) return cachedStoreTypesPromise;
 
-    cachedStoreTypes = new Map();
-    cachedChannelOverrides = new Map();
-    for (const row of data || []) {
-      const key = `${row.business_id}:${row.store_name.toLowerCase()}`;
-      cachedStoreTypes.set(key, row.store_type as StoreType);
-      if (row.channel_override) {
-        cachedChannelOverrides.set(key, row.channel_override);
+  cachedStoreTypesPromise = (async () => {
+    try {
+      const svc = getServiceSupabase();
+      const { data } = await svc
+        .from('scalev_store_channels')
+        .select('store_name, store_type, business_id, channel_override')
+        .eq('is_active', true);
+
+      cachedStoreTypes = new Map();
+      cachedChannelOverrides = new Map();
+      for (const row of data || []) {
+        const key = `${row.business_id}:${row.store_name.toLowerCase()}`;
+        cachedStoreTypes.set(key, row.store_type as StoreType);
+        if (row.channel_override) {
+          cachedChannelOverrides.set(key, row.channel_override);
+        }
       }
+      storeTypeCacheExpiry = Date.now() + CACHE_TTL_MS;
+      return cachedStoreTypes;
+    } catch {
+      return new Map();
+    } finally {
+      cachedStoreTypesPromise = null;
     }
-    storeTypeCacheExpiry = Date.now() + CACHE_TTL_MS;
-    return cachedStoreTypes;
-  } catch {
-    return new Map();
-  }
+  })();
+
+  return cachedStoreTypesPromise;
 }
 
 // Lookup store type by business_id + store_name
@@ -194,42 +204,49 @@ async function getBusinessSecrets(): Promise<BusinessSecret[]> {
   if (cachedSecrets && Date.now() < cacheExpiry) {
     return cachedSecrets;
   }
+  if (cachedSecretsPromise) return cachedSecretsPromise;
 
-  // Try DB first
-  const dbSecrets = await getBusinessSecretsFromDB();
-  if (dbSecrets.length > 0) {
-    cachedSecrets = dbSecrets;
-    cacheExpiry = Date.now() + CACHE_TTL_MS;
-    return dbSecrets;
-  }
+  cachedSecretsPromise = (async () => {
+    // Try DB first
+    const dbSecrets = await getBusinessSecretsFromDB();
+    if (dbSecrets.length > 0) {
+      cachedSecrets = dbSecrets;
+      cacheExpiry = Date.now() + CACHE_TTL_MS;
+      return dbSecrets;
+    }
 
-  // Fallback: env vars (backward compatible)
-  const envSecrets: BusinessSecret[] = [];
-  const envBizIds: Record<string, number> = { RTI: 4, RLB: 5, RLT: 1 };
-  for (const [code, name] of Object.entries({
-    RTI: 'Roove Tijara Internasional',
-    RLB: 'Roove Lautan Barat',
-    RLT: 'Roove Lautan Timur',
-  })) {
-    const secret = process.env[`SCALEV_WEBHOOK_SECRET_${code}`];
-    if (secret) envSecrets.push({ id: envBizIds[code] || 0, code, name, secret, taxRateName: 'PPN' });
-  }
+    // Fallback: env vars (backward compatible)
+    const envSecrets: BusinessSecret[] = [];
+    const envBizIds: Record<string, number> = { RTI: 4, RLB: 5, RLT: 1 };
+    for (const [code, name] of Object.entries({
+      RTI: 'Roove Tijara Internasional',
+      RLB: 'Roove Lautan Barat',
+      RLT: 'Roove Lautan Timur',
+    })) {
+      const secret = process.env[`SCALEV_WEBHOOK_SECRET_${code}`];
+      if (secret) envSecrets.push({ id: envBizIds[code] || 0, code, name, secret, taxRateName: 'PPN' });
+    }
 
-  if (envSecrets.length > 0) {
-    cachedSecrets = envSecrets;
-    cacheExpiry = Date.now() + CACHE_TTL_MS;
-    return envSecrets;
-  }
+    if (envSecrets.length > 0) {
+      cachedSecrets = envSecrets;
+      cacheExpiry = Date.now() + CACHE_TTL_MS;
+      return envSecrets;
+    }
 
-  // Legacy fallback: single secret
-  if (process.env.SCALEV_WEBHOOK_SECRET) {
-    const legacy = [{ id: 4, code: 'RTI', name: 'Legacy', secret: process.env.SCALEV_WEBHOOK_SECRET, taxRateName: 'PPN' }];
-    cachedSecrets = legacy;
-    cacheExpiry = Date.now() + CACHE_TTL_MS;
-    return legacy;
-  }
+    // Legacy fallback: single secret
+    if (process.env.SCALEV_WEBHOOK_SECRET) {
+      const legacy = [{ id: 4, code: 'RTI', name: 'Legacy', secret: process.env.SCALEV_WEBHOOK_SECRET, taxRateName: 'PPN' }];
+      cachedSecrets = legacy;
+      cacheExpiry = Date.now() + CACHE_TTL_MS;
+      return legacy;
+    }
 
-  return [];
+    return [];
+  })().finally(() => {
+    cachedSecretsPromise = null;
+  });
+
+  return cachedSecretsPromise;
 }
 
 // ── Verify HMAC-SHA256 signature and resolve business ──
@@ -595,6 +612,31 @@ async function lookupOrderForBusinessOrExternal(
     .maybeSingle();
 }
 
+async function lookupOrderByExternalForBusiness(
+  svc: any,
+  externalId: string | null | undefined,
+  businessCode: string,
+  columns: string,
+) {
+  if (!externalId) return { data: null, error: null };
+
+  const scoped = await svc
+    .from('scalev_orders')
+    .select(columns)
+    .eq('external_id', externalId)
+    .eq('business_code', businessCode)
+    .maybeSingle();
+
+  if (scoped.error || scoped.data) return scoped;
+
+  return svc
+    .from('scalev_orders')
+    .select(columns)
+    .eq('external_id', externalId)
+    .is('business_code', null)
+    .maybeSingle();
+}
+
 async function lookupMarketplaceOrderForBusinessTracking(
   svc: any,
   businessCode: string,
@@ -660,6 +702,14 @@ async function lookupOrderForBusinessConnector(
   if (byOrderId.error || byOrderId.data) return byOrderId;
 
   if (isMarketplaceSourceClass(args.sourceClassFields)) {
+    const byExternalId = await lookupOrderByExternalForBusiness(
+      svc,
+      args.externalId,
+      args.businessCode,
+      args.columns,
+    );
+    if (byExternalId.error || byExternalId.data) return byExternalId;
+
     return lookupMarketplaceOrderForBusinessTracking(
       svc,
       args.businessCode,
