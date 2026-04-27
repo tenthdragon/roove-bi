@@ -718,6 +718,7 @@ export default function PulsePage() {
 
   return (
     <div className="fade-in" style={{ maxWidth: 1200 }}>
+      <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 2, color: 'var(--text)' }}>Business Pulse</h2>
       <p style={{ ...dimText, marginBottom: 20 }}>Sintesis strategis lintas seluruh domain — inti problem & opportunity</p>
 
       {pageNotices.length > 0 && (

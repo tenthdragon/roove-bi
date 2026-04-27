@@ -793,9 +793,6 @@ export default function DashboardLayout({ children }) {
                   <line x1="3" y1="18" x2="21" y2="18"/>
                 </svg>
               </button>
-              <div style={{ fontSize:14, fontWeight:600, color:'var(--text-secondary)' }}>
-                {findTabLabel(visibleTabs, currentTab) || 'Dashboard'}
-              </div>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
               {showRefreshButton && (

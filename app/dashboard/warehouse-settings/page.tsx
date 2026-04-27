@@ -76,6 +76,7 @@ export default function WarehouseSettingsPage() {
   if (visibleTabs.length === 0) {
     return (
       <div className="fade-in">
+        <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Warehouse Settings</h2>
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, color: 'var(--dim)', fontSize: 13 }}>
           Akun ini belum punya akses ke sub-tab Warehouse Settings.
         </div>
@@ -85,6 +86,7 @@ export default function WarehouseSettingsPage() {
 
   return (
     <div className="fade-in">
+      <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Warehouse Settings</h2>
 
       <div style={{ display: 'flex', gap: 2, marginBottom: 20, borderBottom: '1px solid var(--border)', overflowX: 'auto' }}>
         {visibleTabs.map(t => (

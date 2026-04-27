@@ -46,6 +46,7 @@ export default function MarketplaceIntakePage() {
 
   return (
     <div className="fade-in">
+      <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Marketplace Intake</h2>
       <div style={{ fontSize: 13, color: 'var(--dim)', marginBottom: 18, maxWidth: 920 }}>
         Tahap pertama untuk jalur baru marketplace. Pilih source yang sesuai, upload file marketplace, lalu app akan match exact SKU Excel ke bundle <strong>custom_id</strong> di business yang tepat dan menaruh hasilnya ke <strong>workspace warehouse</strong>.
         Data baru dianggap valid downstream setelah warehouse memberi <strong>shipment date</strong>.

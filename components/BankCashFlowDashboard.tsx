@@ -679,6 +679,7 @@ export default function BankCashFlowDashboard() {
       {/* ── Header ── */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
+          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: 0 }}>💳 Cash Flow Mutasi Bank</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>
             Kompilasi mutasi rekening BCA · BRI · Mandiri
           </p>

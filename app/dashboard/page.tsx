@@ -481,6 +481,7 @@ export default function OverviewPage() {
   if (dailyData.length === 0 && !loading) {
     return (
       <div className="fade-in">
+        <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
         <div style={{ textAlign:'center', padding:60, color:'var(--dim)', background:'var(--card)', border:'1px solid var(--border)', borderRadius:12 }}>
           <div style={{ fontSize:48, marginBottom:16 }}>📊</div>
           <div style={{ fontSize:18, fontWeight:600, marginBottom:8 }}>Belum Ada Data untuk Periode Ini</div>
@@ -492,6 +493,7 @@ export default function OverviewPage() {
 
   return (
     <div className="fade-in">
+      <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
 
       {feeError && (
         <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:12, fontSize:12, color:'#fcd34d' }}>
@@ -573,7 +575,7 @@ export default function OverviewPage() {
           {showTren && <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12, minWidth: showDetail ? 1210 : 930 }}>
             <thead>
               <tr style={{ borderBottom:'2px solid var(--border)' }}>
-                <th style={{ padding:'8px 10px', textAlign:'left', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>Tanggal</th>
+                <th style={{ padding:'8px 10px', textAlign:'left', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase', position: isMobile ? 'static' : 'sticky', left:0, background:'var(--card)', zIndex:1 }}>Tanggal</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Shipment</th>
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--accent)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Net Sales</th>
                 {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>COGS</th>}
@@ -591,7 +593,7 @@ export default function OverviewPage() {
                 const rowBg = rowNpM === null ? 'transparent' : rowNpM >= 15 ? 'rgba(16,185,129,0.04)' : rowNpM >= 0 ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.05)';
                 return (
                 <tr key={i} style={{ borderBottom:'1px solid var(--bg-deep)', background: rowBg }}>
-                  <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap', position:'sticky', left:0, background: rowBg === 'transparent' ? 'var(--card)' : rowBg, zIndex:1 }}>{row.date}</td>
+                  <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap', position: isMobile ? 'static' : 'sticky', left:0, background: rowBg === 'transparent' ? 'var(--card)' : rowBg, zIndex:1 }}>{row.date}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--text-secondary)' }}>
                     {row.shipment > 0 ? <span style={{ background:'var(--bg-deep)', padding:'1px 6px', borderRadius:10, fontSize:10 }}>{row.shipment.toLocaleString('id-ID')}</span> : '—'}
                   </td>
@@ -608,7 +610,7 @@ export default function OverviewPage() {
               })}
               {/* TOTAL row with % of net sales */}
               <tr style={{ borderTop:'2px solid var(--border)', fontWeight:700 }}>
-                <td style={{ padding:'10px 10px', position:'sticky', left:0, background:'var(--card)', zIndex:1, textTransform:'uppercase', fontSize:11, letterSpacing:'0.05em' }}>Total</td>
+                <td style={{ padding:'10px 10px', position: isMobile ? 'static' : 'sticky', left:0, background:'var(--card)', zIndex:1, textTransform:'uppercase', fontSize:11, letterSpacing:'0.05em' }}>Total</td>
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
                   <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--text-secondary)' }}>{kpi.tShipment.toLocaleString('id-ID')}</div>
                 </td>
