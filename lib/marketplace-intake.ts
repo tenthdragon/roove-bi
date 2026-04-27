@@ -9,6 +9,7 @@ import {
   type MarketplaceIntakeSourceConfig,
 } from './marketplace-intake-sources';
 import { resolveMarketplaceIntakeSourceConfig } from './marketplace-intake-source-store-scopes';
+import { resolveMarketplaceIntakeShippingFinancials } from './marketplace-intake-shipping';
 
 type SheetRow = Record<string, unknown>;
 
@@ -1392,6 +1393,10 @@ function summarizeOrderFromLines(
   extraIssueCodes: string[] = [],
 ): MarketplaceIntakePreviewOrder {
   const issueCodes = new Set<string>(extraIssueCodes);
+  const shipping = resolveMarketplaceIntakeShippingFinancials({
+    rawMeta: order.rawMeta || {},
+    rawRows: order.lines.map((line) => line.rawRow || {}),
+  });
 
   const identifiedLineCount = lines.filter((line) => line.lineStatus !== 'not_identified').length;
   const classifiedLineCount = lines.filter((line) => line.lineStatus === 'identified').length;
@@ -1476,14 +1481,21 @@ function summarizeOrderFromLines(
       buyerNote: order.buyerNote,
       addressNotes: order.addressNotes,
       rawAddress: order.rawAddress,
-      shippingCost: order.shippingCost,
-      shippingCostBuyer: order.shippingCost,
       buyerPaidAmount: order.buyerPaidAmount,
       totalPaymentAmount: order.totalPaymentAmount,
-      estimatedShippingCost: order.estimatedShippingCost,
-      shippingFeeEstimatedDeduction: order.shippingFeeEstimatedDeduction,
       returnShippingCost: order.returnShippingCost,
       ...order.rawMeta,
+      shippingCost: shipping.grossPresent ? shipping.grossAmount : order.shippingCost,
+      shippingCostBuyer: shipping.buyerPresent ? shipping.buyerAmount : order.shippingCost,
+      shippingCostGross: shipping.grossPresent ? shipping.grossAmount : order.shippingCost,
+      shippingDiscountCompany: shipping.companyDiscountPresent ? shipping.companyDiscountAmount : 0,
+      shippingDiscountPlatform: shipping.platformDiscountPresent ? shipping.platformDiscountAmount : 0,
+      estimatedShippingCost: shipping.estimatedGrossPresent
+        ? shipping.estimatedGrossAmount
+        : Number(order.rawMeta?.estimatedShippingCost ?? order.estimatedShippingCost ?? 0) || 0,
+      shippingFeeEstimatedDeduction: shipping.platform === 'shopee'
+        ? (shipping.companyDiscountPresent ? shipping.companyDiscountAmount : 0)
+        : Number(order.rawMeta?.shippingFeeEstimatedDeduction ?? order.shippingFeeEstimatedDeduction ?? 0) || 0,
     },
     lines,
   };
@@ -2064,9 +2076,13 @@ export async function saveMarketplaceIntakePreview(input: {
     mp_seller_note: String(order.rawMeta?.addressNotes || '') || null,
     mp_buyer_paid_amount: Number(order.rawMeta?.buyerPaidAmount || 0) || 0,
     mp_total_payment_amount: Number(order.rawMeta?.totalPaymentAmount || 0) || 0,
-    mp_shipping_cost_buyer: Number(order.rawMeta?.shippingCostBuyer || order.rawMeta?.shippingCost || 0) || 0,
+    mp_shipping_cost_buyer: Number(order.rawMeta?.shippingCostBuyer ?? order.rawMeta?.shippingCost ?? 0) || 0,
     mp_estimated_shipping_cost: Number(order.rawMeta?.estimatedShippingCost || 0) || 0,
-    mp_shipping_fee_estimated_deduction: Number(order.rawMeta?.shippingFeeEstimatedDeduction || 0) || 0,
+    mp_shipping_fee_estimated_deduction: Number(
+      order.rawMeta?.shippingFeeEstimatedDeduction
+      ?? order.rawMeta?.shippingDiscountCompany
+      ?? 0,
+    ) || 0,
     mp_return_shipping_cost: Number(order.rawMeta?.returnShippingCost || 0) || 0,
     shipment_date: null,
     warehouse_status: 'staged',

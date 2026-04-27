@@ -3,6 +3,10 @@ import {
   buildScalevOpsProjectionForBatch,
   type ScalevOpsCsvRow,
 } from './marketplace-intake-scalev-export';
+import {
+  resolveMarketplaceIntakeShippingFinancials,
+  type MarketplaceIntakeShippingFinancials,
+} from './marketplace-intake-shipping';
 import { buildScalevSourceClassFields } from './scalev-source-class';
 import {
   extractMarketplaceTrackingFromProjectionRows,
@@ -59,6 +63,8 @@ type ExistingScalevOrderRow = {
   source: string | null;
   business_code: string | null;
   scalev_id: string | null;
+  shipping_cost?: number | null;
+  shipping_discount?: number | null;
   store_name?: string | null;
   raw_data?: any;
 };
@@ -120,6 +126,13 @@ function normalizeIdentifier(value: string | null | undefined): string {
 function parseInteger(value: unknown): number {
   const num = Number(String(value ?? '').replace(/[^0-9.-]+/g, ''));
   return Number.isFinite(num) ? Math.round(num) : 0;
+}
+
+function parseNullableAmount(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const num = Number(value);
+  if (!Number.isFinite(num)) return null;
+  return Math.max(0, Math.round(num));
 }
 
 function calcBeforeTax(value: number): number {
@@ -278,6 +291,56 @@ function buildUniqueProductName(base: string, sku: string, used: Set<string>): s
   return finalName;
 }
 
+function resolvePromoteShipping(input: {
+  headerRow: ScalevOpsCsvRow;
+  intakeOrder: PromoteOrderRow;
+  intakeLines: PromoteLineRow[];
+  existing: ExistingScalevOrderRow | null;
+}): {
+  shippingCost: number;
+  shippingDiscount: number | null;
+  shippingFinancials: MarketplaceIntakeShippingFinancials;
+} {
+  const projectedShippingCost = parseInteger(input.headerRow.shipping_cost);
+  const existingShippingCost = parseNullableAmount(input.existing?.shipping_cost);
+  const existingShippingDiscount = parseNullableAmount(input.existing?.shipping_discount);
+  const intakeShipping = resolveMarketplaceIntakeShippingFinancials({
+    rawMeta: input.intakeOrder.raw_meta,
+    rawRows: input.intakeLines.map((line) => line.raw_row || {}),
+  });
+
+  const shippingCost = projectedShippingCost > 0
+    ? projectedShippingCost
+    : intakeShipping.grossPresent
+      ? intakeShipping.grossAmount
+      : (existingShippingCost || 0);
+
+  let shippingDiscount: number | null = null;
+  if (shippingCost === 0) {
+    shippingDiscount = 0;
+  } else if (intakeShipping.companyDiscountPresent) {
+    shippingDiscount = Math.min(intakeShipping.companyDiscountAmount, shippingCost);
+  } else if (existingShippingDiscount != null) {
+    shippingDiscount = Math.min(existingShippingDiscount, shippingCost);
+  }
+
+  return {
+    shippingCost,
+    shippingDiscount,
+    shippingFinancials: {
+      ...intakeShipping,
+      grossAmount: shippingCost,
+      grossPresent: shippingCost > 0 || intakeShipping.grossPresent,
+      grossSource: projectedShippingCost > 0 ? 'projection.shipping_cost' : intakeShipping.grossSource,
+      companyDiscountAmount: shippingDiscount != null ? Math.min(shippingDiscount, shippingCost) : intakeShipping.companyDiscountAmount,
+      companyDiscountPresent: shippingDiscount != null ? true : intakeShipping.companyDiscountPresent,
+      companyDiscountSource: shippingDiscount != null && !intakeShipping.companyDiscountPresent
+        ? 'existing.shipping_discount'
+        : intakeShipping.companyDiscountSource,
+    },
+  };
+}
+
 async function loadPromoteBatch(batchId: number): Promise<PromoteBatchRow> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
@@ -408,7 +471,7 @@ async function loadExistingScalevOrders(input: {
   for (const chunk of chunkValues(input.externalIds, 25)) {
     const { data, error } = await svc
       .from('scalev_orders')
-      .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, store_name')
+      .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, shipping_cost, shipping_discount, store_name')
       .eq('business_code', input.businessCode)
       .eq('source', MARKETPLACE_APP_SOURCE)
       .in('external_id', chunk);
@@ -430,7 +493,7 @@ async function loadExistingScalevOrders(input: {
 
   const { data: webhookRows, error: webhookError } = await svc
     .from('scalev_orders')
-    .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, store_name, shipped_time')
+    .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, shipping_cost, shipping_discount, store_name, shipped_time')
     .eq('business_code', input.businessCode)
     .eq('source', 'webhook')
     .gte('shipped_time', dayStart)
@@ -462,7 +525,7 @@ async function findExistingWebhookOrderByTracking(input: {
 
   let query = svc
     .from('scalev_orders')
-    .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, store_name, shipped_time')
+    .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, shipping_cost, shipping_discount, store_name, shipped_time')
     .eq('business_code', input.businessCode)
     .eq('source', 'webhook')
     .eq('marketplace_tracking_number', input.trackingNumber)
@@ -724,10 +787,42 @@ export async function promoteMarketplaceIntakeBatchToApp(
         return sum + (unitPrice * quantity);
       }, 0);
       const totalQuantity = group.rows.reduce((sum, row) => sum + parseInteger(row.quantity), 0);
+      const intakeLines = linesByOrderId.get(intakeOrder.id) || [];
+      const promoteShipping = resolvePromoteShipping({
+        headerRow,
+        intakeOrder,
+        intakeLines,
+        existing,
+      });
+      const shippingCost = promoteShipping.shippingCost;
+      const shippingDiscount = promoteShipping.shippingDiscount;
+      const projectionRows = group.rows.map((row, index) => (
+        index === 0
+          ? { ...row, shipping_cost: String(shippingCost) }
+          : row
+      ));
+      const rawData = {
+        kind: 'marketplace_intake_promote',
+        version: 1,
+        promoted_at: promotedAt,
+        marketplace_intake_batch_id: batch.id,
+        marketplace_intake_order_id: intakeOrder.id,
+        source_key: batch.source_key,
+        source_label: batch.source_label,
+        include_warehouse_statuses: includeWarehouseStatuses,
+        shipment_date: targetShipmentDate,
+        shipping_cost: shippingCost,
+        shipping_discount: shippingDiscount,
+        shipping_financials: promoteShipping.shippingFinancials,
+        raw_meta: intakeOrder.raw_meta || {},
+        projection_rows: projectionRows,
+      };
       const orderPayload: Record<string, unknown> = {
         order_id: orderId,
         external_id: group.externalId,
         marketplace_tracking_number: trackingNumber,
+        marketplace_intake_batch_id: batch.id,
+        marketplace_intake_order_id: intakeOrder.id,
         scalev_id: cleanText(existing?.scalev_id) || null,
         customer_type: null,
         status: 'shipped',
@@ -742,8 +837,8 @@ export async function promoteMarketplaceIntakeBatchToApp(
         is_purchase_kwai: false,
         gross_revenue: totalRevenue,
         net_revenue: totalRevenue,
-        shipping_cost: parseInteger(headerRow.shipping_cost),
-        shipping_discount: null,
+        shipping_cost: shippingCost,
+        shipping_discount: shippingDiscount,
         discount_code_discount: null,
         total_quantity: totalQuantity,
         customer_name: cleanText(headerRow.username) || cleanText(headerRow.name) || intakeOrder.recipient_name || intakeOrder.customer_label || null,
@@ -767,34 +862,10 @@ export async function promoteMarketplaceIntakeBatchToApp(
           platform: cleanText(headerRow.platform) || 'shopee',
           externalId: group.externalId,
           financialEntity: 'shopee',
-          rawData: {
-            kind: 'marketplace_intake_promote',
-            version: 1,
-            promoted_at: promotedAt,
-            marketplace_intake_batch_id: batch.id,
-            marketplace_intake_order_id: intakeOrder.id,
-            source_key: batch.source_key,
-            source_label: batch.source_label,
-            include_warehouse_statuses: includeWarehouseStatuses,
-            shipment_date: targetShipmentDate,
-            raw_meta: intakeOrder.raw_meta || {},
-            projection_rows: group.rows,
-          },
+          rawData,
           storeName: cleanText(headerRow.store) || intakeOrder.final_store_name || null,
         }),
-        raw_data: {
-          kind: 'marketplace_intake_promote',
-          version: 1,
-          promoted_at: promotedAt,
-          marketplace_intake_batch_id: batch.id,
-          marketplace_intake_order_id: intakeOrder.id,
-          source_key: batch.source_key,
-          source_label: batch.source_label,
-          include_warehouse_statuses: includeWarehouseStatuses,
-          shipment_date: targetShipmentDate,
-          raw_meta: intakeOrder.raw_meta || {},
-          projection_rows: group.rows,
-        },
+        raw_data: rawData,
         synced_at: promotedAt,
       };
 
@@ -826,8 +897,8 @@ export async function promoteMarketplaceIntakeBatchToApp(
       await replaceOrderLines({
         dbOrderId,
         orderId,
-        projectionRows: group.rows,
-        intakeLines: linesByOrderId.get(intakeOrder.id) || [],
+        projectionRows,
+        intakeLines,
         fallbackStoreName: intakeOrder.final_store_name,
         mappingIndexes,
       });

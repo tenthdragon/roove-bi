@@ -1,4 +1,5 @@
 import { createServiceSupabase } from './service-supabase';
+import { resolveMarketplaceIntakeShippingCost } from './marketplace-intake-shipping';
 
 export const SCALEV_OPS_CSV_HEADERS = [
   'external_id',
@@ -408,6 +409,10 @@ export async function buildScalevOpsProjectionForBatch(input: {
     const customerName = resolveOpsCustomerName(order);
     const { courier, courierService } = resolveOpsCourier(batch.source_key, order.shipping_provider, order.tracking_number);
     const warehouse = resolveOpsWarehouse(batch.source_key, order.final_store_name);
+    const shippingCost = resolveMarketplaceIntakeShippingCost(
+      order.raw_meta,
+      orderLines.map((line) => line.raw_row || {}),
+    ).amount;
 
     if (!cleanText(order.final_store_name)) {
       warnings.push({
@@ -458,7 +463,7 @@ export async function buildScalevOpsProjectionForBatch(input: {
         sku,
         price: resolveOpsPrice(batch.source_key, line),
         quantity: formatInteger(line.quantity),
-        shipping_cost: '0',
+        shipping_cost: index === 0 ? formatInteger(shippingCost) : '0',
         other_income: '0',
         weight_bump: '0',
         courier: index === 0 ? courier : '',
