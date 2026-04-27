@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { revalidateTag } from 'next/cache';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createServerSupabase } from '@/lib/supabase-server';
@@ -52,6 +53,8 @@ export async function POST(req: NextRequest) {
       includeWarehouseStatuses,
       promotedByEmail: user?.email || null,
     });
+
+    revalidateTag('shipping-fee-range');
 
     return NextResponse.json({
       success: true,

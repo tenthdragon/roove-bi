@@ -6,6 +6,7 @@ import {
   getMarketplaceIntakeSourceConfig,
   listMarketplaceIntakeSourceConfigs,
 } from '@/lib/marketplace-intake-sources';
+import { invalidateAll } from '@/lib/dashboard-cache';
 
 const panelStyle = {
   background: 'var(--card)',
@@ -1766,6 +1767,7 @@ export default function MarketplaceIntakeManager() {
         throw new Error(data.error || 'Gagal memasukkan batch ke app.');
       }
 
+      invalidateAll();
       setWorkspaceDate(targetShipmentDate);
       await loadWorkspace(targetShipmentDate);
       setMessage({

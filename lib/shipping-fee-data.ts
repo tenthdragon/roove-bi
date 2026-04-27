@@ -157,7 +157,10 @@ async function fetchShippingFeeRangeUncached(from: string, to: string): Promise<
 const getCachedShippingFeeRange = unstable_cache(
   async (from: string, to: string) => fetchShippingFeeRangeUncached(from, to),
   ['shipping-fee-range-v1'],
-  { revalidate: 300 },
+  {
+    revalidate: 300,
+    tags: ['shipping-fee-range'],
+  },
 );
 
 export async function getShippingFeeRange(from: string, to: string) {
