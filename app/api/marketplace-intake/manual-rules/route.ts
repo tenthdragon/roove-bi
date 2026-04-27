@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createServerSupabase } from '@/lib/supabase-server';
 import {
   listMarketplaceManualRules,
@@ -21,6 +22,21 @@ async function guardOwner(message: string) {
 
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-manual-rules-read',
+      30,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan resolver rule marketplace. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const denied = await guardOwner('Hanya owner yang bisa melihat resolver rule marketplace.');
     if (denied) return denied;
 
@@ -47,6 +63,21 @@ async function getUserEmail() {
 
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-manual-rules-write',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan resolver rule marketplace. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const denied = await guardOwner('Hanya owner yang bisa mengubah resolver rule marketplace.');
     if (denied) return denied;
 
@@ -76,6 +107,21 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-manual-rules-write',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan resolver rule marketplace. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const denied = await guardOwner('Hanya owner yang bisa mengubah resolver rule marketplace.');
     if (denied) return denied;
 

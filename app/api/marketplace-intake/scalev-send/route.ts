@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { sendMarketplaceIntakeBatchToScalev } from '@/lib/marketplace-intake-scalev-send';
 
@@ -7,6 +8,21 @@ export const maxDuration = 250;
 
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-intake-scalev-send',
+      6,
+      10 * 60 * 1000,
+      'Terlalu banyak pengiriman Marketplace Intake ke Scalev. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     try {
       await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengirim Marketplace Intake ke Scalev.');
     } catch (error: any) {

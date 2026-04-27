@@ -1,14 +1,12 @@
 'use client';
 
 import { useState } from 'react';
-import { useSupabase } from '@/lib/supabase-browser';
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);
-  const supabase = useSupabase();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,10 +15,16 @@ export default function ForgotPasswordPage() {
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
-      const { error } = await supabase.auth.resetPasswordForEmail(normalizedEmail, {
-        redirectTo: `${window.location.origin}/reset-password`,
+      const res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          redirectTo: `${window.location.origin}/reset-password`,
+        }),
       });
-      if (error) throw error;
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Gagal mengirim email reset password');
       setEmail(normalizedEmail);
       setSent(true);
     } catch (err: any) {

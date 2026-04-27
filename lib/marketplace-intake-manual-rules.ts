@@ -1,5 +1,6 @@
 'use server';
 
+import { requireDashboardRoles } from './dashboard-access';
 import { createServiceSupabase } from './supabase-server';
 import {
   getMarketplaceIntakeSourceConfig,
@@ -123,6 +124,8 @@ export async function listMarketplaceManualRules(params?: {
   sourceKey?: string | null;
   limit?: number;
 }): Promise<MarketplaceManualRuleListResult> {
+  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat resolver rule marketplace.');
+
   const svc = createServiceSupabase();
   const limit = Math.min(Math.max(Number(params?.limit || 500), 1), 1000);
 
@@ -205,6 +208,8 @@ export async function listMarketplaceManualRules(params?: {
 export async function upsertMarketplaceManualRule(
   input: UpsertMarketplaceManualRuleInput,
 ): Promise<MarketplaceManualRuleListItem> {
+  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengubah resolver rule marketplace.');
+
   const sourceConfig = getMarketplaceIntakeSourceConfig(assertSourceKey(input.sourceKey));
   const mpProductName = cleanText(input.mpProductName);
   const targetEntityKey = cleanText(input.targetEntityKey);

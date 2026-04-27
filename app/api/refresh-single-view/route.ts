@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 
 export const maxDuration = 300;
 
@@ -17,6 +18,21 @@ function getServiceSupabase() {
 
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'refresh-single-view',
+      3,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan refresh full summary. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     // Auth check: admin:sync
     try {
       await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');

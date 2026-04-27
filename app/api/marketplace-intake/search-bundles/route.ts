@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import {
   guessMarketplaceStoreFromTexts,
 } from '@/lib/marketplace-intake-store';
@@ -8,6 +9,21 @@ import { createServiceSupabase } from '@/lib/service-supabase';
 
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-intake-search-bundles',
+      60,
+      10 * 60 * 1000,
+      'Terlalu banyak pencarian bundle Marketplace Intake. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     try {
       await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mencari bundle Marketplace Intake.');
     } catch (error: any) {

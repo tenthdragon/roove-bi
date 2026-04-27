@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { runMetaSync } from '@/lib/meta-sync-runner';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 
@@ -57,6 +58,21 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
 
   try {
     if (!isCron) {
+      const originError = rejectUntrustedOrigin(req);
+      if (originError) return originError;
+
+      const sessionError = rejectMissingDashboardSession(req);
+      if (sessionError) return sessionError;
+
+      const rateLimitError = limitByIp(
+        req,
+        'meta-sync',
+        8,
+        10 * 60 * 1000,
+        'Terlalu banyak permintaan Meta sync. Coba lagi beberapa menit lagi.',
+      );
+      if (rateLimitError) return rateLimitError;
+
       try {
         const { profile } = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
         requestedBy = profile.id;

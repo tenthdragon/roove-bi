@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireAnyDashboardTabAccess, requireDashboardTabAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 
 function getServiceSupabase() {
   return createClient(
@@ -13,8 +14,23 @@ function getServiceSupabase() {
 }
 
 // GET — ambil semua rekening
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'bank-accounts-read',
+      30,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan daftar rekening bank. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     await requireAnyDashboardTabAccess(['cashflow', 'financial-settings'], 'rekening bank');
 
     const supabase = getServiceSupabase();
@@ -35,6 +51,21 @@ export async function GET() {
 // POST — tambah rekening baru
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'bank-accounts-write',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan rekening bank. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     await requireDashboardTabAccess('financial-settings', 'Financial Settings');
 
     const body = await req.json();
@@ -65,6 +96,21 @@ export async function POST(req: NextRequest) {
 // PATCH — edit rekening
 export async function PATCH(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'bank-accounts-write',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan rekening bank. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     await requireDashboardTabAccess('financial-settings', 'Financial Settings');
 
     const body = await req.json();
@@ -98,6 +144,21 @@ export async function PATCH(req: NextRequest) {
 // DELETE — hapus rekening
 export async function DELETE(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'bank-accounts-write',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan rekening bank. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     await requireDashboardTabAccess('financial-settings', 'Financial Settings');
 
     const { id } = await req.json();
@@ -114,15 +175,15 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Rekening tidak ditemukan' }, { status: 404 });
     }
 
-    const { data: existingSessions, error: sessionError } = await supabase
+    const { data: existingSessions, error: existingSessionsError } = await supabase
       .from('bank_upload_sessions')
       .select('id')
       .eq('bank', account.bank)
       .eq('account_no', account.account_no)
       .limit(1);
 
-    if (sessionError) {
-      return NextResponse.json({ error: sessionError.message }, { status: 500 });
+    if (existingSessionsError) {
+      return NextResponse.json({ error: existingSessionsError.message }, { status: 500 });
     }
 
     if ((existingSessions || []).length > 0) {

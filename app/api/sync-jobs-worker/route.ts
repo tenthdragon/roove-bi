@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { executeSyncJob } from '@/lib/sync-job-runners';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import {
   claimNextSyncJob,
   failSyncJob,
@@ -102,6 +103,21 @@ async function handleRun(request: NextRequest) {
   const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
 
   if (!isCron) {
+    const originError = rejectUntrustedOrigin(request);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(request);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      request,
+      'sync-jobs-worker',
+      12,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan worker sync. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     try {
       await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
     } catch (err: any) {

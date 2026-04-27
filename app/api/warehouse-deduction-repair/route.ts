@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess, requireDashboardTabAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { backfillWarehouseDeductions } from '@/lib/warehouse-ledger-actions';
 
 export const maxDuration = 300;
@@ -10,6 +11,21 @@ function parseRepairDate(input: unknown) {
 }
 
 export async function POST(request: NextRequest) {
+  const originError = rejectUntrustedOrigin(request);
+  if (originError) return originError;
+
+  const sessionError = rejectMissingDashboardSession(request);
+  if (sessionError) return sessionError;
+
+  const rateLimitError = limitByIp(
+    request,
+    'warehouse-deduction-repair',
+    4,
+    10 * 60 * 1000,
+    'Terlalu banyak permintaan repair warehouse deduction. Coba lagi beberapa menit lagi.',
+  );
+  if (rateLimitError) return rateLimitError;
+
   try {
     await requireDashboardTabAccess('warehouse', 'Sync Deduction Gudang');
     await requireDashboardPermissionAccess('wh:mapping_sync', 'Sync Deduction Gudang');

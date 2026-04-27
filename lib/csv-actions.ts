@@ -1,6 +1,7 @@
 // lib/csv-actions.ts
 'use server';
 import { createServiceSupabase } from '@/lib/supabase-server';
+import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import {
   cleanWarehouseDomainText,
   fetchWarehouseBusinessDirectoryRows,
@@ -81,6 +82,8 @@ function deriveSalesChannel(row: Record<string, string>): string {
 }
 
 export async function uploadCsvOrders(formData: FormData) {
+  await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
+
   const file = formData.get('file') as File;
   if (!file) throw new Error('No file provided');
 

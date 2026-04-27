@@ -4,6 +4,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardTabAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { classifyTransaction } from '@/lib/transaction-tagger';
 
@@ -17,6 +18,21 @@ function getServiceSupabase() {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'bank-transactions-write',
+      40,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan transaksi bank. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
     const body = await req.json();
@@ -54,6 +70,21 @@ export async function PATCH(req: NextRequest) {
 // POST /api/bank-transactions — retag all untagged (or all) transactions
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'bank-transactions-retag',
+      6,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan retag transaksi. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
     const body = await req.json().catch(() => ({}));

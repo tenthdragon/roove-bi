@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardTabAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 
 function getServiceSupabase() {
   return createClient(
@@ -31,6 +32,21 @@ export async function POST(req: NextRequest) {
       year = prev.getFullYear();
       triggeredBy = 'cron';
     } else {
+      const originError = rejectUntrustedOrigin(req);
+      if (originError) return originError;
+
+      const sessionError = rejectMissingDashboardSession(req);
+      if (sessionError) return sessionError;
+
+      const rateLimitError = limitByIp(
+        req,
+        'cashflow-snapshot',
+        6,
+        10 * 60 * 1000,
+        'Terlalu banyak permintaan snapshot cashflow. Coba lagi beberapa menit lagi.',
+      );
+      if (rateLimitError) return rateLimitError;
+
       await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
       // Manual: read from body
@@ -89,6 +105,12 @@ export async function POST(req: NextRequest) {
 // GET: retrieve snapshots
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
     await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
     const svc = getServiceSupabase();

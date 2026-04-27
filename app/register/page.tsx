@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { useSupabase } from '@/lib/supabase-browser';
 import { useRouter } from 'next/navigation';
 
 const ALLOWED_DOMAINS = ['roove.co.id'];
@@ -15,7 +14,6 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const router = useRouter();
-  const supabase = useSupabase();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -46,18 +44,17 @@ export default function RegisterPage() {
     }
 
     try {
-      const { error: signUpError } = await supabase.auth.signUp({
-        email: normalizedEmail,
-        password,
-        options: {
-          data: {
-            full_name: fullName,
-            email_verified: true,
-          },
-        },
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password,
+          fullName,
+        }),
       });
-
-      if (signUpError) throw signUpError;
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Terjadi kesalahan');
       setSuccess(true);
     } catch (err: any) {
       setError(err.message || 'Terjadi kesalahan');

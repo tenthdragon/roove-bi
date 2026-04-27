@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,21 @@ interface MetaAdAccountRaw {
  */
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'meta-accounts-read',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan daftar akun Meta. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     // ── Auth: admin meta access ──
     try {
       await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');

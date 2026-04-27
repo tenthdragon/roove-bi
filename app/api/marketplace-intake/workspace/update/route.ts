@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createServerSupabase } from '@/lib/supabase-server';
 import {
   updateMarketplaceIntakeWorkspace,
@@ -10,6 +11,21 @@ export const maxDuration = 250;
 
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-intake-workspace-update',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan workspace Marketplace Intake. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     try {
       await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengubah workspace Marketplace Intake.');
     } catch (error: any) {

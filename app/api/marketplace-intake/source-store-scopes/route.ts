@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import {
   assertMarketplaceIntakeSourceKey,
   listMarketplaceIntakeStoreScope,
@@ -8,6 +9,21 @@ import {
 
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-store-scopes-read',
+      30,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan store scope Marketplace Intake. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     try {
       await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat store scope Marketplace Intake.');
     } catch (error: any) {
@@ -26,6 +42,21 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-store-scopes-write',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan store scope Marketplace Intake. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     try {
       await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengubah store scope Marketplace Intake.');
     } catch (error: any) {

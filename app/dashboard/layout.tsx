@@ -324,7 +324,8 @@ export default function DashboardLayout({ children }) {
 
   useEffect(() => {
     async function load() {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { session } } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) { router.push('/'); return; }
       const { data, error: profileError } = await supabase.from('profiles').select('*').eq('id', user.id).single();
 

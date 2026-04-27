@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { runScalevSync, type ScalevSyncMode } from '@/lib/scalev-sync-runner';
 import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
@@ -61,6 +62,21 @@ export async function POST(req: NextRequest) {
 
   try {
     if (!isCron) {
+      const originError = rejectUntrustedOrigin(req);
+      if (originError) return originError;
+
+      const sessionError = rejectMissingDashboardSession(req);
+      if (sessionError) return sessionError;
+
+      const rateLimitError = limitByIp(
+        req,
+        'scalev-sync',
+        8,
+        10 * 60 * 1000,
+        'Terlalu banyak permintaan sync ScaleV. Coba lagi beberapa menit lagi.',
+      );
+      if (rateLimitError) return rateLimitError;
+
       try {
         const { profile } = await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
         requestedBy = profile.id;

@@ -1,6 +1,7 @@
 'use server';
 
 import { createServiceSupabase } from './supabase-server';
+import { requireDashboardRoles } from './dashboard-access';
 
 export type MarketplaceWebhookQuarantineListItem = {
   id: number;
@@ -59,6 +60,8 @@ function extractStoreName(payload: any) {
 export async function listMarketplaceWebhookQuarantine(params?: {
   limit?: number;
 }) : Promise<MarketplaceWebhookQuarantineListResult> {
+  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat webhook quarantine marketplace.');
+
   const svc = createServiceSupabase();
   const limit = Math.min(Math.max(Number(params?.limit || 100), 1), 500);
 

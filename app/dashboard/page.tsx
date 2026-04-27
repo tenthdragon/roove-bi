@@ -146,7 +146,8 @@ export default function OverviewPage() {
   );
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      const user = session?.user;
       if (user) {
         supabase.from('profiles').select('role').eq('id', user.id).single()
           .then(({ data }) => setUserRole(data?.role || null));

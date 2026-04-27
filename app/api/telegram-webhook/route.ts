@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { buildDailyReport, buildMonthlyReport } from '@/lib/daily-report';
 import { analyzeMonthlyReport } from '@/lib/opus-analyst';
 import { sendTelegramMessage, answerCallbackQuery } from '@/lib/telegram';
+import { limitByIp } from '@/lib/request-hardening';
 import {
   approveStockReclassRequestViaTelegram,
   rejectStockReclassRequestViaTelegram,
@@ -40,6 +41,15 @@ function parseReclassCallbackData(data: string) {
 
 export async function POST(req: NextRequest) {
   try {
+    const rateLimitError = limitByIp(
+      req,
+      'telegram-webhook',
+      180,
+      60 * 1000,
+      'Too many Telegram webhook requests.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     if (!isAuthorizedTelegramWebhook(req)) {
       console.warn('[telegram-webhook] Rejected request with invalid secret token');
       return NextResponse.json({ ok: true });

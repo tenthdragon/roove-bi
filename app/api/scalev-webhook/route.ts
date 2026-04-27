@@ -22,6 +22,7 @@ import {
   resolveWarehouseBusinessCode,
   resolveWarehouseOrigin,
 } from '@/lib/warehouse-domain-helpers';
+import { limitByIp } from '@/lib/request-hardening';
 
 function getServiceSupabase() {
   return createClient(
@@ -2082,6 +2083,15 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
 // ── POST handler ──
 export async function POST(req: NextRequest) {
   try {
+    const rateLimitError = limitByIp(
+      req,
+      'scalev-webhook',
+      1200,
+      60 * 1000,
+      'Too many webhook requests.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     // Validate required env vars early
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
       console.error('[scalev-webhook] Missing SUPABASE env vars');

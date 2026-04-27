@@ -2,6 +2,8 @@
 // Parses bank statement CSVs (BCA / BRI / Mandiri) and saves to Supabase
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { classifyTransaction } from '@/lib/transaction-tagger';
 
 type Bank = 'BCA' | 'BRI' | 'MANDIRI';
@@ -457,6 +459,30 @@ function detectBank(text: string): Bank {
 // ── Route handler ──
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'bank-csv-upload',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak upload bank statement. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
+    let uploadedById: string | null = null;
+    try {
+      const { profile } = await requireDashboardPermissionAccess('admin:financial', 'Admin Financial');
+      uploadedById = profile.id;
+    } catch (error: any) {
+      const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
+      return NextResponse.json({ error: error.message }, { status });
+    }
+
     const formData = await req.formData();
     const file = formData.get('file') as File | null;
     if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
@@ -495,18 +521,6 @@ export async function POST(req: NextRequest) {
 
     const supabase = getServiceSupabase();
 
-    // Get current user from Authorization header
-    const authHeader = req.headers.get('Authorization') || '';
-    let userId: string | null = null;
-    if (authHeader.startsWith('Bearer ')) {
-      const userSupabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      );
-      const { data } = await userSupabase.auth.getUser(authHeader.replace('Bearer ', ''));
-      userId = data.user?.id ?? null;
-    }
-
     // Upsert session (delete old transactions for this bank+period first)
     const { data: session, error: sessionErr } = await supabase
       .from('bank_upload_sessions')
@@ -522,7 +536,7 @@ export async function POST(req: NextRequest) {
         total_debit:       totalDebit,
         transaction_count: parsed.transactions.length,
         uploaded_at:       new Date().toISOString(),
-        uploaded_by:       userId,
+        uploaded_by:       uploadedById,
       }, { onConflict: 'bank,account_no,period_label' })
       .select('id')
       .single();

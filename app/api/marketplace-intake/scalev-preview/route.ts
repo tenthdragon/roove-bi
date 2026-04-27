@@ -1,9 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { buildScalevOpsProjectionForBatch } from '@/lib/marketplace-intake-scalev-export';
 
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-intake-scalev-preview',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak preview Scalev Marketplace Intake. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     try {
       await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
     } catch (error: any) {

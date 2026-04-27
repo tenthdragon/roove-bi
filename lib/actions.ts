@@ -1,7 +1,7 @@
 'use server';
 
 import { createServerSupabase, createServiceSupabase } from './supabase-server';
-import { requireDashboardPermissionAccess, requireDashboardRoles } from './dashboard-access';
+import { requireDashboardPermissionAccess, requireDashboardRoles, requireDashboardTabAccess } from './dashboard-access';
 import { parseRooveExcel } from './excel-parser';
 import type { Profile, DailyProductSummary, MonthlyProductSummary } from './utils';
 
@@ -24,6 +24,8 @@ export async function getCurrentProfile(): Promise<Profile | null> {
 // ── Dashboard Data Queries ──
 
 export async function fetchDailyProductSummary(from: string, to: string) {
+  await requireDashboardTabAccess('overview', 'Overview');
+
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('daily_product_summary')
@@ -37,6 +39,8 @@ export async function fetchDailyProductSummary(from: string, to: string) {
 }
 
 export async function fetchDailyChannelData(from: string, to: string) {
+  await requireDashboardTabAccess('channels', 'Sales Channel');
+
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('daily_channel_data')
@@ -50,6 +54,8 @@ export async function fetchDailyChannelData(from: string, to: string) {
 }
 
 export async function fetchDailyAdsSpend(from: string, to: string) {
+  await requireDashboardTabAccess('marketing', 'Marketing');
+
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('daily_ads_spend')
@@ -63,6 +69,8 @@ export async function fetchDailyAdsSpend(from: string, to: string) {
 }
 
 export async function fetchMonthlySummary(month: number, year: number) {
+  await requireDashboardTabAccess('overview', 'Overview');
+
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('monthly_product_summary')
@@ -76,6 +84,8 @@ export async function fetchMonthlySummary(month: number, year: number) {
 }
 
 export async function fetchAvailablePeriods() {
+  await requireDashboardTabAccess('overview', 'Overview');
+
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('data_imports')
@@ -89,6 +99,8 @@ export async function fetchAvailablePeriods() {
 }
 
 export async function fetchDateRange() {
+  await requireDashboardTabAccess('overview', 'Overview');
+
   const supabase = createServerSupabase();
 
   const { data } = await supabase

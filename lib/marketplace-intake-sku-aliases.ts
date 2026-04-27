@@ -1,5 +1,6 @@
 'use server';
 
+import { requireDashboardRoles } from './dashboard-access';
 import { createServiceSupabase } from './supabase-server';
 import {
   getMarketplaceIntakeSourceConfig,
@@ -94,6 +95,8 @@ export async function listMarketplaceSkuAliases(params?: {
   sourceKey?: string | null;
   limit?: number;
 }): Promise<MarketplaceSkuAliasListResult> {
+  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat SKU alias marketplace.');
+
   const svc = createServiceSupabase();
   const limit = Math.min(Math.max(Number(params?.limit || 500), 1), 1000);
 
@@ -163,6 +166,8 @@ export async function listMarketplaceSkuAliases(params?: {
 export async function upsertMarketplaceSkuAlias(
   input: UpsertMarketplaceSkuAliasInput,
 ): Promise<MarketplaceSkuAliasListItem> {
+  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengubah SKU alias marketplace.');
+
   const sourceConfig = getMarketplaceIntakeSourceConfig(assertSourceKey(input.sourceKey));
   const normalizedSku = cleanText(input.normalizedSku);
   const rawPlatformSkuId = cleanText(input.rawPlatformSkuId);

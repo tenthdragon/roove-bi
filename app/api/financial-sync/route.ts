@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 
@@ -27,6 +28,21 @@ async function queueFinancialSync(request: NextRequest, method: 'GET' | 'POST') 
   });
 
   if (!isCron) {
+    const originError = rejectUntrustedOrigin(request);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(request);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      request,
+      'financial-sync',
+      8,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan Financial Sync. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     try {
       const { profile } = await requireDashboardPermissionAccess('admin:financial', 'Admin Financial');
       requestedBy = profile.id;

@@ -1,6 +1,7 @@
 // app/api/financial-analysis/route.ts
 import { NextRequest } from 'next/server';
 import { getFinancialDataForAI } from '@/lib/financial-actions';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createServiceSupabase } from '@/lib/supabase-server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
 import Anthropic from '@anthropic-ai/sdk';
@@ -21,6 +22,21 @@ const MAX_TOKENS = USE_OPUS ? 4096 : 4096;
 
 export async function POST(request: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(request);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(request);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      request,
+      'financial-analysis',
+      3,
+      30 * 60 * 1000,
+      'Terlalu banyak permintaan AI financial analysis. Coba lagi nanti.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const { profile } = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa menjalankan AI Finance Analysis.');
 
     if (!process.env.ANTHROPIC_API_KEY) {

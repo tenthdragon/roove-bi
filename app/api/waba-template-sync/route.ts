@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import {
   listMessageTemplates,
   fetchTemplateAnalyticsRaw,
@@ -43,6 +44,21 @@ export async function POST(req: NextRequest) {
     const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
 
     if (!isCron) {
+      const originError = rejectUntrustedOrigin(req);
+      if (originError) return originError;
+
+      const sessionError = rejectMissingDashboardSession(req);
+      if (sessionError) return sessionError;
+
+      const rateLimitError = limitByIp(
+        req,
+        'waba-template-sync',
+        6,
+        10 * 60 * 1000,
+        'Terlalu banyak permintaan sync template WhatsApp. Coba lagi beberapa menit lagi.',
+      );
+      if (rateLimitError) return rateLimitError;
+
       try {
         await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
       } catch (err: any) {

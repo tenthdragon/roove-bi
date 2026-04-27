@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 
 function getServiceSupabase() {
   return createClient(
@@ -25,6 +26,21 @@ const STORE_NORMALIZE: Record<string, string> = {
 
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'xlsx-ads-upload',
+      12,
+      10 * 60 * 1000,
+      'Terlalu banyak upload ads. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     let profileId: string | null = null;
     try {
       const { profile } = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');

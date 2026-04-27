@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import {
   listMarketplaceSkuAliases,
   upsertMarketplaceSkuAlias,
@@ -20,6 +21,21 @@ async function guardOwner(message: string) {
 
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-sku-aliases-read',
+      30,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan SKU alias marketplace. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const denied = await guardOwner('Hanya owner yang bisa melihat SKU alias marketplace.');
     if (denied) return denied;
 
@@ -38,6 +54,21 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-sku-aliases-write',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan SKU alias marketplace. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const denied = await guardOwner('Hanya owner yang bisa mengubah SKU alias marketplace.');
     if (denied) return denied;
 
@@ -64,6 +95,21 @@ export async function POST(req: NextRequest) {
 
 export async function PATCH(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-sku-aliases-write',
+      20,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan SKU alias marketplace. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const denied = await guardOwner('Hanya owner yang bisa mengubah SKU alias marketplace.');
     if (denied) return denied;
 

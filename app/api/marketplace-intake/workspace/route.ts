@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { listMarketplaceIntakeWorkspace } from '@/lib/marketplace-intake';
 
 function getCurrentDateValue() {
@@ -14,6 +15,21 @@ export const maxDuration = 250;
 
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-intake-workspace-read',
+      40,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan workspace Marketplace Intake. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     try {
       await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat workspace Marketplace Intake.');
     } catch (error: any) {

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { importMarketplaceWorkbook } from '@/lib/marketplace-upload';
 
@@ -18,6 +19,21 @@ function isLikelyMarketplaceWorkbook(file: File): boolean {
 
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'marketplace-upload',
+      10,
+      15 * 60 * 1000,
+      'Terlalu banyak upload marketplace. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     try {
       await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
     } catch (error: any) {

@@ -4,6 +4,7 @@ import {
   requireDashboardPermissionAccess,
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import {
   createMessageTemplate,
   deleteMessageTemplate,
@@ -86,6 +87,21 @@ function resolveTargetWabaId(accounts: ActiveWabaAccount[], requestedWabaId?: st
 /** GET — List message templates from DB (synced via /api/waba-template-sync) */
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'waba-templates-read',
+      30,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan template WhatsApp. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const auth = await requireReadAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
@@ -111,6 +127,21 @@ export async function GET(req: NextRequest) {
 /** POST — Create a message template (write-through: Graph API + DB) */
 export async function POST(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'waba-templates-write',
+      10,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan template WhatsApp. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const auth = await requireManageAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
@@ -156,6 +187,21 @@ export async function POST(req: NextRequest) {
 /** PATCH — Update template tags */
 export async function PATCH(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'waba-templates-write',
+      10,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan template WhatsApp. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const auth = await requireManageAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
@@ -183,6 +229,21 @@ export async function PATCH(req: NextRequest) {
 /** DELETE — Delete a message template (write-through: Graph API + DB soft-delete) */
 export async function DELETE(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'waba-templates-write',
+      10,
+      10 * 60 * 1000,
+      'Terlalu banyak perubahan template WhatsApp. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const auth = await requireManageAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 

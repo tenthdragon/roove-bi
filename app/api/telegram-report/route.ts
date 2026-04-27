@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
 import { buildDailyReport } from '@/lib/daily-report';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { sendTelegramMessage } from '@/lib/telegram';
 
 export const dynamic = 'force-dynamic';
@@ -18,6 +19,21 @@ export async function GET(req: NextRequest) {
     const isCron = !!cronSecret && (authHeader === `Bearer ${cronSecret}` || secret === cronSecret);
 
     if (!isCron) {
+      const originError = rejectUntrustedOrigin(req);
+      if (originError) return originError;
+
+      const sessionError = rejectMissingDashboardSession(req);
+      if (sessionError) return sessionError;
+
+      const rateLimitError = limitByIp(
+        req,
+        'telegram-report',
+        4,
+        10 * 60 * 1000,
+        'Terlalu banyak permintaan Telegram report. Coba lagi beberapa menit lagi.',
+      );
+      if (rateLimitError) return rateLimitError;
+
       try {
         await requireDashboardRoles(['owner'], 'Hanya owner yang bisa menjalankan Telegram report manual.');
       } catch (err: any) {

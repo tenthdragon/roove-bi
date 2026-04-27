@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { useRouter } from 'next/navigation';
 
@@ -12,6 +12,19 @@ export default function LoginPage() {
   const router = useRouter();
   const supabase = useSupabase();
 
+  useEffect(() => {
+    let cancelled = false;
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (cancelled || !session?.user) return;
+      router.replace('/dashboard');
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router, supabase]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -19,7 +32,15 @@ export default function LoginPage() {
 
     try {
       const normalizedEmail = email.trim().toLowerCase();
-      const { error } = await supabase.auth.signInWithPassword({ email: normalizedEmail, password });
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail, password }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || 'Login gagal');
+
+      const { error } = await supabase.auth.setSession(data.session);
       if (error) throw error;
       router.push('/dashboard');
       router.refresh();

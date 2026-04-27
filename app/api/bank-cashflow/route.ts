@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardTabAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 
 function getServiceSupabase() {
   return createClient(
@@ -16,6 +17,21 @@ function getServiceSupabase() {
 // GET /api/bank-cashflow?period=APRIL+2026&bank=BCA&type=CR&accounts=123,456&business=RTI
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'bank-cashflow-read',
+      30,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan cashflow bank. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
     const url = new URL(req.url);
@@ -139,6 +155,21 @@ export async function GET(req: NextRequest) {
 // DELETE /api/bank-cashflow?bank=BCA&period=APRIL+2026&account=1234567890
 export async function DELETE(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'bank-cashflow-delete',
+      6,
+      10 * 60 * 1000,
+      'Terlalu banyak penghapusan sesi cashflow bank. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
     const url = new URL(req.url);

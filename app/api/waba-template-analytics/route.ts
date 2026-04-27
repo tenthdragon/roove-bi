@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardTabAccess } from '@/lib/dashboard-access';
+import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +28,21 @@ async function authenticate() {
 /** GET — Fetch template performance analytics from DB */
 export async function GET(req: NextRequest) {
   try {
+    const originError = rejectUntrustedOrigin(req);
+    if (originError) return originError;
+
+    const sessionError = rejectMissingDashboardSession(req);
+    if (sessionError) return sessionError;
+
+    const rateLimitError = limitByIp(
+      req,
+      'waba-template-analytics-read',
+      30,
+      10 * 60 * 1000,
+      'Terlalu banyak permintaan analytics template WhatsApp. Coba lagi beberapa menit lagi.',
+    );
+    if (rateLimitError) return rateLimitError;
+
     const auth = await authenticate();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
