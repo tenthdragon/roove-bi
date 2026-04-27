@@ -5,7 +5,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
-import { getOverviewCoreData, getOverviewFeeData } from '@/lib/overview-actions';
+import { getOverviewPageData } from '@/lib/overview-actions';
 // Recharts removed — daily trend is now a table
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
@@ -86,8 +86,8 @@ export default function OverviewPage() {
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [prevShippingData, setPrevShippingData] = useState<any[]>([]);
-  const [feeLoading, setFeeLoading] = useState(true);
   const [feeError, setFeeError] = useState('');
+  const [prevFeeError, setPrevFeeError] = useState('');
   const [shippingError, setShippingError] = useState('');
   const [prevShippingError, setPrevShippingError] = useState('');
   const { activeBrands, error: activeBrandsError, isActiveBrand } = useActiveBrands();
@@ -145,6 +145,41 @@ export default function OverviewPage() {
     [prevRange]
   );
 
+  const filteredDailyData = useMemo(
+    () => dailyData.filter((row: any) => isActiveBrand(row.product)),
+    [dailyData, isActiveBrand]
+  );
+
+  const filteredShipmentData = useMemo(
+    () => shipmentData.filter((row: any) => isActiveBrand(row.product)),
+    [shipmentData, isActiveBrand]
+  );
+
+  const filteredPrevDailyData = useMemo(
+    () => prevDailyData.filter((row: any) => isActiveBrand(row.product)),
+    [prevDailyData, isActiveBrand]
+  );
+
+  const filteredChannelData = useMemo(
+    () => channelData.filter((row: any) => isActiveBrand(row.product)),
+    [channelData, isActiveBrand]
+  );
+
+  const filteredShippingData = useMemo(
+    () => shippingData.filter((row: any) => isActiveBrand(row.product)),
+    [shippingData, isActiveBrand]
+  );
+
+  const filteredPrevChannelData = useMemo(
+    () => prevChannelData.filter((row: any) => isActiveBrand(row.product)),
+    [prevChannelData, isActiveBrand]
+  );
+
+  const filteredPrevShippingData = useMemo(
+    () => prevShippingData.filter((row: any) => isActiveBrand(row.product)),
+    [prevShippingData, isActiveBrand]
+  );
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       const user = session?.user;
@@ -158,13 +193,23 @@ export default function OverviewPage() {
   useEffect(() => {
     if (!dateRange.from || !dateRange.to || !prevRange) return;
     const { prevFrom, prevTo } = prevRange;
-    const cached = getCached<any>('overview_core_data', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
+    const cached = getCached<any>('overview_page_data_v1', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
     if (cached) {
-      setDailyData(cached.daily.filter(row => isActiveBrand(row.product)));
+      setDailyData(cached.daily || []);
       setShipmentData(cached.shipment || []);
       setOverheadData(cached.overhead || []);
-      setPrevDailyData(cached.prevDaily.filter(row => isActiveBrand(row.product)));
+      setPrevDailyData(cached.prevDaily || []);
       setPrevOverheadData(cached.prevOverhead || []);
+      setAdsData(cached.ads || []);
+      setChannelData(cached.channel || []);
+      setShippingData(cached.shipping || []);
+      setPrevAdsData(cached.prevAds || []);
+      setPrevChannelData(cached.prevChannel || []);
+      setPrevShippingData(cached.prevShipping || []);
+      setFeeError(cached.feeError || '');
+      setPrevFeeError(cached.prevFeeError || '');
+      setShippingError(cached.shippingError || '');
+      setPrevShippingError(cached.prevShippingError || '');
       setLoadError('');
       setLoading(false);
       return;
@@ -173,8 +218,12 @@ export default function OverviewPage() {
     let cancelled = false;
     setLoading(true);
     setLoadError('');
+    setFeeError('');
+    setPrevFeeError('');
+    setShippingError('');
+    setPrevShippingError('');
 
-    getOverviewCoreData({
+    getOverviewPageData({
       from: dateRange.from,
       to: dateRange.to,
       prevFrom,
@@ -182,105 +231,49 @@ export default function OverviewPage() {
     })
       .then((data) => {
         if (cancelled) return;
-        setCache('overview_core_data', dateRange.from, dateRange.to, data, `${prevFrom}|${prevTo}`);
-        setDailyData(data.daily.filter(row => isActiveBrand(row.product)));
+        setCache('overview_page_data_v1', dateRange.from, dateRange.to, data, `${prevFrom}|${prevTo}`);
+        setDailyData(data.daily || []);
         setShipmentData(data.shipment || []);
         setOverheadData(data.overhead || []);
-        setPrevDailyData(data.prevDaily.filter(row => isActiveBrand(row.product)));
+        setPrevDailyData(data.prevDaily || []);
         setPrevOverheadData(data.prevOverhead || []);
+        setAdsData(data.ads || []);
+        setChannelData(data.channel || []);
+        setShippingData(data.shipping || []);
+        setPrevAdsData(data.prevAds || []);
+        setPrevChannelData(data.prevChannel || []);
+        setPrevShippingData(data.prevShipping || []);
+        setFeeError(data.feeError || '');
+        setPrevFeeError(data.prevFeeError || '');
+        setShippingError(data.shippingError || '');
+        setPrevShippingError(data.prevShippingError || '');
         setLoadError('');
         setLoading(false);
       })
       .catch((e: any) => {
         if (cancelled) return;
-        console.error('[Overview] core load error:', e);
+        console.error('[Overview] page load error:', e);
         setLoadError(e?.message || 'Gagal memuat data Overview.');
         setDailyData([]);
         setShipmentData([]);
         setOverheadData([]);
         setPrevDailyData([]);
         setPrevOverheadData([]);
-        setLoading(false);
-      });
-
-    return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to, prevRange, activeBrands, activeBrandsError, isActiveBrand]);
-
-  useEffect(() => {
-    if (!dateRange.from || !dateRange.to || !prevRange) return;
-    const { prevFrom, prevTo } = prevRange;
-
-    const cachedAds = getCached<any[]>('overview_ads_spend_v2', dateRange.from, dateRange.to);
-    const cachedCh = getCached<any[]>('overview_channel_data_v2', dateRange.from, dateRange.to);
-    const cachedShipping = getCached<any[]>('overview_shipping_fee_data_v5', dateRange.from, dateRange.to);
-    const cachedShippingError = getCached<string>('overview_shipping_fee_error_v5', dateRange.from, dateRange.to) || '';
-    const cachedPrevAds = getCached<any[]>('overview_ads_spend_prev_v2', prevFrom, prevTo);
-    const cachedPrevCh = getCached<any[]>('overview_channel_data_prev_v2', prevFrom, prevTo);
-    const cachedPrevShipping = getCached<any[]>('overview_shipping_fee_data_prev_v5', prevFrom, prevTo);
-    const cachedPrevShippingError = getCached<string>('overview_shipping_fee_prev_error_v5', prevFrom, prevTo) || '';
-
-    if (cachedAds && cachedCh && cachedShipping && cachedPrevAds && cachedPrevCh && cachedPrevShipping) {
-      setAdsData(cachedAds);
-      setChannelData(cachedCh);
-      setShippingData(cachedShipping.filter(row => isActiveBrand(row.product)));
-      setPrevAdsData(cachedPrevAds);
-      setPrevChannelData(cachedPrevCh);
-      setPrevShippingData(cachedPrevShipping.filter(row => isActiveBrand(row.product)));
-      setFeeError('');
-      setShippingError(cachedShippingError);
-      setPrevShippingError(cachedPrevShippingError);
-      setFeeLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setFeeLoading(true);
-    setFeeError('');
-
-    getOverviewFeeData({
-      from: dateRange.from,
-      to: dateRange.to,
-      prevFrom,
-      prevTo,
-    })
-      .then((data) => {
-        if (cancelled) return;
-        setCache('overview_ads_spend_v2', dateRange.from, dateRange.to, data.ads);
-        setCache('overview_channel_data_v2', dateRange.from, dateRange.to, data.channel);
-        setCache('overview_shipping_fee_data_v5', dateRange.from, dateRange.to, data.shipping);
-        setCache('overview_shipping_fee_error_v5', dateRange.from, dateRange.to, data.shippingError || '');
-        setCache('overview_ads_spend_prev_v2', prevFrom, prevTo, data.prevAds);
-        setCache('overview_channel_data_prev_v2', prevFrom, prevTo, data.prevChannel);
-        setCache('overview_shipping_fee_data_prev_v5', prevFrom, prevTo, data.prevShipping);
-        setCache('overview_shipping_fee_prev_error_v5', prevFrom, prevTo, data.prevShippingError || '');
-        setAdsData(data.ads);
-        setChannelData(data.channel);
-        setShippingData(data.shipping.filter(row => isActiveBrand(row.product)));
-        setPrevAdsData(data.prevAds);
-        setPrevChannelData(data.prevChannel);
-        setPrevShippingData(data.prevShipping.filter(row => isActiveBrand(row.product)));
-        setFeeError('');
-        setShippingError(data.shippingError || '');
-        setPrevShippingError(data.prevShippingError || '');
-        setFeeLoading(false);
-      })
-      .catch((e: any) => {
-        if (cancelled) return;
-        console.error('[Overview] fee load error:', e);
-        setFeeError(e?.message || 'Gagal memuat biaya marketing Overview.');
         setAdsData([]);
         setChannelData([]);
         setShippingData([]);
         setPrevAdsData([]);
         setPrevChannelData([]);
         setPrevShippingData([]);
-        setFeeLoading(false);
+        setFeeError('');
+        setPrevFeeError('');
         setShippingError('');
         setPrevShippingError('');
+        setLoading(false);
       });
 
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to, prevRange, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [dateRange.from, dateRange.to, prevRange]);
 
   // Build overhead per-day lookup: date (YYYY-MM-DD) → daily overhead amount
   const overheadPerDay = useMemo(() => {
@@ -294,12 +287,11 @@ export default function OverviewPage() {
   // Build shipment-per-day lookup
   const shipPerDay = useMemo(() => {
     const map: Record<string, number> = {};
-    shipmentData.forEach((r: any) => {
-      if (!isActiveBrand(r.product)) return;
+    filteredShipmentData.forEach((r: any) => {
       map[r.date] = (map[r.date] || 0) + Number(r.order_count);
     });
     return map;
-  }, [shipmentData, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [filteredShipmentData]);
 
   // Build per-day ads spend lookup (from daily_ads_spend — matches marketing page)
   const adsByDate = useMemo(() => {
@@ -311,21 +303,19 @@ export default function OverviewPage() {
   // Build per-day MP fee lookup (from daily_channel_data — matches channels page)
   const mpByDate = useMemo(() => {
     const map: Record<string, number> = {};
-    channelData.forEach(d => {
-      if (!isActiveBrand(d.product)) return;
+    filteredChannelData.forEach(d => {
       map[d.date] = (map[d.date] || 0) + Math.abs(Number(d.mp_admin_cost) || 0);
     });
     return map;
-  }, [channelData, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [filteredChannelData]);
 
   const shippingByDate = useMemo(() => {
     const map: Record<string, number> = {};
-    shippingData.forEach(d => {
-      if (!isActiveBrand(d.product)) return;
+    filteredShippingData.forEach(d => {
       map[d.date] = (map[d.date] || 0) + Number(d.shipping_charge || 0);
     });
     return map;
-  }, [shippingData, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [filteredShippingData]);
 
   const kpi = useMemo(() => {
     // Build all dates in the selected range so days with only overhead/ads still appear
@@ -333,7 +323,7 @@ export default function OverviewPage() {
     rangeDates.forEach((dateKey) => {
       byDate[dateKey] = { s: 0, g: 0 };
     });
-    dailyData.forEach(d => {
+    filteredDailyData.forEach(d => {
       if (!byDate[d.date]) return;
       byDate[d.date].s += Number(d.net_sales);
       byDate[d.date].g += Number(d.gross_profit);
@@ -344,8 +334,8 @@ export default function OverviewPage() {
     const tCogs = ts - tg;
     // Explicit totals from dedicated tables
     const tAds = adsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
-    const tMp = channelData.filter(d => isActiveBrand(d.product)).reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost) || 0), 0);
-    const tShipping = shippingData.reduce((s, d) => s + Number(d.shipping_charge || 0), 0);
+    const tMp = filteredChannelData.reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost) || 0), 0);
+    const tShipping = filteredShippingData.reduce((s, d) => s + Number(d.shipping_charge || 0), 0);
     const ad = dates.filter(d => byDate[d].s > 0).length;
     const hasOverhead = overheadData.length > 0;
     const tOverheadRaw = dates.reduce((a, d) => a + (overheadPerDay[d] || 0), 0);
@@ -377,20 +367,20 @@ export default function OverviewPage() {
     });
     const tShipment = chart.reduce((a,r) => a + r.shipment, 0);
     return { ts, tg, tCogs, tAds, tMp, tShipping, tOverhead: tOverheadRaw, tNetProfit, tShipment, npM, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, mR: ts>0?(tAds+tMp)/ts*100:0, avg: ad>0?ts/ad:0 };
-  }, [dailyData, adsData, channelData, shippingData, overheadPerDay, overheadData, shipPerDay, rangeDates, adsByDate, mpByDate, shippingByDate, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [filteredDailyData, adsData, filteredChannelData, filteredShippingData, overheadPerDay, overheadData, shipPerDay, rangeDates, adsByDate, mpByDate, shippingByDate]);
 
   // ── Previous month KPIs (for delta comparison) ──
   const prevKpi = useMemo(() => {
-    if (prevDailyData.length === 0) return null;
+    if (filteredPrevDailyData.length === 0) return null;
     let ts = 0, tg = 0;
-    prevDailyData.forEach(d => { ts += Number(d.net_sales); tg += Number(d.gross_profit); });
+    filteredPrevDailyData.forEach(d => { ts += Number(d.net_sales); tg += Number(d.gross_profit); });
     const tAds = prevAdsData.reduce((s, d) => s + Math.abs(Number(d.spent || 0)), 0);
-    const tMp = prevChannelData.filter(d => isActiveBrand(d.product)).reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost) || 0), 0);
-    const tShipping = prevShippingData.reduce((s, d) => s + Number(d.shipping_charge || 0), 0);
+    const tMp = filteredPrevChannelData.reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost) || 0), 0);
+    const tShipping = filteredPrevShippingData.reduce((s, d) => s + Number(d.shipping_charge || 0), 0);
     const prevOH = prevRangeDates.reduce((sum, dateKey) => sum + (prevOverheadPerDay[dateKey] || 0), 0);
     const tNetProfit = tg - tAds - tMp - tShipping - prevOH;
     return { ts, tg, tAds, tMp, tShipping, tNetProfit, gpM: ts>0?tg/ts*100:0, npM: ts>0?tNetProfit/ts*100:0 };
-  }, [prevDailyData, prevAdsData, prevChannelData, prevShippingData, prevRangeDates, prevOverheadPerDay, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [filteredPrevDailyData, prevAdsData, filteredPrevChannelData, filteredPrevShippingData, prevRangeDates, prevOverheadPerDay]);
 
   const prevMonthLabel = useMemo(() => {
     if (!dateRange.from) return '';
@@ -401,7 +391,7 @@ export default function OverviewPage() {
 
   const productTable = useMemo(() => {
     const byP = {};
-    dailyData.forEach(d => {
+    filteredDailyData.forEach(d => {
       if (!byP[d.product]) byP[d.product] = { s:0, g:0, n:0, mp:0, mc:0 };
       byP[d.product].s += Number(d.net_sales);
       byP[d.product].g += Number(d.gross_profit);
@@ -415,7 +405,7 @@ export default function OverviewPage() {
         const adsFee = v.mc - v.mp;
         return { sku: p, sales: v.s, cogs, gp: v.g, adsFee, mpFee: v.mp, nam: v.n, gmpR: v.s>0?v.n/v.s*100:0, mktR: v.s>0?v.mc/v.s*100:0, sp: kpi.ts>0?v.s/kpi.ts*100:0 };
       });
-  }, [dailyData, kpi.ts]);
+  }, [filteredDailyData, kpi.ts]);
 
   const hasPreFebData = dateRange.from < '2026-02-01';
 
@@ -448,7 +438,7 @@ export default function OverviewPage() {
     </div>
   );
 
-  if (dateLoading || loading || feeLoading) {
+  if (dateLoading || loading) {
     return (
       <div style={{ textAlign:'center', padding:60, color:'var(--dim)' }}>
         <div className="spinner" style={{ width:32, height:32, border:'3px solid var(--border)', borderTop:'3px solid var(--accent)', borderRadius:'50%', margin:'0 auto 12px' }} />
@@ -479,7 +469,7 @@ export default function OverviewPage() {
     );
   }
 
-  if (dailyData.length === 0 && !loading) {
+  if (filteredDailyData.length === 0 && !loading) {
     return (
       <div className="fade-in">
         <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
@@ -527,8 +517,8 @@ export default function OverviewPage() {
         const dGp  = prevKpi?.tg > 0 ? (kpi.tg - prevKpi.tg) / prevKpi.tg * 100 : null;
         const dNp  = prevKpi?.tNetProfit ? (kpi.tNetProfit - prevKpi.tNetProfit) / Math.abs(prevKpi.tNetProfit) * 100 : null;
         const dCogs= prevCogs > 0 ? (kpi.tCogs - prevCogs) / prevCogs * 100 : null;
-        const dAds = prevKpi?.tAds > 0 ? (kpi.tAds - prevKpi.tAds) / prevKpi.tAds * 100 : null;
-        const dMp  = prevKpi?.tMp > 0 ? (kpi.tMp - prevKpi.tMp) / prevKpi.tMp * 100 : null;
+        const dAds = !feeError && !prevFeeError && prevKpi?.tAds > 0 ? (kpi.tAds - prevKpi.tAds) / prevKpi.tAds * 100 : null;
+        const dMp  = !feeError && !prevFeeError && prevKpi?.tMp > 0 ? (kpi.tMp - prevKpi.tMp) / prevKpi.tMp * 100 : null;
         const dShip= !shippingError && !prevShippingError && prevKpi?.tShipping > 0 ? (kpi.tShipping - prevKpi.tShipping) / prevKpi.tShipping * 100 : null;
         return (
           <div style={{ display:'grid', gridTemplateColumns:cols, gap:10, marginBottom:16 }}>
