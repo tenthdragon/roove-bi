@@ -100,7 +100,7 @@ export default function ChannelsPage() {
     const pf = shiftIsoDateByMonthsClamped(from, -1);
     const pt = shiftIsoDateByMonthsClamped(to, -1);
 
-    const cached = getCached<any>('channels_page_data_v5', from, to, `${pf}|${pt}`);
+    const cached = getCached<any>('channels_page_data_v6', from, to, `${pf}|${pt}`);
 
     if (cached) {
       setChannelData(cached.channel.filter(row => isActiveBrand(row.product)));
@@ -125,7 +125,7 @@ export default function ChannelsPage() {
     getChannelsPageData({ from, to, prevFrom: pf, prevTo: pt })
       .then((data) => {
         if (cancelled) return;
-        setCache('channels_page_data_v5', from, to, data, `${pf}|${pt}`);
+        setCache('channels_page_data_v6', from, to, data, `${pf}|${pt}`);
         setChannelData(data.channel.filter(row => isActiveBrand(row.product)));
         setAdsData(data.ads);
         setShippingData(data.shipping.filter(row => isActiveBrand(row.product)));

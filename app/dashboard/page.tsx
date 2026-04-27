@@ -211,12 +211,12 @@ export default function OverviewPage() {
 
     const cachedAds = getCached<any[]>('overview_ads_spend_v2', dateRange.from, dateRange.to);
     const cachedCh = getCached<any[]>('overview_channel_data_v2', dateRange.from, dateRange.to);
-    const cachedShipping = getCached<any[]>('overview_shipping_charge_data_v4', dateRange.from, dateRange.to);
-    const cachedShippingError = getCached<string>('overview_shipping_charge_error_v4', dateRange.from, dateRange.to) || '';
+    const cachedShipping = getCached<any[]>('overview_shipping_fee_data_v5', dateRange.from, dateRange.to);
+    const cachedShippingError = getCached<string>('overview_shipping_fee_error_v5', dateRange.from, dateRange.to) || '';
     const cachedPrevAds = getCached<any[]>('overview_ads_spend_prev_v2', prevFrom, prevTo);
     const cachedPrevCh = getCached<any[]>('overview_channel_data_prev_v2', prevFrom, prevTo);
-    const cachedPrevShipping = getCached<any[]>('overview_shipping_charge_data_prev_v4', prevFrom, prevTo);
-    const cachedPrevShippingError = getCached<string>('overview_shipping_charge_prev_error_v4', prevFrom, prevTo) || '';
+    const cachedPrevShipping = getCached<any[]>('overview_shipping_fee_data_prev_v5', prevFrom, prevTo);
+    const cachedPrevShippingError = getCached<string>('overview_shipping_fee_prev_error_v5', prevFrom, prevTo) || '';
 
     if (cachedAds && cachedCh && cachedShipping && cachedPrevAds && cachedPrevCh && cachedPrevShipping) {
       setAdsData(cachedAds);
@@ -246,12 +246,12 @@ export default function OverviewPage() {
         if (cancelled) return;
         setCache('overview_ads_spend_v2', dateRange.from, dateRange.to, data.ads);
         setCache('overview_channel_data_v2', dateRange.from, dateRange.to, data.channel);
-        setCache('overview_shipping_charge_data_v4', dateRange.from, dateRange.to, data.shipping);
-        setCache('overview_shipping_charge_error_v4', dateRange.from, dateRange.to, data.shippingError || '');
+        setCache('overview_shipping_fee_data_v5', dateRange.from, dateRange.to, data.shipping);
+        setCache('overview_shipping_fee_error_v5', dateRange.from, dateRange.to, data.shippingError || '');
         setCache('overview_ads_spend_prev_v2', prevFrom, prevTo, data.prevAds);
         setCache('overview_channel_data_prev_v2', prevFrom, prevTo, data.prevChannel);
-        setCache('overview_shipping_charge_data_prev_v4', prevFrom, prevTo, data.prevShipping);
-        setCache('overview_shipping_charge_prev_error_v4', prevFrom, prevTo, data.prevShippingError || '');
+        setCache('overview_shipping_fee_data_prev_v5', prevFrom, prevTo, data.prevShipping);
+        setCache('overview_shipping_fee_prev_error_v5', prevFrom, prevTo, data.prevShippingError || '');
         setAdsData(data.ads);
         setChannelData(data.channel);
         setShippingData(data.shipping.filter(row => isActiveBrand(row.product)));

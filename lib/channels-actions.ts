@@ -2,6 +2,7 @@
 
 import { requireDashboardTabAccess } from './dashboard-access';
 import { createServiceSupabase } from './supabase-server';
+import { getShippingFeeRange } from './shipping-fee-data';
 
 interface ChannelsPageDataParams {
   from: string;
@@ -57,7 +58,9 @@ export async function getChannelsPageData({
       .select('date, source, spent, store, data_source, impressions, cpm')
       .gte('date', from)
       .lte('date', to),
-    svc.rpc('get_daily_shipping_charge_data', { p_from: from, p_to: to }),
+    getShippingFeeRange(from, to)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: { message: error.message } })),
     svc.from('ads_store_brand_mapping')
       .select('store_pattern, brand'),
     svc.rpc('get_daily_shipment_counts', { p_from: from, p_to: to }),
@@ -69,11 +72,13 @@ export async function getChannelsPageData({
       .select('date, source, spent, store')
       .gte('date', prevFrom)
       .lte('date', prevTo),
-    svc.rpc('get_daily_shipping_charge_data', { p_from: prevFrom, p_to: prevTo }),
+    getShippingFeeRange(prevFrom, prevTo)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: { message: error.message } })),
   ]);
 
-  const shipping = unwrapOptional(shippingRes, 'Gagal memuat shipping charges Sales Channel');
-  const prevShipping = unwrapOptional(prevShippingRes, 'Gagal memuat shipping charges bulan sebelumnya');
+  const shipping = unwrapOptional(shippingRes, 'Gagal memuat shipping fee Sales Channel');
+  const prevShipping = unwrapOptional(prevShippingRes, 'Gagal memuat shipping fee bulan sebelumnya');
 
   return {
     channel: unwrap(channelRes, 'Gagal memuat data Sales Channel'),
