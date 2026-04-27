@@ -83,6 +83,23 @@ export function extractScalevOrderOriginRaw(rawData: any) {
   );
 }
 
+export function deriveWarehouseOriginBusinessNameFromOriginName(rawOriginName?: string | null) {
+  const cleaned = cleanWarehouseDomainText(rawOriginName);
+  if (!cleaned) return null;
+
+  const derived = cleanWarehouseDomainText(
+    cleaned
+      .replace(/'s warehouse$/i, '')
+      .replace(/\s+warehouse$/i, '')
+      .replace(/\s+gudang$/i, ''),
+  );
+
+  if (!derived) return null;
+  return normalizeWarehouseDomainText(derived) === normalizeWarehouseDomainText(cleaned)
+    ? null
+    : derived;
+}
+
 export function extractScalevLineItemNameRaw(line: any) {
   return cleanWarehouseDomainText(
     line?.item_name
@@ -199,24 +216,60 @@ export function resolveWarehouseOrigin(params: {
   rawOriginName?: string | null;
   registryRows: WarehouseOriginRegistryRow[];
 }): ResolvedWarehouseOrigin {
-  const businessNameNormalized = normalizeWarehouseDomainText(params.rawOriginBusinessName);
-  const originNameNormalized = normalizeWarehouseDomainText(params.rawOriginName);
-  if (!businessNameNormalized || !originNameNormalized) {
+  const cleanedOriginBusinessName = cleanWarehouseDomainText(params.rawOriginBusinessName);
+  const cleanedOriginName = cleanWarehouseDomainText(params.rawOriginName);
+  const derivedBusinessName = deriveWarehouseOriginBusinessNameFromOriginName(cleanedOriginName);
+
+  const businessNameCandidates = Array.from(new Set(
+    [
+      cleanedOriginBusinessName,
+      derivedBusinessName,
+    ]
+      .map((value) => normalizeWarehouseDomainText(value))
+      .filter(Boolean),
+  ));
+  const originNameCandidates = Array.from(new Set(
+    [
+      cleanedOriginName,
+      derivedBusinessName,
+    ]
+      .map((value) => normalizeWarehouseDomainText(value))
+      .filter(Boolean),
+  ));
+
+  if (businessNameCandidates.length === 0 && originNameCandidates.length === 0) {
     return {
       id: null,
       operator_business_id: null,
       operator_business_code: null,
       internal_warehouse_code: null,
-      external_origin_business_name: cleanWarehouseDomainText(params.rawOriginBusinessName),
-      external_origin_name: cleanWarehouseDomainText(params.rawOriginName),
+      external_origin_business_name: cleanedOriginBusinessName || derivedBusinessName,
+      external_origin_name: cleanedOriginName,
       source: 'none',
     };
   }
 
-  const entry = params.registryRows.find((row) => (
-    row.external_origin_business_name_normalized === businessNameNormalized
-    && row.external_origin_name_normalized === originNameNormalized
+  const exactEntry = params.registryRows.find((row) => (
+    businessNameCandidates.includes(row.external_origin_business_name_normalized)
+    && originNameCandidates.includes(row.external_origin_name_normalized)
   )) || null;
+
+  const businessOnlyMatches = businessNameCandidates.length > 0
+    ? params.registryRows.filter((row) => (
+        businessNameCandidates.includes(row.external_origin_business_name_normalized)
+        || businessNameCandidates.includes(row.external_origin_name_normalized)
+      ))
+    : [];
+  const originOnlyMatches = originNameCandidates.length > 0
+    ? params.registryRows.filter((row) => (
+        originNameCandidates.includes(row.external_origin_name_normalized)
+        || originNameCandidates.includes(row.external_origin_business_name_normalized)
+      ))
+    : [];
+
+  const entry = exactEntry
+    || (businessOnlyMatches.length === 1 ? businessOnlyMatches[0] : null)
+    || (originOnlyMatches.length === 1 ? originOnlyMatches[0] : null);
 
   if (!entry) {
     return {
@@ -224,8 +277,8 @@ export function resolveWarehouseOrigin(params: {
       operator_business_id: null,
       operator_business_code: null,
       internal_warehouse_code: null,
-      external_origin_business_name: cleanWarehouseDomainText(params.rawOriginBusinessName),
-      external_origin_name: cleanWarehouseDomainText(params.rawOriginName),
+      external_origin_business_name: cleanedOriginBusinessName || derivedBusinessName,
+      external_origin_name: cleanedOriginName,
       source: 'none',
     };
   }

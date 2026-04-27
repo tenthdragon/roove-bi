@@ -8,7 +8,8 @@ import {
 } from './scalev-api';
 import { parseScalevHeaderFinancialFields } from './scalev-header-financials';
 import { buildScalevSourceClassFields } from './scalev-source-class';
-import { reverseWarehouseDeductions } from './warehouse-ledger-actions';
+import { reconcileScalevOrderWarehouse } from './warehouse-ledger-actions';
+import { resolveWarehouseOrderContext } from './warehouse-order-context';
 import { createServiceSupabase } from './service-supabase';
 
 export type ScalevSyncMode = 'full' | 'date' | 'order_id' | 'repair';
@@ -31,18 +32,12 @@ export type ScalevSyncResult = {
   details: Array<Record<string, any>>;
 };
 
-const TERMINAL_SCALEV_STATUSES = new Set(['shipped', 'completed']);
-
 function getSyncLogType(syncMode: ScalevSyncMode) {
   return syncMode === 'full'
     ? 'pending_reconcile'
     : syncMode === 'repair'
       ? 'repair_missing_lines'
       : `targeted_${syncMode}`;
-}
-
-function shouldReverseWarehouseForStatusChange(oldStatus?: string | null, newStatus?: string | null) {
-  return TERMINAL_SCALEV_STATUSES.has(oldStatus || '') && !!newStatus && !TERMINAL_SCALEV_STATUSES.has(newStatus);
 }
 
 function buildSyncSourceClassFields(args: {
@@ -444,8 +439,9 @@ async function processOrder(
   channelOverrideMap: Map<string, string> = new Map(),
 ): Promise<'updated' | 'still_pending'> {
   const newStatus = apiOrder.status;
-  let reversedCount = 0;
+  let warehouseResult: Awaited<ReturnType<typeof reconcileScalevOrderWarehouse>> | null = null;
   const businessId = bizCodeToId.get(dbOrder.business_code) || 0;
+  const warehouseOrderContext = await resolveWarehouseOrderContext(svc, apiOrder, dbOrder.business_code || '');
   const sourceClassFields = buildSyncSourceClassFields({
     apiOrder,
     dbOrder,
@@ -463,20 +459,18 @@ async function processOrder(
 
     await svc.from('scalev_orders').update({
       status: newStatus,
+      business_name_raw: warehouseOrderContext.businessNameRaw,
+      origin_business_name_raw: warehouseOrderContext.originBusinessNameRaw,
+      origin_raw: warehouseOrderContext.originRaw,
+      seller_business_code: warehouseOrderContext.sellerBusinessCode,
+      origin_operator_business_code: warehouseOrderContext.originOperatorBusinessCode,
+      origin_registry_id: warehouseOrderContext.originRegistryId,
       ...sourceClassFields,
       ...(parsedHeaderFinancials.shippingDiscountPresent ? { shipping_discount: parsedHeaderFinancials.shippingDiscount } : {}),
       ...(parsedHeaderFinancials.discountCodeDiscountPresent ? { discount_code_discount: parsedHeaderFinancials.discountCodeDiscount } : {}),
       raw_data: apiOrder,
       synced_at: new Date().toISOString(),
     }).eq('id', dbOrder.id);
-
-    if (shouldReverseWarehouseForStatusChange(dbOrder.status, newStatus)) {
-      try {
-        reversedCount = await reverseWarehouseDeductions(dbOrder.order_id, dbOrder.id);
-      } catch (err: any) {
-        console.error(`[Sync] Failed to reverse warehouse for ${dbOrder.order_id}:`, err.message);
-      }
-    }
 
     if (!lightweight) {
       const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
@@ -493,6 +487,8 @@ async function processOrder(
       );
     }
 
+    warehouseResult = await reconcileScalevOrderWarehouse(dbOrder.order_id, dbOrder.id);
+
     details.push({
       order_id: dbOrder.order_id,
       store_name: dbOrder.store_name,
@@ -500,7 +496,9 @@ async function processOrder(
       old_status: dbOrder.status,
       new_status: newStatus,
       action: lightweight ? 'status_updated' : 'force_refreshed',
-      ...(reversedCount > 0 ? { warehouse_reversed: reversedCount } : {}),
+      ...(warehouseResult ? { warehouse_action: warehouseResult.action } : {}),
+      ...(warehouseResult && warehouseResult.reversed > 0 ? { warehouse_reversed: warehouseResult.reversed } : {}),
+      ...(warehouseResult && warehouseResult.deducted > 0 ? { warehouse_deducted: warehouseResult.deducted } : {}),
     });
     return 'updated';
   }
@@ -508,6 +506,12 @@ async function processOrder(
   const now = new Date().toISOString();
   const updateData: Record<string, any> = {
     status: newStatus,
+    business_name_raw: warehouseOrderContext.businessNameRaw,
+    origin_business_name_raw: warehouseOrderContext.originBusinessNameRaw,
+    origin_raw: warehouseOrderContext.originRaw,
+    seller_business_code: warehouseOrderContext.sellerBusinessCode,
+    origin_operator_business_code: warehouseOrderContext.originOperatorBusinessCode,
+    origin_registry_id: warehouseOrderContext.originRegistryId,
     ...sourceClassFields,
     synced_at: now,
     raw_data: apiOrder,
@@ -543,13 +547,7 @@ async function processOrder(
     );
   }
 
-  if (shouldReverseWarehouseForStatusChange(dbOrder.status, newStatus)) {
-    try {
-      reversedCount = await reverseWarehouseDeductions(dbOrder.order_id, dbOrder.id);
-    } catch (err: any) {
-      console.error(`[Sync] Failed to reverse warehouse for ${dbOrder.order_id}:`, err.message);
-    }
-  }
+  warehouseResult = await reconcileScalevOrderWarehouse(dbOrder.order_id, dbOrder.id);
 
   details.push({
     order_id: dbOrder.order_id,
@@ -557,7 +555,9 @@ async function processOrder(
     business_code: dbOrder.business_code,
     old_status: dbOrder.status,
     new_status: newStatus,
-    ...(reversedCount > 0 ? { warehouse_reversed: reversedCount } : {}),
+    ...(warehouseResult ? { warehouse_action: warehouseResult.action } : {}),
+    ...(warehouseResult && warehouseResult.reversed > 0 ? { warehouse_reversed: warehouseResult.reversed } : {}),
+    ...(warehouseResult && warehouseResult.deducted > 0 ? { warehouse_deducted: warehouseResult.deducted } : {}),
   });
 
   return 'updated';

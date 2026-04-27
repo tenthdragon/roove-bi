@@ -924,8 +924,22 @@ async function resolveWarehouseTargetsForOrder(
 ) {
   const productLines = await getScalevOrderWarehouseLines(svc, order.id);
   const orderContext = await resolveScalevOrderWarehouseContext(svc, order);
+  const mappingBusinessCode = cleanWarehouseDomainText(orderContext.seller_business_code)
+    || cleanWarehouseDomainText(order.business_code)
+    || null;
+  const mappingRows = mappingBusinessCode
+    ? await fetchBusinessMappingsByCodes(svc, [mappingBusinessCode])
+    : [];
+  const mappingGroups = groupBusinessMappingsByCode(mappingRows);
+  const mappings = mappingBusinessCode
+    ? (mappingGroups.get(mappingBusinessCode) || [])
+    : [];
+  const primaryBusinessMapping = pickPrimaryBusinessTarget(mappings);
+  const catalogBusinessCode = cleanWarehouseDomainText(orderContext.seller_business_code)
+    || cleanWarehouseDomainText(order.business_code)
+    || null;
 
-  if (!orderContext.seller_business_code || !orderContext.internal_warehouse_code) {
+  if (!catalogBusinessCode && !primaryBusinessMapping) {
     return {
       productLines,
       targets: [] as ResolvedWarehouseTarget[],
@@ -939,17 +953,30 @@ async function resolveWarehouseTargetsForOrder(
 
   const businessDirectoryRows = await fetchWarehouseBusinessDirectoryRows(svc);
   const linesByBusinessCode = new Map<string, ScalevOrderLineForWarehouse[]>();
-  linesByBusinessCode.set(orderContext.seller_business_code, productLines);
+  if (catalogBusinessCode) {
+    linesByBusinessCode.set(catalogBusinessCode, productLines);
+  }
 
   const context = await buildCatalogResolutionContext(
     svc,
-    [orderContext.seller_business_code],
+    catalogBusinessCode ? [catalogBusinessCode] : [],
     linesByBusinessCode,
   );
-  const catalogBusinessId = context.catalogBusinessIdByCode.get(orderContext.seller_business_code) || null;
+  const catalogBusinessId = catalogBusinessCode
+    ? (context.catalogBusinessIdByCode.get(catalogBusinessCode) || null)
+    : null;
+  const scalevMappings = await fetchScalevMappingsByProductNames(
+    svc,
+    Array.from(new Set(productLines.map(line => line.product_name))),
+  );
+  const scalevMappingByName = new Map<string, WarehouseScalevMappingRow>();
+  for (const scalevMapping of scalevMappings) {
+    scalevMappingByName.set(scalevMapping.scalev_product_name, scalevMapping);
+  }
 
   const targets: ResolvedWarehouseTarget[] = [];
   const unmappedProducts: string[] = [];
+  let skippedIgnored = 0;
   const allowedMappings = new Map<string, { deduct_entity: string; deduct_warehouse: string }>();
 
   for (const line of productLines) {
@@ -961,14 +988,21 @@ async function resolveWarehouseTargetsForOrder(
       directEntitiesByViewerKey: context.directEntitiesByViewerKey,
       canonicalMappingsByKey: context.canonicalMappingsByKey,
     });
-    if (!catalogTargets || catalogTargets.length === 0) {
-      unmappedProducts.push(line.product_name);
+    const scalevMapping = scalevMappingByName.get(line.product_name);
+
+    if ((!catalogTargets || catalogTargets.length === 0) && scalevMapping?.is_ignored) {
+      skippedIgnored++;
       continue;
     }
 
     let matchedAnyTarget = false;
+    const targetNoteBase = mappingBusinessCode && mappings.length > 0
+      ? `${mappingBusinessCode}\u2192${formatBusinessTargetSummary(mappings)}`
+      : catalogBusinessCode
+        ? `${catalogBusinessCode}\u2192${orderContext.internal_warehouse_code || '-'}`
+        : `${order.business_code || '-'}\u2192-`;
 
-    for (const catalogTarget of catalogTargets) {
+    for (const catalogTarget of catalogTargets || []) {
       const ownerResolution = await resolveScalevLineOwnerBusinessCode(
         svc,
         line,
@@ -978,20 +1012,6 @@ async function resolveWarehouseTargetsForOrder(
       const ownerBusinessCode = cleanWarehouseDomainText(ownerResolution.owner_business_code);
       const targetEntity = cleanWarehouseDomainText(catalogTarget.entity);
       const targetWarehouse = cleanWarehouseDomainText(catalogTarget.warehouse);
-
-      if (!ownerBusinessCode) continue;
-      if (targetEntity && targetEntity !== ownerBusinessCode) continue;
-      if (targetWarehouse && targetWarehouse !== orderContext.internal_warehouse_code) continue;
-
-      matchedAnyTarget = true;
-      allowedMappings.set(
-        `${ownerBusinessCode}|${orderContext.internal_warehouse_code}`,
-        {
-          deduct_entity: ownerBusinessCode,
-          deduct_warehouse: orderContext.internal_warehouse_code,
-        },
-      );
-
       const ownerSourceLabel = ownerResolution.source === 'order_line'
         ? 'owner-line'
         : ownerResolution.source === 'directory'
@@ -1000,21 +1020,120 @@ async function resolveWarehouseTargetsForOrder(
             ? 'owner-catalog-fallback'
             : 'owner-missing';
 
+      if (orderContext.internal_warehouse_code) {
+        if (!ownerBusinessCode) continue;
+        if (targetEntity && targetEntity !== ownerBusinessCode) continue;
+        if (targetWarehouse && targetWarehouse !== orderContext.internal_warehouse_code) continue;
+
+        matchedAnyTarget = true;
+        allowedMappings.set(
+          `${ownerBusinessCode}|${orderContext.internal_warehouse_code}`,
+          {
+            deduct_entity: ownerBusinessCode,
+            deduct_warehouse: orderContext.internal_warehouse_code,
+          },
+        );
+
+        targets.push({
+          warehouse_product_id: Number(catalogTarget.warehouse_product_id),
+          scalev_product_name: catalogTarget.scalev_label,
+          quantity: Number(line.quantity) * Number(catalogTarget.quantity_multiplier || 1),
+          note_context: `${catalogBusinessCode}\u2192${ownerBusinessCode}@${orderContext.origin_operator_business_code || '-'}:${orderContext.internal_warehouse_code} via ${catalogTarget.note_suffix} [${ownerSourceLabel}]`,
+          owner_business_code: ownerBusinessCode,
+        });
+        continue;
+      }
+
+      if (!targetEntity || !isWarehouseTargetAllowed(targetEntity, targetWarehouse, mappings)) {
+        continue;
+      }
+
+      matchedAnyTarget = true;
+      allowedMappings.set(
+        `${targetEntity}|${targetWarehouse || 'BTN'}`,
+        {
+          deduct_entity: targetEntity,
+          deduct_warehouse: targetWarehouse || 'BTN',
+        },
+      );
+
       targets.push({
         warehouse_product_id: Number(catalogTarget.warehouse_product_id),
         scalev_product_name: catalogTarget.scalev_label,
         quantity: Number(line.quantity) * Number(catalogTarget.quantity_multiplier || 1),
-        note_context: `${orderContext.seller_business_code}\u2192${ownerBusinessCode}@${orderContext.origin_operator_business_code || '-'}:${orderContext.internal_warehouse_code} via ${catalogTarget.note_suffix} [${ownerSourceLabel}]`,
-        owner_business_code: ownerBusinessCode,
+        note_context: `${targetNoteBase} via ${catalogTarget.note_suffix} [${ownerSourceLabel}]`,
+        owner_business_code: targetEntity,
       });
     }
 
-    if (!matchedAnyTarget) {
-      unmappedProducts.push(line.product_name);
+    if (matchedAnyTarget) {
+      continue;
     }
+
+    if (catalogTargets && catalogTargets.length > 0) {
+      unmappedProducts.push(line.product_name);
+      continue;
+    }
+
+    let targetProductId: number | null = null;
+    let deductQty = Number(line.quantity);
+    let targetNote = targetNoteBase;
+
+    if (
+      scalevMapping?.warehouse_product_id
+      && !isSuspiciousLegacyScalevTarget({
+        scalevProductName: line.product_name,
+        mapping: scalevMapping,
+        allowedTargets: mappings.length > 0 ? mappings : null,
+        deductEntity: primaryBusinessMapping?.deduct_entity || null,
+        deductWarehouse: primaryBusinessMapping?.deduct_warehouse || orderContext.internal_warehouse_code || 'BTN',
+      })
+    ) {
+      targetProductId = Number(scalevMapping.warehouse_product_id);
+      deductQty = Number(line.quantity) * Number(scalevMapping.deduct_qty_multiplier || 1);
+      targetNote = `${targetNoteBase} via legacy`;
+    } else {
+      for (const allowedMapping of mappings) {
+        const { data: whProducts, error: whProductsErr } = await svc
+          .rpc('warehouse_find_product_for_deduction', {
+            p_scalev_name: line.product_name,
+            p_entity: allowedMapping.deduct_entity,
+            p_warehouse: allowedMapping.deduct_warehouse || 'BTN',
+          });
+        if (whProductsErr) throw whProductsErr;
+        if (whProducts && whProducts.length > 0) {
+          targetProductId = Number(whProducts[0].id);
+          targetNote = `${targetNoteBase} via fallback:${allowedMapping.deduct_entity}`;
+          break;
+        }
+      }
+    }
+
+    if (targetProductId == null) {
+      unmappedProducts.push(line.product_name);
+      continue;
+    }
+
+    if (primaryBusinessMapping) {
+      allowedMappings.set(
+        `${primaryBusinessMapping.deduct_entity}|${primaryBusinessMapping.deduct_warehouse || 'BTN'}`,
+        {
+          deduct_entity: primaryBusinessMapping.deduct_entity,
+          deduct_warehouse: primaryBusinessMapping.deduct_warehouse || 'BTN',
+        },
+      );
+    }
+    targets.push({
+      warehouse_product_id: targetProductId,
+      scalev_product_name: line.product_name,
+      quantity: deductQty,
+      note_context: targetNote,
+      owner_business_code: primaryBusinessMapping?.deduct_entity || null,
+    });
   }
+
   const allowedMappingsList = Array.from(allowedMappings.values());
-  const primaryMapping = allowedMappingsList[0]
+  const derivedMapping = allowedMappingsList[0]
     ? {
         deduct_entity: allowedMappingsList[0].deduct_entity,
         deduct_warehouse: allowedMappingsList[0].deduct_warehouse,
@@ -1026,14 +1145,24 @@ async function resolveWarehouseTargetsForOrder(
     targets,
     desiredByProduct: aggregateTargetsByProduct(targets),
     unmappedProducts,
-    skippedIgnored: 0,
-    mapping: primaryMapping
+    skippedIgnored,
+    mapping: derivedMapping
       ? {
-          deduct_entity: primaryMapping.deduct_entity,
-          deduct_warehouse: primaryMapping.deduct_warehouse || orderContext.internal_warehouse_code || 'BTN',
+          deduct_entity: derivedMapping.deduct_entity,
+          deduct_warehouse: derivedMapping.deduct_warehouse || orderContext.internal_warehouse_code || primaryBusinessMapping?.deduct_warehouse || 'BTN',
         }
-      : null,
-    allowedMappings: allowedMappingsList,
+      : primaryBusinessMapping
+        ? {
+            deduct_entity: primaryBusinessMapping.deduct_entity,
+            deduct_warehouse: primaryBusinessMapping.deduct_warehouse || orderContext.internal_warehouse_code || 'BTN',
+          }
+        : null,
+    allowedMappings: allowedMappingsList.length > 0
+      ? allowedMappingsList
+      : mappings.map((row) => ({
+          deduct_entity: row.deduct_entity,
+          deduct_warehouse: row.deduct_warehouse || 'BTN',
+        })),
   };
 }
 

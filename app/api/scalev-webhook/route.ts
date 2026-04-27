@@ -10,17 +10,13 @@ import {
   extractMarketplaceTrackingFromScalevOrderRawData,
   extractMarketplaceTrackingFromWebhookData,
 } from '@/lib/marketplace-tracking';
+import { resolveWarehouseOrderContext } from '@/lib/warehouse-order-context';
 import { reconcileScalevOrderWarehouse } from '@/lib/warehouse-ledger-actions';
 import {
   extractScalevLineItemNameRaw,
   extractScalevLineItemOwnerRaw,
-  extractScalevOrderBusinessNameRaw,
-  extractScalevOrderOriginBusinessNameRaw,
-  extractScalevOrderOriginRaw,
   fetchWarehouseBusinessDirectoryRows,
-  fetchWarehouseOriginRegistryRows,
   resolveWarehouseBusinessCode,
-  resolveWarehouseOrigin,
 } from '@/lib/warehouse-domain-helpers';
 import { limitByIp } from '@/lib/request-hardening';
 
@@ -277,43 +273,6 @@ function getBusinessName(code: string): string {
   if (!cachedSecrets) return code;
   const found = cachedSecrets.find((s) => s.code === code);
   return found?.name || code;
-}
-
-async function resolveWarehouseOrderContext(svc: ReturnType<typeof getServiceSupabase>, data: any, businessCode: string) {
-  const [businessDirectoryRows, originRegistryRows] = await Promise.all([
-    fetchWarehouseBusinessDirectoryRows(svc as any),
-    fetchWarehouseOriginRegistryRows(svc as any),
-  ]);
-
-  const businessNameRaw = extractScalevOrderBusinessNameRaw(data, businessCode);
-  const originBusinessNameRaw = extractScalevOrderOriginBusinessNameRaw(data);
-  const originRaw = extractScalevOrderOriginRaw(data);
-
-  const seller = resolveWarehouseBusinessCode({
-    rawValue: businessNameRaw,
-    fallbackBusinessCode: businessCode,
-    directoryRows: businessDirectoryRows,
-  });
-  const originOperator = resolveWarehouseBusinessCode({
-    rawValue: originBusinessNameRaw,
-    fallbackBusinessCode: null,
-    directoryRows: businessDirectoryRows,
-  });
-  const originRegistry = resolveWarehouseOrigin({
-    rawOriginBusinessName: originBusinessNameRaw,
-    rawOriginName: originRaw,
-    registryRows: originRegistryRows,
-  });
-
-  return {
-    businessDirectoryRows,
-    businessNameRaw,
-    originBusinessNameRaw,
-    originRaw,
-    sellerBusinessCode: seller.business_code || businessCode || null,
-    originOperatorBusinessCode: originRegistry.operator_business_code || originOperator.business_code || null,
-    originRegistryId: originRegistry.id || null,
-  };
 }
 
 type ExistingScalevWebhookOrder = {
