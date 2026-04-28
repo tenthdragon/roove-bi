@@ -255,6 +255,15 @@ export function findWebhookRowByTrackingInRows(input: {
   return matches[0] || null;
 }
 
+export function resolvePromoteExistingSourceBehavior(
+  existingSource: string | null | undefined,
+): 'insert' | 'update' | 'skip' {
+  const source = cleanText(existingSource);
+  if (!source) return 'insert';
+  if (source === MARKETPLACE_APP_SOURCE || source === 'webhook') return 'update';
+  return 'skip';
+}
+
 function chunkValues<T>(values: T[], size: number): T[][] {
   const chunks: T[][] = [];
   for (let index = 0; index < values.length; index += size) {
@@ -899,24 +908,18 @@ export async function promoteMarketplaceIntakeBatchToApp(
         }
       }
 
-      if (!existing) {
-        const contextLabel = trackingNumber
-          ? `tracking ${trackingNumber}`
-          : `external_id ${group.externalId}`;
-        throw new Error(
-          `Order marketplace ${group.externalId} tidak bisa diikat ke row webhook existing (${contextLabel}). Promote dihentikan untuk mencegah duplicate order.`,
-        );
-      }
-
-      if (existing && existing.source && existing.source !== MARKETPLACE_APP_SOURCE && existing.source !== 'webhook') {
+      const existingBehavior = resolvePromoteExistingSourceBehavior(existing?.source);
+      if (existingBehavior === 'skip') {
         skippedCount += 1;
         continue;
       }
 
-      if (matchedBy === 'external_id') matchedExternalIdCount += 1;
-      if (matchedBy === 'tracking') matchedTrackingCount += 1;
-      if (existing.source === 'webhook') updatedWebhookCount += 1;
-      if (existing.source === MARKETPLACE_APP_SOURCE) updatedAuthoritativeCount += 1;
+      if (existing) {
+        if (matchedBy === 'external_id') matchedExternalIdCount += 1;
+        if (matchedBy === 'tracking') matchedTrackingCount += 1;
+        if (existing.source === 'webhook') updatedWebhookCount += 1;
+        if (existing.source === MARKETPLACE_APP_SOURCE) updatedAuthoritativeCount += 1;
+      }
 
       const promotePlatform = normalizePromotePlatformSlug(
         intakeOrder.raw_meta?.platform

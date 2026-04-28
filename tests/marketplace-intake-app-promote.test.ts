@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   buildTrackingLookupBounds,
   findWebhookRowByTrackingInRows,
+  resolvePromoteExistingSourceBehavior,
 } from '../lib/marketplace-intake-app-promote';
 
 test('buildTrackingLookupBounds widens tracking lookup around shipment date', () => {
@@ -82,4 +83,12 @@ test('findWebhookRowByTrackingInRows rejects duplicate matches for the same trac
       ],
     });
   }, /lebih dari satu webhook row/i);
+});
+
+test('resolvePromoteExistingSourceBehavior allows marketplace intake to seed authoritative rows', () => {
+  assert.equal(resolvePromoteExistingSourceBehavior(null), 'insert');
+  assert.equal(resolvePromoteExistingSourceBehavior(''), 'insert');
+  assert.equal(resolvePromoteExistingSourceBehavior('webhook'), 'update');
+  assert.equal(resolvePromoteExistingSourceBehavior('marketplace_api_upload'), 'update');
+  assert.equal(resolvePromoteExistingSourceBehavior('ops_upload'), 'skip');
 });
