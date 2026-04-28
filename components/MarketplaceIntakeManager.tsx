@@ -164,6 +164,43 @@ function SyncStatusPill({ status, successLabel, failedLabel, idleLabel, partialL
   );
 }
 
+function FeedbackNotice({ message, compact = false }) {
+  if (!message?.text) return null;
+
+  const meta = message.type === 'success'
+    ? {
+      bg: 'rgba(34,197,94,0.12)',
+      color: '#86efac',
+      border: 'rgba(34,197,94,0.24)',
+    }
+    : message.type === 'error'
+      ? {
+        bg: 'rgba(239,68,68,0.12)',
+        color: '#fca5a5',
+        border: 'rgba(239,68,68,0.24)',
+      }
+      : {
+        bg: 'rgba(148,163,184,0.12)',
+        color: 'var(--text-secondary)',
+        border: 'var(--border)',
+      };
+
+  return (
+    <div
+      style={{
+        padding: compact ? '8px 10px' : '10px 12px',
+        borderRadius: 10,
+        fontSize: compact ? 12 : 13,
+        background: meta.bg,
+        color: meta.color,
+        border: `1px solid ${meta.border}`,
+      }}
+    >
+      {message.text}
+    </div>
+  );
+}
+
 function SummaryCard({ label, value, tone = 'default', helper }) {
   const color = tone === 'danger'
     ? '#ef4444'
@@ -1215,6 +1252,7 @@ export default function MarketplaceIntakeManager() {
       setLineSearchResults({});
       setMessage({
         type: 'success',
+        scope: 'upload',
         text: `Preview selesai. ${fmtNumber(data.summary?.readyOrders || 0)} order siap, ${fmtNumber(data.summary?.needsReviewOrders || 0)} perlu review, ${fmtNumber(Object.keys(initialSelections).length)} line sudah preselect dari ingatan manual.`,
       });
     } catch (err) {
@@ -1271,6 +1309,7 @@ export default function MarketplaceIntakeManager() {
 
       setMessage({
         type: 'success',
+        scope: 'workspace',
         text: data.message || `Batch #${data.batchId} berhasil masuk ke workspace warehouse. Data ini belum ikut proses downstream sampai shipment date diisi.`,
       });
     } catch (err) {
@@ -1378,6 +1417,7 @@ export default function MarketplaceIntakeManager() {
       });
       setMessage({
         type: 'success',
+        scope: 'preview',
         text: `Rule permanen tersimpan untuk "${line.mpProductName}". Line serupa sekarang bisa dipetakan lagi dari tab Resolver Rules.`,
       });
     } catch (err) {
@@ -1494,6 +1534,7 @@ export default function MarketplaceIntakeManager() {
       }));
       setMessage({
         type: 'success',
+        scope: 'preview',
         text: `Perbaikan inline tersimpan untuk "${line.mpProductName}". SKU normalization dan atribusi entity/store sekarang tersimpan permanen.`,
       });
     } catch (err) {
@@ -1636,6 +1677,7 @@ export default function MarketplaceIntakeManager() {
 
       setMessage({
         type: 'success',
+        scope: 'preview',
         text: `Isu "${cluster.title}" tersimpan. ${fmtNumber(cluster.lineCount)} line di ${fmtNumber(cluster.orderCount)} order sekarang memakai rule yang sama.`,
       });
     } catch (err) {
@@ -1674,6 +1716,7 @@ export default function MarketplaceIntakeManager() {
       await loadWorkspace(nextWorkspaceDate);
       setMessage({
         type: 'success',
+        scope: 'workspace',
         text: successText || `${fmtNumber(data.updatedCount || orderIds.length)} order berhasil diperbarui.`,
       });
     } catch (err) {
@@ -1712,6 +1755,8 @@ export default function MarketplaceIntakeManager() {
       await loadWorkspace(targetShipmentDate);
       setMessage({
         type: 'success',
+        scope: 'batch',
+        batchId,
         text: data.reconcile
           ? `Batch #${batchId} berhasil dikirim ke Scalev (${fmtNumber(data.rowCount || 0)} row, shipment ${fmtDateLabel(targetShipmentDate)}). Tarik ID: ${formatReconcileSuccessText(data.reconcile)}.`
           : data.reconcileError
@@ -1747,6 +1792,8 @@ export default function MarketplaceIntakeManager() {
       await loadWorkspace(workspaceDate);
       setMessage({
         type: 'success',
+        scope: 'batch',
+        batchId,
         text: `Batch #${batchId} selesai tarik Scalev ID: ${formatReconcileSuccessText(data)}.`,
       });
     } catch (err) {
@@ -1785,6 +1832,8 @@ export default function MarketplaceIntakeManager() {
       await loadWorkspace(targetShipmentDate);
       setMessage({
         type: 'success',
+        scope: 'batch',
+        batchId,
         text: `Batch #${batchId} masuk ke app (${fmtNumber(data.insertedCount || 0)} baru, ${fmtNumber(data.updatedCount || 0)} update, ${fmtNumber(data.updatedWebhookCount || 0)} bind webhook, ${fmtNumber(data.matchedTrackingCount || 0)} via tracking, ${fmtNumber(data.skippedCount || 0)} skip).`,
       });
     } catch (err) {
@@ -1800,6 +1849,9 @@ export default function MarketplaceIntakeManager() {
   const stagedBatches = useMemo(() => groupOrdersByBatch(stagedOrders), [stagedOrders]);
   const shipmentBatches = useMemo(() => groupOrdersByBatch(shipmentOrders), [shipmentOrders]);
   const allStagedOrderIds = useMemo(() => stagedOrders.map((order) => Number(order.id)).filter((id) => Number.isFinite(id) && id > 0), [stagedOrders]);
+  const previewMessage = message?.scope === 'preview' ? message : null;
+  const workspaceMessage = message?.scope === 'workspace' ? message : null;
+  const globalMessage = !message?.scope || message.scope === 'upload' ? message : null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -1857,19 +1909,9 @@ export default function MarketplaceIntakeManager() {
           </div>
         ) : null}
 
-        {message?.text ? (
-          <div
-            style={{
-              marginBottom: 12,
-              padding: '10px 12px',
-              borderRadius: 10,
-              fontSize: 13,
-              background: message.type === 'success' ? 'rgba(34,197,94,0.12)' : 'rgba(148,163,184,0.12)',
-              color: message.type === 'success' ? '#86efac' : 'var(--text-secondary)',
-              border: `1px solid ${message.type === 'success' ? 'rgba(34,197,94,0.24)' : 'var(--border)'}`,
-            }}
-          >
-            {message.text}
+        {globalMessage ? (
+          <div style={{ marginBottom: 12 }}>
+            <FeedbackNotice message={globalMessage} />
           </div>
         ) : null}
 
@@ -1984,6 +2026,12 @@ export default function MarketplaceIntakeManager() {
                 />
               </div>
             </div>
+
+            {previewMessage ? (
+              <div style={{ marginBottom: 12 }}>
+                <FeedbackNotice message={previewMessage} />
+              </div>
+            ) : null}
 
             {!canConfirm ? (
               <div
@@ -2751,6 +2799,12 @@ export default function MarketplaceIntakeManager() {
           </div>
         ) : null}
 
+        {workspaceMessage ? (
+          <div style={{ marginBottom: 12 }}>
+            <FeedbackNotice message={workspaceMessage} />
+          </div>
+        ) : null}
+
         <div
           style={{
             display: 'grid',
@@ -2812,6 +2866,9 @@ export default function MarketplaceIntakeManager() {
                     const appButtonMeta = getAppButtonMeta(batch.appLastPromoteStatus);
                     const scalevButtonMeta = getScalevButtonMeta(batch.scalevLastSendStatus);
                     const reconcileButtonMeta = getScalevReconcileButtonMeta(batch.scalevLastReconcileStatus);
+                    const batchMessage = message?.scope === 'batch' && String(message.batchId) === String(batch.batchId)
+                      ? message
+                      : null;
                     return (
                       <Fragment key={batchKey}>
                         <tr>
@@ -2886,6 +2943,9 @@ export default function MarketplaceIntakeManager() {
                                   {formatReconcileStatusText(batch)}
                                 </div>
                               </div>
+                              {batchMessage ? (
+                                <FeedbackNotice message={batchMessage} compact />
+                              ) : null}
                             </div>
                           </td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
@@ -3061,6 +3121,9 @@ export default function MarketplaceIntakeManager() {
                     const appButtonMeta = getAppButtonMeta(batch.appLastPromoteStatus);
                     const scalevButtonMeta = getScalevButtonMeta(batch.scalevLastSendStatus);
                     const reconcileButtonMeta = getScalevReconcileButtonMeta(batch.scalevLastReconcileStatus);
+                    const batchMessage = message?.scope === 'batch' && String(message.batchId) === String(batch.batchId)
+                      ? message
+                      : null;
                     return (
                       <Fragment key={batchKey}>
                         <tr>
@@ -3116,6 +3179,9 @@ export default function MarketplaceIntakeManager() {
                                   {formatReconcileStatusText(batch)}
                                 </div>
                               </div>
+                              {batchMessage ? (
+                                <FeedbackNotice message={batchMessage} compact />
+                              ) : null}
                             </div>
                           </td>
                           <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
