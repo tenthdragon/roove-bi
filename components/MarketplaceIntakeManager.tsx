@@ -46,6 +46,16 @@ function cleanText(value) {
   return String(value ?? '').trim();
 }
 
+const NON_BLOCKING_PREVIEW_ISSUE_CODES = new Set([
+  'remembered_manual_match',
+  'manual_match_confirmed',
+  'sku_alias_applied',
+]);
+
+function isActionablePreviewIssueCode(code) {
+  return !NON_BLOCKING_PREVIEW_ISSUE_CODES.has(String(code || '').trim());
+}
+
 function getCurrentDateValue() {
   const now = new Date();
   const year = now.getFullYear();
@@ -640,7 +650,10 @@ export default function MarketplaceIntakeManager() {
       });
 
       const issueCodes = new Set(
-        (order.issueCodes || []).filter((code) => !['custom_id_not_found', 'custom_id_ambiguous', 'store_classifier_missing', 'store_amount_tie'].includes(code)),
+        (order.issueCodes || []).filter((code) => (
+          !['custom_id_not_found', 'custom_id_ambiguous', 'store_classifier_missing', 'store_amount_tie'].includes(code)
+          && isActionablePreviewIssueCode(code)
+        )),
       );
       const identifiedLineCount = lines.filter((line) => line.effectiveStatus !== 'not_identified').length;
       const classifiedLineCount = lines.filter((line) => line.effectiveStatus === 'identified').length;
@@ -648,7 +661,7 @@ export default function MarketplaceIntakeManager() {
 
       for (const line of lines) {
         for (const code of line.effectiveIssueCodes || []) {
-          if (code !== 'remembered_manual_match') {
+          if (isActionablePreviewIssueCode(code)) {
             issueCodes.add(code);
           }
         }
@@ -862,7 +875,7 @@ export default function MarketplaceIntakeManager() {
 
     for (const order of effectivePreviewOrders) {
       for (const line of order.lines || []) {
-        const meaningfulIssueCodes = (line.effectiveIssueCodes || []).filter((code) => code !== 'remembered_manual_match');
+        const meaningfulIssueCodes = (line.effectiveIssueCodes || []).filter((code) => isActionablePreviewIssueCode(code));
         const needsReview = line.effectiveStatus !== 'identified' || meaningfulIssueCodes.length > 0;
         if (!needsReview) continue;
 
@@ -2374,8 +2387,9 @@ export default function MarketplaceIntakeManager() {
                                 && Number(inlineFixCandidate?.scalevBundleId || 0) > 0
                                 && inlineFixCandidate?.storeName,
                               );
+                              const actionableIssueCodes = (line.effectiveIssueCodes || []).filter((code) => isActionablePreviewIssueCode(code));
                               const shouldShowInlineFix = line.effectiveStatus !== 'identified'
-                                || (line.effectiveIssueCodes || []).some((code) => code !== 'remembered_manual_match');
+                                || actionableIssueCodes.length > 0;
                               const canPersistResolverRule = Boolean(
                                 persistCandidate?.entityKey
                                 && Number(persistCandidate?.scalevBundleId || 0) > 0,
@@ -2425,7 +2439,7 @@ export default function MarketplaceIntakeManager() {
                                   <div>
                                     <div style={{ fontWeight: 700 }}>{line.mpProductName}</div>
                                     {(line.effectiveIssueCodes || []).length ? (
-                                      <div style={{ marginTop: 6, fontSize: 12, color: (line.effectiveIssueCodes || []).includes('remembered_manual_match') ? '#93c5fd' : '#fca5a5' }}>
+                                      <div style={{ marginTop: 6, fontSize: 12, color: actionableIssueCodes.length ? '#fca5a5' : '#93c5fd' }}>
                                         {(line.effectiveIssueCodes || []).join(', ')}
                                       </div>
                                     ) : null}
