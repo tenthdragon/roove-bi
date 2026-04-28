@@ -332,8 +332,35 @@ function parseDateTime(value: unknown): string | null {
     .replace(/\./g, ':')
     .replace(/(\d{2})\/(\d{2})\/(\d{4})/, '$3-$2-$1');
   const parsed = new Date(normalized);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed.toISOString();
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString();
+
+  const wibMatch = text.match(/^(?:[A-Za-z]{3}\s+)?([A-Za-z]{3})\s+(\d{1,2})\s+(\d{2}:\d{2}(?::\d{2})?)\s+WIB\s+(\d{4})$/i);
+  if (wibMatch) {
+    const monthMap: Record<string, string> = {
+      jan: '01',
+      feb: '02',
+      mar: '03',
+      apr: '04',
+      may: '05',
+      jun: '06',
+      jul: '07',
+      aug: '08',
+      sep: '09',
+      oct: '10',
+      nov: '11',
+      dec: '12',
+    };
+    const month = monthMap[wibMatch[1].slice(0, 3).toLowerCase()];
+    const day = String(wibMatch[2]).padStart(2, '0');
+    const time = wibMatch[3].length === 5 ? `${wibMatch[3]}:00` : wibMatch[3];
+    const year = wibMatch[4];
+    if (month) {
+      const fallback = new Date(`${year}-${month}-${day}T${time}+07:00`);
+      if (!Number.isNaN(fallback.getTime())) return fallback.toISOString();
+    }
+  }
+
+  return null;
 }
 
 function parseWeightGrams(value: unknown): number | null {
@@ -743,6 +770,225 @@ function parseShopeeOrders(rows: Record<string, string>[]): CanonicalOrder[] {
   }));
 }
 
+function parseBlibliOrders(rows: Record<string, string>[]): CanonicalOrder[] {
+  const orders = new Map<string, CanonicalOrder>();
+
+  for (const row of rows) {
+    const externalId = cleanText(row['No. Order']);
+    if (!externalId) continue;
+
+    const existing = orders.get(externalId);
+    const quantity = Math.max(parseInteger(row['Total Barang']) || 1, 1);
+    const unitPrice = parseNumber(row['Harga Produk']);
+    const rawSellerSku = cleanText(row['Merchant Sku']) || cleanText(row['Blibli SKU']);
+    const line: CanonicalLine = {
+      rawPlatformSkuId: cleanText(row['Blibli SKU']),
+      rawSellerSku,
+      sku: rawSellerSku,
+      normalizedSku: rawSellerSku,
+      skuNormalizationSource: rawSellerSku ? 'marketplace_seller_sku' : null,
+      skuNormalizationReason: null,
+      productName: cleanText(row['Nama Produk']) || 'Produk Marketplace',
+      variation: null,
+      quantity,
+      unitPrice,
+      lineSubtotal: unitPrice * quantity,
+      lineDiscount: 0,
+      priceInitial: unitPrice,
+      priceAfterDiscount: unitPrice,
+      rawRow: row,
+    };
+
+    if (existing) {
+      existing.lines.push(line);
+      existing.orderAmount += line.lineSubtotal;
+      existing.buyerPaidAmount = (existing.buyerPaidAmount || 0) + line.lineSubtotal;
+      existing.rawMeta = {
+        ...existing.rawMeta,
+        orderItemIds: Array.from(new Set([
+          ...((Array.isArray(existing.rawMeta?.orderItemIds) ? existing.rawMeta.orderItemIds : []) as unknown[]),
+          cleanText(row['No. Order Item']),
+        ].filter(Boolean))),
+      };
+      continue;
+    }
+
+    orders.set(externalId, {
+      platform: 'blibli',
+      externalId,
+      status: cleanText(row['Order Status']),
+      substatus: null,
+      paymentMethodLabel: 'marketplace',
+      createdAt: parseDateTime(row['Tanggal Order']),
+      paidAt: parseDateTime(row['Tanggal Order']),
+      rtsAt: null,
+      deliveredAt: null,
+      trackingNumber: cleanText(row['No. Awb']),
+      shippingProvider: cleanText(row['Merchant Delivery Type']),
+      deliveryOption: cleanText(row['Merchant Delivery Type']),
+      customerUsername: cleanText(row['Nama Pemesan']),
+      customerName: cleanText(row['Nama Pemesan']),
+      customerPhone: null,
+      customerEmail: null,
+      country: 'Indonesia',
+      province: null,
+      city: null,
+      district: null,
+      village: null,
+      postalCode: null,
+      address: null,
+      addressNotes: null,
+      rawAddress: null,
+      shippingCost: 0,
+      orderAmount: line.lineSubtotal,
+      buyerPaidAmount: line.lineSubtotal,
+      totalPaymentAmount: undefined,
+      lines: [line],
+      rawMeta: {
+        orderItemIds: [cleanText(row['No. Order Item'])].filter(Boolean),
+        marketplaceOrderNumber: externalId,
+        packageNumber: cleanText(row['No. Paket']),
+        deliveryType: cleanText(row['Merchant Delivery Type']),
+        pickupPointCode: cleanText(row['Pickup Point Code']),
+        blibliSku: cleanText(row['Blibli SKU']),
+      },
+    });
+  }
+
+  return Array.from(orders.values()).map((order) => ({
+    ...order,
+    lines: aggregateCanonicalLines(order.lines),
+  }));
+}
+
+function parseLazadaOrders(rows: Record<string, string>[]): CanonicalOrder[] {
+  const orders = new Map<string, CanonicalOrder>();
+  const orderKeyToExternalIdCandidates = new Map<string, string[]>();
+
+  for (const row of rows) {
+    const orderNumber = cleanText(row.orderNumber);
+    if (!orderNumber) continue;
+
+    const orderKey = orderNumber;
+    const externalIdCandidates = [
+      cleanText(row.orderItemId),
+      cleanText(row.lazadaId),
+      orderNumber,
+    ].filter((value): value is string => Boolean(value));
+    const knownCandidates = orderKeyToExternalIdCandidates.get(orderKey) || [];
+    for (const candidate of externalIdCandidates) {
+      if (!knownCandidates.includes(candidate)) knownCandidates.push(candidate);
+    }
+    knownCandidates.sort((left, right) => left.localeCompare(right, 'en', { numeric: true }));
+    orderKeyToExternalIdCandidates.set(orderKey, knownCandidates);
+    const externalId = knownCandidates[0] || orderNumber;
+
+    const existing = orders.get(orderKey);
+    const quantity = 1;
+    const unitPrice = parseNumber(row.unitPrice);
+    const paidPrice = parseNumber(row.paidPrice) || unitPrice;
+    const sellerDiscount = parseNumber(row.sellerDiscountTotal);
+    const bundleDiscount = parseNumber(row.bundleDiscount);
+    const platformDiscount = Math.abs(parseNumber(row.platformDiscountTotal));
+    const rawSellerSku = cleanText(row.sellerSku) || cleanText(row.lazadaSku);
+    const line: CanonicalLine = {
+      rawPlatformSkuId: cleanText(row.orderItemId) || cleanText(row.lazadaId),
+      rawSellerSku,
+      sku: rawSellerSku,
+      normalizedSku: rawSellerSku,
+      skuNormalizationSource: rawSellerSku ? 'marketplace_seller_sku' : null,
+      skuNormalizationReason: null,
+      productName: cleanText(row.itemName) || 'Produk Marketplace',
+      variation: cleanText(row.variation),
+      quantity,
+      unitPrice,
+      lineSubtotal: unitPrice * quantity,
+      lineDiscount: sellerDiscount + bundleDiscount + platformDiscount,
+      priceInitial: unitPrice,
+      priceAfterDiscount: paidPrice,
+      totalDiscount: sellerDiscount + bundleDiscount + platformDiscount,
+      rawRow: row,
+    };
+
+    if (existing) {
+      existing.lines.push(line);
+      existing.orderAmount += paidPrice;
+      existing.buyerPaidAmount = (existing.buyerPaidAmount || 0) + paidPrice;
+      existing.rawMeta = {
+        ...existing.rawMeta,
+        orderItemIds: Array.from(new Set([
+          ...((Array.isArray(existing.rawMeta?.orderItemIds) ? existing.rawMeta.orderItemIds : []) as unknown[]),
+          cleanText(row.orderItemId) || cleanText(row.lazadaId),
+        ].filter(Boolean))),
+        unitPriceTotal: Number(existing.rawMeta?.unitPriceTotal || 0) + unitPrice,
+        paidPriceTotal: Number(existing.rawMeta?.paidPriceTotal || 0) + paidPrice,
+        platformDiscountTotal: Number(existing.rawMeta?.platformDiscountTotal || 0) + platformDiscount,
+        sellerDiscountTotal: Number(existing.rawMeta?.sellerDiscountTotal || 0) + sellerDiscount,
+        bundleDiscountTotal: Number(existing.rawMeta?.bundleDiscountTotal || 0) + bundleDiscount,
+      };
+      continue;
+    }
+
+    const addressParts = [
+      cleanText(row.shippingAddress),
+      cleanText(row.shippingAddress2),
+      cleanText(row.shippingAddress3),
+      cleanText(row.shippingAddress4),
+      cleanText(row.shippingAddress5),
+    ].filter((part): part is string => Boolean(part));
+
+    orders.set(orderKey, {
+      platform: 'lazada',
+      externalId,
+      status: cleanText(row.status),
+      substatus: cleanText(row.buyerFailedDeliveryReason),
+      paymentMethodLabel: cleanText(row.payMethod),
+      createdAt: parseDateTime(row.createTime),
+      paidAt: parseDateTime(row.createTime),
+      rtsAt: parseDateTime(row.updateTime),
+      deliveredAt: parseDateTime(row.deliveredDate),
+      trackingNumber: cleanText(row.trackingCode) || cleanText(row.cdTrackingCode),
+      shippingProvider: cleanText(row.shippingProvider) || cleanText(row.shippingProviderFM),
+      deliveryOption: cleanText(row.shipmentTypeName) || cleanText(row.deliveryType),
+      customerUsername: cleanText(row.customerName),
+      customerName: cleanText(row.shippingName) || cleanText(row.customerName),
+      customerPhone: normalizePhone(cleanText(row.shippingPhone) || cleanText(row.shippingPhone2)),
+      customerEmail: cleanText(row.customerEmail),
+      country: cleanText(row.shippingCountry) || 'Indonesia',
+      province: cleanText(row.shippingRegion) || cleanText(row.shippingAddress5),
+      city: cleanText(row.shippingCity),
+      district: cleanText(row.shippingAddress4),
+      village: cleanText(row.shippingAddress3),
+      postalCode: cleanText(row.shippingPostCode),
+      address: cleanText(row.shippingAddress),
+      addressNotes: cleanText(row.sellerNote),
+      rawAddress: addressParts.join(', ') || null,
+      shippingCost: 0,
+      orderAmount: paidPrice,
+      buyerPaidAmount: paidPrice,
+      totalPaymentAmount: undefined,
+      lines: [line],
+      rawMeta: {
+        marketplaceOrderNumber: orderNumber,
+        orderItemIds: [cleanText(row.orderItemId) || cleanText(row.lazadaId)].filter(Boolean),
+        lazadaSku: cleanText(row.lazadaSku),
+        shippingFeeRaw: parseNumber(row.shippingFee),
+        unitPriceTotal: unitPrice,
+        paidPriceTotal: paidPrice,
+        platformDiscountTotal: platformDiscount,
+        sellerDiscountTotal: sellerDiscount,
+        bundleDiscountTotal: bundleDiscount,
+        walletCredit: parseNumber(row.walletCredit),
+      },
+    });
+  }
+
+  return Array.from(orders.values()).map((order) => ({
+    ...order,
+    lines: aggregateCanonicalLines(order.lines),
+  }));
+}
+
 async function parseMarketplaceWorkbook(input: {
   file: File;
   sourceConfig: MarketplaceIntakeSourceConfig;
@@ -771,6 +1017,28 @@ async function parseMarketplaceWorkbook(input: {
     }
     return {
       orders: parseShopeeOrders(stringRows),
+      rowCount: stringRows.length,
+      headers,
+    };
+  }
+
+  if (input.sourceConfig.parserFamily === 'blibli') {
+    if (!headers.includes('No. Order') || !headers.includes('Merchant Sku')) {
+      throw new Error('Halaman ini saat ini hanya menerima export Blibli yang memiliki kolom "No. Order" dan "Merchant Sku".');
+    }
+    return {
+      orders: parseBlibliOrders(stringRows),
+      rowCount: stringRows.length,
+      headers,
+    };
+  }
+
+  if (input.sourceConfig.parserFamily === 'lazada') {
+    if (!headers.includes('orderNumber') || !headers.includes('sellerSku')) {
+      throw new Error('Halaman ini saat ini hanya menerima export Lazada yang memiliki kolom "orderNumber" dan "sellerSku".');
+    }
+    return {
+      orders: parseLazadaOrders(stringRows),
       rowCount: stringRows.length,
       headers,
     };

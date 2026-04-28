@@ -6,7 +6,7 @@ export type MarketplaceIntakeSourceKey =
   | 'blibli_rti'
   | 'lazada_rlt';
 export type MarketplaceIntakePlatform = 'shopee' | 'tiktok' | 'blibli' | 'lazada';
-export type MarketplaceIntakeParserFamily = 'shopee' | 'tiktok' | 'none';
+export type MarketplaceIntakeParserFamily = 'shopee' | 'tiktok' | 'blibli' | 'lazada' | 'none';
 
 export type MarketplaceIntakeSourceConfig = {
   id: number | null;
@@ -147,34 +147,34 @@ const MARKETPLACE_INTAKE_SOURCE_CONFIGS: Record<MarketplaceIntakeSourceKey, Mark
     sourceKey: 'blibli_rti',
     sourceLabel: 'Blibli RTI',
     platform: 'blibli',
-    parserFamily: 'none',
-    uploadEnabled: false,
+    parserFamily: 'blibli',
+    uploadEnabled: true,
     businessCode: 'RTI',
     allowedStores: BLIBLI_RTI_ALLOWED_STORE_NAMES,
     uploadTitle: 'Upload Blibli RTI',
-    uploadDescription: 'Source ini sudah terdaftar untuk reference dan store scope RTI, tetapi parser upload intake belum diaktifkan.',
-    dragDropTitle: 'Upload Blibli RTI belum aktif',
-    readingLabel: 'Parser Blibli RTI belum aktif…',
+    uploadDescription: 'Halaman ini membaca export order mentah Blibli RTI. App akan match Merchant SKU workbook ke bundle custom_id di business RTI, lalu menebak store final dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.',
+    dragDropTitle: 'Drag & drop file Blibli RTI di sini',
+    readingLabel: 'Membaca file Blibli RTI…',
     previewLabel: 'Preview Mapping Blibli RTI',
     searchPlaceholder: 'Cari bundle RTI…',
-    pageDescription: 'Source Blibli RTI sudah terdaftar untuk kebutuhan reference, store scope, dan resolver rules. Jalur parsing upload akan diaktifkan menyusul.',
+    pageDescription: 'Tahap pertama untuk jalur marketplace Blibli RTI. Upload workbook order mentah, lalu app akan match Merchant SKU ke bundle custom_id di business RTI, mencari store final dari nama bundle/produk, dan menaruh hasilnya ke workspace warehouse. Data baru dianggap valid downstream setelah warehouse memberi shipment date.',
   },
   lazada_rlt: {
     id: null,
     sourceKey: 'lazada_rlt',
     sourceLabel: 'Lazada RLT',
     platform: 'lazada',
-    parserFamily: 'none',
-    uploadEnabled: false,
+    parserFamily: 'lazada',
+    uploadEnabled: true,
     businessCode: 'RLT',
     allowedStores: LAZADA_RLT_ALLOWED_STORE_NAMES,
     uploadTitle: 'Upload Lazada RLT',
-    uploadDescription: 'Source ini sudah terdaftar untuk reference dan store scope RLT, tetapi parser upload intake belum diaktifkan.',
-    dragDropTitle: 'Upload Lazada RLT belum aktif',
-    readingLabel: 'Parser Lazada RLT belum aktif…',
+    uploadDescription: 'Halaman ini membaca export order mentah Lazada RLT. App akan match Seller SKU workbook ke bundle custom_id di business RLT, lalu menebak store final dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.',
+    dragDropTitle: 'Drag & drop file Lazada RLT di sini',
+    readingLabel: 'Membaca file Lazada RLT…',
     previewLabel: 'Preview Mapping Lazada RLT',
     searchPlaceholder: 'Cari bundle RLT…',
-    pageDescription: 'Source Lazada RLT sudah terdaftar untuk kebutuhan reference, store scope, dan resolver rules. Jalur parsing upload akan diaktifkan menyusul.',
+    pageDescription: 'Tahap pertama untuk jalur marketplace Lazada RLT. Upload workbook order mentah, lalu app akan match Seller SKU ke bundle custom_id di business RLT, mencari store final dari nama bundle/produk, dan menaruh hasilnya ke workspace warehouse. Data baru dianggap valid downstream setelah warehouse memberi shipment date.',
   },
 };
 

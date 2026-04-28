@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!isSupportedShopeeFile(file)) {
-      return NextResponse.json({ error: 'File harus berformat Excel (.xlsx / .xls) atau CSV Shopee.' }, { status: 400 });
+      return NextResponse.json({ error: 'File harus berformat Excel (.xlsx / .xls) atau CSV marketplace.' }, { status: 400 });
     }
 
     if (file.size > MAX_MARKETPLACE_FILE_SIZE_BYTES) {

@@ -152,6 +152,14 @@ function isTikTokSourceKey(sourceKey: string): boolean {
   return sourceKey === 'tiktok_rti' || sourceKey === 'tiktok_jhn';
 }
 
+function isBlibliSourceKey(sourceKey: string): boolean {
+  return sourceKey === 'blibli_rti';
+}
+
+function isLazadaSourceKey(sourceKey: string): boolean {
+  return sourceKey === 'lazada_rlt';
+}
+
 function resolveOpsCustomerName(order: IntakeOrderRow): string {
   const username = cleanText(order.mp_customer_username) || metaString(order, 'customerUsername');
   if (username) return username;
@@ -243,6 +251,8 @@ function resolveOpsWarehouse(sourceKey: string, storeName: string | null): strin
 
   switch (cleanText(storeName)) {
     case 'Purvu The Secret Store - Markerplace':
+    case 'Purvu The Secret Store - Marketplace':
+    case 'Purvu The Secret Store':
       return "Jejak Herba Nusantara's Warehouse";
     case 'Roove Main Store - Marketplace':
     case 'Globite Store - Marketplace':
@@ -265,6 +275,20 @@ function resolveOpsCourier(
 ): { courier: string; courierService: string } {
   if (isTikTokSourceKey(sourceKey)) {
     return { courier: 'J&T Express Cashless', courierService: 'EZ' };
+  }
+
+  if (isLazadaSourceKey(sourceKey)) {
+    return {
+      courier: cleanText(shippingProvider) || 'LEX ID',
+      courierService: 'STANDARD',
+    };
+  }
+
+  if (isBlibliSourceKey(sourceKey)) {
+    const tracking = cleanText(trackingNumber).toUpperCase();
+    if (tracking.startsWith('BLIJC')) {
+      return { courier: 'J&T Express Cashless', courierService: 'EZ' };
+    }
   }
 
   const text = cleanText(shippingProvider).toLowerCase();
@@ -294,11 +318,15 @@ function resolveOpsCourier(
 
 function resolveOpsPlatform(sourceKey: string): string {
   if (isTikTokSourceKey(sourceKey)) return 'tiktokshop';
+  if (isLazadaSourceKey(sourceKey)) return 'lazada';
+  if (isBlibliSourceKey(sourceKey)) return 'blibli';
   return 'shopee';
 }
 
 function resolveOpsBank(sourceKey: string): string {
   if (isTikTokSourceKey(sourceKey)) return 'tiktokshop';
+  if (isLazadaSourceKey(sourceKey)) return 'lazada';
+  if (isBlibliSourceKey(sourceKey)) return 'blibli';
   return 'shopee';
 }
 
