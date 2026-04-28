@@ -534,6 +534,12 @@ function buildMarketplaceAuthoritativeUpdateBase(args: {
   return updateData;
 }
 
+function shouldFallbackMissingMarketplaceOrder(sourceClassFields: {
+  source_class?: string | null;
+}) {
+  return isMarketplaceSourceClass(sourceClassFields);
+}
+
 const WEBHOOK_TIMESTAMP_FIELDS = [
   'draft_time',
   'pending_time',
@@ -1182,6 +1188,10 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
   }
 
   if (!existing) {
+    if (shouldFallbackMissingMarketplaceOrder(sourceClassFields)) {
+      console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} not found, retrying via order.updated fallback`);
+      return handleOrderUpdated(data, businessCode, businessId, taxRateName);
+    }
     console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} not found in DB, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
   }
@@ -1929,6 +1939,10 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
   }
 
   if (!existing) {
+    if (shouldFallbackMissingMarketplaceOrder(sourceClassFields)) {
+      console.log(`[scalev-webhook][${businessCode}] payment_status_changed: ${orderId} not found, retrying via order.updated fallback`);
+      return handleOrderUpdated(data, businessCode, businessId, 'PPN');
+    }
     console.log(`[scalev-webhook][${businessCode}] payment_status_changed: ${orderId} not found, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
   }
@@ -2050,6 +2064,10 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
   }
 
   if (!existing) {
+    if (shouldFallbackMissingMarketplaceOrder(sourceClassFields)) {
+      console.log(`[scalev-webhook][${businessCode}] e_payment_created: ${orderId} not found, retrying via order.updated fallback`);
+      return handleOrderUpdated(data, businessCode, businessId, 'PPN');
+    }
     console.log(`[scalev-webhook][${businessCode}] e_payment_created: ${orderId} not found, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
   }
