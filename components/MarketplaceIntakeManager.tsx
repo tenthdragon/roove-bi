@@ -33,6 +33,10 @@ const WAREHOUSE_STATUS_META = {
 };
 
 const MARKETPLACE_SOURCE_OPTIONS = listMarketplaceIntakeUploadSourceConfigs();
+const WORKSPACE_SOURCE_OPTIONS = [
+  { sourceKey: 'all', sourceLabel: 'Semua Marketplace', businessCode: 'ALL' },
+  ...MARKETPLACE_SOURCE_OPTIONS,
+];
 
 function fmtNumber(value) {
   return new Intl.NumberFormat('id-ID').format(Number(value || 0));
@@ -553,7 +557,7 @@ function groupOrdersByBatch(orders) {
 
 export default function MarketplaceIntakeManager() {
   const inputRef = useRef(null);
-  const [sourceKey, setSourceKey] = useState('shopee_rlt');
+  const [sourceKey, setSourceKey] = useState('all');
   const [dragOver, setDragOver] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -565,6 +569,8 @@ export default function MarketplaceIntakeManager() {
   const [savingInlineFixKey, setSavingInlineFixKey] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState(null);
+  const [previewQueue, setPreviewQueue] = useState([]);
+  const [activePreviewKey, setActivePreviewKey] = useState('');
   const [preview, setPreview] = useState(null);
   const [search, setSearch] = useState('');
   const [issuesOnly, setIssuesOnly] = useState(false);
@@ -587,16 +593,176 @@ export default function MarketplaceIntakeManager() {
   const [workspaceError, setWorkspaceError] = useState('');
   const [workspace, setWorkspace] = useState(null);
 
-  const activeSource = useMemo(() => getMarketplaceIntakeSourceConfig(sourceKey), [sourceKey]);
+  const activeSource = useMemo(
+    () => (preview?.source?.sourceKey ? getMarketplaceIntakeSourceConfig(preview.source.sourceKey) : null),
+    [preview?.source?.sourceKey],
+  );
+  const activePreviewSourceKey = preview?.source?.sourceKey || '';
+  const workspaceSourceOption = useMemo(
+    () => WORKSPACE_SOURCE_OPTIONS.find((option) => option.sourceKey === sourceKey) || WORKSPACE_SOURCE_OPTIONS[0],
+    [sourceKey],
+  );
+  const previewSourceLabel = preview?.source?.sourceLabel || activeSource?.sourceLabel || 'Marketplace';
+  const previewSearchPlaceholder = activeSource?.searchPlaceholder || 'Cari bundle marketplace…';
+  const workspaceScopeLabel = workspaceSourceOption?.sourceLabel || 'Marketplace';
+  const livePreviewDrafts = useMemo(() => {
+    const drafts = [...previewQueue];
+    if (!preview || !activePreviewKey) return drafts;
+    return upsertDraft(drafts, {
+      key: activePreviewKey,
+      preview,
+      expandedPreviewOrders,
+      manualSelections,
+      issueSelections,
+      issueSearchQueries,
+      issueSearchResults,
+      inlineFixOpen,
+      inlineFixForms,
+      lineSearchQueries,
+      lineSearchResults,
+      search,
+      issuesOnly,
+    });
+  }, [
+    activePreviewKey,
+    expandedPreviewOrders,
+    inlineFixForms,
+    inlineFixOpen,
+    issueSearchQueries,
+    issueSearchResults,
+    issueSelections,
+    issuesOnly,
+    lineSearchQueries,
+    lineSearchResults,
+    manualSelections,
+    preview,
+    previewQueue,
+    search,
+  ]);
   const activeAllowedStores = useMemo(() => {
-    const previewStores = preview?.source?.sourceKey === sourceKey
-      ? (preview?.source?.allowedStores || []).filter(Boolean)
-      : [];
-    return previewStores.length > 0 ? previewStores : activeSource.allowedStores;
-  }, [activeSource.allowedStores, preview?.source?.allowedStores, preview?.source?.sourceKey, sourceKey]);
+    const previewStores = (preview?.source?.allowedStores || []).filter(Boolean);
+    return previewStores.length > 0 ? previewStores : (activeSource?.allowedStores || []);
+  }, [activeSource?.allowedStores, preview?.source?.allowedStores]);
 
   function getLineKey(orderId, lineIndex) {
     return `${orderId}::${lineIndex}`;
+  }
+
+  function buildDraftFromPreviewData(data) {
+    const initialSelections = {};
+    for (const order of data.orders || []) {
+      for (const line of order.lines || []) {
+        if (line.selectedSuggestion) {
+          initialSelections[getLineKey(order.externalOrderId, line.lineIndex)] = line.selectedSuggestion;
+        }
+      }
+    }
+
+    return {
+      key: `${data.source?.sourceKey || 'unknown'}::${data.fingerprint || data.filename || Date.now()}`,
+      preview: data,
+      expandedPreviewOrders: {},
+      manualSelections: initialSelections,
+      issueSelections: {},
+      issueSearchQueries: {},
+      issueSearchResults: {},
+      inlineFixOpen: {},
+      inlineFixForms: {},
+      lineSearchQueries: {},
+      lineSearchResults: {},
+      search: '',
+      issuesOnly: Boolean(data.summary?.needsReviewOrders),
+    };
+  }
+
+  function upsertDraft(currentDrafts, nextDraft) {
+    const existingIndex = currentDrafts.findIndex((item) => item.key === nextDraft.key);
+    if (existingIndex === -1) return [...currentDrafts, nextDraft];
+    const next = [...currentDrafts];
+    next[existingIndex] = nextDraft;
+    return next;
+  }
+
+  function clearActivePreviewEditor() {
+    setActivePreviewKey('');
+    setPreview(null);
+    setExpandedPreviewOrders({});
+    setManualSelections({});
+    setIssueSelections({});
+    setIssueSearchQueries({});
+    setIssueSearchResults({});
+    setInlineFixOpen({});
+    setInlineFixForms({});
+    setLineSearchQueries({});
+    setLineSearchResults({});
+    setSearch('');
+    setIssuesOnly(false);
+  }
+
+  function snapshotActiveDraft() {
+    if (!preview || !activePreviewKey) return null;
+    return {
+      key: activePreviewKey,
+      preview,
+      expandedPreviewOrders,
+      manualSelections,
+      issueSelections,
+      issueSearchQueries,
+      issueSearchResults,
+      inlineFixOpen,
+      inlineFixForms,
+      lineSearchQueries,
+      lineSearchResults,
+      search,
+      issuesOnly,
+    };
+  }
+
+  function persistActiveDraft() {
+    const snapshot = snapshotActiveDraft();
+    if (!snapshot) return;
+    setPreviewQueue((current) => upsertDraft(current, snapshot));
+  }
+
+  function loadDraftIntoEditor(draft) {
+    if (!draft) {
+      clearActivePreviewEditor();
+      return;
+    }
+    setActivePreviewKey(draft.key);
+    setPreview(draft.preview || null);
+    setExpandedPreviewOrders(draft.expandedPreviewOrders || {});
+    setManualSelections(draft.manualSelections || {});
+    setIssueSelections(draft.issueSelections || {});
+    setIssueSearchQueries(draft.issueSearchQueries || {});
+    setIssueSearchResults(draft.issueSearchResults || {});
+    setInlineFixOpen(draft.inlineFixOpen || {});
+    setInlineFixForms(draft.inlineFixForms || {});
+    setLineSearchQueries(draft.lineSearchQueries || {});
+    setLineSearchResults(draft.lineSearchResults || {});
+    setSearch(draft.search || '');
+    setIssuesOnly(Boolean(draft.issuesOnly));
+  }
+
+  function switchToDraft(nextDraftKey) {
+    if (!nextDraftKey || nextDraftKey === activePreviewKey) return;
+    const nextDraft = previewQueue.find((draft) => draft.key === nextDraftKey);
+    if (!nextDraft) return;
+    persistActiveDraft();
+    loadDraftIntoEditor(nextDraft);
+  }
+
+  function dismissDraft(draftKey) {
+    if (!draftKey) return;
+    const remainingDrafts = previewQueue.filter((draft) => draft.key !== draftKey);
+    setPreviewQueue(remainingDrafts);
+    if (draftKey === activePreviewKey) {
+      if (remainingDrafts.length > 0) {
+        loadDraftIntoEditor(remainingDrafts[0]);
+      } else {
+        clearActivePreviewEditor();
+      }
+    }
   }
 
   function getBatchShipmentDate(batchId) {
@@ -616,22 +782,7 @@ export default function MarketplaceIntakeManager() {
   }, [sourceKey]);
 
   useEffect(() => {
-    setPreview(null);
-    setExpandedPreviewOrders({});
-    setExpandedWorkspaceBatches({});
-    setExpandedWorkspaceOrders({});
-    setManualSelections({});
-    setIssueSelections({});
-    setIssueSearchQueries({});
-    setIssueSearchResults({});
-    setInlineFixOpen({});
-    setInlineFixForms({});
-    setLineSearchQueries({});
-    setLineSearchResults({});
-    setSearch('');
-    setIssuesOnly(false);
     setBatchShipmentDates({});
-    setError('');
     setWorkspaceError('');
     setWorkspace(null);
     setWorkspaceDate(getCurrentDateValue());
@@ -1127,10 +1278,14 @@ export default function MarketplaceIntakeManager() {
     const clusterKey = cluster.key;
     const query = String(issueSearchQueries[clusterKey] || '').trim();
     if (query.length < 2) return;
+    if (!activePreviewSourceKey) {
+      setError('Source preview belum terdeteksi. Upload ulang file ini.');
+      return;
+    }
 
     setSearchingIssueKey(clusterKey);
     try {
-      const requestUrl = `/api/marketplace-intake/search-bundles?q=${encodeURIComponent(query)}&sourceKey=${encodeURIComponent(sourceKey)}`;
+      const requestUrl = `/api/marketplace-intake/search-bundles?q=${encodeURIComponent(query)}&sourceKey=${encodeURIComponent(activePreviewSourceKey)}`;
       const res = await fetch(requestUrl);
       const data = await res.json();
       if (!res.ok) {
@@ -1209,56 +1364,79 @@ export default function MarketplaceIntakeManager() {
     }
   }
 
-  async function handleUpload(file) {
-    if (!file) return;
+  async function previewSingleFile(file) {
+    if (!file) return null;
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('filename', file.name);
+
+    const { res, data } = await fetchJsonWithTimeout('/api/marketplace-intake/preview', {
+      method: 'POST',
+      body: formData,
+    }, 45000);
+    if (!res.ok) {
+      throw new Error(data.error || `Gagal membaca file ${file.name}.`);
+    }
+
+    return buildDraftFromPreviewData(data);
+  }
+
+  async function handleUpload(filesInput) {
+    const files = Array.from(filesInput || []).filter(Boolean);
+    if (!files.length) return;
     setUploading(true);
     setError('');
     setMessage(null);
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('filename', file.name);
-      formData.append('sourceKey', sourceKey);
+      const currentSnapshot = snapshotActiveDraft();
+      const successfulDrafts = [];
+      const failedUploads = [];
 
-      const { res, data } = await fetchJsonWithTimeout('/api/marketplace-intake/preview', {
-        method: 'POST',
-        body: formData,
-      }, 45000);
-      if (!res.ok) {
-        throw new Error(data.error || `Gagal membaca file ${activeSource.sourceLabel}.`);
-      }
-
-      const initialSelections = {};
-      for (const order of data.orders || []) {
-        for (const line of order.lines || []) {
-          if (line.selectedSuggestion) {
-            initialSelections[getLineKey(order.externalOrderId, line.lineIndex)] = line.selectedSuggestion;
-          }
+      for (const file of files) {
+        try {
+          const draft = await previewSingleFile(file);
+          if (draft) successfulDrafts.push(draft);
+        } catch (err) {
+          console.error(err);
+          failedUploads.push(`${file.name}: ${err?.message || 'Gagal memproses file.'}`);
         }
       }
 
-      setPreview(data);
-      setExpandedPreviewOrders({});
-      setSearch('');
-      setIssuesOnly(Boolean(data.summary?.needsReviewOrders));
-      setManualSelections(initialSelections);
-      setIssueSelections({});
-      setIssueSearchQueries({});
-      setIssueSearchResults({});
-      setInlineFixOpen({});
-      setInlineFixForms({});
-      setLineSearchQueries({});
-      setLineSearchResults({});
+      if (!successfulDrafts.length) {
+        throw new Error(failedUploads[0] || 'Tidak ada file yang berhasil dipreview.');
+      }
+
+      setPreviewQueue((current) => {
+        let next = [...current];
+        if (currentSnapshot) {
+          next = upsertDraft(next, currentSnapshot);
+        }
+        for (const draft of successfulDrafts) {
+          next = upsertDraft(next, draft);
+        }
+        return next;
+      });
+
+      if (!preview || !activePreviewKey) {
+        loadDraftIntoEditor(successfulDrafts[0]);
+      }
+
+      if (failedUploads.length > 0) {
+        setError(failedUploads.join(' | '));
+      }
+
+      const totalReady = successfulDrafts.reduce((sum, draft) => sum + Number(draft.preview?.summary?.readyOrders || 0), 0);
+      const totalNeedsReview = successfulDrafts.reduce((sum, draft) => sum + Number(draft.preview?.summary?.needsReviewOrders || 0), 0);
+      const totalPreselected = successfulDrafts.reduce((sum, draft) => sum + Object.keys(draft.manualSelections || {}).length, 0);
       setMessage({
         type: 'success',
         scope: 'upload',
-        text: `Preview selesai. ${fmtNumber(data.summary?.readyOrders || 0)} order siap, ${fmtNumber(data.summary?.needsReviewOrders || 0)} perlu review, ${fmtNumber(Object.keys(initialSelections).length)} line sudah preselect dari ingatan manual.`,
+        text: `${fmtNumber(successfulDrafts.length)} file berhasil dipreview. ${fmtNumber(totalReady)} order siap, ${fmtNumber(totalNeedsReview)} perlu review, ${fmtNumber(totalPreselected)} line sudah preselect dari ingatan manual.${failedUploads.length ? ` ${fmtNumber(failedUploads.length)} file gagal dibaca.` : ''}`,
       });
     } catch (err) {
       console.error(err);
-      setPreview(null);
-      setError(err?.message || `Gagal memproses file ${activeSource.sourceLabel}.`);
+      setError(err?.message || 'Gagal memproses file marketplace.');
     } finally {
       setUploading(false);
     }
@@ -1293,18 +1471,13 @@ export default function MarketplaceIntakeManager() {
         throw new Error(data.error || 'Gagal menyimpan preview intake.');
       }
 
-      setPreview(null);
-      setExpandedPreviewOrders({});
-      setManualSelections({});
-      setIssueSelections({});
-      setIssueSearchQueries({});
-      setIssueSearchResults({});
-      setInlineFixOpen({});
-      setInlineFixForms({});
-      setLineSearchQueries({});
-      setLineSearchResults({});
-      setSearch('');
-      setIssuesOnly(false);
+      const remainingDrafts = previewQueue.filter((draft) => draft.key !== activePreviewKey);
+      setPreviewQueue(remainingDrafts);
+      if (remainingDrafts.length > 0) {
+        loadDraftIntoEditor(remainingDrafts[0]);
+      } else {
+        clearActivePreviewEditor();
+      }
       await loadWorkspace(workspaceDate);
 
       setMessage({
@@ -1353,10 +1526,14 @@ export default function MarketplaceIntakeManager() {
     const key = getLineKey(orderId, lineIndex);
     const query = String(lineSearchQueries[key] || '').trim();
     if (query.length < 2) return;
+    if (!activePreviewSourceKey) {
+      setError('Source preview belum terdeteksi. Upload ulang file ini.');
+      return;
+    }
 
     setSearchingLineKey(key);
     try {
-      const requestUrl = `/api/marketplace-intake/search-bundles?q=${encodeURIComponent(query)}&sourceKey=${encodeURIComponent(sourceKey)}`;
+      const requestUrl = `/api/marketplace-intake/search-bundles?q=${encodeURIComponent(query)}&sourceKey=${encodeURIComponent(activePreviewSourceKey)}`;
       const res = await fetch(requestUrl);
       const data = await res.json();
       if (!res.ok) {
@@ -1378,6 +1555,10 @@ export default function MarketplaceIntakeManager() {
     const lineKey = getLineKey(order.externalOrderId, line.lineIndex);
     const candidate = manualSelections[lineKey] || line.selectedCandidate || line.selectedSuggestion || null;
     if (!candidate?.entityKey || !Number(candidate?.scalevBundleId || 0)) return;
+    if (!activePreviewSourceKey) {
+      setError('Source preview belum terdeteksi. Upload ulang file ini.');
+      return;
+    }
 
     setSavingResolverRuleKey(lineKey);
     setError('');
@@ -1389,7 +1570,7 @@ export default function MarketplaceIntakeManager() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sourceKey,
+          sourceKey: activePreviewSourceKey,
           mpSku: line.normalizedSku || line.mpSku || null,
           mpProductName: line.mpProductName,
           mpVariation: line.mpVariation || null,
@@ -1447,6 +1628,10 @@ export default function MarketplaceIntakeManager() {
       setError('Normalized SKU wajib diisi untuk menyimpan perbaikan inline.');
       return;
     }
+    if (!activePreviewSourceKey) {
+      setError('Source preview belum terdeteksi. Upload ulang file ini.');
+      return;
+    }
 
     setSavingInlineFixKey(lineKey);
     setError('');
@@ -1471,7 +1656,7 @@ export default function MarketplaceIntakeManager() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sourceKey,
+            sourceKey: activePreviewSourceKey,
             normalizedSku,
             reason,
             isActive: true,
@@ -1488,7 +1673,7 @@ export default function MarketplaceIntakeManager() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sourceKey,
+          sourceKey: activePreviewSourceKey,
           mpSku: normalizedSku,
           mpProductName: line.mpProductName,
           mpVariation: line.mpVariation || null,
@@ -1566,6 +1751,10 @@ export default function MarketplaceIntakeManager() {
       setError('Normalized SKU wajib diisi untuk isu yang belum punya matcher entity.');
       return;
     }
+    if (!activePreviewSourceKey) {
+      setError('Source preview belum terdeteksi. Upload ulang file ini.');
+      return;
+    }
 
     setSavingInlineFixKey(clusterKey);
     setError('');
@@ -1586,7 +1775,7 @@ export default function MarketplaceIntakeManager() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            sourceKey,
+            sourceKey: activePreviewSourceKey,
             normalizedSku,
             reason,
             isActive: true,
@@ -1603,7 +1792,7 @@ export default function MarketplaceIntakeManager() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          sourceKey,
+          sourceKey: activePreviewSourceKey,
           mpSku: normalizedSku || representativeLine.normalizedSku || representativeLine.mpSku || null,
           mpProductName: representativeLine.mpProductName,
           mpVariation: representativeLine.mpVariation || null,
@@ -1857,38 +2046,10 @@ export default function MarketplaceIntakeManager() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={panelStyle}>
         <div style={{ marginBottom: 14 }}>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 14 }}>
-            <div style={{ display: 'grid', gap: 6 }}>
-              <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                Source Marketplace
-              </div>
-              <select
-                value={sourceKey}
-                onChange={(event) => setSourceKey(event.target.value)}
-                disabled={uploading || confirming}
-                style={{
-                  minWidth: 220,
-                  padding: '9px 12px',
-                  borderRadius: 10,
-                  border: '1px solid var(--border)',
-                  background: 'var(--bg)',
-                  color: 'var(--text)',
-                  fontSize: 13,
-                  outline: 'none',
-                }}
-              >
-                {MARKETPLACE_SOURCE_OPTIONS.map((source) => (
-                  <option key={source.sourceKey} value={source.sourceKey}>
-                    {source.sourceLabel} • {source.businessCode}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
           <div>
-            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>{activeSource.uploadTitle}</div>
+            <div style={{ fontSize: 16, fontWeight: 800, marginBottom: 4 }}>Upload Marketplace</div>
             <div style={{ fontSize: 13, color: 'var(--dim)', maxWidth: 840, lineHeight: 1.6 }}>
-              {activeSource.uploadDescription}
+              Upload satu atau banyak file marketplace sekaligus. App akan mendeteksi marketplace dan business yang tepat secara otomatis untuk setiap file. Setiap file tetap diperlakukan sebagai <strong>1 marketplace</strong>, <strong>1 business</strong>, dan <strong>1 batch</strong>.
             </div>
           </div>
         </div>
@@ -1919,10 +2080,11 @@ export default function MarketplaceIntakeManager() {
           ref={inputRef}
           type="file"
           accept=".xlsx,.xls,.csv"
+          multiple
           style={{ display: 'none' }}
           onChange={(event) => {
-            const file = event.target.files?.[0];
-            if (file) handleUpload(file);
+            const files = event.target.files;
+            if (files?.length) handleUpload(files);
             event.target.value = '';
           }}
         />
@@ -1936,8 +2098,8 @@ export default function MarketplaceIntakeManager() {
           onDrop={(event) => {
             event.preventDefault();
             setDragOver(false);
-            const file = event.dataTransfer.files?.[0];
-            if (file) handleUpload(file);
+            const files = event.dataTransfer.files;
+            if (files?.length) handleUpload(files);
           }}
           onClick={() => {
             if (uploading) return;
@@ -1965,20 +2127,113 @@ export default function MarketplaceIntakeManager() {
                   animation: 'spin 0.8s linear infinite',
                 }}
               />
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#ee4d2d' }}>{activeSource.readingLabel}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#ee4d2d' }}>Membaca file marketplace…</div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
               <div style={{ fontSize: 30 }}>📦</div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>{activeSource.dragDropTitle}</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Drag & drop file marketplace di sini</div>
               <div style={{ fontSize: 12, color: 'var(--dim)' }}>
-                Support `.xlsx`, `.xls`, atau `.csv` Shopee/SPX
+                Support `.xlsx`, `.xls`, atau `.csv` untuk Shopee, TikTok, Blibli, dan Lazada
               </div>
             </div>
           )}
         </div>
 
         <style>{`@keyframes spin { from { transform: rotate(0deg) } to { transform: rotate(360deg) } }`}</style>
+
+        {livePreviewDrafts.length > 0 ? (
+          <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
+            <div style={{ fontSize: 12, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Queue Preview Batch
+            </div>
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                gap: 10,
+              }}
+            >
+              {livePreviewDrafts.map((draft) => {
+                const isActive = draft.key === activePreviewKey;
+                const draftSummary = draft.preview?.summary || {};
+                return (
+                  <div
+                    key={draft.key}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => switchToDraft(draft.key)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        switchToDraft(draft.key);
+                      }
+                    }}
+                    style={{
+                      textAlign: 'left',
+                      padding: 12,
+                      borderRadius: 12,
+                      border: isActive ? '1px solid rgba(34,197,94,0.4)' : '1px solid var(--border)',
+                      background: isActive ? 'rgba(34,197,94,0.08)' : 'var(--bg)',
+                      color: 'var(--text)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'flex-start' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 4 }}>
+                          {draft.preview?.source?.sourceLabel || 'Marketplace'}
+                        </div>
+                        <div style={{ fontSize: 13, fontWeight: 700, lineHeight: 1.45, wordBreak: 'break-word' }}>
+                          {draft.preview?.filename || 'Tanpa nama file'}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexShrink: 0 }}>
+                        {isActive ? (
+                          <div
+                            style={{
+                              padding: '4px 8px',
+                              borderRadius: 999,
+                              fontSize: 11,
+                              fontWeight: 700,
+                              background: 'rgba(34,197,94,0.12)',
+                              color: '#86efac',
+                            }}
+                          >
+                            Aktif
+                          </div>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            dismissDraft(draft.key);
+                          }}
+                          style={{
+                            border: '1px solid var(--border)',
+                            background: 'transparent',
+                            color: 'var(--dim)',
+                            borderRadius: 8,
+                            padding: '4px 8px',
+                            fontSize: 11,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Tutup
+                        </button>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 10, fontSize: 12, color: 'var(--dim)' }}>
+                      <span>Order {fmtNumber(draftSummary.totalOrders || 0)}</span>
+                      <span>Ready {fmtNumber(draftSummary.readyOrders || 0)}</span>
+                      <span>Review {fmtNumber(draftSummary.needsReviewOrders || 0)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {preview ? (
@@ -2003,9 +2258,9 @@ export default function MarketplaceIntakeManager() {
           <div style={panelStyle}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
               <div>
-                <div style={{ fontSize: 16, fontWeight: 800 }}>{activeSource.previewLabel}</div>
+                <div style={{ fontSize: 16, fontWeight: 800 }}>{activeSource?.previewLabel || 'Preview Mapping Marketplace'}</div>
                 <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • source <strong>{activeSource.sourceLabel}</strong> • exact bundle match + local store guess
+                  File: <strong>{preview.filename}</strong> • tanggal order file <strong>{preview.sourceOrderDate || '-'}</strong> • {fmtNumber(preview.rowCount)} row sumber • source <strong>{previewSourceLabel}</strong> • exact bundle match + local store guess
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2235,7 +2490,7 @@ export default function MarketplaceIntakeManager() {
                               ...current,
                               [cluster.key]: event.target.value,
                             }))}
-                            placeholder={activeSource.searchPlaceholder}
+                            placeholder={previewSearchPlaceholder}
                             style={{
                               width: '100%',
                               padding: '8px 10px',
@@ -2539,7 +2794,7 @@ export default function MarketplaceIntakeManager() {
                                               ...current,
                                               [lineKey]: event.target.value,
                                             }))}
-                                            placeholder={activeSource.searchPlaceholder}
+                                            placeholder={previewSearchPlaceholder}
                                             style={{
                                               width: '100%',
                                               padding: '7px 10px',
@@ -2743,10 +2998,35 @@ export default function MarketplaceIntakeManager() {
           <div>
             <div style={{ fontSize: 16, fontWeight: 800 }}>Workspace Warehouse</div>
             <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4, maxWidth: 860, lineHeight: 1.6 }}>
-              Upload <strong>{activeSource.sourceLabel}</strong> yang sudah <strong>Confirm & Save</strong> akan masuk ke workspace ini sebagai data <strong>staging</strong>. Data baru dianggap valid downstream setelah warehouse memberi <strong>shipment date</strong>. Tanggal shipped utama sekarang dipilih langsung di tiap batch staged, sedangkan selector di kanan dipakai untuk <strong>melihat shipment date tertentu</strong>.
+              Batch <strong>{workspaceScopeLabel}</strong> yang sudah <strong>Confirm & Save</strong> akan masuk ke workspace ini sebagai data <strong>staging</strong>. Data baru dianggap valid downstream setelah warehouse memberi <strong>shipment date</strong>. Tanggal shipped utama sekarang dipilih langsung di tiap batch staged, sedangkan selector di kanan dipakai untuk <strong>melihat shipment date tertentu</strong>.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ display: 'grid', gap: 6 }}>
+              <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Filter Source
+              </div>
+              <select
+                value={sourceKey}
+                onChange={(event) => setSourceKey(event.target.value)}
+                style={{
+                  minWidth: 200,
+                  padding: '9px 12px',
+                  borderRadius: 10,
+                  border: '1px solid var(--border)',
+                  background: 'var(--bg)',
+                  color: 'var(--text)',
+                  fontSize: 13,
+                  outline: 'none',
+                }}
+              >
+                {WORKSPACE_SOURCE_OPTIONS.map((source) => (
+                  <option key={source.sourceKey} value={source.sourceKey}>
+                    {source.sourceLabel} • {source.businessCode}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               Lihat Shipment
             </div>
@@ -2825,7 +3105,7 @@ export default function MarketplaceIntakeManager() {
               <div>
                 <div style={{ fontSize: 15, fontWeight: 800 }}>Belum Dikirim</div>
                 <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                  Batch <strong>{activeSource.sourceLabel}</strong> di bawah ini masih pre-valid. Warehouse bisa memilih <strong>tanggal shipped</strong> langsung di row batch, lalu menandai batch atau order tertentu sebagai shipped.
+                  Batch <strong>{workspaceScopeLabel}</strong> di bawah ini masih pre-valid. Warehouse bisa memilih <strong>tanggal shipped</strong> langsung di row batch, lalu menandai batch atau order tertentu sebagai shipped.
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -3097,7 +3377,7 @@ export default function MarketplaceIntakeManager() {
             <div>
               <div style={{ fontSize: 15, fontWeight: 800 }}>Shipped {fmtDateLabel(workspaceDate)}</div>
               <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-                Batch <strong>{activeSource.sourceLabel}</strong> yang sudah ditandai shipped untuk tanggal <strong>{fmtDateLabel(workspaceDate)}</strong> akan muncul di bawah ini. Buka batch untuk melihat order-order di dalamnya, lalu buka order jika perlu melihat line item.
+                Batch <strong>{workspaceScopeLabel}</strong> yang sudah ditandai shipped untuk tanggal <strong>{fmtDateLabel(workspaceDate)}</strong> akan muncul di bawah ini. Buka batch untuk melihat order-order di dalamnya, lalu buka order jika perlu melihat line item.
               </div>
             </div>
 

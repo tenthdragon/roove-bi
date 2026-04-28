@@ -6,7 +6,9 @@ import {
 } from './marketplace-intake-store';
 import {
   type MarketplaceIntakePlatform,
+  type MarketplaceIntakeParserFamily,
   type MarketplaceIntakeSourceConfig,
+  listMarketplaceIntakeUploadSourceConfigs,
 } from './marketplace-intake-sources';
 import { resolveMarketplaceIntakeSourceConfig } from './marketplace-intake-source-store-scopes';
 import { resolveMarketplaceIntakeFeeFinancials } from './marketplace-intake-fee';
@@ -465,6 +467,125 @@ function toRawStringRow(row: SheetRow): Record<string, string> {
 
 function isBlankRow(row: Record<string, string>): boolean {
   return Object.values(row).every((value) => !cleanText(value));
+}
+
+function detectParserFamilyFromHeaders(headers: string[]): MarketplaceIntakeParserFamily {
+  const headerSet = new Set(headers);
+  if (headerSet.has('No. Pesanan')) return 'shopee';
+  if (headerSet.has('Order ID')) return 'tiktok';
+  if (headerSet.has('No. Order') && headerSet.has('Merchant Sku')) return 'blibli';
+  if (headerSet.has('orderNumber') && headerSet.has('sellerSku')) return 'lazada';
+  return 'none';
+}
+
+function scoreSourceByFilename(sourceConfig: MarketplaceIntakeSourceConfig, filename: string): number {
+  const haystack = normalizeIdentifier(filename);
+  if (!haystack) return 0;
+
+  let score = 0;
+  const businessToken = normalizeIdentifier(sourceConfig.businessCode);
+  if (businessToken && haystack.includes(businessToken)) score += 5000;
+
+  const labelTokens = normalizeIdentifier(sourceConfig.sourceLabel)
+    .split(' ')
+    .map((token) => token.trim())
+    .filter((token) => token.length >= 3 && !['upload', 'marketplace'].includes(token));
+  for (const token of labelTokens) {
+    if (haystack.includes(token)) score += token === businessToken ? 0 : 250;
+  }
+
+  return score;
+}
+
+async function detectMarketplaceIntakeSourceConfig(input: {
+  file: File;
+  filenameOverride?: string | null;
+}): Promise<MarketplaceIntakeSourceConfig> {
+  const workbook = XLSX.read(await input.file.arrayBuffer(), { type: 'array' });
+  const sheetName = workbook.SheetNames[0];
+  if (!sheetName) throw new Error('Workbook tidak memiliki sheet yang bisa dibaca.');
+
+  const sheet = workbook.Sheets[sheetName];
+  const rawRows = XLSX.utils.sheet_to_json<SheetRow>(sheet, { defval: '' });
+  if (rawRows.length === 0) throw new Error('Workbook kosong.');
+
+  const stringRows = rawRows
+    .map((row) => toRawStringRow(row))
+    .filter((row) => !isBlankRow(row));
+  if (stringRows.length === 0) throw new Error('Workbook tidak memiliki baris data.');
+
+  const headers = Object.keys(stringRows[0]);
+  const parserFamily = detectParserFamilyFromHeaders(headers);
+  if (parserFamily === 'none') {
+    throw new Error('Format marketplace tidak dikenali. Gunakan export Shopee, TikTok Shop, Blibli, atau Lazada yang didukung.');
+  }
+
+  const candidates = listMarketplaceIntakeUploadSourceConfigs()
+    .filter((config) => config.parserFamily === parserFamily);
+  if (candidates.length === 1) return candidates[0];
+  if (!candidates.length) {
+    throw new Error('Source marketplace untuk format file ini belum aktif di intake.');
+  }
+
+  const genericOrders = parserFamily === 'shopee'
+    ? parseShopeeOrders(stringRows)
+    : parserFamily === 'tiktok'
+      ? parseTikTokOrders(
+        stringRows.filter((row) => {
+          const orderId = cleanText(row['Order ID']);
+          return !orderId || !orderId.toLowerCase().includes('platform unique');
+        }),
+      )
+      : parserFamily === 'blibli'
+        ? parseBlibliOrders(stringRows)
+        : parseLazadaOrders(stringRows);
+
+  const normalizedIdentifiers = Array.from(new Set(
+    genericOrders
+      .flatMap((order) => order.lines.map((line) => normalizeIdentifier(line.normalizedSku || line.sku)))
+      .filter(Boolean),
+  ));
+
+  const sourceScores = await Promise.all(candidates.map(async (candidate) => {
+    const business = await loadBusinessForSource(candidate);
+    const identifierLookup = await loadBundleIdentifierLookup(business.id, normalizedIdentifiers);
+
+    let bundleMatchCount = 0;
+    let guessedStoreCount = 0;
+    for (const order of genericOrders) {
+      for (const line of order.lines || []) {
+        const normalizedSku = normalizeIdentifier(line.normalizedSku || line.sku);
+        if (normalizedSku && (identifierLookup.get(normalizedSku)?.length || 0) > 0) {
+          bundleMatchCount += 1;
+        }
+
+        const guessedStore = guessMarketplaceStoreFromTexts(
+          [line.productName, line.variation, line.rawSellerSku, line.sku],
+          candidate.allowedStores,
+        );
+        if (guessedStore.resolution === 'guessed' && guessedStore.storeName) {
+          guessedStoreCount += 1;
+        }
+      }
+    }
+
+    return {
+      sourceConfig: candidate,
+      score: (bundleMatchCount * 100) + (guessedStoreCount * 10) + scoreSourceByFilename(candidate, String(input.filenameOverride || input.file.name || '')),
+      bundleMatchCount,
+      guessedStoreCount,
+    };
+  }));
+
+  sourceScores.sort((left, right) => right.score - left.score);
+  const best = sourceScores[0];
+  const second = sourceScores[1];
+  if (!best || best.score <= 0 || (second && best.score === second.score)) {
+    const candidateLabels = sourceScores.map((item) => item.sourceConfig.sourceLabel).join(', ');
+    throw new Error(`Source file ini ambigu. Saya mengenali format ${parserFamily.toUpperCase()}, tetapi tidak bisa memilih business secara unik antara: ${candidateLabels}. Gunakan nama file yang lebih jelas atau pecah file sesuai business.`);
+  }
+
+  return best.sourceConfig;
 }
 
 function parseShopeeAddress(rawAddress: string | null, city: string | null, province: string | null): {
@@ -1982,7 +2103,12 @@ export async function previewMarketplaceIntake(input: {
   filenameOverride?: string | null;
   sourceKey?: string | null;
 }): Promise<MarketplaceIntakePreview> {
-  const sourceConfig = await resolveMarketplaceIntakeSourceConfig(input.sourceKey);
+  const sourceConfig = cleanText(input.sourceKey)
+    ? await resolveMarketplaceIntakeSourceConfig(input.sourceKey)
+    : await detectMarketplaceIntakeSourceConfig({
+      file: input.file,
+      filenameOverride: input.filenameOverride,
+    });
   const business = await loadBusinessForSource(sourceConfig);
   const { orders, rowCount, headers } = await parseMarketplaceWorkbook({
     file: input.file,
@@ -2774,13 +2900,14 @@ function normalizeShipmentDate(value: string): string {
 }
 
 async function loadWorkspaceBatchMeta(
-  sourceConfig: MarketplaceIntakeSourceConfig,
+  sourceConfigs: MarketplaceIntakeSourceConfig[],
 ): Promise<Map<number, MarketplaceIntakeBatchMetaRow>> {
   const svc = createServiceSupabase();
+  const sourceKeys = Array.from(new Set(sourceConfigs.map((config) => config.sourceKey)));
   let data: any[] | null = null;
   let error: any = null;
 
-  const primaryRes = await svc
+  let primaryQuery: any = svc
     .from('marketplace_intake_batches')
     .select(`
       id,
@@ -2813,16 +2940,19 @@ async function loadWorkspaceBatchMeta(
       scalev_last_reconcile_error_count,
       scalev_last_reconcile_error
     `)
-    .eq('source_key', sourceConfig.sourceKey)
-    .eq('business_code', sourceConfig.businessCode)
     .order('confirmed_at', { ascending: false })
     .order('id', { ascending: false });
+  primaryQuery = sourceKeys.length === 1
+    ? primaryQuery.eq('source_key', sourceKeys[0])
+    : primaryQuery.in('source_key', sourceKeys);
+
+  const primaryRes = await primaryQuery;
 
   data = primaryRes.data;
   error = primaryRes.error;
 
   if (error) {
-    const fallbackRes = await svc
+    let fallbackQuery: any = svc
       .from('marketplace_intake_batches')
       .select(`
         id,
@@ -2845,17 +2975,20 @@ async function loadWorkspaceBatchMeta(
         scalev_last_send_row_count,
         scalev_last_send_error
       `)
-      .eq('source_key', sourceConfig.sourceKey)
-      .eq('business_code', sourceConfig.businessCode)
       .order('confirmed_at', { ascending: false })
       .order('id', { ascending: false });
+    fallbackQuery = sourceKeys.length === 1
+      ? fallbackQuery.eq('source_key', sourceKeys[0])
+      : fallbackQuery.in('source_key', sourceKeys);
+
+    const fallbackRes = await fallbackQuery;
 
     data = fallbackRes.data;
     error = fallbackRes.error;
   }
 
   if (error) {
-    const fallbackRes = await svc
+    let fallbackQuery: any = svc
       .from('marketplace_intake_batches')
       .select(`
         id,
@@ -2867,10 +3000,13 @@ async function loadWorkspaceBatchMeta(
         scalev_last_send_row_count,
         scalev_last_send_error
       `)
-      .eq('source_key', sourceConfig.sourceKey)
-      .eq('business_code', sourceConfig.businessCode)
       .order('confirmed_at', { ascending: false })
       .order('id', { ascending: false });
+    fallbackQuery = sourceKeys.length === 1
+      ? fallbackQuery.eq('source_key', sourceKeys[0])
+      : fallbackQuery.in('source_key', sourceKeys);
+
+    const fallbackRes = await fallbackQuery;
 
     data = fallbackRes.data;
     error = fallbackRes.error;
@@ -3133,8 +3269,11 @@ export async function listMarketplaceIntakeWorkspace(input: {
   sourceKey?: string | null;
 }): Promise<MarketplaceIntakeWorkspaceResponse> {
   const shipmentDate = normalizeShipmentDate(input.shipmentDate);
-  const sourceConfig = await resolveMarketplaceIntakeSourceConfig(input.sourceKey);
-  const batchMetaById = await loadWorkspaceBatchMeta(sourceConfig);
+  const normalizedSourceKey = cleanText(input.sourceKey);
+  const sourceConfigs = !normalizedSourceKey || normalizedSourceKey === 'all'
+    ? listMarketplaceIntakeUploadSourceConfigs()
+    : [await resolveMarketplaceIntakeSourceConfig(normalizedSourceKey)];
+  const batchMetaById = await loadWorkspaceBatchMeta(sourceConfigs);
   const batchIds = Array.from(batchMetaById.keys());
 
   const [stagedOrders, shipmentOrders] = await Promise.all([
@@ -3181,8 +3320,11 @@ export async function updateMarketplaceIntakeWorkspace(input: MarketplaceIntakeW
     ? null
     : normalizeShipmentDate(String(input.shipmentDate || ''));
 
-  const sourceConfig = await resolveMarketplaceIntakeSourceConfig(input.sourceKey);
-  const batchMetaById = await loadWorkspaceBatchMeta(sourceConfig);
+  const normalizedSourceKey = cleanText(input.sourceKey);
+  const sourceConfigs = !normalizedSourceKey || normalizedSourceKey === 'all'
+    ? listMarketplaceIntakeUploadSourceConfigs()
+    : [await resolveMarketplaceIntakeSourceConfig(normalizedSourceKey)];
+  const batchMetaById = await loadWorkspaceBatchMeta(sourceConfigs);
   const allowedBatchIds = new Set<number>(batchMetaById.keys());
   const svc = createServiceSupabase();
   const existingRes = await svc
@@ -3203,7 +3345,7 @@ export async function updateMarketplaceIntakeWorkspace(input: MarketplaceIntakeW
   for (const row of rows) {
     const batchId = Number((row as any).batch_id || 0);
     if (!allowedBatchIds.has(batchId)) {
-      throw new Error(`Ada order yang tidak termasuk workspace ${sourceConfig.sourceLabel}.`);
+      throw new Error('Ada order yang tidak termasuk workspace marketplace yang sedang aktif.');
     }
   }
 
