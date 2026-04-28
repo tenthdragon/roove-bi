@@ -41,9 +41,13 @@ supabase/migrations/007_validation_queries.sql
 scripts/*
 !scripts/sync-jobs-worker.ts
 !scripts/backfill-marketplace-tracking.ts
+!scripts/ops/
+!scripts/ops/backfill-marketplace-tracking.ts
 
 # docs
 docs/
+!docs/runbooks/
+!docs/runbooks/marketplace-tracking-backfill.md
 
 # supabase temp
 supabase/.temp/
