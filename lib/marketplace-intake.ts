@@ -9,6 +9,7 @@ import {
   type MarketplaceIntakeSourceConfig,
 } from './marketplace-intake-sources';
 import { resolveMarketplaceIntakeSourceConfig } from './marketplace-intake-source-store-scopes';
+import { resolveMarketplaceIntakeFeeFinancials } from './marketplace-intake-fee';
 import { resolveMarketplaceIntakeShippingFinancials } from './marketplace-intake-shipping';
 
 type SheetRow = Record<string, unknown>;
@@ -2036,61 +2037,83 @@ export async function saveMarketplaceIntakePreview(input: {
   let insertedOrderIds: number[] = [];
 
   try {
-    const orderRows = normalizedOrders.map((order) => ({
-    batch_id: batchId,
-    external_order_id: order.externalOrderId,
-    order_status: order.orderStatus,
-    final_source_store_id: null,
-    final_store_name: order.finalStoreName,
-    final_store_resolution: order.finalStoreResolution,
-    issue_codes: order.issueCodes || [],
-    line_count: order.lineCount,
-    identified_line_count: order.identifiedLineCount,
-    classified_line_count: order.classifiedLineCount,
-    issue_count: order.issueCount,
-    is_mixed_store: order.isMixedStore,
-    has_unidentified: order.hasUnidentified,
-    customer_label: order.customerLabel,
-    recipient_name: order.recipientName,
-    tracking_number: order.trackingNumber,
-    payment_method_label: order.paymentMethodLabel,
-    shipping_provider: order.shippingProvider,
-    delivery_option: order.deliveryOption,
-    order_amount: order.orderAmount,
-    mp_order_status: String(order.rawMeta?.marketplaceStatus || order.rawMeta?.status || '') || null,
-    mp_cancel_return_status: String(order.rawMeta?.cancellationStatus || order.rawMeta?.substatus || '') || null,
-    mp_ship_by_deadline_at: String(order.rawMeta?.shipByDeadlineAt || '') || null,
-    mp_order_created_at: String(order.rawMeta?.createdAt || '') || null,
-    mp_payment_paid_at: String(order.rawMeta?.paidAt || '') || null,
-    mp_ready_to_ship_at: String(order.rawMeta?.rtsAt || '') || null,
-    mp_order_completed_at: String(order.rawMeta?.deliveredAt || '') || null,
-    mp_customer_username: String(order.rawMeta?.customerUsername || '') || null,
-    mp_customer_phone: String(order.rawMeta?.customerPhone || '') || null,
-    mp_shipping_address: String(order.rawMeta?.address || '') || null,
-    mp_shipping_district: String(order.rawMeta?.district || '') || null,
-    mp_shipping_city: String(order.rawMeta?.city || '') || null,
-    mp_shipping_province: String(order.rawMeta?.province || '') || null,
-    mp_shipping_postal_code: String(order.rawMeta?.postalCode || '') || null,
-    mp_raw_shipping_address: String(order.rawMeta?.rawAddress || '') || null,
-    mp_buyer_note: String(order.rawMeta?.buyerNote || '') || null,
-    mp_seller_note: String(order.rawMeta?.addressNotes || '') || null,
-    mp_buyer_paid_amount: Number(order.rawMeta?.buyerPaidAmount || 0) || 0,
-    mp_total_payment_amount: Number(order.rawMeta?.totalPaymentAmount || 0) || 0,
-    mp_shipping_cost_buyer: Number(order.rawMeta?.shippingCostBuyer ?? order.rawMeta?.shippingCost ?? 0) || 0,
-    mp_estimated_shipping_cost: Number(order.rawMeta?.estimatedShippingCost || 0) || 0,
-    mp_shipping_fee_estimated_deduction: Number(
-      order.rawMeta?.shippingFeeEstimatedDeduction
-      ?? order.rawMeta?.shippingDiscountCompany
-      ?? 0,
-    ) || 0,
-    mp_return_shipping_cost: Number(order.rawMeta?.returnShippingCost || 0) || 0,
-    shipment_date: null,
-    warehouse_status: 'staged',
-    warehouse_note: null,
-    warehouse_updated_at: null,
-    warehouse_updated_by_email: null,
-    raw_meta: order.rawMeta || {},
-    }));
+    const orderRows = normalizedOrders.map((order) => {
+      const marketplaceFeeFinancials = resolveMarketplaceIntakeFeeFinancials({
+        platform: String(order.rawMeta?.platform || ''),
+        orderAmount: order.orderAmount,
+        buyerPaidAmount: Number(order.rawMeta?.buyerPaidAmount || 0) || 0,
+        totalPaymentAmount: Number(order.rawMeta?.totalPaymentAmount || 0) || 0,
+        shippingCost: Number(order.rawMeta?.shippingCostBuyer ?? order.rawMeta?.shippingCost ?? 0) || 0,
+        lines: (order.lines || []).map((line) => ({
+          lineSubtotal: line.lineSubtotal,
+          quantity: line.quantity,
+          rawRow: line.rawRow,
+        })),
+      });
+      const rawMeta = {
+        ...(order.rawMeta || {}),
+        marketplaceFeeAmount: marketplaceFeeFinancials.amount,
+        marketplaceFeeSource: marketplaceFeeFinancials.source,
+        marketplaceFeeFinancials,
+      };
+
+      return {
+        batch_id: batchId,
+        external_order_id: order.externalOrderId,
+        order_status: order.orderStatus,
+        final_source_store_id: null,
+        final_store_name: order.finalStoreName,
+        final_store_resolution: order.finalStoreResolution,
+        issue_codes: order.issueCodes || [],
+        line_count: order.lineCount,
+        identified_line_count: order.identifiedLineCount,
+        classified_line_count: order.classifiedLineCount,
+        issue_count: order.issueCount,
+        is_mixed_store: order.isMixedStore,
+        has_unidentified: order.hasUnidentified,
+        customer_label: order.customerLabel,
+        recipient_name: order.recipientName,
+        tracking_number: order.trackingNumber,
+        payment_method_label: order.paymentMethodLabel,
+        shipping_provider: order.shippingProvider,
+        delivery_option: order.deliveryOption,
+        order_amount: order.orderAmount,
+        mp_order_status: String(order.rawMeta?.marketplaceStatus || order.rawMeta?.status || '') || null,
+        mp_cancel_return_status: String(order.rawMeta?.cancellationStatus || order.rawMeta?.substatus || '') || null,
+        mp_ship_by_deadline_at: String(order.rawMeta?.shipByDeadlineAt || '') || null,
+        mp_order_created_at: String(order.rawMeta?.createdAt || '') || null,
+        mp_payment_paid_at: String(order.rawMeta?.paidAt || '') || null,
+        mp_ready_to_ship_at: String(order.rawMeta?.rtsAt || '') || null,
+        mp_order_completed_at: String(order.rawMeta?.deliveredAt || '') || null,
+        mp_customer_username: String(order.rawMeta?.customerUsername || '') || null,
+        mp_customer_phone: String(order.rawMeta?.customerPhone || '') || null,
+        mp_shipping_address: String(order.rawMeta?.address || '') || null,
+        mp_shipping_district: String(order.rawMeta?.district || '') || null,
+        mp_shipping_city: String(order.rawMeta?.city || '') || null,
+        mp_shipping_province: String(order.rawMeta?.province || '') || null,
+        mp_shipping_postal_code: String(order.rawMeta?.postalCode || '') || null,
+        mp_raw_shipping_address: String(order.rawMeta?.rawAddress || '') || null,
+        mp_buyer_note: String(order.rawMeta?.buyerNote || '') || null,
+        mp_seller_note: String(order.rawMeta?.addressNotes || '') || null,
+        mp_buyer_paid_amount: Number(order.rawMeta?.buyerPaidAmount || 0) || 0,
+        mp_total_payment_amount: Number(order.rawMeta?.totalPaymentAmount || 0) || 0,
+        mp_shipping_cost_buyer: Number(order.rawMeta?.shippingCostBuyer ?? order.rawMeta?.shippingCost ?? 0) || 0,
+        mp_estimated_shipping_cost: Number(order.rawMeta?.estimatedShippingCost || 0) || 0,
+        mp_shipping_fee_estimated_deduction: Number(
+          order.rawMeta?.shippingFeeEstimatedDeduction
+          ?? order.rawMeta?.shippingDiscountCompany
+          ?? 0,
+        ) || 0,
+        mp_return_shipping_cost: Number(order.rawMeta?.returnShippingCost || 0) || 0,
+        mp_marketplace_fee_amount: marketplaceFeeFinancials.present ? marketplaceFeeFinancials.amount : null,
+        shipment_date: null,
+        warehouse_status: 'staged',
+        warehouse_note: null,
+        warehouse_updated_at: null,
+        warehouse_updated_by_email: null,
+        raw_meta: rawMeta,
+      };
+    });
 
     const ordersRes = await insertRowsWithSchemaFallback({
       table: 'marketplace_intake_orders',
@@ -2120,6 +2143,7 @@ export async function saveMarketplaceIntakePreview(input: {
         'mp_estimated_shipping_cost',
         'mp_shipping_fee_estimated_deduction',
         'mp_return_shipping_cost',
+        'mp_marketplace_fee_amount',
       ],
     });
 

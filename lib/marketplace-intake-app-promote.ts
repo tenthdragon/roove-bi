@@ -7,6 +7,7 @@ import {
   resolveMarketplaceIntakeShippingFinancials,
   type MarketplaceIntakeShippingFinancials,
 } from './marketplace-intake-shipping';
+import { resolveMarketplaceIntakeFeeFinancials } from './marketplace-intake-fee';
 import { buildScalevSourceClassFields } from './scalev-source-class';
 import {
   extractMarketplaceTrackingFromProjectionRows,
@@ -31,6 +32,7 @@ type PromoteOrderRow = {
   id: number;
   external_order_id: string;
   final_store_name: string | null;
+  order_amount?: number | null;
   shipment_date: string | null;
   warehouse_status: string;
   customer_label: string | null;
@@ -39,6 +41,10 @@ type PromoteOrderRow = {
   mp_customer_username: string | null;
   mp_order_created_at: string | null;
   mp_payment_paid_at: string | null;
+  mp_buyer_paid_amount?: number | null;
+  mp_total_payment_amount?: number | null;
+  mp_shipping_cost_buyer?: number | null;
+  mp_marketplace_fee_amount?: number | null;
   raw_meta: Record<string, unknown> | null;
 };
 
@@ -47,6 +53,7 @@ type PromoteLineRow = {
   line_index: number;
   mp_product_name: string;
   quantity: number;
+  line_subtotal?: number | null;
   matched_entity_label: string | null;
   detected_custom_id: string | null;
   normalized_sku?: string | null;
@@ -366,6 +373,7 @@ async function loadPromoteOrdersAndLines(input: {
       'id',
       'external_order_id',
       'final_store_name',
+      'order_amount',
       'shipment_date',
       'warehouse_status',
       'customer_label',
@@ -374,6 +382,10 @@ async function loadPromoteOrdersAndLines(input: {
       'mp_customer_username',
       'mp_order_created_at',
       'mp_payment_paid_at',
+      'mp_buyer_paid_amount',
+      'mp_total_payment_amount',
+      'mp_shipping_cost_buyer',
+      'mp_marketplace_fee_amount',
       'raw_meta',
     ].join(','))
     .eq('batch_id', input.batchId)
@@ -421,6 +433,7 @@ async function loadPromoteOrdersAndLines(input: {
         'line_index',
         'mp_product_name',
         'quantity',
+        'line_subtotal',
         'matched_entity_label',
         'detected_custom_id',
         'mp_sku',
@@ -788,6 +801,44 @@ export async function promoteMarketplaceIntakeBatchToApp(
       }, 0);
       const totalQuantity = group.rows.reduce((sum, row) => sum + parseInteger(row.quantity), 0);
       const intakeLines = linesByOrderId.get(intakeOrder.id) || [];
+      const intakePlatform = cleanText(String(intakeOrder.raw_meta?.platform || headerRow.platform || '')).toLowerCase();
+      const derivedMarketplaceFeeFinancials = resolveMarketplaceIntakeFeeFinancials({
+        platform: intakePlatform,
+        orderAmount: Number(intakeOrder.order_amount || 0) || 0,
+        buyerPaidAmount: Number(
+          intakeOrder.mp_buyer_paid_amount
+          ?? intakeOrder.raw_meta?.buyerPaidAmount
+          ?? 0,
+        ) || 0,
+        totalPaymentAmount: Number(
+          intakeOrder.mp_total_payment_amount
+          ?? intakeOrder.raw_meta?.totalPaymentAmount
+          ?? intakeOrder.order_amount
+          ?? 0,
+        ) || 0,
+        shippingCost: Number(
+          intakeOrder.mp_shipping_cost_buyer
+          ?? intakeOrder.raw_meta?.shippingCostBuyer
+          ?? intakeOrder.raw_meta?.shippingCost
+          ?? 0,
+        ) || 0,
+        lines: intakeLines.map((line) => ({
+          lineSubtotal: Number(line.line_subtotal || 0) || 0,
+          quantity: Number(line.quantity || 0) || 0,
+          rawRow: line.raw_row,
+        })),
+      });
+      const storedMarketplaceFeeAmount = intakePlatform === 'shopee' && intakeOrder.mp_marketplace_fee_amount != null
+        ? Number(intakeOrder.mp_marketplace_fee_amount)
+        : null;
+      const marketplaceFeeFinancials = storedMarketplaceFeeAmount == null
+        ? derivedMarketplaceFeeFinancials
+        : {
+          ...derivedMarketplaceFeeFinancials,
+          present: true,
+          amount: storedMarketplaceFeeAmount,
+          source: 'marketplace_intake_orders.mp_marketplace_fee_amount',
+        };
       const promoteShipping = resolvePromoteShipping({
         headerRow,
         intakeOrder,
@@ -813,6 +864,8 @@ export async function promoteMarketplaceIntakeBatchToApp(
         shipment_date: targetShipmentDate,
         shipping_cost: shippingCost,
         shipping_discount: shippingDiscount,
+        marketplace_fee_amount: marketplaceFeeFinancials.present ? marketplaceFeeFinancials.amount : null,
+        marketplace_fee_financials: marketplaceFeeFinancials,
         shipping_financials: promoteShipping.shippingFinancials,
         raw_meta: intakeOrder.raw_meta || {},
         projection_rows: projectionRows,
@@ -839,6 +892,7 @@ export async function promoteMarketplaceIntakeBatchToApp(
         net_revenue: totalRevenue,
         shipping_cost: shippingCost,
         shipping_discount: shippingDiscount,
+        marketplace_fee_amount: marketplaceFeeFinancials.present ? marketplaceFeeFinancials.amount : null,
         discount_code_discount: null,
         total_quantity: totalQuantity,
         customer_name: cleanText(headerRow.username) || cleanText(headerRow.name) || intakeOrder.recipient_name || intakeOrder.customer_label || null,

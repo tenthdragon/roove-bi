@@ -5,14 +5,14 @@ import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
 import {
-  deleteCommissionRate,
+  deleteMarketplaceFeeEstimateRate,
   deleteMonthlyOverhead,
   deleteTaxRate,
   getAdminBootstrap,
   getAdminDataReferenceSnapshot,
   getAdminLogsSnapshot,
+  saveMarketplaceFeeEstimateRate,
   updateTelegramChatId,
-  saveCommissionRate,
   saveMonthlyOverhead,
   saveRolePermissionsMatrix,
   saveTaxRate,
@@ -40,6 +40,16 @@ const TABS = [
   { id: 'permissions', label: 'Permissions' },
   { id: 'logs', label: 'Logs' },
 ];
+
+const MP_FEE_SETTING_OPTIONS = [
+  { key: 'tiktok_estimated', label: 'TikTok estimated commission rate' },
+  { key: 'others_estimated', label: 'Others MP estimated commission rate' },
+  { key: 'shopee_fallback', label: 'Fallback Shopee commission rate' },
+];
+
+const MP_FEE_SETTING_LABELS = Object.fromEntries(
+  MP_FEE_SETTING_OPTIONS.map((option) => [option.key, option.label])
+);
 
 export default function AdminPage() {
   const { can } = usePermissions();
@@ -69,7 +79,7 @@ export default function AdminPage() {
   const [commLoading, setCommLoading] = useState(false);
   const [commSaving, setCommSaving] = useState(false);
   const [commMsg, setCommMsg] = useState(null);
-  const [editingRate, setEditingRate] = useState(null); // { channel, rate, effective_from, isNew }
+  const [editingRate, setEditingRate] = useState(null); // { setting_key, rate, effective_from, isNew }
 
   // Tax Rate states
   const [taxRates, setTaxRates] = useState([]);
@@ -167,7 +177,7 @@ export default function AdminPage() {
     setOverheadLoading(true);
     try {
       const snapshot = await getAdminDataReferenceSnapshot();
-      setCommRates(snapshot.commRates || []);
+      setCommRates(snapshot.marketplaceFeeEstimateRates || []);
       setTaxRates(snapshot.taxRates || []);
       setOverheadData(snapshot.overheadData || []);
       setCommMsg(null);
@@ -193,7 +203,7 @@ export default function AdminPage() {
   }, [currentTabId, dataRefInitialized, loadDataReference]);
 
   const handleSaveRate = async (row) => {
-    if (!row.channel || !row.rate || !row.effective_from) {
+    if (!row.setting_key || !row.rate || !row.effective_from) {
       setCommMsg({ type: 'error', text: 'Semua field harus diisi' });
       return;
     }
@@ -204,12 +214,13 @@ export default function AdminPage() {
       if (isNaN(rateNum) || rateNum < 0 || rateNum > 1) {
         throw new Error('Rate harus berupa desimal antara 0 dan 1 (contoh: 0.19 = 19%)');
       }
-      await saveCommissionRate({
-        channel: row.channel,
+      await saveMarketplaceFeeEstimateRate({
+        setting_key: row.setting_key,
         rate: rateNum,
         effective_from: row.effective_from,
       });
-      setCommMsg({ type: 'success', text: `Rate ${row.channel} berhasil disimpan` });
+      invalidateAll();
+      setCommMsg({ type: 'success', text: `${MP_FEE_SETTING_LABELS[row.setting_key] || row.setting_key} berhasil disimpan` });
       setEditingRate(null);
       await loadDataReference();
     } catch (err) {
@@ -220,9 +231,10 @@ export default function AdminPage() {
   };
 
   const handleDeleteRate = async (id) => {
-    if (!confirm('Hapus rate ini? Data mp_admin_cost akan otomatis dihitung ulang.')) return;
+    if (!confirm('Hapus setting rate ini? Data mp_admin_cost akan otomatis dihitung ulang.')) return;
     try {
-      await deleteCommissionRate(id);
+      await deleteMarketplaceFeeEstimateRate(id);
+      invalidateAll();
       setCommMsg({ type: 'success', text: 'Rate dihapus' });
       await loadDataReference();
     } catch (err) {
@@ -535,20 +547,21 @@ export default function AdminPage() {
       {/* ═══ TAB: DATA REFERENCE ═══ */}
       {currentTabId === 'data_ref' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {/* Marketplace Commission Rates */}
+          {/* Marketplace MP Fee Settings */}
           <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Marketplace Commission Rates</div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Marketplace MP Fee Settings</div>
               <button
-                onClick={() => setEditingRate({ channel: '', rate: '', effective_from: new Date().toISOString().slice(0, 10), isNew: true })}
+                onClick={() => setEditingRate({ setting_key: '', rate: '', effective_from: '2026-05-01', isNew: true })}
                 style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600 }}
               >
                 + Tambah Rate
               </button>
             </div>
             <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
-              Rate komisi marketplace yang digunakan untuk menghitung biaya admin (mp_admin_cost = net_sales × rate).
-              Perubahan rate akan berlaku sesuai tanggal efektif.
+              Rezim lama sebelum 1 Mei 2026 tetap memakai legacy marketplace commission rate.
+              Setelah 1 Mei 2026, Shopee memakai actual MP fee jika tersedia, lalu fallback ke setting Shopee ini jika kosong.
+              TikTok dan marketplace lain tetap estimated dari setting di bawah.
             </div>
 
             {commMsg && (
@@ -565,24 +578,28 @@ export default function AdminPage() {
             {editingRate && (
               <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 14, marginBottom: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 10, color: 'var(--text)' }}>
-                  {editingRate.isNew ? 'Tambah Rate Baru' : `Edit Rate — ${editingRate.channel}`}
+                  {editingRate.isNew
+                    ? 'Tambah Setting Baru'
+                    : `Edit Rate — ${MP_FEE_SETTING_LABELS[editingRate.setting_key] || editingRate.setting_key}`}
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
                   <div style={{ flex: '1 1 140px' }}>
-                    <label style={{ fontSize: 10, color: 'var(--dim)', display: 'block', marginBottom: 3 }}>Channel</label>
+                    <label style={{ fontSize: 10, color: 'var(--dim)', display: 'block', marginBottom: 3 }}>Setting</label>
                     {editingRate.isNew ? (
                       <select
-                        value={editingRate.channel}
-                        onChange={e => setEditingRate({ ...editingRate, channel: e.target.value })}
+                        value={editingRate.setting_key}
+                        onChange={e => setEditingRate({ ...editingRate, setting_key: e.target.value })}
                         style={{ width: '100%', padding: '7px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)', fontSize: 12 }}
                       >
-                        <option value="">— Pilih Channel —</option>
-                        {['TikTok Shop', 'Shopee', 'Lazada', 'BliBli', 'Tokopedia'].map(ch => (
-                          <option key={ch} value={ch}>{ch}</option>
+                        <option value="">— Pilih Setting —</option>
+                        {MP_FEE_SETTING_OPTIONS.map((option) => (
+                          <option key={option.key} value={option.key}>{option.label}</option>
                         ))}
                       </select>
                     ) : (
-                      <div style={{ padding: '7px 10px', fontSize: 12, color: 'var(--text-secondary)' }}>{editingRate.channel}</div>
+                      <div style={{ padding: '7px 10px', fontSize: 12, color: 'var(--text-secondary)' }}>
+                        {MP_FEE_SETTING_LABELS[editingRate.setting_key] || editingRate.setting_key}
+                      </div>
                     )}
                   </div>
                   <div style={{ flex: '0 0 120px' }}>
@@ -632,13 +649,13 @@ export default function AdminPage() {
                 <div className="spinner" style={{ width: 28, height: 28, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
               </div>
             ) : commRates.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>Belum ada data commission rate</div>
+              <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 13 }}>Belum ada data setting MP fee</div>
             ) : (
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                   <thead>
                     <tr style={{ background: 'var(--bg)' }}>
-                      {['Channel', 'Rate', 'Berlaku Sejak', 'Aksi'].map(h => (
+                      {['Setting', 'Rate', 'Berlaku Sejak', 'Aksi'].map(h => (
                         <th key={h} style={{ padding: '10px 12px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', borderBottom: '2px solid var(--border)' }}>{h}</th>
                       ))}
                     </tr>
@@ -646,7 +663,9 @@ export default function AdminPage() {
                   <tbody>
                     {commRates.map((r) => (
                       <tr key={r.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                        <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text)' }}>{r.channel}</td>
+                        <td style={{ padding: '10px 12px', fontWeight: 600, color: 'var(--text)' }}>
+                          {MP_FEE_SETTING_LABELS[r.setting_key] || r.setting_key}
+                        </td>
                         <td style={{ padding: '10px 12px' }}>
                           <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{(r.rate * 100).toFixed(2)}%</span>
                           <span style={{ color: 'var(--dim)', marginLeft: 6, fontSize: 10 }}>({r.rate})</span>
@@ -657,7 +676,7 @@ export default function AdminPage() {
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button
-                              onClick={() => setEditingRate({ channel: r.channel, rate: String(r.rate), effective_from: r.effective_from, isNew: false })}
+                              onClick={() => setEditingRate({ setting_key: r.setting_key, rate: String(r.rate), effective_from: r.effective_from, isNew: false })}
                               style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
                             >
                               Edit

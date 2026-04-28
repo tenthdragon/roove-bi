@@ -102,21 +102,62 @@ export async function getAdminDataReferenceSnapshot() {
   await requireOwnerAccess('Admin Data Reference');
 
   const svc = createServiceSupabase();
-  const [commRes, taxRes, overheadRes] = await Promise.all([
-    svc.from('marketplace_commission_rates').select('*').order('channel').order('effective_from', { ascending: false }),
+  const [mpFeeRes, taxRes, overheadRes] = await Promise.all([
+    svc.from('marketplace_fee_estimate_rates').select('*').order('setting_key').order('effective_from', { ascending: false }),
     svc.from('tax_rates').select('*').order('name').order('effective_from', { ascending: false }),
     svc.from('monthly_overhead').select('*').order('year_month', { ascending: false }),
   ]);
 
-  if (commRes.error) throw commRes.error;
+  if (mpFeeRes.error) throw mpFeeRes.error;
   if (taxRes.error) throw taxRes.error;
   if (overheadRes.error) throw overheadRes.error;
 
   return {
-    commRates: commRes.data || [],
+    marketplaceFeeEstimateRates: mpFeeRes.data || [],
     taxRates: taxRes.data || [],
     overheadData: overheadRes.data || [],
   };
+}
+
+const MARKETPLACE_FEE_SETTING_KEYS = new Set([
+  'tiktok_estimated',
+  'others_estimated',
+  'shopee_fallback',
+]);
+
+export async function saveMarketplaceFeeEstimateRate(row: {
+  setting_key: string;
+  rate: number;
+  effective_from: string;
+}) {
+  await requireOwnerAccess('Admin Data Reference');
+
+  const settingKey = String(row.setting_key || '').trim();
+  if (!MARKETPLACE_FEE_SETTING_KEYS.has(settingKey)) {
+    throw new Error('Setting marketplace fee tidak dikenali.');
+  }
+
+  const svc = createServiceSupabase();
+  const { error } = await svc.from('marketplace_fee_estimate_rates').upsert(
+    {
+      setting_key: settingKey,
+      rate: row.rate,
+      effective_from: row.effective_from,
+    },
+    { onConflict: 'setting_key,effective_from' }
+  );
+
+  if (error) throw error;
+  return { success: true };
+}
+
+export async function deleteMarketplaceFeeEstimateRate(id: number) {
+  await requireOwnerAccess('Admin Data Reference');
+
+  const svc = createServiceSupabase();
+  const { error } = await svc.from('marketplace_fee_estimate_rates').delete().eq('id', id);
+  if (error) throw error;
+  return { success: true };
 }
 
 export async function saveCommissionRate(row: { channel: string; rate: number; effective_from: string }) {
