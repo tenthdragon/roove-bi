@@ -534,6 +534,42 @@ function buildMarketplaceAuthoritativeUpdateBase(args: {
   return updateData;
 }
 
+const WEBHOOK_TIMESTAMP_FIELDS = [
+  'draft_time',
+  'pending_time',
+  'confirmed_time',
+  'paid_time',
+  'shipped_time',
+  'completed_time',
+  'canceled_time',
+] as const;
+
+const MARKETPLACE_AUTHORITATIVE_LOCKED_TIMESTAMP_FIELDS = new Set([
+  'draft_time',
+  'pending_time',
+  'confirmed_time',
+  'paid_time',
+  'shipped_time',
+]);
+
+function applyWebhookTimestampsToUpdate(
+  updateData: Record<string, any>,
+  data: any,
+  options?: {
+    preserveMarketplaceAuthoritativeTimeline?: boolean;
+  },
+) {
+  const preserveLockedFields = options?.preserveMarketplaceAuthoritativeTimeline === true;
+  for (const field of WEBHOOK_TIMESTAMP_FIELDS) {
+    if (preserveLockedFields && MARKETPLACE_AUTHORITATIVE_LOCKED_TIMESTAMP_FIELDS.has(field)) {
+      continue;
+    }
+    if (field in data) {
+      updateData[field] = ts(data[field]);
+    }
+  }
+}
+
 // ── PPN Tax Rate (dynamic from DB, cached) ──
 const DEFAULT_TAX_RATE = 11;
 const DEFAULT_TAX_DIVISOR = 1 + DEFAULT_TAX_RATE / 100; // 1.11
@@ -1160,17 +1196,9 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
       sourceClassFields,
     });
     updateData.status = newStatus;
-
-    const timestampFields = [
-      'draft_time', 'pending_time', 'confirmed_time',
-      'paid_time', 'shipped_time', 'completed_time', 'canceled_time',
-    ];
-
-    for (const field of timestampFields) {
-      if (field in data) {
-        updateData[field] = ts(data[field]);
-      }
-    }
+    applyWebhookTimestampsToUpdate(updateData, data, {
+      preserveMarketplaceAuthoritativeTimeline: true,
+    });
 
     if (data.gross_revenue != null) updateData.gross_revenue = num(data.gross_revenue);
     if (data.net_revenue != null) updateData.net_revenue = num(data.net_revenue);
@@ -1248,16 +1276,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     updateData.order_id = orderId;
   }
 
-  const timestampFields = [
-    'draft_time', 'pending_time', 'confirmed_time',
-    'paid_time', 'shipped_time', 'completed_time', 'canceled_time',
-  ];
-
-  for (const field of timestampFields) {
-    if (field in data) {
-      updateData[field] = ts(data[field]);
-    }
-  }
+  applyWebhookTimestampsToUpdate(updateData, data);
 
   if (data.gross_revenue != null) updateData.gross_revenue = num(data.gross_revenue);
   if (data.net_revenue != null) updateData.net_revenue = num(data.net_revenue);
@@ -1554,14 +1573,9 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     if (data.unique_code_discount != null) updateData.unique_code_discount = num(data.unique_code_discount);
     if (parsedHeaderFinancials.shippingDiscountPresent) updateData.shipping_discount = parsedHeaderFinancials.shippingDiscount;
     if (parsedHeaderFinancials.discountCodeDiscountPresent) updateData.discount_code_discount = parsedHeaderFinancials.discountCodeDiscount;
-
-    const timestampFields = [
-      'draft_time', 'pending_time', 'confirmed_time',
-      'paid_time', 'shipped_time', 'completed_time', 'canceled_time',
-    ];
-    for (const field of timestampFields) {
-      if (field in data) updateData[field] = ts(data[field]);
-    }
+    applyWebhookTimestampsToUpdate(updateData, data, {
+      preserveMarketplaceAuthoritativeTimeline: true,
+    });
 
     const { error: updateErr } = await svc
       .from('scalev_orders')
@@ -1648,13 +1662,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   if (dest.subdistrict) updateData.subdistrict = dest.subdistrict;
 
   // Timestamps
-  const timestampFields = [
-    'draft_time', 'pending_time', 'confirmed_time',
-    'paid_time', 'shipped_time', 'completed_time', 'canceled_time',
-  ];
-  for (const field of timestampFields) {
-    if (field in data) updateData[field] = ts(data[field]);
-  }
+  applyWebhookTimestampsToUpdate(updateData, data);
 
   const { error: updateErr } = await svc
     .from('scalev_orders')
@@ -1943,7 +1951,7 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
 
   if (data.payment_method) updateData.payment_method = data.payment_method;
   if (data.status) updateData.status = data.status;
-  if (data.paid_time) updateData.paid_time = ts(data.paid_time);
+  if (data.paid_time && !isMarketplaceAuthoritativeSource(existing.source)) updateData.paid_time = ts(data.paid_time);
   if (data.gross_revenue != null) updateData.gross_revenue = num(data.gross_revenue);
   if (data.net_revenue != null) updateData.net_revenue = num(data.net_revenue);
   if (data.shipping_cost != null) updateData.shipping_cost = num(data.shipping_cost);
