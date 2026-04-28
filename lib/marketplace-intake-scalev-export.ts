@@ -148,6 +148,10 @@ function rawString(line: IntakeLineRow, key: string): string {
   return cleanText((line.raw_row || {})[key]);
 }
 
+function isTikTokSourceKey(sourceKey: string): boolean {
+  return sourceKey === 'tiktok_rti' || sourceKey === 'tiktok_jhn';
+}
+
 function resolveOpsCustomerName(order: IntakeOrderRow): string {
   const username = cleanText(order.mp_customer_username) || metaString(order, 'customerUsername');
   if (username) return username;
@@ -176,7 +180,7 @@ function resolveOpsSku(line: IntakeLineRow): string {
 }
 
 function resolveOpsPrice(sourceKey: string, line: IntakeLineRow): string {
-  if (sourceKey === 'tiktok_rti') {
+  if (isTikTokSourceKey(sourceKey)) {
     const sellerSkuDiscount = parseLocalizedNumber(rawString(line, 'SKU Seller Discount'));
     const tiktokOriginalUnitPrice = parseLocalizedNumber(rawString(line, 'SKU Unit Original Price'));
     const quantity = Math.max(Number(line.quantity || 0), 1);
@@ -193,6 +197,18 @@ function resolveOpsPrice(sourceKey: string, line: IntakeLineRow): string {
 }
 
 function resolveOpsWarehouse(sourceKey: string, storeName: string | null): string {
+  if (sourceKey === 'tiktok_jhn') {
+    switch (cleanText(storeName)) {
+      case 'Purvu Store':
+      case 'Purvu The Secret Store':
+      case 'drHyun Main Store':
+      case 'Calmara Main Store':
+        return "Jejak Herba Nusantara's Warehouse";
+      default:
+        return '';
+    }
+  }
+
   if (sourceKey === 'tiktok_rti') {
     switch (cleanText(storeName)) {
       case 'Purvu The Secret Store - Markerplace':
@@ -247,7 +263,7 @@ function resolveOpsCourier(
   shippingProvider: string | null,
   trackingNumber: string | null,
 ): { courier: string; courierService: string } {
-  if (sourceKey === 'tiktok_rti') {
+  if (isTikTokSourceKey(sourceKey)) {
     return { courier: 'J&T Express Cashless', courierService: 'EZ' };
   }
 
@@ -277,12 +293,12 @@ function resolveOpsCourier(
 }
 
 function resolveOpsPlatform(sourceKey: string): string {
-  if (sourceKey === 'tiktok_rti') return 'tiktokshop';
+  if (isTikTokSourceKey(sourceKey)) return 'tiktokshop';
   return 'shopee';
 }
 
 function resolveOpsBank(sourceKey: string): string {
-  if (sourceKey === 'tiktok_rti') return 'tiktokshop';
+  if (isTikTokSourceKey(sourceKey)) return 'tiktokshop';
   return 'shopee';
 }
 

@@ -1,11 +1,20 @@
-export type MarketplaceIntakeSourceKey = 'shopee_rlt' | 'shopee_jhn' | 'tiktok_rti';
-export type MarketplaceIntakePlatform = 'shopee' | 'tiktok';
+export type MarketplaceIntakeSourceKey =
+  | 'shopee_rlt'
+  | 'shopee_jhn'
+  | 'tiktok_rti'
+  | 'tiktok_jhn'
+  | 'blibli_rti'
+  | 'lazada_rlt';
+export type MarketplaceIntakePlatform = 'shopee' | 'tiktok' | 'blibli' | 'lazada';
+export type MarketplaceIntakeParserFamily = 'shopee' | 'tiktok' | 'none';
 
 export type MarketplaceIntakeSourceConfig = {
   id: number | null;
   sourceKey: MarketplaceIntakeSourceKey;
   sourceLabel: string;
   platform: MarketplaceIntakePlatform;
+  parserFamily: MarketplaceIntakeParserFamily;
+  uploadEnabled: boolean;
   businessCode: 'RLT' | 'JHN' | 'RTI';
   allowedStores: string[];
   uploadTitle: string;
@@ -29,7 +38,7 @@ export const SHOPEE_RLT_ALLOWED_STORE_NAMES = [
   'Calmara Main Store - Marketplace',
 ];
 
-export const SHOPEE_JHN_ALLOWED_STORE_NAMES = [
+export const JHN_ALLOWED_STORE_NAMES = [
   'Purvu Store',
   'Purvu The Secret Store',
   'drHyun Main Store',
@@ -47,12 +56,31 @@ export const TIKTOK_RTI_ALLOWED_STORE_NAMES = [
   'drHyun Main Store - Marketplace',
 ];
 
+export const BLIBLI_RTI_ALLOWED_STORE_NAMES = [
+  'Roove Main Store - Marketplace',
+  'Globite Store - Marketplace',
+  'Pluve Main Store - Marketplace',
+  'Purvu Store - Marketplace',
+  'Purvu The Secret Store - Markerplace',
+];
+
+export const LAZADA_RLT_ALLOWED_STORE_NAMES = [
+  'Roove Main Store - Marketplace',
+  'Globite Store - Marketplace',
+  'Pluve Main Store - Marketplace',
+  'Purvu Store - Marketplace',
+  'Purvu The Secret Store - Markerplace',
+  'Osgard Oil Store',
+];
+
 const MARKETPLACE_INTAKE_SOURCE_CONFIGS: Record<MarketplaceIntakeSourceKey, MarketplaceIntakeSourceConfig> = {
   shopee_rlt: {
     id: null,
     sourceKey: 'shopee_rlt',
     sourceLabel: 'Shopee RLT',
     platform: 'shopee',
+    parserFamily: 'shopee',
+    uploadEnabled: true,
     businessCode: 'RLT',
     allowedStores: SHOPEE_RLT_ALLOWED_STORE_NAMES,
     uploadTitle: 'Upload Shopee RLT',
@@ -68,8 +96,10 @@ const MARKETPLACE_INTAKE_SOURCE_CONFIGS: Record<MarketplaceIntakeSourceKey, Mark
     sourceKey: 'shopee_jhn',
     sourceLabel: 'Shopee JHN',
     platform: 'shopee',
+    parserFamily: 'shopee',
+    uploadEnabled: true,
     businessCode: 'JHN',
-    allowedStores: SHOPEE_JHN_ALLOWED_STORE_NAMES,
+    allowedStores: JHN_ALLOWED_STORE_NAMES,
     uploadTitle: 'Upload Shopee JHN',
     uploadDescription: 'Halaman ini hanya membaca export Shopee JHN. File yang namanya mengandung SPX tetap diperlakukan sebagai Shopee. App akan match exact SKU Excel ke bundle custom_id di business JHN, lalu menebak store dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.',
     dragDropTitle: 'Drag & drop file Shopee JHN di sini',
@@ -83,6 +113,8 @@ const MARKETPLACE_INTAKE_SOURCE_CONFIGS: Record<MarketplaceIntakeSourceKey, Mark
     sourceKey: 'tiktok_rti',
     sourceLabel: 'Tiktok RTI',
     platform: 'tiktok',
+    parserFamily: 'tiktok',
+    uploadEnabled: true,
     businessCode: 'RTI',
     allowedStores: TIKTOK_RTI_ALLOWED_STORE_NAMES,
     uploadTitle: 'Upload Tiktok RTI',
@@ -93,6 +125,57 @@ const MARKETPLACE_INTAKE_SOURCE_CONFIGS: Record<MarketplaceIntakeSourceKey, Mark
     searchPlaceholder: 'Cari bundle RTI…',
     pageDescription: 'Tahap pertama untuk jalur baru marketplace TikTok RTI. Upload workbook seller center, lalu app akan match SKU workbook ke bundle custom_id di business RTI, mencari store final dari nama bundle/produk, dan menaruh hasilnya ke workspace warehouse. Data baru dianggap valid downstream setelah warehouse memberi shipment date.',
   },
+  tiktok_jhn: {
+    id: null,
+    sourceKey: 'tiktok_jhn',
+    sourceLabel: 'Tiktok JHN',
+    platform: 'tiktok',
+    parserFamily: 'tiktok',
+    uploadEnabled: true,
+    businessCode: 'JHN',
+    allowedStores: JHN_ALLOWED_STORE_NAMES,
+    uploadTitle: 'Upload Tiktok JHN',
+    uploadDescription: 'Halaman ini membaca export TikTok Shop seller center JHN. App akan match SKU workbook ke bundle custom_id di business JHN, lalu menebak store final dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.',
+    dragDropTitle: 'Drag & drop file Tiktok JHN di sini',
+    readingLabel: 'Membaca file Tiktok JHN…',
+    previewLabel: 'Preview Mapping Tiktok JHN',
+    searchPlaceholder: 'Cari bundle JHN…',
+    pageDescription: 'Tahap pertama untuk jalur baru marketplace TikTok JHN. Upload workbook seller center, lalu app akan match SKU workbook ke bundle custom_id di business JHN, mencari store final dari nama bundle/produk, dan menaruh hasilnya ke workspace warehouse. Data baru dianggap valid downstream setelah warehouse memberi shipment date.',
+  },
+  blibli_rti: {
+    id: null,
+    sourceKey: 'blibli_rti',
+    sourceLabel: 'Blibli RTI',
+    platform: 'blibli',
+    parserFamily: 'none',
+    uploadEnabled: false,
+    businessCode: 'RTI',
+    allowedStores: BLIBLI_RTI_ALLOWED_STORE_NAMES,
+    uploadTitle: 'Upload Blibli RTI',
+    uploadDescription: 'Source ini sudah terdaftar untuk reference dan store scope RTI, tetapi parser upload intake belum diaktifkan.',
+    dragDropTitle: 'Upload Blibli RTI belum aktif',
+    readingLabel: 'Parser Blibli RTI belum aktif…',
+    previewLabel: 'Preview Mapping Blibli RTI',
+    searchPlaceholder: 'Cari bundle RTI…',
+    pageDescription: 'Source Blibli RTI sudah terdaftar untuk kebutuhan reference, store scope, dan resolver rules. Jalur parsing upload akan diaktifkan menyusul.',
+  },
+  lazada_rlt: {
+    id: null,
+    sourceKey: 'lazada_rlt',
+    sourceLabel: 'Lazada RLT',
+    platform: 'lazada',
+    parserFamily: 'none',
+    uploadEnabled: false,
+    businessCode: 'RLT',
+    allowedStores: LAZADA_RLT_ALLOWED_STORE_NAMES,
+    uploadTitle: 'Upload Lazada RLT',
+    uploadDescription: 'Source ini sudah terdaftar untuk reference dan store scope RLT, tetapi parser upload intake belum diaktifkan.',
+    dragDropTitle: 'Upload Lazada RLT belum aktif',
+    readingLabel: 'Parser Lazada RLT belum aktif…',
+    previewLabel: 'Preview Mapping Lazada RLT',
+    searchPlaceholder: 'Cari bundle RLT…',
+    pageDescription: 'Source Lazada RLT sudah terdaftar untuk kebutuhan reference, store scope, dan resolver rules. Jalur parsing upload akan diaktifkan menyusul.',
+  },
 };
 
 export function getMarketplaceIntakeSourceConfig(sourceKey?: string | null): MarketplaceIntakeSourceConfig {
@@ -102,4 +185,8 @@ export function getMarketplaceIntakeSourceConfig(sourceKey?: string | null): Mar
 
 export function listMarketplaceIntakeSourceConfigs(): MarketplaceIntakeSourceConfig[] {
   return Object.values(MARKETPLACE_INTAKE_SOURCE_CONFIGS);
+}
+
+export function listMarketplaceIntakeUploadSourceConfigs(): MarketplaceIntakeSourceConfig[] {
+  return listMarketplaceIntakeSourceConfigs().filter((config) => config.uploadEnabled);
 }

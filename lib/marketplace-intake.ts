@@ -761,7 +761,11 @@ async function parseMarketplaceWorkbook(input: {
   if (stringRows.length === 0) throw new Error('Workbook tidak memiliki baris data.');
 
   const headers = Object.keys(stringRows[0]);
-  if (input.sourceConfig.platform === 'shopee') {
+  if (input.sourceConfig.parserFamily === 'none' || input.sourceConfig.uploadEnabled === false) {
+    throw new Error(`Source ${input.sourceConfig.sourceLabel} sudah terdaftar, tetapi parser upload intake-nya belum diaktifkan.`);
+  }
+
+  if (input.sourceConfig.parserFamily === 'shopee') {
     if (!headers.includes('No. Pesanan')) {
       throw new Error('Halaman ini saat ini hanya menerima export Shopee/SPX yang memiliki kolom "No. Pesanan".');
     }

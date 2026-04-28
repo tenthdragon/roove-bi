@@ -4,7 +4,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getMarketplaceIntakeSourceConfig,
-  listMarketplaceIntakeSourceConfigs,
+  listMarketplaceIntakeUploadSourceConfigs,
 } from '@/lib/marketplace-intake-sources';
 import { invalidateAll } from '@/lib/dashboard-cache';
 
@@ -32,7 +32,7 @@ const WAREHOUSE_STATUS_META = {
   canceled: { label: 'Canceled', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
 };
 
-const MARKETPLACE_SOURCE_OPTIONS = listMarketplaceIntakeSourceConfigs();
+const MARKETPLACE_SOURCE_OPTIONS = listMarketplaceIntakeUploadSourceConfigs();
 
 function fmtNumber(value) {
   return new Intl.NumberFormat('id-ID').format(Number(value || 0));
