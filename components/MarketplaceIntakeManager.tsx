@@ -168,39 +168,6 @@ function SyncStatusPill({ status, successLabel, failedLabel, idleLabel, partialL
   );
 }
 
-function getWorkspaceScalevSyncMeta(sync, loading) {
-  if (loading) {
-    return {
-      label: 'Cek App ↔ Scalev…',
-      tone: 'default',
-      helper: 'Sedang membandingkan batch marketplace yang sudah dipush ke Scalev.',
-    };
-  }
-
-  if (!sync || sync.status === 'empty') {
-    return {
-      label: 'Belum Ada Cek Scalev',
-      tone: 'default',
-      helper: 'Belum ada batch shipped pada scope ini yang pernah dipush ke Scalev.',
-    };
-  }
-
-  if (sync.status === 'accurate') {
-    return {
-      label: 'App ↔ Scalev Akur',
-      tone: 'success',
-      helper: `${fmtNumber(sync.eligibleOrderCount || 0)} order yang sudah dipush ke Scalev cocok dengan posisi di app.`,
-    };
-  }
-
-  const gapCount = Number(sync.missingOrderCount || 0) + Number(sync.wrongDateCount || 0);
-  return {
-    label: `Perlu Sinkron (${fmtNumber(gapCount)})`,
-    tone: 'warn',
-    helper: `${fmtNumber(sync.missingOrderCount || 0)} order belum ada di app, ${fmtNumber(sync.wrongDateCount || 0)} masih jatuh di tanggal yang berbeda.`,
-  };
-}
-
 function FeedbackNotice({ message, compact = false }) {
   if (!message?.text) return null;
 
@@ -627,13 +594,6 @@ export default function MarketplaceIntakeManager() {
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState('');
   const [workspace, setWorkspace] = useState(null);
-  const [workspaceScalevSync, setWorkspaceScalevSync] = useState(null);
-  const [workspaceScalevSyncLoading, setWorkspaceScalevSyncLoading] = useState(false);
-  const [workspaceScalevSyncError, setWorkspaceScalevSyncError] = useState('');
-  const [workspaceScalevSyncModalOpen, setWorkspaceScalevSyncModalOpen] = useState(false);
-  const [workspaceScalevSyncRepairing, setWorkspaceScalevSyncRepairing] = useState(false);
-  const workspaceScalevSyncRequestRef = useRef('');
-
   const activeSource = useMemo(
     () => (preview?.source?.sourceKey ? getMarketplaceIntakeSourceConfig(preview.source.sourceKey) : null),
     [preview?.source?.sourceKey],
@@ -826,9 +786,6 @@ export default function MarketplaceIntakeManager() {
     setBatchShipmentDates({});
     setWorkspaceError('');
     setWorkspace(null);
-    setWorkspaceScalevSync(null);
-    setWorkspaceScalevSyncError('');
-    setWorkspaceScalevSyncModalOpen(false);
     setWorkspaceDate(getCurrentDateValue());
   }, [sourceKey]);
 
@@ -1384,36 +1341,6 @@ export default function MarketplaceIntakeManager() {
     }
   }
 
-  async function loadWorkspaceScalevSync(date) {
-    const shipmentDate = String(date || workspaceDate || getCurrentDateValue());
-    const requestKey = `${sourceKey}::${shipmentDate}`;
-    workspaceScalevSyncRequestRef.current = requestKey;
-    setWorkspaceScalevSyncLoading(true);
-    setWorkspaceScalevSyncError('');
-
-    try {
-      const res = await fetch(
-        `/api/marketplace-intake/workspace-scalev-sync?shipmentDate=${encodeURIComponent(shipmentDate)}&sourceKey=${encodeURIComponent(sourceKey)}`,
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Gagal mengecek akurasi Scalev vs app.');
-      }
-
-      if (workspaceScalevSyncRequestRef.current !== requestKey) return;
-      setWorkspaceScalevSync(data);
-    } catch (err) {
-      console.error(err);
-      if (workspaceScalevSyncRequestRef.current !== requestKey) return;
-      setWorkspaceScalevSync(null);
-      setWorkspaceScalevSyncError(err?.message || 'Gagal mengecek akurasi Scalev vs app.');
-    } finally {
-      if (workspaceScalevSyncRequestRef.current === requestKey) {
-        setWorkspaceScalevSyncLoading(false);
-      }
-    }
-  }
-
   async function loadWorkspace(date) {
     const shipmentDate = String(date || getCurrentDateValue());
     setWorkspaceLoading(true);
@@ -1429,13 +1356,10 @@ export default function MarketplaceIntakeManager() {
       }
 
       setWorkspace(data);
-      void loadWorkspaceScalevSync(shipmentDate);
     } catch (err) {
       console.error(err);
       setWorkspace(null);
       setWorkspaceError(err?.message || 'Gagal membaca workspace warehouse.');
-      setWorkspaceScalevSync(null);
-      setWorkspaceScalevSyncError('');
     } finally {
       setWorkspaceLoading(false);
     }
@@ -2110,44 +2034,6 @@ export default function MarketplaceIntakeManager() {
     }
   }
 
-  async function handleRepairWorkspaceScalevSync() {
-    const targetShipmentDate = workspaceDate || getCurrentDateValue();
-    setWorkspaceScalevSyncRepairing(true);
-    setWorkspaceError('');
-    setMessage(null);
-
-    try {
-      const res = await fetch('/api/marketplace-intake/workspace-scalev-sync', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          shipmentDate: targetShipmentDate,
-          sourceKey,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || 'Gagal memperbaiki gap Scalev vs app.');
-      }
-
-      setWorkspaceScalevSync(data.inspection || null);
-      invalidateAll();
-      await loadWorkspace(targetShipmentDate);
-      setMessage({
-        type: 'success',
-        scope: 'workspace',
-        text: data.batchErrors?.length
-          ? `Perbaikan selesai sebagian. ${fmtNumber(data.repairedBatchCount || 0)} batch berhasil diproses, ${fmtNumber(data.batchErrors.length)} batch masih error.`
-          : `Perbaikan selesai. ${fmtNumber(data.repairedBatchCount || 0)} batch diproses, ${fmtNumber(data.promoteInsertedCount || 0)} row baru seeded ke app, ${fmtNumber(data.reconcileUpdatedCount || 0)} identity Scalev diikat.`,
-      });
-    } catch (err) {
-      console.error(err);
-      setWorkspaceError(err?.message || 'Gagal memperbaiki gap Scalev vs app.');
-    } finally {
-      setWorkspaceScalevSyncRepairing(false);
-    }
-  }
-
   const stagedOrders = useMemo(() => workspace?.stagedOrders || [], [workspace?.stagedOrders]);
   const shipmentOrders = useMemo(() => workspace?.shipmentOrders || [], [workspace?.shipmentOrders]);
   const stagedBatches = useMemo(() => groupOrdersByBatch(stagedOrders), [stagedOrders]);
@@ -2156,10 +2042,6 @@ export default function MarketplaceIntakeManager() {
   const previewMessage = message?.scope === 'preview' ? message : null;
   const workspaceMessage = message?.scope === 'workspace' ? message : null;
   const globalMessage = !message?.scope || message.scope === 'upload' ? message : null;
-  const workspaceScalevSyncMeta = useMemo(
-    () => getWorkspaceScalevSyncMeta(workspaceScalevSync, workspaceScalevSyncLoading),
-    [workspaceScalevSync, workspaceScalevSyncLoading],
-  );
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -3182,37 +3064,6 @@ export default function MarketplaceIntakeManager() {
           </div>
         </div>
 
-        <div
-          style={{
-            marginBottom: 12,
-            padding: '10px 12px',
-            borderRadius: 12,
-            border: '1px solid var(--border)',
-            background: 'var(--bg)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            gap: 12,
-            flexWrap: 'wrap',
-            alignItems: 'center',
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)' }}>
-              {workspaceScalevSyncMeta.label}
-            </div>
-            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)', lineHeight: 1.5 }}>
-              {workspaceScalevSyncMeta.helper}
-            </div>
-          </div>
-          <ActionButton
-            onClick={() => setWorkspaceScalevSyncModalOpen(true)}
-            tone={workspaceScalevSyncMeta.tone}
-            disabled={workspaceLoading}
-          >
-            {workspaceScalevSync?.status === 'drift' ? 'Buka Sinkronisasi' : 'Lihat Status'}
-          </ActionButton>
-        </div>
-
         {workspaceError ? (
           <div
             style={{
@@ -3232,12 +3083,6 @@ export default function MarketplaceIntakeManager() {
         {workspaceMessage ? (
           <div style={{ marginBottom: 12 }}>
             <FeedbackNotice message={workspaceMessage} />
-          </div>
-        ) : null}
-
-        {workspaceScalevSyncError ? (
-          <div style={{ marginBottom: 12 }}>
-            <FeedbackNotice message={{ type: 'error', text: workspaceScalevSyncError }} compact />
           </div>
         ) : null}
 
@@ -3783,168 +3628,6 @@ export default function MarketplaceIntakeManager() {
         </div>
       </div>
 
-      {workspaceScalevSyncModalOpen ? (
-        <div
-          onClick={() => {
-            if (!workspaceScalevSyncRepairing) setWorkspaceScalevSyncModalOpen(false);
-          }}
-          style={{
-            position: 'fixed',
-            inset: 0,
-            background: 'rgba(15,23,42,0.72)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 20,
-            zIndex: 60,
-          }}
-        >
-          <div
-            onClick={(event) => event.stopPropagation()}
-            style={{
-              width: 'min(760px, 100%)',
-              maxHeight: '85vh',
-              overflow: 'auto',
-              background: 'var(--card)',
-              border: '1px solid var(--border)',
-              borderRadius: 16,
-              boxShadow: 'var(--shadow)',
-              padding: 18,
-              display: 'grid',
-              gap: 14,
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontSize: 18, fontWeight: 800 }}>Akurasi App ↔ Scalev</div>
-                <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
-                  Scope saat ini: <strong>{workspaceScopeLabel}</strong> • shipment <strong>{fmtDateLabel(workspaceDate)}</strong>.
-                </div>
-              </div>
-              <ActionButton
-                onClick={() => setWorkspaceScalevSyncModalOpen(false)}
-                disabled={workspaceScalevSyncRepairing}
-              >
-                Tutup
-              </ActionButton>
-            </div>
-
-            <FeedbackNotice
-              message={{
-                type: workspaceScalevSync?.status === 'drift' ? 'error' : 'success',
-                text: workspaceScalevSyncMeta.helper,
-              }}
-              compact
-            />
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                gap: 12,
-              }}
-            >
-              <SummaryCard label="Order Scalev Scope" value={workspaceScalevSync?.eligibleOrderCount || 0} />
-              <SummaryCard label="Sudah Akur di App" value={workspaceScalevSync?.matchedOrderCount || 0} tone="success" />
-              <SummaryCard label="Belum Ada di App" value={workspaceScalevSync?.missingOrderCount || 0} tone={(workspaceScalevSync?.missingOrderCount || 0) > 0 ? 'danger' : 'default'} />
-              <SummaryCard label="Salah Tanggal" value={workspaceScalevSync?.wrongDateCount || 0} tone={(workspaceScalevSync?.wrongDateCount || 0) > 0 ? 'warn' : 'default'} />
-            </div>
-
-            {workspaceScalevSync?.affectedBatches?.length ? (
-              <div style={{ display: 'grid', gap: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 800 }}>Batch yang Perlu Ditarik Ulang</div>
-                <div style={{ display: 'grid', gap: 8 }}>
-                  {workspaceScalevSync.affectedBatches.map((batch) => (
-                    <div
-                      key={`gap-batch:${batch.batchId}`}
-                      style={{
-                        border: '1px solid var(--border)',
-                        borderRadius: 12,
-                        padding: 12,
-                        background: 'var(--bg)',
-                        display: 'grid',
-                        gap: 4,
-                      }}
-                    >
-                      <div style={{ fontSize: 13, fontWeight: 700 }}>
-                        #{batch.batchId} • {batch.batchFilename}
-                      </div>
-                      <div style={{ fontSize: 12, color: 'var(--dim)' }}>
-                        {batch.businessCode} • {fmtNumber(batch.orderCount || 0)} order • {fmtNumber(batch.missingCount || 0)} belum ada di app • {fmtNumber(batch.wrongDateCount || 0)} salah tanggal
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {workspaceScalevSync?.samples?.length ? (
-              <div style={{ display: 'grid', gap: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 800 }}>Contoh Gap</div>
-                <div style={{ border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 640 }}>
-                    <thead>
-                      <tr style={{ background: 'var(--bg)' }}>
-                        <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>Order</th>
-                        <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>Batch</th>
-                        <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>Masalah</th>
-                        <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>Posisi App</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {workspaceScalevSync.samples.map((sample) => (
-                        <tr key={`gap-sample:${sample.batchId}:${sample.externalOrderId}`}>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                            <div style={{ fontWeight: 700 }}>{sample.externalOrderId}</div>
-                            <div style={{ color: 'var(--dim)', marginTop: 3 }}>{sample.trackingNumber || '-'}</div>
-                          </td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                            <div>#{sample.batchId}</div>
-                            <div style={{ color: 'var(--dim)', marginTop: 3 }}>{sample.businessCode}</div>
-                          </td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                            {sample.reason === 'missing_in_app' ? 'Belum ada row di app' : `Masih jatuh di ${sample.appShipmentDate || '-'}`}
-                          </td>
-                          <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
-                            <div>{sample.appOrderId || '-'}</div>
-                            <div style={{ color: 'var(--dim)', marginTop: 3 }}>{sample.appSource || '-'}</div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : null}
-
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-              <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
-                Tombol perbaikan akan menjalankan <strong>Masuk ke App</strong> ulang untuk batch yang tidak akur, lalu langsung <strong>Tarik ID Scalev</strong> agar row authoritative di app cepat menempel ke identity Scalev.
-              </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <ActionButton
-                  onClick={() => loadWorkspaceScalevSync(workspaceDate)}
-                  disabled={workspaceScalevSyncRepairing}
-                >
-                  {workspaceScalevSyncLoading ? 'Mengecek…' : 'Cek Ulang'}
-                </ActionButton>
-                <ActionButton
-                  onClick={handleRepairWorkspaceScalevSync}
-                  tone="primary"
-                  disabled={
-                    workspaceScalevSyncRepairing
-                    || workspaceScalevSyncLoading
-                    || !workspaceScalevSync
-                    || workspaceScalevSync.status !== 'drift'
-                  }
-                >
-                  {workspaceScalevSyncRepairing ? 'Menarik…' : 'Tarik Order Hilang'}
-                </ActionButton>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }
