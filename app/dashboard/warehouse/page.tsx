@@ -1355,11 +1355,19 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                 <div style={{ padding: '5px 16px 9px', fontSize: 11.5, color: reviewTextMuted, borderBottom: `1px solid ${reviewBorderSoft}` }}>
                   Status: {(row.order_status || '-').toUpperCase()} · Triggered {fmtDateTime(row.triggered_at)}
                   {row.completed_at ? ` · Selesai ${fmtDateTime(row.completed_at)}` : ''}
+                  {row.notes ? ` · ${row.notes}` : ''}
                 </div>
                 {isExpanded && (
                   <div>
                     {(row.items || []).length === 0 ? (
-                      <div style={{ padding: '16px', color: reviewTextSecondary, fontSize: 12 }}>Belum ada item RTS yang dapat diverifikasi.</div>
+                      <div style={{ padding: '16px', color: reviewTextSecondary, fontSize: 12, lineHeight: 1.6 }}>
+                        <div style={{ fontWeight: 700, color: reviewTextPrimary, marginBottom: 6 }}>
+                          RTS ini sudah tertangkap, tetapi belum bisa dibentuk menjadi item verifikasi.
+                        </div>
+                        <div>
+                          {row.notes || 'Benahi mapping produk/business terlebih dulu, lalu refresh queue RTS atau tunggu event webhook berikutnya memicu re-sync.'}
+                        </div>
+                      </div>
                     ) : (
                       <div>
                         {(row.items || []).map((item: any, itemIndex: number) => {
@@ -1715,7 +1723,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                       </div>
                     )}
 
-                    {isPending && (
+                    {isPending && (row.items || []).length > 0 && (
                       <div style={{ padding: '13px 16px', background: reviewSurface2, borderTop: `1px solid ${reviewBorderSoft}` }}>
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 12, alignItems: 'end' }}>
                           <div>

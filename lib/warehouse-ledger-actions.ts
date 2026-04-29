@@ -1538,37 +1538,17 @@ async function cancelPendingWarehouseRtsVerification(
   return data ? Number(data.id) : null;
 }
 
-async function queueWarehouseRtsVerification(
+async function upsertPendingWarehouseRtsVerification(
   svc: ReturnType<typeof createServiceSupabase>,
-  assessment: ScalevOrderWarehouseAssessment,
-  scope: WarehouseRtsVerificationScope,
+  input: {
+    assessment: ScalevOrderWarehouseAssessment;
+    scope: WarehouseRtsVerificationScope;
+    expectedTotalQty: number;
+    notes?: string | null;
+  },
 ) {
-  if (!assessment.mapping || assessment.productLines.length === 0) {
-    return {
-      action: 'partial',
-      reversed: 0,
-      deducted: 0,
-      skipped: assessment.skippedIgnored,
-      unmapped_products: assessment.unmappedProducts,
-      ...buildWarehouseIssueSummary(assessment),
-    };
-  }
-
-  const items = buildWarehouseRtsVerificationQueueItems(assessment);
-  if (items.length === 0) {
-    return {
-      action: 'partial',
-      reversed: 0,
-      deducted: 0,
-      skipped: assessment.skippedIgnored,
-      unmapped_products: assessment.unmappedProducts,
-      ...buildWarehouseIssueSummary(assessment),
-    };
-  }
-
   const now = new Date().toISOString();
-  const expectedTotalQty = items.reduce((sum, item) => sum + Number(item.expected_qty || 0), 0);
-
+  const { assessment, scope } = input;
   const { data: existing, error: existingErr } = await svc
     .from('warehouse_rts_verifications')
     .select('id, status')
@@ -1578,12 +1558,8 @@ async function queueWarehouseRtsVerification(
 
   if (existing?.status === 'completed') {
     return {
-      action: 'rts_already_verified',
-      reversed: 0,
-      deducted: 0,
-      skipped: assessment.skippedIgnored,
-      unmapped_products: assessment.unmappedProducts,
-      verification_id: Number(existing.id),
+      verificationId: Number(existing.id),
+      existingCompleted: true,
     };
   }
 
@@ -1594,12 +1570,12 @@ async function queueWarehouseRtsVerification(
     order_status: assessment.order.status || null,
     scope,
     status: 'pending' as WarehouseRtsVerificationStatus,
-    expected_total_qty: expectedTotalQty,
+    expected_total_qty: Number(input.expectedTotalQty || 0),
+    notes: input.notes?.trim() || null,
     triggered_at: now,
     updated_at: now,
   };
 
-  let verificationId: number;
   if (existing?.id) {
     const { data: refreshed, error: updateErr } = await svc
       .from('warehouse_rts_verifications')
@@ -1612,25 +1588,121 @@ async function queueWarehouseRtsVerification(
       .select('id')
       .single();
     if (updateErr) throw updateErr;
-    verificationId = Number(refreshed.id);
-  } else {
-    const { data: created, error: insertErr } = await svc
-      .from('warehouse_rts_verifications')
-      .insert({
-        ...payload,
-        created_at: now,
-      })
-      .select('id')
-      .single();
-    if (insertErr) throw insertErr;
-    verificationId = Number(created.id);
+    return {
+      verificationId: Number(refreshed.id),
+      existingCompleted: false,
+      existingId: Number(existing.id),
+    };
   }
 
+  const { data: created, error: insertErr } = await svc
+    .from('warehouse_rts_verifications')
+    .insert({
+      ...payload,
+      created_at: now,
+    })
+    .select('id')
+    .single();
+  if (insertErr) throw insertErr;
+  return {
+    verificationId: Number(created.id),
+    existingCompleted: false,
+    existingId: null,
+  };
+}
+
+async function queueWarehouseRtsVerification(
+  svc: ReturnType<typeof createServiceSupabase>,
+  assessment: ScalevOrderWarehouseAssessment,
+  scope: WarehouseRtsVerificationScope,
+) {
+  const issueSummary = buildWarehouseIssueSummary(assessment);
+  if (!assessment.mapping || assessment.productLines.length === 0) {
+    const header = await upsertPendingWarehouseRtsVerification(svc, {
+      assessment,
+      scope,
+      expectedTotalQty: assessment.productLines.reduce((sum, line) => sum + Number(line.quantity || 0), 0),
+      notes: issueSummary.problem_detail,
+    });
+    await syncWarehouseRtsVerificationItems(svc, header.verificationId, []);
+
+    if (header.existingCompleted) {
+      return {
+        action: 'rts_already_verified',
+        reversed: 0,
+        deducted: 0,
+        skipped: assessment.skippedIgnored,
+        unmapped_products: assessment.unmappedProducts,
+        verification_id: header.verificationId,
+      };
+    }
+
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+      verification_id: header.verificationId,
+      ...issueSummary,
+    };
+  }
+
+  const items = buildWarehouseRtsVerificationQueueItems(assessment);
+  if (items.length === 0) {
+    const header = await upsertPendingWarehouseRtsVerification(svc, {
+      assessment,
+      scope,
+      expectedTotalQty: assessment.productLines.reduce((sum, line) => sum + Number(line.quantity || 0), 0),
+      notes: issueSummary.problem_detail,
+    });
+    await syncWarehouseRtsVerificationItems(svc, header.verificationId, []);
+
+    if (header.existingCompleted) {
+      return {
+        action: 'rts_already_verified',
+        reversed: 0,
+        deducted: 0,
+        skipped: assessment.skippedIgnored,
+        unmapped_products: assessment.unmappedProducts,
+        verification_id: header.verificationId,
+      };
+    }
+
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+      verification_id: header.verificationId,
+      ...issueSummary,
+    };
+  }
+
+  const expectedTotalQty = items.reduce((sum, item) => sum + Number(item.expected_qty || 0), 0);
+  const header = await upsertPendingWarehouseRtsVerification(svc, {
+    assessment,
+    scope,
+    expectedTotalQty,
+    notes: assessment.unmappedProducts.length > 0 ? issueSummary.problem_detail : null,
+  });
+  if (header.existingCompleted) {
+    return {
+      action: 'rts_already_verified',
+      reversed: 0,
+      deducted: 0,
+      skipped: assessment.skippedIgnored,
+      unmapped_products: assessment.unmappedProducts,
+      verification_id: header.verificationId,
+    };
+  }
+  const verificationId = header.verificationId;
   await syncWarehouseRtsVerificationItems(svc, verificationId, items);
 
   const action = assessment.unmappedProducts.length > 0
     ? 'rts_verification_partial'
-    : existing?.id
+    : header.existingId
       ? 'rts_verification_pending'
       : 'rts_verification_needed';
 
@@ -5067,6 +5139,9 @@ export async function completeWarehouseRTSVerification(
       .eq('verification_id', verificationId)
       .order('id', { ascending: true });
     if (itemsErr) throw itemsErr;
+    if (!itemRows || itemRows.length === 0) {
+      throw new Error('Verifikasi RTS ini belum punya item yang bisa diproses. Benahi mapping produk/business lalu refresh queue RTS.');
+    }
 
     const submittedById = new Map<number, {
       mode: WarehouseRtsReturnMode;
