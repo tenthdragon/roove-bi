@@ -725,6 +725,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
   const [formByVerification, setFormByVerification] = useState<Record<number, any>>({});
   const [loadingContextByVerification, setLoadingContextByVerification] = useState<Record<number, boolean>>({});
   const [submittingId, setSubmittingId] = useState<number | null>(null);
+  const [syncingVerificationId, setSyncingVerificationId] = useState<number | null>(null);
   const [errorByVerification, setErrorByVerification] = useState<Record<number, string>>({});
   const isRtsDecomposeTargetCategory = (category: string | null | undefined) => category === 'wip' || category === 'wip_material';
 
@@ -1203,6 +1204,30 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
     }
   };
 
+  const handleResyncVerification = async (row: any) => {
+    const verificationId = Number(row.id);
+    setSyncingVerificationId(verificationId);
+    setErrorByVerification((current) => ({ ...current, [verificationId]: '' }));
+    try {
+      const result = await backfillSingleOrder(row.order_id);
+      const stillBlocked = result.action === 'partial' || result.action === 'unchanged';
+      if (stillBlocked) {
+        setErrorByVerification((current) => ({
+          ...current,
+          [verificationId]: result.problem_detail || result.problem || 'RTS masih belum bisa dibentuk. Cek mapping produk / business lagi.',
+        }));
+      }
+      onRefresh();
+    } catch (e: any) {
+      setErrorByVerification((current) => ({
+        ...current,
+        [verificationId]: e?.message || 'Gagal sync ulang RTS.',
+      }));
+    } finally {
+      setSyncingVerificationId(null);
+    }
+  };
+
   const scopeLabel = (scope: string) => scope === 'pre_go_live' ? 'RTS Pra Go-Live' : 'RTS Pasca Go-Live';
   const statusTone = (status: string) => {
     if (status === 'completed') return { bg: 'var(--badge-green-bg)', color: '#6ee7b7', label: 'Selesai' };
@@ -1367,6 +1392,35 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                         <div>
                           {row.notes || 'Benahi mapping produk/business terlebih dulu, lalu refresh queue RTS atau tunggu event webhook berikutnya memicu re-sync.'}
                         </div>
+                        {isPending && can('wh:mapping_sync') && (
+                          <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                            <button
+                              onClick={() => handleResyncVerification(row)}
+                              disabled={syncingVerificationId === verificationId}
+                              style={{
+                                padding: '7px 12px',
+                                borderRadius: 6,
+                                border: `1px solid ${reviewAccent}`,
+                                background: syncingVerificationId === verificationId ? reviewAccentDim : 'transparent',
+                                color: reviewAccent,
+                                fontSize: 11.5,
+                                fontWeight: 600,
+                                cursor: syncingVerificationId === verificationId ? 'wait' : 'pointer',
+                                opacity: syncingVerificationId === verificationId ? 0.7 : 1,
+                              }}
+                            >
+                              {syncingVerificationId === verificationId ? 'Syncing...' : 'Sync Ulang RTS'}
+                            </button>
+                            <span style={{ fontSize: 11, color: reviewTextMuted }}>
+                              Gunakan ini setelah mapping bundle / produk sudah dibetulkan.
+                            </span>
+                          </div>
+                        )}
+                        {!!errorByVerification[verificationId] && (
+                          <div style={{ marginTop: 10, color: reviewRed, fontSize: 11.5 }}>
+                            {errorByVerification[verificationId]}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div>
