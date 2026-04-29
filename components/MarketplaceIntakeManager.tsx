@@ -3179,14 +3179,38 @@ export default function MarketplaceIntakeManager() {
             <ActionButton onClick={() => loadWorkspace(workspaceDate)}>
               {workspaceLoading ? 'Memuat...' : 'Refresh'}
             </ActionButton>
-            <ActionButton
-              onClick={() => setWorkspaceScalevSyncModalOpen(true)}
-              tone={workspaceScalevSyncMeta.tone}
-              disabled={workspaceLoading}
-            >
-              {workspaceScalevSyncMeta.label}
-            </ActionButton>
           </div>
+        </div>
+
+        <div
+          style={{
+            marginBottom: 12,
+            padding: '10px 12px',
+            borderRadius: 12,
+            border: '1px solid var(--border)',
+            background: 'var(--bg)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: 12,
+            flexWrap: 'wrap',
+            alignItems: 'center',
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--text)' }}>
+              {workspaceScalevSyncMeta.label}
+            </div>
+            <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)', lineHeight: 1.5 }}>
+              {workspaceScalevSyncMeta.helper}
+            </div>
+          </div>
+          <ActionButton
+            onClick={() => setWorkspaceScalevSyncModalOpen(true)}
+            tone={workspaceScalevSyncMeta.tone}
+            disabled={workspaceLoading}
+          >
+            {workspaceScalevSync?.status === 'drift' ? 'Buka Sinkronisasi' : 'Lihat Status'}
+          </ActionButton>
         </div>
 
         {workspaceError ? (
