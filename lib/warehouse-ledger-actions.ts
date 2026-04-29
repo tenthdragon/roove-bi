@@ -3018,70 +3018,6 @@ async function insertLedgerEntry(svc: ReturnType<typeof createServiceSupabase>, 
   return data;
 }
 
-async function loadBatchLedgerQuantityMap(
-  svc: ReturnType<typeof createServiceSupabase>,
-  batchIds: number[],
-) {
-  const uniqueBatchIds = Array.from(new Set((batchIds || []).map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)));
-  const quantities = new Map<number, number>();
-  if (uniqueBatchIds.length === 0) return quantities;
-
-  const { data, error } = await svc
-    .from('warehouse_stock_ledger')
-    .select('batch_id, quantity')
-    .in('batch_id', uniqueBatchIds);
-  if (error) throw error;
-
-  for (const row of data || []) {
-    const batchId = Number((row as any).batch_id || 0);
-    if (!Number.isFinite(batchId) || batchId <= 0) continue;
-    quantities.set(batchId, (quantities.get(batchId) || 0) + Number((row as any).quantity || 0));
-  }
-  return quantities;
-}
-
-async function syncBatchCurrentQtyFromLedger(
-  svc: ReturnType<typeof createServiceSupabase>,
-  batchIds: number[],
-) {
-  const uniqueBatchIds = Array.from(new Set((batchIds || []).map((value) => Number(value)).filter((value) => Number.isFinite(value) && value > 0)));
-  if (uniqueBatchIds.length === 0) return;
-
-  const { data: batches, error: batchesErr } = await svc
-    .from('warehouse_batches')
-    .select('id, current_qty')
-    .in('id', uniqueBatchIds);
-  if (batchesErr) throw batchesErr;
-
-  const qtyByBatchId = await loadBatchLedgerQuantityMap(svc, uniqueBatchIds);
-
-  for (const batch of batches || []) {
-    const batchId = Number((batch as any).id || 0);
-    if (!Number.isFinite(batchId) || batchId <= 0) continue;
-    const nextQty = Math.max(0, Number(qtyByBatchId.get(batchId) || 0));
-    const currentQty = Number((batch as any).current_qty || 0);
-    if (Math.abs(currentQty - nextQty) <= QUANTITY_EPSILON) continue;
-
-    const { error: updateErr } = await svc
-      .from('warehouse_batches')
-      .update({ current_qty: nextQty })
-      .eq('id', batchId);
-    if (updateErr) throw updateErr;
-  }
-}
-
-async function trySyncBatchCurrentQtyFromLedger(
-  svc: ReturnType<typeof createServiceSupabase>,
-  batchIds: number[],
-  context: string,
-) {
-  try {
-    await syncBatchCurrentQtyFromLedger(svc, batchIds);
-  } catch (error) {
-    console.error(`[warehouse] failed to sync batch current_qty from ledger after ${context}:`, error);
-  }
-}
-
 async function getBatchOrThrow(
   svc: ReturnType<typeof createServiceSupabase>,
   batchId: number,
@@ -3096,11 +3032,7 @@ async function getBatchOrThrow(
   if (productId && Number(batch.warehouse_product_id) !== Number(productId)) {
     throw new Error('Batch tidak cocok dengan produk yang dipilih');
   }
-  const liveQtyMap = await loadBatchLedgerQuantityMap(svc, [Number(batch.id)]);
-  return {
-    ...batch,
-    current_qty: Math.max(0, Number(liveQtyMap.get(Number(batch.id)) ?? Number(batch.current_qty || 0))),
-  };
+  return batch;
 }
 
 async function deductBatchQuantityOrThrow(
@@ -3212,36 +3144,31 @@ export async function recordStockInInternal(
   if (quantity <= 0) throw new Error('Stock IN quantity must be positive');
   const svc = createServiceSupabase();
   const userId = await getCurrentUserId();
-  const touchedBatchIds = batchId ? [Number(batchId)] : [];
 
-  try {
-    // Update batch qty if batch specified
-    if (batchId) {
-      await incrementBatchQuantityOrThrow(svc, batchId, productId, quantity);
-    }
-
-    const result = await insertLedgerEntry(svc, {
-      warehouse_product_id: productId,
-      batch_id: batchId,
-      movement_type: 'IN',
-      quantity: quantity,
-      reference_type: referenceType,
-      reference_id: referenceId,
-      notes,
-      created_by: userId,
-    });
-
-    // Notify direktur (fire-and-forget)
-    const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
-    if (prod) {
-      const userName = await getCurrentUserName();
-      notifyDirekturs(formatNotification('Stock Masuk', prod.name, quantity, `${prod.warehouse} - ${prod.entity}`, userName));
-    }
-
-    return result;
-  } finally {
-    await trySyncBatchCurrentQtyFromLedger(svc, touchedBatchIds, 'recordStockInInternal');
+  // Update batch qty if batch specified
+  if (batchId) {
+    await incrementBatchQuantityOrThrow(svc, batchId, productId, quantity);
   }
+
+  const result = await insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'IN',
+    quantity: quantity,
+    reference_type: referenceType,
+    reference_id: referenceId,
+    notes,
+    created_by: userId,
+  });
+
+  // Notify direktur (fire-and-forget)
+  const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
+  if (prod) {
+    const userName = await getCurrentUserName();
+    notifyDirekturs(formatNotification('Stock Masuk', prod.name, quantity, `${prod.warehouse} - ${prod.entity}`, userName));
+  }
+
+  return result;
 }
 
 export async function recordStockIn(
@@ -3294,30 +3221,26 @@ export async function recordStockOut(
   }
 
   // Specific batch deduction
-  try {
-    await deductBatchQuantityOrThrow(svc, batchId, productId, quantity);
+  await deductBatchQuantityOrThrow(svc, batchId, productId, quantity);
 
-    const result = await insertLedgerEntry(svc, {
-      warehouse_product_id: productId,
-      batch_id: batchId,
-      movement_type: 'OUT',
-      quantity: -quantity,
-      reference_type: referenceType,
-      reference_id: referenceId,
-      notes,
-      created_by: userId,
-    });
+  const result = await insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'OUT',
+    quantity: -quantity,
+    reference_type: referenceType,
+    reference_id: referenceId,
+    notes,
+    created_by: userId,
+  });
 
-    const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
-    if (prod) {
-      const userName = await getCurrentUserName();
-      notifyDirekturs(formatNotification('Stock Keluar', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName));
-    }
-
-    return result;
-  } finally {
-    await trySyncBatchCurrentQtyFromLedger(svc, [Number(batchId)], 'recordStockOut');
+  const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
+  if (prod) {
+    const userName = await getCurrentUserName();
+    notifyDirekturs(formatNotification('Stock Keluar', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName));
   }
+
+  return result;
 }
 
 // ============================================================
@@ -3337,30 +3260,27 @@ export async function recordStockRTS(
   if (!batchId) throw new Error('Batch wajib dipilih untuk RTS');
   const svc = createServiceSupabase();
   const userId = await getCurrentUserId();
-  try {
-    await incrementBatchQuantityOrThrow(svc, batchId, productId, quantity);
 
-    const result = await insertLedgerEntry(svc, {
-      warehouse_product_id: productId,
-      batch_id: batchId,
-      movement_type: 'IN',
-      quantity: quantity,
-      reference_type: 'rts',
-      reference_id: resiNumber.trim(),
-      notes: notes ? `RTS: ${notes}` : `RTS resi: ${resiNumber.trim()}`,
-      created_by: userId,
-    });
+  await incrementBatchQuantityOrThrow(svc, batchId, productId, quantity);
 
-    const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
-    if (prod) {
-      const userName = await getCurrentUserName();
-      notifyDirekturs(formatNotification('Stock Masuk (RTS)', prod.name, quantity, `${prod.warehouse} - ${prod.entity}`, userName, `Resi: ${resiNumber.trim()}`));
-    }
+  const result = await insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'IN',
+    quantity: quantity,
+    reference_type: 'rts',
+    reference_id: resiNumber.trim(),
+    notes: notes ? `RTS: ${notes}` : `RTS resi: ${resiNumber.trim()}`,
+    created_by: userId,
+  });
 
-    return result;
-  } finally {
-    await trySyncBatchCurrentQtyFromLedger(svc, [Number(batchId)], 'recordStockRTS');
+  const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
+  if (prod) {
+    const userName = await getCurrentUserName();
+    notifyDirekturs(formatNotification('Stock Masuk (RTS)', prod.name, quantity, `${prod.warehouse} - ${prod.entity}`, userName, `Resi: ${resiNumber.trim()}`));
   }
+
+  return result;
 }
 
 // ============================================================
@@ -3375,33 +3295,30 @@ async function recordStockAdjustInternal(
 ) {
   const svc = createServiceSupabase();
   const userId = await getCurrentUserId();
-  try {
-    if (batchId) {
-      const batch = await getBatchOrThrow(svc, batchId, productId);
-      const nextQty = Number(batch.current_qty || 0) + adjustmentQty;
-      if (nextQty < 0) {
-        throw new Error(`Adjust menyebabkan stok batch ${batch.batch_code} menjadi negatif`);
-      }
 
-      const { error } = await svc
-        .from('warehouse_batches')
-        .update({ current_qty: nextQty })
-        .eq('id', batchId);
-      if (error) throw error;
+  if (batchId) {
+    const batch = await getBatchOrThrow(svc, batchId, productId);
+    const nextQty = Number(batch.current_qty || 0) + adjustmentQty;
+    if (nextQty < 0) {
+      throw new Error(`Adjust menyebabkan stok batch ${batch.batch_code} menjadi negatif`);
     }
 
-    return await insertLedgerEntry(svc, {
-      warehouse_product_id: productId,
-      batch_id: batchId,
-      movement_type: 'ADJUST',
-      quantity: adjustmentQty,
-      created_by: userId,
-      reference_type: 'opname',
-      notes,
-    });
-  } finally {
-    await trySyncBatchCurrentQtyFromLedger(svc, batchId ? [Number(batchId)] : [], 'recordStockAdjustInternal');
+    const { error } = await svc
+      .from('warehouse_batches')
+      .update({ current_qty: nextQty })
+      .eq('id', batchId);
+    if (error) throw error;
   }
+
+  return insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'ADJUST',
+    quantity: adjustmentQty,
+    created_by: userId,
+    reference_type: 'opname',
+    notes,
+  });
 }
 
 async function recordStockOpnameAdjustInternal(
@@ -3502,7 +3419,6 @@ export async function recordTransfer(
   if (quantity <= 0) throw new Error('Transfer quantity must be positive');
   const svc = createServiceSupabase();
   const userId = await getCurrentUserId();
-  const touchedBatchIds = new Set<number>();
 
   const { data: sourceProduct, error: sourceErr } = await svc
     .from('warehouse_products')
@@ -3544,57 +3460,56 @@ export async function recordTransfer(
   let sourceBatchLabel = '';
 
   // Update batch qty (deduct from source) and mirror batch to target when available
-  try {
-    if (batchId) {
-      touchedBatchIds.add(Number(batchId));
-      const sourceBatch = await deductBatchQuantityOrThrow(svc, batchId, productId, quantity);
-      sourceBatchLabel = sourceBatch.batch_code || '';
+  if (batchId) {
+    const sourceBatch = await deductBatchQuantityOrThrow(svc, batchId, productId, quantity);
+    sourceBatchLabel = sourceBatch.batch_code || '';
 
-      const targetBatch = await findOrCreateTargetBatch(
-        svc,
-        targetProduct.id,
-        sourceBatch.batch_code,
-        sourceBatch.expired_date || null,
-        sourceBatch.cost_per_unit ?? null,
-      );
-      targetBatchId = targetBatch.id;
-      touchedBatchIds.add(Number(targetBatch.id));
-      await incrementBatchQuantityOrThrow(svc, Number(targetBatch.id), Number(targetProduct.id), quantity);
-    }
+    const targetBatch = await findOrCreateTargetBatch(
+      svc,
+      targetProduct.id,
+      sourceBatch.batch_code,
+      sourceBatch.expired_date || null,
+      sourceBatch.cost_per_unit ?? null,
+    );
+    targetBatchId = targetBatch.id;
 
-    // Ledger: OUT from source
-    await insertLedgerEntry(svc, {
-      warehouse_product_id: productId,
-      batch_id: batchId,
-      movement_type: 'TRANSFER_OUT',
-      quantity: -quantity,
-      reference_type: 'transfer',
-      reference_id: String(transfer.id),
-      notes: `Transfer to ${toEntity} (${toWarehouse})`,
-      created_by: userId,
-    });
-
-    // Ledger: IN to target
-    await insertLedgerEntry(svc, {
-      warehouse_product_id: targetProduct.id,
-      batch_id: targetBatchId,
-      movement_type: 'TRANSFER_IN',
-      quantity,
-      reference_type: 'transfer',
-      reference_id: String(transfer.id),
-      notes: `Transfer from ${fromEntity} (${fromWarehouse})${sourceBatchLabel ? ` — batch ${sourceBatchLabel}` : ''}`,
-      created_by: userId,
-    });
-
-    if (sourceProduct) {
-      const userName = await getCurrentUserName();
-      notifyDirekturs(formatNotification('Transfer', sourceProduct.name, quantity, `${fromEntity} → ${toEntity}`, userName, `Dari: ${fromWarehouse} - ${fromEntity}\nKe: ${toWarehouse} - ${toEntity}`));
-    }
-
-    return transfer;
-  } finally {
-    await trySyncBatchCurrentQtyFromLedger(svc, Array.from(touchedBatchIds), 'recordTransfer');
+    const { error: targetBatchErr } = await svc
+      .from('warehouse_batches')
+      .update({ current_qty: Number(targetBatch.current_qty || 0) + quantity })
+      .eq('id', targetBatch.id);
+    if (targetBatchErr) throw targetBatchErr;
   }
+
+  // Ledger: OUT from source
+  await insertLedgerEntry(svc, {
+    warehouse_product_id: productId,
+    batch_id: batchId,
+    movement_type: 'TRANSFER_OUT',
+    quantity: -quantity,
+    reference_type: 'transfer',
+    reference_id: String(transfer.id),
+    notes: `Transfer to ${toEntity} (${toWarehouse})`,
+    created_by: userId,
+  });
+
+  // Ledger: IN to target
+  await insertLedgerEntry(svc, {
+    warehouse_product_id: targetProduct.id,
+    batch_id: targetBatchId,
+    movement_type: 'TRANSFER_IN',
+    quantity,
+    reference_type: 'transfer',
+    reference_id: String(transfer.id),
+    notes: `Transfer from ${fromEntity} (${fromWarehouse})${sourceBatchLabel ? ` — batch ${sourceBatchLabel}` : ''}`,
+    created_by: userId,
+  });
+
+  if (sourceProduct) {
+    const userName = await getCurrentUserName();
+    notifyDirekturs(formatNotification('Transfer', sourceProduct.name, quantity, `${fromEntity} → ${toEntity}`, userName, `Dari: ${fromWarehouse} - ${fromEntity}\nKe: ${toWarehouse} - ${toEntity}`));
+  }
+
+  return transfer;
 }
 
 // ============================================================
@@ -3626,58 +3541,56 @@ export async function recordConversion(
   const svc = createServiceSupabase();
   const userId = await getCurrentUserId();
   const refId = `conv-${Date.now()}`;
-  const touchedBatchIds = new Set<number>();
 
-  try {
-    // Deduct each source
-    for (const src of sources) {
-      const batchId = src.batchId;
-      if (batchId == null) throw new Error('Batch sumber wajib dipilih untuk setiap bahan konversi.');
-      touchedBatchIds.add(Number(batchId));
-      await deductBatchQuantityOrThrow(svc, batchId, src.productId, src.quantity);
+  // Deduct each source
+  for (const src of sources) {
+    const batchId = src.batchId;
+    if (batchId == null) throw new Error('Batch sumber wajib dipilih untuk setiap bahan konversi.');
+    await deductBatchQuantityOrThrow(svc, batchId, src.productId, src.quantity);
 
-      await insertLedgerEntry(svc, {
-        warehouse_product_id: src.productId,
-        batch_id: batchId,
-        movement_type: 'OUT',
-        quantity: -src.quantity,
-        reference_type: 'manual',
-        reference_id: refId,
-        notes: `Konversi keluar: ${src.quantity} unit`,
-        created_by: userId,
-      });
-    }
-
-    // Create or find target batch
-    let targetBatchId: number | null = null;
-    if (targetBatchCode) {
-      const targetBatch = await findOrCreateTargetBatch(
-        svc,
-        targetProductId,
-        targetBatchCode,
-        targetExpiredDate || null,
-      );
-      targetBatchId = targetBatch.id;
-      touchedBatchIds.add(Number(targetBatch.id));
-      await incrementBatchQuantityOrThrow(svc, Number(targetBatch.id), Number(targetProductId), targetQty);
-    }
-
-    // Ledger IN for target
     await insertLedgerEntry(svc, {
-      warehouse_product_id: targetProductId,
-      batch_id: targetBatchId,
-      movement_type: 'IN',
-      quantity: targetQty,
+      warehouse_product_id: src.productId,
+      batch_id: batchId,
+      movement_type: 'OUT',
+      quantity: -src.quantity,
       reference_type: 'manual',
       reference_id: refId,
-      notes: notes || `Konversi masuk: ${targetQty} unit dari produk lain`,
+      notes: `Konversi keluar: ${src.quantity} unit`,
       created_by: userId,
     });
-
-    return { reference_id: refId };
-  } finally {
-    await trySyncBatchCurrentQtyFromLedger(svc, Array.from(touchedBatchIds), 'recordConversion');
   }
+
+  // Create or find target batch
+  let targetBatchId: number | null = null;
+  if (targetBatchCode) {
+    const targetBatch = await findOrCreateTargetBatch(
+      svc,
+      targetProductId,
+      targetBatchCode,
+      targetExpiredDate || null,
+    );
+    targetBatchId = targetBatch.id;
+
+    const { error: targetBatchErr } = await svc
+      .from('warehouse_batches')
+      .update({ current_qty: Number(targetBatch.current_qty || 0) + targetQty })
+      .eq('id', targetBatch.id);
+    if (targetBatchErr) throw targetBatchErr;
+  }
+
+  // Ledger IN for target
+  await insertLedgerEntry(svc, {
+    warehouse_product_id: targetProductId,
+    batch_id: targetBatchId,
+    movement_type: 'IN',
+    quantity: targetQty,
+    reference_type: 'manual',
+    reference_id: refId,
+    notes: notes || `Konversi masuk: ${targetQty} unit dari produk lain`,
+    created_by: userId,
+  });
+
+  return { reference_id: refId };
 }
 
 // ============================================================
@@ -3864,128 +3777,19 @@ async function applyStockReclassRequestInternal(
   const refId = request.ledger_reference_id || `reclass-${request.id}`;
   const notesBase = `[RECLASS#${request.id}] ${sourceProduct.name} (${sourceProduct.category}) -> ${targetProduct.name} (${targetProduct.category})`;
   const quantity = Number(request.quantity || 0);
-  const touchedBatchIds = new Set<number>();
 
   if (quantity <= 0) throw new Error('Quantity reklasifikasi tidak valid.');
 
-  try {
-    if (request.source_batch_id) {
-      touchedBatchIds.add(Number(request.source_batch_id));
-      const sourceBatch = await deductBatchQuantityOrThrow(
-        svc,
-        Number(request.source_batch_id),
-        Number(sourceProduct.id),
-        quantity,
-      );
+  if (request.source_batch_id) {
+    const sourceBatch = await deductBatchQuantityOrThrow(
+      svc,
+      Number(request.source_batch_id),
+      Number(sourceProduct.id),
+      quantity,
+    );
 
-      let targetBatchId: number | null = null;
-      if (sourceBatch.batch_code) {
-        const targetBatch = await findOrCreateTargetBatch(
-          svc,
-          Number(targetProduct.id),
-          sourceBatch.batch_code,
-          sourceBatch.expired_date || null,
-          sourceBatch.cost_per_unit ?? null,
-        );
-        targetBatchId = Number(targetBatch.id);
-        touchedBatchIds.add(Number(targetBatch.id));
-        await incrementBatchQuantityOrThrow(svc, Number(targetBatch.id), Number(targetProduct.id), quantity);
-      }
-
-      await insertLedgerEntry(svc, {
-        warehouse_product_id: Number(sourceProduct.id),
-        batch_id: Number(request.source_batch_id),
-        movement_type: 'OUT',
-        quantity: -quantity,
-        reference_type: 'reclass',
-        reference_id: refId,
-        notes: `${notesBase} | ${request.reason}`,
-        created_by: actedByUserId,
-      });
-
-      await insertLedgerEntry(svc, {
-        warehouse_product_id: Number(targetProduct.id),
-        batch_id: targetBatchId,
-        movement_type: 'IN',
-        quantity,
-        reference_type: 'reclass',
-        reference_id: refId,
-        notes: `${notesBase} | ${request.reason}`,
-        created_by: actedByUserId,
-      });
-
-      return { referenceId: refId };
-    }
-
-    const { data: availableBatches, error: batchErr } = await svc
-      .from('warehouse_batches')
-      .select('id')
-      .eq('warehouse_product_id', Number(sourceProduct.id))
-      .eq('is_active', true)
-      .gt('current_qty', 0)
-      .limit(1);
-    if (batchErr) throw batchErr;
-
-    if ((availableBatches || []).length === 0) {
-      const currentBalance = await getCurrentBalance(svc, Number(sourceProduct.id));
-      if (quantity > currentBalance) {
-        throw new Error(`Qty melebihi saldo produk sumber (${currentBalance}).`);
-      }
-
-      await insertLedgerEntry(svc, {
-        warehouse_product_id: Number(sourceProduct.id),
-        batch_id: null,
-        movement_type: 'OUT',
-        quantity: -quantity,
-        reference_type: 'reclass',
-        reference_id: refId,
-        notes: `${notesBase} | ${request.reason}`,
-        created_by: actedByUserId,
-      });
-
-      await insertLedgerEntry(svc, {
-        warehouse_product_id: Number(targetProduct.id),
-        batch_id: null,
-        movement_type: 'IN',
-        quantity,
-        reference_type: 'reclass',
-        reference_id: refId,
-        notes: `${notesBase} | ${request.reason}`,
-        created_by: actedByUserId,
-      });
-
-      return { referenceId: refId };
-    }
-
-    const { data: fifoBatches, error: fifoBatchErr } = await svc
-      .from('warehouse_batches')
-      .select('id, batch_code, expired_date, cost_per_unit, current_qty')
-      .eq('warehouse_product_id', Number(sourceProduct.id))
-      .eq('is_active', true)
-      .gt('current_qty', 0)
-      .order('expired_date', { ascending: true, nullsFirst: false });
-    if (fifoBatchErr) throw fifoBatchErr;
-
-    const sourceBatches = fifoBatches || [];
-    const batchTotal = sourceBatches.reduce((sum: number, row: any) => sum + Number(row.current_qty || 0), 0);
-    if (batchTotal < quantity) {
-      throw new Error(`Qty melebihi total stok batch produk sumber (${batchTotal}).`);
-    }
-
-    let remaining = quantity;
-    for (const sourceBatch of sourceBatches) {
-      if (remaining <= 0) break;
-      const deductedQty = Math.min(Number(sourceBatch.current_qty || 0), remaining);
-      if (deductedQty <= 0) continue;
-
-      touchedBatchIds.add(Number(sourceBatch.id));
-      await deductBatchQuantityOrThrow(
-        svc,
-        Number(sourceBatch.id),
-        Number(sourceProduct.id),
-        deductedQty,
-      );
-
+    let targetBatchId: number | null = null;
+    if (sourceBatch.batch_code) {
       const targetBatch = await findOrCreateTargetBatch(
         svc,
         Number(targetProduct.id),
@@ -3993,43 +3797,153 @@ async function applyStockReclassRequestInternal(
         sourceBatch.expired_date || null,
         sourceBatch.cost_per_unit ?? null,
       );
-      const targetBatchId = Number(targetBatch.id);
-      touchedBatchIds.add(targetBatchId);
-      await incrementBatchQuantityOrThrow(svc, targetBatchId, Number(targetProduct.id), deductedQty);
+      targetBatchId = Number(targetBatch.id);
 
-      await insertLedgerEntry(svc, {
-        warehouse_product_id: Number(sourceProduct.id),
-        batch_id: Number(sourceBatch.id),
-        movement_type: 'OUT',
-        quantity: -deductedQty,
-        reference_type: 'reclass',
-        reference_id: refId,
-        notes: `${notesBase} | ${request.reason}`,
-        created_by: actedByUserId,
-      });
-
-      await insertLedgerEntry(svc, {
-        warehouse_product_id: Number(targetProduct.id),
-        batch_id: targetBatchId,
-        movement_type: 'IN',
-        quantity: deductedQty,
-        reference_type: 'reclass',
-        reference_id: refId,
-        notes: `${notesBase} | ${request.reason}`,
-        created_by: actedByUserId,
-      });
-
-      remaining -= deductedQty;
+      const { error: targetBatchErr } = await svc
+        .from('warehouse_batches')
+        .update({ current_qty: Number(targetBatch.current_qty || 0) + quantity })
+        .eq('id', targetBatchId);
+      if (targetBatchErr) throw targetBatchErr;
     }
 
-    if (remaining > 0) {
-      throw new Error(`Reklasifikasi batch tidak selesai. Sisa ${remaining} unit belum terpindah.`);
-    }
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(sourceProduct.id),
+      batch_id: Number(request.source_batch_id),
+      movement_type: 'OUT',
+      quantity: -quantity,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(targetProduct.id),
+      batch_id: targetBatchId,
+      movement_type: 'IN',
+      quantity,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
 
     return { referenceId: refId };
-  } finally {
-    await trySyncBatchCurrentQtyFromLedger(svc, Array.from(touchedBatchIds), 'applyStockReclassRequestInternal');
   }
+
+  const { data: availableBatches, error: batchErr } = await svc
+    .from('warehouse_batches')
+    .select('id')
+    .eq('warehouse_product_id', Number(sourceProduct.id))
+    .eq('is_active', true)
+    .gt('current_qty', 0)
+    .limit(1);
+  if (batchErr) throw batchErr;
+
+  if ((availableBatches || []).length === 0) {
+    const currentBalance = await getCurrentBalance(svc, Number(sourceProduct.id));
+    if (quantity > currentBalance) {
+      throw new Error(`Qty melebihi saldo produk sumber (${currentBalance}).`);
+    }
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(sourceProduct.id),
+      batch_id: null,
+      movement_type: 'OUT',
+      quantity: -quantity,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(targetProduct.id),
+      batch_id: null,
+      movement_type: 'IN',
+      quantity,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    return { referenceId: refId };
+  }
+
+  const { data: fifoBatches, error: fifoBatchErr } = await svc
+    .from('warehouse_batches')
+    .select('id, batch_code, expired_date, cost_per_unit, current_qty')
+    .eq('warehouse_product_id', Number(sourceProduct.id))
+    .eq('is_active', true)
+    .gt('current_qty', 0)
+    .order('expired_date', { ascending: true, nullsFirst: false });
+  if (fifoBatchErr) throw fifoBatchErr;
+
+  const sourceBatches = fifoBatches || [];
+  const batchTotal = sourceBatches.reduce((sum: number, row: any) => sum + Number(row.current_qty || 0), 0);
+  if (batchTotal < quantity) {
+    throw new Error(`Qty melebihi total stok batch produk sumber (${batchTotal}).`);
+  }
+
+  let remaining = quantity;
+  for (const sourceBatch of sourceBatches) {
+    if (remaining <= 0) break;
+    const deductedQty = Math.min(Number(sourceBatch.current_qty || 0), remaining);
+    if (deductedQty <= 0) continue;
+
+    await deductBatchQuantityOrThrow(
+      svc,
+      Number(sourceBatch.id),
+      Number(sourceProduct.id),
+      deductedQty,
+    );
+
+    const targetBatch = await findOrCreateTargetBatch(
+      svc,
+      Number(targetProduct.id),
+      sourceBatch.batch_code,
+      sourceBatch.expired_date || null,
+      sourceBatch.cost_per_unit ?? null,
+    );
+    const targetBatchId = Number(targetBatch.id);
+
+    const { error: targetBatchErr } = await svc
+      .from('warehouse_batches')
+      .update({ current_qty: Number(targetBatch.current_qty || 0) + deductedQty })
+      .eq('id', targetBatchId);
+    if (targetBatchErr) throw targetBatchErr;
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(sourceProduct.id),
+      batch_id: Number(sourceBatch.id),
+      movement_type: 'OUT',
+      quantity: -deductedQty,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    await insertLedgerEntry(svc, {
+      warehouse_product_id: Number(targetProduct.id),
+      batch_id: targetBatchId,
+      movement_type: 'IN',
+      quantity: deductedQty,
+      reference_type: 'reclass',
+      reference_id: refId,
+      notes: `${notesBase} | ${request.reason}`,
+      created_by: actedByUserId,
+    });
+
+    remaining -= deductedQty;
+  }
+
+  if (remaining > 0) {
+    throw new Error(`Reklasifikasi batch tidak selesai. Sisa ${remaining} unit belum terpindah.`);
+  }
+
+  return { referenceId: refId };
 }
 
 export async function getStockReclassRequests(status?: WarehouseStockReclassStatus) {
@@ -4920,85 +4834,11 @@ export async function getWipEventHistory(limit: number = 100) {
 export async function getStockByBatch(productId?: number) {
   await requireWarehouseAccess('Batch & Expiry');
   const svc = createServiceSupabase();
-  let query = svc
-    .from('warehouse_batches')
-    .select(`
-      id,
-      batch_code,
-      expired_date,
-      cost_per_unit,
-      warehouse_products!inner(
-        id,
-        name,
-        category,
-        entity,
-        warehouse,
-        price_list,
-        hpp
-      )
-    `)
-    .eq('is_active', true);
-  if (productId) query = query.eq('warehouse_product_id', productId);
-  const { data, error } = await query;
+  let query = svc.from('v_warehouse_batch_stock').select('*');
+  if (productId) query = query.eq('product_id', productId);
+  const { data, error } = await query.order('expired_date', { ascending: true, nullsFirst: false });
   if (error) throw error;
-
-  const batchRows = data || [];
-  const batchIds = batchRows.map((row: any) => Number(row.id)).filter(Boolean);
-  const liveQtyMap = await loadBatchLedgerQuantityMap(svc, batchIds);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const rows = batchRows
-    .map((row: any) => {
-      const product = row.warehouse_products;
-      const currentQty = Math.max(0, Number(liveQtyMap.get(Number(row.id)) || 0));
-      if (currentQty <= QUANTITY_EPSILON) return null;
-
-      const expiredDate = row.expired_date || null;
-      const effectiveHpp = Number(row.cost_per_unit || 0) > 0 ? Number(row.cost_per_unit || 0) : Number(product?.hpp || 0);
-      let expiryStatus = 'no_expiry';
-      let daysRemaining: number | null = null;
-      if (expiredDate) {
-        const parsed = new Date(`${expiredDate}T00:00:00`);
-        parsed.setHours(0, 0, 0, 0);
-        const diff = Math.round((parsed.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-        daysRemaining = diff;
-        if (diff < 0) expiryStatus = 'expired';
-        else if (diff < 30) expiryStatus = 'critical';
-        else if (diff < 90) expiryStatus = 'warning';
-        else expiryStatus = 'safe';
-      }
-
-      return {
-        batch_id: Number(row.id),
-        batch_code: row.batch_code,
-        expired_date: expiredDate,
-        current_qty: currentQty,
-        cost_per_unit: Number(row.cost_per_unit || 0),
-        product_id: Number(product?.id || 0),
-        product_name: product?.name || null,
-        category: product?.category || null,
-        entity: product?.entity || null,
-        warehouse: product?.warehouse || null,
-        effective_hpp: effectiveHpp,
-        price_list: Number(product?.price_list || 0),
-        expiry_status: expiryStatus,
-        days_remaining: daysRemaining,
-      };
-    })
-    .filter(Boolean)
-    .sort((left: any, right: any) => {
-      const leftHasExpiry = Boolean(left.expired_date);
-      const rightHasExpiry = Boolean(right.expired_date);
-      if (leftHasExpiry && rightHasExpiry) {
-        return String(left.expired_date).localeCompare(String(right.expired_date));
-      }
-      if (leftHasExpiry) return -1;
-      if (rightHasExpiry) return 1;
-      return String(left.product_name || '').localeCompare(String(right.product_name || ''));
-    });
-
-  return rows;
+  return data || [];
 }
 
 export async function getLedgerHistory(filters?: {
