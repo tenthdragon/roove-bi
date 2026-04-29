@@ -424,6 +424,8 @@ interface CatalogResolutionContext {
   bundleLinesByBusinessId: Map<number, Map<string, ScalevCatalogBundleLineLookupRow[]>>;
   directEntitiesByViewerKey: Map<string, VisibleDirectCatalogEntityRow>;
   canonicalMappingsByKey: Map<string, CanonicalCatalogMappingRow>;
+  variantOwnersById: Map<number, ScalevCatalogEntityOwnerLookupRow[]>;
+  productOwnersById: Map<number, ScalevCatalogEntityOwnerLookupRow[]>;
   processorMappingsByCode: Map<string, WarehouseBusinessTargetRow[]>;
 }
 
@@ -987,6 +989,8 @@ async function resolveWarehouseTargetsForOrder(
       bundleLinesByBusinessId: context.bundleLinesByBusinessId,
       directEntitiesByViewerKey: context.directEntitiesByViewerKey,
       canonicalMappingsByKey: context.canonicalMappingsByKey,
+      variantOwnersById: context.variantOwnersById,
+      productOwnersById: context.productOwnersById,
     });
     const scalevMapping = scalevMappingByName.get(line.product_name);
 
@@ -2099,6 +2103,7 @@ async function buildCatalogResolutionContext(
     linesByBusinessCode,
   );
   const bundleLineRows = await fetchScalevCatalogBundleLinesByBusinesses(svc, identifierRows);
+  const entityOwners = await fetchScalevCatalogEntityOwnersByBundleLines(svc, bundleLineRows);
   const visibleEntityRequests = buildVisibleDirectEntityRequests(identifierRows, bundleLineRows);
   const directEntities = visibleEntityRequests.size > 0
     ? await fetchVisibleDirectCatalogEntitiesByBusinessRequests(svc, visibleEntityRequests, {
@@ -2112,6 +2117,22 @@ async function buildCatalogResolutionContext(
       mappingRequestsByBusinessId.set(entity.owner_business_id, new Set<string>());
     }
     mappingRequestsByBusinessId.get(entity.owner_business_id)!.add(entity.entity_key);
+  }
+  for (const ownerRows of entityOwners.variantOwnersById.values()) {
+    for (const row of ownerRows) {
+      if (!mappingRequestsByBusinessId.has(row.business_id)) {
+        mappingRequestsByBusinessId.set(row.business_id, new Set<string>());
+      }
+      mappingRequestsByBusinessId.get(row.business_id)!.add(row.entity_key);
+    }
+  }
+  for (const ownerRows of entityOwners.productOwnersById.values()) {
+    for (const row of ownerRows) {
+      if (!mappingRequestsByBusinessId.has(row.business_id)) {
+        mappingRequestsByBusinessId.set(row.business_id, new Set<string>());
+      }
+      mappingRequestsByBusinessId.get(row.business_id)!.add(row.entity_key);
+    }
   }
 
   const canonicalMappings = mappingRequestsByBusinessId.size > 0
@@ -2129,6 +2150,8 @@ async function buildCatalogResolutionContext(
       ]),
     ),
     canonicalMappingsByKey: buildCanonicalCatalogMappingLookupMap(canonicalMappings),
+    variantOwnersById: entityOwners.variantOwnersById,
+    productOwnersById: entityOwners.productOwnersById,
     processorMappingsByCode: new Map(),
   };
 }
@@ -2155,6 +2178,16 @@ function buildCatalogEntityOwnerLookupMap(
   return map;
 }
 
+function pickPreferredCatalogEntityOwnerRow(
+  rows: ScalevCatalogEntityOwnerLookupRow[],
+  viewerBusinessId: number,
+) {
+  if (rows.length === 0) return null;
+  return rows.find((row) => Number(row.business_id || 0) === viewerBusinessId)
+    || rows[0]
+    || null;
+}
+
 function resolveCatalogWarehouseTargetsForLine(args: {
   businessId: number | null;
   line: ScalevOrderLineForWarehouse;
@@ -2162,6 +2195,8 @@ function resolveCatalogWarehouseTargetsForLine(args: {
   bundleLinesByBusinessId: Map<number, Map<string, ScalevCatalogBundleLineLookupRow[]>>;
   directEntitiesByViewerKey: Map<string, VisibleDirectCatalogEntityRow>;
   canonicalMappingsByKey: Map<string, CanonicalCatalogMappingRow>;
+  variantOwnersById: Map<number, ScalevCatalogEntityOwnerLookupRow[]>;
+  productOwnersById: Map<number, ScalevCatalogEntityOwnerLookupRow[]>;
 }): WarehouseCatalogResolvedTarget[] | null {
   if (!args.businessId) return null;
 
@@ -2195,9 +2230,22 @@ function resolveCatalogWarehouseTargetsForLine(args: {
     const visibleEntity = args.directEntitiesByViewerKey.get(
       buildViewerEntityLookupKey(args.businessId!, identifierRow.entity_key),
     ) || null;
-    const canonicalBusinessId = visibleEntity?.owner_business_id || identifierRow.owner_business_id || 0;
+    const entityId = Number(String(identifierRow.entity_key || '').split(':')[1] || 0);
+    const ownerRow = !visibleEntity && identifierRow.entity_type === 'variant' && entityId > 0
+      ? pickPreferredCatalogEntityOwnerRow(
+          args.variantOwnersById.get(entityId) || [],
+          args.businessId!,
+        )
+      : !visibleEntity && identifierRow.entity_type === 'product' && entityId > 0
+        ? pickPreferredCatalogEntityOwnerRow(
+            args.productOwnersById.get(entityId) || [],
+            args.businessId!,
+          )
+        : null;
+    const resolvedEntityKey = visibleEntity?.entity_key || ownerRow?.entity_key || identifierRow.entity_key;
+    const canonicalBusinessId = visibleEntity?.owner_business_id || ownerRow?.business_id || identifierRow.owner_business_id || 0;
     const mappingRow = args.canonicalMappingsByKey.get(
-      buildCanonicalMappingLookupKey(canonicalBusinessId, identifierRow.entity_key),
+      buildCanonicalMappingLookupKey(canonicalBusinessId, resolvedEntityKey),
     ) || null;
     if (!mappingRow?.warehouse_product_id) return null;
 
@@ -2208,7 +2256,7 @@ function resolveCatalogWarehouseTargetsForLine(args: {
       note_suffix: mappingRow.business_code
         ? `catalog:${identifierRow.source}:${mappingRow.business_code}`
         : `catalog:${identifierRow.source}`,
-      owner_business_code: visibleEntity?.owner_business_code || identifierRow.owner_business_code || mappingRow.business_code || null,
+      owner_business_code: visibleEntity?.owner_business_code || ownerRow?.business_code || identifierRow.owner_business_code || mappingRow.business_code || null,
       entity: mappingRow.warehouse_products?.entity || null,
       warehouse: mappingRow.warehouse_products?.warehouse || null,
     }] as WarehouseCatalogResolvedTarget[];
@@ -2228,12 +2276,27 @@ function resolveCatalogWarehouseTargetsForLine(args: {
         : null) || (productKey
           ? args.directEntitiesByViewerKey.get(buildViewerEntityLookupKey(args.businessId!, productKey))
           : null) || null;
-      const resolvedEntityKey = visibleEntity?.entity_key || variantKey || productKey || '';
+      const ownerRow = !visibleEntity && bundleLine.scalev_variant_id
+        ? pickPreferredCatalogEntityOwnerRow(
+            args.variantOwnersById.get(Number(bundleLine.scalev_variant_id)) || [],
+            args.businessId!,
+          )
+        : !visibleEntity && bundleLine.scalev_product_id
+          ? pickPreferredCatalogEntityOwnerRow(
+              args.productOwnersById.get(Number(bundleLine.scalev_product_id)) || [],
+              args.businessId!,
+            )
+          : null;
+      const resolvedEntityKey = visibleEntity?.entity_key || ownerRow?.entity_key || variantKey || productKey || '';
       const mappingRow = visibleEntity
         ? args.canonicalMappingsByKey.get(
             buildCanonicalMappingLookupKey(visibleEntity.owner_business_id, resolvedEntityKey),
           ) || null
-        : null;
+        : ownerRow
+          ? args.canonicalMappingsByKey.get(
+              buildCanonicalMappingLookupKey(ownerRow.business_id, resolvedEntityKey),
+            ) || null
+          : null;
 
       if (!mappingRow?.warehouse_product_id) {
         return null;
@@ -2250,7 +2313,7 @@ function resolveCatalogWarehouseTargetsForLine(args: {
         note_suffix: mappingRow.business_code && mappingRow.business_id !== args.businessId
           ? `catalog:${identifierRow.source}:${mappingRow.business_code}`
           : `catalog:${identifierRow.source}`,
-        owner_business_code: visibleEntity?.owner_business_code || mappingRow.business_code || null,
+        owner_business_code: visibleEntity?.owner_business_code || ownerRow?.business_code || mappingRow.business_code || null,
         entity: mappingRow.warehouse_products?.entity || null,
         warehouse: mappingRow.warehouse_products?.warehouse || null,
       });

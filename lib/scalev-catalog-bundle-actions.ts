@@ -11,6 +11,7 @@ import {
   buildVisibleDirectEntityLookup,
   fetchCanonicalCatalogMappingsByRequests,
   fetchVisibleDirectCatalogEntities,
+  type VisibleDirectCatalogEntityRow,
   type ScalevVisibilityKind,
 } from '@/lib/scalev-visible-entity-helpers';
 
@@ -177,6 +178,145 @@ function isMissingTableError(error: any): boolean {
   const code = String(error?.code || '');
   const message = String(error?.message || '');
   return code === 'PGRST205' || code === '42P01' || /does not exist/i.test(message) || /schema cache/i.test(message);
+}
+
+function pickPreferredFallbackComponentRow<T extends { business_id?: number | null; owner_business_id?: number | null }>(
+  rows: T[],
+  viewerBusinessId: number,
+) {
+  if (rows.length === 0) return null;
+  return rows.find((row) => Number(row.business_id || 0) === viewerBusinessId)
+    || rows.find((row) => Number(row.business_id || 0) === Number(row.owner_business_id || 0))
+    || rows[0]
+    || null;
+}
+
+async function fetchFallbackDirectEntitiesForBundleComponents(
+  svc: ReturnType<typeof createServiceSupabase>,
+  args: {
+    viewerBusinessId: number;
+    viewerBusinessCode: string;
+    variantIds: number[];
+    productIds: number[];
+  },
+): Promise<VisibleDirectCatalogEntityRow[]> {
+  const rows: VisibleDirectCatalogEntityRow[] = [];
+
+  for (const chunk of chunkArray(args.variantIds, 500)) {
+    if (chunk.length === 0) continue;
+    const { data, error } = await svc
+      .from('scalev_catalog_variants')
+      .select(`
+        business_id,
+        business_code,
+        scalev_product_id,
+        scalev_variant_id,
+        name,
+        product_name,
+        sku,
+        item_type,
+        visibility_kind,
+        owner_business_id,
+        owner_business_code,
+        processor_business_id,
+        processor_business_code
+      `)
+      .in('scalev_variant_id', chunk);
+    if (error) throw error;
+
+    const byId = new Map<number, any[]>();
+    for (const row of (data || []) as any[]) {
+      const key = Number(row.scalev_variant_id || 0);
+      if (!key) continue;
+      if (!byId.has(key)) byId.set(key, []);
+      byId.get(key)!.push(row);
+    }
+
+    for (const variantId of chunk) {
+      const preferred = pickPreferredFallbackComponentRow(byId.get(variantId) || [], args.viewerBusinessId);
+      if (!preferred) continue;
+      rows.push({
+        viewer_business_id: args.viewerBusinessId,
+        viewer_business_code: args.viewerBusinessCode,
+        business_id: Number(preferred.business_id || 0),
+        business_code: String(preferred.business_code || args.viewerBusinessCode),
+        entity_type: 'variant',
+        entity_key: `variant:${Number(preferred.scalev_variant_id || 0)}`,
+        scalev_product_id: Number(preferred.scalev_product_id || 0),
+        scalev_variant_id: Number(preferred.scalev_variant_id || 0),
+        label: String(preferred.name || preferred.product_name || `Variant ${preferred.scalev_variant_id}`),
+        secondary_label: preferred.product_name && preferred.product_name !== preferred.name
+          ? String(preferred.product_name)
+          : null,
+        sku: preferred.sku ? String(preferred.sku) : null,
+        item_type: preferred.item_type ? String(preferred.item_type) : null,
+        identifiers: [],
+        visibility_kind: preferred.visibility_kind === 'shared' ? 'shared' : 'owned',
+        owner_business_id: Number(preferred.owner_business_id || preferred.business_id || 0),
+        owner_business_code: String(preferred.owner_business_code || preferred.business_code || args.viewerBusinessCode),
+        processor_business_id: Number(preferred.processor_business_id || preferred.owner_business_id || preferred.business_id || 0),
+        processor_business_code: String(preferred.processor_business_code || preferred.owner_business_code || preferred.business_code || args.viewerBusinessCode),
+      });
+    }
+  }
+
+  for (const chunk of chunkArray(args.productIds, 500)) {
+    if (chunk.length === 0) continue;
+    const { data, error } = await svc
+      .from('scalev_catalog_products')
+      .select(`
+        business_id,
+        business_code,
+        scalev_product_id,
+        name,
+        public_name,
+        display,
+        item_type,
+        visibility_kind,
+        owner_business_id,
+        owner_business_code,
+        processor_business_id,
+        processor_business_code
+      `)
+      .in('scalev_product_id', chunk);
+    if (error) throw error;
+
+    const byId = new Map<number, any[]>();
+    for (const row of (data || []) as any[]) {
+      const key = Number(row.scalev_product_id || 0);
+      if (!key) continue;
+      if (!byId.has(key)) byId.set(key, []);
+      byId.get(key)!.push(row);
+    }
+
+    for (const productId of chunk) {
+      const preferred = pickPreferredFallbackComponentRow(byId.get(productId) || [], args.viewerBusinessId);
+      if (!preferred) continue;
+      const label = String(preferred.display || preferred.public_name || preferred.name || `Product ${preferred.scalev_product_id}`);
+      rows.push({
+        viewer_business_id: args.viewerBusinessId,
+        viewer_business_code: args.viewerBusinessCode,
+        business_id: Number(preferred.business_id || 0),
+        business_code: String(preferred.business_code || args.viewerBusinessCode),
+        entity_type: 'product',
+        entity_key: `product:${Number(preferred.scalev_product_id || 0)}`,
+        scalev_product_id: Number(preferred.scalev_product_id || 0),
+        scalev_variant_id: null,
+        label,
+        secondary_label: [preferred.name, preferred.public_name].find((value: string | null) => value && value !== label) || null,
+        sku: null,
+        item_type: preferred.item_type ? String(preferred.item_type) : null,
+        identifiers: [],
+        visibility_kind: preferred.visibility_kind === 'shared' ? 'shared' : 'owned',
+        owner_business_id: Number(preferred.owner_business_id || preferred.business_id || 0),
+        owner_business_code: String(preferred.owner_business_code || preferred.business_code || args.viewerBusinessCode),
+        processor_business_id: Number(preferred.processor_business_id || preferred.owner_business_id || preferred.business_id || 0),
+        processor_business_code: String(preferred.processor_business_code || preferred.owner_business_code || preferred.business_code || args.viewerBusinessCode),
+      });
+    }
+  }
+
+  return rows;
 }
 
 function getMissingBundleSchemaMessage() {
@@ -780,9 +920,34 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
       productIds: Array.from(componentProductIds),
       includeProductsWithVariants: true,
     });
-    const directEntityLookup = buildVisibleDirectEntityLookup(directEntities.rows);
+    const directVariantIds = new Set(
+      directEntities.rows
+        .filter((entity) => entity.entity_type === 'variant' && entity.scalev_variant_id != null)
+        .map((entity) => Number(entity.scalev_variant_id || 0))
+        .filter((value) => value > 0),
+    );
+    const directProductIds = new Set(
+      directEntities.rows
+        .filter((entity) => entity.entity_type === 'product')
+        .map((entity) => Number(entity.scalev_product_id || 0))
+        .filter((value) => value > 0),
+    );
+    const fallbackDirectEntities = await fetchFallbackDirectEntitiesForBundleComponents(svc, {
+      viewerBusinessId: businessId,
+      viewerBusinessCode: businessCode,
+      variantIds: Array.from(componentVariantIds).filter((variantId) => !directVariantIds.has(variantId)),
+      productIds: Array.from(componentProductIds).filter((productId) => !directProductIds.has(productId)),
+    });
+    const mergedDirectEntities = [
+      ...directEntities.rows,
+      ...fallbackDirectEntities.filter((fallback) => !directEntities.rows.some((entity) => (
+        entity.entity_key === fallback.entity_key
+        && entity.viewer_business_id === fallback.viewer_business_id
+      ))),
+    ];
+    const directEntityLookup = buildVisibleDirectEntityLookup(mergedDirectEntities);
 
-    for (const entity of directEntities.rows) {
+    for (const entity of mergedDirectEntities) {
       if (!mappingRequestsByBusinessId.has(entity.owner_business_id)) {
         mappingRequestsByBusinessId.set(entity.owner_business_id, new Set<string>());
       }
@@ -857,6 +1022,16 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
       const components = componentsByBundleId.get(bundleId) || [];
       const resolvedComponents = components.filter((component) => component.resolved_warehouse_product_id != null);
       const unresolvedComponents = components.filter((component) => component.resolved_warehouse_product_id == null);
+      const componentOwnerCodes = Array.from(new Set(
+        components
+          .map((component) => String(component.owner_business_code || '').trim())
+          .filter(Boolean),
+      ));
+      const componentProcessorCodes = Array.from(new Set(
+        components
+          .map((component) => String(component.processor_business_code || '').trim())
+          .filter(Boolean),
+      ));
       const label = bundle.display || bundle.public_name || bundle.name || `Bundle ${bundleId}`;
       const secondaryLabel = [bundle.name, bundle.public_name].find((value: string | null) => value && value !== label) || null;
       const identifiersPreview = Array.from(
@@ -880,8 +1055,12 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
         bundle_id: bundleId,
         entity_key: entityKey,
         visibility_kind: bundle.visibility_kind === 'shared' ? 'shared' : 'owned',
-        owner_business_code: bundle.owner_business_code || businessCode,
-        processor_business_code: bundle.processor_business_code || bundle.owner_business_code || businessCode,
+        owner_business_code: componentOwnerCodes.length === 1
+          ? componentOwnerCodes[0]
+          : (bundle.owner_business_code || businessCode),
+        processor_business_code: componentProcessorCodes.length === 1
+          ? componentProcessorCodes[0]
+          : (bundle.processor_business_code || bundle.owner_business_code || businessCode),
         label,
         secondary_label: secondaryLabel,
         custom_id: bundle.custom_id || null,

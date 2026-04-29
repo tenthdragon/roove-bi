@@ -480,7 +480,7 @@ export default function ScalevBundleMappingSettingsTab() {
                             <div style={{ marginTop: 6, fontSize: 10, color: '#93c5fd', fontFamily: 'monospace' }}>{row.custom_id}</div>
                           ) : null}
                           <div style={{ marginTop: 6, fontSize: 10, color: row.visibility_kind === 'shared' ? '#93c5fd' : 'var(--dim)' }}>
-                            {row.visibility_kind.toUpperCase()} • owner: {row.owner_business_code} • processor: {row.processor_business_code}
+                            {row.visibility_kind.toUpperCase()} • stock owner: {row.owner_business_code} • processor: {row.processor_business_code}
                           </div>
                         </td>
 
