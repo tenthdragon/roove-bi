@@ -8,6 +8,7 @@ import { getCached, setCache } from '@/lib/dashboard-cache';
 import { getOverviewPageData } from '@/lib/overview-actions';
 // Recharts removed — daily trend is now a table
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
+import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
 import CashFlowSection from '@/components/CashFlowSection';
 
@@ -73,6 +74,7 @@ function buildOverheadPerDayLookup(rows: Array<{ year_month: string; amount: num
 export default function OverviewPage() {
   const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
+  const { ready: authReady } = useSupabaseSessionReady();
   const [dailyData, setDailyData] = useState([]);
   const [overheadData, setOverheadData] = useState([]);
   const [shipmentData, setShipmentData] = useState([]);
@@ -90,7 +92,7 @@ export default function OverviewPage() {
   const [prevFeeError, setPrevFeeError] = useState('');
   const [shippingError, setShippingError] = useState('');
   const [prevShippingError, setPrevShippingError] = useState('');
-  const { activeBrands, error: activeBrandsError, isActiveBrand } = useActiveBrands();
+  const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
   const [userRole, setUserRole] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showTren, setShowTren] = useState(false);
@@ -191,7 +193,8 @@ export default function OverviewPage() {
   }, [supabase]);
 
   useEffect(() => {
-    if (!dateRange.from || !dateRange.to || !prevRange) return;
+    // Wait until auth has finished hydrating so server actions can read the same session cookies.
+    if (dateLoading || activeBrandsLoading || !authReady || !dateRange.from || !dateRange.to || !prevRange) return;
     const { prevFrom, prevTo } = prevRange;
     const cached = getCached<any>('overview_page_data_v1', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
     if (cached) {
@@ -273,7 +276,7 @@ export default function OverviewPage() {
       });
 
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to, prevRange]);
+  }, [dateLoading, activeBrandsLoading, authReady, dateRange.from, dateRange.to, prevRange]);
 
   // Build overhead per-day lookup: date (YYYY-MM-DD) → daily overhead amount
   const overheadPerDay = useMemo(() => {
