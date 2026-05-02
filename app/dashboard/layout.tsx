@@ -11,6 +11,7 @@ import { DateRangeProvider, useDateRange } from '@/lib/DateRangeContext';
 import DateRangePicker from '@/components/DateRangePicker';
 import { ActiveBrandsProvider } from '@/lib/ActiveBrandsContext';
 import ThemeToggle from '@/components/ThemeToggle';
+import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
 
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
@@ -320,16 +321,62 @@ export default function DashboardLayout({ children }) {
   const router = useRouter();
   const pathname = usePathname();
   const supabase = useSupabase();
+  const { ready: authReady, hasSession } = useSupabaseSessionReady();
   const currentTab = getCurrentTab(pathname);
 
   useEffect(() => {
+    if (!authReady) return;
+
+    if (!hasSession) {
+      router.replace('/');
+      return;
+    }
+
+    let cancelled = false;
+
+    const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+    async function loadProfileWithRetry(userId: string) {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (data || error) return { data, error };
+        if (attempt < 2) await wait(250 * (attempt + 1));
+      }
+
+      return { data: null, error: null };
+    }
+
     async function load() {
-      const { data: { session } } = await supabase.auth.getSession();
-      const user = session?.user;
-      if (!user) { router.push('/'); return; }
-      const { data, error: profileError } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      setLoading(true);
+      setAccessError('');
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (cancelled) return;
+
+      if (userError || !user) {
+        router.replace('/');
+        return;
+      }
+
+      const { data, error: profileError } = await loadProfileWithRetry(user.id);
+
+      if (cancelled) return;
 
       if (profileError || !data) {
+        console.warn('[dashboard-layout] profile lookup failed', {
+          userId: user.id,
+          message: profileError?.message ?? null,
+          code: (profileError as any)?.code ?? null,
+        });
         setAccessError('Profil dashboard tidak ditemukan atau gagal dimuat. Silakan hubungi owner.');
         setLoading(false);
         return;
@@ -342,6 +389,8 @@ export default function DashboardLayout({ children }) {
             .select('permission_key')
             .eq('role', data.role);
 
+        if (cancelled) return;
+
         if (permsError) {
           setAccessError('Permission dashboard gagal dimuat. Silakan coba lagi atau hubungi owner.');
           setLoading(false);
@@ -353,7 +402,11 @@ export default function DashboardLayout({ children }) {
       setLoading(false);
     }
     load();
-  }, [router, supabase]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, hasSession, router, supabase]);
 
   const accessibleTabIds = useMemo(() => {
     if (!profile || profile.role === 'pending') return [];
