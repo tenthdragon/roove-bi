@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
+import { buildPublicSiteUrl } from '@/lib/site-config';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest) {
 
     const svc = getServiceSupabase();
     const warnings: string[] = [];
-    const resetRedirectTo = `${process.env.NEXT_PUBLIC_SITE_URL || 'https://app.roove.info'}/reset-password`;
+    const resetRedirectTo = buildPublicSiteUrl('/reset-password');
 
     // Check if user already exists in profiles
     const { data: existing } = await svc.from('profiles').select('email').eq('email', normalizedEmail).maybeSingle();

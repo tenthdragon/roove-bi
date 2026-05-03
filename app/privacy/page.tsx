@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { getPublicSiteHost, getSupportEmail } from '@/lib/site-config';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy — Roove',
@@ -6,6 +7,9 @@ export const metadata: Metadata = {
 };
 
 export default function PrivacyPage() {
+  const publicSiteHost = getPublicSiteHost();
+  const supportEmail = getSupportEmail();
+
   return (
     <div style={{ maxWidth: 720, margin: '0 auto', padding: '48px 24px', fontFamily: 'system-ui, sans-serif', lineHeight: 1.7, color: '#e2e8f0' }}>
       <h1 style={{ fontSize: 28, marginBottom: 8, color: '#f1f5f9' }}>Privacy Policy</h1>
@@ -13,7 +17,7 @@ export default function PrivacyPage() {
 
       <p>
         PT Roove Tijara Internasional (&quot;Roove&quot;, &quot;we&quot;, &quot;us&quot;, or &quot;our&quot;) operates the Roove BI platform
-        at <strong>roove.info</strong> and related services. This Privacy Policy explains how we collect, use, and
+        at <strong>{publicSiteHost}</strong> and related services. This Privacy Policy explains how we collect, use, and
         protect your information when you use our services.
       </p>
 
@@ -90,7 +94,7 @@ export default function PrivacyPage() {
       </p>
       <p>
         <strong>PT Roove Tijara Internasional</strong><br />
-        Email: <a href="mailto:hello@roove.info" style={{ color: '#2563eb' }}>hello@roove.info</a>
+        Email: <a href={`mailto:${supportEmail}`} style={{ color: '#2563eb' }}>{supportEmail}</a>
       </p>
     </div>
   );

@@ -6,8 +6,10 @@ import {
   limitByIpAndValue,
   rejectUntrustedOrigin,
 } from '@/lib/request-hardening';
-
-const ALLOWED_DOMAINS = new Set(['roove.co.id']);
+import {
+  getAllowedEmailDomainsLabel,
+  isAllowedSignupEmail,
+} from '@/lib/site-config';
 
 function getAuthClient() {
   return createClient(
@@ -36,9 +38,10 @@ export async function POST(req: NextRequest) {
     const password = String(body?.password || '');
     const fullName = String(body?.fullName || '').trim();
 
-    const domain = email.split('@')[1]?.toLowerCase() || '';
-    if (!email || !password || !ALLOWED_DOMAINS.has(domain)) {
-      return NextResponse.json({ error: 'Hanya email @roove.co.id yang dapat mendaftar.' }, { status: 400 });
+    if (!email || !password || !isAllowedSignupEmail(email)) {
+      return NextResponse.json({
+        error: `Hanya email ${getAllowedEmailDomainsLabel()} yang dapat mendaftar.`,
+      }, { status: 400 });
     }
 
     if (password.length < 6) {

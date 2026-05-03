@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getPublicSiteOrigin } from '@/lib/site-config';
 
 type RateLimitBucket = {
   count: number;
@@ -33,7 +34,7 @@ function getExpectedOrigins(req: NextRequest) {
   const proto = forwardedProto || (host?.includes('localhost') ? 'http' : 'https');
 
   if (host) origins.add(`${proto}://${host}`);
-  if (process.env.NEXT_PUBLIC_SITE_URL) origins.add(process.env.NEXT_PUBLIC_SITE_URL.replace(/\/$/, ''));
+  origins.add(getPublicSiteOrigin());
 
   origins.add('http://localhost:3000');
   origins.add('http://127.0.0.1:3000');

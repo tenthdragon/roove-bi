@@ -2,8 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-
-const ALLOWED_DOMAINS = ['roove.co.id'];
+import {
+  getAllowedEmailDomainsLabel,
+  getDefaultSignupEmailPlaceholder,
+  isAllowedSignupEmail,
+} from '@/lib/site-config';
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
@@ -23,9 +26,8 @@ export default function RegisterPage() {
     const normalizedEmail = email.trim().toLowerCase();
 
     // Validate domain
-    const domain = normalizedEmail.split('@')[1]?.toLowerCase();
-    if (!ALLOWED_DOMAINS.includes(domain)) {
-      setError('Hanya email @roove.co.id yang dapat mendaftar.');
+    if (!isAllowedSignupEmail(normalizedEmail)) {
+      setError(`Hanya email ${getAllowedEmailDomainsLabel()} yang dapat mendaftar.`);
       setLoading(false);
       return;
     }
@@ -73,6 +75,8 @@ export default function RegisterPage() {
     display: 'block' as const, fontSize: 12, fontWeight: 600, color: 'var(--dim)',
     marginBottom: 6, textTransform: 'uppercase' as const, letterSpacing: '0.05em',
   };
+  const allowedDomainsLabel = getAllowedEmailDomainsLabel();
+  const emailPlaceholder = getDefaultSignupEmailPlaceholder();
 
   if (success) {
     return (
@@ -159,13 +163,13 @@ export default function RegisterPage() {
               value={email}
               onChange={e => setEmail(e.target.value)}
               required
-              placeholder="nama@roove.co.id"
+              placeholder={emailPlaceholder}
               style={inputStyle}
               onFocus={e => e.target.style.borderColor = 'var(--accent)'}
               onBlur={e => e.target.style.borderColor = 'var(--border)'}
             />
             <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--text-muted)' }}>
-              Hanya email @roove.co.id yang diterima
+              {`Hanya email ${allowedDomainsLabel} yang diterima`}
             </p>
           </div>
 
