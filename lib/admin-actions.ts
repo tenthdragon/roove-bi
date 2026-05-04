@@ -7,6 +7,7 @@ import { getShopeeSetupInfo } from './shopee-open-platform';
 import { listMarketplaceIntakeSourceConfigs } from './marketplace-intake-sources';
 import {
   buildDefaultShopeeSpendStreams,
+  isShopeeSpendStreamKey,
   listShopeeSpendStreamDefinitions,
   normalizeShopeeSpendStreamConfig,
   type ShopeeSpendStreamKey,
@@ -502,15 +503,15 @@ export async function getShopeeAdminSnapshot() {
   const defaultStreamMap = new Map(
     listShopeeSpendStreamDefinitions().map((definition) => [definition.key, definition]),
   );
-  const streamRows = (streamsRes.data || []) as Array<{
+  const streamRows = ((streamsRes.data || []) as Array<{
     id: number;
     shop_config_id: number;
-    stream_key: ShopeeSpendStreamKey;
+    stream_key: string;
     default_source: string;
     default_advertiser: string;
     sync_mode: ShopeeSpendSyncMode;
     is_enabled: boolean;
-  }>;
+  }>).filter((row) => isShopeeSpendStreamKey(row.stream_key));
   const streamsByShopId = new Map<number, typeof streamRows>();
 
   for (const row of streamRows) {
@@ -525,7 +526,7 @@ export async function getShopeeAdminSnapshot() {
     stream: {
       id?: number | null;
       shop_config_id?: number;
-      stream_key: ShopeeSpendStreamKey;
+      stream_key: string;
       default_source: string;
       default_advertiser: string;
       sync_mode: ShopeeSpendSyncMode;

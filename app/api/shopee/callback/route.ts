@@ -4,7 +4,6 @@ import { createServiceSupabase } from '@/lib/service-supabase';
 import {
   exchangeShopeeAuthCode,
   getShopeeShopInfo,
-  getShopeeSetupInfo,
 } from '@/lib/shopee-open-platform';
 import { buildDefaultShopeeSpendStreams } from '@/lib/shopee-streams';
 
@@ -55,47 +54,12 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const setup = getShopeeSetupInfo();
-    let tokens;
-    try {
-      tokens = await exchangeShopeeAuthCode({ code, shopId });
-    } catch (error: any) {
-      console.error('[shopee-callback] Token exchange failed', {
-        shop_id: shopId,
-        environment: setup.environment,
-        auth_base_url: setup.authBaseUrl,
-        api_base_url: setup.apiBaseUrl,
-        request_base_url: setup.requestBaseUrl,
-        base_url_mode_mismatch: setup.baseUrlModeMismatch,
-        partner_id_suffix: setup.partnerIdSuffix,
-        partner_key_length: setup.partnerKeyLength,
-        partner_key_wrapped: setup.partnerKeyWrapped,
-        error: error.message,
-      });
-      throw new Error(`Token exchange gagal: ${error.message}`);
-    }
+    const tokens = await exchangeShopeeAuthCode({ code, shopId });
 
-    let shopInfo;
-    try {
-      shopInfo = await getShopeeShopInfo({
-        accessToken: tokens.accessToken,
-        shopId,
-      });
-    } catch (error: any) {
-      console.error('[shopee-callback] get_shop_info failed', {
-        shop_id: shopId,
-        environment: setup.environment,
-        auth_base_url: setup.authBaseUrl,
-        api_base_url: setup.apiBaseUrl,
-        request_base_url: setup.requestBaseUrl,
-        base_url_mode_mismatch: setup.baseUrlModeMismatch,
-        partner_id_suffix: setup.partnerIdSuffix,
-        partner_key_length: setup.partnerKeyLength,
-        partner_key_wrapped: setup.partnerKeyWrapped,
-        error: error.message,
-      });
-      throw new Error(`Get shop info gagal: ${error.message}`);
-    }
+    const shopInfo = await getShopeeShopInfo({
+      accessToken: tokens.accessToken,
+      shopId,
+    });
 
     const svc = createServiceSupabase();
     const numericShopId = Number(shopId);

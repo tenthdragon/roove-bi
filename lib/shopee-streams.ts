@@ -1,4 +1,4 @@
-export type ShopeeSpendStreamKey = 'shopee_ads' | 'shopee_live';
+export type ShopeeSpendStreamKey = 'shopee_ads';
 export type ShopeeSpendSyncMode = 'api' | 'manual';
 
 export type ShopeeSpendStreamDefinition = {
@@ -12,7 +12,7 @@ export type ShopeeSpendStreamDefinition = {
 };
 
 export type ShopeeSpendStreamRowLike = {
-  stream_key: ShopeeSpendStreamKey;
+  stream_key: string | null;
   default_source: string | null;
   default_advertiser: string | null;
   sync_mode: ShopeeSpendSyncMode | null;
@@ -27,16 +27,7 @@ const SHOPEE_SPEND_STREAMS: Record<ShopeeSpendStreamKey, ShopeeSpendStreamDefini
     defaultSyncMode: 'api',
     defaultEnabled: true,
     apiSupported: true,
-    description: 'Spend iklan CPC Shopee yang saat ini sudah kita sink lewat Open Platform Ads API.',
-  },
-  shopee_live: {
-    key: 'shopee_live',
-    label: 'Shopee Live',
-    defaultSource: 'Shopee Live',
-    defaultSyncMode: 'manual',
-    defaultEnabled: false,
-    apiSupported: false,
-    description: 'Spend Shopee Live untuk saat ini masih diperlakukan sebagai feed manual sampai jalur API yang tepat siap dipakai.',
+    description: 'Spend iklan CPC Shopee yang saat ini kita sink lewat Open Platform Ads API.',
   },
 };
 
@@ -44,13 +35,16 @@ export function listShopeeSpendStreamDefinitions(): ShopeeSpendStreamDefinition[
   return Object.values(SHOPEE_SPEND_STREAMS);
 }
 
+export function isShopeeSpendStreamKey(key: string | null | undefined): key is ShopeeSpendStreamKey {
+  return String(key || '').trim().toLowerCase() === 'shopee_ads';
+}
+
 export function getShopeeSpendStreamDefinition(key: string | null | undefined): ShopeeSpendStreamDefinition {
-  const normalizedKey = String(key || '').trim().toLowerCase() as ShopeeSpendStreamKey;
-  return SHOPEE_SPEND_STREAMS[normalizedKey] || SHOPEE_SPEND_STREAMS.shopee_ads;
+  return SHOPEE_SPEND_STREAMS.shopee_ads;
 }
 
 export function getShopeeApiDataSourceForStream(key: ShopeeSpendStreamKey) {
-  return key === 'shopee_live' ? 'shopee_live_api' : 'shopee_ads_api';
+  return 'shopee_ads_api';
 }
 
 export function buildDefaultShopeeSpendStreams(shopName: string, _legacyAdsSource?: string | null, legacyAdvertiser?: string | null) {

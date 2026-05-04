@@ -23,19 +23,7 @@ type ShopeeApiResponse<TResponse, TExtra extends object = Record<string, never>>
 
 export type ShopeeSetupInfo = {
   configured: boolean;
-  redirectUrl: string;
-  authBaseUrl: string;
-  apiBaseUrl: string;
-  requestBaseUrl: string;
   missingEnv: string[];
-  environment: 'sandbox' | 'production' | 'custom';
-  authLooksSandbox: boolean;
-  apiLooksSandbox: boolean;
-  baseUrlModeMismatch: boolean;
-  partnerIdSuffix: string | null;
-  partnerIdWrapped: boolean;
-  partnerKeyLength: number;
-  partnerKeyWrapped: boolean;
 };
 
 export type ShopeeTokenPayload = {
@@ -136,35 +124,13 @@ function getSignedRequestBaseUrl(input: Pick<ShopeeConfig, 'authBaseUrl' | 'apiB
 export function getShopeeSetupInfo(): ShopeeSetupInfo {
   const partnerId = readEnvText('SHOPEE_PARTNER_ID');
   const partnerKey = readEnvText('SHOPEE_PARTNER_KEY');
-  const authBaseUrl = getAuthBaseUrl();
-  const apiBaseUrl = getApiBaseUrl();
-  const authLooksSandbox = isSandboxBaseUrl(authBaseUrl);
-  const apiLooksSandbox = isSandboxBaseUrl(apiBaseUrl);
-  const environment =
-    authLooksSandbox && apiLooksSandbox
-      ? 'sandbox'
-      : !authLooksSandbox && !apiLooksSandbox
-        ? 'production'
-        : 'custom';
   const missingEnv: string[] = [];
   if (!partnerId.value) missingEnv.push('SHOPEE_PARTNER_ID');
   if (!partnerKey.value) missingEnv.push('SHOPEE_PARTNER_KEY');
 
   return {
     configured: missingEnv.length === 0,
-    redirectUrl: getRedirectUrl(),
-    authBaseUrl,
-    apiBaseUrl,
-    requestBaseUrl: getSignedRequestBaseUrl({ authBaseUrl, apiBaseUrl }),
     missingEnv,
-    environment,
-    authLooksSandbox,
-    apiLooksSandbox,
-    baseUrlModeMismatch: authLooksSandbox !== apiLooksSandbox,
-    partnerIdSuffix: partnerId.value ? partnerId.value.slice(-4) : null,
-    partnerIdWrapped: partnerId.wrapped,
-    partnerKeyLength: partnerKey.value.length,
-    partnerKeyWrapped: partnerKey.wrapped,
   };
 }
 
@@ -177,9 +143,9 @@ function requireShopeeConfig(): ShopeeConfig {
   return {
     partnerId: readEnvText('SHOPEE_PARTNER_ID').value,
     partnerKey: readEnvText('SHOPEE_PARTNER_KEY').value,
-    redirectUrl: setup.redirectUrl,
-    authBaseUrl: setup.authBaseUrl,
-    apiBaseUrl: setup.apiBaseUrl,
+    redirectUrl: getRedirectUrl(),
+    authBaseUrl: getAuthBaseUrl(),
+    apiBaseUrl: getApiBaseUrl(),
   };
 }
 

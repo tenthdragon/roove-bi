@@ -8,6 +8,7 @@ import {
 import {
   getShopeeApiDataSourceForStream,
   getShopeeSpendStreamDefinition,
+  isShopeeSpendStreamKey,
   type ShopeeSpendStreamKey,
   type ShopeeSpendSyncMode,
 } from './shopee-streams';
@@ -195,7 +196,7 @@ function buildSpendRows(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow, point
   const streamDefinition = getShopeeSpendStreamDefinition(stream.stream_key);
   const source = streamDefinition.defaultSource;
   const dataSource = getShopeeApiDataSourceForStream(stream.stream_key);
-  const objective = stream.stream_key === 'shopee_live' ? 'Shopee Live' : 'Shopee CPC Ads';
+  const objective = 'Shopee CPC Ads';
   const businessCode = resolveCommerceBusinessCode(shop);
 
   return points
@@ -250,7 +251,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
   const tokenMap = new Map<number, ShopeeTokenRow>(
     ((tokensRes.data || []) as ShopeeTokenRow[]).map((row) => [row.shop_config_id, row]),
   );
-  const { data: streamRows, error: streamError } = await svc
+  const { data: rawStreamRows, error: streamError } = await svc
     .from('shopee_shop_spend_streams')
     .select('*')
     .eq('sync_mode', 'api')
@@ -261,7 +262,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
   if (streamError) throw streamError;
 
   const streamsByShopId = new Map<number, ShopeeSpendStreamRow[]>();
-  for (const row of (streamRows || []) as ShopeeSpendStreamRow[]) {
+  for (const row of ((rawStreamRows || []) as Array<ShopeeSpendStreamRow & { stream_key: string }>).filter((item) => isShopeeSpendStreamKey(item.stream_key))) {
     if (!streamsByShopId.has(row.shop_config_id)) {
       streamsByShopId.set(row.shop_config_id, []);
     }
@@ -333,13 +334,6 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
         let shopHadSuccess = false;
 
         for (const stream of apiStreams) {
-          if (stream.stream_key !== 'shopee_ads') {
-            errors.push(
-              `${shop.shop_name} / ${getShopeeSpendStreamDefinition(stream.stream_key).label}: mode API belum didukung di app.`,
-            );
-            continue;
-          }
-
           const points = await fetchShopeeAdsPerformanceRange({
             accessToken: usableToken.accessToken,
             shopId: shop.shop_id,

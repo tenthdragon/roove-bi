@@ -18,19 +18,7 @@ import { invalidateAll } from '@/lib/dashboard-cache';
 
 type ShopeeSetupInfo = {
   configured: boolean;
-  redirectUrl: string;
-  authBaseUrl: string;
-  apiBaseUrl: string;
-  requestBaseUrl: string;
   missingEnv: string[];
-  environment: 'sandbox' | 'production' | 'custom';
-  authLooksSandbox: boolean;
-  apiLooksSandbox: boolean;
-  baseUrlModeMismatch: boolean;
-  partnerIdSuffix: string | null;
-  partnerIdWrapped: boolean;
-  partnerKeyLength: number;
-  partnerKeyWrapped: boolean;
 };
 
 type ShopeeSpendStream = {
@@ -386,7 +374,7 @@ export default function ShopeeManager() {
           <div>
             <div style={{ fontSize: 14, fontWeight: 700 }}>Shopee Shops</div>
             <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-              Hubungkan shop Shopee, pilih commerce source yang nanti menggantikan marketplace intake, lalu kelola spend stream Shopee Ads dan Shopee Live per shop.
+              Hubungkan shop Shopee, pilih commerce source yang nanti menggantikan marketplace intake, lalu kelola sink Shopee Ads per shop.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -426,75 +414,18 @@ export default function ShopeeManager() {
           </div>
         </div>
 
-        <div style={{
-          marginBottom: 14,
-          padding: 14,
-          borderRadius: 8,
-          border: '1px solid var(--border)',
-          background: 'var(--bg)',
-          display: 'grid',
-          gap: 8,
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>Checklist setup Shopee Open Platform</div>
-          <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-            1. Create APP di portal Shopee Open Platform.<br />
-            2. Daftarkan redirect URL ini secara exact: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{setup?.redirectUrl || '-'}</span><br />
-            3. Isi env server: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>SHOPEE_PARTNER_ID</span> dan <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>SHOPEE_PARTNER_KEY</span>.<br />
-            4. Klik <strong>Hubungkan Shop</strong> untuk authorize seller shop.<br />
-            5. Setelah shop terhubung, pilih <strong>Commerce Source</strong>. Ownership spend akan otomatis mengikuti business dari source ini, sedangkan parsing brand/store order tetap berjalan downstream dari SKU dan bundle.
+        {!setup?.configured && (
+          <div style={{
+            marginBottom: 12,
+            padding: 12,
+            borderRadius: 8,
+            fontSize: 13,
+            background: 'var(--badge-red-bg)',
+            color: 'var(--red)',
+          }}>
+            Konfigurasi Shopee belum lengkap. Missing env: {setup?.missingEnv?.join(', ') || '-'}
           </div>
-          {setup && (
-            <div style={{
-              padding: 10,
-              borderRadius: 6,
-              background: 'rgba(255,255,255,0.03)',
-              color: 'var(--text-secondary)',
-              fontSize: 11,
-              lineHeight: 1.7,
-              fontFamily: 'monospace',
-            }}>
-              runtime.environment={setup.environment}<br />
-              runtime.auth_base_url={setup.authBaseUrl}<br />
-              runtime.api_base_url={setup.apiBaseUrl}<br />
-              runtime.request_base_url={setup.requestBaseUrl}<br />
-              runtime.partner_id_suffix={setup.partnerIdSuffix || '-'}<br />
-              runtime.partner_key_length={setup.partnerKeyLength}
-            </div>
-          )}
-          {!setup?.configured && (
-            <div style={{
-              padding: 10,
-              borderRadius: 6,
-              background: 'var(--badge-red-bg)',
-              color: 'var(--red)',
-              fontSize: 12,
-            }}>
-              Konfigurasi Shopee belum lengkap. Missing env: {setup?.missingEnv?.join(', ') || '-'}
-            </div>
-          )}
-          {setup?.baseUrlModeMismatch && (
-            <div style={{
-              padding: 10,
-              borderRadius: 6,
-              background: 'var(--badge-red-bg)',
-              color: 'var(--red)',
-              fontSize: 12,
-            }}>
-              Runtime Shopee tidak konsisten: auth base terlihat {setup.authLooksSandbox ? 'sandbox' : 'production/custom'}, tapi API base terlihat {setup.apiLooksSandbox ? 'sandbox' : 'production/custom'}.
-            </div>
-          )}
-          {(setup?.partnerIdWrapped || setup?.partnerKeyWrapped) && (
-            <div style={{
-              padding: 10,
-              borderRadius: 6,
-              background: 'var(--badge-yellow-bg)',
-              color: 'var(--yellow)',
-              fontSize: 12,
-            }}>
-              Terdeteksi env Shopee sempat memakai wrapping quote. Runtime sekarang otomatis membersihkannya.
-            </div>
-          )}
-        </div>
+        )}
 
         {message && (
           <div style={{
@@ -555,8 +486,8 @@ export default function ShopeeManager() {
             </button>
             <span style={{ fontSize: 11, color: 'var(--dim)' }}>
               {readyShops.length > 0
-                ? `${readyShops.length} shop siap di-sync. Hanya spend stream mode API yang aktif yang akan dijalankan.`
-                : 'Aktifkan shop, pastikan token ada, pilih commerce source, lalu aktifkan minimal satu spend stream API sebelum sync.'}
+                ? `${readyShops.length} shop siap di-sync. Sink Shopee Ads API akan dijalankan untuk shop yang aktif.`
+                : 'Aktifkan shop, pastikan token ada, pilih commerce source, lalu aktifkan sink Shopee Ads sebelum sync.'}
             </span>
           </div>
         )}
@@ -570,7 +501,7 @@ export default function ShopeeManager() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 920 }}>
               <thead>
                 <tr style={{ background: 'var(--bg)' }}>
-                  {['Status', 'Shop', 'Commerce Source', 'Spend Streams', 'Token', 'Auth Expire', 'Aksi'].map((header) => (
+                  {['Status', 'Shop', 'Commerce Source', 'Shopee Ads', 'Token', 'Auth Expire', 'Aksi'].map((header) => (
                     <th
                       key={header}
                       style={{
