@@ -10,6 +10,12 @@ type ShopeeShopRow = {
   shop_id: number;
   shop_name: string;
   region: string | null;
+  marketplace_source_key: string | null;
+  account_business_code: string | null;
+  viewer_business_code: string | null;
+  revenue_business_code: string | null;
+  default_owner_business_code: string | null;
+  default_processor_business_code: string | null;
   store: string | null;
   default_source: string;
   default_advertiser: string;
@@ -56,6 +62,16 @@ function toStableAdAccount(shopId: number) {
 
 function normalizeAdvertiser(shop: ShopeeShopRow) {
   return String(shop.default_advertiser || '').trim() || shop.shop_name || 'Shopee Shop';
+}
+
+function getMissingShopeeConfigLabels(shop: ShopeeShopRow) {
+  const missing: string[] = [];
+  if (!String(shop.marketplace_source_key || '').trim()) missing.push('source marketplace');
+  if (!String(shop.account_business_code || '').trim()) missing.push('account business');
+  if (!String(shop.viewer_business_code || '').trim()) missing.push('viewer business');
+  if (!String(shop.revenue_business_code || '').trim()) missing.push('revenue business');
+  if (!String(shop.store || '').trim()) missing.push('brand/store');
+  return missing;
 }
 
 function shouldRefreshToken(tokenExpiresAt: string | null | undefined) {
@@ -114,6 +130,12 @@ function buildMetricsRows(shop: ShopeeShopRow, points: ShopeeAdsPerformancePoint
     shop_id: shop.shop_id,
     shop_name: shop.shop_name,
     region: shop.region,
+    marketplace_source_key: shop.marketplace_source_key,
+    account_business_code: shop.account_business_code,
+    viewer_business_code: shop.viewer_business_code,
+    revenue_business_code: shop.revenue_business_code,
+    default_owner_business_code: shop.default_owner_business_code,
+    default_processor_business_code: shop.default_processor_business_code,
     store: shop.store,
     source,
     advertiser,
@@ -233,8 +255,9 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
     let broadGmvTotal = 0;
 
     for (const shop of shops) {
-      if (!String(shop.store || '').trim()) {
-        errors.push(`${shop.shop_name}: brand mapping Shopee belum diisi.`);
+      const missingConfig = getMissingShopeeConfigLabels(shop);
+      if (missingConfig.length > 0) {
+        errors.push(`${shop.shop_name}: konfigurasi Shopee belum lengkap (${missingConfig.join(', ')}).`);
         continue;
       }
 

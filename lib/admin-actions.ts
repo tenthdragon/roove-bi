@@ -4,6 +4,7 @@ import { createServerSupabase, createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardRoles } from './dashboard-access';
 import { MATRIX_ROLES, PERMISSION_GROUPS } from './utils';
 import { getShopeeSetupInfo } from './shopee-open-platform';
+import { listMarketplaceIntakeSourceConfigs } from './marketplace-intake-sources';
 
 const MATRIX_ROLE_IDS = new Set(MATRIX_ROLES.map((role) => role.id));
 const KNOWN_PERMISSION_KEYS = new Set(
@@ -13,6 +14,11 @@ const KNOWN_PERMISSION_KEYS = new Set(
 function normalizeOptionalText(value: string | null | undefined) {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed || null;
+}
+
+function normalizeBusinessCode(value: string | null | undefined) {
+  const normalized = normalizeOptionalText(value);
+  return normalized ? normalized.toUpperCase() : null;
 }
 
 async function requireOwnerAccess(label: string) {
@@ -466,17 +472,19 @@ export async function getShopeeAdminSnapshot() {
   await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
-  const [shopsRes, tokensRes, logsRes, mappingsRes] = await Promise.all([
+  const [shopsRes, tokensRes, logsRes, mappingsRes, businessesRes] = await Promise.all([
     svc.from('shopee_shops').select('*').order('shop_name'),
     svc.from('shopee_shop_tokens').select('shop_config_id, token_expires_at'),
     svc.from('shopee_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
     svc.from('ads_store_brand_mapping').select('store_pattern, brand').order('brand').order('store_pattern'),
+    svc.from('scalev_webhook_businesses').select('business_code, business_name, is_active').order('business_code'),
   ]);
 
   if (shopsRes.error) throw shopsRes.error;
   if (tokensRes.error) throw tokensRes.error;
   if (logsRes.error) throw logsRes.error;
   if (mappingsRes.error) throw mappingsRes.error;
+  if (businessesRes.error) throw businessesRes.error;
 
   const tokenMap = new Map(
     (tokensRes.data || []).map((row: any) => [row.shop_config_id, row.token_expires_at || null])
@@ -491,12 +499,19 @@ export async function getShopeeAdminSnapshot() {
     })),
     recentLogs: logsRes.data || [],
     brandMappings: mappingsRes.data || [],
+    businesses: businessesRes.data || [],
   };
 }
 
 export async function updateShopeeShop(
   id: number,
   payload: {
+    marketplace_source_key: string | null;
+    account_business_code: string | null;
+    viewer_business_code: string | null;
+    revenue_business_code: string | null;
+    default_owner_business_code: string | null;
+    default_processor_business_code: string | null;
     store: string | null;
     default_source: string;
     default_advertiser: string;
@@ -504,10 +519,65 @@ export async function updateShopeeShop(
 ) {
   await requireAdminAccess('admin:meta', 'Admin Meta');
 
+  const sourceKey = normalizeOptionalText(payload.marketplace_source_key)?.toLowerCase() || null;
+  const sourceConfig = sourceKey
+    ? listMarketplaceIntakeSourceConfigs().find(
+        (config) => config.platform === 'shopee' && config.sourceKey === sourceKey,
+      ) || null
+    : null;
+  if (sourceKey && !sourceConfig) {
+    throw new Error('Source marketplace Shopee tidak dikenali.');
+  }
+
+  const sourceBusinessCode = sourceConfig
+    ? sourceConfig.businessCode
+    : null;
+  const accountBusinessCode = normalizeBusinessCode(payload.account_business_code) || sourceBusinessCode;
+  const viewerBusinessCode = normalizeBusinessCode(payload.viewer_business_code) || sourceBusinessCode;
+  const revenueBusinessCode =
+    normalizeBusinessCode(payload.revenue_business_code) || viewerBusinessCode || sourceBusinessCode;
+  const defaultOwnerBusinessCode = normalizeBusinessCode(payload.default_owner_business_code);
+  const defaultProcessorBusinessCode = normalizeBusinessCode(payload.default_processor_business_code);
+
+  const businessCodesToValidate = Array.from(
+    new Set(
+      [
+        accountBusinessCode,
+        viewerBusinessCode,
+        revenueBusinessCode,
+        defaultOwnerBusinessCode,
+        defaultProcessorBusinessCode,
+      ].filter((value): value is string => Boolean(value)),
+    ),
+  );
+
   const svc = createServiceSupabase();
+  if (businessCodesToValidate.length > 0) {
+    const { data: businessRows, error: businessError } = await svc
+      .from('scalev_webhook_businesses')
+      .select('business_code')
+      .in('business_code', businessCodesToValidate);
+
+    if (businessError) throw businessError;
+
+    const availableBusinessCodes = new Set(
+      (businessRows || []).map((row: any) => String(row.business_code || '').trim().toUpperCase()).filter(Boolean),
+    );
+    const missingBusinessCodes = businessCodesToValidate.filter((code) => !availableBusinessCodes.has(code));
+    if (missingBusinessCodes.length > 0) {
+      throw new Error(`Business Shopee tidak dikenali: ${missingBusinessCodes.join(', ')}`);
+    }
+  }
+
   const { error } = await svc
     .from('shopee_shops')
     .update({
+      marketplace_source_key: sourceKey,
+      account_business_code: accountBusinessCode,
+      viewer_business_code: viewerBusinessCode,
+      revenue_business_code: revenueBusinessCode,
+      default_owner_business_code: defaultOwnerBusinessCode,
+      default_processor_business_code: defaultProcessorBusinessCode,
       store: normalizeOptionalText(payload.store),
       default_source: payload.default_source.trim() || 'Shopee Ads',
       default_advertiser: payload.default_advertiser.trim() || 'Shopee Shop',

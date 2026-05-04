@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { listMarketplaceIntakeSourceConfigs } from '@/lib/marketplace-intake-sources';
 import {
   getShopeeAdminSnapshot,
   setShopeeShopActive,
@@ -26,6 +27,18 @@ type ShopeeSetupInfo = {
   partnerKeyWrapped: boolean;
 };
 
+type ShopeeBusinessOption = {
+  business_code: string;
+  business_name: string;
+  is_active: boolean;
+};
+
+type ShopeeSourceOption = {
+  value: string;
+  label: string;
+  businessCode: string;
+};
+
 type ShopeeShop = {
   id: number;
   shop_id: number;
@@ -36,6 +49,12 @@ type ShopeeShop = {
   is_cb: boolean;
   auth_time: string | null;
   auth_expire_at: string | null;
+  marketplace_source_key: string | null;
+  account_business_code: string | null;
+  viewer_business_code: string | null;
+  revenue_business_code: string | null;
+  default_owner_business_code: string | null;
+  default_processor_business_code: string | null;
   store: string | null;
   default_source: string;
   default_advertiser: string;
@@ -104,11 +123,18 @@ export default function ShopeeManager() {
   const [shops, setShops] = useState<ShopeeShop[]>([]);
   const [logs, setLogs] = useState<SyncLog[]>([]);
   const [brandMappings, setBrandMappings] = useState<AdsStoreBrandMapping[]>([]);
+  const [businesses, setBusinesses] = useState<ShopeeBusinessOption[]>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [syncDateStart, setSyncDateStart] = useState(getYesterday);
   const [syncDateEnd, setSyncDateEnd] = useState(getYesterday);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({
+    marketplace_source_key: '',
+    account_business_code: '',
+    viewer_business_code: '',
+    revenue_business_code: '',
+    default_owner_business_code: '',
+    default_processor_business_code: '',
     store: '',
     default_source: 'Shopee Ads',
     default_advertiser: 'Shopee Shop',
@@ -160,6 +186,55 @@ export default function ShopeeManager() {
     return brandOptions.find((option) => option.value === storeValue)?.label || storeValue;
   }, [brandOptions]);
 
+  const shopeeSourceOptions = useMemo<ShopeeSourceOption[]>(
+    () =>
+      listMarketplaceIntakeSourceConfigs()
+        .filter((config) => config.platform === 'shopee')
+        .map((config) => ({
+          value: config.sourceKey,
+          label: `${config.sourceLabel} (${config.businessCode})`,
+          businessCode: config.businessCode,
+        })),
+    [],
+  );
+
+  const shopeeSourceConfigMap = useMemo(
+    () => new Map(shopeeSourceOptions.map((option) => [option.value, option])),
+    [shopeeSourceOptions],
+  );
+
+  const businessLabelMap = useMemo(
+    () =>
+      new Map(
+        businesses.map((business) => [
+          business.business_code,
+          business.business_name ? `${business.business_code} • ${business.business_name}` : business.business_code,
+        ]),
+      ),
+    [businesses],
+  );
+
+  const getBusinessDisplay = useCallback((businessCode: string | null) => {
+    if (!businessCode) return '-';
+    return businessLabelMap.get(businessCode) || businessCode;
+  }, [businessLabelMap]);
+
+  const hasCoreBusinessMapping = useCallback((shop: ShopeeShop) => (
+    Boolean(
+      String(shop.marketplace_source_key || '').trim()
+      && String(shop.account_business_code || '').trim()
+      && String(shop.viewer_business_code || '').trim()
+      && String(shop.revenue_business_code || '').trim(),
+    )
+  ), []);
+
+  const isShopSyncReady = useCallback((shop: ShopeeShop) => (
+    shop.is_active
+      && shop.has_tokens
+      && Boolean(String(shop.store || '').trim())
+      && hasCoreBusinessMapping(shop)
+  ), [hasCoreBusinessMapping]);
+
   const loadData = useCallback(async () => {
     try {
       const snapshot = await getShopeeAdminSnapshot();
@@ -167,6 +242,7 @@ export default function ShopeeManager() {
       setShops(snapshot.shops || []);
       setLogs(snapshot.recentLogs || []);
       setBrandMappings(snapshot.brandMappings || []);
+      setBusinesses(snapshot.businesses || []);
     } catch (error: any) {
       console.error('Failed to load Shopee admin snapshot:', error);
       setMessage({ type: 'error', text: error.message || 'Gagal memuat konfigurasi Shopee.' });
@@ -213,24 +289,55 @@ export default function ShopeeManager() {
   const handleEdit = (shop: ShopeeShop) => {
     setEditingId(shop.id);
     setEditForm({
+      marketplace_source_key: shop.marketplace_source_key || '',
+      account_business_code: shop.account_business_code || '',
+      viewer_business_code: shop.viewer_business_code || '',
+      revenue_business_code: shop.revenue_business_code || '',
+      default_owner_business_code: shop.default_owner_business_code || '',
+      default_processor_business_code: shop.default_processor_business_code || '',
       store: shop.store || '',
       default_source: shop.default_source || 'Shopee Ads',
       default_advertiser: shop.default_advertiser || shop.shop_name || 'Shopee Shop',
     });
   };
 
+  const handleMarketplaceSourceChange = (nextSourceKey: string) => {
+    const sourceConfig = shopeeSourceConfigMap.get(nextSourceKey);
+    setEditForm((form) => ({
+      ...form,
+      marketplace_source_key: nextSourceKey,
+      account_business_code: sourceConfig?.businessCode || '',
+      viewer_business_code: sourceConfig?.businessCode || '',
+      revenue_business_code: sourceConfig?.businessCode || '',
+    }));
+  };
+
   const handleEditSave = async () => {
+    const hasStore = Boolean(editForm.store.trim());
+    const hasCoreBusinessFields = Boolean(
+      editForm.marketplace_source_key.trim()
+      && editForm.account_business_code.trim()
+      && editForm.viewer_business_code.trim()
+      && editForm.revenue_business_code.trim(),
+    );
+
     try {
       await updateShopeeShop(editingId!, {
+        marketplace_source_key: editForm.marketplace_source_key.trim() || null,
+        account_business_code: editForm.account_business_code.trim() || null,
+        viewer_business_code: editForm.viewer_business_code.trim() || null,
+        revenue_business_code: editForm.revenue_business_code.trim() || null,
+        default_owner_business_code: editForm.default_owner_business_code.trim() || null,
+        default_processor_business_code: editForm.default_processor_business_code.trim() || null,
         store: editForm.store.trim() || null,
         default_source: editForm.default_source.trim() || 'Shopee Ads',
         default_advertiser: editForm.default_advertiser.trim() || 'Shopee Shop',
       });
       setMessage({
         type: 'success',
-        text: editForm.store.trim()
-          ? 'Konfigurasi Shopee diperbarui.'
-          : 'Konfigurasi Shopee diperbarui. Isi brand mapping sebelum sync agar data bisa masuk ke dashboard.',
+        text: !hasStore || !hasCoreBusinessFields
+          ? 'Konfigurasi Shopee diperbarui. Lengkapi source marketplace, business mapping inti, dan brand/store sebelum sync.'
+          : 'Konfigurasi Shopee diperbarui.',
       });
       setEditingId(null);
       await loadData();
@@ -275,16 +382,16 @@ export default function ShopeeManager() {
     );
   }
 
-  const readyShops = shops.filter((shop) => shop.is_active && shop.has_tokens && shop.store);
+  const readyShops = shops.filter(isShopSyncReady);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 12, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>Shopee Ads</div>
-            <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-              Hubungkan shop Shopee, simpan brand mapping, lalu sync ad spend ke dashboard.
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Shopee Ads</div>
+              <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
+              Hubungkan shop Shopee, simpan mapping business + brand/store, lalu sync ad spend ke dashboard.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -452,7 +559,7 @@ export default function ShopeeManager() {
             </button>
             {readyShops.length === 0 && (
               <span style={{ fontSize: 11, color: 'var(--dim)' }}>
-                Aktifkan shop, pastikan token ada, dan isi brand mapping sebelum sync.
+                Aktifkan shop, pastikan token ada, lalu isi source marketplace, business mapping inti, dan brand/store sebelum sync.
               </span>
             )}
           </div>
@@ -493,6 +600,105 @@ export default function ShopeeManager() {
                         <td style={{ padding: '10px 12px' }} colSpan={4}>
                           <div style={{ fontWeight: 600, color: 'var(--text)' }}>{shop.shop_name}</div>
                           <div style={{ fontSize: 11, color: 'var(--dim)', fontFamily: 'monospace' }}>{shop.shop_id}</div>
+                          <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(2, minmax(180px, 1fr))',
+                            gap: 8,
+                            marginTop: 10,
+                          }}>
+                            <label>
+                              <span style={labelStyle}>Source Marketplace</span>
+                              <select
+                                value={editForm.marketplace_source_key}
+                                onChange={(e) => handleMarketplaceSourceChange(e.target.value)}
+                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
+                              >
+                                <option value="">- Pilih Source -</option>
+                                {shopeeSourceOptions.map((option) => (
+                                  <option key={option.value} value={option.value}>{option.label}</option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              <span style={labelStyle}>Account Business</span>
+                              <select
+                                value={editForm.account_business_code}
+                                onChange={(e) => setEditForm((form) => ({ ...form, account_business_code: e.target.value }))}
+                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
+                              >
+                                <option value="">- Pilih Business -</option>
+                                {businesses.map((business) => (
+                                  <option key={business.business_code} value={business.business_code}>
+                                    {getBusinessDisplay(business.business_code)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              <span style={labelStyle}>Viewer Business</span>
+                              <select
+                                value={editForm.viewer_business_code}
+                                onChange={(e) => setEditForm((form) => ({ ...form, viewer_business_code: e.target.value }))}
+                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
+                              >
+                                <option value="">- Pilih Business -</option>
+                                {businesses.map((business) => (
+                                  <option key={business.business_code} value={business.business_code}>
+                                    {getBusinessDisplay(business.business_code)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              <span style={labelStyle}>Revenue Business</span>
+                              <select
+                                value={editForm.revenue_business_code}
+                                onChange={(e) => setEditForm((form) => ({ ...form, revenue_business_code: e.target.value }))}
+                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
+                              >
+                                <option value="">- Pilih Business -</option>
+                                {businesses.map((business) => (
+                                  <option key={business.business_code} value={business.business_code}>
+                                    {getBusinessDisplay(business.business_code)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              <span style={labelStyle}>Fallback Owner</span>
+                              <select
+                                value={editForm.default_owner_business_code}
+                                onChange={(e) => setEditForm((form) => ({ ...form, default_owner_business_code: e.target.value }))}
+                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
+                              >
+                                <option value="">- Optional -</option>
+                                {businesses.map((business) => (
+                                  <option key={business.business_code} value={business.business_code}>
+                                    {getBusinessDisplay(business.business_code)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <label>
+                              <span style={labelStyle}>Fallback Processor</span>
+                              <select
+                                value={editForm.default_processor_business_code}
+                                onChange={(e) => setEditForm((form) => ({ ...form, default_processor_business_code: e.target.value }))}
+                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
+                              >
+                                <option value="">- Optional -</option>
+                                {businesses.map((business) => (
+                                  <option key={business.business_code} value={business.business_code}>
+                                    {getBusinessDisplay(business.business_code)}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <div style={{ marginTop: 10, fontSize: 10, color: 'var(--dim)', lineHeight: 1.6 }}>
+                            account = business pemilik akun seller, viewer = business yang katalog visible-nya dijual,
+                            revenue = business penerima revenue marketplace, owner/processor = fallback owner stok dan fulfillment.
+                          </div>
                         </td>
                         <td style={{ padding: '8px 6px' }}>
                           <select
@@ -500,7 +706,7 @@ export default function ShopeeManager() {
                             onChange={(e) => setEditForm((form) => ({ ...form, store: e.target.value }))}
                             style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
                           >
-                            <option value="">- Pilih Brand -</option>
+                            <option value="">- Pilih Brand/Store -</option>
                             {brandOptions.map((option) => (
                               <option key={option.value} value={option.value}>{option.label}</option>
                             ))}
@@ -579,7 +785,13 @@ export default function ShopeeManager() {
                               {shop.is_active ? 'Aktif' : 'Nonaktif'}
                             </span>
                             {!shop.store && (
-                              <span style={{ fontSize: 10, color: 'var(--yellow)' }}>Brand belum diisi</span>
+                              <span style={{ fontSize: 10, color: 'var(--yellow)' }}>Brand/store belum diisi</span>
+                            )}
+                            {!shop.marketplace_source_key && (
+                              <span style={{ fontSize: 10, color: 'var(--yellow)' }}>Source marketplace belum diisi</span>
+                            )}
+                            {!hasCoreBusinessMapping(shop) && (
+                              <span style={{ fontSize: 10, color: 'var(--yellow)' }}>Business core belum lengkap</span>
                             )}
                           </div>
                         </td>
@@ -589,6 +801,15 @@ export default function ShopeeManager() {
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ color: 'var(--text)', fontWeight: 600 }}>{shop.shop_name}</div>
                           <div style={{ color: 'var(--dim)', fontSize: 10 }}>{shop.shop_status || '-'}</div>
+                          <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 4 }}>
+                            source: {shop.marketplace_source_key || '-'} • revenue: {getBusinessDisplay(shop.revenue_business_code)}
+                          </div>
+                          <div style={{ color: 'var(--dim)', fontSize: 10 }}>
+                            account: {getBusinessDisplay(shop.account_business_code)} • viewer: {getBusinessDisplay(shop.viewer_business_code)}
+                          </div>
+                          <div style={{ color: 'var(--dim)', fontSize: 10 }}>
+                            owner: {getBusinessDisplay(shop.default_owner_business_code)} • processor: {getBusinessDisplay(shop.default_processor_business_code)}
+                          </div>
                         </td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
                           {shop.region || '-'}
