@@ -26,11 +26,12 @@ import SyncManager from '@/components/SyncManager';
 import FinancialSheetManager from '@/components/FinancialSheetManager';
 import CsvOrderUploader from '@/components/CsvOrderUploader';
 import MetaManager from '@/components/MetaManager';
+import ShopeeManager from '@/components/ShopeeManager';
 import WarehouseSheetManager from '@/components/WarehouseSheetManager';
 
 const TABS = [
   { id: 'daily', label: 'Daily Data' },
-  { id: 'meta', label: 'Meta Ads' },
+  { id: 'meta', label: 'Marketing APIs' },
   { id: 'financial', label: 'Financial' },
   { id: 'warehouse', label: 'Warehouse' },
   // Connection + PKP moved to Business Settings
@@ -143,6 +144,13 @@ export default function AdminPage() {
       setActiveTab(currentTabId);
     }
   }, [activeTab, currentTabId, visibleTabs.length]);
+
+  useEffect(() => {
+    const requestedTab = searchParams.get('tab');
+    if (!requestedTab) return;
+    if (!visibleTabs.some((tab) => tab.id === requestedTab)) return;
+    if (requestedTab !== activeTab) setActiveTab(requestedTab);
+  }, [activeTab, searchParams, visibleTabs]);
 
   const refreshUsers = useCallback(async () => {
     const allUsers = await fetchAllUsers();
@@ -524,7 +532,10 @@ export default function AdminPage() {
 
       {/* ═══ TAB: META ADS ═══ */}
       {currentTabId === 'meta' && (
-        <MetaManager />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <MetaManager />
+          <ShopeeManager />
+        </div>
       )}
 
       {/* ═══ TAB: FINANCIAL ═══ */}

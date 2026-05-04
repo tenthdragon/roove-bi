@@ -78,10 +78,10 @@ export const PERMISSION_GROUPS = [
     ],
   },
   {
-    label: 'Admin — Sub-tab',
+    label: 'Admin - Sub-tab',
     keys: [
       { key: 'admin:daily',      label: 'Daily Data' },
-      { key: 'admin:meta',       label: 'Meta Ads' },
+      { key: 'admin:meta',       label: 'Marketing APIs' },
       { key: 'admin:financial',  label: 'Financial' },
       { key: 'admin:warehouse',  label: 'Warehouse (upload)' },
       { key: 'admin:sync',       label: 'Sync' },

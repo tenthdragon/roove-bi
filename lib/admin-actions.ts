@@ -3,6 +3,7 @@
 import { createServerSupabase, createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardRoles } from './dashboard-access';
 import { MATRIX_ROLES, PERMISSION_GROUPS } from './utils';
+import { getShopeeSetupInfo } from './shopee-open-platform';
 
 const MATRIX_ROLE_IDS = new Set(MATRIX_ROLES.map((role) => role.id));
 const KNOWN_PERMISSION_KEYS = new Set(
@@ -451,6 +452,79 @@ export async function setWabaAccountActive(id: number, isActive: boolean) {
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('waba_accounts')
+    .update({
+      is_active: isActive,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+
+  if (error) throw error;
+  return { success: true };
+}
+
+export async function getShopeeAdminSnapshot() {
+  await requireAdminAccess('admin:meta', 'Admin Meta');
+
+  const svc = createServiceSupabase();
+  const [shopsRes, tokensRes, logsRes, mappingsRes] = await Promise.all([
+    svc.from('shopee_shops').select('*').order('shop_name'),
+    svc.from('shopee_shop_tokens').select('shop_config_id, token_expires_at'),
+    svc.from('shopee_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
+    svc.from('ads_store_brand_mapping').select('store_pattern, brand').order('brand').order('store_pattern'),
+  ]);
+
+  if (shopsRes.error) throw shopsRes.error;
+  if (tokensRes.error) throw tokensRes.error;
+  if (logsRes.error) throw logsRes.error;
+  if (mappingsRes.error) throw mappingsRes.error;
+
+  const tokenMap = new Map(
+    (tokensRes.data || []).map((row: any) => [row.shop_config_id, row.token_expires_at || null])
+  );
+
+  return {
+    setup: getShopeeSetupInfo(),
+    shops: (shopsRes.data || []).map((shop: any) => ({
+      ...shop,
+      has_tokens: tokenMap.has(shop.id),
+      token_expires_at: tokenMap.get(shop.id) || null,
+    })),
+    recentLogs: logsRes.data || [],
+    brandMappings: mappingsRes.data || [],
+  };
+}
+
+export async function updateShopeeShop(
+  id: number,
+  payload: {
+    store: string | null;
+    default_source: string;
+    default_advertiser: string;
+  }
+) {
+  await requireAdminAccess('admin:meta', 'Admin Meta');
+
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('shopee_shops')
+    .update({
+      store: normalizeOptionalText(payload.store),
+      default_source: payload.default_source.trim() || 'Shopee Ads',
+      default_advertiser: payload.default_advertiser.trim() || 'Shopee Shop',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id);
+
+  if (error) throw error;
+  return { success: true };
+}
+
+export async function setShopeeShopActive(id: number, isActive: boolean) {
+  await requireAdminAccess('admin:meta', 'Admin Meta');
+
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('shopee_shops')
     .update({
       is_active: isActive,
       updated_at: new Date().toISOString(),
