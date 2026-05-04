@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
 
     const allowedRoles = [
       'admin',
+      'marketing_api_reviewer',
       'direktur_ops', 'staf_ops',
       'direktur_finance', 'staf_finance',
       'brand_manager', 'sales_manager',

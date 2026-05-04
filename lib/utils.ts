@@ -5,6 +5,7 @@
 export type UserRole =
   | 'owner'
   | 'admin'
+  | 'marketing_api_reviewer'
   | 'direktur_ops'
   | 'staf_ops'
   | 'direktur_finance'
@@ -23,6 +24,7 @@ export type UserRole =
 // Roles that appear in the permission matrix (excludes owner + pending)
 export const MATRIX_ROLES: { id: string; label: string }[] = [
   { id: 'admin',             label: 'Admin' },
+  { id: 'marketing_api_reviewer', label: 'Marketing API Reviewer' },
   { id: 'direktur_ops',      label: 'Direktur Ops' },
   { id: 'staf_ops',          label: 'Staf Ops' },
   { id: 'direktur_finance',  label: 'Direktur Finance' },

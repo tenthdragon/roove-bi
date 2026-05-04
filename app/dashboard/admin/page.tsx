@@ -396,6 +396,7 @@ export default function AdminPage() {
     switch (r) {
       case 'owner':              return { text: 'Owner',             bg: 'var(--accent-subtle)',    color: '#818cf8' };
       case 'admin':              return { text: 'Admin',             bg: 'var(--badge-green-bg)',   color: 'var(--green)' };
+      case 'marketing_api_reviewer': return { text: 'Marketing API Reviewer', bg: 'var(--accent-subtle)', color: '#f97316' };
       case 'direktur_ops':       return { text: 'Direktur Ops',      bg: 'var(--badge-green-bg)',   color: '#34d399' };
       case 'staf_ops':           return { text: 'Staf Ops',          bg: 'var(--accent-subtle)',    color: '#38bdf8' };
       case 'direktur_finance':   return { text: 'Direktur Finance',  bg: 'var(--accent-subtle)',    color: '#60a5fa' };
@@ -1250,6 +1251,7 @@ export default function AdminPage() {
             {[
               { r: 'owner',             desc: 'akses penuh' },
               { r: 'admin',             desc: 'lihat semua, atur via matrix' },
+              { r: 'marketing_api_reviewer', desc: 'khusus Admin > Marketing APIs' },
               { r: 'direktur_ops',      desc: 'operasional + notif gudang' },
               { r: 'staf_ops',          desc: 'akses via matrix' },
               { r: 'direktur_finance',  desc: 'finance + laporan' },

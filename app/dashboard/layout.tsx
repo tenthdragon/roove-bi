@@ -22,15 +22,31 @@ function getTabPath(tabId) {
   return tabId === 'overview' ? '/dashboard' : '/dashboard/' + tabId;
 }
 
+function hasAdminAreaAccess(role, permissions) {
+  if (role === 'owner') return true;
+  if (permissions.has('tab:admin')) return true;
+
+  for (const permission of permissions) {
+    if (permission.startsWith('admin:')) return true;
+  }
+
+  return false;
+}
+
+function canAccessLayoutTab(role, tab, permissions) {
+  if (tab.id === 'admin') return hasAdminAreaAccess(role, permissions);
+  if (tab.ownerOnly && role !== 'owner') return false;
+  return canAccessTab(role, tab.id, permissions);
+}
+
 function getOrderedAccessibleTabIds(role, permissions) {
   const ids: string[] = [];
 
   for (const tab of ALL_TABS) {
-    if (tab.ownerOnly && role !== 'owner') continue;
-    if (canAccessTab(role, tab.id, permissions)) ids.push(tab.id);
+    if (canAccessLayoutTab(role, tab, permissions)) ids.push(tab.id);
     if (tab.children) {
       for (const child of tab.children) {
-        if (canAccessTab(role, child.id, permissions)) ids.push(child.id);
+        if (canAccessLayoutTab(role, child, permissions)) ids.push(child.id);
       }
     }
   }
@@ -40,10 +56,8 @@ function getOrderedAccessibleTabIds(role, permissions) {
 
 function buildVisibleTabs(role, permissions) {
   return ALL_TABS.map(tab => {
-    if (tab.ownerOnly && role !== 'owner') return null;
-
-    const parentVisible = canAccessTab(role, tab.id, permissions);
-    const visibleChildren = tab.children?.filter(child => canAccessTab(role, child.id, permissions)) ?? [];
+    const parentVisible = canAccessLayoutTab(role, tab, permissions);
+    const visibleChildren = tab.children?.filter(child => canAccessLayoutTab(role, child, permissions)) ?? [];
 
     if (tab.children) {
       if (!parentVisible && visibleChildren.length === 0) return null;
@@ -513,7 +527,7 @@ export default function DashboardLayout({ children }) {
     // On mobile, flatten children into top-level items (no submenus)
     const flatTabs = isMobile
       ? visibleTabs.flatMap(t => {
-          const parentAccessible = canAccessTab(profile.role, t.id, permissions);
+          const parentAccessible = canAccessLayoutTab(profile.role, t, permissions);
           const parent = { ...t, children: undefined };
           const children = t.children?.map(c => ({ ...c, group: t.group })) ?? [];
           return t.children?.length
@@ -536,7 +550,7 @@ export default function DashboardLayout({ children }) {
         <nav style={{ flex:1, padding:'8px 8px', display:'flex', flexDirection:'column', gap:2 }}>
           {tabsWithGroupInfo.map((t, idx) => {
             const hasChildren = t.children && t.children.length > 0;
-            const parentAccessible = canAccessTab(profile.role, t.id, permissions);
+            const parentAccessible = canAccessLayoutTab(profile.role, t, permissions);
             const active = currentTab === t.id;
             const childActive = hasChildren && t.children.some(c => currentTab === c.id);
             const isExpanded = expandedMenus[t.id] || childActive;
