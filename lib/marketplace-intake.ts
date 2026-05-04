@@ -1715,6 +1715,33 @@ function buildLineFromBundleCandidate(
   };
 }
 
+function mapSuggestionSourceToLineSource(
+  source: MarketplaceIntakeSuggestionCandidate['source'] | null | undefined,
+): 'direct' | 'remembered' | 'manual' | 'companion' {
+  if (source === 'remembered') return 'remembered';
+  if (source === 'manual') return 'manual';
+  if (source === 'companion') return 'companion';
+  return 'direct';
+}
+
+function buildCanonicalLineFromPreviewLine(line: MarketplaceIntakePreviewLine): CanonicalLine {
+  return {
+    rawPlatformSkuId: line.rawPlatformSkuId,
+    rawSellerSku: line.rawSellerSku,
+    sku: line.mpSku,
+    normalizedSku: line.normalizedSku,
+    skuNormalizationSource: line.skuNormalizationSource,
+    skuNormalizationReason: line.skuNormalizationReason,
+    productName: line.mpProductName,
+    variation: line.mpVariation,
+    quantity: line.quantity,
+    unitPrice: line.unitPrice,
+    lineSubtotal: line.lineSubtotal,
+    lineDiscount: line.lineDiscount,
+    rawRow: line.rawRow,
+  };
+}
+
 function inheritCompanionStoreForOrder(
   lines: MarketplaceIntakePreviewLine[],
 ): MarketplaceIntakePreviewLine[] {
@@ -2196,40 +2223,52 @@ export async function saveMarketplaceIntakePreview(input: {
 
   const normalizedOrders = await Promise.all((preview.orders || []).map(async (order) => {
     const lines = await Promise.all((order.lines || []).map(async (line) => {
+      const canonicalLine = buildCanonicalLineFromPreviewLine(line);
       const selection = selectionMap.get(`${order.externalOrderId}::${line.lineIndex}`);
-      if (!selection) return line;
 
-      const bundle = bundleById.get(Number(selection.scalevBundleId || 0));
-      if (!bundle) return line;
+      if (selection) {
+        const bundle = bundleById.get(Number(selection.scalevBundleId || 0));
+        if (bundle) {
+          const selectedStoreName = cleanText(selection.mappedStoreName);
+          const fallbackStoreCandidates = selectedStoreName ? [selectedStoreName] : sourceConfig.allowedStores;
+          const candidate = await buildSuggestionCandidateFromBundle(
+            bundle,
+            sourceConfig,
+            'manual',
+            99999,
+            {
+              preferredStoreName: selectedStoreName,
+              textHints: [line.mpProductName, line.mpVariation],
+              fallbackStoreCandidates,
+            },
+          );
 
-      const candidate = await buildSuggestionCandidateFromBundle(
-        bundle,
-        sourceConfig,
-        'manual',
-        99999,
-        {
-          preferredStoreName: selection.mappedStoreName || null,
-          textHints: [line.mpProductName, line.mpVariation],
-          fallbackStoreCandidates: sourceConfig.allowedStores,
-        },
-      );
-      if (!candidate.storeName || !sourceConfig.allowedStores.includes(candidate.storeName)) return line;
+          if (selectedStoreName && sourceConfig.allowedStores.includes(selectedStoreName)) {
+            return buildLineFromBundleCandidate(canonicalLine, line.lineIndex, {
+              ...candidate,
+              storeName: selectedStoreName,
+              storeCandidates: Array.from(new Set([selectedStoreName, ...(candidate.storeCandidates || [])])),
+              source: 'manual',
+            }, 'manual');
+          }
 
-      return buildLineFromBundleCandidate({
-        rawPlatformSkuId: line.rawPlatformSkuId,
-        rawSellerSku: line.rawSellerSku,
-        sku: line.mpSku,
-        normalizedSku: line.normalizedSku,
-        skuNormalizationSource: line.skuNormalizationSource,
-        skuNormalizationReason: line.skuNormalizationReason,
-        productName: line.mpProductName,
-        variation: line.mpVariation,
-        quantity: line.quantity,
-        unitPrice: line.unitPrice,
-        lineSubtotal: line.lineSubtotal,
-        lineDiscount: line.lineDiscount,
-        rawRow: line.rawRow,
-      }, line.lineIndex, candidate, 'manual');
+          if (candidate.storeName && sourceConfig.allowedStores.includes(candidate.storeName)) {
+            return buildLineFromBundleCandidate(canonicalLine, line.lineIndex, candidate, 'manual');
+          }
+        }
+      }
+
+      const previewCandidate = line.selectedSuggestion;
+      if (previewCandidate?.storeName && sourceConfig.allowedStores.includes(previewCandidate.storeName)) {
+        return buildLineFromBundleCandidate(
+          canonicalLine,
+          line.lineIndex,
+          previewCandidate,
+          mapSuggestionSourceToLineSource(previewCandidate.source),
+        );
+      }
+
+      return line;
     }));
 
     return summarizeOrderFromLines({

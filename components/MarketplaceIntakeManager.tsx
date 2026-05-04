@@ -2157,7 +2157,7 @@ export default function MarketplaceIntakeManager() {
             >
               {livePreviewDrafts.map((draft) => {
                 const isActive = draft.key === activePreviewKey;
-                const draftSummary = draft.preview?.summary || {};
+                const draftSummary = isActive ? effectivePreviewSummary : (draft.preview?.summary || {});
                 return (
                   <div
                     key={draft.key}
