@@ -374,7 +374,7 @@ export default function ShopeeManager() {
           <div>
             <div style={{ fontSize: 14, fontWeight: 700 }}>Shopee Shops</div>
             <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-              Hubungkan shop Shopee, pilih commerce source yang nanti menggantikan marketplace intake, lalu kelola sink Shopee Ads per shop.
+              Hubungkan business dengan Shopee untuk mendapatkan data Shopee Ads harian
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
