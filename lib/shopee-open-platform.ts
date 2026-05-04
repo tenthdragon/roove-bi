@@ -246,6 +246,7 @@ function buildSignedUrl(
   path: string,
   extraParams: Record<string, string | number | null | undefined>,
   auth?: ShopeeAuthContext,
+  baseUrlOverride?: string,
 ) {
   const config = requireShopeeConfig();
   const timestamp = nowUnix();
@@ -264,7 +265,7 @@ function buildSignedUrl(
 
   params.set('sign', buildSignature(config, path, timestamp, auth));
 
-  return `${config.apiBaseUrl}${path}?${params.toString()}`;
+  return `${cleanUrl(baseUrlOverride || config.apiBaseUrl)}${path}?${params.toString()}`;
 }
 
 async function parseShopeeResponse<TResponse, TExtra extends object = Record<string, never>>(
@@ -387,7 +388,7 @@ export function buildShopeeShopAuthUrl() {
 export async function exchangeShopeeAuthCode(input: { code: string; shopId: number | string }) {
   const config = requireShopeeConfig();
   const path = '/api/v2/auth/token/get';
-  const url = buildSignedUrl(path, {}, undefined);
+  const url = buildSignedUrl(path, {}, undefined, config.authBaseUrl);
 
   const json = await postJson<never, ShopeeTokenPayload>(url, {
     code: input.code,
@@ -410,7 +411,7 @@ export async function exchangeShopeeAuthCode(input: { code: string; shopId: numb
 export async function refreshShopeeAccessToken(input: { refreshToken: string; shopId: number | string }) {
   const config = requireShopeeConfig();
   const path = '/api/v2/auth/access_token/get';
-  const url = buildSignedUrl(path, {}, undefined);
+  const url = buildSignedUrl(path, {}, undefined, config.authBaseUrl);
 
   const json = await postJson<never, ShopeeTokenPayload>(url, {
     refresh_token: input.refreshToken,
