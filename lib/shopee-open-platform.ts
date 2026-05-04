@@ -26,6 +26,7 @@ export type ShopeeSetupInfo = {
   redirectUrl: string;
   authBaseUrl: string;
   apiBaseUrl: string;
+  requestBaseUrl: string;
   missingEnv: string[];
   environment: 'sandbox' | 'production' | 'custom';
   authLooksSandbox: boolean;
@@ -124,13 +125,21 @@ function getApiBaseUrl() {
   return cleanUrl(readEnvText('SHOPEE_API_BASE_URL').value || DEFAULT_SHOPEE_API_BASE_URL);
 }
 
+function isSandboxBaseUrl(value: string) {
+  return /sandbox|test-stable/i.test(value);
+}
+
+function getSignedRequestBaseUrl(input: Pick<ShopeeConfig, 'authBaseUrl' | 'apiBaseUrl'>) {
+  return isSandboxBaseUrl(input.authBaseUrl) ? input.authBaseUrl : input.apiBaseUrl;
+}
+
 export function getShopeeSetupInfo(): ShopeeSetupInfo {
   const partnerId = readEnvText('SHOPEE_PARTNER_ID');
   const partnerKey = readEnvText('SHOPEE_PARTNER_KEY');
   const authBaseUrl = getAuthBaseUrl();
   const apiBaseUrl = getApiBaseUrl();
-  const authLooksSandbox = /sandbox|test-stable/i.test(authBaseUrl);
-  const apiLooksSandbox = /sandbox|test-stable/i.test(apiBaseUrl);
+  const authLooksSandbox = isSandboxBaseUrl(authBaseUrl);
+  const apiLooksSandbox = isSandboxBaseUrl(apiBaseUrl);
   const environment =
     authLooksSandbox && apiLooksSandbox
       ? 'sandbox'
@@ -146,6 +155,7 @@ export function getShopeeSetupInfo(): ShopeeSetupInfo {
     redirectUrl: getRedirectUrl(),
     authBaseUrl,
     apiBaseUrl,
+    requestBaseUrl: getSignedRequestBaseUrl({ authBaseUrl, apiBaseUrl }),
     missingEnv,
     environment,
     authLooksSandbox,
@@ -265,7 +275,7 @@ function buildSignedUrl(
 
   params.set('sign', buildSignature(config, path, timestamp, auth));
 
-  return `${cleanUrl(baseUrlOverride || config.apiBaseUrl)}${path}?${params.toString()}`;
+  return `${cleanUrl(baseUrlOverride || getSignedRequestBaseUrl(config))}${path}?${params.toString()}`;
 }
 
 async function parseShopeeResponse<TResponse, TExtra extends object = Record<string, never>>(

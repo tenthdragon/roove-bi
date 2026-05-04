@@ -14,6 +14,7 @@ type ShopeeSetupInfo = {
   redirectUrl: string;
   authBaseUrl: string;
   apiBaseUrl: string;
+  requestBaseUrl: string;
   missingEnv: string[];
   environment: 'sandbox' | 'production' | 'custom';
   authLooksSandbox: boolean;
@@ -352,6 +353,7 @@ export default function ShopeeManager() {
               runtime.environment={setup.environment}<br />
               runtime.auth_base_url={setup.authBaseUrl}<br />
               runtime.api_base_url={setup.apiBaseUrl}<br />
+              runtime.request_base_url={setup.requestBaseUrl}<br />
               runtime.partner_id_suffix={setup.partnerIdSuffix || '-'}<br />
               runtime.partner_key_length={setup.partnerKeyLength}
             </div>
