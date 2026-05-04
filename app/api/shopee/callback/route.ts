@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { createServiceSupabase } from '@/lib/service-supabase';
-import { exchangeShopeeAuthCode, getShopeeShopInfo } from '@/lib/shopee-open-platform';
+import {
+  exchangeShopeeAuthCode,
+  getShopeeShopInfo,
+  getShopeeSetupInfo,
+} from '@/lib/shopee-open-platform';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,11 +54,37 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const tokens = await exchangeShopeeAuthCode({ code, shopId });
-    const shopInfo = await getShopeeShopInfo({
-      accessToken: tokens.accessToken,
-      shopId,
-    });
+    const setup = getShopeeSetupInfo();
+    let tokens;
+    try {
+      tokens = await exchangeShopeeAuthCode({ code, shopId });
+    } catch (error: any) {
+      console.error('[shopee-callback] Token exchange failed', {
+        shop_id: shopId,
+        auth_base_url: setup.authBaseUrl,
+        api_base_url: setup.apiBaseUrl,
+        partner_id_suffix: String(process.env.SHOPEE_PARTNER_ID || '').slice(-4),
+        error: error.message,
+      });
+      throw new Error(`Token exchange gagal: ${error.message}`);
+    }
+
+    let shopInfo;
+    try {
+      shopInfo = await getShopeeShopInfo({
+        accessToken: tokens.accessToken,
+        shopId,
+      });
+    } catch (error: any) {
+      console.error('[shopee-callback] get_shop_info failed', {
+        shop_id: shopId,
+        auth_base_url: setup.authBaseUrl,
+        api_base_url: setup.apiBaseUrl,
+        partner_id_suffix: String(process.env.SHOPEE_PARTNER_ID || '').slice(-4),
+        error: error.message,
+      });
+      throw new Error(`Get shop info gagal: ${error.message}`);
+    }
 
     const svc = createServiceSupabase();
     const numericShopId = Number(shopId);
