@@ -23,6 +23,16 @@ function normalizeOptionalText(value: string | null | undefined) {
   return trimmed || null;
 }
 
+function findShopeeMarketplaceSourceConfig(sourceKey: string | null | undefined) {
+  const normalizedKey = String(sourceKey || '').trim().toLowerCase();
+  if (!normalizedKey) return null;
+  return (
+    listMarketplaceIntakeSourceConfigs().find(
+      (config) => config.platform === 'shopee' && config.sourceKey === normalizedKey,
+    ) || null
+  );
+}
+
 async function requireOwnerAccess(label: string) {
   await requireDashboardRoles(['owner'], `Hanya owner yang bisa mengakses ${label}.`);
 }
@@ -474,18 +484,16 @@ export async function getShopeeAdminSnapshot() {
   await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
-  const [shopsRes, tokensRes, logsRes, mappingsRes, streamsRes] = await Promise.all([
+  const [shopsRes, tokensRes, logsRes, streamsRes] = await Promise.all([
     svc.from('shopee_shops').select('*').order('shop_name'),
     svc.from('shopee_shop_tokens').select('shop_config_id, token_expires_at'),
     svc.from('shopee_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
-    svc.from('ads_store_brand_mapping').select('store_pattern, brand').order('brand').order('store_pattern'),
     svc.from('shopee_shop_spend_streams').select('*').order('shop_config_id').order('stream_key'),
   ]);
 
   if (shopsRes.error) throw shopsRes.error;
   if (tokensRes.error) throw tokensRes.error;
   if (logsRes.error) throw logsRes.error;
-  if (mappingsRes.error) throw mappingsRes.error;
   if (streamsRes.error) throw streamsRes.error;
 
   const tokenMap = new Map(
@@ -524,16 +532,17 @@ export async function getShopeeAdminSnapshot() {
       is_enabled: boolean;
     },
   ) => {
-    const definition = defaultStreamMap.get(stream.stream_key);
+    const normalizedStream = normalizeShopeeSpendStreamConfig(stream);
+    const definition = defaultStreamMap.get(normalizedStream.stream_key);
     return {
       id: stream.id ?? null,
       shop_config_id: stream.shop_config_id ?? shopId,
-      stream_key: stream.stream_key,
-      default_source: stream.default_source,
-      default_advertiser: stream.default_advertiser,
-      sync_mode: stream.sync_mode,
-      is_enabled: stream.is_enabled,
-      label: definition?.label || stream.default_source,
+      stream_key: normalizedStream.stream_key,
+      default_source: normalizedStream.default_source,
+      default_advertiser: normalizedStream.default_advertiser,
+      sync_mode: normalizedStream.sync_mode,
+      is_enabled: normalizedStream.is_enabled,
+      label: definition?.label || normalizedStream.default_source,
       api_supported: definition?.apiSupported || false,
       description: definition?.description || '',
     };
@@ -559,7 +568,6 @@ export async function getShopeeAdminSnapshot() {
       ).map((stream) => decorateSpendStream(shop.id, stream)),
     })),
     recentLogs: logsRes.data || [],
-    brandMappings: mappingsRes.data || [],
   };
 }
 
@@ -567,7 +575,6 @@ export async function updateShopeeShop(
   id: number,
   payload: {
     marketplace_source_key: string | null;
-    store: string | null;
     spend_streams: Array<{
       stream_key: ShopeeSpendStreamKey;
       default_source: string;
@@ -580,11 +587,7 @@ export async function updateShopeeShop(
   await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const sourceKey = normalizeOptionalText(payload.marketplace_source_key)?.toLowerCase() || null;
-  const sourceConfig = sourceKey
-    ? listMarketplaceIntakeSourceConfigs().find(
-        (config) => config.platform === 'shopee' && config.sourceKey === sourceKey,
-      ) || null
-    : null;
+  const sourceConfig = findShopeeMarketplaceSourceConfig(sourceKey);
   if (sourceKey && !sourceConfig) {
     throw new Error('Source marketplace Shopee tidak dikenali.');
   }
@@ -610,7 +613,12 @@ export async function updateShopeeShop(
     .from('shopee_shops')
     .update({
       marketplace_source_key: sourceKey,
-      store: normalizeOptionalText(payload.store),
+      account_business_code: sourceConfig?.businessCode || null,
+      viewer_business_code: sourceConfig?.businessCode || null,
+      revenue_business_code: sourceConfig?.businessCode || null,
+      default_owner_business_code: null,
+      default_processor_business_code: null,
+      store: null,
       updated_at: new Date().toISOString(),
     })
     .eq('id', id);

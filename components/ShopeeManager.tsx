@@ -57,7 +57,6 @@ type ShopeeShop = {
   auth_time: string | null;
   auth_expire_at: string | null;
   marketplace_source_key: string | null;
-  store: string | null;
   is_active: boolean;
   has_tokens: boolean;
   token_expires_at: string | null;
@@ -80,11 +79,6 @@ type SyncLog = {
   created_at: string;
 };
 
-type AdsStoreBrandMapping = {
-  store_pattern: string;
-  brand: string;
-};
-
 type EditableShopeeSpendStream = {
   stream_key: ShopeeSpendStreamKey;
   default_source: string;
@@ -95,7 +89,6 @@ type EditableShopeeSpendStream = {
 
 type EditFormState = {
   marketplace_source_key: string;
-  store: string;
   spend_streams: EditableShopeeSpendStream[];
 };
 
@@ -104,6 +97,7 @@ const SHOPEE_SOURCE_OPTIONS = listMarketplaceIntakeSourceConfigs()
   .map((config) => ({
     value: config.sourceKey,
     label: config.sourceLabel,
+    businessCode: config.businessCode,
   }));
 
 const SHOPEE_STREAM_DEFINITIONS = listShopeeSpendStreamDefinitions();
@@ -145,7 +139,6 @@ function normalizeEditStreams(streams: EditableShopeeSpendStream[], shopName: st
       stream.stream_key,
       {
         ...stream,
-        default_source: String(stream.default_source || '').trim(),
         default_advertiser: String(stream.default_advertiser || '').trim() || shopName || 'Shopee Shop',
       },
     ]),
@@ -155,7 +148,7 @@ function normalizeEditStreams(streams: EditableShopeeSpendStream[], shopName: st
     const stream = streamMap.get(definition.key);
     return {
       stream_key: definition.key,
-      default_source: stream?.default_source || definition.defaultSource,
+      default_source: definition.defaultSource,
       default_advertiser: stream?.default_advertiser || shopName || 'Shopee Shop',
       sync_mode: stream?.sync_mode || definition.defaultSyncMode,
       is_enabled: Boolean(stream?.is_enabled ?? definition.defaultEnabled),
@@ -166,7 +159,6 @@ function normalizeEditStreams(streams: EditableShopeeSpendStream[], shopName: st
 function buildEditForm(shop: ShopeeShop): EditFormState {
   return {
     marketplace_source_key: shop.marketplace_source_key || '',
-    store: shop.store || '',
     spend_streams: normalizeEditStreams(
       (shop.spend_streams || []).map((stream) => ({
         stream_key: stream.stream_key,
@@ -187,14 +179,12 @@ export default function ShopeeManager() {
   const [setup, setSetup] = useState<ShopeeSetupInfo | null>(null);
   const [shops, setShops] = useState<ShopeeShop[]>([]);
   const [logs, setLogs] = useState<SyncLog[]>([]);
-  const [brandMappings, setBrandMappings] = useState<AdsStoreBrandMapping[]>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [syncDateStart, setSyncDateStart] = useState(getYesterday);
   const [syncDateEnd, setSyncDateEnd] = useState(getYesterday);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState<EditFormState>({
     marketplace_source_key: '',
-    store: '',
     spend_streams: buildDefaultEditStreams('Shopee Shop'),
   });
 
@@ -216,43 +206,22 @@ export default function ShopeeManager() {
     marginBottom: 4,
   };
 
-  const brandOptions = useMemo<{ value: string; label: string }[]>(() => {
-    const brandCounts: Record<string, number> = {};
-    brandMappings.forEach((mapping) => {
-      const brand = mapping.brand?.trim() || mapping.store_pattern?.trim() || '';
-      if (!brand) return;
-      brandCounts[brand] = (brandCounts[brand] || 0) + 1;
-    });
-
-    return brandMappings
-      .map((mapping) => {
-        const value = mapping.store_pattern?.trim() || '';
-        const brand = mapping.brand?.trim() || value;
-        if (!value) return null;
-        const needsDisambiguation = (brandCounts[brand] || 0) > 1 && value.toLowerCase() !== brand.toLowerCase();
-        return {
-          value,
-          label: needsDisambiguation ? `${brand} (${value})` : brand,
-        };
-      })
-      .filter((option): option is { value: string; label: string } => Boolean(option))
-      .sort((a, b) => a.label.localeCompare(b.label));
-  }, [brandMappings]);
-
-  const sourceOptionLabelMap = useMemo(
-    () => new Map<string, string>(SHOPEE_SOURCE_OPTIONS.map((option) => [option.value, option.label])),
+  const sourceOptionMetaMap = useMemo(
+    () => new Map<string, { label: string; businessCode: string }>(
+      SHOPEE_SOURCE_OPTIONS.map((option) => [option.value, { label: option.label, businessCode: option.businessCode }]),
+    ),
     [],
   );
 
-  const getBrandDisplay = useCallback((storeValue: string | null) => {
-    if (!storeValue) return '-';
-    return brandOptions.find((option) => option.value === storeValue)?.label || storeValue;
-  }, [brandOptions]);
-
   const getSourceDisplay = useCallback((sourceKey: string | null) => {
     if (!sourceKey) return '-';
-    return sourceOptionLabelMap.get(sourceKey) || sourceKey;
-  }, [sourceOptionLabelMap]);
+    return sourceOptionMetaMap.get(sourceKey)?.label || sourceKey;
+  }, [sourceOptionMetaMap]);
+
+  const getSourceBusinessCode = useCallback((sourceKey: string | null) => {
+    if (!sourceKey) return null;
+    return sourceOptionMetaMap.get(sourceKey)?.businessCode || null;
+  }, [sourceOptionMetaMap]);
 
   const hasCommerceMapping = useCallback((shop: ShopeeShop) => (
     Boolean(String(shop.marketplace_source_key || '').trim())
@@ -265,7 +234,6 @@ export default function ShopeeManager() {
   const isShopSyncReady = useCallback((shop: ShopeeShop) => (
     shop.is_active
       && shop.has_tokens
-      && Boolean(String(shop.store || '').trim())
       && hasCommerceMapping(shop)
       && hasApiSpendStreamEnabled(shop)
   ), [hasApiSpendStreamEnabled, hasCommerceMapping]);
@@ -276,7 +244,6 @@ export default function ShopeeManager() {
       setSetup(snapshot.setup || null);
       setShops(snapshot.shops || []);
       setLogs(snapshot.recentLogs || []);
-      setBrandMappings(snapshot.brandMappings || []);
     } catch (error: any) {
       console.error('Failed to load Shopee admin snapshot:', error);
       setMessage({ type: 'error', text: error.message || 'Gagal memuat konfigurasi Shopee.' });
@@ -343,7 +310,6 @@ export default function ShopeeManager() {
     const editingShop = shops.find((shop) => shop.id === editingId);
     const shopName = editingShop?.shop_name || 'Shopee Shop';
     const normalizedStreams = normalizeEditStreams(editForm.spend_streams, shopName);
-    const hasStore = Boolean(editForm.store.trim());
     const hasCommerceSource = Boolean(editForm.marketplace_source_key.trim());
     const hasEnabledApiStream = normalizedStreams.some(
       (stream) => stream.sync_mode === 'api' && stream.is_enabled,
@@ -352,13 +318,12 @@ export default function ShopeeManager() {
     try {
       await updateShopeeShop(editingId, {
         marketplace_source_key: editForm.marketplace_source_key.trim() || null,
-        store: editForm.store.trim() || null,
         spend_streams: normalizedStreams,
       });
       setMessage({
         type: 'success',
-        text: !hasStore || !hasCommerceSource || !hasEnabledApiStream
-          ? 'Konfigurasi Shopee diperbarui. Lengkapi commerce source, brand/store, dan aktifkan minimal satu spend stream API sebelum sync.'
+        text: !hasCommerceSource || !hasEnabledApiStream
+          ? 'Konfigurasi Shopee diperbarui. Lengkapi commerce source dan aktifkan minimal satu spend stream API sebelum sync.'
           : 'Konfigurasi Shopee diperbarui.',
       });
       setEditingId(null);
@@ -398,7 +363,6 @@ export default function ShopeeManager() {
 
   const getShopWarnings = useCallback((shop: ShopeeShop) => {
     const warnings: string[] = [];
-    if (!shop.store) warnings.push('Brand/store belum diisi');
     if (!shop.marketplace_source_key) warnings.push('Commerce source belum diisi');
     if (!hasApiSpendStreamEnabled(shop)) warnings.push('Belum ada spend stream API aktif');
     if (!shop.has_tokens) warnings.push('Token belum tersedia');
@@ -477,7 +441,7 @@ export default function ShopeeManager() {
             2. Daftarkan redirect URL ini secara exact: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{setup?.redirectUrl || '-'}</span><br />
             3. Isi env server: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>SHOPEE_PARTNER_ID</span> dan <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>SHOPEE_PARTNER_KEY</span>.<br />
             4. Klik <strong>Hubungkan Shop</strong> untuk authorize seller shop.<br />
-            5. Setelah shop terhubung, isi <strong>Commerce Source</strong> dan <strong>Brand/Store</strong>, lalu aktifkan spend stream yang relevan.
+            5. Setelah shop terhubung, pilih <strong>Commerce Source</strong>. Ownership spend akan otomatis mengikuti business dari source ini, sedangkan parsing brand/store order tetap berjalan downstream dari SKU dan bundle.
           </div>
           {setup && (
             <div style={{
@@ -592,7 +556,7 @@ export default function ShopeeManager() {
             <span style={{ fontSize: 11, color: 'var(--dim)' }}>
               {readyShops.length > 0
                 ? `${readyShops.length} shop siap di-sync. Hanya spend stream mode API yang aktif yang akan dijalankan.`
-                : 'Aktifkan shop, pastikan token ada, isi commerce source + brand/store, lalu aktifkan minimal satu spend stream API sebelum sync.'}
+                : 'Aktifkan shop, pastikan token ada, pilih commerce source, lalu aktifkan minimal satu spend stream API sebelum sync.'}
             </span>
           </div>
         )}
@@ -603,10 +567,10 @@ export default function ShopeeManager() {
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 980 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 920 }}>
               <thead>
                 <tr style={{ background: 'var(--bg)' }}>
-                  {['Status', 'Shop', 'Commerce Source', 'Brand/Store', 'Spend Streams', 'Token', 'Auth Expire', 'Aksi'].map((header) => (
+                  {['Status', 'Shop', 'Commerce Source', 'Spend Streams', 'Token', 'Auth Expire', 'Aksi'].map((header) => (
                     <th
                       key={header}
                       style={{
@@ -627,11 +591,12 @@ export default function ShopeeManager() {
               <tbody>
                 {shops.map((shop) => {
                   const warnings = getShopWarnings(shop);
+                  const businessCode = getSourceBusinessCode(shop.marketplace_source_key);
 
                   return (
                     <tr key={shop.id} style={{ borderBottom: '1px solid var(--bg-deep)', verticalAlign: 'top' }}>
                       {editingId === shop.id ? (
-                        <td style={{ padding: '12px' }} colSpan={8}>
+                        <td style={{ padding: '12px' }} colSpan={7}>
                           <div style={{ display: 'grid', gap: 14 }}>
                             <div>
                               <div style={{ fontWeight: 700, color: 'var(--text)' }}>{shop.shop_name}</div>
@@ -657,19 +622,23 @@ export default function ShopeeManager() {
                                 </select>
                               </label>
 
-                              <label>
-                                <span style={labelStyle}>Brand / Store</span>
-                                <select
-                                  value={editForm.store}
-                                  onChange={(e) => setEditForm((form) => ({ ...form, store: e.target.value }))}
-                                  style={inputStyle}
-                                >
-                                  <option value="">- Pilih Brand/Store -</option>
-                                  {brandOptions.map((option) => (
-                                    <option key={option.value} value={option.value}>{option.label}</option>
-                                  ))}
-                                </select>
-                              </label>
+                              <div
+                                style={{
+                                  border: '1px solid var(--border)',
+                                  borderRadius: 6,
+                                  padding: '10px 12px',
+                                  background: 'var(--bg)',
+                                  alignSelf: 'end',
+                                }}
+                              >
+                                <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>Business Owner Spend</div>
+                                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>
+                                  {getSourceBusinessCode(editForm.marketplace_source_key) || '-'}
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 6, lineHeight: 1.5 }}>
+                                  Brand/store tidak diisi di sini. Order akan tetap diparsing downstream dari SKU dan bundle seperti jalur marketplace intake.
+                                </div>
+                              </div>
                             </div>
 
                             <div style={{ display: 'grid', gap: 12 }}>
@@ -723,12 +692,10 @@ export default function ShopeeManager() {
                                       <label>
                                         <span style={labelStyle}>Label Source</span>
                                         <input
-                                          value={stream.default_source}
-                                          onChange={(e) => updateEditStream(stream.stream_key, (current) => ({
-                                            ...current,
-                                            default_source: e.target.value,
-                                          }))}
-                                          style={inputStyle}
+                                          value={definition.defaultSource}
+                                          readOnly
+                                          disabled
+                                          style={{ ...inputStyle, opacity: 0.72, cursor: 'not-allowed' }}
                                         />
                                       </label>
 
@@ -821,11 +788,10 @@ export default function ShopeeManager() {
                           </td>
 
                           <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
-                            {getSourceDisplay(shop.marketplace_source_key)}
-                          </td>
-
-                          <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
-                            {getBrandDisplay(shop.store)}
+                            <div>{getSourceDisplay(shop.marketplace_source_key)}</div>
+                            <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 4 }}>
+                              business: {businessCode || '-'}
+                            </div>
                           </td>
 
                           <td style={{ padding: '10px 12px' }}>
@@ -864,7 +830,7 @@ export default function ShopeeManager() {
                                     </span>
                                   </div>
                                   <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 6 }}>
-                                    source: {stream.default_source} • advertiser: {stream.default_advertiser}
+                                    source: {getShopeeSpendStreamDefinition(stream.stream_key).defaultSource} • advertiser: {stream.default_advertiser}
                                   </div>
                                 </div>
                               ))}

@@ -1,4 +1,5 @@
 import { createServiceSupabase } from './service-supabase';
+import { listMarketplaceIntakeSourceConfigs } from './marketplace-intake-sources';
 import {
   fetchShopeeAdsPerformanceRange,
   refreshShopeeAccessToken,
@@ -17,7 +18,11 @@ type ShopeeShopRow = {
   shop_name: string;
   region: string | null;
   marketplace_source_key: string | null;
-  store: string | null;
+  account_business_code: string | null;
+  viewer_business_code: string | null;
+  revenue_business_code: string | null;
+  default_owner_business_code: string | null;
+  default_processor_business_code: string | null;
   is_active: boolean;
 };
 
@@ -74,10 +79,29 @@ function normalizeAdvertiser(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow) 
   return String(stream.default_advertiser || '').trim() || shop.shop_name || 'Shopee Shop';
 }
 
+function findShopeeMarketplaceSourceConfig(sourceKey: string | null | undefined) {
+  const normalizedKey = String(sourceKey || '').trim().toLowerCase();
+  if (!normalizedKey) return null;
+  return (
+    listMarketplaceIntakeSourceConfigs().find(
+      (config) => config.platform === 'shopee' && config.sourceKey === normalizedKey,
+    ) || null
+  );
+}
+
+function resolveCommerceBusinessCode(shop: ShopeeShopRow) {
+  return (
+    String(shop.revenue_business_code || '').trim()
+    || String(shop.viewer_business_code || '').trim()
+    || String(shop.account_business_code || '').trim()
+    || findShopeeMarketplaceSourceConfig(shop.marketplace_source_key)?.businessCode
+    || null
+  );
+}
+
 function getMissingShopeeConfigLabels(shop: ShopeeShopRow) {
   const missing: string[] = [];
   if (!String(shop.marketplace_source_key || '').trim()) missing.push('commerce source');
-  if (!String(shop.store || '').trim()) missing.push('brand/store');
   return missing;
 }
 
@@ -129,7 +153,8 @@ async function ensureUsableToken(
 
 function buildMetricsRows(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow, points: ShopeeAdsPerformancePoint[]) {
   const advertiser = normalizeAdvertiser(shop, stream);
-  const source = String(stream.default_source || '').trim() || getShopeeSpendStreamDefinition(stream.stream_key).defaultSource;
+  const source = getShopeeSpendStreamDefinition(stream.stream_key).defaultSource;
+  const businessCode = resolveCommerceBusinessCode(shop);
 
   return points.map((point) => ({
     shop_config_id: shop.id,
@@ -139,7 +164,12 @@ function buildMetricsRows(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow, poi
     shop_name: shop.shop_name,
     region: shop.region,
     marketplace_source_key: shop.marketplace_source_key,
-    store: shop.store,
+    account_business_code: String(shop.account_business_code || '').trim() || businessCode,
+    viewer_business_code: String(shop.viewer_business_code || '').trim() || businessCode,
+    revenue_business_code: String(shop.revenue_business_code || '').trim() || businessCode,
+    default_owner_business_code: String(shop.default_owner_business_code || '').trim() || null,
+    default_processor_business_code: String(shop.default_processor_business_code || '').trim() || null,
+    store: null,
     source,
     advertiser,
     impressions: point.impression,
@@ -163,9 +193,10 @@ function buildMetricsRows(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow, poi
 function buildSpendRows(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow, points: ShopeeAdsPerformancePoint[]) {
   const advertiser = normalizeAdvertiser(shop, stream);
   const streamDefinition = getShopeeSpendStreamDefinition(stream.stream_key);
-  const source = String(stream.default_source || '').trim() || streamDefinition.defaultSource;
+  const source = streamDefinition.defaultSource;
   const dataSource = getShopeeApiDataSourceForStream(stream.stream_key);
   const objective = stream.stream_key === 'shopee_live' ? 'Shopee Live' : 'Shopee CPC Ads';
+  const businessCode = resolveCommerceBusinessCode(shop);
 
   return points
     .filter((point) => point.expense > 0 || point.impression > 0)
@@ -177,8 +208,9 @@ function buildSpendRows(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow, point
       cpm: point.impression > 0 ? (point.expense / point.impression) * 1000 : 0,
       objective,
       source,
-      store: shop.store,
+      store: null,
       advertiser,
+      business_code: businessCode,
       data_source: dataSource,
     }));
 }
@@ -318,7 +350,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
           const metricsRows = buildMetricsRows(shop, stream, points);
           const spendRows = buildSpendRows(shop, stream, points);
           const advertiser = normalizeAdvertiser(shop, stream);
-          const source = String(stream.default_source || '').trim() || getShopeeSpendStreamDefinition(stream.stream_key).defaultSource;
+          const source = getShopeeSpendStreamDefinition(stream.stream_key).defaultSource;
           const apiDataSource = getShopeeApiDataSourceForStream(stream.stream_key);
 
           const { error: deleteMetricsError } = await svc
@@ -338,7 +370,6 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
             .delete()
             .in('data_source', ['google_sheets', 'xlsx_upload', apiDataSource])
             .eq('source', source)
-            .eq('store', shop.store)
             .eq('advertiser', advertiser)
             .gte('date', dateStart)
             .lte('date', dateEnd);

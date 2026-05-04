@@ -53,13 +53,10 @@ export function getShopeeApiDataSourceForStream(key: ShopeeSpendStreamKey) {
   return key === 'shopee_live' ? 'shopee_live_api' : 'shopee_ads_api';
 }
 
-export function buildDefaultShopeeSpendStreams(shopName: string, legacyAdsSource?: string | null, legacyAdvertiser?: string | null) {
+export function buildDefaultShopeeSpendStreams(shopName: string, _legacyAdsSource?: string | null, legacyAdvertiser?: string | null) {
   return listShopeeSpendStreamDefinitions().map((definition) => ({
     stream_key: definition.key,
-    default_source:
-      definition.key === 'shopee_ads'
-        ? String(legacyAdsSource || '').trim() || definition.defaultSource
-        : definition.defaultSource,
+    default_source: definition.defaultSource,
     default_advertiser: String(legacyAdvertiser || '').trim() || shopName || 'Shopee Shop',
     sync_mode: definition.defaultSyncMode,
     is_enabled: definition.defaultEnabled,
@@ -80,7 +77,7 @@ export function normalizeShopeeSpendStreamConfig(
 
   return {
     stream_key: definition.key,
-    default_source: String(stream.default_source || '').trim() || definition.defaultSource,
+    default_source: definition.defaultSource,
     default_advertiser: String(stream.default_advertiser || '').trim() || 'Shopee Shop',
     sync_mode: syncMode,
     is_enabled: Boolean(stream.is_enabled),
