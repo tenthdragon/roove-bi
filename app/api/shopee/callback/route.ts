@@ -61,9 +61,13 @@ export async function GET(req: NextRequest) {
     } catch (error: any) {
       console.error('[shopee-callback] Token exchange failed', {
         shop_id: shopId,
+        environment: setup.environment,
         auth_base_url: setup.authBaseUrl,
         api_base_url: setup.apiBaseUrl,
-        partner_id_suffix: String(process.env.SHOPEE_PARTNER_ID || '').slice(-4),
+        base_url_mode_mismatch: setup.baseUrlModeMismatch,
+        partner_id_suffix: setup.partnerIdSuffix,
+        partner_key_length: setup.partnerKeyLength,
+        partner_key_wrapped: setup.partnerKeyWrapped,
         error: error.message,
       });
       throw new Error(`Token exchange gagal: ${error.message}`);
@@ -78,9 +82,13 @@ export async function GET(req: NextRequest) {
     } catch (error: any) {
       console.error('[shopee-callback] get_shop_info failed', {
         shop_id: shopId,
+        environment: setup.environment,
         auth_base_url: setup.authBaseUrl,
         api_base_url: setup.apiBaseUrl,
-        partner_id_suffix: String(process.env.SHOPEE_PARTNER_ID || '').slice(-4),
+        base_url_mode_mismatch: setup.baseUrlModeMismatch,
+        partner_id_suffix: setup.partnerIdSuffix,
+        partner_key_length: setup.partnerKeyLength,
+        partner_key_wrapped: setup.partnerKeyWrapped,
         error: error.message,
       });
       throw new Error(`Get shop info gagal: ${error.message}`);

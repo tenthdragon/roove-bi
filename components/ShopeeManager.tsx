@@ -15,6 +15,14 @@ type ShopeeSetupInfo = {
   authBaseUrl: string;
   apiBaseUrl: string;
   missingEnv: string[];
+  environment: 'sandbox' | 'production' | 'custom';
+  authLooksSandbox: boolean;
+  apiLooksSandbox: boolean;
+  baseUrlModeMismatch: boolean;
+  partnerIdSuffix: string | null;
+  partnerIdWrapped: boolean;
+  partnerKeyLength: number;
+  partnerKeyWrapped: boolean;
 };
 
 type ShopeeShop = {
@@ -331,6 +339,23 @@ export default function ShopeeManager() {
             3. Isi env server: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>SHOPEE_PARTNER_ID</span> dan <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>SHOPEE_PARTNER_KEY</span>.<br />
             4. Setelah itu klik <strong>Hubungkan Shop</strong> untuk authorize seller shop ke aplikasi ini.
           </div>
+          {setup && (
+            <div style={{
+              padding: 10,
+              borderRadius: 6,
+              background: 'rgba(255,255,255,0.03)',
+              color: 'var(--text-secondary)',
+              fontSize: 11,
+              lineHeight: 1.7,
+              fontFamily: 'monospace',
+            }}>
+              runtime.environment={setup.environment}<br />
+              runtime.auth_base_url={setup.authBaseUrl}<br />
+              runtime.api_base_url={setup.apiBaseUrl}<br />
+              runtime.partner_id_suffix={setup.partnerIdSuffix || '-'}<br />
+              runtime.partner_key_length={setup.partnerKeyLength}
+            </div>
+          )}
           {!setup?.configured && (
             <div style={{
               padding: 10,
@@ -340,6 +365,28 @@ export default function ShopeeManager() {
               fontSize: 12,
             }}>
               Konfigurasi Shopee belum lengkap. Missing env: {setup?.missingEnv?.join(', ') || '-'}
+            </div>
+          )}
+          {setup?.baseUrlModeMismatch && (
+            <div style={{
+              padding: 10,
+              borderRadius: 6,
+              background: 'var(--badge-red-bg)',
+              color: 'var(--red)',
+              fontSize: 12,
+            }}>
+              Runtime Shopee tidak konsisten: auth base terlihat {setup.authLooksSandbox ? 'sandbox' : 'production/custom'}, tapi API base terlihat {setup.apiLooksSandbox ? 'sandbox' : 'production/custom'}.
+            </div>
+          )}
+          {(setup?.partnerIdWrapped || setup?.partnerKeyWrapped) && (
+            <div style={{
+              padding: 10,
+              borderRadius: 6,
+              background: 'var(--badge-yellow-bg)',
+              color: 'var(--yellow)',
+              fontSize: 12,
+            }}>
+              Terdeteksi env Shopee sempat memakai wrapping quote. Runtime sekarang otomatis membersihkannya.
             </div>
           )}
         </div>

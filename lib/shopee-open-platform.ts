@@ -27,6 +27,14 @@ export type ShopeeSetupInfo = {
   authBaseUrl: string;
   apiBaseUrl: string;
   missingEnv: string[];
+  environment: 'sandbox' | 'production' | 'custom';
+  authLooksSandbox: boolean;
+  apiLooksSandbox: boolean;
+  baseUrlModeMismatch: boolean;
+  partnerIdSuffix: string | null;
+  partnerIdWrapped: boolean;
+  partnerKeyLength: number;
+  partnerKeyWrapped: boolean;
 };
 
 export type ShopeeTokenPayload = {
@@ -79,29 +87,74 @@ function cleanUrl(value: string) {
   return value.replace(/\/$/, '');
 }
 
+function stripWrappingQuotes(value: string) {
+  if (value.length >= 2) {
+    const startsWithDouble = value.startsWith('"') && value.endsWith('"');
+    const startsWithSingle = value.startsWith("'") && value.endsWith("'");
+    if (startsWithDouble || startsWithSingle) {
+      return value.slice(1, -1).trim();
+    }
+  }
+
+  return value;
+}
+
+function readEnvText(name: string) {
+  const raw = String(process.env[name] || '').trim();
+  const wrapped =
+    raw.length >= 2 &&
+    ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")));
+
+  return {
+    raw,
+    wrapped,
+    value: stripWrappingQuotes(raw),
+  };
+}
+
 function getRedirectUrl() {
-  return String(process.env.SHOPEE_REDIRECT_URL || '').trim() || buildPublicSiteUrl(SHOPEE_CALLBACK_PATH);
+  return readEnvText('SHOPEE_REDIRECT_URL').value || buildPublicSiteUrl(SHOPEE_CALLBACK_PATH);
 }
 
 function getAuthBaseUrl() {
-  return cleanUrl(String(process.env.SHOPEE_AUTH_BASE_URL || DEFAULT_SHOPEE_AUTH_BASE_URL).trim());
+  return cleanUrl(readEnvText('SHOPEE_AUTH_BASE_URL').value || DEFAULT_SHOPEE_AUTH_BASE_URL);
 }
 
 function getApiBaseUrl() {
-  return cleanUrl(String(process.env.SHOPEE_API_BASE_URL || DEFAULT_SHOPEE_API_BASE_URL).trim());
+  return cleanUrl(readEnvText('SHOPEE_API_BASE_URL').value || DEFAULT_SHOPEE_API_BASE_URL);
 }
 
 export function getShopeeSetupInfo(): ShopeeSetupInfo {
+  const partnerId = readEnvText('SHOPEE_PARTNER_ID');
+  const partnerKey = readEnvText('SHOPEE_PARTNER_KEY');
+  const authBaseUrl = getAuthBaseUrl();
+  const apiBaseUrl = getApiBaseUrl();
+  const authLooksSandbox = /sandbox|test-stable/i.test(authBaseUrl);
+  const apiLooksSandbox = /sandbox|test-stable/i.test(apiBaseUrl);
+  const environment =
+    authLooksSandbox && apiLooksSandbox
+      ? 'sandbox'
+      : !authLooksSandbox && !apiLooksSandbox
+        ? 'production'
+        : 'custom';
   const missingEnv: string[] = [];
-  if (!String(process.env.SHOPEE_PARTNER_ID || '').trim()) missingEnv.push('SHOPEE_PARTNER_ID');
-  if (!String(process.env.SHOPEE_PARTNER_KEY || '').trim()) missingEnv.push('SHOPEE_PARTNER_KEY');
+  if (!partnerId.value) missingEnv.push('SHOPEE_PARTNER_ID');
+  if (!partnerKey.value) missingEnv.push('SHOPEE_PARTNER_KEY');
 
   return {
     configured: missingEnv.length === 0,
     redirectUrl: getRedirectUrl(),
-    authBaseUrl: getAuthBaseUrl(),
-    apiBaseUrl: getApiBaseUrl(),
+    authBaseUrl,
+    apiBaseUrl,
     missingEnv,
+    environment,
+    authLooksSandbox,
+    apiLooksSandbox,
+    baseUrlModeMismatch: authLooksSandbox !== apiLooksSandbox,
+    partnerIdSuffix: partnerId.value ? partnerId.value.slice(-4) : null,
+    partnerIdWrapped: partnerId.wrapped,
+    partnerKeyLength: partnerKey.value.length,
+    partnerKeyWrapped: partnerKey.wrapped,
   };
 }
 
@@ -112,8 +165,8 @@ function requireShopeeConfig(): ShopeeConfig {
   }
 
   return {
-    partnerId: String(process.env.SHOPEE_PARTNER_ID || '').trim(),
-    partnerKey: String(process.env.SHOPEE_PARTNER_KEY || '').trim(),
+    partnerId: readEnvText('SHOPEE_PARTNER_ID').value,
+    partnerKey: readEnvText('SHOPEE_PARTNER_KEY').value,
     redirectUrl: setup.redirectUrl,
     authBaseUrl: setup.authBaseUrl,
     apiBaseUrl: setup.apiBaseUrl,
