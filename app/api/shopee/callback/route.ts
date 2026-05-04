@@ -6,6 +6,7 @@ import {
   getShopeeShopInfo,
   getShopeeSetupInfo,
 } from '@/lib/shopee-open-platform';
+import { buildDefaultShopeeSpendStreams } from '@/lib/shopee-streams';
 
 export const dynamic = 'force-dynamic';
 
@@ -152,6 +153,22 @@ export async function GET(req: NextRequest) {
     if (!shopConfigId) {
       throw new Error('Gagal menentukan shop config id Shopee.');
     }
+
+    const defaultStreams = buildDefaultShopeeSpendStreams(
+      basePayload.shop_name,
+      existingShop?.default_source,
+      existingShop?.default_advertiser,
+    ).map((stream) => ({
+      shop_config_id: shopConfigId,
+      ...stream,
+      updated_at: new Date().toISOString(),
+    }));
+
+    const { error: streamError } = await svc
+      .from('shopee_shop_spend_streams')
+      .upsert(defaultStreams, { onConflict: 'shop_config_id,stream_key' });
+
+    if (streamError) throw streamError;
 
     const { error: tokenError } = await svc
       .from('shopee_shop_tokens')

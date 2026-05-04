@@ -4,6 +4,12 @@ import {
   refreshShopeeAccessToken,
   type ShopeeAdsPerformancePoint,
 } from './shopee-open-platform';
+import {
+  getShopeeApiDataSourceForStream,
+  getShopeeSpendStreamDefinition,
+  type ShopeeSpendStreamKey,
+  type ShopeeSpendSyncMode,
+} from './shopee-streams';
 
 type ShopeeShopRow = {
   id: number;
@@ -11,15 +17,18 @@ type ShopeeShopRow = {
   shop_name: string;
   region: string | null;
   marketplace_source_key: string | null;
-  account_business_code: string | null;
-  viewer_business_code: string | null;
-  revenue_business_code: string | null;
-  default_owner_business_code: string | null;
-  default_processor_business_code: string | null;
   store: string | null;
+  is_active: boolean;
+};
+
+type ShopeeSpendStreamRow = {
+  id: number;
+  shop_config_id: number;
+  stream_key: ShopeeSpendStreamKey;
   default_source: string;
   default_advertiser: string;
-  is_active: boolean;
+  sync_mode: ShopeeSpendSyncMode;
+  is_enabled: boolean;
 };
 
 type ShopeeTokenRow = {
@@ -56,20 +65,18 @@ function getYesterdayWib() {
   return wib.toISOString().slice(0, 10);
 }
 
-function toStableAdAccount(shopId: number) {
-  return `Shopee Shop ${shopId}`;
+function toStableAdAccount(shopId: number, streamKey: ShopeeSpendStreamKey) {
+  const definition = getShopeeSpendStreamDefinition(streamKey);
+  return `Shopee Shop ${shopId} • ${definition.label}`;
 }
 
-function normalizeAdvertiser(shop: ShopeeShopRow) {
-  return String(shop.default_advertiser || '').trim() || shop.shop_name || 'Shopee Shop';
+function normalizeAdvertiser(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow) {
+  return String(stream.default_advertiser || '').trim() || shop.shop_name || 'Shopee Shop';
 }
 
 function getMissingShopeeConfigLabels(shop: ShopeeShopRow) {
   const missing: string[] = [];
-  if (!String(shop.marketplace_source_key || '').trim()) missing.push('source marketplace');
-  if (!String(shop.account_business_code || '').trim()) missing.push('account business');
-  if (!String(shop.viewer_business_code || '').trim()) missing.push('viewer business');
-  if (!String(shop.revenue_business_code || '').trim()) missing.push('revenue business');
+  if (!String(shop.marketplace_source_key || '').trim()) missing.push('commerce source');
   if (!String(shop.store || '').trim()) missing.push('brand/store');
   return missing;
 }
@@ -120,22 +127,18 @@ async function ensureUsableToken(
   };
 }
 
-function buildMetricsRows(shop: ShopeeShopRow, points: ShopeeAdsPerformancePoint[]) {
-  const advertiser = normalizeAdvertiser(shop);
-  const source = String(shop.default_source || '').trim() || 'Shopee Ads';
+function buildMetricsRows(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow, points: ShopeeAdsPerformancePoint[]) {
+  const advertiser = normalizeAdvertiser(shop, stream);
+  const source = String(stream.default_source || '').trim() || getShopeeSpendStreamDefinition(stream.stream_key).defaultSource;
 
   return points.map((point) => ({
     shop_config_id: shop.id,
+    spend_stream_key: stream.stream_key,
     metric_date: point.date,
     shop_id: shop.shop_id,
     shop_name: shop.shop_name,
     region: shop.region,
     marketplace_source_key: shop.marketplace_source_key,
-    account_business_code: shop.account_business_code,
-    viewer_business_code: shop.viewer_business_code,
-    revenue_business_code: shop.revenue_business_code,
-    default_owner_business_code: shop.default_owner_business_code,
-    default_processor_business_code: shop.default_processor_business_code,
     store: shop.store,
     source,
     advertiser,
@@ -157,23 +160,26 @@ function buildMetricsRows(shop: ShopeeShopRow, points: ShopeeAdsPerformancePoint
   }));
 }
 
-function buildSpendRows(shop: ShopeeShopRow, points: ShopeeAdsPerformancePoint[]) {
-  const advertiser = normalizeAdvertiser(shop);
-  const source = String(shop.default_source || '').trim() || 'Shopee Ads';
+function buildSpendRows(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow, points: ShopeeAdsPerformancePoint[]) {
+  const advertiser = normalizeAdvertiser(shop, stream);
+  const streamDefinition = getShopeeSpendStreamDefinition(stream.stream_key);
+  const source = String(stream.default_source || '').trim() || streamDefinition.defaultSource;
+  const dataSource = getShopeeApiDataSourceForStream(stream.stream_key);
+  const objective = stream.stream_key === 'shopee_live' ? 'Shopee Live' : 'Shopee CPC Ads';
 
   return points
     .filter((point) => point.expense > 0 || point.impression > 0)
     .map((point) => ({
       date: point.date,
-      ad_account: toStableAdAccount(shop.shop_id),
+      ad_account: toStableAdAccount(shop.shop_id, stream.stream_key),
       spent: point.expense,
       impressions: point.impression,
       cpm: point.impression > 0 ? (point.expense / point.impression) * 1000 : 0,
-      objective: 'Shopee CPC Ads',
+      objective,
       source,
       store: shop.store,
       advertiser,
-      data_source: 'shopee_ads_api',
+      data_source: dataSource,
     }));
 }
 
@@ -212,6 +218,23 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
   const tokenMap = new Map<number, ShopeeTokenRow>(
     ((tokensRes.data || []) as ShopeeTokenRow[]).map((row) => [row.shop_config_id, row]),
   );
+  const { data: streamRows, error: streamError } = await svc
+    .from('shopee_shop_spend_streams')
+    .select('*')
+    .eq('sync_mode', 'api')
+    .eq('is_enabled', true)
+    .order('shop_config_id')
+    .order('stream_key');
+
+  if (streamError) throw streamError;
+
+  const streamsByShopId = new Map<number, ShopeeSpendStreamRow[]>();
+  for (const row of (streamRows || []) as ShopeeSpendStreamRow[]) {
+    if (!streamsByShopId.has(row.shop_config_id)) {
+      streamsByShopId.set(row.shop_config_id, []);
+    }
+    streamsByShopId.get(row.shop_config_id)!.push(row);
+  }
 
   if (shops.length === 0) {
     return {
@@ -261,6 +284,12 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
         continue;
       }
 
+      const apiStreams = streamsByShopId.get(shop.id) || [];
+      if (apiStreams.length === 0) {
+        errors.push(`${shop.shop_name}: belum ada spend stream mode API yang aktif.`);
+        continue;
+      }
+
       const token = tokenMap.get(shop.id);
       if (!token?.access_token || !token?.refresh_token) {
         errors.push(`${shop.shop_name}: token Shopee belum lengkap. Reconnect shop diperlukan.`);
@@ -269,47 +298,68 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
 
       try {
         const usableToken = await ensureUsableToken(token, shop);
-        const points = await fetchShopeeAdsPerformanceRange({
-          accessToken: usableToken.accessToken,
-          shopId: shop.shop_id,
-          dateStart,
-          dateEnd,
-        });
+        let shopHadSuccess = false;
 
-        const metricsRows = buildMetricsRows(shop, points);
-        const spendRows = buildSpendRows(shop, points);
+        for (const stream of apiStreams) {
+          if (stream.stream_key !== 'shopee_ads') {
+            errors.push(
+              `${shop.shop_name} / ${getShopeeSpendStreamDefinition(stream.stream_key).label}: mode API belum didukung di app.`,
+            );
+            continue;
+          }
 
-        const { error: deleteMetricsError } = await svc
-          .from('shopee_ads_daily_metrics')
-          .delete()
-          .eq('shop_config_id', shop.id)
-          .gte('metric_date', dateStart)
-          .lte('metric_date', dateEnd);
+          const points = await fetchShopeeAdsPerformanceRange({
+            accessToken: usableToken.accessToken,
+            shopId: shop.shop_id,
+            dateStart,
+            dateEnd,
+          });
 
-        if (deleteMetricsError) {
-          throw new Error(`Delete shopee_ads_daily_metrics: ${deleteMetricsError.message}`);
+          const metricsRows = buildMetricsRows(shop, stream, points);
+          const spendRows = buildSpendRows(shop, stream, points);
+          const advertiser = normalizeAdvertiser(shop, stream);
+          const source = String(stream.default_source || '').trim() || getShopeeSpendStreamDefinition(stream.stream_key).defaultSource;
+          const apiDataSource = getShopeeApiDataSourceForStream(stream.stream_key);
+
+          const { error: deleteMetricsError } = await svc
+            .from('shopee_ads_daily_metrics')
+            .delete()
+            .eq('shop_config_id', shop.id)
+            .eq('spend_stream_key', stream.stream_key)
+            .gte('metric_date', dateStart)
+            .lte('metric_date', dateEnd);
+
+          if (deleteMetricsError) {
+            throw new Error(`Delete shopee_ads_daily_metrics: ${deleteMetricsError.message}`);
+          }
+
+          const { error: deleteSpendError } = await svc
+            .from('daily_ads_spend')
+            .delete()
+            .in('data_source', ['google_sheets', 'xlsx_upload', apiDataSource])
+            .eq('source', source)
+            .eq('store', shop.store)
+            .eq('advertiser', advertiser)
+            .gte('date', dateStart)
+            .lte('date', dateEnd);
+
+          if (deleteSpendError) {
+            throw new Error(`Delete daily_ads_spend Shopee: ${deleteSpendError.message}`);
+          }
+
+          await insertInBatches('shopee_ads_daily_metrics', metricsRows);
+          await insertInBatches('daily_ads_spend', spendRows);
+
+          rowsInserted += metricsRows.length;
+          spendTotal += metricsRows.reduce((sum, row) => sum + Number(row.expense || 0), 0);
+          directGmvTotal += metricsRows.reduce((sum, row) => sum + Number(row.direct_gmv || 0), 0);
+          broadGmvTotal += metricsRows.reduce((sum, row) => sum + Number(row.broad_gmv || 0), 0);
+          shopHadSuccess = true;
         }
 
-        const { error: deleteSpendError } = await svc
-          .from('daily_ads_spend')
-          .delete()
-          .eq('data_source', 'shopee_ads_api')
-          .eq('ad_account', toStableAdAccount(shop.shop_id))
-          .gte('date', dateStart)
-          .lte('date', dateEnd);
-
-        if (deleteSpendError) {
-          throw new Error(`Delete daily_ads_spend Shopee: ${deleteSpendError.message}`);
+        if (shopHadSuccess) {
+          shopsSynced += 1;
         }
-
-        await insertInBatches('shopee_ads_daily_metrics', metricsRows);
-        await insertInBatches('daily_ads_spend', spendRows);
-
-        rowsInserted += metricsRows.length;
-        spendTotal += metricsRows.reduce((sum, row) => sum + Number(row.expense || 0), 0);
-        directGmvTotal += metricsRows.reduce((sum, row) => sum + Number(row.direct_gmv || 0), 0);
-        broadGmvTotal += metricsRows.reduce((sum, row) => sum + Number(row.broad_gmv || 0), 0);
-        shopsSynced += 1;
       } catch (error: any) {
         errors.push(`${shop.shop_name}: ${error.message || 'Sync Shopee gagal.'}`);
       }

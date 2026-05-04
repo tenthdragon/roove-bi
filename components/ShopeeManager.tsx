@@ -1,8 +1,14 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { listMarketplaceIntakeSourceConfigs } from '@/lib/marketplace-intake-sources';
+import {
+  getShopeeSpendStreamDefinition,
+  listShopeeSpendStreamDefinitions,
+  type ShopeeSpendStreamKey,
+  type ShopeeSpendSyncMode,
+} from '@/lib/shopee-streams';
 import {
   getShopeeAdminSnapshot,
   setShopeeShopActive,
@@ -27,16 +33,17 @@ type ShopeeSetupInfo = {
   partnerKeyWrapped: boolean;
 };
 
-type ShopeeBusinessOption = {
-  business_code: string;
-  business_name: string;
-  is_active: boolean;
-};
-
-type ShopeeSourceOption = {
-  value: string;
+type ShopeeSpendStream = {
+  id: number | null;
+  shop_config_id: number;
+  stream_key: ShopeeSpendStreamKey;
   label: string;
-  businessCode: string;
+  default_source: string;
+  default_advertiser: string;
+  sync_mode: ShopeeSpendSyncMode;
+  is_enabled: boolean;
+  api_supported: boolean;
+  description: string;
 };
 
 type ShopeeShop = {
@@ -50,17 +57,11 @@ type ShopeeShop = {
   auth_time: string | null;
   auth_expire_at: string | null;
   marketplace_source_key: string | null;
-  account_business_code: string | null;
-  viewer_business_code: string | null;
-  revenue_business_code: string | null;
-  default_owner_business_code: string | null;
-  default_processor_business_code: string | null;
   store: string | null;
-  default_source: string;
-  default_advertiser: string;
   is_active: boolean;
   has_tokens: boolean;
   token_expires_at: string | null;
+  spend_streams: ShopeeSpendStream[];
 };
 
 type SyncLog = {
@@ -84,15 +85,28 @@ type AdsStoreBrandMapping = {
   brand: string;
 };
 
-const SOURCE_OPTIONS = [
-  'Shopee Ads',
-  'Shopee Live',
-  'Facebook CPAS',
-  'Facebook Ads',
-  'Google Ads',
-  'TikTok Ads',
-  'Organik',
-];
+type EditableShopeeSpendStream = {
+  stream_key: ShopeeSpendStreamKey;
+  default_source: string;
+  default_advertiser: string;
+  sync_mode: ShopeeSpendSyncMode;
+  is_enabled: boolean;
+};
+
+type EditFormState = {
+  marketplace_source_key: string;
+  store: string;
+  spend_streams: EditableShopeeSpendStream[];
+};
+
+const SHOPEE_SOURCE_OPTIONS = listMarketplaceIntakeSourceConfigs()
+  .filter((config) => config.platform === 'shopee')
+  .map((config) => ({
+    value: config.sourceKey,
+    label: config.sourceLabel,
+  }));
+
+const SHOPEE_STREAM_DEFINITIONS = listShopeeSpendStreamDefinitions();
 
 function getYesterday() {
   const d = new Date();
@@ -115,6 +129,57 @@ function formatDateTime(value: string | null | undefined) {
   });
 }
 
+function buildDefaultEditStreams(shopName: string) {
+  return SHOPEE_STREAM_DEFINITIONS.map((definition) => ({
+    stream_key: definition.key,
+    default_source: definition.defaultSource,
+    default_advertiser: shopName || 'Shopee Shop',
+    sync_mode: definition.defaultSyncMode,
+    is_enabled: definition.defaultEnabled,
+  }));
+}
+
+function normalizeEditStreams(streams: EditableShopeeSpendStream[], shopName: string) {
+  const streamMap = new Map(
+    (streams || []).map((stream) => [
+      stream.stream_key,
+      {
+        ...stream,
+        default_source: String(stream.default_source || '').trim(),
+        default_advertiser: String(stream.default_advertiser || '').trim() || shopName || 'Shopee Shop',
+      },
+    ]),
+  );
+
+  return SHOPEE_STREAM_DEFINITIONS.map((definition) => {
+    const stream = streamMap.get(definition.key);
+    return {
+      stream_key: definition.key,
+      default_source: stream?.default_source || definition.defaultSource,
+      default_advertiser: stream?.default_advertiser || shopName || 'Shopee Shop',
+      sync_mode: stream?.sync_mode || definition.defaultSyncMode,
+      is_enabled: Boolean(stream?.is_enabled ?? definition.defaultEnabled),
+    };
+  });
+}
+
+function buildEditForm(shop: ShopeeShop): EditFormState {
+  return {
+    marketplace_source_key: shop.marketplace_source_key || '',
+    store: shop.store || '',
+    spend_streams: normalizeEditStreams(
+      (shop.spend_streams || []).map((stream) => ({
+        stream_key: stream.stream_key,
+        default_source: stream.default_source || getShopeeSpendStreamDefinition(stream.stream_key).defaultSource,
+        default_advertiser: stream.default_advertiser || shop.shop_name || 'Shopee Shop',
+        sync_mode: stream.sync_mode,
+        is_enabled: stream.is_enabled,
+      })),
+      shop.shop_name || 'Shopee Shop',
+    ),
+  };
+}
+
 export default function ShopeeManager() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
@@ -123,24 +188,17 @@ export default function ShopeeManager() {
   const [shops, setShops] = useState<ShopeeShop[]>([]);
   const [logs, setLogs] = useState<SyncLog[]>([]);
   const [brandMappings, setBrandMappings] = useState<AdsStoreBrandMapping[]>([]);
-  const [businesses, setBusinesses] = useState<ShopeeBusinessOption[]>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [syncDateStart, setSyncDateStart] = useState(getYesterday);
   const [syncDateEnd, setSyncDateEnd] = useState(getYesterday);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [editForm, setEditForm] = useState({
+  const [editForm, setEditForm] = useState<EditFormState>({
     marketplace_source_key: '',
-    account_business_code: '',
-    viewer_business_code: '',
-    revenue_business_code: '',
-    default_owner_business_code: '',
-    default_processor_business_code: '',
     store: '',
-    default_source: 'Shopee Ads',
-    default_advertiser: 'Shopee Shop',
+    spend_streams: buildDefaultEditStreams('Shopee Shop'),
   });
 
-  const inputStyle: React.CSSProperties = {
+  const inputStyle: CSSProperties = {
     width: '100%',
     padding: '8px 12px',
     borderRadius: 6,
@@ -151,7 +209,7 @@ export default function ShopeeManager() {
     outline: 'none',
   };
 
-  const labelStyle: React.CSSProperties = {
+  const labelStyle: CSSProperties = {
     fontSize: 11,
     color: 'var(--dim)',
     display: 'block',
@@ -181,59 +239,36 @@ export default function ShopeeManager() {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [brandMappings]);
 
+  const sourceOptionLabelMap = useMemo(
+    () => new Map<string, string>(SHOPEE_SOURCE_OPTIONS.map((option) => [option.value, option.label])),
+    [],
+  );
+
   const getBrandDisplay = useCallback((storeValue: string | null) => {
     if (!storeValue) return '-';
     return brandOptions.find((option) => option.value === storeValue)?.label || storeValue;
   }, [brandOptions]);
 
-  const shopeeSourceOptions = useMemo<ShopeeSourceOption[]>(
-    () =>
-      listMarketplaceIntakeSourceConfigs()
-        .filter((config) => config.platform === 'shopee')
-        .map((config) => ({
-          value: config.sourceKey,
-          label: `${config.sourceLabel} (${config.businessCode})`,
-          businessCode: config.businessCode,
-        })),
-    [],
-  );
+  const getSourceDisplay = useCallback((sourceKey: string | null) => {
+    if (!sourceKey) return '-';
+    return sourceOptionLabelMap.get(sourceKey) || sourceKey;
+  }, [sourceOptionLabelMap]);
 
-  const shopeeSourceConfigMap = useMemo(
-    () => new Map(shopeeSourceOptions.map((option) => [option.value, option])),
-    [shopeeSourceOptions],
-  );
+  const hasCommerceMapping = useCallback((shop: ShopeeShop) => (
+    Boolean(String(shop.marketplace_source_key || '').trim())
+  ), []);
 
-  const businessLabelMap = useMemo(
-    () =>
-      new Map(
-        businesses.map((business) => [
-          business.business_code,
-          business.business_name ? `${business.business_code} • ${business.business_name}` : business.business_code,
-        ]),
-      ),
-    [businesses],
-  );
-
-  const getBusinessDisplay = useCallback((businessCode: string | null) => {
-    if (!businessCode) return '-';
-    return businessLabelMap.get(businessCode) || businessCode;
-  }, [businessLabelMap]);
-
-  const hasCoreBusinessMapping = useCallback((shop: ShopeeShop) => (
-    Boolean(
-      String(shop.marketplace_source_key || '').trim()
-      && String(shop.account_business_code || '').trim()
-      && String(shop.viewer_business_code || '').trim()
-      && String(shop.revenue_business_code || '').trim(),
-    )
+  const hasApiSpendStreamEnabled = useCallback((shop: ShopeeShop) => (
+    (shop.spend_streams || []).some((stream) => stream.sync_mode === 'api' && stream.is_enabled)
   ), []);
 
   const isShopSyncReady = useCallback((shop: ShopeeShop) => (
     shop.is_active
       && shop.has_tokens
       && Boolean(String(shop.store || '').trim())
-      && hasCoreBusinessMapping(shop)
-  ), [hasCoreBusinessMapping]);
+      && hasCommerceMapping(shop)
+      && hasApiSpendStreamEnabled(shop)
+  ), [hasApiSpendStreamEnabled, hasCommerceMapping]);
 
   const loadData = useCallback(async () => {
     try {
@@ -242,7 +277,6 @@ export default function ShopeeManager() {
       setShops(snapshot.shops || []);
       setLogs(snapshot.recentLogs || []);
       setBrandMappings(snapshot.brandMappings || []);
-      setBusinesses(snapshot.businesses || []);
     } catch (error: any) {
       console.error('Failed to load Shopee admin snapshot:', error);
       setMessage({ type: 'error', text: error.message || 'Gagal memuat konfigurasi Shopee.' });
@@ -261,6 +295,18 @@ export default function ShopeeManager() {
     if (!status || !text) return;
     setMessage({ type: status === 'error' ? 'error' : 'success', text });
   }, [searchParams]);
+
+  const updateEditStream = useCallback((
+    streamKey: ShopeeSpendStreamKey,
+    updater: (stream: EditableShopeeSpendStream) => EditableShopeeSpendStream,
+  ) => {
+    setEditForm((form) => ({
+      ...form,
+      spend_streams: form.spend_streams.map((stream) => (
+        stream.stream_key === streamKey ? updater(stream) : stream
+      )),
+    }));
+  }, []);
 
   const handleSyncNow = async () => {
     setSyncing(true);
@@ -288,55 +334,31 @@ export default function ShopeeManager() {
 
   const handleEdit = (shop: ShopeeShop) => {
     setEditingId(shop.id);
-    setEditForm({
-      marketplace_source_key: shop.marketplace_source_key || '',
-      account_business_code: shop.account_business_code || '',
-      viewer_business_code: shop.viewer_business_code || '',
-      revenue_business_code: shop.revenue_business_code || '',
-      default_owner_business_code: shop.default_owner_business_code || '',
-      default_processor_business_code: shop.default_processor_business_code || '',
-      store: shop.store || '',
-      default_source: shop.default_source || 'Shopee Ads',
-      default_advertiser: shop.default_advertiser || shop.shop_name || 'Shopee Shop',
-    });
-  };
-
-  const handleMarketplaceSourceChange = (nextSourceKey: string) => {
-    const sourceConfig = shopeeSourceConfigMap.get(nextSourceKey);
-    setEditForm((form) => ({
-      ...form,
-      marketplace_source_key: nextSourceKey,
-      account_business_code: sourceConfig?.businessCode || '',
-      viewer_business_code: sourceConfig?.businessCode || '',
-      revenue_business_code: sourceConfig?.businessCode || '',
-    }));
+    setEditForm(buildEditForm(shop));
   };
 
   const handleEditSave = async () => {
+    if (!editingId) return;
+
+    const editingShop = shops.find((shop) => shop.id === editingId);
+    const shopName = editingShop?.shop_name || 'Shopee Shop';
+    const normalizedStreams = normalizeEditStreams(editForm.spend_streams, shopName);
     const hasStore = Boolean(editForm.store.trim());
-    const hasCoreBusinessFields = Boolean(
-      editForm.marketplace_source_key.trim()
-      && editForm.account_business_code.trim()
-      && editForm.viewer_business_code.trim()
-      && editForm.revenue_business_code.trim(),
+    const hasCommerceSource = Boolean(editForm.marketplace_source_key.trim());
+    const hasEnabledApiStream = normalizedStreams.some(
+      (stream) => stream.sync_mode === 'api' && stream.is_enabled,
     );
 
     try {
-      await updateShopeeShop(editingId!, {
+      await updateShopeeShop(editingId, {
         marketplace_source_key: editForm.marketplace_source_key.trim() || null,
-        account_business_code: editForm.account_business_code.trim() || null,
-        viewer_business_code: editForm.viewer_business_code.trim() || null,
-        revenue_business_code: editForm.revenue_business_code.trim() || null,
-        default_owner_business_code: editForm.default_owner_business_code.trim() || null,
-        default_processor_business_code: editForm.default_processor_business_code.trim() || null,
         store: editForm.store.trim() || null,
-        default_source: editForm.default_source.trim() || 'Shopee Ads',
-        default_advertiser: editForm.default_advertiser.trim() || 'Shopee Shop',
+        spend_streams: normalizedStreams,
       });
       setMessage({
         type: 'success',
-        text: !hasStore || !hasCoreBusinessFields
-          ? 'Konfigurasi Shopee diperbarui. Lengkapi source marketplace, business mapping inti, dan brand/store sebelum sync.'
+        text: !hasStore || !hasCommerceSource || !hasEnabledApiStream
+          ? 'Konfigurasi Shopee diperbarui. Lengkapi commerce source, brand/store, dan aktifkan minimal satu spend stream API sebelum sync.'
           : 'Konfigurasi Shopee diperbarui.',
       });
       setEditingId(null);
@@ -374,6 +396,15 @@ export default function ShopeeManager() {
     }
   };
 
+  const getShopWarnings = useCallback((shop: ShopeeShop) => {
+    const warnings: string[] = [];
+    if (!shop.store) warnings.push('Brand/store belum diisi');
+    if (!shop.marketplace_source_key) warnings.push('Commerce source belum diisi');
+    if (!hasApiSpendStreamEnabled(shop)) warnings.push('Belum ada spend stream API aktif');
+    if (!shop.has_tokens) warnings.push('Token belum tersedia');
+    return warnings;
+  }, [hasApiSpendStreamEnabled]);
+
   if (loading) {
     return (
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
@@ -388,10 +419,10 @@ export default function ShopeeManager() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, gap: 12, flexWrap: 'wrap' }}>
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700 }}>Shopee Ads</div>
-              <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
-              Hubungkan shop Shopee, simpan mapping business + brand/store, lalu sync ad spend ke dashboard.
+          <div>
+            <div style={{ fontSize: 14, fontWeight: 700 }}>Shopee Shops</div>
+            <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 4 }}>
+              Hubungkan shop Shopee, pilih commerce source yang nanti menggantikan marketplace intake, lalu kelola spend stream Shopee Ads dan Shopee Live per shop.
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -445,7 +476,8 @@ export default function ShopeeManager() {
             1. Create APP di portal Shopee Open Platform.<br />
             2. Daftarkan redirect URL ini secara exact: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{setup?.redirectUrl || '-'}</span><br />
             3. Isi env server: <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>SHOPEE_PARTNER_ID</span> dan <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>SHOPEE_PARTNER_KEY</span>.<br />
-            4. Setelah itu klik <strong>Hubungkan Shop</strong> untuk authorize seller shop ke aplikasi ini.
+            4. Klik <strong>Hubungkan Shop</strong> untuk authorize seller shop.<br />
+            5. Setelah shop terhubung, isi <strong>Commerce Source</strong> dan <strong>Brand/Store</strong>, lalu aktifkan spend stream yang relevan.
           </div>
           {setup && (
             <div style={{
@@ -557,11 +589,11 @@ export default function ShopeeManager() {
             >
               {syncing ? 'Syncing...' : 'Sync Shopee'}
             </button>
-            {readyShops.length === 0 && (
-              <span style={{ fontSize: 11, color: 'var(--dim)' }}>
-                Aktifkan shop, pastikan token ada, lalu isi source marketplace, business mapping inti, dan brand/store sebelum sync.
-              </span>
-            )}
+            <span style={{ fontSize: 11, color: 'var(--dim)' }}>
+              {readyShops.length > 0
+                ? `${readyShops.length} shop siap di-sync. Hanya spend stream mode API yang aktif yang akan dijalankan.`
+                : 'Aktifkan shop, pastikan token ada, isi commerce source + brand/store, lalu aktifkan minimal satu spend stream API sebelum sync.'}
+            </span>
           </div>
         )}
 
@@ -571,10 +603,10 @@ export default function ShopeeManager() {
           </div>
         ) : (
           <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 960 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 980 }}>
               <thead>
                 <tr style={{ background: 'var(--bg)' }}>
-                  {['Status', 'Shop ID', 'Nama Shop', 'Region', 'Brand', 'Source', 'Advertiser', 'Token', 'Auth Expire', 'Aksi'].map((header) => (
+                  {['Status', 'Shop', 'Commerce Source', 'Brand/Store', 'Spend Streams', 'Token', 'Auth Expire', 'Aksi'].map((header) => (
                     <th
                       key={header}
                       style={{
@@ -593,286 +625,310 @@ export default function ShopeeManager() {
                 </tr>
               </thead>
               <tbody>
-                {shops.map((shop) => (
-                  <tr key={shop.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                    {editingId === shop.id ? (
-                      <>
-                        <td style={{ padding: '10px 12px' }} colSpan={4}>
-                          <div style={{ fontWeight: 600, color: 'var(--text)' }}>{shop.shop_name}</div>
-                          <div style={{ fontSize: 11, color: 'var(--dim)', fontFamily: 'monospace' }}>{shop.shop_id}</div>
-                          <div style={{
-                            display: 'grid',
-                            gridTemplateColumns: 'repeat(2, minmax(180px, 1fr))',
-                            gap: 8,
-                            marginTop: 10,
-                          }}>
-                            <label>
-                              <span style={labelStyle}>Source Marketplace</span>
-                              <select
-                                value={editForm.marketplace_source_key}
-                                onChange={(e) => handleMarketplaceSourceChange(e.target.value)}
-                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
+                {shops.map((shop) => {
+                  const warnings = getShopWarnings(shop);
+
+                  return (
+                    <tr key={shop.id} style={{ borderBottom: '1px solid var(--bg-deep)', verticalAlign: 'top' }}>
+                      {editingId === shop.id ? (
+                        <td style={{ padding: '12px' }} colSpan={8}>
+                          <div style={{ display: 'grid', gap: 14 }}>
+                            <div>
+                              <div style={{ fontWeight: 700, color: 'var(--text)' }}>{shop.shop_name}</div>
+                              <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>
+                                Shop ID <span style={{ fontFamily: 'monospace' }}>{shop.shop_id}</span>
+                                {shop.region ? ` • ${shop.region}` : ''}
+                                {shop.shop_status ? ` • ${shop.shop_status}` : ''}
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))', gap: 12 }}>
+                              <label>
+                                <span style={labelStyle}>Commerce Source</span>
+                                <select
+                                  value={editForm.marketplace_source_key}
+                                  onChange={(e) => setEditForm((form) => ({ ...form, marketplace_source_key: e.target.value }))}
+                                  style={inputStyle}
+                                >
+                                  <option value="">- Pilih Source Shopee -</option>
+                                  {SHOPEE_SOURCE_OPTIONS.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <label>
+                                <span style={labelStyle}>Brand / Store</span>
+                                <select
+                                  value={editForm.store}
+                                  onChange={(e) => setEditForm((form) => ({ ...form, store: e.target.value }))}
+                                  style={inputStyle}
+                                >
+                                  <option value="">- Pilih Brand/Store -</option>
+                                  {brandOptions.map((option) => (
+                                    <option key={option.value} value={option.value}>{option.label}</option>
+                                  ))}
+                                </select>
+                              </label>
+                            </div>
+
+                            <div style={{ display: 'grid', gap: 12 }}>
+                              {editForm.spend_streams.map((stream) => {
+                                const definition = getShopeeSpendStreamDefinition(stream.stream_key);
+                                return (
+                                  <div
+                                    key={stream.stream_key}
+                                    style={{
+                                      border: '1px solid var(--border)',
+                                      borderRadius: 8,
+                                      background: 'var(--bg)',
+                                      padding: 12,
+                                      display: 'grid',
+                                      gap: 10,
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+                                      <div>
+                                        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{definition.label}</div>
+                                        <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4, maxWidth: 720 }}>
+                                          {definition.description}
+                                        </div>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                                        <span style={{
+                                          padding: '2px 8px',
+                                          borderRadius: 999,
+                                          fontSize: 10,
+                                          fontWeight: 700,
+                                          background: stream.sync_mode === 'api' ? 'var(--badge-green-bg)' : 'rgba(255,255,255,0.06)',
+                                          color: stream.sync_mode === 'api' ? 'var(--green)' : 'var(--dim)',
+                                        }}>
+                                          {stream.sync_mode === 'api' ? 'Mode API' : 'Mode Manual'}
+                                        </span>
+                                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-secondary)' }}>
+                                          <input
+                                            type="checkbox"
+                                            checked={stream.is_enabled}
+                                            onChange={(e) => updateEditStream(stream.stream_key, (current) => ({
+                                              ...current,
+                                              is_enabled: e.target.checked,
+                                            }))}
+                                          />
+                                          Aktifkan stream ini
+                                        </label>
+                                      </div>
+                                    </div>
+
+                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(220px, 1fr))', gap: 12 }}>
+                                      <label>
+                                        <span style={labelStyle}>Label Source</span>
+                                        <input
+                                          value={stream.default_source}
+                                          onChange={(e) => updateEditStream(stream.stream_key, (current) => ({
+                                            ...current,
+                                            default_source: e.target.value,
+                                          }))}
+                                          style={inputStyle}
+                                        />
+                                      </label>
+
+                                      <label>
+                                        <span style={labelStyle}>Advertiser</span>
+                                        <input
+                                          value={stream.default_advertiser}
+                                          onChange={(e) => updateEditStream(stream.stream_key, (current) => ({
+                                            ...current,
+                                            default_advertiser: e.target.value,
+                                          }))}
+                                          style={inputStyle}
+                                        />
+                                      </label>
+                                    </div>
+
+                                    {!definition.apiSupported && (
+                                      <div style={{ fontSize: 11, color: 'var(--yellow)' }}>
+                                        Stream ini tetap bisa dicatat di dashboard, tetapi nilainya masih di-feed manual dari spreadsheet/admin daily data sampai jalur API yang tepat siap dipakai.
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                              <button
+                                onClick={handleEditSave}
+                                style={{
+                                  padding: '6px 12px',
+                                  borderRadius: 6,
+                                  border: 'none',
+                                  background: 'var(--accent)',
+                                  color: '#fff',
+                                  fontSize: 12,
+                                  cursor: 'pointer',
+                                }}
                               >
-                                <option value="">- Pilih Source -</option>
-                                {shopeeSourceOptions.map((option) => (
-                                  <option key={option.value} value={option.value}>{option.label}</option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              <span style={labelStyle}>Account Business</span>
-                              <select
-                                value={editForm.account_business_code}
-                                onChange={(e) => setEditForm((form) => ({ ...form, account_business_code: e.target.value }))}
-                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
+                                Simpan
+                              </button>
+                              <button
+                                onClick={() => setEditingId(null)}
+                                style={{
+                                  padding: '6px 12px',
+                                  borderRadius: 6,
+                                  border: '1px solid var(--border)',
+                                  background: 'transparent',
+                                  color: 'var(--dim)',
+                                  fontSize: 12,
+                                  cursor: 'pointer',
+                                }}
                               >
-                                <option value="">- Pilih Business -</option>
-                                {businesses.map((business) => (
-                                  <option key={business.business_code} value={business.business_code}>
-                                    {getBusinessDisplay(business.business_code)}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              <span style={labelStyle}>Viewer Business</span>
-                              <select
-                                value={editForm.viewer_business_code}
-                                onChange={(e) => setEditForm((form) => ({ ...form, viewer_business_code: e.target.value }))}
-                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
-                              >
-                                <option value="">- Pilih Business -</option>
-                                {businesses.map((business) => (
-                                  <option key={business.business_code} value={business.business_code}>
-                                    {getBusinessDisplay(business.business_code)}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              <span style={labelStyle}>Revenue Business</span>
-                              <select
-                                value={editForm.revenue_business_code}
-                                onChange={(e) => setEditForm((form) => ({ ...form, revenue_business_code: e.target.value }))}
-                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
-                              >
-                                <option value="">- Pilih Business -</option>
-                                {businesses.map((business) => (
-                                  <option key={business.business_code} value={business.business_code}>
-                                    {getBusinessDisplay(business.business_code)}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              <span style={labelStyle}>Fallback Owner</span>
-                              <select
-                                value={editForm.default_owner_business_code}
-                                onChange={(e) => setEditForm((form) => ({ ...form, default_owner_business_code: e.target.value }))}
-                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
-                              >
-                                <option value="">- Optional -</option>
-                                {businesses.map((business) => (
-                                  <option key={business.business_code} value={business.business_code}>
-                                    {getBusinessDisplay(business.business_code)}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
-                            <label>
-                              <span style={labelStyle}>Fallback Processor</span>
-                              <select
-                                value={editForm.default_processor_business_code}
-                                onChange={(e) => setEditForm((form) => ({ ...form, default_processor_business_code: e.target.value }))}
-                                style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
-                              >
-                                <option value="">- Optional -</option>
-                                {businesses.map((business) => (
-                                  <option key={business.business_code} value={business.business_code}>
-                                    {getBusinessDisplay(business.business_code)}
-                                  </option>
-                                ))}
-                              </select>
-                            </label>
+                                Batal
+                              </button>
+                            </div>
                           </div>
-                          <div style={{ marginTop: 10, fontSize: 10, color: 'var(--dim)', lineHeight: 1.6 }}>
-                            account = business pemilik akun seller, viewer = business yang katalog visible-nya dijual,
-                            revenue = business penerima revenue marketplace, owner/processor = fallback owner stok dan fulfillment.
-                          </div>
                         </td>
-                        <td style={{ padding: '8px 6px' }}>
-                          <select
-                            value={editForm.store}
-                            onChange={(e) => setEditForm((form) => ({ ...form, store: e.target.value }))}
-                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
-                          >
-                            <option value="">- Pilih Brand/Store -</option>
-                            {brandOptions.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td style={{ padding: '8px 6px' }}>
-                          <select
-                            value={editForm.default_source}
-                            onChange={(e) => setEditForm((form) => ({ ...form, default_source: e.target.value }))}
-                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
-                          >
-                            {SOURCE_OPTIONS.map((option) => (
-                              <option key={option} value={option}>{option}</option>
-                            ))}
-                          </select>
-                        </td>
-                        <td style={{ padding: '8px 6px' }}>
-                          <input
-                            value={editForm.default_advertiser}
-                            onChange={(e) => setEditForm((form) => ({ ...form, default_advertiser: e.target.value }))}
-                            style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}
-                          />
-                        </td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
-                          {shop.has_tokens ? formatDateTime(shop.token_expires_at) : '-'}
-                        </td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
-                          {formatDateTime(shop.auth_expire_at)}
-                        </td>
-                        <td style={{ padding: '8px 12px' }}>
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            <button
-                              onClick={handleEditSave}
-                              style={{
-                                padding: '4px 8px',
-                                borderRadius: 4,
-                                border: 'none',
-                                background: 'var(--accent)',
-                                color: '#fff',
+                      ) : (
+                        <>
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: 5,
                                 fontSize: 10,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Simpan
-                            </button>
-                            <button
-                              onClick={() => setEditingId(null)}
-                              style={{
-                                padding: '4px 8px',
-                                borderRadius: 4,
-                                border: '1px solid var(--border)',
-                                background: 'transparent',
-                                color: 'var(--dim)',
+                                fontWeight: 600,
+                                background: shop.is_active ? 'var(--badge-green-bg)' : 'var(--border)',
+                                color: shop.is_active ? 'var(--green)' : 'var(--dim)',
+                                width: 'fit-content',
+                              }}>
+                                {shop.is_active ? 'Aktif' : 'Nonaktif'}
+                              </span>
+                              {warnings.map((warning) => (
+                                <span key={warning} style={{ fontSize: 10, color: 'var(--yellow)' }}>{warning}</span>
+                              ))}
+                            </div>
+                          </td>
+
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ color: 'var(--text)', fontWeight: 600 }}>{shop.shop_name}</div>
+                            <div style={{ color: 'var(--dim)', fontSize: 10, fontFamily: 'monospace', marginTop: 4 }}>
+                              {shop.shop_id}
+                            </div>
+                            <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 4 }}>
+                              {shop.region || '-'}
+                              {shop.is_cb ? ' • CB' : ''}
+                              {shop.shop_status ? ` • ${shop.shop_status}` : ''}
+                            </div>
+                          </td>
+
+                          <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
+                            {getSourceDisplay(shop.marketplace_source_key)}
+                          </td>
+
+                          <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
+                            {getBrandDisplay(shop.store)}
+                          </td>
+
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ display: 'grid', gap: 8 }}>
+                              {(shop.spend_streams || []).map((stream) => (
+                                <div
+                                  key={stream.stream_key}
+                                  style={{
+                                    padding: '8px 10px',
+                                    borderRadius: 8,
+                                    border: '1px solid var(--bg-deep)',
+                                    background: 'rgba(255,255,255,0.02)',
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                                    <span style={{ color: 'var(--text)', fontWeight: 600 }}>{stream.label}</span>
+                                    <span style={{
+                                      padding: '2px 6px',
+                                      borderRadius: 999,
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      background: stream.sync_mode === 'api' ? 'var(--badge-green-bg)' : 'rgba(255,255,255,0.06)',
+                                      color: stream.sync_mode === 'api' ? 'var(--green)' : 'var(--dim)',
+                                    }}>
+                                      {stream.sync_mode === 'api' ? 'API' : 'Manual'}
+                                    </span>
+                                    <span style={{
+                                      padding: '2px 6px',
+                                      borderRadius: 999,
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      background: stream.is_enabled ? 'var(--badge-green-bg)' : 'var(--border)',
+                                      color: stream.is_enabled ? 'var(--green)' : 'var(--dim)',
+                                    }}>
+                                      {stream.is_enabled ? 'Aktif' : 'Off'}
+                                    </span>
+                                  </div>
+                                  <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 6 }}>
+                                    source: {stream.default_source} • advertiser: {stream.default_advertiser}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: 5,
                                 fontSize: 10,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Batal
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    ) : (
-                      <>
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <span style={{
-                              padding: '2px 8px',
-                              borderRadius: 5,
-                              fontSize: 10,
-                              fontWeight: 600,
-                              background: shop.is_active ? 'var(--badge-green-bg)' : 'var(--border)',
-                              color: shop.is_active ? 'var(--green)' : 'var(--dim)',
-                              width: 'fit-content',
-                            }}>
-                              {shop.is_active ? 'Aktif' : 'Nonaktif'}
-                            </span>
-                            {!shop.store && (
-                              <span style={{ fontSize: 10, color: 'var(--yellow)' }}>Brand/store belum diisi</span>
-                            )}
-                            {!shop.marketplace_source_key && (
-                              <span style={{ fontSize: 10, color: 'var(--yellow)' }}>Source marketplace belum diisi</span>
-                            )}
-                            {!hasCoreBusinessMapping(shop) && (
-                              <span style={{ fontSize: 10, color: 'var(--yellow)' }}>Business core belum lengkap</span>
-                            )}
-                          </div>
-                        </td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 11 }}>
-                          {shop.shop_id}
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ color: 'var(--text)', fontWeight: 600 }}>{shop.shop_name}</div>
-                          <div style={{ color: 'var(--dim)', fontSize: 10 }}>{shop.shop_status || '-'}</div>
-                          <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 4 }}>
-                            source: {shop.marketplace_source_key || '-'} • revenue: {getBusinessDisplay(shop.revenue_business_code)}
-                          </div>
-                          <div style={{ color: 'var(--dim)', fontSize: 10 }}>
-                            account: {getBusinessDisplay(shop.account_business_code)} • viewer: {getBusinessDisplay(shop.viewer_business_code)}
-                          </div>
-                          <div style={{ color: 'var(--dim)', fontSize: 10 }}>
-                            owner: {getBusinessDisplay(shop.default_owner_business_code)} • processor: {getBusinessDisplay(shop.default_processor_business_code)}
-                          </div>
-                        </td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
-                          {shop.region || '-'}
-                          {shop.is_cb ? <span style={{ marginLeft: 6, color: '#60a5fa', fontSize: 10 }}>CB</span> : null}
-                        </td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{getBrandDisplay(shop.store)}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{shop.default_source}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{shop.default_advertiser}</td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                            <span style={{
-                              padding: '2px 8px',
-                              borderRadius: 5,
-                              fontSize: 10,
-                              fontWeight: 600,
-                              background: shop.has_tokens ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
-                              color: shop.has_tokens ? 'var(--green)' : 'var(--red)',
-                              width: 'fit-content',
-                            }}>
-                              {shop.has_tokens ? 'Connected' : 'Missing'}
-                            </span>
-                            <span style={{ fontSize: 10, color: 'var(--dim)' }}>{formatDateTime(shop.token_expires_at)}</span>
-                          </div>
-                        </td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
-                          {formatDateTime(shop.auth_expire_at)}
-                        </td>
-                        <td style={{ padding: '10px 12px' }}>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              onClick={() => handleEdit(shop)}
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: 4,
-                                border: '1px solid var(--border)',
-                                background: 'transparent',
-                                color: '#60a5fa',
-                                fontSize: 11,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleToggleActive(shop)}
-                              style={{
-                                padding: '4px 10px',
-                                borderRadius: 4,
-                                border: '1px solid var(--border)',
-                                background: 'transparent',
-                                color: shop.is_active ? 'var(--yellow)' : 'var(--green)',
-                                fontSize: 11,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              {shop.is_active ? 'Nonaktifkan' : 'Aktifkan'}
-                            </button>
-                          </div>
-                        </td>
-                      </>
-                    )}
-                  </tr>
-                ))}
+                                fontWeight: 600,
+                                background: shop.has_tokens ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+                                color: shop.has_tokens ? 'var(--green)' : 'var(--red)',
+                                width: 'fit-content',
+                              }}>
+                                {shop.has_tokens ? 'Connected' : 'Missing'}
+                              </span>
+                              <span style={{ fontSize: 10, color: 'var(--dim)' }}>{formatDateTime(shop.token_expires_at)}</span>
+                            </div>
+                          </td>
+
+                          <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
+                            {formatDateTime(shop.auth_expire_at)}
+                          </td>
+
+                          <td style={{ padding: '10px 12px' }}>
+                            <div style={{ display: 'flex', gap: 6 }}>
+                              <button
+                                onClick={() => handleEdit(shop)}
+                                style={{
+                                  padding: '4px 10px',
+                                  borderRadius: 4,
+                                  border: '1px solid var(--border)',
+                                  background: 'transparent',
+                                  color: '#60a5fa',
+                                  fontSize: 11,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Edit
+                              </button>
+                              <button
+                                onClick={() => handleToggleActive(shop)}
+                                style={{
+                                  padding: '4px 10px',
+                                  borderRadius: 4,
+                                  border: '1px solid var(--border)',
+                                  background: 'transparent',
+                                  color: shop.is_active ? 'var(--yellow)' : 'var(--green)',
+                                  fontSize: 11,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {shop.is_active ? 'Nonaktifkan' : 'Aktifkan'}
+                              </button>
+                            </div>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -907,19 +963,17 @@ export default function ShopeeManager() {
               </thead>
               <tbody>
                 {logs.map((log) => {
-                  const badge = statusStyle(log.status);
+                  const status = statusStyle(log.status);
                   return (
                     <tr key={log.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontSize: 11 }}>
-                        {formatDateTime(log.created_at)}
-                      </td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{formatDateTime(log.created_at)}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
                         {log.date_range_start === log.date_range_end
                           ? log.date_range_start
-                          : `${log.date_range_start} ~ ${log.date_range_end}`}
+                          : `${log.date_range_start} - ${log.date_range_end}`}
                       </td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text)' }}>{log.shops_synced}</td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text)' }}>{log.rows_inserted}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{log.shops_synced}</td>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{log.rows_inserted}</td>
                       <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{fmtRupiah(log.spend_total)}</td>
                       <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{fmtRupiah(log.direct_gmv_total)}</td>
                       <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{fmtRupiah(log.broad_gmv_total)}</td>
@@ -928,27 +982,17 @@ export default function ShopeeManager() {
                           padding: '2px 8px',
                           borderRadius: 5,
                           fontSize: 10,
-                          fontWeight: 700,
-                          background: badge.bg,
-                          color: badge.color,
+                          fontWeight: 600,
+                          background: status.bg,
+                          color: status.color,
                         }}>
-                          {badge.label}
+                          {status.label}
                         </span>
-                        {log.error_message && (
-                          <div style={{
-                            fontSize: 10,
-                            color: 'var(--red)',
-                            marginTop: 2,
-                            maxWidth: 220,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}>
-                            {log.error_message}
-                          </div>
-                        )}
+                        {log.error_message ? (
+                          <div style={{ marginTop: 6, fontSize: 10, color: 'var(--red)' }}>{log.error_message}</div>
+                        ) : null}
                       </td>
-                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)', fontSize: 11 }}>
+                      <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
                         {log.duration_ms ? `${(log.duration_ms / 1000).toFixed(1)}s` : '-'}
                       </td>
                     </tr>

@@ -5,6 +5,13 @@ import { requireDashboardPermissionAccess, requireDashboardRoles } from './dashb
 import { MATRIX_ROLES, PERMISSION_GROUPS } from './utils';
 import { getShopeeSetupInfo } from './shopee-open-platform';
 import { listMarketplaceIntakeSourceConfigs } from './marketplace-intake-sources';
+import {
+  buildDefaultShopeeSpendStreams,
+  listShopeeSpendStreamDefinitions,
+  normalizeShopeeSpendStreamConfig,
+  type ShopeeSpendStreamKey,
+  type ShopeeSpendSyncMode,
+} from './shopee-streams';
 
 const MATRIX_ROLE_IDS = new Set(MATRIX_ROLES.map((role) => role.id));
 const KNOWN_PERMISSION_KEYS = new Set(
@@ -14,11 +21,6 @@ const KNOWN_PERMISSION_KEYS = new Set(
 function normalizeOptionalText(value: string | null | undefined) {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed || null;
-}
-
-function normalizeBusinessCode(value: string | null | undefined) {
-  const normalized = normalizeOptionalText(value);
-  return normalized ? normalized.toUpperCase() : null;
 }
 
 async function requireOwnerAccess(label: string) {
@@ -472,23 +474,70 @@ export async function getShopeeAdminSnapshot() {
   await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
-  const [shopsRes, tokensRes, logsRes, mappingsRes, businessesRes] = await Promise.all([
+  const [shopsRes, tokensRes, logsRes, mappingsRes, streamsRes] = await Promise.all([
     svc.from('shopee_shops').select('*').order('shop_name'),
     svc.from('shopee_shop_tokens').select('shop_config_id, token_expires_at'),
     svc.from('shopee_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
     svc.from('ads_store_brand_mapping').select('store_pattern, brand').order('brand').order('store_pattern'),
-    svc.from('scalev_webhook_businesses').select('business_code, business_name, is_active').order('business_code'),
+    svc.from('shopee_shop_spend_streams').select('*').order('shop_config_id').order('stream_key'),
   ]);
 
   if (shopsRes.error) throw shopsRes.error;
   if (tokensRes.error) throw tokensRes.error;
   if (logsRes.error) throw logsRes.error;
   if (mappingsRes.error) throw mappingsRes.error;
-  if (businessesRes.error) throw businessesRes.error;
+  if (streamsRes.error) throw streamsRes.error;
 
   const tokenMap = new Map(
     (tokensRes.data || []).map((row: any) => [row.shop_config_id, row.token_expires_at || null])
   );
+  const defaultStreamMap = new Map(
+    listShopeeSpendStreamDefinitions().map((definition) => [definition.key, definition]),
+  );
+  const streamRows = (streamsRes.data || []) as Array<{
+    id: number;
+    shop_config_id: number;
+    stream_key: ShopeeSpendStreamKey;
+    default_source: string;
+    default_advertiser: string;
+    sync_mode: ShopeeSpendSyncMode;
+    is_enabled: boolean;
+  }>;
+  const streamsByShopId = new Map<number, typeof streamRows>();
+
+  for (const row of streamRows) {
+    if (!streamsByShopId.has(row.shop_config_id)) {
+      streamsByShopId.set(row.shop_config_id, []);
+    }
+    streamsByShopId.get(row.shop_config_id)!.push(row);
+  }
+
+  const decorateSpendStream = (
+    shopId: number,
+    stream: {
+      id?: number | null;
+      shop_config_id?: number;
+      stream_key: ShopeeSpendStreamKey;
+      default_source: string;
+      default_advertiser: string;
+      sync_mode: ShopeeSpendSyncMode;
+      is_enabled: boolean;
+    },
+  ) => {
+    const definition = defaultStreamMap.get(stream.stream_key);
+    return {
+      id: stream.id ?? null,
+      shop_config_id: stream.shop_config_id ?? shopId,
+      stream_key: stream.stream_key,
+      default_source: stream.default_source,
+      default_advertiser: stream.default_advertiser,
+      sync_mode: stream.sync_mode,
+      is_enabled: stream.is_enabled,
+      label: definition?.label || stream.default_source,
+      api_supported: definition?.apiSupported || false,
+      description: definition?.description || '',
+    };
+  };
 
   return {
     setup: getShopeeSetupInfo(),
@@ -496,10 +545,21 @@ export async function getShopeeAdminSnapshot() {
       ...shop,
       has_tokens: tokenMap.has(shop.id),
       token_expires_at: tokenMap.get(shop.id) || null,
+      spend_streams: (
+        streamsByShopId.get(shop.id)
+          || buildDefaultShopeeSpendStreams(
+            String(shop.shop_name || '').trim() || 'Shopee Shop',
+            shop.default_source,
+            shop.default_advertiser,
+          ).map((stream) => ({
+            id: null,
+            shop_config_id: shop.id,
+            ...stream,
+          }))
+      ).map((stream) => decorateSpendStream(shop.id, stream)),
     })),
     recentLogs: logsRes.data || [],
     brandMappings: mappingsRes.data || [],
-    businesses: businessesRes.data || [],
   };
 }
 
@@ -507,14 +567,14 @@ export async function updateShopeeShop(
   id: number,
   payload: {
     marketplace_source_key: string | null;
-    account_business_code: string | null;
-    viewer_business_code: string | null;
-    revenue_business_code: string | null;
-    default_owner_business_code: string | null;
-    default_processor_business_code: string | null;
     store: string | null;
-    default_source: string;
-    default_advertiser: string;
+    spend_streams: Array<{
+      stream_key: ShopeeSpendStreamKey;
+      default_source: string;
+      default_advertiser: string;
+      sync_mode: ShopeeSpendSyncMode;
+      is_enabled: boolean;
+    }>;
   }
 ) {
   await requireAdminAccess('admin:meta', 'Admin Meta');
@@ -529,43 +589,20 @@ export async function updateShopeeShop(
     throw new Error('Source marketplace Shopee tidak dikenali.');
   }
 
-  const sourceBusinessCode = sourceConfig
-    ? sourceConfig.businessCode
-    : null;
-  const accountBusinessCode = normalizeBusinessCode(payload.account_business_code) || sourceBusinessCode;
-  const viewerBusinessCode = normalizeBusinessCode(payload.viewer_business_code) || sourceBusinessCode;
-  const revenueBusinessCode =
-    normalizeBusinessCode(payload.revenue_business_code) || viewerBusinessCode || sourceBusinessCode;
-  const defaultOwnerBusinessCode = normalizeBusinessCode(payload.default_owner_business_code);
-  const defaultProcessorBusinessCode = normalizeBusinessCode(payload.default_processor_business_code);
-
-  const businessCodesToValidate = Array.from(
-    new Set(
-      [
-        accountBusinessCode,
-        viewerBusinessCode,
-        revenueBusinessCode,
-        defaultOwnerBusinessCode,
-        defaultProcessorBusinessCode,
-      ].filter((value): value is string => Boolean(value)),
-    ),
-  );
-
   const svc = createServiceSupabase();
-  if (businessCodesToValidate.length > 0) {
-    const { data: businessRows, error: businessError } = await svc
-      .from('scalev_webhook_businesses')
-      .select('business_code')
-      .in('business_code', businessCodesToValidate);
-
-    if (businessError) throw businessError;
-
-    const availableBusinessCodes = new Set(
-      (businessRows || []).map((row: any) => String(row.business_code || '').trim().toUpperCase()).filter(Boolean),
-    );
-    const missingBusinessCodes = businessCodesToValidate.filter((code) => !availableBusinessCodes.has(code));
-    if (missingBusinessCodes.length > 0) {
-      throw new Error(`Business Shopee tidak dikenali: ${missingBusinessCodes.join(', ')}`);
+  const normalizedStreams = (payload.spend_streams || []).map((stream) => normalizeShopeeSpendStreamConfig(stream));
+  const streamKeys = new Set(normalizedStreams.map((stream) => stream.stream_key));
+  for (const definition of listShopeeSpendStreamDefinitions()) {
+    if (!streamKeys.has(definition.key)) {
+      normalizedStreams.push(
+        normalizeShopeeSpendStreamConfig({
+          stream_key: definition.key,
+          default_source: definition.defaultSource,
+          default_advertiser: 'Shopee Shop',
+          sync_mode: definition.defaultSyncMode,
+          is_enabled: definition.defaultEnabled,
+        }),
+      );
     }
   }
 
@@ -573,19 +610,38 @@ export async function updateShopeeShop(
     .from('shopee_shops')
     .update({
       marketplace_source_key: sourceKey,
-      account_business_code: accountBusinessCode,
-      viewer_business_code: viewerBusinessCode,
-      revenue_business_code: revenueBusinessCode,
-      default_owner_business_code: defaultOwnerBusinessCode,
-      default_processor_business_code: defaultProcessorBusinessCode,
       store: normalizeOptionalText(payload.store),
-      default_source: payload.default_source.trim() || 'Shopee Ads',
-      default_advertiser: payload.default_advertiser.trim() || 'Shopee Shop',
       updated_at: new Date().toISOString(),
     })
     .eq('id', id);
 
   if (error) throw error;
+
+  const { data: shopRow, error: shopError } = await svc
+    .from('shopee_shops')
+    .select('shop_name')
+    .eq('id', id)
+    .single();
+
+  if (shopError) throw shopError;
+
+  const shopName = String(shopRow.shop_name || '').trim() || 'Shopee Shop';
+  const rows = normalizedStreams.map((stream) => ({
+    shop_config_id: id,
+    stream_key: stream.stream_key,
+    default_source: stream.default_source,
+    default_advertiser: String(stream.default_advertiser || '').trim() || shopName,
+    sync_mode: stream.sync_mode,
+    is_enabled: stream.is_enabled,
+    updated_at: new Date().toISOString(),
+  }));
+
+  const { error: streamError } = await svc
+    .from('shopee_shop_spend_streams')
+    .upsert(rows, { onConflict: 'shop_config_id,stream_key' });
+
+  if (streamError) throw streamError;
+
   return { success: true };
 }
 
