@@ -6,6 +6,17 @@ type DailyAdsPeriod = {
   year: number;
 };
 
+type DailyAdsRow = {
+  date: string;
+  ad_account: string;
+  spent: number;
+  objective?: string | null;
+  source?: string | null;
+  store?: string | null;
+  advertiser?: string | null;
+  data_source?: string | null;
+};
+
 type DailyAdsConnectionResult = {
   spreadsheet_id: string;
   label: string;
@@ -25,6 +36,134 @@ export type DailyAdsSyncResult = {
   rows_inserted: number;
   results: DailyAdsConnectionResult[];
 };
+
+function normalizeSyncValue(value: unknown) {
+  return String(value || '').trim();
+}
+
+export function getAdsDateRange(rows: Array<Pick<DailyAdsRow, 'date'>>) {
+  const dates = rows
+    .map((row) => normalizeSyncValue(row.date))
+    .filter(Boolean)
+    .sort();
+
+  if (dates.length === 0) return null;
+
+  return {
+    start: dates[0],
+    end: dates[dates.length - 1],
+  };
+}
+
+function getUniqueAdsDates(rows: Array<Pick<DailyAdsRow, 'date'>>) {
+  return Array.from(new Set(
+    rows
+      .map((row) => normalizeSyncValue(row.date))
+      .filter(Boolean),
+  )).sort();
+}
+
+export function getImportPeriodFromAds(rows: Array<Pick<DailyAdsRow, 'date'>>): DailyAdsPeriod | null {
+  const range = getAdsDateRange(rows);
+  if (!range) return null;
+
+  const [yearText, monthText] = range.end.split('-');
+  const year = Number(yearText);
+  const month = Number(monthText);
+
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null;
+  }
+
+  return { month, year };
+}
+
+export function dedupeAdsRows<T extends DailyAdsRow>(rows: T[]) {
+  const seen = new Set<string>();
+  const deduped: T[] = [];
+
+  for (const row of rows) {
+    const key = [
+      normalizeSyncValue(row.date),
+      normalizeSyncValue(row.ad_account),
+      Number(row.spent || 0),
+      normalizeSyncValue(row.objective),
+      normalizeSyncValue(row.source),
+      normalizeSyncValue(row.store),
+      normalizeSyncValue(row.advertiser),
+      normalizeSyncValue(row.data_source),
+    ].join('|');
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(row);
+  }
+
+  return deduped;
+}
+
+async function deleteExistingGoogleSheetRows(
+  rows: DailyAdsRow[],
+) {
+  const dates = getUniqueAdsDates(rows);
+  if (dates.length === 0) return;
+
+  const svc = createServiceSupabase();
+  const adAccounts = Array.from(new Set(
+    rows
+      .map((row) => normalizeSyncValue(row.ad_account))
+      .filter(Boolean),
+  ));
+
+  const blankAccountScopes = Array.from(new Map(
+    rows
+      .filter((row) => !normalizeSyncValue(row.ad_account))
+      .map((row) => {
+        const source = normalizeSyncValue(row.source);
+        const store = normalizeSyncValue(row.store);
+        return [`${source}|${store}`, { source, store }];
+      }),
+  ).values());
+
+  const accountBatchSize = 200;
+  const dateBatchSize = 31;
+
+  for (let dateIndex = 0; dateIndex < dates.length; dateIndex += dateBatchSize) {
+    const dateBatch = dates.slice(dateIndex, dateIndex + dateBatchSize);
+
+    for (let accountIndex = 0; accountIndex < adAccounts.length; accountIndex += accountBatchSize) {
+      const accountBatch = adAccounts.slice(accountIndex, accountIndex + accountBatchSize);
+      const { error } = await svc
+        .from('daily_ads_spend')
+        .delete()
+        .eq('data_source', 'google_sheets')
+        .in('date', dateBatch)
+        .in('ad_account', accountBatch);
+
+      if (error) {
+        throw new Error(`Delete daily_ads_spend existing ad accounts: ${error.message}`);
+      }
+    }
+  }
+
+  for (const scope of blankAccountScopes) {
+    for (let dateIndex = 0; dateIndex < dates.length; dateIndex += dateBatchSize) {
+      const dateBatch = dates.slice(dateIndex, dateIndex + dateBatchSize);
+      const { error } = await svc
+        .from('daily_ads_spend')
+        .delete()
+        .eq('data_source', 'google_sheets')
+        .in('date', dateBatch)
+        .eq('ad_account', '')
+        .eq('source', scope.source)
+        .eq('store', scope.store);
+
+      if (error) {
+        throw new Error(`Delete daily_ads_spend blank-account scope: ${error.message}`);
+      }
+    }
+  }
+}
 
 export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
   const svc = createServiceSupabase();
@@ -56,36 +195,37 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
   const results: DailyAdsConnectionResult[] = [];
   let rowsInserted = 0;
 
-  for (const conn of connections) {
+  const orderedConnections = [...connections].sort((left: any, right: any) => {
+    const leftTime = Date.parse(String(left?.created_at || ''));
+    const rightTime = Date.parse(String(right?.created_at || ''));
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return rightTime - leftTime;
+    }
+    return String(right?.id || '').localeCompare(String(left?.id || ''));
+  });
+
+  for (const conn of orderedConnections) {
     let importTarget: { filename: string; periodMonth: number; periodYear: number } | null = null;
 
     try {
       console.log(`Syncing ads from spreadsheet: ${conn.spreadsheet_id} (${conn.label})`);
 
       const parsed = await parseGoogleSheet(conn.spreadsheet_id, brandList, { adsOnly: true });
+      const deleteScopeRows = parsed.ads.map((row) => ({
+        ...row,
+        data_source: 'google_sheets',
+      }));
+      const importPeriod = getImportPeriodFromAds(deleteScopeRows);
+      const importRange = getAdsDateRange(deleteScopeRows);
 
-      if (!parsed.period.month || !parsed.period.year) {
+      if (!importPeriod || !importRange) {
         results.push({
           spreadsheet_id: conn.spreadsheet_id,
           label: conn.label,
           success: false,
-          error: 'Could not detect period from sheet',
+          error: 'Could not detect ad date range from sheet',
         });
         continue;
-      }
-
-      const periodStart = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-01`;
-      const lastDay = new Date(parsed.period.year, parsed.period.month, 0).getDate();
-      const periodEnd = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
-
-      const delResult = await svc
-        .from('daily_ads_spend')
-        .delete()
-        .gte('date', periodStart)
-        .lte('date', periodEnd)
-        .eq('data_source', 'google_sheets');
-      if (delResult.error) {
-        throw new Error(`Delete daily_ads_spend: ${delResult.error.message}`);
       }
 
       const { data: metaAccounts, error: metaAccountsError } = await svc
@@ -100,19 +240,30 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
         (metaAccounts || []).map((account: { account_name: string }) => account.account_name)
       );
 
-      const filteredAds = parsed.ads.filter(
-        (row: { ad_account: string }) => !metaManagedNames.has(row.ad_account)
-      );
+      await deleteExistingGoogleSheetRows(deleteScopeRows);
+
+      const filteredAds = parsed.ads
+        .filter((row: { ad_account: string }) => !metaManagedNames.has(row.ad_account))
+        .map((row) => ({
+          ...row,
+          data_source: 'google_sheets',
+        }));
+
+      const dedupedAds = dedupeAdsRows(filteredAds);
 
       const skippedCount = parsed.ads.length - filteredAds.length;
+      const duplicateCount = filteredAds.length - dedupedAds.length;
       if (skippedCount > 0) {
         console.log(`[sync] Skipped ${skippedCount} rows already managed by Meta API`);
+      }
+      if (duplicateCount > 0) {
+        console.log(`[sync] Dropped ${duplicateCount} duplicate rows already present in the sheet payload`);
       }
 
       importTarget = {
         filename: `gsheet:${conn.spreadsheet_id}`,
-        periodMonth: parsed.period.month,
-        periodYear: parsed.period.year,
+        periodMonth: importPeriod.month,
+        periodYear: importPeriod.year,
       };
 
       const upsertResult = await svc.from('data_imports').upsert({
@@ -120,17 +271,17 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
         period_month: importTarget.periodMonth,
         period_year: importTarget.periodYear,
         imported_by: conn.created_by,
-        row_count: filteredAds.length,
+        row_count: dedupedAds.length,
         status: 'processing',
-        notes: `Ads sync from Google Sheet: ${conn.label}${skippedCount > 0 ? ` (${skippedCount} rows skipped — managed by Meta API)` : ''}`,
+        notes: `Ads sync from Google Sheet: ${conn.label}. Range: ${importRange.start} to ${importRange.end}${skippedCount > 0 ? ` (${skippedCount} rows skipped — managed by Meta API)` : ''}${duplicateCount > 0 ? ` (${duplicateCount} duplicate rows dropped)` : ''}`,
       }, { onConflict: 'period_month,period_year,filename' });
       if (upsertResult.error) {
         throw new Error(`Upsert data_imports: ${upsertResult.error.message}`);
       }
 
-      if (filteredAds.length > 0) {
-        for (let i = 0; i < filteredAds.length; i += 500) {
-          const batch = filteredAds.slice(i, i + 500);
+      if (dedupedAds.length > 0) {
+        for (let i = 0; i < dedupedAds.length; i += 500) {
+          const batch = dedupedAds.slice(i, i + 500);
           const { error } = await svc.from('daily_ads_spend').insert(batch);
           if (error) throw error;
           rowsInserted += batch.length;
@@ -139,14 +290,16 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
 
       await svc.from('data_imports').update({
         status: 'completed',
-        row_count: filteredAds.length,
+        row_count: dedupedAds.length,
       }).eq('filename', importTarget.filename)
         .eq('period_month', importTarget.periodMonth)
         .eq('period_year', importTarget.periodYear);
 
       const syncMsg = skippedCount > 0
-        ? `Synced ${filteredAds.length} ad rows (${skippedCount} skipped — Meta API managed)`
-        : `Synced ${filteredAds.length} ad rows`;
+        ? `Synced ${dedupedAds.length} ad rows (${skippedCount} skipped — Meta API managed${duplicateCount > 0 ? `, ${duplicateCount} duplicate dropped` : ''})`
+        : duplicateCount > 0
+          ? `Synced ${dedupedAds.length} ad rows (${duplicateCount} duplicate dropped)`
+          : `Synced ${dedupedAds.length} ad rows`;
       await svc.from('sheet_connections').update({
         last_synced: new Date().toISOString(),
         last_sync_status: 'success',
@@ -157,8 +310,8 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
         spreadsheet_id: conn.spreadsheet_id,
         label: conn.label,
         success: true,
-        period: parsed.period,
-        counts: { ads: filteredAds.length, skipped_meta: skippedCount },
+        period: importPeriod,
+        counts: { ads: dedupedAds.length, skipped_meta: skippedCount },
       });
     } catch (err: any) {
       console.error(`Sync failed for ${conn.spreadsheet_id}:`, err);

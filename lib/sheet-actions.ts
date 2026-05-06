@@ -31,9 +31,23 @@ export async function fetchSheetConnections() {
   const { data, error } = await svc
     .from('sheet_connections')
     .select('*')
+    .order('is_active', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) throw toActionError(error, 'Gagal memuat koneksi spreadsheet.');
   return data;
+}
+
+async function deactivateOtherSheetConnections(targetId: string) {
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('sheet_connections')
+    .update({ is_active: false })
+    .neq('id', targetId)
+    .eq('is_active', true);
+
+  if (error) {
+    throw toActionError(error, 'Gagal menonaktifkan koneksi spreadsheet lain.');
+  }
 }
 
 export async function addSheetConnection(spreadsheetId: string, label: string) {
@@ -62,6 +76,15 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
     .maybeSingle();
   if (existingError) throw toActionError(existingError, 'Gagal memeriksa spreadsheet yang sudah terhubung.');
 
+  const { data: activeConnection, error: activeConnectionError } = await svc
+    .from('sheet_connections')
+    .select('id, spreadsheet_id')
+    .eq('is_active', true)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (activeConnectionError) throw toActionError(activeConnectionError, 'Gagal memeriksa spreadsheet aktif.');
+
   if (existing) {
     const { data: updated, error: updateError } = await svc
       .from('sheet_connections')
@@ -73,6 +96,24 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
       .select()
       .single();
     if (updateError) throw toActionError(updateError, 'Gagal memperbarui koneksi spreadsheet.');
+    await deactivateOtherSheetConnections(existing.id);
+    return updated;
+  }
+
+  if (activeConnection) {
+    const { data: updated, error: updateError } = await svc
+      .from('sheet_connections')
+      .update({
+        spreadsheet_id: normalizedSpreadsheetId,
+        label: normalizedLabel,
+        is_active: true,
+      })
+      .eq('id', activeConnection.id)
+      .select()
+      .single();
+
+    if (updateError) throw toActionError(updateError, 'Gagal memperbarui spreadsheet aktif.');
+    await deactivateOtherSheetConnections(activeConnection.id);
     return updated;
   }
 
@@ -88,6 +129,7 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
     .single();
 
   if (error) throw toActionError(error, 'Gagal menambahkan koneksi spreadsheet.');
+  await deactivateOtherSheetConnections(data.id);
   return data;
 }
 
@@ -107,6 +149,9 @@ export async function toggleSheetConnection(connectionId: string, isActive: bool
   await requireDailyAdminAccess('Admin Daily Data');
 
   const svc = createServiceSupabase();
+  if (isActive) {
+    await deactivateOtherSheetConnections(connectionId);
+  }
   const { error } = await svc
     .from('sheet_connections')
     .update({ is_active: isActive })

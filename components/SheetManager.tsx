@@ -30,6 +30,9 @@ export default function SheetManager() {
   const [newLabel, setNewLabel] = useState('');
 
   const SERVICE_EMAIL = 'roove-bi-reader@roove-bi.iam.gserviceaccount.com';
+  const activeConnection = connections.find((connection) => connection.is_active) || null;
+  const otherConnections = connections.filter((connection) => connection.id !== activeConnection?.id);
+  const activeConnectionCount = connections.filter((connection) => connection.is_active).length;
 
   useEffect(() => { loadConnections(); }, []);
 
@@ -55,10 +58,13 @@ export default function SheetManager() {
       let spreadsheetId = newSpreadsheetId.trim();
       const urlMatch = spreadsheetId.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/);
       if (urlMatch) spreadsheetId = urlMatch[1];
+      const replacingExisting = Boolean(activeConnection);
       await addSheetConnection(spreadsheetId, newLabel.trim());
       setNewSpreadsheetId('');
       setNewLabel('');
-      setSuccess('Spreadsheet berhasil ditambahkan!');
+      setSuccess(replacingExisting
+        ? 'Spreadsheet aktif berhasil diperbarui.'
+        : 'Spreadsheet aktif berhasil disimpan.');
       await loadConnections();
     } catch (err: any) {
       setError(err.message);
@@ -78,10 +84,20 @@ export default function SheetManager() {
     }
   }
 
-  async function handleToggle(id: string, isActive: boolean) {
+  async function handleSetActive(id: string) {
     try {
       setError(null);
-      await toggleSheetConnection(id, !isActive);
+      await toggleSheetConnection(id, true);
+      await loadConnections();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  }
+
+  async function handleDeactivate(id: string) {
+    try {
+      setError(null);
+      await toggleSheetConnection(id, false);
       await loadConnections();
     } catch (err: any) {
       setError(err.message);
@@ -147,16 +163,17 @@ export default function SheetManager() {
       </div>
 
       <div style={{ fontSize:12, color:'var(--dim)', marginBottom:16 }}>
-        Hubungkan Google Sheets agar data otomatis tersinkron. Auto-sync berjalan setiap 1 jam.
+        Daily ads sync sekarang memakai <strong>1 spreadsheet aktif</strong> yang berjalan terus. Menyimpan spreadsheet baru akan menggantikan spreadsheet aktif sebelumnya tanpa menghapus data bulan lama di database.
       </div>
 
       {/* Info box */}
       <div style={{ background:'var(--accent-subtle)', border:'1px solid var(--border)', borderRadius:8, padding:12, marginBottom:16, fontSize:12, color:'var(--accent)' }}>
-        <div style={{ fontWeight:600, marginBottom:6 }}>Cara menambahkan spreadsheet:</div>
+        <div style={{ fontWeight:600, marginBottom:6 }}>Cara menyimpan spreadsheet aktif:</div>
         <div style={{ color:'var(--accent)', lineHeight:1.8 }}>
           1. Buka Google Sheet → klik Share → tambahkan: <code style={{ background:'var(--bg-deep)', padding:'2px 6px', borderRadius:4, fontSize:11 }}>{SERVICE_EMAIL}</code><br/>
           2. Set sebagai <strong>Viewer</strong><br/>
-          3. Copy Spreadsheet ID dari URL (atau paste URL lengkap) ke form di bawah
+          3. Paste Spreadsheet ID atau URL lengkap ke form di bawah<br/>
+          4. Spreadsheet ini boleh rolling lintas bulan; sync hanya mengganti row ads Google Sheets untuk tanggal yang memang ada di sheet
         </div>
       </div>
 
@@ -164,6 +181,11 @@ export default function SheetManager() {
       {error && (
         <div style={{ marginBottom:12, padding:12, background:'var(--badge-red-bg)', borderRadius:8, color:'var(--red)', fontSize:13 }}>
           ❌ {error}
+        </div>
+      )}
+      {activeConnectionCount > 1 && (
+        <div style={{ marginBottom:12, padding:12, background:'rgba(245, 158, 11, 0.12)', borderRadius:8, color:'#f59e0b', fontSize:13 }}>
+          Ada lebih dari satu koneksi aktif dari konfigurasi lama. Menyimpan atau mengaktifkan satu spreadsheet dari halaman ini akan otomatis menonaktifkan sisanya.
         </div>
       )}
       {success && (
@@ -177,7 +199,7 @@ export default function SheetManager() {
         <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:8 }}>
           <input
             type="text"
-            placeholder="Label (misal: Feb 2026)"
+            placeholder="Label internal (misal: Master Ads Rolling)"
             value={newLabel}
             onChange={e => setNewLabel(e.target.value)}
             style={{
@@ -208,7 +230,7 @@ export default function SheetManager() {
             opacity: (!newSpreadsheetId.trim() || !newLabel.trim()) ? 0.5 : 1,
           }}
         >
-          {adding ? 'Menambahkan...' : '+ Tambah Spreadsheet'}
+          {adding ? 'Menyimpan...' : activeConnection ? 'Perbarui Spreadsheet Aktif' : 'Simpan Spreadsheet Aktif'}
         </button>
       </form>
 
@@ -216,56 +238,59 @@ export default function SheetManager() {
       {loading ? (
         <div style={{ color:'var(--dim)', fontSize:13 }}>Memuat...</div>
       ) : connections.length === 0 ? (
-        <div style={{ color:'var(--dim)', fontSize:13 }}>Belum ada spreadsheet yang terhubung.</div>
+        <div style={{ color:'var(--dim)', fontSize:13 }}>Belum ada spreadsheet aktif yang terhubung.</div>
       ) : (
-        <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
-          {connections.map(conn => (
+        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
+          {activeConnection && (
             <div
-              key={conn.id}
               style={{
-                padding:14, background:'var(--bg)', borderRadius:8,
+                padding:14,
+                background:'var(--bg)',
+                borderRadius:8,
                 border:'1px solid var(--border)',
-                opacity: conn.is_active ? 1 : 0.5,
-                display:'flex', justifyContent:'space-between', alignItems:'flex-start',
-                flexWrap:'wrap', gap:8,
+                display:'flex',
+                justifyContent:'space-between',
+                alignItems:'flex-start',
+                flexWrap:'wrap',
+                gap:8,
               }}
             >
               <div style={{ flex:1 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                   <span style={{
                     width:8, height:8, borderRadius:'50%', display:'inline-block',
-                    background: conn.last_sync_status === 'success' ? 'var(--green)' :
-                                conn.last_sync_status === 'error' ? 'var(--red)' : 'var(--dim)',
+                    background: activeConnection.last_sync_status === 'success' ? 'var(--green)' :
+                                activeConnection.last_sync_status === 'error' ? 'var(--red)' : 'var(--dim)',
                   }} />
-                  <span style={{ fontWeight:600, fontSize:13 }}>{conn.label}</span>
-                  {!conn.is_active && (
-                    <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:600, background:'var(--border)', color:'var(--dim)' }}>Nonaktif</span>
-                  )}
+                  <span style={{ fontWeight:600, fontSize:13 }}>{activeConnection.label}</span>
+                  <span style={{ padding:'2px 7px', borderRadius:5, fontSize:10, fontWeight:600, background:'var(--badge-green-bg)', color:'var(--green)' }}>
+                    Aktif
+                  </span>
                 </div>
                 <div style={{ fontSize:11, color:'var(--dim)', marginTop:4, fontFamily:'monospace' }}>
-                  {conn.spreadsheet_id}
+                  {activeConnection.spreadsheet_id}
                 </div>
-                <div style={{ display:'flex', gap:16, marginTop:6, fontSize:11, color:'var(--dim)' }}>
-                  <span>Terakhir sync: {formatDate(conn.last_synced)}</span>
-                  {conn.last_sync_message && (
-                    <span style={{ color: conn.last_sync_status === 'error' ? 'var(--red)' : 'var(--green)' }}>
-                      {conn.last_sync_message}
+                <div style={{ display:'flex', gap:16, marginTop:6, fontSize:11, color:'var(--dim)', flexWrap:'wrap' }}>
+                  <span>Terakhir sync: {formatDate(activeConnection.last_synced)}</span>
+                  {activeConnection.last_sync_message && (
+                    <span style={{ color: activeConnection.last_sync_status === 'error' ? 'var(--red)' : 'var(--green)' }}>
+                      {activeConnection.last_sync_message}
                     </span>
                   )}
                 </div>
               </div>
               <div style={{ display:'flex', gap:6 }}>
                 <button
-                  onClick={() => handleToggle(conn.id, conn.is_active)}
+                  onClick={() => handleDeactivate(activeConnection.id)}
                   style={{
                     padding:'5px 12px', borderRadius:6, border:'1px solid var(--border)',
                     background:'transparent', color:'var(--text-secondary)', fontSize:11, cursor:'pointer',
                   }}
                 >
-                  {conn.is_active ? 'Nonaktifkan' : 'Aktifkan'}
+                  Nonaktifkan
                 </button>
                 <button
-                  onClick={() => handleRemove(conn.id)}
+                  onClick={() => handleRemove(activeConnection.id)}
                   style={{
                     padding:'5px 12px', borderRadius:6, border:'1px solid var(--badge-red-bg)',
                     background:'transparent', color:'var(--red)', fontSize:11, cursor:'pointer',
@@ -275,7 +300,86 @@ export default function SheetManager() {
                 </button>
               </div>
             </div>
-          ))}
+          )}
+
+          {otherConnections.length > 0 && (
+            <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+              <div style={{ fontSize:12, color:'var(--dim)', fontWeight:600 }}>
+                Koneksi lain
+              </div>
+              {otherConnections.map(conn => (
+                <div
+                  key={conn.id}
+                  style={{
+                    padding:14, background:'var(--bg)', borderRadius:8,
+                    border:'1px solid var(--border)',
+                    opacity: conn.is_active ? 0.9 : 0.6,
+                    display:'flex', justifyContent:'space-between', alignItems:'flex-start',
+                    flexWrap:'wrap', gap:8,
+                  }}
+                >
+                  <div style={{ flex:1 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <span style={{
+                        width:8, height:8, borderRadius:'50%', display:'inline-block',
+                        background: conn.last_sync_status === 'success' ? 'var(--green)' :
+                                    conn.last_sync_status === 'error' ? 'var(--red)' : 'var(--dim)',
+                      }} />
+                      <span style={{ fontWeight:600, fontSize:13 }}>{conn.label}</span>
+                      <span style={{
+                        padding:'2px 7px',
+                        borderRadius:5,
+                        fontSize:10,
+                        fontWeight:600,
+                        background: conn.is_active ? 'rgba(245, 158, 11, 0.12)' : 'var(--border)',
+                        color: conn.is_active ? '#f59e0b' : 'var(--dim)',
+                      }}>
+                        {conn.is_active ? 'Aktif tambahan' : 'Nonaktif'}
+                      </span>
+                    </div>
+                    <div style={{ fontSize:11, color:'var(--dim)', marginTop:4, fontFamily:'monospace' }}>
+                      {conn.spreadsheet_id}
+                    </div>
+                    <div style={{ display:'flex', gap:16, marginTop:6, fontSize:11, color:'var(--dim)', flexWrap:'wrap' }}>
+                      <span>Terakhir sync: {formatDate(conn.last_synced)}</span>
+                      {conn.last_sync_message && <span>{conn.last_sync_message}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', gap:6 }}>
+                    <button
+                      onClick={() => handleSetActive(conn.id)}
+                      style={{
+                        padding:'5px 12px', borderRadius:6, border:'1px solid var(--border)',
+                        background:'transparent', color:'var(--text-secondary)', fontSize:11, cursor:'pointer',
+                      }}
+                    >
+                      Jadikan Aktif
+                    </button>
+                    {conn.is_active && (
+                      <button
+                        onClick={() => handleDeactivate(conn.id)}
+                        style={{
+                          padding:'5px 12px', borderRadius:6, border:'1px solid var(--border)',
+                          background:'transparent', color:'var(--text-secondary)', fontSize:11, cursor:'pointer',
+                        }}
+                      >
+                        Nonaktifkan
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleRemove(conn.id)}
+                      style={{
+                        padding:'5px 12px', borderRadius:6, border:'1px solid var(--badge-red-bg)',
+                        background:'transparent', color:'var(--red)', fontSize:11, cursor:'pointer',
+                      }}
+                    >
+                      Hapus
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
