@@ -37,6 +37,9 @@ supabase/migrations/007_validation_queries.sql
 # claude code
 .claude/
 
+# codex desktop local config
+.codex/
+
 # temp scripts
 scripts/*
 !scripts/sync-jobs-worker.ts
