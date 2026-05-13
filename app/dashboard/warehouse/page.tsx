@@ -107,6 +107,34 @@ const CATEGORY_COLORS: Record<string, string> = {
   'wip_material': '#06b6d4',
 };
 
+const DEFAULT_RECLASS_CATEGORIES = ['fg', 'sachet', 'packaging', 'bonus', 'wip', 'wip_material', 'other'];
+
+function compareReclassCategoryOption(a: string, b: string) {
+  const left = String(a || '').trim().toLowerCase();
+  const right = String(b || '').trim().toLowerCase();
+  const leftIndex = DEFAULT_RECLASS_CATEGORIES.indexOf(left);
+  const rightIndex = DEFAULT_RECLASS_CATEGORIES.indexOf(right);
+  const leftKnown = leftIndex !== -1;
+  const rightKnown = rightIndex !== -1;
+
+  if (leftKnown && rightKnown) return leftIndex - rightIndex;
+  if (leftKnown) return -1;
+  if (rightKnown) return 1;
+  return left.localeCompare(right, 'id');
+}
+
+function matchesReclassProductSearch(product: any, query: string) {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return true;
+  return [
+    product?.name,
+    product?.sku,
+    product?.category,
+    product?.entity,
+    product?.warehouse,
+  ].some((value) => String(value || '').toLowerCase().includes(q));
+}
+
 const EMPTY_DEDUCTION_LOG = { rows: [], totalUniqueOrders: 0 };
 const ALERTS_PAGE_SIZE = 100;
 const EMPTY_DEDUCTION_ALERTS: WarehouseUndeductedOrdersResult = {
@@ -300,12 +328,6 @@ function PreCutoffNotice({
       <div style={{ fontSize: 13, lineHeight: 1.7, maxWidth: 760, margin: '0 auto' }}>{body}</div>
     </div>
   );
-}
-
-function getOppositeReclassCategory(category: string) {
-  if (category === 'fg') return 'bonus';
-  if (category === 'bonus') return 'fg';
-  return '';
 }
 
 // ── KPI Card ──
@@ -2535,6 +2557,7 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
   const [operationalProfiles, setOperationalProfiles] = useState<any[]>([]);
   const [batches, setBatches] = useState<any[]>([]);
   const [sourceProductId, setSourceProductId] = useState('');
+  const [sourceSearch, setSourceSearch] = useState('');
   const [sourceBatchId, setSourceBatchId] = useState('');
   const [targetCategory, setTargetCategory] = useState('');
   const [quantity, setQuantity] = useState('');
@@ -2582,19 +2605,42 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
     return map;
   }, [stockRows]);
 
-  const sourceOptions = useMemo(() => (
-    products.filter((p: any) => ['fg', 'bonus'].includes(p.category) && Number(stockMap.get(Number(p.id)) || 0) > 0)
-  ), [products, stockMap]);
-
   const sourceProduct = products.find((p: any) => String(p.id) === sourceProductId);
+  const sourceOptions = useMemo(() => (
+    products
+      .filter((p: any) => Number(stockMap.get(Number(p.id)) || 0) > 0)
+      .sort((left: any, right: any) => (
+        String(left.warehouse || '').localeCompare(String(right.warehouse || ''), 'id')
+        || String(left.entity || '').localeCompare(String(right.entity || ''), 'id')
+        || compareReclassCategoryOption(left.category, right.category)
+        || String(left.name || '').localeCompare(String(right.name || ''), 'id')
+      ))
+  ), [products, stockMap]);
+  const filteredSourceOptions = useMemo(() => {
+    const filtered = sourceOptions.filter((product: any) => matchesReclassProductSearch(product, sourceSearch));
+    if (sourceProduct && !filtered.some((product: any) => Number(product.id) === Number(sourceProduct.id))) {
+      return [sourceProduct, ...filtered];
+    }
+    return filtered;
+  }, [sourceOptions, sourceSearch, sourceProduct]);
   const profileMap = useMemo(() => {
     const map = new Map<number, any>();
     operationalProfiles.forEach((row: any) => map.set(Number(row.product_id), row));
     return map;
   }, [operationalProfiles]);
+  const allCategories = useMemo(() => {
+    const set = new Set(DEFAULT_RECLASS_CATEGORIES);
+    products.forEach((product: any) => {
+      const category = String(product?.category || '').trim().toLowerCase();
+      if (category) set.add(category);
+    });
+    return Array.from(set).sort(compareReclassCategoryOption);
+  }, [products]);
   const targetCategoryOptions = useMemo(() => (
-    sourceProduct ? ['fg', 'bonus'].filter((category) => category !== sourceProduct.category) : []
-  ), [sourceProduct]);
+    sourceProduct
+      ? allCategories.filter((category) => category !== String(sourceProduct.category || '').trim().toLowerCase())
+      : []
+  ), [allCategories, sourceProduct]);
   const targetProduct = useMemo(() => {
     if (!sourceProduct || !targetCategory) return null;
     return products.find((p: any) =>
@@ -2618,8 +2664,8 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
       if (targetCategory) setTargetCategory('');
       return;
     }
-    if (!targetCategoryOptions.includes(targetCategory)) {
-      setTargetCategory(getOppositeReclassCategory(sourceProduct.category));
+    if (targetCategory && !targetCategoryOptions.includes(targetCategory)) {
+      setTargetCategory('');
     }
   }, [sourceProduct, targetCategory, targetCategoryOptions]);
 
@@ -2652,8 +2698,7 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
   const handleSourceChange = (value: string) => {
     setSourceProductId(value);
     setSourceBatchId('');
-    const nextSource = products.find((p: any) => String(p.id) === value);
-    setTargetCategory(nextSource ? getOppositeReclassCategory(nextSource.category) : '');
+    setTargetCategory('');
   };
 
   const handleSubmit = async () => {
@@ -2699,18 +2744,31 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#8b5cf6' }}>Request Reklasifikasi Stock</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--dim)', fontSize: 18, cursor: 'pointer', padding: 4 }}>&#10005;</button>
         </div>
-        <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Pindahkan stok antar identity produk pada gudang/entity yang sama. V1 hanya mendukung perpindahan FG ↔ BONUS.</div>
+        <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Pindahkan stok antar kategori identity produk pada gudang dan entity yang sama. Produk sumber bisa dicari dari kategori apa pun, lalu dipindahkan ke kategori tujuan lain.</div>
 
         <div style={{ marginBottom: 14 }}>
+          <label style={labelStyle}>Cari Produk Sumber</label>
+          <input
+            type="text"
+            value={sourceSearch}
+            onChange={(e) => setSourceSearch(e.target.value)}
+            placeholder="Cari nama, SKU, kategori, gudang, atau entity"
+            style={{ ...inputStyle, marginBottom: 8 }}
+          />
           <label style={labelStyle}>Produk Sumber *</label>
           <select value={sourceProductId} onChange={(e) => handleSourceChange(e.target.value)} style={inputStyle}>
             <option value="">-- Pilih Produk Sumber --</option>
-            {sourceOptions.map((p: any) => (
+            {filteredSourceOptions.map((p: any) => (
               <option key={p.id} value={p.id}>
                 {p.name} ({p.category}) [{p.warehouse}-{p.entity}] • saldo {Number(stockMap.get(Number(p.id)) || 0).toLocaleString('id-ID')}
               </option>
             ))}
           </select>
+          <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 6 }}>
+            {filteredSourceOptions.length > 0
+              ? `${filteredSourceOptions.length.toLocaleString('id-ID')} produk siap dipilih untuk reklasifikasi.`
+              : 'Tidak ada produk sumber yang cocok dengan pencarian ini.'}
+          </div>
         </div>
 
         {sourceProduct && (
@@ -2775,7 +2833,7 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
 
         <div style={{ marginBottom: 14 }}>
           <label style={labelStyle}>Alasan *</label>
-          <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Contoh: Shaker dijadikan bonus campaign April" style={inputStyle} />
+          <input type="text" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Contoh: Salah kategori, perlu dipindahkan ke identity yang benar" style={inputStyle} />
         </div>
 
         <div style={{ marginBottom: 14 }}>

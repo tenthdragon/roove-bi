@@ -531,7 +531,6 @@ const WAREHOUSE_GO_LIVE_BASELINE_LABEL = '21 Apr 2026';
 const WAREHOUSE_GO_LIVE_NOT_BEFORE_LABEL = '21 Apr 2026 14:00 WIB';
 const WAREHOUSE_GO_LIVE_NOT_BEFORE_AT = new Date('2026-04-21T14:00:00+07:00').toISOString();
 const QUANTITY_EPSILON = 0.000001;
-const ALLOWED_STOCK_RECLASS_CATEGORIES = new Set(['fg', 'bonus']);
 
 function isTerminalScalevOrderStatus(status?: string | null) {
   return TERMINAL_SCALEV_ORDER_STATUSES.has((status || '').toLowerCase());
@@ -3594,7 +3593,7 @@ export async function recordConversion(
 }
 
 // ============================================================
-// STOCK RECLASSIFICATION — FG <-> BONUS with approval
+// STOCK RECLASSIFICATION — cross-category with approval
 // ============================================================
 
 async function loadWarehouseProductsByIds(
@@ -3618,10 +3617,16 @@ async function resolveOrCreateStockReclassTargetProduct(
   sourceProduct: any,
   targetCategory: string,
 ) {
-  if (!ALLOWED_STOCK_RECLASS_CATEGORIES.has(targetCategory)) {
-    throw new Error('Kategori tujuan reklasifikasi tidak didukung.');
+  const normalizedTargetCategory = String(targetCategory || '').trim().toLowerCase();
+  const normalizedSourceCategory = String(sourceProduct?.category || '').trim().toLowerCase();
+
+  if (!normalizedTargetCategory) {
+    throw new Error('Kategori tujuan reklasifikasi wajib dipilih.');
   }
-  if (targetCategory === sourceProduct.category) {
+  if (!normalizedSourceCategory) {
+    throw new Error('Kategori produk sumber belum terisi.');
+  }
+  if (normalizedTargetCategory === normalizedSourceCategory) {
     throw new Error('Kategori tujuan harus berbeda dari kategori sumber.');
   }
 
@@ -3631,7 +3636,7 @@ async function resolveOrCreateStockReclassTargetProduct(
     .eq('name', sourceProduct.name)
     .eq('entity', sourceProduct.entity)
     .eq('warehouse', sourceProduct.warehouse)
-    .eq('category', targetCategory)
+    .eq('category', normalizedTargetCategory)
     .maybeSingle();
   if (existingErr) throw existingErr;
   if (existing) {
@@ -3641,7 +3646,7 @@ async function resolveOrCreateStockReclassTargetProduct(
   const insertRow: Record<string, any> = {
     name: sourceProduct.name,
     sku: sourceProduct.sku || null,
-    category: targetCategory,
+    category: normalizedTargetCategory,
     unit: sourceProduct.unit || 'pcs',
     price_list: Number(sourceProduct.price_list || 0),
     reorder_threshold: Number(sourceProduct.reorder_threshold || 0),
@@ -3669,7 +3674,7 @@ async function resolveOrCreateStockReclassTargetProduct(
       .eq('name', sourceProduct.name)
       .eq('entity', sourceProduct.entity)
       .eq('warehouse', sourceProduct.warehouse)
-      .eq('category', targetCategory)
+      .eq('category', normalizedTargetCategory)
       .maybeSingle();
     if (existingAfterRaceErr) throw existingAfterRaceErr;
     if (!existingAfterRace) throw createErr;
@@ -3687,11 +3692,13 @@ function validateStockReclassProducts(source: any, target: any) {
   if (Number(source.id) === Number(target.id)) {
     throw new Error('Produk sumber dan target harus berbeda.');
   }
-  if (!ALLOWED_STOCK_RECLASS_CATEGORIES.has(source.category) || !ALLOWED_STOCK_RECLASS_CATEGORIES.has(target.category)) {
-    throw new Error('Reklasifikasi v1 hanya mendukung kategori FG dan BONUS.');
+  const sourceCategory = String(source.category || '').trim().toLowerCase();
+  const targetCategory = String(target.category || '').trim().toLowerCase();
+  if (!sourceCategory || !targetCategory) {
+    throw new Error('Kategori produk sumber dan target wajib terisi.');
   }
-  if (source.category === target.category) {
-    throw new Error('Reklasifikasi harus mengubah kategori FG <-> BONUS.');
+  if (sourceCategory === targetCategory) {
+    throw new Error('Reklasifikasi harus mengubah kategori produk.');
   }
   if (source.entity !== target.entity || source.warehouse !== target.warehouse) {
     throw new Error('Produk sumber dan target harus berada di gudang/entity yang sama.');
