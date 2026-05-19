@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { buildNextScalevSyncJobPayload } from '@/lib/scalev-sync-job-payload';
 import { executeSyncJob } from '@/lib/sync-job-runners';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import {
   claimNextSyncJob,
+  createSyncJobDedupeKey,
+  enqueueSyncJob,
   failSyncJob,
   finalizeSyncJob,
   requeueStaleSyncJobs,
@@ -41,11 +44,30 @@ async function runOneJob(requestId: string) {
 
   try {
     const result = await executeSyncJob(job);
+    const nextScalevPayload = buildNextScalevSyncJobPayload(job, result.resultSummary);
+
+    if (nextScalevPayload) {
+      await enqueueSyncJob({
+        jobName: 'scalev_sync',
+        route: job.route,
+        mode: job.mode,
+        payload: nextScalevPayload as Record<string, any>,
+        dedupeKey: createSyncJobDedupeKey('scalev_sync', job.mode, nextScalevPayload as Record<string, any>),
+        requestedBy: job.requested_by,
+        requestedByName: job.requested_by_name,
+        requestId: job.request_id ?? job.id,
+        maxAttempts: job.max_attempts,
+        priority: job.priority,
+      });
+    }
 
     await finalizeSyncJob({
       jobId: job.id,
       status: result.status as SyncJobTerminalStatus,
-      resultSummary: result.resultSummary as any,
+      resultSummary: {
+        ...(result.resultSummary || {}),
+        ...(nextScalevPayload ? { follow_up_job_enqueued: true } : {}),
+      } as any,
       rowsProcessed: result.rowsProcessed,
       durationMs: Date.now() - startedAt,
     });

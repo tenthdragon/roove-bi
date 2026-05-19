@@ -21,6 +21,10 @@
       "schedule": "0 19 * * *"
     },
     {
+      "path": "/api/sync-jobs-worker",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/telegram-report",
       "schedule": "5 1 * * *"
     }

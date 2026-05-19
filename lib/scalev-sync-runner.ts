@@ -19,6 +19,8 @@ export type ScalevSyncOptions = {
   syncMode?: ScalevSyncMode;
   targetDate?: string | null;
   targetOrderIds?: string[] | null;
+  startAfterId?: number | null;
+  maxPendingOrders?: number | null;
 };
 
 export type ScalevSyncResult = {
@@ -30,8 +32,36 @@ export type ScalevSyncResult = {
   orders_still_pending: number;
   orders_errored: number;
   duration_ms: number;
+  has_more: boolean;
+  next_after_id: number | null;
   details: Array<Record<string, any>>;
 };
+
+export const DEFAULT_FULL_SYNC_BATCH_LIMIT = 100;
+const MAX_FULL_SYNC_BATCH_LIMIT = 250;
+
+export function normalizeFullSyncBatchLimit(value: number | null | undefined): number {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_FULL_SYNC_BATCH_LIMIT;
+  return Math.min(parsed, MAX_FULL_SYNC_BATCH_LIMIT);
+}
+
+export function trimFullSyncBatch<T extends { id?: number | null }>(
+  rows: T[],
+  batchLimit: number,
+): { rows: T[]; hasMore: boolean; nextAfterId: number | null } {
+  const normalizedLimit = normalizeFullSyncBatchLimit(batchLimit);
+  const hasMore = rows.length > normalizedLimit;
+  const batchRows = hasMore ? rows.slice(0, normalizedLimit) : rows.slice();
+  const lastRow = batchRows[batchRows.length - 1];
+  const nextAfterId = Number(lastRow?.id || 0);
+
+  return {
+    rows: batchRows,
+    hasMore,
+    nextAfterId: Number.isFinite(nextAfterId) && nextAfterId > 0 ? nextAfterId : null,
+  };
+}
 
 function getSyncLogType(syncMode: ScalevSyncMode) {
   return syncMode === 'full'
@@ -71,10 +101,14 @@ export async function runScalevSync(options: ScalevSyncOptions = {}): Promise<Sc
   const syncMode: ScalevSyncMode = options.syncMode || 'full';
   const targetDate = options.targetDate || null;
   const targetOrderIds = options.targetOrderIds || null;
+  const startAfterId = Math.floor(Number(options.startAfterId || 0)) || null;
+  const maxPendingOrders = normalizeFullSyncBatchLimit(options.maxPendingOrders);
   const svc = createServiceSupabase();
 
   let pendingOrdersCount = 0;
   let logId: number | null = null;
+  let hasMore = false;
+  let nextAfterId: number | null = null;
 
   try {
     const [bizRes, taxRes, storeRes] = await Promise.all([
@@ -170,12 +204,24 @@ export async function runScalevSync(options: ScalevSyncOptions = {}): Promise<Sc
         }
       }
     } else {
-      const { data, error } = await svc
+      let query = svc
         .from('scalev_orders')
         .select(lightCols)
         .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid', 'in_process']);
+
+      if (startAfterId) {
+        query = query.gt('id', startAfterId);
+      }
+
+      const { data, error } = await query
+        .order('id', { ascending: true })
+        .limit(maxPendingOrders + 1);
       if (error) throw error;
-      pendingOrders = data || [];
+
+      const fullSyncBatch = trimFullSyncBatch(data || [], maxPendingOrders);
+      pendingOrders = fullSyncBatch.rows;
+      hasMore = fullSyncBatch.hasMore;
+      nextAfterId = fullSyncBatch.nextAfterId;
     }
     pendingOrdersCount = pendingOrders.length;
 
@@ -398,6 +444,8 @@ export async function runScalevSync(options: ScalevSyncOptions = {}): Promise<Sc
       orders_still_pending: stillPendingCount,
       orders_errored: erroredCount,
       duration_ms: Date.now() - startTime,
+      has_more: syncMode === 'full' ? hasMore : false,
+      next_after_id: syncMode === 'full' ? nextAfterId : null,
       details,
     };
   } catch (err: any) {

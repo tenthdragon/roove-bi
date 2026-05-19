@@ -17,6 +17,12 @@ function getAggregateStatus(successCount: number, failedCount: number) {
   return 'failed';
 }
 
+function parseOptionalPositiveInt(value: unknown): number | null {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
 export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecutionResult> {
   switch (job.job_name) {
     case 'daily_ads_sync': {
@@ -64,10 +70,14 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
       const orderIds = Array.isArray(payload.order_ids)
         ? payload.order_ids.filter((value): value is string => typeof value === 'string')
         : null;
+      const startAfterId = parseOptionalPositiveInt(payload.after_id);
+      const maxPendingOrders = parseOptionalPositiveInt(payload.batch_limit);
       const result = await runScalevSync({
         syncMode: (typeof payload.mode === 'string' ? payload.mode : 'full') as ScalevSyncMode,
         targetDate: typeof payload.date === 'string' ? payload.date : null,
         targetOrderIds: orderIds,
+        startAfterId,
+        maxPendingOrders,
       });
       return {
         status: result.orders_errored > 0 ? (result.orders_updated + result.orders_still_pending > 0 ? 'partial' : 'failed') : 'success',
