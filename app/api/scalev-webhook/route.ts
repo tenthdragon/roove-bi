@@ -1188,12 +1188,8 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
   }
 
   if (!existing) {
-    if (shouldFallbackMissingMarketplaceOrder(sourceClassFields)) {
-      console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} not found, retrying via order.updated fallback`);
-      return handleOrderUpdated(data, businessCode, businessId, taxRateName);
-    }
-    console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} not found in DB, skipping`);
-    return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
+    console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} not found, retrying via order.updated fallback`);
+    return handleOrderUpdated(data, businessCode, businessId, taxRateName);
   }
 
   if (isMarketplaceAuthoritativeSource(existing.source)) {
