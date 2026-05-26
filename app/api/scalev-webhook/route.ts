@@ -19,6 +19,8 @@ import {
 } from '@/lib/warehouse-domain-helpers';
 import { limitByIp } from '@/lib/request-hardening';
 
+export const maxDuration = 60;
+
 function getServiceSupabase() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -538,6 +540,58 @@ function shouldFallbackMissingMarketplaceOrder(sourceClassFields: {
   source_class?: string | null;
 }) {
   return isMarketplaceSourceClass(sourceClassFields);
+}
+
+function getWarehouseReconcileWebhookTimeoutMs() {
+  const parsed = Math.trunc(Number(process.env.SCALEV_WEBHOOK_WAREHOUSE_TIMEOUT_MS));
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  return 2_000;
+}
+
+async function reconcileScalevOrderWarehouseBestEffort(
+  orderId: string,
+  scalevOrderDbId?: number | null,
+) {
+  const timeoutMs = getWarehouseReconcileWebhookTimeoutMs();
+  const failedResult = (err: any) => {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[scalev-webhook] warehouse reconcile failed for ${orderId}:`, message);
+    return {
+      action: 'warehouse_reconcile_failed',
+      reversed: 0,
+      deducted: 0,
+      skipped: 0,
+      unmapped_products: [],
+      error: message,
+    };
+  };
+
+  const deferredResult = () => {
+    console.warn(`[scalev-webhook] warehouse reconcile deferred for ${orderId} after ${timeoutMs}ms`);
+    return {
+      action: 'warehouse_reconcile_deferred',
+      reversed: 0,
+      deducted: 0,
+      skipped: 0,
+      unmapped_products: [],
+      error: `warehouse reconcile exceeded ${timeoutMs}ms`,
+    };
+  };
+
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  const reconcilePromise = reconcileScalevOrderWarehouse(orderId, scalevOrderDbId)
+    .catch(failedResult);
+
+  try {
+    return await Promise.race([
+      reconcilePromise,
+      new Promise<Awaited<typeof reconcilePromise>>((resolve) => {
+        timeout = setTimeout(() => resolve(deferredResult()), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 const WEBHOOK_TIMESTAMP_FIELDS = [
@@ -1105,7 +1159,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   }
 
   const warehouseResult = inserted
-    ? await reconcileScalevOrderWarehouse(orderId, inserted.id)
+    ? await reconcileScalevOrderWarehouseBestEffort(orderId, inserted.id)
     : null;
 
   // Log
@@ -1223,7 +1277,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
       return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
     }
 
-    const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+    const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
 
     await svc.from('scalev_sync_log').insert({
       status: 'success',
@@ -1253,7 +1307,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 
   // Skip if status hasn't actually changed
   if (existing.status === newStatus) {
-    const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+    const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
     return NextResponse.json({
       ok: true,
       skipped: true,
@@ -1442,7 +1496,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 
   }
 
-  const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+  const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
 
   // Log
   await svc.from('scalev_sync_log').insert({
@@ -1593,7 +1647,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
       return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
     }
 
-    const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+    const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
 
     await svc.from('scalev_sync_log').insert({
       status: 'success',
@@ -1739,7 +1793,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     }
   }
 
-  const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+  const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
 
   // Log
   await svc.from('scalev_sync_log').insert({
@@ -1854,7 +1908,7 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
     console.error(`[scalev-webhook][${businessCode}] order.deleted update error for ${orderId}:`, updateErr.message);
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
-  const warehouseResult = await reconcileScalevOrderWarehouse(orderId, existing.id);
+  const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
 
   // Log
   await svc.from('scalev_sync_log').insert({
@@ -1980,7 +2034,7 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
   }
 
   const warehouseResult = data.status
-    ? await reconcileScalevOrderWarehouse(orderId, existing.id)
+    ? await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id)
     : null;
 
   // Log
