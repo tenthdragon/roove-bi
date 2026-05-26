@@ -15,6 +15,8 @@
     "backfill:marketplace-intake-shipping": "tsx scripts/backfill-marketplace-intake-shipping.ts",
     "backfill:marketplace-tracking": "tsx scripts/ops/backfill-marketplace-tracking.ts",
     "check:mcp": "npm --prefix mcp-server run build",
+    "mcp:build": "npm --prefix mcp-server run build",
+    "mcp:start": "npm --prefix mcp-server run start",
     "sync-jobs:once": "tsx scripts/sync-jobs-worker.ts",
     "sync-jobs:loop": "tsx scripts/sync-jobs-worker.ts --loop"
   },
