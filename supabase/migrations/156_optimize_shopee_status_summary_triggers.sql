@@ -11,7 +11,7 @@
 -- range predicates so existing shipped_time indexes can be used.
 -- ============================================================================
 
-CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_scalev_order_lines_channel_product_order
+CREATE INDEX IF NOT EXISTS idx_scalev_order_lines_channel_product_order
   ON public.scalev_order_lines (sales_channel, product_type, scalev_order_id)
   INCLUDE (product_price_bt, discount_bt)
   WHERE product_type IS NOT NULL
