@@ -342,8 +342,12 @@ export default function OverviewPage() {
     const ad = dates.filter(d => byDate[d].s > 0).length;
     const hasOverhead = overheadData.length > 0;
     const tOverheadRaw = dates.reduce((a, d) => a + (overheadPerDay[d] || 0), 0);
-    const tNetProfit = tg - tAds - tMp - tShipping - tOverheadRaw;
+    const tCm2 = tg - tMp - tShipping;
+    const tCm3 = tCm2 - tAds;
+    const tNetProfit = tCm3 - tOverheadRaw;
     const npM = ts > 0 ? tNetProfit / ts * 100 : 0;
+    const cm2M = ts > 0 ? tCm2 / ts * 100 : 0;
+    const cm3M = ts > 0 ? tCm3 / ts * 100 : 0;
     const chart = dates.map(d => {
       const adsFee = adsByDate[d] || 0;
       const mpFee = mpByDate[d] || 0;
@@ -369,7 +373,7 @@ export default function OverviewPage() {
       };
     });
     const tShipment = chart.reduce((a,r) => a + r.shipment, 0);
-    return { ts, tg, tCogs, tAds, tMp, tShipping, tOverhead: tOverheadRaw, tNetProfit, tShipment, npM, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, mR: ts>0?(tAds+tMp)/ts*100:0, avg: ad>0?ts/ad:0 };
+    return { ts, tg, tCogs, tAds, tMp, tShipping, tCm2, tCm3, tOverhead: tOverheadRaw, tNetProfit, tShipment, npM, cm2M, cm3M, hasOverhead, ad, chart, gpM: ts>0?tg/ts*100:0, mR: ts>0?(tAds+tMp)/ts*100:0, avg: ad>0?ts/ad:0 };
   }, [filteredDailyData, adsData, filteredChannelData, filteredShippingData, overheadPerDay, overheadData, shipPerDay, rangeDates, adsByDate, mpByDate, shippingByDate]);
 
   // ── Previous month KPIs (for delta comparison) ──
@@ -381,8 +385,10 @@ export default function OverviewPage() {
     const tMp = filteredPrevChannelData.reduce((s, d) => s + Math.abs(Number(d.mp_admin_cost) || 0), 0);
     const tShipping = filteredPrevShippingData.reduce((s, d) => s + Number(d.shipping_charge || 0), 0);
     const prevOH = prevRangeDates.reduce((sum, dateKey) => sum + (prevOverheadPerDay[dateKey] || 0), 0);
-    const tNetProfit = tg - tAds - tMp - tShipping - prevOH;
-    return { ts, tg, tAds, tMp, tShipping, tNetProfit, gpM: ts>0?tg/ts*100:0, npM: ts>0?tNetProfit/ts*100:0 };
+    const tCm2 = tg - tMp - tShipping;
+    const tCm3 = tCm2 - tAds;
+    const tNetProfit = tCm3 - prevOH;
+    return { ts, tg, tAds, tMp, tShipping, tCm2, tCm3, tNetProfit, gpM: ts>0?tg/ts*100:0, cm2M: ts>0?tCm2/ts*100:0, cm3M: ts>0?tCm3/ts*100:0, npM: ts>0?tNetProfit/ts*100:0 };
   }, [filteredPrevDailyData, prevAdsData, filteredPrevChannelData, filteredPrevShippingData, prevRangeDates, prevOverheadPerDay]);
 
   const prevMonthLabel = useMemo(() => {
@@ -497,8 +503,8 @@ export default function OverviewPage() {
 
       {/* ── KPI Cards ── */}
       {(() => {
-        const prevCogs = prevKpi ? prevKpi.ts - prevKpi.tg : null;
-        const npColor = kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)';
+        const cm2Color = kpi.tCm2 >= 0 ? '#0ea5e9' : 'var(--red)';
+        const cm3Color = kpi.tCm3 >= 0 ? '#8b5cf6' : 'var(--red)';
         const cols = isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)';
         const Card = ({ label, value, sub, color, deltaVal, lowerBetter }: any) => {
           const hasD = deltaVal != null && !isNaN(deltaVal) && deltaVal !== 0;
@@ -517,22 +523,20 @@ export default function OverviewPage() {
           );
         };
         const dNs  = prevKpi?.ts > 0 ? (kpi.ts - prevKpi.ts) / prevKpi.ts * 100 : null;
-        const dGp  = prevKpi?.tg > 0 ? (kpi.tg - prevKpi.tg) / prevKpi.tg * 100 : null;
-        const dNp  = prevKpi?.tNetProfit ? (kpi.tNetProfit - prevKpi.tNetProfit) / Math.abs(prevKpi.tNetProfit) * 100 : null;
-        const dCogs= prevCogs > 0 ? (kpi.tCogs - prevCogs) / prevCogs * 100 : null;
-        const dAds = !feeError && !prevFeeError && prevKpi?.tAds > 0 ? (kpi.tAds - prevKpi.tAds) / prevKpi.tAds * 100 : null;
-        const dMp  = !feeError && !prevFeeError && prevKpi?.tMp > 0 ? (kpi.tMp - prevKpi.tMp) / prevKpi.tMp * 100 : null;
-        const dShip= !shippingError && !prevShippingError && prevKpi?.tShipping > 0 ? (kpi.tShipping - prevKpi.tShipping) / prevKpi.tShipping * 100 : null;
+        const dCm1 = prevKpi?.tg > 0 ? (kpi.tg - prevKpi.tg) / prevKpi.tg * 100 : null;
+        const dCm2 = !feeError && !prevFeeError && !shippingError && !prevShippingError && prevKpi?.tCm2 ? (kpi.tCm2 - prevKpi.tCm2) / Math.abs(prevKpi.tCm2) * 100 : null;
+        const dCm3 = !feeError && !prevFeeError && !shippingError && !prevShippingError && prevKpi?.tCm3 ? (kpi.tCm3 - prevKpi.tCm3) / Math.abs(prevKpi.tCm3) * 100 : null;
+        const cogsPct = kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : '0.0';
+        const channelLogisticsPct = kpi.ts > 0 ? ((kpi.tMp + kpi.tShipping) / kpi.ts * 100).toFixed(1) : '0.0';
+        const mktPct = kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : '0.0';
+        const cm2Unavailable = Boolean(feeError || shippingError);
+        const cm3Unavailable = Boolean(feeError || shippingError);
         return (
           <div style={{ display:'grid', gridTemplateColumns:cols, gap:10, marginBottom:16 }}>
             <Card label="Net Sales" value={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg Rp ${fmtCompact(kpi.avg)}/hari · ${kpi.tShipment.toLocaleString('id-ID')} shipment`} color="var(--accent)" deltaVal={dNs} />
-            <Card label={`Gross Profit · ${kpi.gpM.toFixed(1)}%`} value={`Rp ${fmtCompact(kpi.tg)}`} color="var(--green)" deltaVal={dGp} />
-            <Card label={`Net Profit · ${kpi.npM.toFixed(1)}%`} value={`Rp ${fmtCompact(kpi.tNetProfit)}`} color={npColor} deltaVal={dNp} />
-            <Card label={`COGS · ${kpi.ts>0?(kpi.tCogs/kpi.ts*100).toFixed(1):0}%`} value={`Rp ${fmtCompact(kpi.tCogs)}`} color="var(--dim)" deltaVal={dCogs} lowerBetter />
-            <Card label={`Mkt Fee · ${kpi.ts>0?(kpi.tAds/kpi.ts*100).toFixed(1):0}%`} value={feeError?'—':`Rp ${fmtCompact(kpi.tAds)}`} color="var(--yellow)" deltaVal={feeError?null:dAds} lowerBetter />
-            <Card label={`MP Fee · ${kpi.ts>0?(kpi.tMp/kpi.ts*100).toFixed(1):0}%`} value={feeError?'—':`Rp ${fmtCompact(kpi.tMp)}`} color="var(--text-secondary)" deltaVal={feeError?null:dMp} lowerBetter />
-            <Card label={`Shipping · ${kpi.ts>0?(kpi.tShipping/kpi.ts*100).toFixed(1):0}%`} value={shippingError?'—':`Rp ${fmtCompact(kpi.tShipping)}`} color="var(--text-secondary)" deltaVal={dShip} lowerBetter />
-            {kpi.hasOverhead && <Card label={`Overhead · ${kpi.ts>0?(kpi.tOverhead/kpi.ts*100).toFixed(1):0}% est.`} value={`Rp ${fmtCompact(kpi.tOverhead)}`} color="var(--text-secondary)" deltaVal={null} />}
+            <Card label={`CM1 · ${kpi.gpM.toFixed(1)}%`} value={`Rp ${fmtCompact(kpi.tg)}`} sub={`Gross profit · COGS ${cogsPct}%`} color="var(--green)" deltaVal={dCm1} />
+            <Card label={`CM2 · ${kpi.cm2M.toFixed(1)}%`} value={cm2Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm2)}`} sub={cm2Unavailable ? 'MP / shipping data belum lengkap' : `MP + shipping ${channelLogisticsPct}%`} color={cm2Color} deltaVal={cm2Unavailable ? null : dCm2} />
+            <Card label={`CM3 · ${kpi.cm3M.toFixed(1)}%`} value={cm3Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm3)}`} sub={cm3Unavailable ? 'Marketing/channel data belum lengkap' : `Mkt fee ${mktPct}%${kpi.hasOverhead ? ` · After OH Rp ${fmtCompact(kpi.tNetProfit)}` : ''}`} color={cm3Color} deltaVal={cm3Unavailable ? null : dCm3} />
           </div>
         );
       })()}
