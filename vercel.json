@@ -22,7 +22,7 @@
     },
     {
       "path": "/api/sync-jobs-worker",
-      "schedule": "*/5 * * * *"
+      "schedule": "15 19 * * *"
     },
     {
       "path": "/api/telegram-report",
