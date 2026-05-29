@@ -364,21 +364,23 @@ export default function ChannelsPage() {
       .map(([ch, v]) => {
         const adsCost = adsPerChannel[ch] || 0;
         const shippingCharge = shippingByChannel[ch] || 0;
-        const totalCost = v.mpAdmin + adsCost;
-        const profitAfterAll = v.gp - totalCost;
+        const cm1 = v.gp;
+        const cm2 = cm1 - v.mpAdmin - shippingCharge;
+        const cm3 = cm2 - adsCost;
         return {
           name: ch,
           revenue: v.revenue,
           gp: v.gp,
+          cm1,
+          cm2,
+          cm3,
           mpAdmin: v.mpAdmin,
           adsCost,
           shippingCharge,
-          totalCost,
-          profitAfterAll,
           pct: totalRevenue > 0 ? (v.revenue / totalRevenue) * 100 : 0,
-          gpMargin: v.revenue > 0 ? (v.gp / v.revenue) * 100 : 0,
-          costRatio: v.revenue > 0 ? (totalCost / v.revenue) * 100 : 0,
-          marginAfterAll: v.revenue > 0 ? (profitAfterAll / v.revenue) * 100 : 0,
+          cm1Pct: v.revenue > 0 ? (cm1 / v.revenue) * 100 : 0,
+          cm2Pct: v.revenue > 0 ? (cm2 / v.revenue) * 100 : 0,
+          cm3Pct: v.revenue > 0 ? (cm3 / v.revenue) * 100 : 0,
         };
       })
       .filter(c => c.revenue > 0)
@@ -408,19 +410,22 @@ export default function ChannelsPage() {
     Object.entries(byC).forEach(([ch, v]) => {
       const adsCost = prevAdsPerChannel[ch] || 0;
       const shippingCharge = prevShippingByChannel[ch] || 0;
-      const totalCost = v.mpAdmin + adsCost;
-      const profitAfterAll = v.gp - totalCost;
+      const cm1 = v.gp;
+      const cm2 = cm1 - v.mpAdmin - shippingCharge;
+      const cm3 = cm2 - adsCost;
       result[ch] = {
         name: ch,
         revenue: v.revenue,
         gp: v.gp,
+        cm1,
+        cm2,
+        cm3,
         mpAdmin: v.mpAdmin,
         adsCost,
         shippingCharge,
-        totalCost,
-        profitAfterAll,
-        costRatio: v.revenue > 0 ? (totalCost / v.revenue) * 100 : 0,
-        marginAfterAll: v.revenue > 0 ? (profitAfterAll / v.revenue) * 100 : 0,
+        cm1Pct: v.revenue > 0 ? (cm1 / v.revenue) * 100 : 0,
+        cm2Pct: v.revenue > 0 ? (cm2 / v.revenue) * 100 : 0,
+        cm3Pct: v.revenue > 0 ? (cm3 / v.revenue) * 100 : 0,
       };
     });
     return result;
@@ -512,13 +517,14 @@ export default function ChannelsPage() {
       }
       adsCost += Math.abs(Number(d.spent || 0));
     });
-    const totalCost = mpAdmin + adsCost;
-    const profitAfterAll = gp - totalCost;
+    const cm1 = gp;
+    const cm2 = cm1 - mpAdmin - shipping;
+    const cm3 = cm2 - adsCost;
     const byChannel: Record<string, number> = {};
     filtered.forEach(d => {
       if (d.channel) byChannel[d.channel] = (byChannel[d.channel] || 0) + (Number(d.net_sales) || 0);
     });
-    return { total, gp, mpAdmin, shipping, adsCost, totalCost, profitAfterAll, byChannel };
+    return { total, gp, cm1, cm2, cm3, mpAdmin, shipping, adsCost, byChannel };
   }, [prevChannelData, prevShippingData, resolvedPrevAdsData, selectedProduct]);
 
   const totalRevenue = channels.reduce((a, c) => a + c.revenue, 0);
@@ -528,9 +534,9 @@ export default function ChannelsPage() {
     .filter(d => selectedProduct === 'all' || d.product === selectedProduct)
     .reduce((sum, d) => sum + (Number(d.shipping_charge) || 0), 0);
   const totalAdsCost = channels.reduce((a, c) => a + c.adsCost, 0);
-  const totalCost = channels.reduce((a, c) => a + c.totalCost, 0);
-  const totalProfitAfterAll = channels.reduce((a, c) => a + c.profitAfterAll, 0);
-  const totalMpRevenue = channels.filter(c => c.mpAdmin > 0).reduce((a, c) => a + c.revenue, 0);
+  const totalCM1 = totalGP;
+  const totalCM2 = totalCM1 - totalMpAdmin - totalShippingCharges;
+  const totalCM3 = totalCM2 - totalAdsCost;
 
   // ── Product Breakdown: aggregate by product across all channels ──
   const productBreakdown = useMemo(() => {
@@ -557,21 +563,23 @@ export default function ChannelsPage() {
       .map(([product, v]) => {
         const adsCost = adsByProduct[product] || 0;
         const shippingCharge = shippingByProduct[product] || 0;
-        const totalCostP = v.mpAdmin + adsCost;
-        const profitAfterAll = v.gp - totalCostP;
+        const cm1 = v.gp;
+        const cm2 = cm1 - v.mpAdmin - shippingCharge;
+        const cm3 = cm2 - adsCost;
         return {
           name: product,
           revenue: v.revenue,
           gp: v.gp,
+          cm1,
+          cm2,
+          cm3,
           mpAdmin: v.mpAdmin,
           adsCost,
           shippingCharge,
-          totalCost: totalCostP,
-          profitAfterAll,
           pct: totalRevenue > 0 ? (v.revenue / totalRevenue) * 100 : 0,
-          gpMargin: v.revenue > 0 ? (v.gp / v.revenue) * 100 : 0,
-          costRatio: v.revenue > 0 ? (totalCostP / v.revenue) * 100 : 0,
-          marginAfterAll: v.revenue > 0 ? (profitAfterAll / v.revenue) * 100 : 0,
+          cm1Pct: v.revenue > 0 ? (cm1 / v.revenue) * 100 : 0,
+          cm2Pct: v.revenue > 0 ? (cm2 / v.revenue) * 100 : 0,
+          cm3Pct: v.revenue > 0 ? (cm3 / v.revenue) * 100 : 0,
         };
       })
       .filter(p => p.revenue > 0)
@@ -594,18 +602,21 @@ export default function ChannelsPage() {
     const mpAdmin = scalevRows.reduce((sum, row) => sum + row.mpAdmin, 0);
     const adsCost = scalevRows.reduce((sum, row) => sum + row.adsCost, 0);
     const shippingCharge = scalevRows.reduce((sum, row) => sum + row.shippingCharge, 0);
-    const totalCost = mpAdmin + adsCost;
-    const profitAfterAll = gp - totalCost;
+    const cm1 = gp;
+    const cm2 = cm1 - mpAdmin - shippingCharge;
+    const cm3 = cm2 - adsCost;
     return {
       revenue,
       gp,
+      cm1,
+      cm2,
+      cm3,
       mpAdmin,
       adsCost,
       shippingCharge,
-      totalCost,
-      profitAfterAll,
-      costRatio: revenue > 0 ? (totalCost / revenue) * 100 : 0,
-      marginAfterAll: revenue > 0 ? (profitAfterAll / revenue) * 100 : 0,
+      cm1Pct: revenue > 0 ? (cm1 / revenue) * 100 : 0,
+      cm2Pct: revenue > 0 ? (cm2 / revenue) * 100 : 0,
+      cm3Pct: revenue > 0 ? (cm3 / revenue) * 100 : 0,
     };
   }, [prevChannelBreakdown]);
 
@@ -613,13 +624,15 @@ export default function ChannelsPage() {
     if (!prevRevenue) return null;
     return {
       revenue: prevRevenue.total,
+      cm1: prevRevenue.cm1,
+      cm2: prevRevenue.cm2,
+      cm3: prevRevenue.cm3,
       mpAdmin: prevRevenue.mpAdmin,
       adsCost: prevRevenue.adsCost,
       shippingCharge: prevRevenue.shipping,
-      totalCost: prevRevenue.totalCost,
-      profitAfterAll: prevRevenue.profitAfterAll,
-      costRatio: prevRevenue.total > 0 ? (prevRevenue.totalCost / prevRevenue.total) * 100 : 0,
-      marginAfterAll: prevRevenue.total > 0 ? (prevRevenue.profitAfterAll / prevRevenue.total) * 100 : 0,
+      cm1Pct: prevRevenue.total > 0 ? (prevRevenue.cm1 / prevRevenue.total) * 100 : 0,
+      cm2Pct: prevRevenue.total > 0 ? (prevRevenue.cm2 / prevRevenue.total) * 100 : 0,
+      cm3Pct: prevRevenue.total > 0 ? (prevRevenue.cm3 / prevRevenue.total) * 100 : 0,
     };
   }, [prevRevenue]);
 
@@ -635,9 +648,12 @@ export default function ChannelsPage() {
       mpAdmin: prev.mpAdmin > 0 ? { value: ((current.mpAdmin - prev.mpAdmin) / prev.mpAdmin) * 100, higherIsBetter: false } : undefined,
       adsCost: prev.adsCost > 0 ? { value: ((current.adsCost - prev.adsCost) / prev.adsCost) * 100, higherIsBetter: false } : undefined,
       shippingCharge: !shippingError && !prevShippingError && prev.shippingCharge > 0 ? { value: ((current.shippingCharge - prev.shippingCharge) / prev.shippingCharge) * 100, higherIsBetter: false } : undefined,
-      costRatio: prev.revenue > 0 ? { value: current.costRatio - prev.costRatio, suffix: 'pp', higherIsBetter: false } : undefined,
-      profitAfterAll: prev.profitAfterAll !== 0 ? { value: ((current.profitAfterAll - prev.profitAfterAll) / Math.abs(prev.profitAfterAll)) * 100 } : undefined,
-      marginAfterAll: prev.revenue > 0 ? { value: current.marginAfterAll - prev.marginAfterAll, suffix: 'pp' } : undefined,
+      cm1: prev.cm1 !== 0 ? { value: ((current.cm1 - prev.cm1) / Math.abs(prev.cm1)) * 100 } : undefined,
+      cm2: prev.cm2 !== 0 ? { value: ((current.cm2 - prev.cm2) / Math.abs(prev.cm2)) * 100 } : undefined,
+      cm3: prev.cm3 !== 0 ? { value: ((current.cm3 - prev.cm3) / Math.abs(prev.cm3)) * 100 } : undefined,
+      cm1Pct: prev.revenue > 0 ? { value: current.cm1Pct - prev.cm1Pct, suffix: 'pp' } : undefined,
+      cm2Pct: prev.revenue > 0 ? { value: current.cm2Pct - prev.cm2Pct, suffix: 'pp' } : undefined,
+      cm3Pct: prev.revenue > 0 ? { value: current.cm3Pct - prev.cm3Pct, suffix: 'pp' } : undefined,
     };
   };
   const KPI = ({ label, val, sub, color = 'var(--accent)', delta, delta2 }: { label: string; val: string; sub?: string; color?: string; delta?: any; delta2?: any }) => (
@@ -732,7 +748,7 @@ export default function ChannelsPage() {
           <span style={{ color: 'var(--text)' }}>
             {unmappedAdsSummary.platforms.map(({ platform, spent }) => `${platform} Rp ${fmtCompact(spent)}`).join(', ')}
           </span>
-          . Spend ini tetap masuk total `Mkt Cost` dan alokasi channel level, tetapi belum bisa dimasukkan ke product-level attribution sampai mapping store-brand dibenahi.
+          . Spend ini tetap masuk total `Mkt Fee` dan alokasi channel level, tetapi belum bisa dimasukkan ke product-level attribution sampai mapping store-brand dibenahi.
         </div>
       )}
 
@@ -749,41 +765,28 @@ export default function ChannelsPage() {
         <KPI label="Net Sales" val={`Rp ${fmtCompact(totalRevenue)}`} sub={`${channels.length} active channels`} color="var(--accent)"
           delta={prevRevenue && prevRevenue.total > 0 ? { value: ((totalRevenue - prevRevenue.total) / prevRevenue.total) * 100 } : undefined} />
         <KPI
-          label="Admin Fee"
-          val={`Rp ${fmtCompact(totalMpAdmin)}`}
-          sub={
-            <span>
-              <span style={{ color: '#c4b5fd' }}>{totalMpRevenue > 0 ? (totalMpAdmin / totalMpRevenue * 100).toFixed(1) : 0}%</span>
-              <span style={{ color: 'var(--dim)' }}> of MP rev</span>
-              <span style={{ color: 'var(--dim)', margin: '0 5px' }}>·</span>
-              <span style={{ color: 'var(--text-secondary)' }}>{totalRevenue > 0 ? (totalMpAdmin / totalRevenue * 100).toFixed(1) : 0}%</span>
-              <span style={{ color: 'var(--dim)' }}> of total</span>
-            </span>
-          }
-          color="#8b5cf6"
-          delta={prevRevenue && prevRevenue.mpAdmin > 0 ? { value: ((totalMpAdmin - prevRevenue.mpAdmin) / prevRevenue.mpAdmin) * 100, higherIsBetter: false } : undefined}
+          label="CM1"
+          val={`Rp ${fmtCompact(totalCM1)}`}
+          sub={`${totalRevenue > 0 ? (totalCM1 / totalRevenue * 100).toFixed(1) : 0}% of net sales`}
+          color="var(--green)"
+          delta={prevRevenue && prevRevenue.cm1 !== 0 ? { value: ((totalCM1 - prevRevenue.cm1) / Math.abs(prevRevenue.cm1)) * 100 } : undefined}
+          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalCM1 / totalRevenue * 100 : 0) - (prevRevenue.cm1 / prevRevenue.total * 100), suffix: 'pp', label: 'CM1%' } : undefined}
         />
         <KPI
-          label="Mkt Cost"
-          val={`Rp ${fmtCompact(totalAdsCost)}`}
-          sub={`${totalRevenue > 0 ? (totalAdsCost / totalRevenue * 100).toFixed(1) : 0}% of revenue`}
-          color="var(--yellow)"
-          delta={prevRevenue && prevRevenue.adsCost > 0 ? { value: ((totalAdsCost - prevRevenue.adsCost) / prevRevenue.adsCost) * 100, higherIsBetter: false } : undefined}
-        />
-        <KPI
-          label="Shipping Fee"
-          val={shippingError ? '—' : `Rp ${fmtCompact(totalShippingCharges)}`}
-          sub={shippingError ? 'Data shipping tidak tersedia' : `${totalRevenue > 0 ? (totalShippingCharges / totalRevenue * 100).toFixed(1) : 0}% of revenue`}
+          label="CM2"
+          val={`Rp ${fmtCompact(totalCM2)}`}
+          sub={`MP + shipping: ${totalRevenue > 0 ? ((totalMpAdmin + totalShippingCharges) / totalRevenue * 100).toFixed(1) : 0}% of net sales`}
           color="#0ea5e9"
-          delta={!shippingError && !prevShippingError && prevRevenue && prevRevenue.shipping > 0 ? { value: ((totalShippingCharges - prevRevenue.shipping) / prevRevenue.shipping) * 100, higherIsBetter: false } : undefined}
+          delta={prevRevenue && prevRevenue.cm2 !== 0 ? { value: ((totalCM2 - prevRevenue.cm2) / Math.abs(prevRevenue.cm2)) * 100 } : undefined}
+          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalCM2 / totalRevenue * 100 : 0) - (prevRevenue.cm2 / prevRevenue.total * 100), suffix: 'pp', label: 'CM2%' } : undefined}
         />
         <KPI
-          label="GP After Mkt + Adm"
-          val={`Rp ${fmtCompact(totalProfitAfterAll)}`}
-          sub={`Margin: ${totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%`}
-          color={totalProfitAfterAll >= 0 ? '#06b6d4' : 'var(--red)'}
-          delta={prevRevenue && prevRevenue.profitAfterAll !== 0 ? { value: ((totalProfitAfterAll - prevRevenue.profitAfterAll) / Math.abs(prevRevenue.profitAfterAll)) * 100 } : undefined}
-          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalProfitAfterAll / totalRevenue * 100 : 0) - (prevRevenue.profitAfterAll / prevRevenue.total * 100), suffix: 'pp', label: 'margin' } : undefined}
+          label="CM3"
+          val={`Rp ${fmtCompact(totalCM3)}`}
+          sub={`Mkt fee: ${totalRevenue > 0 ? (totalAdsCost / totalRevenue * 100).toFixed(1) : 0}% of net sales`}
+          color={totalCM3 >= 0 ? '#06b6d4' : 'var(--red)'}
+          delta={prevRevenue && prevRevenue.cm3 !== 0 ? { value: ((totalCM3 - prevRevenue.cm3) / Math.abs(prevRevenue.cm3)) * 100 } : undefined}
+          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalCM3 / totalRevenue * 100 : 0) - (prevRevenue.cm3 / prevRevenue.total * 100), suffix: 'pp', label: 'CM3%' } : undefined}
         />
       </div>
 
@@ -925,10 +928,10 @@ export default function ChannelsPage() {
         <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4, marginBottom: 12 }}>
           Delta per baris mengikuti rumus KPI cards dan dibandingkan terhadap {prevMonthLabel}.
         </div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 1040 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--border)' }}>
-              {['Channel', 'Net Sales', '% Share', 'Admin Fee', 'Mkt Cost', 'Shipping Fee', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
+              {['Channel', 'Net Sales', '% Share', 'CM1', 'MP Fee', 'Shipping', 'CM2', 'Mkt Fee', 'CM3', 'CM3 %'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Channel' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
@@ -947,11 +950,13 @@ export default function ChannelsPage() {
                 adsCost: scalevGroup.reduce((a, c) => a + c.adsCost, 0),
                 shippingCharge: scalevGroup.reduce((a, c) => a + c.shippingCharge, 0),
               };
-              const svTotalCost = sv.mpAdmin + sv.adsCost;
-              const svProfit = sv.gp - svTotalCost;
+              const svCM1 = sv.gp;
+              const svCM2 = svCM1 - sv.mpAdmin - sv.shippingCharge;
+              const svCM3 = svCM2 - sv.adsCost;
               const svPct = totalRevenue > 0 ? (sv.revenue / totalRevenue) * 100 : 0;
-              const svCostRatio = sv.revenue > 0 ? (svTotalCost / sv.revenue) * 100 : 0;
-              const svMargin = sv.revenue > 0 ? (svProfit / sv.revenue) * 100 : 0;
+              const svCM1Pct = sv.revenue > 0 ? (svCM1 / sv.revenue) * 100 : 0;
+              const svCM2Pct = sv.revenue > 0 ? (svCM2 / sv.revenue) * 100 : 0;
+              const svCM3Pct = sv.revenue > 0 ? (svCM3 / sv.revenue) * 100 : 0;
 
               const renderRow = (c, compact = false) => {
                 const prev = prevChannelBreakdown[c.name];
@@ -970,41 +975,39 @@ export default function ChannelsPage() {
                     {deltas.revenue && <DeltaLine {...deltas.revenue} compact={compact} />}
                   </td>
                   <td style={{ padding: cellPadding, textAlign: 'right', color: 'var(--dim)' }}>{c.pct.toFixed(1)}%</td>
+                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? '#059669' : 'var(--green)' }}>
+                    <div>{fmtRupiah(c.cm1)}</div>
+                    {deltas.cm1 && <DeltaLine {...deltas.cm1} compact={compact} />}
+                  </td>
                   <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? '#7c3aed' : '#8b5cf6' }}>
                     {c.mpAdmin > 0 ? fmtRupiah(c.mpAdmin) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     {deltas.mpAdmin && <DeltaLine {...deltas.mpAdmin} compact={compact} />}
-                  </td>
-                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? '#d97706' : 'var(--yellow)' }}>
-                    {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                    {deltas.adsCost && <DeltaLine {...deltas.adsCost} compact={compact} />}
                   </td>
                   <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: '#0ea5e9' }}>
                     {c.shippingCharge > 0 ? fmtRupiah(c.shippingCharge) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     {deltas.shippingCharge && <DeltaLine {...deltas.shippingCharge} compact={compact} />}
                   </td>
-                  <td style={{ padding: cellPadding, textAlign: 'right' }}>
-                    {c.totalCost > 0 ? (
-                      <span style={{
-                        padding: '2px 7px', borderRadius: 5, fontSize: badgeFontSize, fontWeight: 700,
-                        background: c.costRatio > 40 ? 'var(--badge-red-bg)' : c.costRatio > 25 ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)',
-                        color: c.costRatio > 40 ? 'var(--red)' : c.costRatio > 25 ? 'var(--yellow)' : 'var(--green)',
-                      }}>{c.costRatio.toFixed(1)}%</span>
-                    ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                    {deltas.costRatio && <DeltaLine {...deltas.costRatio} compact={compact} />}
+                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? '#0891b2' : '#06b6d4' }}>
+                    <div>{fmtRupiah(c.cm2)}</div>
+                    {deltas.cm2 && <DeltaLine {...deltas.cm2} compact={compact} />}
                   </td>
-                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: c.profitAfterAll >= 0 ? (compact ? '#059669' : 'var(--green)') : (compact ? '#dc2626' : 'var(--red)') }}>
-                    <div>{fmtRupiah(c.profitAfterAll)}</div>
-                    {deltas.profitAfterAll && <DeltaLine {...deltas.profitAfterAll} compact={compact} />}
+                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? '#d97706' : 'var(--yellow)' }}>
+                    {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                    {deltas.adsCost && <DeltaLine {...deltas.adsCost} compact={compact} />}
+                  </td>
+                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: c.cm3 >= 0 ? (compact ? '#059669' : 'var(--green)') : (compact ? '#dc2626' : 'var(--red)') }}>
+                    <div>{fmtRupiah(c.cm3)}</div>
+                    {deltas.cm3 && <DeltaLine {...deltas.cm3} compact={compact} />}
                   </td>
                   <td style={{ padding: cellPadding, textAlign: 'right' }}>
                     <div>
                       <span style={{
                         padding: '2px 7px', borderRadius: 5, fontSize: badgeFontSize, fontWeight: 700,
-                        background: c.marginAfterAll >= 30 ? 'var(--badge-green-bg)' : c.marginAfterAll >= 10 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
-                        color: c.marginAfterAll >= 30 ? 'var(--green)' : c.marginAfterAll >= 10 ? 'var(--yellow)' : 'var(--red)',
-                      }}>{c.marginAfterAll.toFixed(1)}%</span>
+                        background: c.cm3Pct >= 30 ? 'var(--badge-green-bg)' : c.cm3Pct >= 10 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
+                        color: c.cm3Pct >= 30 ? 'var(--green)' : c.cm3Pct >= 10 ? 'var(--yellow)' : 'var(--red)',
+                      }}>{c.cm3Pct.toFixed(1)}%</span>
                     </div>
-                    {deltas.marginAfterAll && <DeltaLine {...deltas.marginAfterAll} compact={compact} />}
+                    {deltas.cm3Pct && <DeltaLine {...deltas.cm3Pct} compact={compact} />}
                   </td>
                 </tr>
                 );
@@ -1018,13 +1021,15 @@ export default function ChannelsPage() {
                       {(() => {
                         const svDeltas = getComparisonDeltas({
                           revenue: sv.revenue,
+                          cm1: svCM1,
+                          cm2: svCM2,
+                          cm3: svCM3,
+                          cm1Pct: svCM1Pct,
+                          cm2Pct: svCM2Pct,
+                          cm3Pct: svCM3Pct,
                           mpAdmin: sv.mpAdmin,
                           adsCost: sv.adsCost,
                           shippingCharge: sv.shippingCharge,
-                          totalCost: svTotalCost,
-                          profitAfterAll: svProfit,
-                          costRatio: svCostRatio,
-                          marginAfterAll: svMargin,
                         }, prevScalevMetrics);
                         return (
                       <tr
@@ -1043,43 +1048,39 @@ export default function ChannelsPage() {
                           {svDeltas.revenue && <DeltaLine {...svDeltas.revenue} compact />}
                         </td>
                         <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--dim)' }}>{svPct.toFixed(1)}%</td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--green)' }}>
+                          <div>{fmtRupiah(svCM1)}</div>
+                          {svDeltas.cm1 && <DeltaLine {...svDeltas.cm1} compact />}
+                        </td>
                         <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#8b5cf6' }}>
                           {sv.mpAdmin > 0 ? fmtRupiah(sv.mpAdmin) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           {svDeltas.mpAdmin && <DeltaLine {...svDeltas.mpAdmin} compact />}
-                        </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
-                          {sv.adsCost > 0 ? fmtRupiah(sv.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                          {svDeltas.adsCost && <DeltaLine {...svDeltas.adsCost} compact />}
                         </td>
                         <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#0ea5e9' }}>
                           {sv.shippingCharge > 0 ? fmtRupiah(sv.shippingCharge) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           {svDeltas.shippingCharge && <DeltaLine {...svDeltas.shippingCharge} compact />}
                         </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                          <div>
-                            {svTotalCost > 0 ? (
-                            <span style={{
-                              padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                              background: svCostRatio > 40 ? 'var(--badge-red-bg)' : svCostRatio > 25 ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)',
-                              color: svCostRatio > 40 ? 'var(--red)' : svCostRatio > 25 ? 'var(--yellow)' : 'var(--green)',
-                            }}>{svCostRatio.toFixed(1)}%</span>
-                          ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                          </div>
-                          {svDeltas.costRatio && <DeltaLine {...svDeltas.costRatio} compact />}
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#06b6d4' }}>
+                          <div>{fmtRupiah(svCM2)}</div>
+                          {svDeltas.cm2 && <DeltaLine {...svDeltas.cm2} compact />}
                         </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: svProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                          <div>{fmtRupiah(svProfit)}</div>
-                          {svDeltas.profitAfterAll && <DeltaLine {...svDeltas.profitAfterAll} compact />}
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
+                          {sv.adsCost > 0 ? fmtRupiah(sv.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                          {svDeltas.adsCost && <DeltaLine {...svDeltas.adsCost} compact />}
+                        </td>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: svCM3 >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                          <div>{fmtRupiah(svCM3)}</div>
+                          {svDeltas.cm3 && <DeltaLine {...svDeltas.cm3} compact />}
                         </td>
                         <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                           <div>
                             <span style={{
                             padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                            background: svMargin >= 30 ? 'var(--badge-green-bg)' : svMargin >= 10 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
-                            color: svMargin >= 30 ? 'var(--green)' : svMargin >= 10 ? 'var(--yellow)' : 'var(--red)',
-                          }}>{svMargin.toFixed(1)}%</span>
+                            background: svCM3Pct >= 30 ? 'var(--badge-green-bg)' : svCM3Pct >= 10 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
+                            color: svCM3Pct >= 30 ? 'var(--green)' : svCM3Pct >= 10 ? 'var(--yellow)' : 'var(--red)',
+                          }}>{svCM3Pct.toFixed(1)}%</span>
                           </div>
-                          {svDeltas.marginAfterAll && <DeltaLine {...svDeltas.marginAfterAll} compact />}
+                          {svDeltas.cm3Pct && <DeltaLine {...svDeltas.cm3Pct} compact />}
                         </td>
                       </tr>
                         );
@@ -1097,13 +1098,15 @@ export default function ChannelsPage() {
             {(() => {
               const totalDeltas = getComparisonDeltas({
                 revenue: totalRevenue,
+                cm1: totalCM1,
+                cm2: totalCM2,
+                cm3: totalCM3,
+                cm1Pct: totalRevenue > 0 ? (totalCM1 / totalRevenue) * 100 : 0,
+                cm2Pct: totalRevenue > 0 ? (totalCM2 / totalRevenue) * 100 : 0,
+                cm3Pct: totalRevenue > 0 ? (totalCM3 / totalRevenue) * 100 : 0,
                 mpAdmin: totalMpAdmin,
                 adsCost: totalAdsCost,
                 shippingCharge: totalShippingCharges,
-                totalCost,
-                profitAfterAll: totalProfitAfterAll,
-                costRatio: totalRevenue > 0 ? (totalCost / totalRevenue) * 100 : 0,
-                marginAfterAll: totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue) * 100 : 0,
               }, prevTotalMetrics);
               return (
             <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg)' }}>
@@ -1113,37 +1116,37 @@ export default function ChannelsPage() {
                 {totalDeltas.revenue && <DeltaLine {...totalDeltas.revenue} compact />}
               </td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--green)' }}>
+                <div>{fmtRupiah(totalCM1)}</div>
+                {totalDeltas.cm1 && <DeltaLine {...totalDeltas.cm1} compact />}
+              </td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>
                 <div>{fmtRupiah(totalMpAdmin)}</div>
                 {totalDeltas.mpAdmin && <DeltaLine {...totalDeltas.mpAdmin} compact />}
-              </td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>
-                <div>{fmtRupiah(totalAdsCost)}</div>
-                {totalDeltas.adsCost && <DeltaLine {...totalDeltas.adsCost} compact />}
               </td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#0ea5e9' }}>
                 <div>{fmtRupiah(totalShippingCharges)}</div>
                 {totalDeltas.shippingCharge && <DeltaLine {...totalDeltas.shippingCharge} compact />}
               </td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#06b6d4' }}>
+                <div>{fmtRupiah(totalCM2)}</div>
+                {totalDeltas.cm2 && <DeltaLine {...totalDeltas.cm2} compact />}
+              </td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>
+                <div>{fmtRupiah(totalAdsCost)}</div>
+                {totalDeltas.adsCost && <DeltaLine {...totalDeltas.adsCost} compact />}
+              </td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalCM3 >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                <div>{fmtRupiah(totalCM3)}</div>
+                {totalDeltas.cm3 && <DeltaLine {...totalDeltas.cm3} compact />}
+              </td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                 <div>
                   <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--border)', color: 'var(--text)' }}>
-                    {totalRevenue > 0 ? (totalCost / totalRevenue * 100).toFixed(1) : 0}%
+                    {totalRevenue > 0 ? (totalCM3 / totalRevenue * 100).toFixed(1) : 0}%
                   </span>
                 </div>
-                {totalDeltas.costRatio && <DeltaLine {...totalDeltas.costRatio} compact />}
-              </td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalProfitAfterAll >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                <div>{fmtRupiah(totalProfitAfterAll)}</div>
-                {totalDeltas.profitAfterAll && <DeltaLine {...totalDeltas.profitAfterAll} compact />}
-              </td>
-              <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                <div>
-                  <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--border)', color: 'var(--text)' }}>
-                    {totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%
-                  </span>
-                </div>
-                {totalDeltas.marginAfterAll && <DeltaLine {...totalDeltas.marginAfterAll} compact />}
+                {totalDeltas.cm3Pct && <DeltaLine {...totalDeltas.cm3Pct} compact />}
               </td>
             </tr>
               );
@@ -1155,10 +1158,10 @@ export default function ChannelsPage() {
       {/* Product Breakdown Table */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, overflowX: 'auto', marginTop: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>Product Breakdown</div>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 800 }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 1040 }}>
           <thead>
             <tr style={{ borderBottom: '2px solid var(--border)' }}>
-              {['Product', 'Net Sales', '% Share', 'Admin Fee', 'Mkt Cost', 'Shipping Fee', 'Cost Ratio', 'GP After Mkt + Adm', 'Margin'].map(h => (
+              {['Product', 'Net Sales', '% Share', 'CM1', 'MP Fee', 'Shipping', 'CM2', 'Mkt Fee', 'CM3', 'CM3 %'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Product' ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
@@ -1171,33 +1174,30 @@ export default function ChannelsPage() {
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>{fmtRupiah(p.revenue)}</td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--dim)' }}>{p.pct.toFixed(1)}%</td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--green)' }}>
+                  {fmtRupiah(p.cm1)}
+                </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#8b5cf6' }}>
                   {p.mpAdmin > 0 ? fmtRupiah(p.mpAdmin) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
-                  {p.adsCost > 0 ? fmtRupiah(p.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#0ea5e9' }}>
                   {p.shippingCharge > 0 ? fmtRupiah(p.shippingCharge) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                  {p.totalCost > 0 ? (
-                    <span style={{
-                      padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                      background: p.costRatio > 40 ? 'var(--badge-red-bg)' : p.costRatio > 25 ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)',
-                      color: p.costRatio > 40 ? 'var(--red)' : p.costRatio > 25 ? 'var(--yellow)' : 'var(--green)',
-                    }}>{p.costRatio.toFixed(1)}%</span>
-                  ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#06b6d4' }}>
+                  {fmtRupiah(p.cm2)}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: p.profitAfterAll >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                  {fmtRupiah(p.profitAfterAll)}
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
+                  {p.adsCost > 0 ? fmtRupiah(p.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                </td>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: p.cm3 >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {fmtRupiah(p.cm3)}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                   <span style={{
                     padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                    background: p.marginAfterAll >= 30 ? 'var(--badge-green-bg)' : p.marginAfterAll >= 10 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
-                    color: p.marginAfterAll >= 30 ? 'var(--green)' : p.marginAfterAll >= 10 ? 'var(--yellow)' : 'var(--red)',
-                  }}>{p.marginAfterAll.toFixed(1)}%</span>
+                    background: p.cm3Pct >= 30 ? 'var(--badge-green-bg)' : p.cm3Pct >= 10 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)',
+                    color: p.cm3Pct >= 30 ? 'var(--green)' : p.cm3Pct >= 10 ? 'var(--yellow)' : 'var(--red)',
+                  }}>{p.cm3Pct.toFixed(1)}%</span>
                 </td>
               </tr>
             ))}
@@ -1206,20 +1206,17 @@ export default function ChannelsPage() {
               <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11 }}>TOTAL</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalRevenue)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--green)' }}>{fmtRupiah(totalCM1)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>{fmtRupiah(totalMpAdmin)}</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(totalAdsCost)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#0ea5e9' }}>{fmtRupiah(totalShippingCharges)}</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-                <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--border)', color: 'var(--text)' }}>
-                  {totalRevenue > 0 ? (totalCost / totalRevenue * 100).toFixed(1) : 0}%
-                </span>
-              </td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalProfitAfterAll >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                {fmtRupiah(totalProfitAfterAll)}
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#06b6d4' }}>{fmtRupiah(totalCM2)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(totalAdsCost)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalCM3 >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {fmtRupiah(totalCM3)}
               </td>
               <td style={{ padding: '8px 10px', textAlign: 'right' }}>
                 <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--border)', color: 'var(--text)' }}>
-                  {totalRevenue > 0 ? (totalProfitAfterAll / totalRevenue * 100).toFixed(1) : 0}%
+                  {totalRevenue > 0 ? (totalCM3 / totalRevenue * 100).toFixed(1) : 0}%
                 </span>
               </td>
             </tr>
