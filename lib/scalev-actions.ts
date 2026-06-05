@@ -649,15 +649,19 @@ export type BrandBuyerHealthSummary = {
   latestActiveBuyers: number;
   latestNewBuyers: number;
   activeDelta: number | null;
-  activeDelta4w: number | null;
-  activeDeltaPct4w: number | null;
+  trendWindowWeeks: number;
+  recentActiveAvg: number;
+  previousActiveAvg: number;
+  activeAvgDelta: number | null;
+  activeAvgDeltaPct: number | null;
   newDelta: number | null;
   recentNewAvg: number;
   previousNewAvg: number;
   newAvgDelta: number | null;
+  newAvgDeltaPct: number | null;
   baseTrend: 'up' | 'flat' | 'down';
   newTrend: 'up' | 'flat' | 'down';
-  status: 'healthy_growth' | 'retention_led' | 'acquisition_treadmill' | 'contraction' | 'leaky_base' | 'stable_low_acquisition';
+  status: 'healthy_growth' | 'retention_led' | 'acquisition_treadmill' | 'recent_softening' | 'contraction' | 'leaky_base' | 'stable_low_acquisition';
   points: BrandBuyerHealthPoint[];
 };
 
@@ -691,6 +695,7 @@ type OwnedBuyerHealthRpcRow = {
 };
 
 const BUYER_HEALTH_DEFAULT_WEEKS = 26;
+const BUYER_HEALTH_TREND_WINDOW_WEEKS = 13;
 
 function classifyTrend(delta: number, baseline: number, minAbs: number, minPct: number): 'up' | 'flat' | 'down' {
   const threshold = Math.max(minAbs, Math.abs(baseline) * minPct);
@@ -702,11 +707,17 @@ function resolveBuyerHealthStatus(
   baseTrend: 'up' | 'flat' | 'down',
   newTrend: 'up' | 'flat' | 'down',
   recentNewAvg: number,
+  activeAvgDeltaPct: number | null,
+  newAvgDeltaPct: number | null,
 ): BrandBuyerHealthSummary['status'] {
   if (baseTrend === 'up' && newTrend === 'up') return 'healthy_growth';
   if (baseTrend === 'up') return 'retention_led';
   if (baseTrend === 'flat' && recentNewAvg > 0 && newTrend !== 'down') return 'acquisition_treadmill';
-  if (baseTrend === 'down' && newTrend === 'down') return 'contraction';
+  if (baseTrend === 'down' && newTrend === 'down') {
+    const severeBaseDecline = activeAvgDeltaPct != null && activeAvgDeltaPct <= -12;
+    const severeNewDecline = newAvgDeltaPct != null && newAvgDeltaPct <= -25;
+    return severeBaseDecline && severeNewDecline ? 'contraction' : 'recent_softening';
+  }
   if (baseTrend === 'down') return 'leaky_base';
   return 'stable_low_acquisition';
 }
@@ -714,6 +725,11 @@ function resolveBuyerHealthStatus(
 function average(values: number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function percentDelta(delta: number | null, baseline: number): number | null {
+  if (delta == null || baseline <= 0) return null;
+  return (delta / baseline) * 100;
 }
 
 function summarizeBuyerHealthPoints(pointsByBrand: Map<string, BrandBuyerHealthPoint[]>): {
@@ -738,37 +754,47 @@ function summarizeBuyerHealthPoints(pointsByBrand: Map<string, BrandBuyerHealthP
 
     const latest = points[points.length - 1];
     const previous = points.length > 1 ? points[points.length - 2] : null;
-    const fourBack = points.length > 4 ? points[points.length - 5] : previous;
-    const recentNewValues = points.slice(-4).map((point) => point.newBuyers);
-    const previousNewValues = points.slice(-8, -4).map((point) => point.newBuyers);
+    const trendWindowWeeks = Math.min(BUYER_HEALTH_TREND_WINDOW_WEEKS, points.length);
+    const recentTrendPoints = points.slice(-trendWindowWeeks);
+    const previousTrendPoints = points.slice(-(trendWindowWeeks * 2), -trendWindowWeeks);
+    const hasFullPreviousTrend = previousTrendPoints.length === trendWindowWeeks;
+    const recentActiveAvg = average(recentTrendPoints.map((point) => point.trailingActiveBuyers));
+    const previousActiveAvg = hasFullPreviousTrend
+      ? average(previousTrendPoints.map((point) => point.trailingActiveBuyers))
+      : 0;
+    const recentNewValues = recentTrendPoints.map((point) => point.newBuyers);
+    const previousNewValues = previousTrendPoints.map((point) => point.newBuyers);
     const recentNewAvg = average(recentNewValues);
-    const previousNewAvg = average(previousNewValues);
-    const activeDelta4w = fourBack ? latest.trailingActiveBuyers - fourBack.trailingActiveBuyers : null;
-    const activeDeltaPct4w = fourBack && fourBack.trailingActiveBuyers > 0
-      ? (activeDelta4w! / fourBack.trailingActiveBuyers) * 100
-      : null;
-    const newAvgDelta = previousNewValues.length > 0 ? recentNewAvg - previousNewAvg : null;
-    const baseTrend = activeDelta4w == null || !fourBack
+    const previousNewAvg = hasFullPreviousTrend ? average(previousNewValues) : 0;
+    const activeAvgDelta = hasFullPreviousTrend ? recentActiveAvg - previousActiveAvg : null;
+    const activeAvgDeltaPct = percentDelta(activeAvgDelta, previousActiveAvg);
+    const newAvgDelta = hasFullPreviousTrend ? recentNewAvg - previousNewAvg : null;
+    const newAvgDeltaPct = percentDelta(newAvgDelta, previousNewAvg);
+    const baseTrend = activeAvgDelta == null
       ? 'flat'
-      : classifyTrend(activeDelta4w, fourBack.trailingActiveBuyers, 3, 0.02);
+      : classifyTrend(activeAvgDelta, previousActiveAvg, 3, 0.03);
     const newTrend = newAvgDelta == null
       ? 'flat'
-      : classifyTrend(newAvgDelta, previousNewAvg, 2, 0.1);
+      : classifyTrend(newAvgDelta, previousNewAvg, 2, 0.12);
 
     summaries.push({
       brand,
       latestActiveBuyers: latest.trailingActiveBuyers,
       latestNewBuyers: latest.newBuyers,
       activeDelta: previous ? latest.trailingActiveBuyers - previous.trailingActiveBuyers : null,
-      activeDelta4w,
-      activeDeltaPct4w,
+      trendWindowWeeks,
+      recentActiveAvg,
+      previousActiveAvg,
+      activeAvgDelta,
+      activeAvgDeltaPct,
       newDelta: previous ? latest.newBuyers - previous.newBuyers : null,
       recentNewAvg,
       previousNewAvg,
       newAvgDelta,
+      newAvgDeltaPct,
       baseTrend,
       newTrend,
-      status: resolveBuyerHealthStatus(baseTrend, newTrend, recentNewAvg),
+      status: resolveBuyerHealthStatus(baseTrend, newTrend, recentNewAvg, activeAvgDeltaPct, newAvgDeltaPct),
       points,
     });
     allPoints.push(...points);

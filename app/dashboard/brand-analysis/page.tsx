@@ -25,6 +25,7 @@ import {
   Bar,
   Line,
 } from 'recharts';
+import { ChevronDown, Info } from 'lucide-react';
 
 export default function BrandAnalysisPage() {
   const [activeView, setActiveView] = useState('buyer-health'); // 'buyer-health' | 'cross-brand'
@@ -32,7 +33,7 @@ export default function BrandAnalysisPage() {
   const [buyerHealthLoading, setBuyerHealthLoading] = useState(true);
   const [buyerHealthError, setBuyerHealthError] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
-  const [weeksToShow, setWeeksToShow] = useState(52);
+  const [weeksToShow, setWeeksToShow] = useState(13);
   const [matrix, setMatrix] = useState([]);
   const [stats, setStats] = useState(null);
   const [journey, setJourney] = useState([]);
@@ -535,6 +536,7 @@ export default function BrandAnalysisPage() {
 }
 
 function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand, weeksToShow, setWeeksToShow }) {
+  const [statusGuideOpen, setStatusGuideOpen] = useState(false);
   const summaries = data?.summaries || [];
   const brandColors = useMemo(() => buildBrandColorMap(summaries.map((summary) => summary.brand)), [summaries]);
   const selectedSummary = summaries.find((summary) => summary.brand === selectedBrand) || summaries[0] || null;
@@ -576,7 +578,7 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
         <BuyerHealthKpi
           label="Active Base 90D"
           value={selectedSummary.latestActiveBuyers.toLocaleString('id-ID')}
-          sub={`${formatSigned(selectedSummary.activeDelta4w)} vs 4 minggu`}
+          sub={`${formatSigned(roundMaybe(selectedSummary.activeAvgDelta))} vs prev 13W`}
           color={brandColors[selectedSummary.brand] || 'var(--accent)'}
         />
         <BuyerHealthKpi
@@ -586,9 +588,9 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
           color="var(--green)"
         />
         <BuyerHealthKpi
-          label="Avg New 4W"
+          label="Avg New 13W"
           value={Math.round(selectedSummary.recentNewAvg).toLocaleString('id-ID')}
-          sub={`${formatSigned(Math.round(selectedSummary.newAvgDelta || 0))} vs prev 4W`}
+          sub={`${formatSigned(roundMaybe(selectedSummary.newAvgDelta))} vs prev 13W`}
           color="var(--yellow)"
         />
         <div style={{ padding: 16, background: 'var(--card)', border: `1px solid ${statusMeta?.color || 'var(--border)'}`, borderRadius: 8 }}>
@@ -607,6 +609,33 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => setStatusGuideOpen((open) => !open)}
+              aria-expanded={statusGuideOpen}
+              title="Lihat arti status"
+              style={{
+                height: 30,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '0 10px',
+                borderRadius: 8,
+                border: statusGuideOpen ? '1px solid var(--accent)' : '1px solid var(--border)',
+                background: statusGuideOpen ? 'rgba(59,130,246,0.12)' : 'var(--bg)',
+                color: statusGuideOpen ? 'var(--accent)' : 'var(--dim)',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              <Info size={14} />
+              Status guide
+              <ChevronDown
+                size={14}
+                style={{ transform: statusGuideOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 160ms ease' }}
+              />
+            </button>
             <div style={{ display: 'flex', gap: 3, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
               {[13, 26, 52].map((weeks) => (
                 <button
@@ -648,6 +677,8 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
             </select>
           </div>
         </div>
+
+        {statusGuideOpen && <BuyerHealthStatusGuide />}
 
         <div style={{ width: '100%', height: 360 }}>
           <ResponsiveContainer>
@@ -705,7 +736,7 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase' }}>Base 90D</div>
                   <div style={{ fontSize: 18, color: 'var(--text)', fontFamily: 'monospace', fontWeight: 800 }}>{summary.latestActiveBuyers.toLocaleString('id-ID')}</div>
-                  <div style={{ fontSize: 10, color: deltaColor(summary.activeDelta4w) }}>{formatSigned(summary.activeDelta4w)}</div>
+                  <div style={{ fontSize: 10, color: deltaColor(summary.activeAvgDelta) }}>{formatSigned(roundMaybe(summary.activeAvgDelta))} avg13W</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase' }}>New</div>
@@ -744,36 +775,96 @@ function BuyerHealthTooltip({ active, payload, label }) {
   );
 }
 
+function BuyerHealthStatusGuide() {
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', padding: '12px 0', margin: '0 0 14px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+        {BUYER_HEALTH_STATUS_ORDER.map((key) => {
+          const meta = BUYER_HEALTH_STATUS_META[key];
+          return (
+            <div key={key} style={{ display: 'grid', gridTemplateColumns: '10px 1fr', gap: 8, alignItems: 'start', minWidth: 0 }}>
+              <span style={{ width: 8, height: 8, borderRadius: 999, background: meta.color, marginTop: 5 }} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ color: meta.color, fontSize: 11, fontWeight: 900, textTransform: 'uppercase', marginBottom: 3 }}>
+                  {meta.label}
+                </div>
+                <div style={{ color: 'var(--text)', fontSize: 12, lineHeight: 1.45 }}>
+                  {meta.guide}
+                </div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.4, marginTop: 3 }}>
+                  {meta.condition}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div style={{ color: 'var(--text-muted)', fontSize: 11, lineHeight: 1.45, marginTop: 10 }}>
+        Status dihitung dari tren 13 minggu terakhir dibanding 13 minggu sebelumnya. Timeframe 13W/26W/52W hanya mengatur panjang grafik yang ditampilkan.
+      </div>
+    </div>
+  );
+}
+
+const BUYER_HEALTH_STATUS_ORDER = [
+  'healthy_growth',
+  'retention_led',
+  'acquisition_treadmill',
+  'recent_softening',
+  'leaky_base',
+  'contraction',
+  'stable_low_acquisition',
+];
+
 const BUYER_HEALTH_STATUS_META = {
   healthy_growth: {
     label: 'Healthy Growth',
     color: 'var(--green)',
-    copy: 'Base naik dan new buyer ikut naik.',
+    copy: 'Base dan new buyer menguat secara tren 13W.',
+    guide: 'Pertumbuhan paling sehat: base aktif bertambah dan akuisisi ikut menguat.',
+    condition: 'Base 13W naik, Avg New 13W naik.',
   },
   retention_led: {
     label: 'Retention-Led',
     color: 'var(--yellow)',
-    copy: 'Base naik, tapi akuisisi tidak ikut menguat.',
+    copy: 'Base 13W naik, akuisisi belum ikut menguat.',
+    guide: 'Base masih naik, tapi bukan karena dorongan buyer baru yang kuat.',
+    condition: 'Base 13W naik, Avg New 13W datar/turun.',
   },
   acquisition_treadmill: {
     label: 'Treadmill',
     color: '#f97316',
-    copy: 'New buyer masuk, tapi base belum bertambah.',
+    copy: 'Akuisisi masuk, tapi base 13W belum bertambah.',
+    guide: 'Buyer baru masuk, tetapi base tidak ikut naik. Ada indikasi buyer keluar hampir seimbang dengan buyer masuk.',
+    condition: 'Base 13W datar, Avg New 13W masih positif/tidak turun.',
+  },
+  recent_softening: {
+    label: 'Softening',
+    color: '#f97316',
+    copy: 'Tren 13W melemah, belum kontraksi tajam.',
+    guide: 'Ada pelemahan, tetapi belum cukup berat untuk disebut kontraksi.',
+    condition: 'Base 13W turun dan Avg New 13W turun, namun penurunannya belum tajam.',
   },
   contraction: {
     label: 'Contraction',
     color: 'var(--red)',
-    copy: 'Base dan new buyer sama-sama melemah.',
+    copy: 'Base dan new buyer turun tajam dalam tren 13W.',
+    guide: 'Sinyal paling serius: base aktif dan akuisisi sama-sama turun kuat.',
+    condition: 'Base 13W turun tajam, Avg New 13W turun tajam.',
   },
   leaky_base: {
     label: 'Leaky Base',
     color: 'var(--red)',
-    copy: 'Akuisisi belum cukup menahan buyer keluar dari window.',
+    copy: 'Base 13W melemah meski akuisisi belum turun tajam.',
+    guide: 'Base aktif bocor. Akuisisi belum cukup menahan buyer keluar dari window aktif.',
+    condition: 'Base 13W turun, Avg New 13W tidak turun tajam.',
   },
   stable_low_acquisition: {
     label: 'Stable',
     color: 'var(--dim)',
-    copy: 'Base relatif datar dan akuisisi rendah.',
+    copy: 'Base 13W relatif datar dan akuisisi rendah.',
+    guide: 'Belum ada sinyal pertumbuhan atau penurunan yang cukup jelas.',
+    condition: 'Base 13W datar, Avg New 13W rendah/datar.',
   },
 };
 
@@ -782,6 +873,11 @@ function formatSigned(value) {
   const rounded = Math.round(Number(value));
   if (rounded === 0) return '0';
   return `${rounded > 0 ? '+' : ''}${rounded.toLocaleString('id-ID')}`;
+}
+
+function roundMaybe(value) {
+  if (value == null || Number.isNaN(Number(value))) return null;
+  return Math.round(Number(value));
 }
 
 function deltaColor(value) {
