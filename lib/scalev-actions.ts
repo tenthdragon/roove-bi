@@ -804,7 +804,7 @@ function summarizeBuyerHealthPoints(pointsByBrand: Map<string, BrandBuyerHealthP
   return { summaries, points: allPoints };
 }
 
-// ── Owned-channel buyer health: trailing 90D active base + weekly new-to-brand buyers ──
+// ── Owned-channel brand health: trailing 90D active base + weekly new-to-brand buyers ──
 export async function fetchOwnedBrandBuyerHealth(options?: { weeks?: number }): Promise<BrandBuyerHealthData> {
   await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
@@ -864,7 +864,7 @@ export async function fetchOwnedBrandBuyerHealth(options?: { weeks?: number }): 
 
   const rpcMissing = ['PGRST202', '42883'].includes(String((rpcError as any)?.code || ''));
   if (rpcMissing) {
-    throw new Error('Database function get_owned_brand_buyer_health belum tersedia. Jalankan migration 157_owned_brand_buyer_health_rpc.sql sebelum membuka Buyer Health.');
+    throw new Error('Database function get_owned_brand_buyer_health belum tersedia. Jalankan migration 157_owned_brand_buyer_health_rpc.sql sebelum membuka Brand Health.');
   }
   throw rpcError;
 }

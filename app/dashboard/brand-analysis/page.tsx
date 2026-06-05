@@ -28,10 +28,10 @@ import {
 import { ChevronDown, Info } from 'lucide-react';
 
 export default function BrandAnalysisPage() {
-  const [activeView, setActiveView] = useState('buyer-health'); // 'buyer-health' | 'cross-brand'
-  const [buyerHealth, setBuyerHealth] = useState(null);
-  const [buyerHealthLoading, setBuyerHealthLoading] = useState(true);
-  const [buyerHealthError, setBuyerHealthError] = useState('');
+  const [activeView, setActiveView] = useState('brand-health'); // 'brand-health' | 'cross-brand'
+  const [brandHealth, setBrandHealth] = useState(null);
+  const [brandHealthLoading, setBrandHealthLoading] = useState(true);
+  const [brandHealthError, setBrandHealthError] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
   const [weeksToShow, setWeeksToShow] = useState(13);
   const [matrix, setMatrix] = useState([]);
@@ -45,25 +45,25 @@ export default function BrandAnalysisPage() {
   const [crossFilter, setCrossFilter] = useState('all'); // 'all' | 'bundle_only' | 'separate_only' | 'mixed'
   const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
-  useEffect(() => { loadBuyerHealth(); }, []);
+  useEffect(() => { loadBrandHealth(); }, []);
 
   useEffect(() => {
     if (activeView === 'cross-brand' && !stats && !loading) loadData();
   }, [activeView]);
 
-  async function loadBuyerHealth() {
-    setBuyerHealthLoading(true);
+  async function loadBrandHealth() {
+    setBrandHealthLoading(true);
     try {
       const data = await fetchOwnedBrandBuyerHealth({ weeks: 52 });
-      setBuyerHealth(data);
-      setBuyerHealthError('');
+      setBrandHealth(data);
+      setBrandHealthError('');
       return true;
     } catch (err: any) {
-      console.error('Failed to load buyer health:', err);
-      setBuyerHealthError(err?.message || 'Gagal memuat Buyer Health.');
+      console.error('Failed to load brand health:', err);
+      setBrandHealthError(err?.message || 'Gagal memuat Brand Health.');
       return false;
     } finally {
-      setBuyerHealthLoading(false);
+      setBrandHealthLoading(false);
     }
   }
 
@@ -130,24 +130,24 @@ export default function BrandAnalysisPage() {
   const gatewayBrands = (stats?.gateway || []).sort((a, b) => b.count - a.count);
   const crossType = stats?.crossType || {};
 
-  const visibleBuyerHealth = useMemo(() => {
-    if (!buyerHealth) return null;
-    const summaries = (buyerHealth.summaries || []).filter((summary) => isActiveBrand(summary.brand));
+  const visibleBrandHealth = useMemo(() => {
+    if (!brandHealth) return null;
+    const summaries = (brandHealth.summaries || []).filter((summary) => isActiveBrand(summary.brand));
     const visibleBrands = new Set(summaries.map((summary) => summary.brand));
     return {
-      ...buyerHealth,
-      brands: (buyerHealth.brands || []).filter((brand) => visibleBrands.has(brand)),
+      ...brandHealth,
+      brands: (brandHealth.brands || []).filter((brand) => visibleBrands.has(brand)),
       summaries,
-      points: (buyerHealth.points || []).filter((point) => visibleBrands.has(point.brand)),
+      points: (brandHealth.points || []).filter((point) => visibleBrands.has(point.brand)),
     };
-  }, [buyerHealth, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [brandHealth, activeBrands, activeBrandsError, isActiveBrand]);
 
   useEffect(() => {
-    if (!visibleBuyerHealth?.summaries?.length) return;
-    if (!selectedBrand || !visibleBuyerHealth.summaries.some((summary) => summary.brand === selectedBrand)) {
-      setSelectedBrand(visibleBuyerHealth.summaries[0].brand);
+    if (!visibleBrandHealth?.summaries?.length) return;
+    if (!selectedBrand || !visibleBrandHealth.summaries.some((summary) => summary.brand === selectedBrand)) {
+      setSelectedBrand(visibleBrandHealth.summaries[0].brand);
     }
-  }, [visibleBuyerHealth, selectedBrand]);
+  }, [visibleBrandHealth, selectedBrand]);
 
   // ── Matrix brands & lookup ──
   const matrixBrands = useMemo(() => {
@@ -206,21 +206,21 @@ export default function BrandAnalysisPage() {
         <div>
           <h2 style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 700 }}>Brand Analysis</h2>
           <p style={{ margin: 0, fontSize: 13, color: 'var(--dim)' }}>
-            {activeView === 'buyer-health'
-              ? 'Owned channel buyer base — trailing active buyer 90D dan new-to-brand customer'
+            {activeView === 'brand-health'
+              ? 'Owned channel brand health — trailing active buyer 90D dan new-to-brand customer'
               : 'Cross-brand behavior — single vs multi-brand customers, brand overlap, dan journey'}
           </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          {activeView === 'buyer-health' ? (
+          {activeView === 'brand-health' ? (
             <>
               <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                Week end: {buyerHealth?.coverage?.latestCompletedWeekEnd || '—'}
+                Week end: {brandHealth?.coverage?.latestCompletedWeekEnd || '—'}
               </div>
-              <button onClick={loadBuyerHealth} disabled={buyerHealthLoading} style={{
-                padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', cursor: buyerHealthLoading ? 'not-allowed' : 'pointer',
+              <button onClick={loadBrandHealth} disabled={brandHealthLoading} style={{
+                padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', cursor: brandHealthLoading ? 'not-allowed' : 'pointer',
                 background: 'var(--bg)', color: 'var(--dim)', fontSize: 12, fontWeight: 600,
-              }}>{buyerHealthLoading ? '⟳ Loading...' : '⟳ Reload'}</button>
+              }}>{brandHealthLoading ? '⟳ Loading...' : '⟳ Reload'}</button>
             </>
           ) : (
             <>
@@ -240,7 +240,7 @@ export default function BrandAnalysisPage() {
 
       <div style={{ display: 'flex', gap: 4, background: 'var(--card)', padding: 4, borderRadius: 8, border: '1px solid var(--border)', marginBottom: 18, width: 'fit-content', maxWidth: '100%', overflowX: 'auto' }}>
         {[
-          { key: 'buyer-health', label: 'Buyer Health' },
+          { key: 'brand-health', label: 'Brand Health' },
           { key: 'cross-brand', label: 'Cross-Brand' },
         ].map((view) => {
           const active = activeView === view.key;
@@ -266,11 +266,11 @@ export default function BrandAnalysisPage() {
         })}
       </div>
 
-      {activeView === 'buyer-health' ? (
-        <BuyerHealthView
-          data={visibleBuyerHealth}
-          loading={buyerHealthLoading || activeBrandsLoading}
-          error={activeBrandsError || buyerHealthError}
+      {activeView === 'brand-health' ? (
+        <BrandHealthView
+          data={visibleBrandHealth}
+          loading={brandHealthLoading || activeBrandsLoading}
+          error={activeBrandsError || brandHealthError}
           selectedBrand={selectedBrand}
           setSelectedBrand={setSelectedBrand}
           weeksToShow={weeksToShow}
@@ -535,7 +535,7 @@ export default function BrandAnalysisPage() {
   );
 }
 
-function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand, weeksToShow, setWeeksToShow }) {
+function BrandHealthView({ data, loading, error, selectedBrand, setSelectedBrand, weeksToShow, setWeeksToShow }) {
   const [statusGuideOpen, setStatusGuideOpen] = useState(false);
   const summaries = data?.summaries || [];
   const brandColors = useMemo(() => buildBrandColorMap(summaries.map((summary) => summary.brand)), [summaries]);
@@ -544,7 +544,7 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
     ...point,
     weekLabel: formatWeekLabel(point.weekEnd),
   }));
-  const statusMeta = selectedSummary ? BUYER_HEALTH_STATUS_META[selectedSummary.status] : null;
+  const statusMeta = selectedSummary ? BRAND_HEALTH_STATUS_META[selectedSummary.status] : null;
   const latestPoint = selectedSummary?.points?.[selectedSummary.points.length - 1] || null;
 
   if (loading) {
@@ -558,7 +558,7 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
   if (error) {
     return (
       <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Buyer Health Gagal Dimuat</div>
+        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Brand Health Gagal Dimuat</div>
         <div style={{ fontSize: 13 }}>{error}</div>
       </div>
     );
@@ -567,7 +567,7 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
   if (!selectedSummary) {
     return (
       <div style={{ color: 'var(--dim)', textAlign: 'center', padding: 40, background: 'var(--card)', borderRadius: 12, border: '1px solid var(--border)' }}>
-        Belum ada data owned-channel buyer health yang memenuhi kriteria identity phone-backed.
+        Belum ada data owned-channel brand health yang memenuhi kriteria identity phone-backed.
       </div>
     );
   }
@@ -575,19 +575,19 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
   return (
     <>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12, marginBottom: 16 }}>
-        <BuyerHealthKpi
+        <BrandHealthKpi
           label="Active Base 90D"
           value={selectedSummary.latestActiveBuyers.toLocaleString('id-ID')}
           sub={`${formatSigned(roundMaybe(selectedSummary.activeAvgDelta))} vs prev 13W`}
           color={brandColors[selectedSummary.brand] || 'var(--accent)'}
         />
-        <BuyerHealthKpi
+        <BrandHealthKpi
           label="New Buyer"
           value={selectedSummary.latestNewBuyers.toLocaleString('id-ID')}
           sub={`${formatSigned(selectedSummary.newDelta)} WoW`}
           color="var(--green)"
         />
-        <BuyerHealthKpi
+        <BrandHealthKpi
           label="Avg New 13W"
           value={Math.round(selectedSummary.recentNewAvg).toLocaleString('id-ID')}
           sub={`${formatSigned(roundMaybe(selectedSummary.newAvgDelta))} vs prev 13W`}
@@ -603,7 +603,7 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
-            <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800 }}>{selectedSummary.brand} Buyer Health</h3>
+            <h3 style={{ margin: '0 0 4px', fontSize: 15, fontWeight: 800 }}>{selectedSummary.brand} Brand Health</h3>
             <p style={{ margin: 0, fontSize: 12, color: 'var(--dim)' }}>
               Trailing 90D active buyer dan weekly new-to-brand buyer, owned channel only
             </p>
@@ -678,7 +678,7 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
           </div>
         </div>
 
-        {statusGuideOpen && <BuyerHealthStatusGuide />}
+        {statusGuideOpen && <BrandHealthStatusGuide />}
 
         <div style={{ width: '100%', height: 360 }}>
           <ResponsiveContainer>
@@ -687,7 +687,7 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
               <XAxis dataKey="weekLabel" tick={{ fill: 'var(--dim)', fontSize: 10 }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} minTickGap={18} />
               <YAxis yAxisId="base" tick={{ fill: 'var(--dim)', fontSize: 10 }} axisLine={false} tickLine={false} width={42} />
               <YAxis yAxisId="new" orientation="right" tick={{ fill: 'var(--dim)', fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
-              <Tooltip content={<BuyerHealthTooltip />} />
+              <Tooltip content={<BrandHealthTooltip />} />
               <Legend wrapperStyle={{ fontSize: 11, color: 'var(--dim)' }} />
               <Bar yAxisId="new" dataKey="newBuyers" name="New Buyer" fill="var(--green)" radius={[3, 3, 0, 0]} opacity={0.76} />
               <Line
@@ -713,7 +713,7 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: 12 }}>
         {summaries.map((summary) => {
-          const meta = BUYER_HEALTH_STATUS_META[summary.status];
+          const meta = BRAND_HEALTH_STATUS_META[summary.status];
           const active = summary.brand === selectedSummary.brand;
           return (
             <button
@@ -752,7 +752,7 @@ function BuyerHealthView({ data, loading, error, selectedBrand, setSelectedBrand
   );
 }
 
-function BuyerHealthKpi({ label, value, sub, color }) {
+function BrandHealthKpi({ label, value, sub, color }) {
   return (
     <div style={{ padding: 16, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8 }}>
       <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
@@ -762,7 +762,7 @@ function BuyerHealthKpi({ label, value, sub, color }) {
   );
 }
 
-function BuyerHealthTooltip({ active, payload, label }) {
+function BrandHealthTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
   const row = payload[0]?.payload || {};
   return (
@@ -775,12 +775,12 @@ function BuyerHealthTooltip({ active, payload, label }) {
   );
 }
 
-function BuyerHealthStatusGuide() {
+function BrandHealthStatusGuide() {
   return (
     <div style={{ borderTop: '1px solid var(--border)', borderBottom: '1px solid var(--border)', padding: '12px 0', margin: '0 0 14px' }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-        {BUYER_HEALTH_STATUS_ORDER.map((key) => {
-          const meta = BUYER_HEALTH_STATUS_META[key];
+        {BRAND_HEALTH_STATUS_ORDER.map((key) => {
+          const meta = BRAND_HEALTH_STATUS_META[key];
           return (
             <div key={key} style={{ display: 'grid', gridTemplateColumns: '10px 1fr', gap: 8, alignItems: 'start', minWidth: 0 }}>
               <span style={{ width: 8, height: 8, borderRadius: 999, background: meta.color, marginTop: 5 }} />
@@ -806,7 +806,7 @@ function BuyerHealthStatusGuide() {
   );
 }
 
-const BUYER_HEALTH_STATUS_ORDER = [
+const BRAND_HEALTH_STATUS_ORDER = [
   'healthy_growth',
   'retention_led',
   'acquisition_treadmill',
@@ -816,7 +816,7 @@ const BUYER_HEALTH_STATUS_ORDER = [
   'stable_low_acquisition',
 ];
 
-const BUYER_HEALTH_STATUS_META = {
+const BRAND_HEALTH_STATUS_META = {
   healthy_growth: {
     label: 'Healthy Growth',
     color: 'var(--green)',
