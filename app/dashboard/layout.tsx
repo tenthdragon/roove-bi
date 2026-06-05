@@ -547,7 +547,17 @@ export default function DashboardLayout({ children }) {
     return (
       <>
         {/* Nav Items */}
-        <nav style={{ flex:1, padding:'8px 8px', display:'flex', flexDirection:'column', gap:2 }}>
+        <nav style={{
+          flex:1,
+          minHeight:0,
+          padding:'8px 8px',
+          display:'flex',
+          flexDirection:'column',
+          gap:2,
+          overflowY:'auto',
+          overscrollBehavior:'contain',
+          WebkitOverflowScrolling:'touch',
+        }}>
           {tabsWithGroupInfo.map((t, idx) => {
             const hasChildren = t.children && t.children.length > 0;
             const parentAccessible = canAccessLayoutTab(profile.role, t, permissions);
@@ -683,7 +693,7 @@ export default function DashboardLayout({ children }) {
         </nav>
 
         {/* Logout at bottom */}
-        <div style={{ padding:'12px 8px' }}>
+        <div style={{ padding:'12px 8px', flexShrink:0 }}>
           <button
             onClick={handleLogout}
             style={{
@@ -786,11 +796,13 @@ export default function DashboardLayout({ children }) {
           >
             <aside style={{
               width:260,
-              height:'100%',
+              height:'100dvh',
+              maxHeight:'100dvh',
               background:'var(--sidebar-bg)',
               borderRight:'1px solid var(--border)',
               display:'flex',
               flexDirection:'column',
+              overflow:'hidden',
               animation:'slideIn 0.2s ease-out',
             }}>
               {/* Mobile sidebar header */}
