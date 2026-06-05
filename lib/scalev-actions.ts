@@ -634,6 +634,215 @@ export async function fetchBrandSummary() {
   return data || [];
 }
 
+export type BrandBuyerHealthPoint = {
+  brand: string;
+  weekStart: string;
+  weekEnd: string;
+  trailingActiveBuyers: number;
+  newBuyers: number;
+  activeDelta: number | null;
+  newDelta: number | null;
+};
+
+export type BrandBuyerHealthSummary = {
+  brand: string;
+  latestActiveBuyers: number;
+  latestNewBuyers: number;
+  activeDelta: number | null;
+  activeDelta4w: number | null;
+  activeDeltaPct4w: number | null;
+  newDelta: number | null;
+  recentNewAvg: number;
+  previousNewAvg: number;
+  newAvgDelta: number | null;
+  baseTrend: 'up' | 'flat' | 'down';
+  newTrend: 'up' | 'flat' | 'down';
+  status: 'healthy_growth' | 'retention_led' | 'acquisition_treadmill' | 'contraction' | 'leaky_base' | 'stable_low_acquisition';
+  points: BrandBuyerHealthPoint[];
+};
+
+export type BrandBuyerHealthData = {
+  brands: string[];
+  summaries: BrandBuyerHealthSummary[];
+  points: BrandBuyerHealthPoint[];
+  weeks: Array<{ weekStart: string; weekEnd: string }>;
+  coverage: {
+    source: 'owned_non_marketplace';
+    identityRule: string;
+    rowsRead: number;
+    uniqueBrandCustomerDayPurchases: number;
+    uniqueBuyers: number;
+    latestDataDate: string | null;
+    latestCompletedWeekEnd: string | null;
+    generatedAt: string;
+  };
+};
+
+type OwnedBuyerHealthRpcRow = {
+  brand: string | null;
+  week_start: string | null;
+  week_end: string | null;
+  trailing_active_buyers: number | string | null;
+  new_buyers: number | string | null;
+  latest_data_date: string | null;
+  latest_completed_week_end: string | null;
+  owned_purchase_rows: number | string | null;
+  unique_buyers: number | string | null;
+};
+
+const BUYER_HEALTH_DEFAULT_WEEKS = 26;
+
+function classifyTrend(delta: number, baseline: number, minAbs: number, minPct: number): 'up' | 'flat' | 'down' {
+  const threshold = Math.max(minAbs, Math.abs(baseline) * minPct);
+  if (Math.abs(delta) <= threshold) return 'flat';
+  return delta > 0 ? 'up' : 'down';
+}
+
+function resolveBuyerHealthStatus(
+  baseTrend: 'up' | 'flat' | 'down',
+  newTrend: 'up' | 'flat' | 'down',
+  recentNewAvg: number,
+): BrandBuyerHealthSummary['status'] {
+  if (baseTrend === 'up' && newTrend === 'up') return 'healthy_growth';
+  if (baseTrend === 'up') return 'retention_led';
+  if (baseTrend === 'flat' && recentNewAvg > 0 && newTrend !== 'down') return 'acquisition_treadmill';
+  if (baseTrend === 'down' && newTrend === 'down') return 'contraction';
+  if (baseTrend === 'down') return 'leaky_base';
+  return 'stable_low_acquisition';
+}
+
+function average(values: number[]): number {
+  if (values.length === 0) return 0;
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function summarizeBuyerHealthPoints(pointsByBrand: Map<string, BrandBuyerHealthPoint[]>): {
+  summaries: BrandBuyerHealthSummary[];
+  points: BrandBuyerHealthPoint[];
+} {
+  const summaries: BrandBuyerHealthSummary[] = [];
+  const allPoints: BrandBuyerHealthPoint[] = [];
+
+  for (const [brand, rawPoints] of pointsByBrand.entries()) {
+    const points = [...rawPoints]
+      .sort((left, right) => left.weekEnd.localeCompare(right.weekEnd))
+      .map((point, index, list) => {
+        const previous = index > 0 ? list[index - 1] : null;
+        return {
+          ...point,
+          activeDelta: previous ? point.trailingActiveBuyers - previous.trailingActiveBuyers : null,
+          newDelta: previous ? point.newBuyers - previous.newBuyers : null,
+        };
+      });
+    if (points.length === 0) continue;
+
+    const latest = points[points.length - 1];
+    const previous = points.length > 1 ? points[points.length - 2] : null;
+    const fourBack = points.length > 4 ? points[points.length - 5] : previous;
+    const recentNewValues = points.slice(-4).map((point) => point.newBuyers);
+    const previousNewValues = points.slice(-8, -4).map((point) => point.newBuyers);
+    const recentNewAvg = average(recentNewValues);
+    const previousNewAvg = average(previousNewValues);
+    const activeDelta4w = fourBack ? latest.trailingActiveBuyers - fourBack.trailingActiveBuyers : null;
+    const activeDeltaPct4w = fourBack && fourBack.trailingActiveBuyers > 0
+      ? (activeDelta4w! / fourBack.trailingActiveBuyers) * 100
+      : null;
+    const newAvgDelta = previousNewValues.length > 0 ? recentNewAvg - previousNewAvg : null;
+    const baseTrend = activeDelta4w == null || !fourBack
+      ? 'flat'
+      : classifyTrend(activeDelta4w, fourBack.trailingActiveBuyers, 3, 0.02);
+    const newTrend = newAvgDelta == null
+      ? 'flat'
+      : classifyTrend(newAvgDelta, previousNewAvg, 2, 0.1);
+
+    summaries.push({
+      brand,
+      latestActiveBuyers: latest.trailingActiveBuyers,
+      latestNewBuyers: latest.newBuyers,
+      activeDelta: previous ? latest.trailingActiveBuyers - previous.trailingActiveBuyers : null,
+      activeDelta4w,
+      activeDeltaPct4w,
+      newDelta: previous ? latest.newBuyers - previous.newBuyers : null,
+      recentNewAvg,
+      previousNewAvg,
+      newAvgDelta,
+      baseTrend,
+      newTrend,
+      status: resolveBuyerHealthStatus(baseTrend, newTrend, recentNewAvg),
+      points,
+    });
+    allPoints.push(...points);
+  }
+
+  summaries.sort((left, right) => right.latestActiveBuyers - left.latestActiveBuyers || left.brand.localeCompare(right.brand));
+  return { summaries, points: allPoints };
+}
+
+// ── Owned-channel buyer health: trailing 90D active base + weekly new-to-brand buyers ──
+export async function fetchOwnedBrandBuyerHealth(options?: { weeks?: number }): Promise<BrandBuyerHealthData> {
+  await requireBrandAnalysisAccess('Brand Analysis');
+  const svc = createServiceSupabase();
+  const weekCount = Math.max(13, Math.min(Number(options?.weeks || BUYER_HEALTH_DEFAULT_WEEKS), 52));
+
+  const { data: rpcData, error: rpcError } = await svc.rpc('get_owned_brand_buyer_health', { p_weeks: weekCount });
+  if (!rpcError) {
+    const rows = (rpcData || []) as OwnedBuyerHealthRpcRow[];
+    const pointsByBrand = new Map<string, BrandBuyerHealthPoint[]>();
+    const weeksByEnd = new Map<string, { weekStart: string; weekEnd: string }>();
+    let latestDataDate: string | null = null;
+    let latestCompletedWeekEnd: string | null = null;
+    let ownedPurchaseRows = 0;
+    let uniqueBuyers = 0;
+
+    for (const row of rows) {
+      const brand = String(row.brand || '').trim();
+      const weekStart = row.week_start ? String(row.week_start).slice(0, 10) : '';
+      const weekEnd = row.week_end ? String(row.week_end).slice(0, 10) : '';
+      if (!brand || !weekStart || !weekEnd) continue;
+      if (!pointsByBrand.has(brand)) pointsByBrand.set(brand, []);
+      pointsByBrand.get(brand)!.push({
+        brand,
+        weekStart,
+        weekEnd,
+        trailingActiveBuyers: Number(row.trailing_active_buyers || 0),
+        newBuyers: Number(row.new_buyers || 0),
+        activeDelta: null,
+        newDelta: null,
+      });
+      weeksByEnd.set(weekEnd, { weekStart, weekEnd });
+      latestDataDate = row.latest_data_date ? String(row.latest_data_date).slice(0, 10) : latestDataDate;
+      latestCompletedWeekEnd = row.latest_completed_week_end ? String(row.latest_completed_week_end).slice(0, 10) : latestCompletedWeekEnd;
+      ownedPurchaseRows = Math.max(ownedPurchaseRows, Number(row.owned_purchase_rows || 0));
+      uniqueBuyers = Math.max(uniqueBuyers, Number(row.unique_buyers || 0));
+    }
+
+    const summarized = summarizeBuyerHealthPoints(pointsByBrand);
+    const weeks = Array.from(weeksByEnd.values()).sort((left, right) => left.weekEnd.localeCompare(right.weekEnd));
+    return {
+      brands: summarized.summaries.map((summary) => summary.brand),
+      summaries: summarized.summaries,
+      points: summarized.points,
+      weeks,
+      coverage: {
+        source: 'owned_non_marketplace',
+        identityRule: 'platform=scalev and customer_identifier=customer_phone',
+        rowsRead: ownedPurchaseRows,
+        uniqueBrandCustomerDayPurchases: ownedPurchaseRows,
+        uniqueBuyers,
+        latestDataDate,
+        latestCompletedWeekEnd,
+        generatedAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  const rpcMissing = ['PGRST202', '42883'].includes(String((rpcError as any)?.code || ''));
+  if (rpcMissing) {
+    throw new Error('Database function get_owned_brand_buyer_health belum tersedia. Jalankan migration 157_owned_brand_buyer_health_rpc.sql sebelum membuka Buyer Health.');
+  }
+  throw rpcError;
+}
+
 // ── Last refresh time ──
 export async function fetchBrandAnalysisRefreshTime() {
   await requireBrandAnalysisAccess('Brand Analysis');
