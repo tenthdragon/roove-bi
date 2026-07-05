@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import {
+  getMetaAdAccountDiscoveryTargets,
+  type MetaRemoteAdAccount,
+} from '@/lib/meta-marketing';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 
 export const dynamic = 'force-dynamic';
@@ -16,11 +20,32 @@ function getServiceSupabase() {
   );
 }
 
-interface MetaAdAccountRaw {
-  id: string;       // "act_xxx"
-  name: string;
-  account_status: number;
-  currency: string;
+async function fetchPagedMetaAccounts(
+  edge: string,
+  accessToken: string
+): Promise<MetaRemoteAdAccount[]> {
+  const accounts: MetaRemoteAdAccount[] = [];
+  const params = new URLSearchParams({
+    fields: 'id,name,account_status,currency',
+    limit: '100',
+    access_token: accessToken,
+  });
+
+  let url: string | null = `${META_API_BASE}${edge}?${params.toString()}`;
+
+  while (url) {
+    const response: Response = await fetch(url);
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err?.error?.message || 'Failed to fetch from Meta API');
+    }
+
+    const json: any = await response.json();
+    if (Array.isArray(json.data)) accounts.push(...json.data);
+    url = json.paging?.next || null;
+  }
+
+  return accounts;
 }
 
 /**
@@ -59,21 +84,33 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'META_ACCESS_TOKEN not configured' }, { status: 500 });
     }
 
-    const allAccounts: MetaAdAccountRaw[] = [];
-    let url: string | null = `${META_API_BASE}/me/adaccounts?fields=id,name,account_status,currency&limit=100&access_token=${accessToken}`;
+    const businessId = process.env.META_BUSINESS_ID;
+    const discoveryTargets = getMetaAdAccountDiscoveryTargets(businessId);
+    const allAccounts: MetaRemoteAdAccount[] = [];
+    const discoveryErrors: string[] = [];
 
-    while (url) {
-      const response: Response = await fetch(url);
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        return NextResponse.json({
-          error: err?.error?.message || 'Failed to fetch from Meta API',
-        }, { status: 502 });
+    for (const target of discoveryTargets) {
+      try {
+        const rows = await fetchPagedMetaAccounts(target.edge, accessToken);
+        allAccounts.push(...rows);
+      } catch (error: any) {
+        discoveryErrors.push(`${target.label}: ${error.message || 'Unknown Meta API error'}`);
       }
-      const json: any = await response.json();
-      if (json.data) allAccounts.push(...json.data);
-      url = json.paging?.next || null;
     }
+
+    if (allAccounts.length === 0 && discoveryErrors.length > 0) {
+      const systemUserHint = businessId
+        ? `Periksa apakah system user diberi akses ke ad account pada Business Manager ${businessId}.`
+        : 'Jika Anda memakai system user token, isi META_BUSINESS_ID agar app bisa membaca ad account dari Business Manager.';
+
+      return NextResponse.json({
+        error: `${discoveryErrors.join(' | ')} ${systemUserHint}`.trim(),
+      }, { status: 502 });
+    }
+
+    const dedupedAccounts = Array.from(
+      new Map(allAccounts.map((account) => [account.id, account])).values()
+    );
 
     // ── Fetch already-registered accounts from DB ──
     const svc = getServiceSupabase();
@@ -86,7 +123,7 @@ export async function GET(req: NextRequest) {
     );
 
     // ── Merge: enrich Meta accounts with DB registration status ──
-    const merged = allAccounts.map((acc) => ({
+    const merged = dedupedAccounts.map((acc) => ({
       account_id: acc.id,
       name: acc.name,
       account_status: acc.account_status,

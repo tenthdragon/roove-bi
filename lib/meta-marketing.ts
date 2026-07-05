@@ -17,6 +17,18 @@ export interface MetaAdAccount {
   is_active: boolean;
 }
 
+export interface MetaRemoteAdAccount {
+  id: string;
+  name: string;
+  account_status: number;
+  currency: string;
+}
+
+export interface MetaAdAccountDiscoveryTarget {
+  edge: string;
+  label: string;
+}
+
 export interface MetaInsight {
   date_start: string;       // YYYY-MM-DD
   date_stop: string;
@@ -46,6 +58,30 @@ export interface MetaSyncResult {
   account_name: string;
   rows: DailyAdSpendRow[];
   error?: string;
+}
+
+export function getMetaAdAccountDiscoveryTargets(businessId?: string | null): MetaAdAccountDiscoveryTarget[] {
+  const normalizedBusinessId = String(businessId || '').trim();
+
+  if (normalizedBusinessId) {
+    return [
+      {
+        edge: `/${normalizedBusinessId}/owned_ad_accounts`,
+        label: `business ${normalizedBusinessId} owned ad accounts`,
+      },
+      {
+        edge: `/${normalizedBusinessId}/client_ad_accounts`,
+        label: `business ${normalizedBusinessId} client ad accounts`,
+      },
+    ];
+  }
+
+  return [
+    {
+      edge: '/me/adaccounts',
+      label: 'current actor ad accounts',
+    },
+  ];
 }
 
 // ── API Functions ──
@@ -237,12 +273,30 @@ export async function checkTokenHealth(
   if (!info) {
     return { warning: 'Token is invalid or expired', expires_at: new Date() };
   }
+  return getMetaTokenHealthWarning(info);
+}
+
+export function getMetaTokenHealthWarning(
+  info: { is_valid: boolean; expires_at?: number | null },
+  nowMs: number = Date.now()
+): { warning: string; expires_at: Date } | null {
+  const rawExpiresAt = Number(info.expires_at || 0);
+
   if (!info.is_valid) {
-    return { warning: 'Token is no longer valid', expires_at: new Date(info.expires_at * 1000) };
+    return {
+      warning: 'Token is no longer valid',
+      expires_at: rawExpiresAt > 0 ? new Date(rawExpiresAt * 1000) : new Date(0),
+    };
   }
 
-  const expiresAt = new Date(info.expires_at * 1000);
-  const daysUntilExpiry = (expiresAt.getTime() - Date.now()) / (1000 * 60 * 60 * 24);
+  // System user tokens can be configured as non-expiring, and some token types
+  // may not expose a meaningful expires_at value in debug_token responses.
+  if (!Number.isFinite(rawExpiresAt) || rawExpiresAt <= 0) {
+    return null;
+  }
+
+  const expiresAt = new Date(rawExpiresAt * 1000);
+  const daysUntilExpiry = (expiresAt.getTime() - nowMs) / (1000 * 60 * 60 * 24);
 
   if (daysUntilExpiry < 7) {
     return {
