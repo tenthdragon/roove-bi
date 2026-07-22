@@ -1,6 +1,7 @@
 'use server';
 
 import { createServerSupabase, createServiceSupabase } from './supabase-server';
+import { getShippingFeeRange } from './shipping-fee-data';
 
 interface MarketingPageDataParams {
   from: string;
@@ -42,6 +43,20 @@ function unwrap<T>(result: { data: T | null; error: { message: string } | null }
   return (result.data ?? ([] as unknown as T));
 }
 
+function unwrapOptional<T>(result: { data: T | null; error: { message: string } | null }, label: string) {
+  if (result.error) {
+    console.error(`[Marketing] optional load error: ${label}`, result.error.message);
+    return {
+      data: [] as unknown as T,
+      error: `${label}: ${result.error.message}`,
+    };
+  }
+  return {
+    data: (result.data ?? ([] as unknown as T)),
+    error: null as string | null,
+  };
+}
+
 export async function getMarketingPageData({
   from,
   to,
@@ -57,11 +72,14 @@ export async function getMarketingPageData({
     adsRes,
     chRes,
     mappingRes,
+    shippingRes,
+    prevRangeProdRes,
     prevRangeAdsRes,
     prevRangeChRes,
+    prevRangeShippingRes,
   ] = await Promise.all([
     svc.from('daily_product_summary')
-      .select('date, product, net_sales, mkt_cost')
+      .select('date, product, net_sales, gross_profit, mkt_cost')
       .gte('date', from)
       .lte('date', to),
     svc.from('daily_ads_spend')
@@ -74,6 +92,13 @@ export async function getMarketingPageData({
       .lte('date', to),
     svc.from('ads_store_brand_mapping')
       .select('store_pattern, brand'),
+    getShippingFeeRange(from, to)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: { message: error.message } })),
+    svc.from('daily_product_summary')
+      .select('date, product, net_sales, gross_profit, mkt_cost')
+      .gte('date', prevRangeFrom)
+      .lte('date', prevRangeTo),
     svc.from('daily_ads_spend')
       .select('date, source, spent, store')
       .gte('date', prevRangeFrom)
@@ -82,14 +107,25 @@ export async function getMarketingPageData({
       .select('date, channel, product, net_sales, mp_admin_cost')
       .gte('date', prevRangeFrom)
       .lte('date', prevRangeTo),
+    getShippingFeeRange(prevRangeFrom, prevRangeTo)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: { message: error.message } })),
   ]);
+
+  const shipping = unwrapOptional(shippingRes, 'Gagal memuat shipping fee Marketing');
+  const prevShipping = unwrapOptional(prevRangeShippingRes, 'Gagal memuat shipping fee Marketing bulan sebelumnya');
 
   return {
     prod: unwrap(prodRes, 'Gagal memuat revenue marketing'),
     ads: unwrap(adsRes, 'Gagal memuat marketing fee'),
     channel: unwrap(chRes, 'Gagal memuat breakdown channel'),
     brandMapping: unwrap(mappingRes, 'Gagal memuat mapping brand iklan'),
+    shipping: shipping.data,
+    shippingError: shipping.error,
+    prevRangeProd: unwrap(prevRangeProdRes, 'Gagal memuat gross profit bulan sebelumnya'),
     prevRangeAds: unwrap(prevRangeAdsRes, 'Gagal memuat perbandingan ad spend'),
     prevRangeChannel: unwrap(prevRangeChRes, 'Gagal memuat perbandingan channel'),
+    prevRangeShipping: prevShipping.data,
+    prevRangeShippingError: prevShipping.error,
   };
 }

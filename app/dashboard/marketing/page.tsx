@@ -130,6 +130,11 @@ export default function MarketingPage() {
   const [scalevExpanded, setScalevExpanded] = useState(false);
   const [prevRangeAdsData, setPrevRangeAdsData] = useState<any[]>([]);
   const [prevRangeChannelData, setPrevRangeChannelData] = useState<any[]>([]);
+  const [shippingData, setShippingData] = useState<any[]>([]);
+  const [prevRangeProdData, setPrevRangeProdData] = useState<any[]>([]);
+  const [prevRangeShippingData, setPrevRangeShippingData] = useState<any[]>([]);
+  const [shippingError, setShippingError] = useState('');
+  const [prevRangeShippingError, setPrevRangeShippingError] = useState('');
   const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
   const storeBrandMap = useMemo(() => {
@@ -199,6 +204,21 @@ export default function MarketingPage() {
     [prevRangeChannelData, activeBrands, activeBrandsError, isActiveBrand]
   );
 
+  const filteredShippingData = useMemo(
+    () => shippingData.filter(d => isActiveBrand(d.product)),
+    [shippingData, isActiveBrand]
+  );
+
+  const filteredPrevRangeProdData = useMemo(
+    () => prevRangeProdData.filter(d => isActiveBrand(d.product)),
+    [prevRangeProdData, isActiveBrand]
+  );
+
+  const filteredPrevRangeShippingData = useMemo(
+    () => prevRangeShippingData.filter(d => isActiveBrand(d.product)),
+    [prevRangeShippingData, isActiveBrand]
+  );
+
   const unmappedAdsSummary = useMemo(() => {
     const byPlatform: Record<string, number> = {};
     let total = 0;
@@ -232,20 +252,28 @@ export default function MarketingPage() {
     const { from, to } = dateRange;
     const { prevRangeFrom, prevRangeTo } = getComparisonRanges(from, to);
 
-    const cachedProd = getCached<any[]>('daily_product_summary_mkt', from, to);
+    const cachedProd = getCached<any[]>('daily_product_summary_mkt_cm3_v1', from, to);
     const cachedAds = getCached<any[]>('daily_ads_spend', from, to);
     const cachedCh = getCached<any[]>('daily_channel_data_mkt', from, to);
     const cachedBrandMapping = getCached<any[]>('ads_store_brand_mapping_mkt', 'all', 'all');
+    const cachedShipping = getCached<any>('daily_shipping_mkt_cm3_v1', from, to);
+    const cachedPrevRangeProd = getCached<any[]>('daily_product_summary_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo);
     const cachedPrevRangeAds = getCached<any[]>('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo);
     const cachedPrevRangeCh = getCached<any[]>('daily_channel_data_prev_range', prevRangeFrom, prevRangeTo);
+    const cachedPrevRangeShipping = getCached<any>('daily_shipping_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo);
 
-    if (cachedProd && cachedAds && cachedCh && cachedBrandMapping && cachedPrevRangeAds && cachedPrevRangeCh) {
+    if (cachedProd && cachedAds && cachedCh && cachedBrandMapping && cachedShipping && cachedPrevRangeProd && cachedPrevRangeAds && cachedPrevRangeCh && cachedPrevRangeShipping) {
       setRawProdData(cachedProd);
       setAdsData(cachedAds);
       setChannelData(cachedCh);
       setBrandMapping(cachedBrandMapping);
+      setShippingData(cachedShipping.rows || []);
+      setShippingError(cachedShipping.error || '');
+      setPrevRangeProdData(cachedPrevRangeProd);
       setPrevRangeAdsData(cachedPrevRangeAds);
       setPrevRangeChannelData(cachedPrevRangeCh);
+      setPrevRangeShippingData(cachedPrevRangeShipping.rows || []);
+      setPrevRangeShippingError(cachedPrevRangeShipping.error || '');
       setError('');
       setLoading(false);
       return;
@@ -264,19 +292,27 @@ export default function MarketingPage() {
       .then((data) => {
         if (cancelled) return;
 
-        setCache('daily_product_summary_mkt', from, to, data.prod);
+        setCache('daily_product_summary_mkt_cm3_v1', from, to, data.prod);
         setCache('daily_ads_spend', from, to, data.ads);
         setCache('daily_channel_data_mkt', from, to, data.channel);
         setCache('ads_store_brand_mapping_mkt', 'all', 'all', data.brandMapping);
+        setCache('daily_shipping_mkt_cm3_v1', from, to, { rows: data.shipping, error: data.shippingError });
+        setCache('daily_product_summary_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo, data.prevRangeProd);
         setCache('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo, data.prevRangeAds);
         setCache('daily_channel_data_prev_range', prevRangeFrom, prevRangeTo, data.prevRangeChannel);
+        setCache('daily_shipping_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo, { rows: data.prevRangeShipping, error: data.prevRangeShippingError });
 
         setRawProdData(data.prod);
         setAdsData(data.ads);
         setChannelData(data.channel);
         setBrandMapping(data.brandMapping);
+        setShippingData(data.shipping || []);
+        setShippingError(data.shippingError || '');
+        setPrevRangeProdData(data.prevRangeProd || []);
         setPrevRangeAdsData(data.prevRangeAds);
         setPrevRangeChannelData(data.prevRangeChannel);
+        setPrevRangeShippingData(data.prevRangeShipping || []);
+        setPrevRangeShippingError(data.prevRangeShippingError || '');
         setError('');
         setLoading(false);
       })
@@ -315,6 +351,36 @@ export default function MarketingPage() {
       activeDays: days.length,
     };
   }, [prodData, resolvedAdsData]);
+
+  const cm3Metrics = useMemo(() => {
+    const grossProfit = prodData.reduce((sum, row) => sum + Number(row.gross_profit || 0), 0);
+    const mpFee = filteredChannelData.reduce((sum, row) => sum + Math.abs(Number(row.mp_admin_cost) || 0), 0);
+    const shipping = filteredShippingData.reduce((sum, row) => sum + Number(row.shipping_charge || 0), 0);
+    const cm3 = grossProfit - mpFee - shipping - totalSpend;
+
+    const prevGrossProfit = filteredPrevRangeProdData.reduce((sum, row) => sum + Number(row.gross_profit || 0), 0);
+    const prevMpFee = filteredPrevRangeChannelData.reduce((sum, row) => sum + Math.abs(Number(row.mp_admin_cost) || 0), 0);
+    const prevShipping = filteredPrevRangeShippingData.reduce((sum, row) => sum + Number(row.shipping_charge || 0), 0);
+    const prevMarketingFee = resolvedPrevRangeAdsData.reduce((sum, row) => sum + Math.abs(Number(row.spent || 0)), 0);
+    const prevCm3 = prevGrossProfit - prevMpFee - prevShipping - prevMarketingFee;
+
+    return {
+      cm3,
+      margin: totalRevenue > 0 ? (cm3 / totalRevenue) * 100 : 0,
+      prevCm3,
+      hasPrevious: filteredPrevRangeProdData.length > 0,
+    };
+  }, [
+    prodData,
+    filteredChannelData,
+    filteredShippingData,
+    totalSpend,
+    totalRevenue,
+    filteredPrevRangeProdData,
+    filteredPrevRangeChannelData,
+    filteredPrevRangeShippingData,
+    resolvedPrevRangeAdsData,
+  ]);
 
   // ── Unique brands for filter ──
   const uniqueBrands = useMemo(() => {
@@ -815,8 +881,15 @@ const BRAND_COLORS = useMemo(() => {
           delta={prevAdSpend && prevAdSpend.total > 0 ? { value: ((totalSpend - prevAdSpend.total) / prevAdSpend.total) * 100, higherIsBetter: false } : undefined} />
         <KPI label="Mkt Fee %" val={`${totalRatio.toFixed(1)}%`} sub={`Avg: ${avgDailyRatio.toFixed(1)}%/hari`} color={totalRatio > 30 ? 'var(--red)' : totalRatio > 20 ? 'var(--yellow)' : 'var(--green)'}
           delta={prevAdSpend && prevAdSpend.ratio > 0 ? { value: totalRatio - prevAdSpend.ratio, suffix: 'pp', higherIsBetter: false } : undefined} />
-        <KPI label="Blended ROAS" val={`${totalRoas.toFixed(1)}x`} sub="Net sales / mkt fee" color="#8b5cf6"
-          delta={prevAdSpend && prevAdSpend.roas > 0 ? { value: ((totalRoas - prevAdSpend.roas) / prevAdSpend.roas) * 100 } : undefined} />
+        <KPI
+          label={shippingError ? 'CM3' : `CM3 · ${cm3Metrics.margin.toFixed(1)}%`}
+          val={shippingError ? '—' : `Rp ${fmtCompact(cm3Metrics.cm3)}`}
+          sub={shippingError ? 'Data shipping belum tersedia' : 'Setelah COGS, MP, shipping & marketing'}
+          color={shippingError ? C.dim : cm3Metrics.cm3 >= 0 ? '#06b6d4' : 'var(--red)'}
+          delta={!shippingError && !prevRangeShippingError && cm3Metrics.hasPrevious && cm3Metrics.prevCm3 !== 0
+            ? { value: ((cm3Metrics.cm3 - cm3Metrics.prevCm3) / Math.abs(cm3Metrics.prevCm3)) * 100 }
+            : undefined}
+        />
       </div>
 
       {marketingChannelBreakdown.attention && (
