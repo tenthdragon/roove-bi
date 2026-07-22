@@ -3,13 +3,12 @@
 
 import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-server';
 import {
-  requireAnyDashboardTabAccess,
   requireDashboardPermissionAccess,
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
 
 async function requireCustomerAnalyticsAccess(label: string) {
-  await requireAnyDashboardTabAccess(['pulse', 'customers'], label);
+  await requireDashboardTabAccess('customers', label);
 }
 
 async function requireBrandAnalysisAccess(label: string) {

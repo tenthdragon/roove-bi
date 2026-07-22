@@ -47,7 +47,6 @@ export const PERMISSION_GROUPS = [
       { key: 'tab:ppic',               label: 'PPIC' },
       { key: 'tab:warehouse',          label: 'Warehouse' },
       { key: 'tab:warehouse-settings', label: '↳ Warehouse Settings' },
-      { key: 'tab:pulse',              label: 'Business Pulse' },
       { key: 'tab:customers',          label: 'Customer Analysis' },
       { key: 'tab:brand-analysis',     label: 'Brand Analysis' },
       { key: 'tab:finance',            label: 'Finance Analysis' },
@@ -304,7 +303,6 @@ export const ALL_TABS: TabDef[] = [
     { id: 'marketplace-intake', label: 'Marketplace Intake', icon: 'Inbox', ownerOnly: true },
   ]},
   // Analysis
-  { id: 'pulse',           label: 'Business Pulse',     icon: 'Activity', group: 'Analysis' },
   { id: 'customers',      label: 'Customer Analysis',  icon: 'Users', group: 'Analysis' },
   { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers', group: 'Analysis' },
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign', group: 'Analysis' },

@@ -44,7 +44,6 @@ INSERT INTO role_permissions (role, permission_key) VALUES
   ('admin', 'tab:ppic'),
   ('admin', 'tab:warehouse'),
   ('admin', 'tab:warehouse-settings'),
-  ('admin', 'tab:pulse'),
   ('admin', 'tab:customers'),
   ('admin', 'tab:brand-analysis'),
   ('admin', 'tab:finance'),
@@ -70,7 +69,6 @@ INSERT INTO role_permissions (role, permission_key) VALUES
   ('direktur_ops', 'tab:ppic'),
   ('direktur_ops', 'tab:warehouse'),
   ('direktur_ops', 'tab:warehouse-settings'),
-  ('direktur_ops', 'tab:pulse'),
   ('direktur_ops', 'tab:customers'),
   ('direktur_ops', 'tab:brand-analysis'),
   ('direktur_ops', 'tab:finance'),
@@ -93,7 +91,6 @@ INSERT INTO role_permissions (role, permission_key) VALUES
 
   -- ── direktur_finance ─────────────────────────────────────
   ('direktur_finance', 'tab:overview'),
-  ('direktur_finance', 'tab:pulse'),
   ('direktur_finance', 'tab:finance'),
 
   -- ── staf_finance ─────────────────────────────────────────
@@ -102,7 +99,6 @@ INSERT INTO role_permissions (role, permission_key) VALUES
   -- ── brand_manager ─────────────────────────────────────────
   ('brand_manager', 'tab:overview'),
   ('brand_manager', 'tab:marketing'),
-  ('brand_manager', 'tab:pulse'),
   ('brand_manager', 'tab:customers'),
   ('brand_manager', 'tab:brand-analysis'),
 
@@ -111,7 +107,6 @@ INSERT INTO role_permissions (role, permission_key) VALUES
   ('sales_manager', 'tab:marketing'),
   ('sales_manager', 'tab:channels'),
   ('sales_manager', 'tab:waba-management'),
-  ('sales_manager', 'tab:pulse'),
   ('sales_manager', 'tab:customers'),
 
   -- ── warehouse_manager ─────────────────────────────────────
