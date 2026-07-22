@@ -524,7 +524,7 @@ export default function OverviewPage() {
       {(() => {
         const cm2Color = kpi.tCm2 >= 0 ? '#0ea5e9' : 'var(--red)';
         const cm3Color = kpi.tCm3 >= 0 ? '#8b5cf6' : 'var(--red)';
-        const cols = isMobile ? 'repeat(2,1fr)' : 'repeat(4,1fr)';
+        const cols = isMobile ? 'repeat(2,1fr)' : 'repeat(3,1fr)';
         const Card = ({ label, value, sub, color, deltaVal, lowerBetter }: any) => {
           const hasD = deltaVal != null && !isNaN(deltaVal) && deltaVal !== 0;
           return (
@@ -545,17 +545,25 @@ export default function OverviewPage() {
         const dCm1 = prevKpi?.tg > 0 ? (kpi.tg - prevKpi.tg) / prevKpi.tg * 100 : null;
         const dCm2 = !feeError && !prevFeeError && !shippingError && !prevShippingError && prevKpi?.tCm2 ? (kpi.tCm2 - prevKpi.tCm2) / Math.abs(prevKpi.tCm2) * 100 : null;
         const dCm3 = !feeError && !prevFeeError && !shippingError && !prevShippingError && prevKpi?.tCm3 ? (kpi.tCm3 - prevKpi.tCm3) / Math.abs(prevKpi.tCm3) * 100 : null;
+        const dMkt = !feeError && !prevFeeError && prevKpi?.tAds > 0 ? (kpi.tAds - prevKpi.tAds) / prevKpi.tAds * 100 : null;
+        const dAfterOh = !feeError && !prevFeeError && !shippingError && !prevShippingError && kpi.hasOverhead && prevOverheadData.length > 0 && prevKpi?.tNetProfit
+          ? (kpi.tNetProfit - prevKpi.tNetProfit) / Math.abs(prevKpi.tNetProfit) * 100
+          : null;
         const cogsPct = kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : '0.0';
         const channelLogisticsPct = kpi.ts > 0 ? ((kpi.tMp + kpi.tShipping) / kpi.ts * 100).toFixed(1) : '0.0';
         const mktPct = kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : '0.0';
         const cm2Unavailable = Boolean(feeError || shippingError);
         const cm3Unavailable = Boolean(feeError || shippingError);
+        const mktUnavailable = Boolean(feeError);
+        const afterOhUnavailable = cm3Unavailable || !kpi.hasOverhead;
         return (
           <div style={{ display:'grid', gridTemplateColumns:cols, gap:10, marginBottom:16 }}>
             <Card label="Net Sales" value={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg Rp ${fmtCompact(kpi.avg)}/hari · ${kpi.tShipment.toLocaleString('id-ID')} shipment`} color="var(--accent)" deltaVal={dNs} />
             <Card label={`CM1 · ${kpi.gpM.toFixed(1)}%`} value={`Rp ${fmtCompact(kpi.tg)}`} sub={`Gross profit · COGS ${cogsPct}%`} color="var(--green)" deltaVal={dCm1} />
             <Card label={`CM2 · ${kpi.cm2M.toFixed(1)}%`} value={cm2Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm2)}`} sub={cm2Unavailable ? 'MP / shipping data belum lengkap' : `MP + shipping ${channelLogisticsPct}%`} color={cm2Color} deltaVal={cm2Unavailable ? null : dCm2} />
-            <Card label={`CM3 · ${kpi.cm3M.toFixed(1)}%`} value={cm3Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm3)}`} sub={cm3Unavailable ? 'Marketing/channel data belum lengkap' : `Mkt fee ${mktPct}%${kpi.hasOverhead ? ` · After OH Rp ${fmtCompact(kpi.tNetProfit)}` : ''}`} color={cm3Color} deltaVal={cm3Unavailable ? null : dCm3} />
+            <Card label={`CM3 · ${kpi.cm3M.toFixed(1)}%`} value={cm3Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm3)}`} sub={cm3Unavailable ? 'Marketing/channel data belum lengkap' : 'Setelah biaya marketing'} color={cm3Color} deltaVal={cm3Unavailable ? null : dCm3} />
+            <Card label={`Marketing Fee · ${mktPct}%`} value={mktUnavailable ? '—' : `Rp ${fmtCompact(kpi.tAds)}`} sub={mktUnavailable ? 'Data marketing belum lengkap' : 'Biaya marketing terhadap net sales'} color="var(--yellow)" deltaVal={mktUnavailable ? null : dMkt} lowerBetter />
+            <Card label={`After OH · ${kpi.npM.toFixed(1)}%`} value={afterOhUnavailable ? '—' : `Rp ${fmtCompact(kpi.tNetProfit)}`} sub={afterOhUnavailable ? (cm3Unavailable ? 'Marketing/channel data belum lengkap' : 'Data overhead belum tersedia') : `CM3 − overhead Rp ${fmtCompact(kpi.tOverhead)}`} color={afterOhUnavailable ? 'var(--dim)' : (kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)')} deltaVal={afterOhUnavailable ? null : dAfterOh} />
           </div>
         );
       })()}
