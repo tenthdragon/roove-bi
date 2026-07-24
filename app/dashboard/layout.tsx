@@ -34,6 +34,8 @@ function hasAdminAreaAccess(role, permissions) {
 }
 
 function canAccessLayoutTab(role, tab, permissions) {
+  // Sales Channel Analysis inherits its parent Sales Channel permission.
+  if (tab.id === 'sales-channel-analysis') return canAccessTab(role, 'channels', permissions);
   if (tab.id === 'admin') return hasAdminAreaAccess(role, permissions);
   if (tab.ownerOnly && role !== 'owner') return false;
   return canAccessTab(role, tab.id, permissions);
@@ -902,6 +904,7 @@ function TabIcon({ id, size = 18 }) {
   const s = { width: size, height: size, flexShrink: 0 };
   switch(id) {
     case 'overview': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>;
+    case 'sales-channel-analysis': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="15 7 21 7 21 13"/></svg>;
     case 'products': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>;
     case 'channels': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>;
     case 'marketing': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;

@@ -291,6 +291,7 @@ export const ALL_TABS: TabDef[] = [
   // { id: 'products',    label: 'Products',           icon: 'Package' },  // Hidden — merged into Overview
   { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone', group: 'Main Menu' },
   { id: 'channels',       label: 'Sales Channel',      icon: 'Share2', group: 'Main Menu', children: [
+    { id: 'sales-channel-analysis', label: 'Sales Channel Analysis', icon: 'TrendingUp' },
     { id: 'waba-management', label: 'WABA Management',   icon: 'MessageCircle' },
   ]},
   { id: 'financial-report', label: 'Financial Report', icon: 'FileText', group: 'Main Menu', children: [
