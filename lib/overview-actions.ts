@@ -304,33 +304,6 @@ function normalizedCommercialDate(year: number, month: number, day: number) {
   };
 }
 
-function wibDayBoundary(date: { year: number; month: number; day: number }, nextDay = false) {
-  const offsetDays = nextDay ? 1 : 0;
-  return new Date(Date.UTC(date.year, date.month - 1, date.day + offsetDays) - 7 * 60 * 60 * 1000).toISOString();
-}
-
-function wibDateFromTimestamp(value: string | null) {
-  if (!value) return null;
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Jakarta',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date(value));
-  const get = (type: string) => parts.find((part) => part.type === type)?.value || '';
-  return `${get('year')}-${get('month')}-${get('day')}`;
-}
-
-function wibHourFromTimestamp(value: string | null) {
-  if (!value) return null;
-  const hour = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'Asia/Jakarta',
-    hour: '2-digit',
-    hourCycle: 'h23',
-  }).format(new Date(value));
-  return Number(hour);
-}
-
 export async function getCommercialMomentAttribution({
   year,
   month,
@@ -355,72 +328,54 @@ export async function getCommercialMomentAttribution({
     return { ...eventMonth, dates };
   });
 
-  const output: any[] = [];
-  for (const window of windows) {
-    for (let position = 0; position < window.dates.length; position += 1) {
-      const orderDate = window.dates[position];
-      if (orderDate.iso > asOf) continue;
+  const assignmentsByDate = new Map<string, Array<{
+    eventYear: number;
+    eventMonth: number;
+    eventPosition: number;
+  }>>();
 
-      const orders: any[] = [];
-      for (let page = 0; ; page += 1) {
-        const { data, error } = await svc.from('scalev_orders')
-          .select('id, draft_time, shipped_time, status')
-          .gte('draft_time', wibDayBoundary(orderDate))
-          .lt('draft_time', wibDayBoundary(orderDate, true))
-          .in('status', ['shipped', 'completed'])
-          .not('shipped_time', 'is', null)
-          .order('id')
-          .range(page * 1000, page * 1000 + 999);
-        if (error) throw new Error(`Gagal memuat cohort order event: ${error.message}`);
-        orders.push(...(data || []));
-        if ((data || []).length < 1000) break;
-      }
+  windows.forEach((window) => {
+    window.dates.forEach((date, position) => {
+      if (date.iso > asOf) return;
+      const assignments = assignmentsByDate.get(date.iso) || [];
+      assignments.push({
+        eventYear: window.year,
+        eventMonth: window.month,
+        eventPosition: position,
+      });
+      assignmentsByDate.set(date.iso, assignments);
+    });
+  });
 
-      if (orders.length === 0) continue;
-      const orderById = new Map(orders.map((order) => [order.id, order]));
-      const aggregates = new Map<string, any>();
-      const orderIds = orders.map((order) => order.id);
+  const eventDates = Array.from(assignmentsByDate.keys()).sort();
+  if (eventDates.length === 0) return [];
 
-      for (let offset = 0; offset < orderIds.length; offset += 200) {
-        const { data: lines, error } = await svc.from('scalev_order_lines')
-          .select('scalev_order_id, product_type, sales_channel, product_price_bt, discount_bt')
-          .in('scalev_order_id', orderIds.slice(offset, offset + 200))
-          .limit(10000);
-        if (error) throw new Error(`Gagal memuat line order event: ${error.message}`);
+  const summaryRows: any[] = [];
+  for (let page = 0; ; page += 1) {
+    const { data, error } = await svc
+      .from('summary_commercial_order_entry_revenue')
+      .select('order_date, product, total_net_sales, same_day_net_sales, carryover_net_sales, before_noon_net_sales')
+      .in('order_date', eventDates)
+      .order('order_date')
+      .order('product')
+      .range(page * 1000, page * 1000 + 999);
 
-        for (const line of lines || []) {
-          const order = orderById.get(line.scalev_order_id);
-          if (!order) continue;
-          const shipmentDate = wibDateFromTimestamp(order.shipped_time);
-          const orderEntryHour = wibHourFromTimestamp(order.draft_time);
-          const product = line.product_type || 'Unknown';
-          const salesChannel = line.sales_channel || 'Unknown';
-          const key = `${position}|${shipmentDate}|${product}|${orderEntryHour}|${salesChannel}`;
-          const current = aggregates.get(key) || {
-            event_year: window.year,
-            event_month: window.month,
-            event_position: position,
-            order_date: orderDate.iso,
-            order_entry_hour: orderEntryHour,
-            shipment_date: shipmentDate,
-            product,
-            sales_channel: salesChannel,
-            net_sales: 0,
-            line_count: 0,
-            order_ids: new Set<number>(),
-          };
-          current.net_sales += Number(line.product_price_bt || 0) - Number(line.discount_bt || 0);
-          current.line_count += 1;
-          current.order_ids.add(line.scalev_order_id);
-          aggregates.set(key, current);
-        }
-      }
-      output.push(...Array.from(aggregates.values()).map(({ order_ids, ...row }) => ({
-        ...row,
-        order_count: order_ids.size,
-      })));
-    }
+    if (error) throw new Error(`Gagal memuat summary revenue event: ${error.message}`);
+    summaryRows.push(...(data || []));
+    if ((data || []).length < 1000) break;
   }
 
-  return output;
+  return summaryRows.flatMap((row) =>
+    (assignmentsByDate.get(row.order_date) || []).map((assignment) => ({
+      event_year: assignment.eventYear,
+      event_month: assignment.eventMonth,
+      event_position: assignment.eventPosition,
+      order_date: row.order_date,
+      product: row.product,
+      net_sales: Number(row.total_net_sales || 0),
+      same_day_net_sales: Number(row.same_day_net_sales || 0),
+      carryover_net_sales: Number(row.carryover_net_sales || 0),
+      before_noon_net_sales: Number(row.before_noon_net_sales || 0),
+    }))
+  );
 }

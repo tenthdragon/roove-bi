@@ -19,6 +19,7 @@ import { useDateRange } from '@/lib/DateRangeContext';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
 import { getCommercialMomentAttribution, getOverviewPageData } from '@/lib/overview-actions';
+import { getCached, setCache } from '@/lib/dashboard-cache';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 
 const MONTHS = [
@@ -214,8 +215,16 @@ export default function RevenueRunRatePage() {
   }, [authReady, dateLoading, brandLoading, bounds, actualTo]);
 
   useEffect(() => {
-    if (!authReady || dateLoading || brandLoading || !bounds || !actualTo) return;
+    if (chartMode !== 'commercial' || !authReady || dateLoading || brandLoading || !bounds || !actualTo) return;
     let cancelled = false;
+    const cacheKey = `${bounds.year}-${String(bounds.month).padStart(2, '0')}`;
+    const cached = getCached<any[]>('commercial_moment_attribution', cacheKey, actualTo, eventType);
+    if (cached) {
+      setAttributionData(cached);
+      setAttributionLoading(false);
+      return;
+    }
+
     setAttributionLoading(true);
     getCommercialMomentAttribution({
       year: bounds.year,
@@ -224,14 +233,17 @@ export default function RevenueRunRatePage() {
       monthsBack: 6,
       asOf: actualTo,
     }).then((rows) => {
-      if (!cancelled) setAttributionData(rows || []);
+      if (!cancelled) {
+        setAttributionData(rows || []);
+        setCache('commercial_moment_attribution', cacheKey, actualTo, rows || [], eventType);
+      }
     }).catch((err) => {
       if (!cancelled) setError(err?.message || 'Gagal memuat atribusi order event.');
     }).finally(() => {
       if (!cancelled) setAttributionLoading(false);
     });
     return () => { cancelled = true; };
-  }, [authReady, dateLoading, brandLoading, bounds, actualTo, eventType]);
+  }, [chartMode, authReady, dateLoading, brandLoading, bounds, actualTo, eventType]);
 
   const analysis = useMemo(() => {
     if (!data || !bounds) return null;
@@ -349,8 +361,8 @@ export default function RevenueRunRatePage() {
       const current = attributedByPosition.get(key) || { total: 0, carryover: 0, sameDay: 0 };
       const value = Number(row.net_sales || 0);
       current.total += value;
-      if (row.shipment_date && row.shipment_date !== row.order_date) current.carryover += value;
-      else current.sameDay += value;
+      current.carryover += Number(row.carryover_net_sales || 0);
+      current.sameDay += Number(row.same_day_net_sales || 0);
       attributedByPosition.set(key, current);
     });
 
@@ -383,8 +395,7 @@ export default function RevenueRunRatePage() {
             if (!isActiveBrand(row.product)) return sum;
             if (Number(row.event_year) !== eventMonth.year || Number(row.event_month) !== eventMonth.month) return sum;
             if (Number(row.event_position) !== definition.dates.length) return sum;
-            const hour = Number(row.order_entry_hour);
-            return hour >= 0 && hour < 12 ? sum + Number(row.net_sales || 0) : sum;
+            return sum + Number(row.before_noon_net_sales || 0);
           }, 0)
         : null;
       return {
