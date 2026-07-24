@@ -140,18 +140,26 @@ function KpiCard({ label, value, sub, tone = 'var(--accent)', badge, delta, delt
 function ChartTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   const row = payload[0]?.payload || {};
+  const isOperational = payload.some((item: any) => String(item.dataKey).startsWith('operational'));
   return (
     <div style={{ background:'var(--bg-deep)', border:'1px solid var(--border)', borderRadius:10, padding:'10px 12px', boxShadow:'var(--shadow)', minWidth:190 }}>
-      <div style={{ fontSize:11, fontWeight:700, marginBottom:row.window ? 2 : 7 }}>{row.fullLabel || `Tanggal ${label}`}</div>
+      <div style={{ fontSize:11, fontWeight:700, marginBottom:row.window ? 2 : 7 }}>
+        {row.fullLabel || (isOperational ? `Operational Day ${label}` : `Tanggal ${label}`)}
+      </div>
       {row.window && <div style={{ color:'var(--dim)', fontSize:9, marginBottom:7 }}>{row.window}{row.complete === false ? ` · Partial ${row.completedDays} hari` : ''}</div>}
       {payload.filter((p: any) => p.value != null).map((p: any) => {
         const eventIndex = String(p.dataKey).startsWith('eventDay') ? Number(String(p.dataKey).replace('eventDay', '')) : -1;
         const carryover = eventIndex >= 0 ? Number(row.eventCarryover?.[eventIndex] || 0) : 0;
         const sameDay = eventIndex >= 0 ? Number(row.eventSameDay?.[eventIndex] || 0) : 0;
+        const operationalDate = p.dataKey === 'operationalCurrent'
+          ? row.currentDate
+          : p.dataKey === 'operationalPrevious'
+            ? row.previousDate
+            : null;
         return (
           <div key={p.dataKey} style={{ marginBottom:carryover > 0 ? 4 : 0 }}>
             <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10, lineHeight:1.8 }}>
-              <span style={{ color:p.color }}>{p.name}</span>
+              <span style={{ color:p.color }}>{p.name}{operationalDate ? ` · ${operationalDate}` : ''}</span>
               <span style={{ fontFamily:'monospace', color:'var(--text)', fontWeight:600 }}>Rp {fmtCompact(p.value)}</span>
             </div>
             {carryover > 0 && (
@@ -170,6 +178,29 @@ function ChartTooltip({ active, payload, label }: any) {
         </div>
       )}
     </div>
+  );
+}
+
+function AverageLineLabel({ viewBox, label, value, color }: any) {
+  const width = 150;
+  const height = 18;
+  const x = Math.max(Number(viewBox?.x || 0) + 4, Number(viewBox?.x || 0) + Number(viewBox?.width || 0) - width - 4);
+  const y = Number(viewBox?.y || 0) - height / 2;
+  return (
+    <g>
+      <rect
+        x={x}
+        y={y}
+        width={width}
+        height={height}
+        rx={3}
+        fill="rgba(3,7,18,0.62)"
+      />
+      <line x1={x + 7} y1={y + 9} x2={x + 19} y2={y + 9} stroke={color} strokeWidth={2} strokeDasharray="4 3" />
+      <text x={x + 25} y={y + 12.5} fill="#d1d5db" fontSize={8.5} fontWeight={650}>
+        {label} · Rp {fmtCompact(value)}
+      </text>
+    </g>
   );
 }
 
@@ -331,28 +362,29 @@ export default function RevenueRunRatePage() {
       .filter((day) => (revenue[day] || 0) > 0);
     const previousOperationalDays = Array.from({ length: bounds.prevDays }, (_, index) => index + 1)
       .filter((day) => (prevRevenue[day] || 0) > 0);
-    let operationalCurrentCum = 0;
-    let operationalPreviousCum = 0;
     const operationalChart = Array.from(
       { length: Math.max(currentOperationalDays.length, previousOperationalDays.length) },
       (_, index) => {
         const currentDay = currentOperationalDays[index];
         const previousDay = previousOperationalDays[index];
-        if (currentDay) operationalCurrentCum += revenue[currentDay] || 0;
-        if (previousDay) operationalPreviousCum += prevRevenue[previousDay] || 0;
         return {
           day: `D${index + 1}`,
-          operationalCurrent: currentDay ? operationalCurrentCum : null,
-          operationalPrevious: previousDay ? operationalPreviousCum : null,
+          operationalCurrent: currentDay ? revenue[currentDay] || 0 : null,
+          operationalPrevious: previousDay ? prevRevenue[previousDay] || 0 : null,
           currentDate: currentDay ? `${currentDay} ${MONTHS[bounds.month - 1].slice(0, 3)}` : null,
           previousDate: previousDay ? `${previousDay} ${MONTHS[bounds.prevMonth - 1].slice(0, 3)}` : null,
         };
       }
     );
     const comparableOperationalDays = Math.min(currentOperationalDays.length, previousOperationalDays.length);
-    const operationalCurrentAtComparable = operationalChart[comparableOperationalDays - 1]?.operationalCurrent || 0;
-    const operationalPreviousAtComparable = operationalChart[comparableOperationalDays - 1]?.operationalPrevious || 0;
-    const operationalGap = operationalCurrentAtComparable - operationalPreviousAtComparable;
+    const latestComparableIndex = comparableOperationalDays - 1;
+    const latestOperationalCurrent = operationalChart[latestComparableIndex]?.operationalCurrent || 0;
+    const latestOperationalPrevious = operationalChart[latestComparableIndex]?.operationalPrevious || 0;
+    const latestOperationalGap = latestOperationalCurrent - latestOperationalPrevious;
+    const latestCurrentOperationalDay = currentOperationalDays[latestComparableIndex] || null;
+    const latestPreviousOperationalDay = previousOperationalDays[latestComparableIndex] || null;
+    const currentOperationalAverage = currentRevenue / Math.max(1, currentOperationalDays.length);
+    const previousOperationalAverage = prevRevenueFull / Math.max(1, previousOperationalDays.length);
 
     const attributedByPosition = new Map<string, { total: number; carryover: number; sameDay: number }>();
     attributionData.forEach((row: any) => {
@@ -531,8 +563,13 @@ export default function RevenueRunRatePage() {
       currentOperationalDays,
       previousOperationalDays,
       comparableOperationalDays,
-      operationalGap,
-      operationalPreviousAtComparable,
+      latestOperationalCurrent,
+      latestOperationalPrevious,
+      latestOperationalGap,
+      latestCurrentOperationalDay,
+      latestPreviousOperationalDay,
+      currentOperationalAverage,
+      previousOperationalAverage,
       commercialChart,
       currentEvent,
       previousEvent,
@@ -645,7 +682,7 @@ export default function RevenueRunRatePage() {
             </div>
             <div style={{ fontSize:10, color:'var(--dim)', marginTop:3 }}>
               {chartMode === 'cumulative' && 'Garis putus-putus meneruskan run-rate rata-rata bulan berjalan sampai akhir bulan.'}
-              {chartMode === 'operational' && 'Perbandingan kumulatif berdasarkan urutan hari yang menghasilkan revenue, bukan tanggal kalender.'}
+              {chartMode === 'operational' && 'Revenue harian berdasarkan urutan hari yang menghasilkan revenue, bukan tanggal kalender.'}
               {chartMode === 'commercial' && `${eventType === 'twin' ? 'Twin Date H−1, Hari H, H+1' : 'Payday empat hari bergantian 24–27 dan 25–28'} · termasuk seluruh order pukul 00.00–11.59 pada hari pasca-event.`}
             </div>
           </div>
@@ -725,8 +762,22 @@ export default function RevenueRunRatePage() {
               )}
               {chartMode === 'operational' && (
                 <>
-                  <Area type="monotone" dataKey="operationalCurrent" name={monthLabel} stroke="#3b82f6" strokeWidth={2.5} fill="url(#actualRevenueFill)" connectNulls={false} />
-                  <Line type="monotone" dataKey="operationalPrevious" name={prevLabel} stroke="#8b5cf6" strokeWidth={2.2} dot={false} connectNulls={false} />
+                  <Bar dataKey="operationalCurrent" name={monthLabel} fill="#3b82f6" radius={[4, 4, 0, 0]} maxBarSize={24} />
+                  <Bar dataKey="operationalPrevious" name={prevLabel} fill="#8b5cf6" radius={[4, 4, 0, 0]} maxBarSize={24} />
+                  <ReferenceLine
+                    y={analysis.currentOperationalAverage}
+                    stroke="#3b82f6"
+                    strokeWidth={1.25}
+                    strokeDasharray="6 4"
+                    label={<AverageLineLabel label={`Avg ${MONTHS[bounds.month - 1].slice(0, 3)}`} value={analysis.currentOperationalAverage} color="#3b82f6" />}
+                  />
+                  <ReferenceLine
+                    y={analysis.previousOperationalAverage}
+                    stroke="#8b5cf6"
+                    strokeWidth={1.25}
+                    strokeDasharray="6 4"
+                    label={<AverageLineLabel label={`Avg ${MONTHS[bounds.prevMonth - 1].slice(0, 3)}`} value={analysis.previousOperationalAverage} color="#8b5cf6" />}
+                  />
                 </>
               )}
               {chartMode === 'commercial' && (
@@ -770,22 +821,22 @@ export default function RevenueRunRatePage() {
             tone="var(--accent)"
           />
           <KpiCard
-            label="Gap pada Pace Setara"
-            value={`${analysis.operationalGap < 0 ? '−' : '+'}Rp ${fmtCompact(Math.abs(analysis.operationalGap))}`}
-            sub={`Dibandingkan setelah ${analysis.comparableOperationalDays} operational days`}
-            tone={analysis.operationalGap >= 0 ? 'var(--green)' : 'var(--red)'}
+            label="Gap Operational Day Terbaru"
+            value={`${analysis.latestOperationalGap < 0 ? '−' : '+'}Rp ${fmtCompact(Math.abs(analysis.latestOperationalGap))}`}
+            sub={`D${analysis.comparableOperationalDays}: ${analysis.latestCurrentOperationalDay} ${MONTHS[bounds.month - 1].slice(0, 3)} vs ${analysis.latestPreviousOperationalDay} ${MONTHS[bounds.prevMonth - 1].slice(0, 3)}`}
+            tone={analysis.latestOperationalGap >= 0 ? 'var(--green)' : 'var(--red)'}
           />
           <KpiCard
             label="Rata-rata per Operational Day"
-            value={`Rp ${fmtCompact(analysis.currentRevenue / Math.max(1, analysis.currentOperationalDays.length))}`}
-            sub={`Bulan lalu Rp ${fmtCompact(analysis.prevRevenueFull / Math.max(1, analysis.previousOperationalDays.length))}`}
+            value={`Rp ${fmtCompact(analysis.currentOperationalAverage)}`}
+            sub={`Bulan lalu Rp ${fmtCompact(analysis.previousOperationalAverage)}`}
             tone="#06b6d4"
           />
           <KpiCard
-            label="Pace vs Bulan Lalu"
-            value={analysis.operationalPreviousAtComparable > 0 ? pct(analysis.operationalGap / analysis.operationalPreviousAtComparable * 100) : '—'}
-            sub="Berdasarkan jumlah hari operasional yang sama"
-            tone="#8b5cf6"
+            label="Operational Day vs Bulan Lalu"
+            value={analysis.latestOperationalPrevious > 0 ? pct(analysis.latestOperationalGap / analysis.latestOperationalPrevious * 100) : '—'}
+            sub={`Revenue D${analysis.comparableOperationalDays} dibanding D${analysis.comparableOperationalDays} bulan lalu`}
+            tone={analysis.latestOperationalGap >= 0 ? 'var(--green)' : 'var(--red)'}
           />
         </div>
       )}
