@@ -363,11 +363,13 @@ export default function MarketingPage() {
     const prevShipping = filteredPrevRangeShippingData.reduce((sum, row) => sum + Number(row.shipping_charge || 0), 0);
     const prevMarketingFee = resolvedPrevRangeAdsData.reduce((sum, row) => sum + Math.abs(Number(row.spent || 0)), 0);
     const prevCm3 = prevGrossProfit - prevMpFee - prevShipping - prevMarketingFee;
+    const prevRevenue = filteredPrevRangeProdData.reduce((sum, row) => sum + Number(row.net_sales || 0), 0);
 
     return {
       cm3,
       margin: totalRevenue > 0 ? (cm3 / totalRevenue) * 100 : 0,
       prevCm3,
+      prevMargin: prevRevenue > 0 ? (prevCm3 / prevRevenue) * 100 : 0,
       hasPrevious: filteredPrevRangeProdData.length > 0,
     };
   }, [
@@ -739,8 +741,8 @@ const BRAND_COLORS = useMemo(() => {
   const C = { bg: 'var(--bg)', card: 'var(--card)', bdr: 'var(--border)', dim: 'var(--dim)', txt: 'var(--text)' };
 
   const DeltaLine = ({ value, suffix, higherIsBetter, label: lbl }: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }) => (
-    <div style={{ fontSize: 10, marginTop: 4, color: ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
-      {value > 0 ? '▲' : '▼'} {value >= 0 ? '+' : ''}{value.toFixed(1)}{suffix || '%'}{lbl ? ` ${lbl}` : ` vs ${prevMonthLabel}`}
+    <div style={{ fontSize: 10, marginTop: 4, color: value === 0 ? 'var(--dim)' : ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
+      {value > 0 ? '▲' : value < 0 ? '▼' : '•'} {value > 0 ? '+' : ''}{value.toFixed(1)}{suffix || '%'}{lbl ? ` ${lbl}` : ` vs ${prevMonthLabel}`}
     </div>
   );
   const KPI = ({ label, val, sub, color = 'var(--accent)', delta, delta2 }: any) => (
@@ -749,8 +751,8 @@ const BRAND_COLORS = useMemo(() => {
       <div style={{ fontSize: 11, color: C.dim, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>{val}</div>
       {sub && <div style={{ fontSize: 11, color: C.dim, marginTop: 4 }}>{sub}</div>}
-      {delta && delta.value !== 0 && <DeltaLine {...delta} />}
-      {delta2 && delta2.value !== 0 && <DeltaLine {...delta2} />}
+      {delta && <DeltaLine {...delta} />}
+      {delta2 && <DeltaLine {...delta2} />}
     </div>
   );
 
@@ -888,6 +890,9 @@ const BRAND_COLORS = useMemo(() => {
           color={shippingError ? C.dim : cm3Metrics.cm3 >= 0 ? '#06b6d4' : 'var(--red)'}
           delta={!shippingError && !prevRangeShippingError && cm3Metrics.hasPrevious && cm3Metrics.prevCm3 !== 0
             ? { value: ((cm3Metrics.cm3 - cm3Metrics.prevCm3) / Math.abs(cm3Metrics.prevCm3)) * 100 }
+            : undefined}
+          delta2={!shippingError && !prevRangeShippingError && cm3Metrics.hasPrevious
+            ? { value: cm3Metrics.margin - cm3Metrics.prevMargin, suffix: 'pp', label: `CM3% vs ${prevMonthLabel}` }
             : undefined}
         />
       </div>

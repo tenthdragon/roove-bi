@@ -637,8 +637,8 @@ export default function ChannelsPage() {
   }, [prevRevenue]);
 
   const DeltaLine = ({ value, suffix, higherIsBetter, label: lbl, compact = false }: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string; compact?: boolean }) => (
-    <div style={{ fontSize: compact ? 9 : 10, marginTop: compact ? 2 : 4, color: ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
-      {value > 0 ? '▲' : '▼'} {value >= 0 ? '+' : ''}{value.toFixed(1)}{suffix || '%'}{lbl ? ` ${lbl}` : ` vs ${prevMonthLabel}`}
+    <div style={{ fontSize: compact ? 9 : 10, marginTop: compact ? 2 : 4, color: value === 0 ? 'var(--dim)' : ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
+      {value > 0 ? '▲' : value < 0 ? '▼' : '•'} {value > 0 ? '+' : ''}{value.toFixed(1)}{suffix || '%'}{lbl ? ` ${lbl}` : ` vs ${prevMonthLabel}`}
     </div>
   );
   const getComparisonDeltas = (current, prev) => {
@@ -662,8 +662,8 @@ export default function ChannelsPage() {
       <div style={{ fontSize: 11, color: 'var(--dim)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>{label}</div>
       <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>{val}</div>
       {sub && <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>{sub}</div>}
-      {delta && delta.value !== 0 && <DeltaLine {...delta} />}
-      {delta2 && delta2.value !== 0 && <DeltaLine {...delta2} />}
+      {delta && <DeltaLine {...delta} />}
+      {delta2 && <DeltaLine {...delta2} />}
     </div>
   );
 
@@ -770,7 +770,7 @@ export default function ChannelsPage() {
           sub={`${totalRevenue > 0 ? (totalCM1 / totalRevenue * 100).toFixed(1) : 0}% of net sales`}
           color="var(--green)"
           delta={prevRevenue && prevRevenue.cm1 !== 0 ? { value: ((totalCM1 - prevRevenue.cm1) / Math.abs(prevRevenue.cm1)) * 100 } : undefined}
-          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalCM1 / totalRevenue * 100 : 0) - (prevRevenue.cm1 / prevRevenue.total * 100), suffix: 'pp', label: 'CM1%' } : undefined}
+          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalCM1 / totalRevenue * 100 : 0) - (prevRevenue.cm1 / prevRevenue.total * 100), suffix: 'pp', label: `CM1% vs ${prevMonthLabel}` } : undefined}
         />
         <KPI
           label="CM2"
@@ -778,7 +778,7 @@ export default function ChannelsPage() {
           sub={`MP + shipping: ${totalRevenue > 0 ? ((totalMpAdmin + totalShippingCharges) / totalRevenue * 100).toFixed(1) : 0}% of net sales`}
           color="#0ea5e9"
           delta={prevRevenue && prevRevenue.cm2 !== 0 ? { value: ((totalCM2 - prevRevenue.cm2) / Math.abs(prevRevenue.cm2)) * 100 } : undefined}
-          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalCM2 / totalRevenue * 100 : 0) - (prevRevenue.cm2 / prevRevenue.total * 100), suffix: 'pp', label: 'CM2%' } : undefined}
+          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalCM2 / totalRevenue * 100 : 0) - (prevRevenue.cm2 / prevRevenue.total * 100), suffix: 'pp', label: `CM2% vs ${prevMonthLabel}` } : undefined}
         />
         <KPI
           label="CM3"
@@ -786,7 +786,7 @@ export default function ChannelsPage() {
           sub={`Mkt fee: ${totalRevenue > 0 ? (totalAdsCost / totalRevenue * 100).toFixed(1) : 0}% of net sales`}
           color={totalCM3 >= 0 ? '#06b6d4' : 'var(--red)'}
           delta={prevRevenue && prevRevenue.cm3 !== 0 ? { value: ((totalCM3 - prevRevenue.cm3) / Math.abs(prevRevenue.cm3)) * 100 } : undefined}
-          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalCM3 / totalRevenue * 100 : 0) - (prevRevenue.cm3 / prevRevenue.total * 100), suffix: 'pp', label: 'CM3%' } : undefined}
+          delta2={prevRevenue && prevRevenue.total > 0 ? { value: (totalRevenue > 0 ? totalCM3 / totalRevenue * 100 : 0) - (prevRevenue.cm3 / prevRevenue.total * 100), suffix: 'pp', label: `CM3% vs ${prevMonthLabel}` } : undefined}
         />
       </div>
 

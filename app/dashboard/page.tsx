@@ -525,8 +525,9 @@ export default function OverviewPage() {
         const cm2Color = kpi.tCm2 >= 0 ? '#0ea5e9' : 'var(--red)';
         const cm3Color = kpi.tCm3 >= 0 ? '#8b5cf6' : 'var(--red)';
         const cols = isMobile ? 'repeat(2,1fr)' : 'repeat(3,1fr)';
-        const Card = ({ label, value, sub, color, deltaVal, lowerBetter }: any) => {
-          const hasD = deltaVal != null && !isNaN(deltaVal) && deltaVal !== 0;
+        const Card = ({ label, value, sub, color, deltaVal, marginDelta, marginLabel, lowerBetter }: any) => {
+          const hasD = deltaVal != null && !isNaN(deltaVal);
+          const hasMarginDelta = marginDelta != null && !isNaN(marginDelta);
           return (
             <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px', position:'relative', overflow:'hidden' }}>
               <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background:color }} />
@@ -534,8 +535,13 @@ export default function OverviewPage() {
               <div style={{ fontSize:16, fontWeight:700, fontFamily:'monospace', lineHeight:1.2, color }}>{value}</div>
               {sub && <div style={{ fontSize:10, color:'var(--dim)', marginTop:3, lineHeight:1.3 }}>{sub}</div>}
               {hasD && (
-                <div style={{ fontSize:9, marginTop:3, color: ((deltaVal>0) === !lowerBetter) ? '#5b8a7a' : '#9b6b6b' }}>
-                  {deltaVal>0?'▲':'▼'} {deltaVal>=0?'+':''}{deltaVal.toFixed(1)}% vs {prevMonthLabel}
+                <div style={{ fontSize:9, marginTop:3, color: deltaVal === 0 ? 'var(--dim)' : ((deltaVal>0) === !lowerBetter) ? '#5b8a7a' : '#9b6b6b' }}>
+                  {deltaVal>0?'▲':deltaVal<0?'▼':'•'} {deltaVal>0?'+':''}{deltaVal.toFixed(1)}% vs {prevMonthLabel}
+                </div>
+              )}
+              {hasMarginDelta && (
+                <div style={{ fontSize:9, marginTop:3, color: marginDelta === 0 ? 'var(--dim)' : marginDelta > 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                  {marginDelta>0?'▲':marginDelta<0?'▼':'•'} {marginDelta>0?'+':''}{marginDelta.toFixed(1)}pp {marginLabel} vs {prevMonthLabel}
                 </div>
               )}
             </div>
@@ -545,6 +551,9 @@ export default function OverviewPage() {
         const dCm1 = prevKpi?.tg > 0 ? (kpi.tg - prevKpi.tg) / prevKpi.tg * 100 : null;
         const dCm2 = !feeError && !prevFeeError && !shippingError && !prevShippingError && prevKpi?.tCm2 ? (kpi.tCm2 - prevKpi.tCm2) / Math.abs(prevKpi.tCm2) * 100 : null;
         const dCm3 = !feeError && !prevFeeError && !shippingError && !prevShippingError && prevKpi?.tCm3 ? (kpi.tCm3 - prevKpi.tCm3) / Math.abs(prevKpi.tCm3) * 100 : null;
+        const dCm1Margin = prevKpi?.ts > 0 ? kpi.gpM - prevKpi.gpM : null;
+        const dCm2Margin = !feeError && !prevFeeError && !shippingError && !prevShippingError && prevKpi?.ts > 0 ? kpi.cm2M - prevKpi.cm2M : null;
+        const dCm3Margin = !feeError && !prevFeeError && !shippingError && !prevShippingError && prevKpi?.ts > 0 ? kpi.cm3M - prevKpi.cm3M : null;
         const dMkt = !feeError && !prevFeeError && prevKpi?.tAds > 0 ? (kpi.tAds - prevKpi.tAds) / prevKpi.tAds * 100 : null;
         const dAfterOh = !feeError && !prevFeeError && !shippingError && !prevShippingError && kpi.hasOverhead && prevOverheadData.length > 0 && prevKpi?.tNetProfit
           ? (kpi.tNetProfit - prevKpi.tNetProfit) / Math.abs(prevKpi.tNetProfit) * 100
@@ -559,9 +568,9 @@ export default function OverviewPage() {
         return (
           <div style={{ display:'grid', gridTemplateColumns:cols, gap:10, marginBottom:16 }}>
             <Card label="Net Sales" value={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg Rp ${fmtCompact(kpi.avg)}/hari · ${kpi.tShipment.toLocaleString('id-ID')} shipment`} color="var(--accent)" deltaVal={dNs} />
-            <Card label={`CM1 · ${kpi.gpM.toFixed(1)}%`} value={`Rp ${fmtCompact(kpi.tg)}`} sub={`Gross profit · COGS ${cogsPct}%`} color="var(--green)" deltaVal={dCm1} />
-            <Card label={`CM2 · ${kpi.cm2M.toFixed(1)}%`} value={cm2Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm2)}`} sub={cm2Unavailable ? 'MP / shipping data belum lengkap' : `MP + shipping ${channelLogisticsPct}%`} color={cm2Color} deltaVal={cm2Unavailable ? null : dCm2} />
-            <Card label={`CM3 · ${kpi.cm3M.toFixed(1)}%`} value={cm3Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm3)}`} sub={cm3Unavailable ? 'Marketing/channel data belum lengkap' : 'Setelah biaya marketing'} color={cm3Color} deltaVal={cm3Unavailable ? null : dCm3} />
+            <Card label={`CM1 · ${kpi.gpM.toFixed(1)}%`} value={`Rp ${fmtCompact(kpi.tg)}`} sub={`Gross profit · COGS ${cogsPct}%`} color="var(--green)" deltaVal={dCm1} marginDelta={dCm1Margin} marginLabel="CM1%" />
+            <Card label={`CM2 · ${kpi.cm2M.toFixed(1)}%`} value={cm2Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm2)}`} sub={cm2Unavailable ? 'MP / shipping data belum lengkap' : `MP + shipping ${channelLogisticsPct}%`} color={cm2Color} deltaVal={cm2Unavailable ? null : dCm2} marginDelta={cm2Unavailable ? null : dCm2Margin} marginLabel="CM2%" />
+            <Card label={`CM3 · ${kpi.cm3M.toFixed(1)}%`} value={cm3Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm3)}`} sub={cm3Unavailable ? 'Marketing/channel data belum lengkap' : 'Setelah biaya marketing'} color={cm3Color} deltaVal={cm3Unavailable ? null : dCm3} marginDelta={cm3Unavailable ? null : dCm3Margin} marginLabel="CM3%" />
             <Card label={`Marketing Fee · ${mktPct}%`} value={mktUnavailable ? '—' : `Rp ${fmtCompact(kpi.tAds)}`} sub={mktUnavailable ? 'Data marketing belum lengkap' : 'Biaya marketing terhadap net sales'} color="var(--yellow)" deltaVal={mktUnavailable ? null : dMkt} lowerBetter />
             <Card label={`After OH · ${kpi.npM.toFixed(1)}%`} value={afterOhUnavailable ? '—' : `Rp ${fmtCompact(kpi.tNetProfit)}`} sub={afterOhUnavailable ? (cm3Unavailable ? 'Marketing/channel data belum lengkap' : 'Data overhead belum tersedia') : `CM3 − overhead Rp ${fmtCompact(kpi.tOverhead)}`} color={afterOhUnavailable ? 'var(--dim)' : (kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)')} deltaVal={afterOhUnavailable ? null : dAfterOh} />
           </div>
