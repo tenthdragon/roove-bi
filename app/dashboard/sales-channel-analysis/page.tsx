@@ -924,8 +924,7 @@ export default function RevenueRunRatePage() {
             <span style={{ color:'var(--dim)', fontSize:10 }}>margin berjalan</span>
           </div>
           <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.6 }}>
-            Proyeksi CM3 <strong style={{ color:'var(--text)' }}>Rp {fmtCompact(analysis.projectedCm3)}</strong>.
-            Pada prediksi revenue saat ini, margin CM3 yang dibutuhkan menjadi <strong style={{ color:analysis.currentCm3Margin >= analysis.requiredCm3MarginAtProjection ? 'var(--green)' : 'var(--yellow)' }}>{(analysis.requiredCm3MarginAtProjection * 100).toFixed(1)}%</strong>. Karena fixed cost menjadi anchor, kebutuhan margin akan naik ketika revenue turun.
+            Target dinamis CM3 bulan ini adalah <strong style={{ color:analysis.currentCm3Margin >= analysis.requiredCm3MarginAtProjection ? 'var(--green)' : 'var(--yellow)' }}>{(analysis.requiredCm3MarginAtProjection * 100).toFixed(1)}%</strong>.
           </div>
         </div>
       </div>
