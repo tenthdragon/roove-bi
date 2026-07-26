@@ -117,7 +117,7 @@ async function loadOverviewCm3Month(from: string, to: string) {
 
 const getCompletedOverviewCm3Month = unstable_cache(
   loadOverviewCm3Month,
-  ['overview-cm3-month-completed-v2'],
+  ['overview-cm3-month-completed-v3'],
   { revalidate: 86400, tags: ['overview-cm3-history'] },
 );
 

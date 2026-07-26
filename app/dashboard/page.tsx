@@ -210,7 +210,7 @@ export default function OverviewPage() {
     // Wait until auth has finished hydrating so server actions can read the same session cookies.
     if (dateLoading || activeBrandsLoading || !authReady || !dateRange.from || !dateRange.to || !prevRange) return;
     const { prevFrom, prevTo } = prevRange;
-    const cached = getCached<any>('overview_page_data_v5', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
+    const cached = getCached<any>('overview_page_data_v6', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
     if (cached) {
       setDailyData(cached.daily || []);
       setShipmentData(cached.shipment || []);
@@ -249,7 +249,7 @@ export default function OverviewPage() {
     })
       .then((data) => {
         if (cancelled) return;
-        setCache('overview_page_data_v5', dateRange.from, dateRange.to, data, `${prevFrom}|${prevTo}`);
+        setCache('overview_page_data_v6', dateRange.from, dateRange.to, data, `${prevFrom}|${prevTo}`);
         setDailyData(data.daily || []);
         setShipmentData(data.shipment || []);
         setOverheadData(data.overhead || []);
