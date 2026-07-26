@@ -677,6 +677,9 @@ export default function OverviewPage() {
         const dAfterOh = !feeError && !prevFeeError && !shippingError && !prevShippingError && kpi.hasOverhead && prevOverheadData.length > 0 && prevKpi?.tNetProfit
           ? (kpi.tNetProfit - prevKpi.tNetProfit) / Math.abs(prevKpi.tNetProfit) * 100
           : null;
+        const dAfterOhMargin = !feeError && !prevFeeError && !shippingError && !prevShippingError && kpi.hasOverhead && prevOverheadData.length > 0 && prevKpi?.ts > 0
+          ? kpi.npM - prevKpi.npM
+          : null;
         const cogsPct = kpi.ts > 0 ? (kpi.tCogs / kpi.ts * 100).toFixed(1) : '0.0';
         const channelLogisticsPct = kpi.ts > 0 ? ((kpi.tMp + kpi.tShipping) / kpi.ts * 100).toFixed(1) : '0.0';
         const mktPct = kpi.ts > 0 ? (kpi.tAds / kpi.ts * 100).toFixed(1) : '0.0';
@@ -691,7 +694,7 @@ export default function OverviewPage() {
             <Card label={`CM2 · ${kpi.cm2M.toFixed(1)}%`} value={cm2Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm2)}`} sub={cm2Unavailable ? 'MP / shipping data belum lengkap' : `MP + shipping ${channelLogisticsPct}%`} color={cm2Color} deltaVal={cm2Unavailable ? null : dCm2} marginDelta={cm2Unavailable ? null : dCm2Margin} marginLabel="CM2%" />
             <Card label={`CM3 · ${kpi.cm3M.toFixed(1)}%`} value={cm3Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm3)}`} sub={cm3Unavailable ? 'Marketing/channel data belum lengkap' : 'Setelah biaya marketing'} color={cm3Color} deltaVal={cm3Unavailable ? null : dCm3} marginDelta={cm3Unavailable ? null : dCm3Margin} marginLabel="CM3%" />
             <Card label={`Marketing Fee · ${mktPct}%`} value={mktUnavailable ? '—' : `Rp ${fmtCompact(kpi.tAds)}`} sub={mktUnavailable ? 'Data marketing belum lengkap' : 'Biaya marketing terhadap net sales'} color="var(--yellow)" deltaVal={mktUnavailable ? null : dMkt} lowerBetter />
-            <Card label={`After OH · ${kpi.npM.toFixed(1)}%`} value={afterOhUnavailable ? '—' : `Rp ${fmtCompact(kpi.tNetProfit)}`} sub={afterOhUnavailable ? (cm3Unavailable ? 'Marketing/channel data belum lengkap' : 'Data overhead belum tersedia') : `CM3 − overhead Rp ${fmtCompact(kpi.tOverhead)}`} color={afterOhUnavailable ? 'var(--dim)' : (kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)')} deltaVal={afterOhUnavailable ? null : dAfterOh} />
+            <Card label={`After OH · ${kpi.npM.toFixed(1)}%`} value={afterOhUnavailable ? '—' : `Rp ${fmtCompact(kpi.tNetProfit)}`} sub={afterOhUnavailable ? (cm3Unavailable ? 'Marketing/channel data belum lengkap' : 'Data overhead belum tersedia') : `CM3 − overhead Rp ${fmtCompact(kpi.tOverhead)}`} color={afterOhUnavailable ? 'var(--dim)' : (kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)')} deltaVal={afterOhUnavailable ? null : dAfterOh} marginDelta={afterOhUnavailable ? null : dAfterOhMargin} marginLabel="After OH%" />
           </div>
         );
       })()}
@@ -850,12 +853,13 @@ export default function OverviewPage() {
           <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12, flexWrap:'wrap', marginBottom:12 }}>
             <div>
               <div style={{ fontSize:15, fontWeight:700 }}>Tren CM3 · 12 Bulan</div>
-              <div style={{ fontSize:10, color:'var(--dim)', marginTop:3 }}>Batang menunjukkan nominal CM3 · garis menunjukkan margin terhadap net sales</div>
+              <div style={{ fontSize:10, color:'var(--dim)', marginTop:3 }}>Batang menunjukkan nominal CM3 dan After OH · garis menunjukkan margin terhadap net sales</div>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:12, fontSize:9, color:'var(--dim)' }}>
               <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:9, height:9, borderRadius:2, background:'#8b5cf6' }} /> CM3</span>
               <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:6, height:9, borderRadius:2, background:'#6d28d9' }} /> After OH</span>
               <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:14, height:2, background:'#06b6d4' }} /> CM3 margin</span>
+              <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:14, borderTop:'2px dashed #a78bfa' }} /> After OH margin</span>
             </div>
           </div>
           {cm3HistoryData?.error && (
@@ -877,6 +881,7 @@ export default function OverviewPage() {
                   {cm3MonthlyTrend.map((row) => <Cell key={row.month} fill={row.netProfit >= 0 ? '#6d28d9' : '#ef4444'} fillOpacity={row.isPartial ? 0.65 : 0.95} />)}
                 </Bar>
                 <Line yAxisId="margin" type="monotone" dataKey="margin" name="CM3 margin" stroke="#06b6d4" strokeWidth={2.2} dot={{ r:3, fill:'#06b6d4', stroke:'var(--card)', strokeWidth:1.5 }} activeDot={{ r:5 }} />
+                <Line yAxisId="margin" type="monotone" dataKey="netProfitMargin" name="After OH margin" stroke="#a78bfa" strokeWidth={1.8} strokeDasharray="5 4" dot={false} activeDot={{ r:4, fill:'#a78bfa', stroke:'var(--card)', strokeWidth:1.5 }} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
