@@ -84,7 +84,7 @@ async function fetchAllDateRangeRows(
 
 async function loadOverviewCm3Month(from: string, to: string) {
   const svc = createServiceSupabase();
-  const [daily, ads, channel, shipping] = await Promise.all([
+  const [daily, ads, channel, shipping, overhead] = await Promise.all([
     fetchAllDateRangeRows(svc, 'daily_product_summary', 'date, product, net_sales, gross_profit', from, to)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: `Histori CM3: ${error.message}` })),
@@ -97,6 +97,12 @@ async function loadOverviewCm3Month(from: string, to: string) {
     getShippingFeeRange(from, to)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: `Histori shipping fee CM3: ${error.message}` })),
+    svc.from('monthly_overhead')
+      .select('year_month, amount')
+      .eq('year_month', from.slice(0, 7))
+      .then(({ data, error }) => error
+        ? { data: [], error: `Histori overhead: ${error.message}` }
+        : { data: data || [], error: null }),
   ]);
 
   return {
@@ -104,19 +110,20 @@ async function loadOverviewCm3Month(from: string, to: string) {
     ads: ads.data,
     channel: channel.data,
     shipping: shipping.data,
-    errors: [daily.error, ads.error, channel.error, shipping.error].filter(Boolean),
+    overhead: overhead.data,
+    errors: [daily.error, ads.error, channel.error, shipping.error, overhead.error].filter(Boolean),
   };
 }
 
 const getCompletedOverviewCm3Month = unstable_cache(
   loadOverviewCm3Month,
-  ['overview-cm3-month-completed-v1'],
+  ['overview-cm3-month-completed-v2'],
   { revalidate: 86400, tags: ['overview-cm3-history'] },
 );
 
 const getActiveOverviewCm3Month = unstable_cache(
   loadOverviewCm3Month,
-  ['overview-cm3-month-active-v1'],
+  ['overview-cm3-month-active-v2'],
   { revalidate: 300, tags: ['overview-cm3-history-active'] },
 );
 
@@ -322,6 +329,7 @@ export async function getOverviewPageData({
   const historyAds = historyMonthResults.flatMap((month) => month.ads);
   const historyChannel = historyMonthResults.flatMap((month) => month.channel);
   const historyShipping = historyMonthResults.flatMap((month) => month.shipping);
+  const historyOverhead = historyMonthResults.flatMap((month) => month.overhead);
   const historyErrors = historyMonthResults.flatMap((month) => month.errors);
 
   return {
@@ -347,6 +355,7 @@ export async function getOverviewPageData({
       ads: historyAds,
       channel: historyChannel,
       shipping: historyShipping,
+      overhead: historyOverhead,
       error: historyErrors.join(' | ') || null,
     },
   };

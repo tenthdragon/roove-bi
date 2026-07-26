@@ -210,7 +210,7 @@ export default function OverviewPage() {
     // Wait until auth has finished hydrating so server actions can read the same session cookies.
     if (dateLoading || activeBrandsLoading || !authReady || !dateRange.from || !dateRange.to || !prevRange) return;
     const { prevFrom, prevTo } = prevRange;
-    const cached = getCached<any>('overview_page_data_v4', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
+    const cached = getCached<any>('overview_page_data_v5', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
     if (cached) {
       setDailyData(cached.daily || []);
       setShipmentData(cached.shipment || []);
@@ -249,7 +249,7 @@ export default function OverviewPage() {
     })
       .then((data) => {
         if (cancelled) return;
-        setCache('overview_page_data_v4', dateRange.from, dateRange.to, data, `${prevFrom}|${prevTo}`);
+        setCache('overview_page_data_v5', dateRange.from, dateRange.to, data, `${prevFrom}|${prevTo}`);
         setDailyData(data.daily || []);
         setShipmentData(data.shipment || []);
         setOverheadData(data.overhead || []);
@@ -424,13 +424,13 @@ export default function OverviewPage() {
   const cm3MonthlyTrend = useMemo(() => {
     if (!cm3HistoryData?.from || !cm3HistoryData?.to) return [];
 
-    const monthly: Record<string, { revenue:number; grossProfit:number; ads:number; mp:number; shipping:number }> = {};
+    const monthly: Record<string, { revenue:number; grossProfit:number; ads:number; mp:number; shipping:number; overhead:number }> = {};
     const start = new Date(`${cm3HistoryData.from.slice(0, 7)}-01T00:00:00Z`);
     const endMonth = cm3HistoryData.to.slice(0, 7);
     const cursor = new Date(start);
 
     while (cursor.toISOString().slice(0, 7) <= endMonth) {
-      monthly[cursor.toISOString().slice(0, 7)] = { revenue:0, grossProfit:0, ads:0, mp:0, shipping:0 };
+      monthly[cursor.toISOString().slice(0, 7)] = { revenue:0, grossProfit:0, ads:0, mp:0, shipping:0, overhead:0 };
       cursor.setUTCMonth(cursor.getUTCMonth() + 1);
     }
 
@@ -455,6 +455,16 @@ export default function OverviewPage() {
       const bucket = monthly[String(row.date).slice(0, 7)];
       if (bucket) bucket.shipping += Number(row.shipping_charge || 0);
     });
+    (cm3HistoryData.overhead || []).forEach((row: any) => {
+      const bucket = monthly[String(row.year_month)];
+      if (!bucket) return;
+      const [year, monthNumber] = String(row.year_month).split('-').map(Number);
+      const fullMonthDays = getDaysInMonth(year, monthNumber);
+      const coveredDays = String(row.year_month) === endMonth
+        ? Math.min(Number(cm3HistoryData.to.slice(8, 10)), fullMonthDays)
+        : fullMonthDays;
+      bucket.overhead += Number(row.amount || 0) * coveredDays / fullMonthDays;
+    });
 
     return Object.entries(monthly).map(([month, value]) => {
       const [year, monthNumber] = month.split('-').map(Number);
@@ -464,18 +474,23 @@ export default function OverviewPage() {
       const calculatedCm3 = value.grossProfit - value.mp - value.shipping - value.ads;
       const cm3 = matchesActiveMonthlyKpi ? kpi.tCm3 : calculatedCm3;
       const revenue = matchesActiveMonthlyKpi ? kpi.ts : value.revenue;
+      const overhead = matchesActiveMonthlyKpi ? kpi.tOverhead : value.overhead;
+      const netProfit = matchesActiveMonthlyKpi ? kpi.tNetProfit : cm3 - overhead;
       const isPartial = month === endMonth && Number(cm3HistoryData.to.slice(8, 10)) < getDaysInMonth(year, monthNumber);
       return {
         month,
         label: new Date(Date.UTC(year, monthNumber - 1, 1)).toLocaleDateString('id-ID', { month:'short', year:'2-digit', timeZone:'UTC' }),
         cm3,
         margin: revenue > 0 ? cm3 / revenue * 100 : 0,
+        overhead,
+        netProfit,
+        netProfitMargin: revenue > 0 ? netProfit / revenue * 100 : 0,
         revenue,
         isPartial,
         throughDay: isPartial ? Number(cm3HistoryData.to.slice(8, 10)) : null,
       };
     });
-  }, [cm3HistoryData, dateRange.from, isActiveBrand, kpi.tCm3, kpi.ts]);
+  }, [cm3HistoryData, dateRange.from, isActiveBrand, kpi.tCm3, kpi.tNetProfit, kpi.tOverhead, kpi.ts]);
 
   const productTable = useMemo(() => {
     const byP = {};
@@ -539,9 +554,22 @@ export default function OverviewPage() {
           <span style={{ color:'var(--dim)' }}>CM3</span>
           <span style={{ fontFamily:'monospace', color:row.cm3 >= 0 ? '#8b5cf6' : 'var(--red)', fontWeight:700 }}>Rp {fmtCompact(row.cm3)}</span>
         </div>
-        <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10, marginBottom:4 }}>
           <span style={{ color:'var(--dim)' }}>CM3 margin</span>
           <span style={{ fontFamily:'monospace', color:'#06b6d4', fontWeight:700 }}>{row.margin.toFixed(1)}%</span>
+        </div>
+        <div style={{ borderTop:'1px solid var(--border)', margin:'6px 0' }} />
+        <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10, marginBottom:4 }}>
+          <span style={{ color:'var(--dim)' }}>Overhead</span>
+          <span style={{ fontFamily:'monospace', color:'#a78bfa' }}>Rp {fmtCompact(row.overhead)}</span>
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10, marginBottom:4 }}>
+          <span style={{ color:'var(--dim)' }}>After OH</span>
+          <span style={{ fontFamily:'monospace', color:row.netProfit >= 0 ? '#6d28d9' : 'var(--red)', fontWeight:700 }}>Rp {fmtCompact(row.netProfit)}</span>
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10 }}>
+          <span style={{ color:'var(--dim)' }}>After OH margin</span>
+          <span style={{ fontFamily:'monospace', color:row.netProfit >= 0 ? '#a78bfa' : 'var(--red)', fontWeight:700 }}>{row.netProfitMargin.toFixed(1)}%</span>
         </div>
       </div>
     );
@@ -826,6 +854,7 @@ export default function OverviewPage() {
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:12, fontSize:9, color:'var(--dim)' }}>
               <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:9, height:9, borderRadius:2, background:'#8b5cf6' }} /> CM3</span>
+              <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:6, height:9, borderRadius:2, background:'#6d28d9' }} /> After OH</span>
               <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:14, height:2, background:'#06b6d4' }} /> CM3 margin</span>
             </div>
           </div>
@@ -834,15 +863,18 @@ export default function OverviewPage() {
           )}
           <div style={{ width:'100%', height:isMobile ? 260 : 300 }}>
             <ResponsiveContainer>
-              <ComposedChart data={cm3MonthlyTrend} margin={{ top:10, right:10, left:4, bottom:2 }}>
+              <ComposedChart data={cm3MonthlyTrend} margin={{ top:10, right:10, left:4, bottom:2 }} barGap={-31}>
                 <CartesianGrid stroke="var(--border)" strokeDasharray="3 4" vertical={false} />
                 <XAxis dataKey="label" tick={{ fill:'var(--dim)', fontSize:9 }} axisLine={{ stroke:'var(--border)' }} tickLine={false} />
                 <YAxis yAxisId="amount" tickFormatter={(value) => fmtCompact(value)} tick={{ fill:'var(--dim)', fontSize:9 }} axisLine={false} tickLine={false} width={52} />
                 <YAxis yAxisId="margin" orientation="right" tickFormatter={(value) => `${value.toFixed(0)}%`} tick={{ fill:'#06b6d4', fontSize:9 }} axisLine={false} tickLine={false} width={38} />
                 <Tooltip content={<Cm3HistoryTooltip />} />
                 <ReferenceLine yAxisId="amount" y={0} stroke="var(--border)" />
-                <Bar yAxisId="amount" dataKey="cm3" name="CM3" radius={[4,4,0,0]} maxBarSize={42}>
-                  {cm3MonthlyTrend.map((row) => <Cell key={row.month} fill={row.cm3 >= 0 ? '#8b5cf6' : '#ef4444'} fillOpacity={row.isPartial ? 0.6 : 0.9} />)}
+                <Bar yAxisId="amount" dataKey="cm3" name="CM3" radius={[4,4,0,0]} barSize={42}>
+                  {cm3MonthlyTrend.map((row) => <Cell key={row.month} fill={row.cm3 >= 0 ? '#8b5cf6' : '#ef4444'} fillOpacity={row.isPartial ? 0.35 : 0.5} />)}
+                </Bar>
+                <Bar yAxisId="amount" dataKey="netProfit" name="Net Profit After OH" radius={[3,3,0,0]} barSize={20}>
+                  {cm3MonthlyTrend.map((row) => <Cell key={row.month} fill={row.netProfit >= 0 ? '#6d28d9' : '#ef4444'} fillOpacity={row.isPartial ? 0.65 : 0.95} />)}
                 </Bar>
                 <Line yAxisId="margin" type="monotone" dataKey="margin" name="CM3 margin" stroke="#06b6d4" strokeWidth={2.2} dot={{ r:3, fill:'#06b6d4', stroke:'var(--card)', strokeWidth:1.5 }} activeDot={{ r:5 }} />
               </ComposedChart>
