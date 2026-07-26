@@ -2,6 +2,18 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import {
+  Bar,
+  Cell,
+  CartesianGrid,
+  ComposedChart,
+  Line,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { useSupabase } from '@/lib/supabase-browser';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
@@ -88,6 +100,7 @@ export default function OverviewPage() {
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [prevShippingData, setPrevShippingData] = useState<any[]>([]);
+  const [cm3HistoryData, setCm3HistoryData] = useState<any>(null);
   const [feeError, setFeeError] = useState('');
   const [prevFeeError, setPrevFeeError] = useState('');
   const [shippingError, setShippingError] = useState('');
@@ -197,7 +210,7 @@ export default function OverviewPage() {
     // Wait until auth has finished hydrating so server actions can read the same session cookies.
     if (dateLoading || activeBrandsLoading || !authReady || !dateRange.from || !dateRange.to || !prevRange) return;
     const { prevFrom, prevTo } = prevRange;
-    const cached = getCached<any>('overview_page_data_v1', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
+    const cached = getCached<any>('overview_page_data_v4', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
     if (cached) {
       setDailyData(cached.daily || []);
       setShipmentData(cached.shipment || []);
@@ -210,6 +223,7 @@ export default function OverviewPage() {
       setPrevAdsData(cached.prevAds || []);
       setPrevChannelData(cached.prevChannel || []);
       setPrevShippingData(cached.prevShipping || []);
+      setCm3HistoryData(cached.cm3History || null);
       setFeeError(cached.feeError || '');
       setPrevFeeError(cached.prevFeeError || '');
       setShippingError(cached.shippingError || '');
@@ -235,7 +249,7 @@ export default function OverviewPage() {
     })
       .then((data) => {
         if (cancelled) return;
-        setCache('overview_page_data_v1', dateRange.from, dateRange.to, data, `${prevFrom}|${prevTo}`);
+        setCache('overview_page_data_v4', dateRange.from, dateRange.to, data, `${prevFrom}|${prevTo}`);
         setDailyData(data.daily || []);
         setShipmentData(data.shipment || []);
         setOverheadData(data.overhead || []);
@@ -247,6 +261,7 @@ export default function OverviewPage() {
         setPrevAdsData(data.prevAds || []);
         setPrevChannelData(data.prevChannel || []);
         setPrevShippingData(data.prevShipping || []);
+        setCm3HistoryData(data.cm3History || null);
         setFeeError(data.feeError || '');
         setPrevFeeError(data.prevFeeError || '');
         setShippingError(data.shippingError || '');
@@ -269,6 +284,7 @@ export default function OverviewPage() {
         setPrevAdsData([]);
         setPrevChannelData([]);
         setPrevShippingData([]);
+        setCm3HistoryData(null);
         setFeeError('');
         setPrevFeeError('');
         setShippingError('');
@@ -405,6 +421,62 @@ export default function OverviewPage() {
     return prevMonth.toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
   }, [dateRange.from]);
 
+  const cm3MonthlyTrend = useMemo(() => {
+    if (!cm3HistoryData?.from || !cm3HistoryData?.to) return [];
+
+    const monthly: Record<string, { revenue:number; grossProfit:number; ads:number; mp:number; shipping:number }> = {};
+    const start = new Date(`${cm3HistoryData.from.slice(0, 7)}-01T00:00:00Z`);
+    const endMonth = cm3HistoryData.to.slice(0, 7);
+    const cursor = new Date(start);
+
+    while (cursor.toISOString().slice(0, 7) <= endMonth) {
+      monthly[cursor.toISOString().slice(0, 7)] = { revenue:0, grossProfit:0, ads:0, mp:0, shipping:0 };
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    }
+
+    (cm3HistoryData.daily || []).forEach((row: any) => {
+      if (!isActiveBrand(row.product)) return;
+      const bucket = monthly[String(row.date).slice(0, 7)];
+      if (!bucket) return;
+      bucket.revenue += Number(row.net_sales || 0);
+      bucket.grossProfit += Number(row.gross_profit || 0);
+    });
+    (cm3HistoryData.ads || []).forEach((row: any) => {
+      const bucket = monthly[String(row.date).slice(0, 7)];
+      if (bucket) bucket.ads += Math.abs(Number(row.spent || 0));
+    });
+    (cm3HistoryData.channel || []).forEach((row: any) => {
+      if (!isActiveBrand(row.product)) return;
+      const bucket = monthly[String(row.date).slice(0, 7)];
+      if (bucket) bucket.mp += Math.abs(Number(row.mp_admin_cost || 0));
+    });
+    (cm3HistoryData.shipping || []).forEach((row: any) => {
+      if (!isActiveBrand(row.product)) return;
+      const bucket = monthly[String(row.date).slice(0, 7)];
+      if (bucket) bucket.shipping += Number(row.shipping_charge || 0);
+    });
+
+    return Object.entries(monthly).map(([month, value]) => {
+      const [year, monthNumber] = month.split('-').map(Number);
+      const matchesActiveMonthlyKpi = month === endMonth
+        && dateRange.from.slice(0, 7) === endMonth
+        && dateRange.from.endsWith('-01');
+      const calculatedCm3 = value.grossProfit - value.mp - value.shipping - value.ads;
+      const cm3 = matchesActiveMonthlyKpi ? kpi.tCm3 : calculatedCm3;
+      const revenue = matchesActiveMonthlyKpi ? kpi.ts : value.revenue;
+      const isPartial = month === endMonth && Number(cm3HistoryData.to.slice(8, 10)) < getDaysInMonth(year, monthNumber);
+      return {
+        month,
+        label: new Date(Date.UTC(year, monthNumber - 1, 1)).toLocaleDateString('id-ID', { month:'short', year:'2-digit', timeZone:'UTC' }),
+        cm3,
+        margin: revenue > 0 ? cm3 / revenue * 100 : 0,
+        revenue,
+        isPartial,
+        throughDay: isPartial ? Number(cm3HistoryData.to.slice(8, 10)) : null,
+      };
+    });
+  }, [cm3HistoryData, dateRange.from, isActiveBrand, kpi.tCm3, kpi.ts]);
+
   const productTable = useMemo(() => {
     const byP = {};
     filteredDailyData.forEach(d => {
@@ -456,6 +528,24 @@ export default function OverviewPage() {
       </div>
     </td>
   );
+  const Cm3HistoryTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null;
+    const row = payload[0]?.payload;
+    if (!row) return null;
+    return (
+      <div style={{ background:'var(--bg-deep)', border:'1px solid var(--border)', borderRadius:9, padding:'9px 11px', boxShadow:'var(--shadow)', minWidth:160 }}>
+        <div style={{ fontSize:11, fontWeight:700, marginBottom:6 }}>{row.label}{row.isPartial ? ` · s.d. hari ${row.throughDay}` : ''}</div>
+        <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10, marginBottom:4 }}>
+          <span style={{ color:'var(--dim)' }}>CM3</span>
+          <span style={{ fontFamily:'monospace', color:row.cm3 >= 0 ? '#8b5cf6' : 'var(--red)', fontWeight:700 }}>Rp {fmtCompact(row.cm3)}</span>
+        </div>
+        <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10 }}>
+          <span style={{ color:'var(--dim)' }}>CM3 margin</span>
+          <span style={{ fontFamily:'monospace', color:'#06b6d4', fontWeight:700 }}>{row.margin.toFixed(1)}%</span>
+        </div>
+      </div>
+    );
+  };
   const KPI = ({ label, val, sub, color='var(--accent)', delta, delta2 }: { label: string; val: string; sub?: string; color?: string; delta?: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }; delta2?: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string } }) => (
     <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 18px', position:'relative', overflow:'hidden' }}>
       <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:color }} />
@@ -724,6 +814,43 @@ export default function OverviewPage() {
               </tr>
             </tbody>
           </table></div>}
+        </div>
+      )}
+
+      {cm3MonthlyTrend.length > 0 && (
+        <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:'16px 16px 10px', marginBottom:20 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12, flexWrap:'wrap', marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:15, fontWeight:700 }}>Tren CM3 · 12 Bulan</div>
+              <div style={{ fontSize:10, color:'var(--dim)', marginTop:3 }}>Batang menunjukkan nominal CM3 · garis menunjukkan margin terhadap net sales</div>
+            </div>
+            <div style={{ display:'flex', alignItems:'center', gap:12, fontSize:9, color:'var(--dim)' }}>
+              <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:9, height:9, borderRadius:2, background:'#8b5cf6' }} /> CM3</span>
+              <span style={{ display:'flex', alignItems:'center', gap:5 }}><span style={{ width:14, height:2, background:'#06b6d4' }} /> CM3 margin</span>
+            </div>
+          </div>
+          {cm3HistoryData?.error && (
+            <div style={{ fontSize:10, color:'var(--yellow)', marginBottom:8 }}>Sebagian data histori belum lengkap: {cm3HistoryData.error}</div>
+          )}
+          <div style={{ width:'100%', height:isMobile ? 260 : 300 }}>
+            <ResponsiveContainer>
+              <ComposedChart data={cm3MonthlyTrend} margin={{ top:10, right:10, left:4, bottom:2 }}>
+                <CartesianGrid stroke="var(--border)" strokeDasharray="3 4" vertical={false} />
+                <XAxis dataKey="label" tick={{ fill:'var(--dim)', fontSize:9 }} axisLine={{ stroke:'var(--border)' }} tickLine={false} />
+                <YAxis yAxisId="amount" tickFormatter={(value) => fmtCompact(value)} tick={{ fill:'var(--dim)', fontSize:9 }} axisLine={false} tickLine={false} width={52} />
+                <YAxis yAxisId="margin" orientation="right" tickFormatter={(value) => `${value.toFixed(0)}%`} tick={{ fill:'#06b6d4', fontSize:9 }} axisLine={false} tickLine={false} width={38} />
+                <Tooltip content={<Cm3HistoryTooltip />} />
+                <ReferenceLine yAxisId="amount" y={0} stroke="var(--border)" />
+                <Bar yAxisId="amount" dataKey="cm3" name="CM3" radius={[4,4,0,0]} maxBarSize={42}>
+                  {cm3MonthlyTrend.map((row) => <Cell key={row.month} fill={row.cm3 >= 0 ? '#8b5cf6' : '#ef4444'} fillOpacity={row.isPartial ? 0.6 : 0.9} />)}
+                </Bar>
+                <Line yAxisId="margin" type="monotone" dataKey="margin" name="CM3 margin" stroke="#06b6d4" strokeWidth={2.2} dot={{ r:3, fill:'#06b6d4', stroke:'var(--card)', strokeWidth:1.5 }} activeDot={{ r:5 }} />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+          {cm3MonthlyTrend.some(row => row.isPartial) && (
+            <div style={{ fontSize:9, color:'var(--dim)', textAlign:'right', marginTop:2 }}>* Bulan terakhir masih berjalan dan hanya mencakup data hingga tanggal filter.</div>
+          )}
         </div>
       )}
 

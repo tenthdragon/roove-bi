@@ -1,5 +1,6 @@
 'use server';
 
+import { unstable_cache } from 'next/cache';
 import { createServiceSupabase } from './supabase-server';
 import { requireDashboardTabAccess } from './dashboard-access';
 import { getShippingFeeRange } from './shipping-fee-data';
@@ -53,6 +54,71 @@ function unwrapOptional<T>(result: { data: T | null; error: { message: string } 
     error: null as string | null,
   };
 }
+
+async function fetchAllDateRangeRows(
+  svc: ReturnType<typeof createServiceSupabase>,
+  table: string,
+  columns: string,
+  from: string,
+  to: string,
+) {
+  const pageSize = 1000;
+  const rows: any[] = [];
+
+  for (let offset = 0; ; offset += pageSize) {
+    const result = await svc.from(table)
+      .select(columns)
+      .gte('date', from)
+      .lte('date', to)
+      .order('date')
+      .range(offset, offset + pageSize - 1);
+
+    if (result.error) throw new Error(result.error.message);
+    const page = result.data || [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return rows;
+}
+
+async function loadOverviewCm3Month(from: string, to: string) {
+  const svc = createServiceSupabase();
+  const [daily, ads, channel, shipping] = await Promise.all([
+    fetchAllDateRangeRows(svc, 'daily_product_summary', 'date, product, net_sales, gross_profit', from, to)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: `Histori CM3: ${error.message}` })),
+    fetchAllDateRangeRows(svc, 'daily_ads_spend', 'date, spent', from, to)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: `Histori marketing fee CM3: ${error.message}` })),
+    fetchAllDateRangeRows(svc, 'daily_channel_data', 'date, product, mp_admin_cost', from, to)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: `Histori MP fee CM3: ${error.message}` })),
+    getShippingFeeRange(from, to)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: `Histori shipping fee CM3: ${error.message}` })),
+  ]);
+
+  return {
+    daily: daily.data,
+    ads: ads.data,
+    channel: channel.data,
+    shipping: shipping.data,
+    errors: [daily.error, ads.error, channel.error, shipping.error].filter(Boolean),
+  };
+}
+
+const getCompletedOverviewCm3Month = unstable_cache(
+  loadOverviewCm3Month,
+  ['overview-cm3-month-completed-v1'],
+  { revalidate: 86400, tags: ['overview-cm3-history'] },
+);
+
+const getActiveOverviewCm3Month = unstable_cache(
+  loadOverviewCm3Month,
+  ['overview-cm3-month-active-v1'],
+  { revalidate: 300, tags: ['overview-cm3-history-active'] },
+);
 
 export async function getOverviewCoreData({
   from,
@@ -163,6 +229,26 @@ export async function getOverviewPageData({
   const toYM = to.slice(0, 7);
   const prevFromYM = prevFrom.slice(0, 7);
   const prevToYM = prevTo.slice(0, 7);
+  const historyEnd = new Date(`${to}T00:00:00Z`);
+  const historyStartDate = new Date(Date.UTC(historyEnd.getUTCFullYear(), historyEnd.getUTCMonth() - 11, 1));
+  const historyFrom = historyStartDate.toISOString().slice(0, 10);
+  const historyMonths: Array<{ from: string; to: string; active: boolean }> = [];
+  const historyCursor = new Date(historyStartDate);
+  const historyEndMonth = to.slice(0, 7);
+
+  while (historyCursor.toISOString().slice(0, 7) <= historyEndMonth) {
+    const year = historyCursor.getUTCFullYear();
+    const monthIndex = historyCursor.getUTCMonth();
+    const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+    const monthFrom = `${monthKey}-01`;
+    const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0)).toISOString().slice(0, 10);
+    historyMonths.push({
+      from: monthFrom,
+      to: monthKey === historyEndMonth ? to : monthEnd,
+      active: monthKey === historyEndMonth,
+    });
+    historyCursor.setUTCMonth(historyCursor.getUTCMonth() + 1);
+  }
 
   const [
     dailyRes,
@@ -176,6 +262,7 @@ export async function getOverviewPageData({
     prevAdsRes,
     prevChannelRes,
     prevShippingRes,
+    historyMonthResults,
   ] = await Promise.all([
     svc.from('daily_product_summary')
       .select(OVERVIEW_DAILY_SUMMARY_COLUMNS)
@@ -218,6 +305,11 @@ export async function getOverviewPageData({
     getShippingFeeRange(prevFrom, prevTo)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: { message: error.message } })),
+    Promise.all(historyMonths.map((range) =>
+      range.active
+        ? getActiveOverviewCm3Month(range.from, range.to)
+        : getCompletedOverviewCm3Month(range.from, range.to)
+    )),
   ]);
 
   const ads = unwrapOptional(adsRes, 'Gagal memuat marketing fee Overview');
@@ -226,6 +318,11 @@ export async function getOverviewPageData({
   const prevAds = unwrapOptional(prevAdsRes, 'Gagal memuat marketing fee bulan sebelumnya');
   const prevChannel = unwrapOptional(prevChannelRes, 'Gagal memuat MP fee bulan sebelumnya');
   const prevShipping = unwrapOptional(prevShippingRes, 'Gagal memuat shipping fee bulan sebelumnya');
+  const historyDaily = historyMonthResults.flatMap((month) => month.daily);
+  const historyAds = historyMonthResults.flatMap((month) => month.ads);
+  const historyChannel = historyMonthResults.flatMap((month) => month.channel);
+  const historyShipping = historyMonthResults.flatMap((month) => month.shipping);
+  const historyErrors = historyMonthResults.flatMap((month) => month.errors);
 
   return {
     daily: unwrap(dailyRes, 'Gagal memuat data Overview'),
@@ -243,6 +340,15 @@ export async function getOverviewPageData({
     prevFeeError: [prevAds.error, prevChannel.error].filter(Boolean).join(' | ') || null,
     shippingError: shipping.error,
     prevShippingError: prevShipping.error,
+    cm3History: {
+      from: historyFrom,
+      to,
+      daily: historyDaily,
+      ads: historyAds,
+      channel: historyChannel,
+      shipping: historyShipping,
+      error: historyErrors.join(' | ') || null,
+    },
   };
 }
 
