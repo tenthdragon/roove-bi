@@ -95,7 +95,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
   );
 
   const SeparatorRow = ({ label, pctVal, amount, orders, color }: any) => (
-    <div style={{ padding:'12px 20px', background:`${color}14`, borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
+    <div style={{ padding:'11px 16px', background:`${color}14`, borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
       <span style={{ fontSize:12, fontWeight:700, color }}>
         {label}
         <span style={{ fontSize:10, fontFamily:'monospace', fontWeight:400, opacity:0.75, marginLeft:6 }}>{pctVal.toFixed(1)}%</span>
@@ -107,23 +107,61 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
     </div>
   );
 
+  const totalCashInPct = pct(totalCashIn);
+  const receivedPct = pct(data.cashReceived);
+  const spillOverPct = pct(data.spillOver);
+  const circumference = 2 * Math.PI * 46;
+  const receivedArc = Math.min(receivedPct, 100) / 100 * circumference;
+  const spillOverArc = Math.min(spillOverPct, Math.max(100 - receivedPct, 0)) / 100 * circumference;
+
   return shell(
     <>
-      {/* Cash Masuk */}
-      <Row label="Received (bulan ini)" pctVal={pct(data.cashReceived)} amount={data.cashReceived} orders={data.cashReceivedOrders} indent />
-      <Row label="Spill Over (bulan lalu)" pctVal={pct(data.spillOver)} amount={data.spillOver} orders={data.spillOverOrders} indent />
-      <SeparatorRow label="Total Cash Masuk" pctVal={pct(totalCashIn)} amount={totalCashIn} orders={data.cashReceivedOrders + data.spillOverOrders} color="#10b981" />
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', borderBottom:'1px solid var(--border)' }}>
+        {/* Visual summary */}
+        <div style={{ padding:'18px 20px', borderRight:'1px solid var(--border)', display:'flex', alignItems:'center', justifyContent:'center', gap:24, flexWrap:'wrap' }}>
+          <div style={{ position:'relative', width:138, height:138, flex:'0 0 138px' }}>
+            <svg width="138" height="138" viewBox="0 0 120 120" role="img" aria-label={`Total cash masuk ${totalCashInPct.toFixed(1)} persen dari net sales`}>
+              <circle cx="60" cy="60" r="46" fill="none" stroke="var(--bg-deep)" strokeWidth="11" />
+              <circle cx="60" cy="60" r="46" fill="none" stroke="#10b981" strokeWidth="11" strokeLinecap="butt"
+                strokeDasharray={`${receivedArc} ${circumference - receivedArc}`} transform="rotate(-90 60 60)" />
+              <circle cx="60" cy="60" r="46" fill="none" stroke="#8b5cf6" strokeWidth="11" strokeLinecap="butt"
+                strokeDasharray={`${spillOverArc} ${circumference - spillOverArc}`} strokeDashoffset={-receivedArc} transform="rotate(-90 60 60)" />
+            </svg>
+            <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
+              <div style={{ fontFamily:'monospace', fontSize:20, fontWeight:800, color:'#10b981' }}>{totalCashInPct.toFixed(1)}%</div>
+              <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>cash masuk</div>
+            </div>
+          </div>
+          <div style={{ minWidth:190, flex:'1 1 190px', maxWidth:300 }}>
+            <div style={{ fontSize:10, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:7 }}>Terhadap net sales</div>
+            {[
+              { label:'Received', value:receivedPct, color:'#10b981' },
+              { label:'Spill Over', value:spillOverPct, color:'#8b5cf6' },
+              { label:'In Progress', value:pct(data.cashInProgress), color:'#f59e0b' },
+              { label:'Overdue', value:pct(data.overdue), color:'#ef4444' },
+            ].map(item => (
+              <div key={item.label} style={{ marginBottom:8 }}>
+                <div style={{ display:'flex', justifyContent:'space-between', gap:10, fontSize:10, marginBottom:3 }}>
+                  <span style={{ color:'var(--text-secondary)' }}>{item.label}</span>
+                  <span style={{ fontFamily:'monospace', color:item.color }}>{item.value.toFixed(1)}%</span>
+                </div>
+                <div style={{ height:5, background:'var(--bg-deep)', borderRadius:999, overflow:'hidden' }}>
+                  <div style={{ width:`${Math.min(item.value, 100)}%`, height:'100%', background:item.color, borderRadius:999 }} />
+                </div>
+              </div>
+            ))}
+            <div style={{ fontSize:9, color:'var(--dim)', marginTop:10 }}>Target cash masuk 100% dari net sales</div>
+          </div>
+        </div>
 
-      {/* Cash Belum Masuk */}
-      <Row label="In Progress (bulan ini)" pctVal={pct(data.cashInProgress)} amount={data.cashInProgress} orders={data.cashInProgressOrders} color="var(--yellow)" indent />
-      <Row label="Overdue (bulan lalu)" pctVal={pct(data.overdue)} amount={data.overdue} orders={data.overdueOrders} color={data.overdueOrders > 0 ? 'var(--red)' : 'var(--text-secondary)'} indent warn={data.overdueOrders > 100} />
-
-      {/* Progress bar */}
-      <div style={{ height:4, display:'flex', overflow:'hidden', background:'var(--bg-deep)' }}>
-        {pct(data.cashReceived) > 0 && <div style={{ width:`${pct(data.cashReceived)}%`, background:'#10b981' }} />}
-        {pct(data.spillOver) > 0 && <div style={{ width:`${pct(data.spillOver)}%`, background:'#8b5cf6' }} />}
-        {pct(data.cashInProgress) > 0 && <div style={{ width:`${Math.min(pct(data.cashInProgress), 100-pct(data.cashReceived)-pct(data.spillOver))}%`, background:'#f59e0b', opacity:0.6 }} />}
-        {pct(data.overdue) > 0 && <div style={{ width:`${Math.min(pct(data.overdue),5)}%`, background:'#ef4444', opacity:0.8 }} />}
+        {/* Current status summary */}
+        <div style={{ minWidth:0, alignSelf:'stretch' }}>
+          <Row label="Received (bulan ini)" pctVal={receivedPct} amount={data.cashReceived} orders={data.cashReceivedOrders} indent />
+          <Row label="Spill Over (bulan lalu)" pctVal={spillOverPct} amount={data.spillOver} orders={data.spillOverOrders} indent />
+          <SeparatorRow label="Total Cash Masuk" pctVal={totalCashInPct} amount={totalCashIn} orders={data.cashReceivedOrders + data.spillOverOrders} color="#10b981" />
+          <Row label="In Progress (bulan ini)" pctVal={pct(data.cashInProgress)} amount={data.cashInProgress} orders={data.cashInProgressOrders} color="var(--yellow)" indent />
+          <Row label="Overdue (bulan lalu)" pctVal={pct(data.overdue)} amount={data.overdue} orders={data.overdueOrders} color={data.overdueOrders > 0 ? 'var(--red)' : 'var(--text-secondary)'} indent warn={data.overdueOrders > 100} />
+        </div>
       </div>
 
       {/* Channel breakdown collapsible */}
