@@ -95,7 +95,8 @@ export default function OverviewPage() {
   const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
   const [userRole, setUserRole] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
-  const [showTren, setShowTren] = useState(false);
+  const [showTren, setShowTren] = useState(true);
+  const [showOlderTrendDays, setShowOlderTrendDays] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
@@ -624,11 +625,14 @@ export default function OverviewPage() {
               </tr>
             </thead>
             <tbody>
-              {kpi.chart.map((row, i) => {
+              {[...kpi.chart]
+                .reverse()
+                .slice(0, showOlderTrendDays ? undefined : 2)
+                .map((row, i) => {
                 const rowCm3M = row['Net Sales'] > 0 ? row['CM3'] / row['Net Sales'] * 100 : null;
                 const rowBg = rowCm3M === null ? 'transparent' : rowCm3M >= 15 ? 'rgba(16,185,129,0.04)' : rowCm3M >= 0 ? 'rgba(245,158,11,0.04)' : 'rgba(239,68,68,0.05)';
                 return (
-                <tr key={i} style={{ borderBottom:'1px solid var(--bg-deep)', background: rowBg }}>
+                <tr key={row.date || i} style={{ borderBottom:'1px solid var(--bg-deep)', background: rowBg }}>
                   <td style={{ padding:'8px 10px', fontWeight:600, whiteSpace:'nowrap', position:'sticky', left:0, background:'var(--card)', zIndex:1 }}>{row.date}</td>
                   <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color:'var(--text-secondary)' }}>
                     {row.shipment > 0 ? <span style={{ background:'var(--bg-deep)', padding:'1px 6px', borderRadius:10, fontSize:10 }}>{row.shipment.toLocaleString('id-ID')}</span> : '—'}
@@ -646,6 +650,19 @@ export default function OverviewPage() {
                 </tr>
                 );
               })}
+              {kpi.chart.length > 2 && (
+                <tr>
+                  <td colSpan={showDetail ? 12 : 6} style={{ padding:'8px 10px', textAlign:'center', borderBottom:'1px solid var(--bg-deep)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowOlderTrendDays(value => !value)}
+                      style={{ background:'none', border:'1px solid var(--border)', borderRadius:6, padding:'5px 10px', cursor:'pointer', fontSize:10, color:'var(--dim)' }}
+                    >
+                      {showOlderTrendDays ? 'Sembunyikan tanggal sebelumnya' : `Tampilkan ${kpi.chart.length - 2} tanggal sebelumnya`}
+                    </button>
+                  </td>
+                </tr>
+              )}
               {/* TOTAL row with % of net sales */}
               <tr style={{ borderTop:'2px solid var(--border)', fontWeight:700 }}>
                 <td style={{ padding:'10px 10px', position:'sticky', left:0, background:'var(--card)', zIndex:1, textTransform:'uppercase', fontSize:11, letterSpacing:'0.05em' }}>Total</td>
