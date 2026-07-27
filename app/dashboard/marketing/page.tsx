@@ -719,7 +719,12 @@ const BRAND_COLORS = useMemo(() => {
   const brandPlatformMatrix = useMemo(() => {
     if (brandFilter !== 'all') return [];
     const matrix: Record<string, Record<string, number>> = {};
+    const revenueByBrand: Record<string, number> = {};
     const allPlatforms = new Set<string>();
+    prodData.forEach(d => {
+      const brand = d.product;
+      revenueByBrand[brand] = (revenueByBrand[brand] || 0) + Number(d.net_sales || 0);
+    });
     resolvedAdsData.forEach(d => {
       const platform = normPlatform(d.source);
       allPlatforms.add(platform);
@@ -732,10 +737,20 @@ const BRAND_COLORS = useMemo(() => {
     });
     const platforms = Array.from(allPlatforms).sort();
     const rows = Object.entries(matrix)
-      .map(([brand, pd]) => ({ brand, ...pd, _total: Object.values(pd).reduce((a, b) => a + b, 0) }))
+      .map(([brand, pd]) => {
+        const totalSpend = Object.values(pd).reduce((a, b) => a + b, 0);
+        const revenue = revenueByBrand[brand] || 0;
+        return {
+          brand,
+          ...pd,
+          _total: totalSpend,
+          _revenue: revenue,
+          _roas: totalSpend > 0 ? revenue / totalSpend : null,
+        };
+      })
       .sort((a, b) => b._total - a._total);
     return { rows, platforms };
-  }, [resolvedAdsData, attributedAdsData, brandFilter]);
+  }, [resolvedAdsData, attributedAdsData, brandFilter, prodData]);
 
   // ── Styles ──
   const C = { bg: 'var(--bg)', card: 'var(--card)', bdr: 'var(--border)', dim: 'var(--dim)', txt: 'var(--text)' };
@@ -1155,6 +1170,7 @@ const BRAND_COLORS = useMemo(() => {
                       <th key={p} style={{ padding: '8px 6px', textAlign: 'right', color: PLATFORM_COLORS[p] || C.dim, fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap' }}>{p}</th>
                     ))}
                     <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f1f5f9', fontWeight: 700, fontSize: 11 }}>Total</th>
+                    <th title="Net Sales brand ÷ total marketing spend seluruh traffic source" style={{ padding: '8px 10px', textAlign: 'right', color: '#06b6d4', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>ROAS Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1170,6 +1186,16 @@ const BRAND_COLORS = useMemo(() => {
                         </td>
                       ))}
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 11 }}>{fmtCompact(row._total)}</td>
+                      <td title={`Net Sales Rp ${fmtCompact(row._revenue)} ÷ Mkt Fee Rp ${fmtCompact(row._total)}`} style={{
+                        padding: '8px 10px',
+                        textAlign: 'right',
+                        fontFamily: 'monospace',
+                        fontWeight: 700,
+                        fontSize: 11,
+                        color: row._roas == null ? C.dim : row._roas >= 3 ? 'var(--green)' : row._roas >= 2 ? 'var(--yellow)' : 'var(--red)',
+                      }}>
+                        {row._roas == null ? '—' : `${row._roas.toFixed(1)}x`}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
