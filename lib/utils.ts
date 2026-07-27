@@ -291,7 +291,6 @@ export const ALL_TABS: TabDef[] = [
   // { id: 'products',    label: 'Products',           icon: 'Package' },  // Hidden — merged into Overview
   { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone', group: 'Main Menu' },
   { id: 'channels',       label: 'Sales Channel',      icon: 'Share2', group: 'Main Menu', children: [
-    { id: 'sales-channel-analysis', label: 'Sales Channel Analysis', icon: 'TrendingUp' },
     { id: 'waba-management', label: 'WABA Management',   icon: 'MessageCircle' },
   ]},
   { id: 'financial-report', label: 'Financial Report', icon: 'FileText', group: 'Main Menu', children: [
@@ -304,6 +303,7 @@ export const ALL_TABS: TabDef[] = [
     { id: 'marketplace-intake', label: 'Marketplace Intake', icon: 'Inbox', ownerOnly: true },
   ]},
   // Analysis
+  { id: 'sales-channel-analysis', label: 'Sales Channel Analysis', icon: 'TrendingUp', group: 'Analysis' },
   { id: 'customers',      label: 'Customer Analysis',  icon: 'Users', group: 'Analysis' },
   { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers', group: 'Analysis' },
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign', group: 'Analysis' },
