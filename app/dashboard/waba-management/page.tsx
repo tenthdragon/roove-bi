@@ -475,7 +475,7 @@ export default function WabaManagementPage() {
     };
   }, [supabase]);
 
-  // ── Fetch templates from DB (instant, no pagination needed) ──
+  // ── Fetch templates from DB ──
   const fetchTemplates = useCallback(async () => {
     setLoadingTemplates(true);
     setTemplateError(null);
@@ -564,7 +564,11 @@ export default function WabaManagementPage() {
     const start = start90.toISOString().split('T')[0];
 
     setLoadingTplAnalytics(true);
-    fetch(`/api/waba-template-analytics?template_ids=${allIds.join(',')}&start=${start}&end=${end}`)
+    fetch('/api/waba-template-analytics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ template_ids: allIds, start, end }),
+    })
       .then(async (res) => {
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Failed to fetch template analytics');

@@ -16,6 +16,8 @@ type ActiveWabaAccount = {
   waba_name: string;
 };
 
+const SUPABASE_PAGE_SIZE = 1000;
+
 function getServiceSupabase() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -108,16 +110,28 @@ export async function GET(req: NextRequest) {
     const activeAccounts = await getActiveWabaAccounts();
     const svc = getServiceSupabase();
 
-    const { data, error } = await svc
-      .from('waba_templates')
-      .select('id, waba_id, name, status, category, language, components, is_auto_generated, tags')
-      .in('waba_id', activeAccounts.map((account) => account.waba_id))
-      .is('deleted_at', null)
-      .order('name');
+    const templates = [];
+    let offset = 0;
 
-    if (error) throw error;
+    while (true) {
+      const { data, error } = await svc
+        .from('waba_templates')
+        .select('id, waba_id, name, status, category, language, components, is_auto_generated, tags')
+        .in('waba_id', activeAccounts.map((account) => account.waba_id))
+        .is('deleted_at', null)
+        .order('name')
+        .order('id')
+        .range(offset, offset + SUPABASE_PAGE_SIZE - 1);
 
-    return NextResponse.json({ data: data || [], accounts: activeAccounts });
+      if (error) throw error;
+
+      const page = data || [];
+      templates.push(...page);
+      if (page.length < SUPABASE_PAGE_SIZE) break;
+      offset += SUPABASE_PAGE_SIZE;
+    }
+
+    return NextResponse.json({ data: templates, accounts: activeAccounts });
   } catch (err: any) {
     console.error('[waba-templates] GET error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
