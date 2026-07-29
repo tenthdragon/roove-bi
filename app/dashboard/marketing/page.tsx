@@ -126,7 +126,6 @@ export default function MarketingPage() {
   const [error, setError] = useState('');
   const [brandFilter, setBrandFilter] = useState('all');
   const [dailyAdSpendOpen, setDailyAdSpendOpen] = useState(false);
-  const [brandMatrixOpen, setBrandMatrixOpen] = useState(false);
   const [scalevExpanded, setScalevExpanded] = useState(false);
   const [prevRangeAdsData, setPrevRangeAdsData] = useState<any[]>([]);
   const [prevRangeChannelData, setPrevRangeChannelData] = useState<any[]>([]);
@@ -1051,6 +1050,56 @@ const BRAND_COLORS = useMemo(() => {
         </table>
       </div>
 
+      {/* ── Brand × Traffic Source Matrix ── */}
+      {brandFilter === 'all' && brandPlatformMatrix.rows?.length > 0 && (
+        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 15, fontWeight: 700 }}>Brand × Traffic Source Matrix</span>
+            <span style={{ fontSize: 12, color: C.dim }}>({brandPlatformMatrix.rows.length} brands)</span>
+          </div>
+          <div style={{ overflowX: 'auto', marginTop: 16 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 500 }}>
+              <thead>
+                <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                  <th style={{ padding: '8px 10px', textAlign: 'left', color: C.dim, fontWeight: 600, fontSize: 11, position: 'sticky', left: 0, background: C.card }}>Brand</th>
+                  {brandPlatformMatrix.platforms?.map((p: string) => (
+                    <th key={p} style={{ padding: '8px 6px', textAlign: 'right', color: PLATFORM_COLORS[p] || C.dim, fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap' }}>{p}</th>
+                  ))}
+                  <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f1f5f9', fontWeight: 700, fontSize: 11 }}>Total</th>
+                  <th title="Net Sales brand ÷ total marketing spend seluruh traffic source" style={{ padding: '8px 10px', textAlign: 'right', color: '#06b6d4', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>ROAS Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {brandPlatformMatrix.rows?.map((row: any) => (
+                  <tr key={row.brand} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
+                    <td style={{ padding: '8px 10px', fontWeight: 600, position: 'sticky', left: 0, background: C.card, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: 2, background: BRAND_COLORS[row.brand] || '#64748b', flexShrink: 0 }} />
+                      {row.brand}
+                    </td>
+                    {brandPlatformMatrix.platforms?.map((p: string) => (
+                      <td key={p} style={{ padding: '8px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: row[p] > 0 ? C.txt : `${C.dim}66` }}>
+                        {row[p] > 0 ? fmtCompact(row[p]) : '—'}
+                      </td>
+                    ))}
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 11 }}>{fmtCompact(row._total)}</td>
+                    <td title={`Net Sales Rp ${fmtCompact(row._revenue)} ÷ Mkt Fee Rp ${fmtCompact(row._total)}`} style={{
+                      padding: '8px 10px',
+                      textAlign: 'right',
+                      fontFamily: 'monospace',
+                      fontWeight: 700,
+                      fontSize: 11,
+                      color: row._roas == null ? C.dim : row._roas >= 3 ? 'var(--green)' : row._roas >= 2 ? 'var(--yellow)' : 'var(--red)',
+                    }}>
+                      {row._roas == null ? '—' : `${row._roas.toFixed(1)}x`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {dailyTrafficSource.rows.length > 0 && (
         <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
           <div
@@ -1149,61 +1198,6 @@ const BRAND_COLORS = useMemo(() => {
         </div>
       )}
 
-      {/* ── Brand × Traffic Source Matrix ── */}
-      {brandFilter === 'all' && brandPlatformMatrix.rows?.length > 0 && (
-        <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <div
-            onClick={() => setBrandMatrixOpen(!brandMatrixOpen)}
-            style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}
-          >
-            <span style={{ fontSize: 13, color: C.dim, transition: 'transform 0.2s', transform: brandMatrixOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>&#9654;</span>
-            <span style={{ fontSize: 15, fontWeight: 700 }}>Brand × Traffic Source Matrix</span>
-            <span style={{ fontSize: 12, color: C.dim }}>({brandPlatformMatrix.rows.length} brands)</span>
-          </div>
-          {brandMatrixOpen && (
-            <div style={{ overflowX: 'auto', marginTop: 16 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 500 }}>
-                <thead>
-                  <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                    <th style={{ padding: '8px 10px', textAlign: 'left', color: C.dim, fontWeight: 600, fontSize: 11, position: 'sticky', left: 0, background: C.card }}>Brand</th>
-                    {brandPlatformMatrix.platforms?.map((p: string) => (
-                      <th key={p} style={{ padding: '8px 6px', textAlign: 'right', color: PLATFORM_COLORS[p] || C.dim, fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap' }}>{p}</th>
-                    ))}
-                    <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f1f5f9', fontWeight: 700, fontSize: 11 }}>Total</th>
-                    <th title="Net Sales brand ÷ total marketing spend seluruh traffic source" style={{ padding: '8px 10px', textAlign: 'right', color: '#06b6d4', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>ROAS Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {brandPlatformMatrix.rows?.map((row: any) => (
-                    <tr key={row.brand} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
-                      <td style={{ padding: '8px 10px', fontWeight: 600, position: 'sticky', left: 0, background: C.card, display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <div style={{ width: 8, height: 8, borderRadius: 2, background: BRAND_COLORS[row.brand] || '#64748b', flexShrink: 0 }} />
-                        {row.brand}
-                      </td>
-                      {brandPlatformMatrix.platforms?.map((p: string) => (
-                        <td key={p} style={{ padding: '8px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: row[p] > 0 ? C.txt : `${C.dim}66` }}>
-                          {row[p] > 0 ? fmtCompact(row[p]) : '—'}
-                        </td>
-                      ))}
-                      <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 11 }}>{fmtCompact(row._total)}</td>
-                      <td title={`Net Sales Rp ${fmtCompact(row._revenue)} ÷ Mkt Fee Rp ${fmtCompact(row._total)}`} style={{
-                        padding: '8px 10px',
-                        textAlign: 'right',
-                        fontFamily: 'monospace',
-                        fontWeight: 700,
-                        fontSize: 11,
-                        color: row._roas == null ? C.dim : row._roas >= 3 ? 'var(--green)' : row._roas >= 2 ? 'var(--yellow)' : 'var(--red)',
-                      }}>
-                        {row._roas == null ? '—' : `${row._roas.toFixed(1)}x`}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
     </div>
   );
 }
