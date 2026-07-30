@@ -335,15 +335,39 @@ export async function fetchScalevChannelSummary(from: string, to: string) {
 }
 
 // ── Get daily new vs repeat customer data ──
-export async function fetchCustomerTypeDaily(from: string, to: string) {
+export async function fetchCustomerTypeDaily(
+  from: string,
+  to: string,
+  brand: string | null = null,
+  salesChannel: string | null = null,
+) {
   await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
   const { data, error } = await svc
-    .from('v_daily_customer_type')
-    .select('*')
-    .gte('date', from)
-    .lte('date', to)
-    .order('date', { ascending: true });
+    .rpc('get_customer_type_daily_exact', {
+      p_from: from,
+      p_to: to,
+      p_brand: brand,
+      p_sales_channel: salesChannel,
+    });
+  if (error) throw error;
+  return data || [];
+}
+
+// ── Get exact period customer data, already grouped for the dashboard ──
+export async function fetchCustomerTypePeriod(
+  from: string,
+  to: string,
+  brand: string | null = null,
+) {
+  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .rpc('get_customer_type_period_exact', {
+      p_from: from,
+      p_to: to,
+      p_brand: brand,
+    });
   if (error) throw error;
   return data || [];
 }
@@ -371,15 +395,18 @@ export async function fetchCustomerKPIs(from: string, to: string) {
   await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
 
-  const { data: dailyData, error } = await svc
-    .from('v_daily_customer_type')
-    .select('*')
-    .gte('date', from)
-    .lte('date', to);
+  const { data: periodData, error } = await svc
+    .rpc('get_customer_type_period_exact', {
+      p_from: from,
+      p_to: to,
+      p_brand: null,
+    });
 
   if (error) throw error;
 
-  if (!dailyData || dailyData.length === 0) {
+  const globalData = (periodData || []).filter((row: any) => row.channel_group === 'Global');
+
+  if (globalData.length === 0) {
     return {
       totalCustomers: 0,
       newCustomers: 0,
@@ -402,23 +429,23 @@ export async function fetchCustomerKPIs(from: string, to: string) {
   let newRevenue = 0, repeatRevenue = 0, unidentifiedRevenue = 0;
   let newOrders = 0, repeatOrders = 0, unidentifiedOrders = 0;
 
-  for (const row of dailyData) {
+  for (const row of globalData) {
     if (row.customer_type === 'new') {
-      newCustomers += row.customer_count || 0;
+      newCustomers += Number(row.customer_count) || 0;
       newRevenue += Number(row.revenue) || 0;
-      newOrders += row.order_count || 0;
+      newOrders += Number(row.order_count) || 0;
     } else if (row.customer_type === 'ro' || row.customer_type === 'repeat') {
-      repeatCustomers += row.customer_count || 0;
+      repeatCustomers += Number(row.customer_count) || 0;
       repeatRevenue += Number(row.revenue) || 0;
-      repeatOrders += row.order_count || 0;
+      repeatOrders += Number(row.order_count) || 0;
     } else if (row.customer_type === 'unidentified') {
-      unidentifiedCustomers += row.customer_count || 0;
+      unidentifiedCustomers += Number(row.customer_count) || 0;
       unidentifiedRevenue += Number(row.revenue) || 0;
-      unidentifiedOrders += row.order_count || 0;
+      unidentifiedOrders += Number(row.order_count) || 0;
     }
   }
 
-  const totalCustomers = newCustomers + repeatCustomers;
+  const totalCustomers = Number(globalData[0]?.scope_customer_count) || 0;
   const totalOrders = newOrders + repeatOrders + unidentifiedOrders;
   const totalRevenue = newRevenue + repeatRevenue + unidentifiedRevenue;
 

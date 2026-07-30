@@ -612,10 +612,12 @@ export default function WabaManagementPage() {
         .select('date, product, channel, net_sales')
         .gte('date', from).lte('date', to)
         .eq('channel', 'WABA'),
-      supabase.from('summary_daily_customer_type')
-        .select('date, sales_channel, order_count')
-        .gte('date', from).lte('date', to)
-        .eq('sales_channel', 'WABA'),
+      supabase.rpc('get_customer_type_daily_exact', {
+        p_from: from,
+        p_to: to,
+        p_brand: null,
+        p_sales_channel: 'WABA',
+      }),
     ]).then(([adsRes, chRes, scRes]) => {
       if (adsRes.error) console.error('[WABA] daily_ads_spend error:', adsRes.error);
       if (chRes.error) console.error('[WABA] daily_channel_data error:', chRes.error);
@@ -623,7 +625,7 @@ export default function WabaManagementPage() {
 
       const ads = adsRes.data || [];
       const ch = chRes.data || [];
-      // Map summary_daily_customer_type rows to the shape expected by wabaAnalysis
+      // Map exact customer-type rows to the shape expected by wabaAnalysis.
       const sc = (scRes.data || []).map((d: any) => ({
         date: d.date,
         channel: d.sales_channel,

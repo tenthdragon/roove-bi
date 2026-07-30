@@ -380,12 +380,11 @@ server.tool(
         .gte("date", from)
         .lte("date", to)
         .limit(10000),
-      svc
-        .from("summary_daily_customer_type")
-        .select("date, customer_type, sales_channel, order_count, customer_count, revenue")
-        .gte("date", from)
-        .lte("date", to)
-        .limit(10000),
+      svc.rpc("get_customer_type_period_exact", {
+        p_from: from,
+        p_to: to,
+        p_brand: null,
+      }),
       svc.from("v_pl_summary").select("*").order("month", { ascending: false }).limit(6),
       svc.from("v_cf_summary").select("*").order("month", { ascending: false }).limit(6),
       svc
@@ -397,7 +396,9 @@ server.tool(
 
     const productRows = unwrap(dailyProduct) as any[];
     const channelRows = unwrap(dailyChannel) as any[];
-    const customerRows = unwrap(customerType) as any[];
+    const customerRows = (unwrap(customerType) as any[]).filter(
+      (row) => row.channel_group === "Global"
+    );
 
     const byProduct = new Map<string, any>();
     for (const row of productRows) {
@@ -917,13 +918,23 @@ server.tool(
     to: z.string().describe("End date YYYY-MM-DD"),
   },
   async ({ from, to }) => {
-    const rows = unwrap(
-      await svc
-        .from("v_daily_customer_type")
-        .select("*")
-        .gte("date", from)
-        .lte("date", to)
-    ) as any[];
+    const [periodResult, dailyResult] = await Promise.all([
+      svc.rpc("get_customer_type_period_exact", {
+        p_from: from,
+        p_to: to,
+        p_brand: null,
+      }),
+      svc.rpc("get_customer_type_daily_exact", {
+        p_from: from,
+        p_to: to,
+        p_brand: null,
+        p_sales_channel: null,
+      }),
+    ]);
+    const rows = (unwrap(periodResult) as any[]).filter(
+      (row) => row.channel_group === "Global"
+    );
+    const dailyRows = unwrap(dailyResult) as any[];
 
     let newCustomers = 0,
       repeatCustomers = 0,
@@ -934,17 +945,17 @@ server.tool(
 
     for (const r of rows) {
       if (r.customer_type === "new") {
-        newCustomers += r.customer_count ?? 0;
-        newRevenue += r.revenue ?? 0;
-        newOrders += r.order_count ?? 0;
+        newCustomers += Number(r.customer_count ?? 0);
+        newRevenue += Number(r.revenue ?? 0);
+        newOrders += Number(r.order_count ?? 0);
       } else if (r.customer_type === "ro") {
-        repeatCustomers += r.customer_count ?? 0;
-        repeatRevenue += r.revenue ?? 0;
-        repeatOrders += r.order_count ?? 0;
+        repeatCustomers += Number(r.customer_count ?? 0);
+        repeatRevenue += Number(r.revenue ?? 0);
+        repeatOrders += Number(r.order_count ?? 0);
       }
     }
 
-    const totalCustomers = newCustomers + repeatCustomers;
+    const totalCustomers = Number(rows[0]?.scope_customer_count ?? 0);
     const totalOrders = newOrders + repeatOrders;
     const totalRevenue = newRevenue + repeatRevenue;
 
@@ -965,7 +976,7 @@ server.tool(
               avgOrderValue: totalOrders > 0 ? Math.round(totalRevenue / totalOrders) : 0,
               newOrders,
               repeatOrders,
-              daily_breakdown: rows,
+              daily_breakdown: dailyRows,
             },
             null,
             2

@@ -7,7 +7,7 @@ import { fmtCompact, fmtRupiah, fmtPct, getDatePartsInTimeZone } from '@/lib/uti
 import { useDateRange } from '@/lib/DateRangeContext';
 import DateRangePicker from '@/components/DateRangePicker';
 import {
-  fetchCustomerTypeDaily,
+  fetchCustomerTypePeriod,
   fetchCustomerCohort,
   fetchMonthlyCohort,
   fetchMonthlyCohortByChannel,
@@ -32,10 +32,6 @@ const CHANNEL_GROUP_MAP = {
   'Marketplace': 'Other Marketplaces',
 };
 
-function getChannelGroup(sc) {
-  return CHANNEL_GROUP_MAP[sc] || 'Other Marketplaces';
-}
-
 const CHANNEL_ORDER = ['Global', 'Scalev Ads', 'CS Manual', 'Reseller', 'TikTok Shop', 'Shopee', 'Other Marketplaces'];
 
 const CHANNEL_TAB_COLORS = {
@@ -59,7 +55,7 @@ export default function CustomersPage() {
   const { dateExtent, loading: dateExtentLoading } = useDateRange();
   const [subTab, setSubTab] = useState('overview');
   const [dateRange, setDateRange] = useState({ from: '', to: '' });
-  const [dailyData, setDailyData] = useState([]);
+  const [periodData, setPeriodData] = useState([]);
   const [cohortData, setCohortData] = useState([]);
   const [cohortChannelData, setCohortChannelData] = useState([]);
   const [topCustomers, setTopCustomers] = useState([]);
@@ -107,18 +103,18 @@ export default function CustomersPage() {
       setOverviewError('');
 
       try {
-        const [daily, customers] = await Promise.all([
-          fetchCustomerTypeDaily(dateRange.from, dateRange.to),
+        const [period, customers] = await Promise.all([
+          fetchCustomerTypePeriod(dateRange.from, dateRange.to),
           fetchCustomerCohort(50, dateRange.from, dateRange.to),
         ]);
 
         if (cancelled) return;
-        setDailyData(daily);
+        setPeriodData(period);
         setTopCustomers(customers);
       } catch (err: any) {
         if (cancelled) return;
         console.error('Failed to load customer overview data:', err);
-        setDailyData([]);
+        setPeriodData([]);
         setTopCustomers([]);
         setOverviewError(err?.message || 'Gagal memuat data customer overview.');
       } finally {
@@ -167,20 +163,15 @@ export default function CustomersPage() {
     };
   }, []);
 
-  const groupedDaily = useMemo(() =>
-    dailyData.map(d => ({ ...d, channel_group: getChannelGroup(d.sales_channel) })),
-    [dailyData]
-  );
-
-  const filteredDaily = useMemo(() =>
-    channelFilter === 'Global' ? groupedDaily : groupedDaily.filter(d => d.channel_group === channelFilter),
-    [groupedDaily, channelFilter]
+  const filteredPeriod = useMemo(() =>
+    periodData.filter(d => d.channel_group === channelFilter),
+    [periodData, channelFilter]
   );
 
   const availableChannels = useMemo(() => {
-    const groups = new Set(groupedDaily.map(d => d.channel_group));
+    const groups = new Set(periodData.map(d => d.channel_group));
     return CHANNEL_ORDER.filter(ch => ch === 'Global' || groups.has(ch));
-  }, [groupedDaily]);
+  }, [periodData]);
 
   useEffect(() => {
     if (!availableChannels.includes(channelFilter)) {
@@ -190,31 +181,31 @@ export default function CustomersPage() {
 
   // ── KPIs: now with unidentified ──
   const filteredKpis = useMemo(() => {
-    if (filteredDaily.length === 0) return null;
+    if (filteredPeriod.length === 0) return null;
     let newC = 0, repC = 0, unidC = 0;
     let newR = 0, repR = 0, unidR = 0;
     let newO = 0, repO = 0, unidO = 0;
-    for (const row of filteredDaily) {
+    let totalCustomers = 0;
+    for (const row of filteredPeriod) {
+      totalCustomers = Math.max(totalCustomers, Number(row.scope_customer_count) || 0);
       if (row.customer_type === 'new') {
-        newC += row.customer_count || 0;
+        newC += Number(row.customer_count) || 0;
         newR += Number(row.revenue) || 0;
-        newO += row.order_count || 0;
+        newO += Number(row.order_count) || 0;
       } else if (row.customer_type === 'ro') {
-        repC += row.customer_count || 0;
+        repC += Number(row.customer_count) || 0;
         repR += Number(row.revenue) || 0;
-        repO += row.order_count || 0;
+        repO += Number(row.order_count) || 0;
       } else if (row.customer_type === 'unidentified') {
-        unidC += row.customer_count || 0;
+        unidC += Number(row.customer_count) || 0;
         unidR += Number(row.revenue) || 0;
-        unidO += row.order_count || 0;
+        unidO += Number(row.order_count) || 0;
       }
     }
-    // Repeat rate based on identified customers only
-    const identifiedTotal = newC + repC;
     return {
-      totalCustomers: identifiedTotal,
+      totalCustomers,
       newCustomers: newC, repeatCustomers: repC,
-      repeatRate: identifiedTotal > 0 ? (repC / identifiedTotal) * 100 : 0,
+      repeatRate: totalCustomers > 0 ? (repC / totalCustomers) * 100 : 0,
       newRevenue: newR, repeatRevenue: repR,
       unidentifiedRevenue: unidR, unidentifiedOrders: unidO, unidentifiedCustomers: unidC,
       avgOrderValue: (newO + repO) > 0 ? (newR + repR) / (newO + repO) : 0,
@@ -222,59 +213,62 @@ export default function CustomersPage() {
       totalRevenue: newR + repR + unidR,
       totalOrders: newO + repO + unidO,
     };
-  }, [filteredDaily]);
+  }, [filteredPeriod]);
 
   // ── Channel performance: include unidentified ──
   const channelPerformance = useMemo(() => {
     const byGroup = {};
-    for (const row of groupedDaily) {
+    for (const row of periodData) {
       const g = row.channel_group;
-      if (!byGroup[g]) byGroup[g] = { newOrders: 0, repeatOrders: 0, unidOrders: 0, newCustomers: 0, repeatCustomers: 0, unidCustomers: 0, newRevenue: 0, repeatRevenue: 0, unidRevenue: 0 };
+      if (!byGroup[g]) byGroup[g] = { scopeCustomers: 0, newOrders: 0, repeatOrders: 0, unidOrders: 0, newCustomers: 0, repeatCustomers: 0, unidCustomers: 0, newRevenue: 0, repeatRevenue: 0, unidRevenue: 0 };
+      byGroup[g].scopeCustomers = Math.max(byGroup[g].scopeCustomers, Number(row.scope_customer_count) || 0);
       if (row.customer_type === 'new') {
-        byGroup[g].newOrders += row.order_count || 0;
-        byGroup[g].newCustomers += row.customer_count || 0;
+        byGroup[g].newOrders += Number(row.order_count) || 0;
+        byGroup[g].newCustomers += Number(row.customer_count) || 0;
         byGroup[g].newRevenue += Number(row.revenue) || 0;
       } else if (row.customer_type === 'ro') {
-        byGroup[g].repeatOrders += row.order_count || 0;
-        byGroup[g].repeatCustomers += row.customer_count || 0;
+        byGroup[g].repeatOrders += Number(row.order_count) || 0;
+        byGroup[g].repeatCustomers += Number(row.customer_count) || 0;
         byGroup[g].repeatRevenue += Number(row.revenue) || 0;
       } else if (row.customer_type === 'unidentified') {
-        byGroup[g].unidOrders += row.order_count || 0;
-        byGroup[g].unidCustomers += row.customer_count || 0;
+        byGroup[g].unidOrders += Number(row.order_count) || 0;
+        byGroup[g].unidCustomers += Number(row.customer_count) || 0;
         byGroup[g].unidRevenue += Number(row.revenue) || 0;
       }
     }
-    const rows = CHANNEL_ORDER.filter(ch => ch !== 'Global' && byGroup[ch]).map(ch => {
+
+    const buildRow = (ch) => {
       const d = byGroup[ch];
       const tO = d.newOrders + d.repeatOrders + d.unidOrders;
-      const tC = d.newCustomers + d.repeatCustomers;
       const tR = d.newRevenue + d.repeatRevenue + d.unidRevenue;
       return {
-        channel: ch, totalOrders: tO, totalCustomers: tC,
+        channel: ch, totalOrders: tO, totalCustomers: d.scopeCustomers,
         newCustomers: d.newCustomers, repeatCustomers: d.repeatCustomers,
-        repeatRate: tC > 0 ? (d.repeatCustomers / tC) * 100 : 0,
+        repeatRate: d.scopeCustomers > 0 ? (d.repeatCustomers / d.scopeCustomers) * 100 : 0,
         totalRevenue: tR, repeatRevenue: d.repeatRevenue,
         repeatRevShare: tR > 0 ? (d.repeatRevenue / tR) * 100 : 0,
         unidOrders: d.unidOrders, unidRevenue: d.unidRevenue,
         color: CHANNEL_TAB_COLORS[ch] || 'var(--dim)'
       };
-    });
-    const gN = rows.reduce((s, r) => s + r.newCustomers, 0);
-    const gR = rows.reduce((s, r) => s + r.repeatCustomers, 0);
-    const gT = gN + gR;
-    const gRev = rows.reduce((s, r) => s + r.totalRevenue, 0);
-    const gRR = rows.reduce((s, r) => s + r.repeatRevenue, 0);
+    };
+
+    const rows = CHANNEL_ORDER
+      .filter(ch => ch !== 'Global' && byGroup[ch])
+      .map(ch => buildRow(ch));
+    const globalRow = byGroup.Global
+      ? buildRow('Global')
+      : {
+          channel: 'Global', totalOrders: 0, totalCustomers: 0,
+          newCustomers: 0, repeatCustomers: 0, repeatRate: 0,
+          totalRevenue: 0, repeatRevenue: 0, repeatRevShare: 0,
+          color: '#3b82f6',
+        };
+
     return {
       rows,
-      globalRow: {
-        channel: 'Global', totalOrders: rows.reduce((s, r) => s + r.totalOrders, 0),
-        totalCustomers: gT, newCustomers: gN, repeatCustomers: gR,
-        repeatRate: gT > 0 ? (gR / gT) * 100 : 0,
-        totalRevenue: gRev, repeatRevenue: gRR,
-        repeatRevShare: gRev > 0 ? (gRR / gRev) * 100 : 0, color: '#3b82f6'
-      }
+      globalRow,
     };
-  }, [groupedDaily]);
+  }, [periodData]);
 
   const filteredTopCustomers = useMemo(() => {
     if (channelFilter === 'Global') return topCustomers;

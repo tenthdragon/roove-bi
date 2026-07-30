@@ -45,26 +45,28 @@ const routes: Record<string, Handler> = {
     const to = param(url, "to");
     if (!from || !to) return err("from and to query params required (YYYY-MM-DD)");
 
-    const { data: rows, error } = await svc
-      .from("v_daily_customer_type")
-      .select("*")
-      .gte("date", from)
-      .lte("date", to);
+    const { data: periodRows, error } = await svc
+      .rpc("get_customer_type_period_exact", {
+        p_from: from,
+        p_to: to,
+        p_brand: null,
+      });
     if (error) return err(error.message, 500);
 
+    const rows = (periodRows ?? []).filter((r) => r.channel_group === "Global");
     let newCust = 0, repeatCust = 0, newRev = 0, repeatRev = 0, newOrd = 0, repeatOrd = 0;
-    for (const r of rows ?? []) {
+    for (const r of rows) {
       if (r.customer_type === "new") {
-        newCust += r.customer_count ?? 0;
-        newRev += r.revenue ?? 0;
-        newOrd += r.order_count ?? 0;
+        newCust += Number(r.customer_count ?? 0);
+        newRev += Number(r.revenue ?? 0);
+        newOrd += Number(r.order_count ?? 0);
       } else if (r.customer_type === "ro") {
-        repeatCust += r.customer_count ?? 0;
-        repeatRev += r.revenue ?? 0;
-        repeatOrd += r.order_count ?? 0;
+        repeatCust += Number(r.customer_count ?? 0);
+        repeatRev += Number(r.revenue ?? 0);
+        repeatOrd += Number(r.order_count ?? 0);
       }
     }
-    const total = newCust + repeatCust;
+    const total = Number(rows[0]?.scope_customer_count ?? 0);
     const totalOrd = newOrd + repeatOrd;
     const totalRev = newRev + repeatRev;
 
@@ -90,11 +92,12 @@ const routes: Record<string, Handler> = {
     if (!from || !to) return err("from and to required");
 
     const { data, error } = await svc
-      .from("v_daily_customer_type")
-      .select("*")
-      .gte("date", from)
-      .lte("date", to)
-      .order("date");
+      .rpc("get_customer_type_daily_exact", {
+        p_from: from,
+        p_to: to,
+        p_brand: null,
+        p_sales_channel: null,
+      });
     if (error) return err(error.message, 500);
     return json(data);
   },
