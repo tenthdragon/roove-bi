@@ -40,26 +40,30 @@ function getWarehouseDomainSchemaMissingMessage() {
 }
 
 async function requireMappingAccess(label: string) {
-  await requireDashboardTabAccess('warehouse-settings', label);
+  const access = await requireDashboardTabAccess('warehouse-settings', label);
   await requireDashboardPermissionAccess('whs:mapping', label);
+  return access;
 }
 
 async function requireWarehouseRegistryAccess(label: string) {
-  await requireDashboardTabAccess('warehouse-settings', label);
+  const access = await requireDashboardTabAccess('warehouse-settings', label);
   await requireDashboardPermissionAccess('whs:warehouses', label);
+  return access;
 }
 
 export async function getWarehouseBusinessDirectoryEntries() {
-  await requireMappingAccess('Business Directory');
+  const { workspaceId } = await requireMappingAccess('Business Directory');
   const svc = createServiceSupabase();
   const [{ data: entries, error }, { data: businesses, error: businessError }] = await Promise.all([
     svc
       .from('warehouse_business_directory')
       .select('id, external_name, external_name_normalized, business_id, business_code, is_active, notes, created_at, updated_at')
+      .eq('workspace_id', workspaceId)
       .order('external_name', { ascending: true }),
     svc
       .from('scalev_webhook_businesses')
       .select('id, business_code, business_name, is_active')
+      .eq('workspace_id', workspaceId)
       .order('business_code', { ascending: true }),
   ]);
 
@@ -86,7 +90,7 @@ export async function getWarehouseBusinessDirectoryEntries() {
 }
 
 export async function saveWarehouseBusinessDirectoryEntry(input: DirectoryEntryPayload) {
-  await requireMappingAccess('Business Directory');
+  const { workspaceId } = await requireMappingAccess('Business Directory');
   const svc = createServiceSupabase();
 
   const externalName = cleanWarehouseDomainText(input.external_name);
@@ -95,6 +99,7 @@ export async function saveWarehouseBusinessDirectoryEntry(input: DirectoryEntryP
   if (!businessCode) throw new Error('Business code wajib diisi.');
 
   const payload = {
+    workspace_id: workspaceId,
     external_name: externalName,
     external_name_normalized: normalizeWarehouseDomainText(externalName),
     business_id: input.business_id == null ? null : Number(input.business_id),
@@ -108,6 +113,7 @@ export async function saveWarehouseBusinessDirectoryEntry(input: DirectoryEntryP
         .from('warehouse_business_directory')
         .select('*')
         .eq('id', Number(input.id))
+        .eq('workspace_id', workspaceId)
         .maybeSingle()
     : { data: null, error: null };
   if (before.error) {
@@ -165,13 +171,14 @@ export async function saveWarehouseBusinessDirectoryEntry(input: DirectoryEntryP
 }
 
 export async function deleteWarehouseBusinessDirectoryEntry(id: number) {
-  await requireMappingAccess('Business Directory');
+  const { workspaceId } = await requireMappingAccess('Business Directory');
   const svc = createServiceSupabase();
 
   const { data: before, error: beforeError } = await svc
     .from('warehouse_business_directory')
     .select('*')
     .eq('id', Number(id))
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (beforeError) {
     if (isWarehouseDomainSchemaMissingError(beforeError)) {
@@ -184,7 +191,8 @@ export async function deleteWarehouseBusinessDirectoryEntry(id: number) {
   const { error } = await svc
     .from('warehouse_business_directory')
     .delete()
-    .eq('id', Number(id));
+    .eq('id', Number(id))
+    .eq('workspace_id', workspaceId);
   if (error) {
     if (isWarehouseDomainSchemaMissingError(error)) {
       throw new Error(getWarehouseDomainSchemaMissingMessage());
@@ -210,7 +218,7 @@ export async function deleteWarehouseBusinessDirectoryEntry(id: number) {
 }
 
 export async function getWarehouseOriginRegistryEntries() {
-  await requireWarehouseRegistryAccess('Warehouse Registry');
+  const { workspaceId } = await requireWarehouseRegistryAccess('Warehouse Registry');
   const svc = createServiceSupabase();
   const [{ data: entries, error }, { data: businesses, error: businessError }] = await Promise.all([
     svc
@@ -229,11 +237,13 @@ export async function getWarehouseOriginRegistryEntries() {
         created_at,
         updated_at
       `)
+      .eq('workspace_id', workspaceId)
       .order('external_origin_business_name', { ascending: true })
       .order('external_origin_name', { ascending: true }),
     svc
       .from('scalev_webhook_businesses')
       .select('id, business_code, business_name, is_active')
+      .eq('workspace_id', workspaceId)
       .order('business_code', { ascending: true }),
   ]);
 
@@ -260,7 +270,7 @@ export async function getWarehouseOriginRegistryEntries() {
 }
 
 export async function saveWarehouseOriginRegistryEntry(input: OriginRegistryPayload) {
-  await requireWarehouseRegistryAccess('Warehouse Registry');
+  const { workspaceId } = await requireWarehouseRegistryAccess('Warehouse Registry');
   const svc = createServiceSupabase();
 
   const externalOriginBusinessName = cleanWarehouseDomainText(input.external_origin_business_name);
@@ -274,6 +284,7 @@ export async function saveWarehouseOriginRegistryEntry(input: OriginRegistryPayl
   if (!internalWarehouseCode) throw new Error('Internal warehouse code wajib diisi.');
 
   const payload = {
+    workspace_id: workspaceId,
     external_origin_business_name: externalOriginBusinessName,
     external_origin_business_name_normalized: normalizeWarehouseDomainText(externalOriginBusinessName),
     external_origin_name: externalOriginName,
@@ -290,6 +301,7 @@ export async function saveWarehouseOriginRegistryEntry(input: OriginRegistryPayl
         .from('warehouse_origin_registry')
         .select('*')
         .eq('id', Number(input.id))
+        .eq('workspace_id', workspaceId)
         .maybeSingle()
     : { data: null, error: null };
   if (before.error) {
@@ -349,13 +361,14 @@ export async function saveWarehouseOriginRegistryEntry(input: OriginRegistryPayl
 }
 
 export async function deleteWarehouseOriginRegistryEntry(id: number) {
-  await requireWarehouseRegistryAccess('Warehouse Registry');
+  const { workspaceId } = await requireWarehouseRegistryAccess('Warehouse Registry');
   const svc = createServiceSupabase();
 
   const { data: before, error: beforeError } = await svc
     .from('warehouse_origin_registry')
     .select('*')
     .eq('id', Number(id))
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (beforeError) {
     if (isWarehouseDomainSchemaMissingError(beforeError)) {
@@ -368,7 +381,8 @@ export async function deleteWarehouseOriginRegistryEntry(id: number) {
   const { error } = await svc
     .from('warehouse_origin_registry')
     .delete()
-    .eq('id', Number(id));
+    .eq('id', Number(id))
+    .eq('workspace_id', workspaceId);
   if (error) {
     if (isWarehouseDomainSchemaMissingError(error)) {
       throw new Error(getWarehouseDomainSchemaMissingMessage());

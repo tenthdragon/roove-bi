@@ -12,6 +12,7 @@ import DateRangePicker from '@/components/DateRangePicker';
 import { ActiveBrandsProvider } from '@/lib/ActiveBrandsContext';
 import ThemeToggle from '@/components/ThemeToggle';
 import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
+import { WorkspaceProvider, useWorkspace } from '@/lib/WorkspaceContext';
 
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
@@ -81,6 +82,15 @@ function findTabLabel(tabs, targetId) {
   }
   return null;
 }
+
+const APURVA_ROLLOUT_BLOCKED_TABS = new Set([
+  'ppic',
+  'warehouse-settings',
+  'marketplace-intake',
+  'customers',
+  'brand-analysis',
+  'sales-channel-analysis',
+]);
 
 // getAllowedTabs is now driven by role_permissions — see usePermissions() hook below
 
@@ -325,8 +335,68 @@ function HeaderDatePicker() {
   );
 }
 
+function WorkspaceSwitcher() {
+  const {
+    activeWorkspace,
+    workspaces,
+    switching,
+    switchWorkspace,
+  } = useWorkspace();
+
+  if (workspaces.length <= 1) {
+    return (
+      <div
+        className="desktop-sidebar"
+        style={{
+          fontSize: 11,
+          color: 'var(--text-secondary)',
+          fontWeight: 650,
+          padding: '5px 9px',
+          border: '1px solid var(--border)',
+          borderRadius: 7,
+          background: 'var(--bg-deep)',
+        }}
+      >
+        {activeWorkspace.name}
+      </div>
+    );
+  }
+
+  return (
+    <select
+      aria-label="Pilih workspace"
+      value={activeWorkspace.id}
+      disabled={switching}
+      onChange={(event) => switchWorkspace(event.target.value)}
+      style={{
+        maxWidth: 190,
+        padding: '5px 28px 5px 9px',
+        borderRadius: 7,
+        border: '1px solid var(--border)',
+        background: 'var(--bg-deep)',
+        color: 'var(--text-secondary)',
+        fontSize: 11,
+        fontWeight: 650,
+        cursor: switching ? 'wait' : 'pointer',
+      }}
+    >
+      {workspaces.map((workspace) => (
+        <option
+          key={workspace.id}
+          value={workspace.id}
+          disabled={workspace.status !== 'active'}
+        >
+          {workspace.name}
+          {workspace.status === 'provisioning' ? ' (Provisioning)' : ''}
+        </option>
+      ))}
+    </select>
+  );
+}
+
 export default function DashboardLayout({ children }) {
   const [profile, setProfile] = useState(null);
+  const [workspaceBootstrap, setWorkspaceBootstrap] = useState(null);
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [accessError, setAccessError] = useState('');
@@ -354,13 +424,35 @@ export default function DashboardLayout({ children }) {
 
     async function loadProfileWithRetry(userId: string) {
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const { data, error } = await supabase
+        const serverResponse = await fetch('/api/auth/profile', {
+          cache: 'no-store',
+        });
+        const serverPayload = await serverResponse.json().catch(() => ({}));
+        if (serverResponse.ok && serverPayload.profile) {
+          return { data: serverPayload.profile, error: null };
+        }
+
+        const directResult = await supabase
           .from('profiles')
           .select('*')
           .eq('id', userId)
           .maybeSingle();
 
-        if (data || error) return { data, error };
+        if (directResult.data) return directResult;
+
+        // Workspace RLS must not strand an otherwise valid authenticated
+        // session. The RPC can only return the profile identified by auth.uid().
+        const rpcResult = await supabase
+          .rpc('get_my_dashboard_profile')
+          .maybeSingle();
+
+        if (rpcResult.data) return rpcResult;
+        if (directResult.error || rpcResult.error) {
+          return {
+            data: null,
+            error: directResult.error || rpcResult.error,
+          };
+        }
         if (attempt < 2) await wait(250 * (attempt + 1));
       }
 
@@ -399,11 +491,37 @@ export default function DashboardLayout({ children }) {
       }
 
       setProfile(data);
-      if (data.role !== 'owner') {
+      let workspaceData = null;
+      if (data.role !== 'pending') {
+        const workspaceResponse = await fetch('/api/workspaces', {
+          cache: 'no-store',
+        });
+        workspaceData = await workspaceResponse.json().catch(() => ({}));
+
+        if (!workspaceResponse.ok || workspaceData.error) {
+          setAccessError(
+            workspaceData.error ||
+              'Workspace dashboard gagal dimuat. Silakan hubungi owner.',
+          );
+          setLoading(false);
+          return;
+        }
+
+        setWorkspaceBootstrap(workspaceData);
+      }
+
+      const membershipRole = workspaceData?.activeWorkspace?.membershipRole;
+      const effectiveRole =
+        data.role === 'owner' || membershipRole === 'workspace_owner'
+          ? 'owner'
+          : membershipRole || data.role;
+
+      if (effectiveRole !== 'owner' && data.role !== 'pending') {
         const { data: perms, error: permsError } = await supabase
-            .from('role_permissions')
+            .from('workspace_role_permissions')
             .select('permission_key')
-            .eq('role', data.role);
+            .eq('workspace_id', workspaceData.activeWorkspace.id)
+            .eq('role', effectiveRole);
 
         if (cancelled) return;
 
@@ -424,10 +542,24 @@ export default function DashboardLayout({ children }) {
     };
   }, [authReady, hasSession, router, supabase]);
 
+  const accessRole = useMemo(() => {
+    if (!profile) return null;
+    if (
+      profile.role === 'owner' ||
+      workspaceBootstrap?.activeWorkspace?.membershipRole === 'workspace_owner'
+    ) {
+      return 'owner';
+    }
+    return workspaceBootstrap?.activeWorkspace?.membershipRole || profile.role;
+  }, [profile, workspaceBootstrap]);
+
   const accessibleTabIds = useMemo(() => {
-    if (!profile || profile.role === 'pending') return [];
-    return getOrderedAccessibleTabIds(profile.role, permissions);
-  }, [profile, permissions]);
+    if (!profile || accessRole === 'pending') return [];
+    const ids = getOrderedAccessibleTabIds(accessRole, permissions);
+    return workspaceBootstrap?.activeWorkspace?.slug === 'roove'
+      ? ids
+      : ids.filter((tabId) => !APURVA_ROLLOUT_BLOCKED_TABS.has(tabId));
+  }, [profile, accessRole, permissions, workspaceBootstrap]);
 
   // Close mobile menu on route change
   useEffect(() => {
@@ -446,12 +578,12 @@ export default function DashboardLayout({ children }) {
 
   useEffect(() => {
     if (!profile || loading) return;
-    if (profile.role === 'pending' || profile.role === 'owner') return;
+    if (accessRole === 'pending' || accessRole === 'owner') return;
     if (accessibleTabIds.length === 0) return;
     if (!accessibleTabIds.includes(currentTab)) {
       router.replace(getTabPath(accessibleTabIds[0]));
     }
-  }, [profile, loading, currentTab, accessibleTabIds, router]);
+  }, [profile, accessRole, loading, currentTab, accessibleTabIds, router]);
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -464,19 +596,27 @@ export default function DashboardLayout({ children }) {
   };
 
   const goHome = () => {
-    if (profile?.role === 'owner') { navigateTo('overview'); return; }
+    if (accessRole === 'owner') { navigateTo('overview'); return; }
     navigateTo(accessibleTabIds[0] || 'overview');
   };
 
-  const isPending = profile?.role === 'pending';
+  const isPending = accessRole === 'pending';
 
-  const visibleTabs = profile && !isPending
-    ? buildVisibleTabs(profile.role, permissions)
+  let visibleTabs = profile && !isPending
+    ? buildVisibleTabs(accessRole, permissions)
     : [];
+  if (workspaceBootstrap?.activeWorkspace?.slug !== 'roove') {
+    visibleTabs = visibleTabs
+      .filter((tab) => !APURVA_ROLLOUT_BLOCKED_TABS.has(tab.id))
+      .map((tab) => ({
+        ...tab,
+        children: tab.children?.filter((child) => !APURVA_ROLLOUT_BLOCKED_TABS.has(child.id)),
+      }));
+  }
 
-  const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'marketplace-intake'].includes(currentTab);
-  const canSyncSheets = profile?.role === 'owner' || permissions.has('admin:daily');
-  const canSyncMeta = profile?.role === 'owner' || permissions.has('admin:meta');
+  const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake'].includes(currentTab);
+  const canSyncSheets = accessRole === 'owner' || permissions.has('admin:daily');
+  const canSyncMeta = accessRole === 'owner' || permissions.has('admin:meta');
   const showRefreshButton = canSyncSheets || canSyncMeta;
 
   if (loading) {
@@ -487,7 +627,7 @@ export default function DashboardLayout({ children }) {
     );
   }
 
-  if (accessError || (!isPending && profile?.role !== 'owner' && accessibleTabIds.length === 0)) {
+  if (accessError || (!isPending && accessRole !== 'owner' && accessibleTabIds.length === 0)) {
     return (
       <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex', alignItems:'center', justifyContent:'center', padding:20 }}>
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:16, padding:40, textAlign:'center', maxWidth:460 }}>
@@ -523,13 +663,17 @@ export default function DashboardLayout({ children }) {
 
 
   const sidebarW = sidebarCollapsed ? 64 : 250;
+  const workspaceBrandName = String(
+    workspaceBootstrap?.activeWorkspace?.name || 'Workspace',
+  ).replace(/\s+Workspace$/i, '');
+  const workspaceBrandInitial = workspaceBrandName.slice(0, 1).toUpperCase() || 'W';
 
   // ── Shared sidebar content (used by both desktop and mobile) ──
   function SidebarNav({ isMobile = false }) {
     // On mobile, flatten children into top-level items (no submenus)
     const flatTabs = isMobile
       ? visibleTabs.flatMap(t => {
-          const parentAccessible = canAccessLayoutTab(profile.role, t, permissions);
+          const parentAccessible = canAccessLayoutTab(accessRole, t, permissions);
           const parent = { ...t, children: undefined };
           const children = t.children?.map(c => ({ ...c, group: t.group })) ?? [];
           return t.children?.length
@@ -562,7 +706,7 @@ export default function DashboardLayout({ children }) {
         }}>
           {tabsWithGroupInfo.map((t, idx) => {
             const hasChildren = t.children && t.children.length > 0;
-            const parentAccessible = canAccessLayoutTab(profile.role, t, permissions);
+            const parentAccessible = canAccessLayoutTab(accessRole, t, permissions);
             const active = currentTab === t.id;
             const childActive = hasChildren && t.children.some(c => currentTab === c.id);
             const isExpanded = expandedMenus[t.id] || childActive;
@@ -716,8 +860,17 @@ export default function DashboardLayout({ children }) {
     );
   }
 
+  if (!workspaceBootstrap) {
+    return (
+      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)' }}>
+        <div style={{ color:'var(--dim)', fontSize:13 }}>Workspace belum tersedia.</div>
+      </div>
+    );
+  }
+
   return (
-    <PermissionsProvider role={profile?.role} permissions={permissions}>
+    <WorkspaceProvider initial={workspaceBootstrap}>
+    <PermissionsProvider role={accessRole} permissions={permissions}>
     <DateRangeProvider>
       <ActiveBrandsProvider>
       <div style={{ minHeight:'100vh', background:'var(--bg)', display:'flex' }}>
@@ -752,9 +905,9 @@ export default function DashboardLayout({ children }) {
                 background:'linear-gradient(135deg,#3b82f6,#8b5cf6)',
                 display:'flex', alignItems:'center', justifyContent:'center',
                 fontSize:15, fontWeight:800, color:'#fff',
-              }}>R</div>
+              }}>{workspaceBrandInitial}</div>
               {!sidebarCollapsed && (
-                <span style={{ fontSize:16, fontWeight:700, color:'var(--text)', whiteSpace:'nowrap' }}>Roove BI</span>
+                <span style={{ fontSize:16, fontWeight:700, color:'var(--text)', whiteSpace:'nowrap' }}>{workspaceBrandName} BI</span>
               )}
             </div>
             {!sidebarCollapsed && (
@@ -821,8 +974,8 @@ export default function DashboardLayout({ children }) {
                     background:'linear-gradient(135deg,#3b82f6,#8b5cf6)',
                     display:'flex', alignItems:'center', justifyContent:'center',
                     fontSize:15, fontWeight:800, color:'#fff',
-                  }}>R</div>
-                  <span style={{ fontSize:16, fontWeight:700, color:'var(--text)' }}>Roove BI</span>
+                  }}>{workspaceBrandInitial}</div>
+                  <span style={{ fontSize:16, fontWeight:700, color:'var(--text)' }}>{workspaceBrandName} BI</span>
                 </div>
                 <button onClick={() => setMobileMenuOpen(false)} style={{
                   background:'none', border:'none', cursor:'pointer', color:'var(--dim)', padding:4,
@@ -877,6 +1030,7 @@ export default function DashboardLayout({ children }) {
               </button>
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
+              <WorkspaceSwitcher />
               {showRefreshButton && (
                 <RefreshViewsButton canSyncSheets={canSyncSheets} canSyncMeta={canSyncMeta} />
               )}
@@ -897,6 +1051,7 @@ export default function DashboardLayout({ children }) {
       </ActiveBrandsProvider>
     </DateRangeProvider>
     </PermissionsProvider>
+    </WorkspaceProvider>
   );
 }
 
@@ -921,6 +1076,7 @@ function TabIcon({ id, size = 18 }) {
     case 'financial-report': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>;
     case 'cashflow': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>;
     case 'financial-settings': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>;
+    case 'fixed-costs': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2V2z"/><path d="M9 7h6"/><path d="M9 11h6"/><path d="M9 15h4"/></svg>;
     default: return null;
   }
 }

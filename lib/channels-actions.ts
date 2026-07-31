@@ -36,7 +36,10 @@ export async function getChannelsPageData({
   prevFrom,
   prevTo,
 }: ChannelsPageDataParams) {
-  await requireDashboardTabAccess('channels', 'Sales Channel');
+  const { workspaceId } = await requireDashboardTabAccess(
+    'channels',
+    'Sales Channel',
+  );
 
   const svc = createServiceSupabase();
 
@@ -52,27 +55,36 @@ export async function getChannelsPageData({
   ] = await Promise.all([
     svc.from('daily_channel_data')
       .select('date, product, channel, net_sales, gross_profit, mp_admin_cost')
+      .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to),
     svc.from('daily_ads_spend')
       .select('date, source, spent, store, data_source, impressions, cpm')
+      .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to),
-    getShippingFeeRange(from, to)
+    getShippingFeeRange(workspaceId, from, to)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: { message: error.message } })),
     svc.from('ads_store_brand_mapping')
-      .select('store_pattern, brand'),
-    svc.rpc('get_daily_shipment_counts', { p_from: from, p_to: to }),
+      .select('store_pattern, brand')
+      .eq('workspace_id', workspaceId),
+    svc.rpc('get_workspace_daily_shipment_counts', {
+      p_workspace_id: workspaceId,
+      p_from: from,
+      p_to: to,
+    }),
     svc.from('daily_channel_data')
       .select('date, product, channel, net_sales, gross_profit, mp_admin_cost')
+      .eq('workspace_id', workspaceId)
       .gte('date', prevFrom)
       .lte('date', prevTo),
     svc.from('daily_ads_spend')
       .select('date, source, spent, store')
+      .eq('workspace_id', workspaceId)
       .gte('date', prevFrom)
       .lte('date', prevTo),
-    getShippingFeeRange(prevFrom, prevTo)
+    getShippingFeeRange(workspaceId, prevFrom, prevTo)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: { message: error.message } })),
   ]);

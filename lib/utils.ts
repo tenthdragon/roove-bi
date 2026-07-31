@@ -53,6 +53,7 @@ export const PERMISSION_GROUPS = [
       { key: 'tab:financial-report',    label: 'Financial Report' },
       { key: 'tab:cashflow',           label: '↳ Cash Flow (Bank)' },
       { key: 'tab:financial-settings', label: '↳ Financial Settings' },
+      { key: 'tab:fixed-costs',         label: '↳ Fixed & Recurring Costs' },
     ],
   },
   {
@@ -296,6 +297,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'financial-report', label: 'Financial Report', icon: 'FileText', group: 'Main Menu', children: [
     { id: 'cashflow',            label: 'Cash Flow',           icon: 'Banknote' },
     { id: 'financial-settings', label: 'Financial Settings',  icon: 'CreditCard' },
+    { id: 'fixed-costs',         label: 'Fixed & Recurring Costs', icon: 'ReceiptText' },
   ]},
   { id: 'ppic',           label: 'PPIC',               icon: 'ClipboardList', group: 'Main Menu' },
   { id: 'warehouse',      label: 'Warehouse',          icon: 'Warehouse', group: 'Main Menu', children: [

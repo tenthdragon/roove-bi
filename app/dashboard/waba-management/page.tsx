@@ -7,6 +7,7 @@ import { fmtRupiah } from '@/lib/utils';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 
 // Lazy-load emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -175,6 +176,7 @@ export default function WabaManagementPage() {
   const supabase = useSupabase();
   const { can } = usePermissions();
   const { dateRange, loading: dateLoading } = useDateRange();
+  const { activeWorkspace } = useWorkspace();
 
   // ── Template state ──
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -590,9 +592,9 @@ export default function WabaManagementPage() {
     if (!dateRange.from || !dateRange.to) return;
     const { from, to } = dateRange;
 
-    const cachedAds = getCached('waba_ads_data', from, to);
-    const cachedCh = getCached('waba_channel_data', from, to);
-    const cachedSc = getCached('waba_shipment_counts', from, to);
+    const cachedAds = getCached('waba_ads_data', from, to, activeWorkspace.id);
+    const cachedCh = getCached('waba_channel_data', from, to, activeWorkspace.id);
+    const cachedSc = getCached('waba_shipment_counts', from, to, activeWorkspace.id);
 
     if (cachedAds && cachedCh && cachedSc) {
       setAdsData(cachedAds);
@@ -612,7 +614,8 @@ export default function WabaManagementPage() {
         .select('date, product, channel, net_sales')
         .gte('date', from).lte('date', to)
         .eq('channel', 'WABA'),
-      supabase.rpc('get_customer_type_daily_exact', {
+      supabase.rpc('get_workspace_customer_type_daily_exact', {
+        p_workspace_id: activeWorkspace.id,
         p_from: from,
         p_to: to,
         p_brand: null,
@@ -632,16 +635,16 @@ export default function WabaManagementPage() {
         order_count: Number(d.order_count || 0),
       }));
 
-      setCache('waba_ads_data', from, to, ads);
-      setCache('waba_channel_data', from, to, ch);
-      setCache('waba_shipment_counts', from, to, sc);
+      setCache('waba_ads_data', from, to, ads, activeWorkspace.id);
+      setCache('waba_channel_data', from, to, ch, activeWorkspace.id);
+      setCache('waba_shipment_counts', from, to, sc, activeWorkspace.id);
 
       setAdsData(ads);
       setChannelData(ch);
       setShipmentCounts(sc);
       setLoadingAnalytics(false);
     });
-  }, [dateRange, supabase]);
+  }, [activeWorkspace.id, dateRange, supabase]);
 
   // ── WABA Promotion Analysis ──
   const wabaAnalysis = useMemo(() => {

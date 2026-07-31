@@ -1,24 +1,27 @@
 // lib/webhook-actions.ts
 'use server';
 
-import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-server';
+import { createServiceSupabase } from '@/lib/supabase-server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
 import { fetchStoreList, guessStoreType } from '@/lib/scalev-api';
 
 // ── Auth helper: require owner role ──
 async function requireOwner(label: string) {
-  const { profile } = await requireDashboardRoles(['owner'], `Hanya owner yang bisa mengakses ${label}.`);
-  return profile;
+  return requireDashboardRoles(
+    ['owner'],
+    `Hanya owner yang bisa mengakses ${label}.`,
+  );
 }
 
 // ── List all webhook businesses ──
 export async function getWebhookBusinesses() {
-  await requireOwner('Business Settings');
+  const { workspaceId } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id, business_code, business_name, is_active, api_key, tax_rate_name, created_at, updated_at')
+    .eq('workspace_id', workspaceId)
     .order('business_code', { ascending: true });
 
   if (error) throw error;
@@ -29,6 +32,7 @@ export async function getWebhookBusinesses() {
     const { data: lastSync } = await svc
       .from('scalev_sync_log')
       .select('completed_at, sync_type')
+      .eq('workspace_id', workspaceId)
       .eq('business_code', biz.business_code)
       .order('completed_at', { ascending: false })
       .limit(1)
@@ -54,7 +58,7 @@ export async function saveWebhookBusiness(input: {
   webhook_secret: string;
   api_key?: string;
 }) {
-  await requireOwner('Business Settings');
+  const { workspaceId } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const code = input.business_code.trim().toUpperCase();
@@ -92,7 +96,8 @@ export async function saveWebhookBusiness(input: {
     const { error } = await svc
       .from('scalev_webhook_businesses')
       .update(updateData)
-      .eq('id', input.id);
+      .eq('id', input.id)
+      .eq('workspace_id', workspaceId);
 
     if (error) {
       if (error.code === '23505') throw new Error(`Business code "${code}" sudah digunakan`);
@@ -101,6 +106,7 @@ export async function saveWebhookBusiness(input: {
   } else {
     // Insert new
     const insertData: Record<string, any> = {
+      workspace_id: workspaceId,
       business_code: code,
       business_name: name,
       webhook_secret: secret,
@@ -121,13 +127,16 @@ export async function saveWebhookBusiness(input: {
     await svc
       .from('warehouse_business_mapping')
       .upsert({
+        workspace_id: workspaceId,
         business_code: code,
         deduct_entity: defaultEntity,
         deduct_warehouse: 'BTN',
         is_active: true,
         is_primary: true,
         notes: 'Auto-created',
-      }, { onConflict: 'business_code,deduct_entity,deduct_warehouse' });
+      }, {
+        onConflict: 'workspace_id,business_code,deduct_entity,deduct_warehouse',
+      });
   }
 
   return { success: true };
@@ -135,13 +144,14 @@ export async function saveWebhookBusiness(input: {
 
 // ── Toggle active status ──
 export async function toggleWebhookBusiness(id: number, isActive: boolean) {
-  await requireOwner('Business Settings');
+  const { workspaceId } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { error } = await svc
     .from('scalev_webhook_businesses')
     .update({ is_active: isActive, updated_at: new Date().toISOString() })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return { success: true };
@@ -149,13 +159,14 @@ export async function toggleWebhookBusiness(id: number, isActive: boolean) {
 
 // ── Delete a webhook business ──
 export async function deleteWebhookBusiness(id: number) {
-  await requireOwner('Business Settings');
+  const { workspaceId } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { error } = await svc
     .from('scalev_webhook_businesses')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return { success: true };
@@ -163,12 +174,13 @@ export async function deleteWebhookBusiness(id: number) {
 
 // ── List store channels for a business ──
 export async function getStoreChannels(businessId: number) {
-  await requireOwner('Business Settings');
+  const { workspaceId } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { data, error } = await svc
     .from('scalev_store_channels')
     .select('id, store_name, store_type, channel_override, is_active, created_at')
+    .eq('workspace_id', workspaceId)
     .eq('business_id', businessId)
     .order('store_name', { ascending: true });
 
@@ -184,7 +196,7 @@ export async function saveStoreChannel(input: {
   store_type: string;
   channel_override?: string | null;
 }) {
-  await requireOwner('Business Settings');
+  const { workspaceId } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const storeName = input.store_name.trim();
@@ -202,7 +214,8 @@ export async function saveStoreChannel(input: {
     const { error } = await svc
       .from('scalev_store_channels')
       .update({ store_name: storeName, store_type: storeType, channel_override: channelOverride })
-      .eq('id', input.id);
+      .eq('id', input.id)
+      .eq('workspace_id', workspaceId);
 
     if (error) {
       if (error.code === '23505') throw new Error(`Store "${storeName}" sudah terdaftar di business ini`);
@@ -211,7 +224,13 @@ export async function saveStoreChannel(input: {
   } else {
     const { error } = await svc
       .from('scalev_store_channels')
-      .insert({ business_id: input.business_id, store_name: storeName, store_type: storeType, channel_override: channelOverride });
+      .insert({
+        workspace_id: workspaceId,
+        business_id: input.business_id,
+        store_name: storeName,
+        store_type: storeType,
+        channel_override: channelOverride,
+      });
 
     if (error) {
       if (error.code === '23505') throw new Error(`Store "${storeName}" sudah terdaftar di business ini`);
@@ -224,13 +243,14 @@ export async function saveStoreChannel(input: {
 
 // ── Toggle store channel active status ──
 export async function toggleStoreChannel(id: number, isActive: boolean) {
-  await requireOwner('Business Settings');
+  const { workspaceId } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { error } = await svc
     .from('scalev_store_channels')
     .update({ is_active: isActive })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return { success: true };
@@ -238,13 +258,14 @@ export async function toggleStoreChannel(id: number, isActive: boolean) {
 
 // ── Delete a store channel mapping ──
 export async function deleteStoreChannel(id: number) {
-  await requireOwner('Business Settings');
+  const { workspaceId } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const { error } = await svc
     .from('scalev_store_channels')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return { success: true };
@@ -252,7 +273,7 @@ export async function deleteStoreChannel(id: number) {
 
 // ── Fetch stores from Scalev API and auto-insert ──
 export async function fetchStoresFromScalev(businessId: number) {
-  await requireOwner('Business Settings');
+  const { workspaceId } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   // Get API key for this business
@@ -260,6 +281,7 @@ export async function fetchStoresFromScalev(businessId: number) {
     .from('scalev_webhook_businesses')
     .select('id, api_key, business_code')
     .eq('id', businessId)
+    .eq('workspace_id', workspaceId)
     .single();
 
   if (bizErr || !biz) throw new Error('Business tidak ditemukan');
@@ -270,6 +292,7 @@ export async function fetchStoresFromScalev(businessId: number) {
   const { data: existingStores, error: existingError } = await svc
     .from('scalev_store_channels')
     .select('store_name')
+    .eq('workspace_id', workspaceId)
     .eq('business_id', businessId);
 
   if (existingError) throw existingError;
@@ -295,6 +318,7 @@ export async function fetchStoresFromScalev(businessId: number) {
     const { error } = await svc
       .from('scalev_store_channels')
       .insert({
+        workspace_id: workspaceId,
         business_id: businessId,
         store_name: storeName,
         store_type: storeType,
@@ -314,14 +338,15 @@ export async function fetchStoresFromScalev(businessId: number) {
 }
 
 export async function updateWebhookBusinessTaxRate(id: number, taxRateName: string) {
-  await requireOwner('Business Settings');
+  const { workspaceId } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const normalizedTaxRate = taxRateName.trim() || 'PPN';
   const { error } = await svc
     .from('scalev_webhook_businesses')
     .update({ tax_rate_name: normalizedTaxRate, updated_at: new Date().toISOString() })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return { success: true };

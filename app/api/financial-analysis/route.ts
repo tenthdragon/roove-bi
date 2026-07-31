@@ -37,7 +37,10 @@ export async function POST(request: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    const { profile } = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa menjalankan AI Finance Analysis.');
+    const { profile, workspaceId } = await requireDashboardRoles(
+      ['owner'],
+      'Hanya owner yang bisa menjalankan AI Finance Analysis.',
+    );
 
     if (!process.env.ANTHROPIC_API_KEY) {
       throw new Error('ANTHROPIC_API_KEY belum dikonfigurasi.');
@@ -87,6 +90,7 @@ export async function POST(request: NextRequest) {
       const { data: saved, error: saveError } = await svc
         .from('financial_analyses')
         .insert({
+          workspace_id: workspaceId,
           analysis_type: mode,
           analysis_data: parsedAnalysis,
           health_score: parsedAnalysis.health_score || null,

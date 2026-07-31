@@ -26,7 +26,7 @@ function parseOptionalPositiveInt(value: unknown): number | null {
 export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecutionResult> {
   switch (job.job_name) {
     case 'daily_ads_sync': {
-      const result = await runDailyAdsSync();
+      const result = await runDailyAdsSync(job.workspace_id);
       return {
         status: getAggregateStatus(result.synced, result.failed),
         rowsProcessed: result.rows_inserted,
@@ -37,6 +37,7 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
     case 'meta_sync': {
       const payload = job.payload || {};
       const result = await runMetaSync({
+        workspaceId: job.workspace_id,
         dateStart: typeof payload.date_start === 'string' ? payload.date_start : null,
         dateEnd: typeof payload.date_end === 'string' ? payload.date_end : null,
       });
@@ -48,7 +49,10 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
     }
 
     case 'financial_sync': {
-      const result = await triggerFinancialSync({ skipAuth: true });
+      const result = await triggerFinancialSync({
+        skipAuth: true,
+        workspaceId: job.workspace_id,
+      });
       return {
         status: getAggregateStatus(result.synced, result.failed),
         rowsProcessed: Array.isArray(result.results) ? result.results.length : 0,
@@ -57,7 +61,10 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
     }
 
     case 'warehouse_sync': {
-      const result = await triggerWarehouseSync({ skipAuth: true });
+      const result = await triggerWarehouseSync({
+        skipAuth: true,
+        workspaceId: job.workspace_id,
+      });
       return {
         status: getAggregateStatus(result.synced, result.failed),
         rowsProcessed: Array.isArray(result.results) ? result.results.length : 0,
@@ -73,6 +80,7 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
       const startAfterId = parseOptionalPositiveInt(payload.after_id);
       const maxPendingOrders = parseOptionalPositiveInt(payload.batch_limit);
       const result = await runScalevSync({
+        workspaceId: job.workspace_id,
         syncMode: (typeof payload.mode === 'string' ? payload.mode : 'full') as ScalevSyncMode,
         targetDate: typeof payload.date === 'string' ? payload.date : null,
         targetOrderIds: orderIds,

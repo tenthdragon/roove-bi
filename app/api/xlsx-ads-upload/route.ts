@@ -15,10 +15,6 @@ function getServiceSupabase() {
 
 export const maxDuration = 120;
 
-const ALLOWED_STORES = new Set([
-  'Roove', 'Purvu', 'Purvu Store', 'Osgard', 'Pluve', 'Calmara', 'DrHyun', 'YUV',
-]);
-
 const STORE_NORMALIZE: Record<string, string> = {
   'Clola': 'YUV',
   'Plume': 'Pluve',
@@ -42,9 +38,11 @@ export async function POST(req: NextRequest) {
     if (rateLimitError) return rateLimitError;
 
     let profileId: string | null = null;
+    let workspaceId: string;
     try {
-      const { profile } = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+      const { profile, workspaceId: activeWorkspaceId } = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
       profileId = profile.id;
+      workspaceId = activeWorkspaceId;
     } catch (err: any) {
       const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
       return NextResponse.json({ error: err.message }, { status });
@@ -55,6 +53,30 @@ export async function POST(req: NextRequest) {
 
     if (!rawRows || !Array.isArray(rawRows) || rawRows.length === 0) {
       return NextResponse.json({ error: 'No rows provided' }, { status: 400 });
+    }
+
+    const svc = getServiceSupabase();
+    const { data: workspaceBrands, error: brandsError } = await svc
+      .from('brands')
+      .select('name, sheet_name')
+      .eq('workspace_id', workspaceId)
+      .eq('is_active', true);
+
+    if (brandsError) {
+      return NextResponse.json({ error: `Failed to load workspace brands: ${brandsError.message}` }, { status: 500 });
+    }
+
+    const allowedStores = new Set(
+      (workspaceBrands || [])
+        .flatMap((brand) => [brand.name, brand.sheet_name])
+        .map((value) => String(value || '').trim())
+        .filter(Boolean),
+    );
+
+    if (allowedStores.size === 0) {
+      return NextResponse.json({
+        error: 'Workspace ini belum memiliki brand aktif. Tambahkan brand sebelum mengunggah ads.',
+      }, { status: 400 });
     }
 
     // Process rows
@@ -78,13 +100,14 @@ export async function POST(req: NextRequest) {
       let store = String(raw.store || '').trim();
       if (STORE_NORMALIZE[store]) store = STORE_NORMALIZE[store];
 
-      if (!ALLOWED_STORES.has(store)) {
+      if (!allowedStores.has(store)) {
         skipped++;
         if (store) skippedStores.add(store);
         continue;
       }
 
       rows.push({
+        workspace_id: workspaceId,
         date,
         ad_account: raw.ad_account || null,
         spent,
@@ -110,8 +133,6 @@ export async function POST(req: NextRequest) {
     const dateTo = dates[dates.length - 1];
     const storesToReplace = Array.from(new Set(rows.map((row) => row.store).filter(Boolean)));
 
-    const svc = getServiceSupabase();
-
     if (storesToReplace.length === 0) {
       return NextResponse.json({ error: 'No valid store rows found after filtering' }, { status: 400 });
     }
@@ -120,6 +141,7 @@ export async function POST(req: NextRequest) {
     const { error: delErr } = await svc
       .from('daily_ads_spend')
       .delete()
+      .eq('workspace_id', workspaceId)
       .eq('data_source', 'xlsx_upload')
       .gte('date', dateFrom)
       .lte('date', dateTo)
@@ -146,6 +168,7 @@ export async function POST(req: NextRequest) {
 
     // Log to data_imports
     await svc.from('data_imports').insert({
+      workspace_id: workspaceId,
       filename: filename || 'unknown.xlsx',
       period_month: parseInt(dateFrom.split('-')[1]),
       period_year: parseInt(dateFrom.split('-')[0]),

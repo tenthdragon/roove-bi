@@ -3,6 +3,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { parseScalevHeaderFinancialFields } from './scalev-header-financials';
+import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 function getServiceSupabase() {
   return createClient(
@@ -305,34 +306,46 @@ export function deriveSalesChannel(order: any): string {
 // 2. Fuzzy match (case-insensitive contains)
 // 3. Keyword-based fallback
 interface ProductInfo { type: string; isBonus: boolean }
-let productMappingCache: Map<string, ProductInfo> | null = null;
+const productMappingCaches = new Map<string, Map<string, ProductInfo>>();
 
-export async function loadProductMappings(): Promise<Map<string, ProductInfo>> {
-  if (productMappingCache) return productMappingCache;
+export async function loadProductMappings(
+  workspaceId = ROOVE_WORKSPACE_ID,
+): Promise<Map<string, ProductInfo>> {
+  const cached = productMappingCaches.get(workspaceId);
+  if (cached) return cached;
 
   const svc = getServiceSupabase();
   const { data, error } = await svc
     .from('product_mapping')
-    .select('product_name, product_type, is_bonus');
+    .select('product_name, product_type, is_bonus')
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
 
-  productMappingCache = new Map();
+  const productMappingCache = new Map<string, ProductInfo>();
   for (const row of data || []) {
     productMappingCache.set(row.product_name.toLowerCase(), {
       type: row.product_type,
       isBonus: row.is_bonus || false,
     });
   }
+  productMappingCaches.set(workspaceId, productMappingCache);
   return productMappingCache;
 }
 
-export function clearProductMappingCache() {
-  productMappingCache = null;
+export function clearProductMappingCache(workspaceId?: string) {
+  if (workspaceId) {
+    productMappingCaches.delete(workspaceId);
+    return;
+  }
+  productMappingCaches.clear();
 }
 
-export async function lookupProductInfo(productName: string): Promise<ProductInfo> {
-  const mappings = await loadProductMappings();
+export async function lookupProductInfo(
+  productName: string,
+  workspaceId = ROOVE_WORKSPACE_ID,
+): Promise<ProductInfo> {
+  const mappings = await loadProductMappings(workspaceId);
   const nameLower = productName.toLowerCase().trim();
 
   // 1. Exact match
@@ -347,7 +360,13 @@ export async function lookupProductInfo(productName: string): Promise<ProductInf
     }
   }
 
-  // 3. Keyword fallback
+  // Roove keeps its historical keyword fallback. A new workspace must build
+  // its own product mapping and never inherit Roove brand assumptions.
+  if (workspaceId !== ROOVE_WORKSPACE_ID) {
+    return { type: 'Unknown', isBonus: false };
+  }
+
+  // 3. Legacy Roove keyword fallback
   const keywordMap: Record<string, ProductInfo> = {
     'roove': { type: 'Roove', isBonus: false },
     'almona': { type: 'Almona', isBonus: false },
@@ -383,8 +402,11 @@ export async function lookupProductInfo(productName: string): Promise<ProductInf
 }
 
 // Backward-compatible wrapper
-export async function lookupProductType(productName: string): Promise<string> {
-  return (await lookupProductInfo(productName)).type;
+export async function lookupProductType(
+  productName: string,
+  workspaceId = ROOVE_WORKSPACE_ID,
+): Promise<string> {
+  return (await lookupProductInfo(productName, workspaceId)).type;
 }
 
 // ── Fetch store list from Scalev API ──

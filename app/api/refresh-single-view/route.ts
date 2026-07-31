@@ -34,8 +34,10 @@ export async function POST(req: NextRequest) {
     if (rateLimitError) return rateLimitError;
 
     // Auth check: admin:sync
+    let workspaceId: string;
     try {
-      await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
+      const access = await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
+      workspaceId = access.workspaceId;
     } catch (err: any) {
       const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
       return NextResponse.json({ error: err.message }, { status });
@@ -43,7 +45,11 @@ export async function POST(req: NextRequest) {
 
     const svc = getServiceSupabase();
     const start = Date.now();
-    const { error } = await svc.rpc('recalculate_all_summaries');
+    const { error } = await svc.rpc('recalculate_workspace_summaries', {
+      p_workspace_id: workspaceId,
+      p_from: null,
+      p_to: null,
+    });
     const ms = Date.now() - start;
 
     if (error) {

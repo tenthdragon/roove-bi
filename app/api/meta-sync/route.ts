@@ -3,6 +3,7 @@ import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { runMetaSync } from '@/lib/meta-sync-runner';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
+import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 export const maxDuration = 60;
 
@@ -47,6 +48,7 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
   const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const mode = isCron ? `cron_${method.toLowerCase()}` : `dashboard_${method.toLowerCase()}`;
   let requestedBy: string | null = null;
+  let workspaceId = ROOVE_WORKSPACE_ID;
 
   logRouteEvent({
     route: '/api/meta-sync',
@@ -74,8 +76,10 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
       if (rateLimitError) return rateLimitError;
 
       try {
-        const { profile } = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        const access = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        const { profile } = access;
         requestedBy = profile.id;
+        workspaceId = access.workspaceId;
       } catch (err: any) {
         const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
         logRouteEvent({
@@ -89,10 +93,13 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
         });
         return NextResponse.json({ error: err.message }, { status });
       }
+    } else {
+      workspaceId = new URL(req.url).searchParams.get('workspace_id') || ROOVE_WORKSPACE_ID;
     }
 
     const payload = resolveDateRange(req);
     const result = await runMetaSync({
+      workspaceId,
       dateStart: payload.date_start,
       dateEnd: payload.date_end,
     });

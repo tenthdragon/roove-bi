@@ -8,6 +8,7 @@ import { getCached, setCache } from '@/lib/dashboard-cache';
 import { getMarketingPageData } from '@/lib/marketing-actions';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { buildBrandColorMap } from '@/lib/utils';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 
 function formatIsoDate(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -121,6 +122,7 @@ const SCALEV_ECOSYSTEM_CHANNELS = ['Scalev Ads', 'CS Manual', 'WABA'];
 const SCALEV_ECOSYSTEM_SOURCES = ['Meta Ads', 'Google Ads', 'WABA MM Cost'];
 
 export default function MarketingPage() {
+  const { activeWorkspace } = useWorkspace();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [rawProdData, setRawProdData] = useState<any[]>([]);
   const [adsData, setAdsData] = useState<any[]>([]);
@@ -139,6 +141,7 @@ export default function MarketingPage() {
   const [shippingError, setShippingError] = useState('');
   const [prevRangeShippingError, setPrevRangeShippingError] = useState('');
   const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
+  const workspaceCache = (key: string) => `${key}:${activeWorkspace.id}`;
 
   const storeBrandMap = useMemo(() => {
     const map: Record<string, string> = {};
@@ -255,15 +258,15 @@ export default function MarketingPage() {
     const { from, to } = dateRange;
     const { prevRangeFrom, prevRangeTo } = getComparisonRanges(from, to);
 
-    const cachedProd = getCached<any[]>('daily_product_summary_mkt_cm3_v1', from, to);
-    const cachedAds = getCached<any[]>('daily_ads_spend', from, to);
-    const cachedCh = getCached<any[]>('daily_channel_data_mkt_cm3_v1', from, to);
-    const cachedBrandMapping = getCached<any[]>('ads_store_brand_mapping_mkt', 'all', 'all');
-    const cachedShipping = getCached<any>('daily_shipping_mkt_cm3_v1', from, to);
-    const cachedPrevRangeProd = getCached<any[]>('daily_product_summary_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo);
-    const cachedPrevRangeAds = getCached<any[]>('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo);
-    const cachedPrevRangeCh = getCached<any[]>('daily_channel_data_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo);
-    const cachedPrevRangeShipping = getCached<any>('daily_shipping_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo);
+    const cachedProd = getCached<any[]>(workspaceCache('daily_product_summary_mkt_cm3_v1'), from, to);
+    const cachedAds = getCached<any[]>(workspaceCache('daily_ads_spend'), from, to);
+    const cachedCh = getCached<any[]>(workspaceCache('daily_channel_data_mkt_cm3_v1'), from, to);
+    const cachedBrandMapping = getCached<any[]>(workspaceCache('ads_store_brand_mapping_mkt'), 'all', 'all');
+    const cachedShipping = getCached<any>(workspaceCache('daily_shipping_mkt_cm3_v1'), from, to);
+    const cachedPrevRangeProd = getCached<any[]>(workspaceCache('daily_product_summary_prev_range_mkt_cm3_v1'), prevRangeFrom, prevRangeTo);
+    const cachedPrevRangeAds = getCached<any[]>(workspaceCache('daily_ads_spend_prev_range'), prevRangeFrom, prevRangeTo);
+    const cachedPrevRangeCh = getCached<any[]>(workspaceCache('daily_channel_data_prev_range_mkt_cm3_v1'), prevRangeFrom, prevRangeTo);
+    const cachedPrevRangeShipping = getCached<any>(workspaceCache('daily_shipping_prev_range_mkt_cm3_v1'), prevRangeFrom, prevRangeTo);
 
     if (cachedProd && cachedAds && cachedCh && cachedBrandMapping && cachedShipping && cachedPrevRangeProd && cachedPrevRangeAds && cachedPrevRangeCh && cachedPrevRangeShipping) {
       setRawProdData(cachedProd);
@@ -295,15 +298,15 @@ export default function MarketingPage() {
       .then((data) => {
         if (cancelled) return;
 
-        setCache('daily_product_summary_mkt_cm3_v1', from, to, data.prod);
-        setCache('daily_ads_spend', from, to, data.ads);
-        setCache('daily_channel_data_mkt_cm3_v1', from, to, data.channel);
-        setCache('ads_store_brand_mapping_mkt', 'all', 'all', data.brandMapping);
-        setCache('daily_shipping_mkt_cm3_v1', from, to, { rows: data.shipping, error: data.shippingError });
-        setCache('daily_product_summary_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo, data.prevRangeProd);
-        setCache('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo, data.prevRangeAds);
-        setCache('daily_channel_data_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo, data.prevRangeChannel);
-        setCache('daily_shipping_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo, { rows: data.prevRangeShipping, error: data.prevRangeShippingError });
+        setCache(workspaceCache('daily_product_summary_mkt_cm3_v1'), from, to, data.prod);
+        setCache(workspaceCache('daily_ads_spend'), from, to, data.ads);
+        setCache(workspaceCache('daily_channel_data_mkt_cm3_v1'), from, to, data.channel);
+        setCache(workspaceCache('ads_store_brand_mapping_mkt'), 'all', 'all', data.brandMapping);
+        setCache(workspaceCache('daily_shipping_mkt_cm3_v1'), from, to, { rows: data.shipping, error: data.shippingError });
+        setCache(workspaceCache('daily_product_summary_prev_range_mkt_cm3_v1'), prevRangeFrom, prevRangeTo, data.prevRangeProd);
+        setCache(workspaceCache('daily_ads_spend_prev_range'), prevRangeFrom, prevRangeTo, data.prevRangeAds);
+        setCache(workspaceCache('daily_channel_data_prev_range_mkt_cm3_v1'), prevRangeFrom, prevRangeTo, data.prevRangeChannel);
+        setCache(workspaceCache('daily_shipping_prev_range_mkt_cm3_v1'), prevRangeFrom, prevRangeTo, { rows: data.prevRangeShipping, error: data.prevRangeShippingError });
 
         setRawProdData(data.prod);
         setAdsData(data.ads);
@@ -327,7 +330,7 @@ export default function MarketingPage() {
       });
 
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to]);
+  }, [activeWorkspace.id, dateRange.from, dateRange.to]);
 
   // ── KPI calculations ──
   const { totalRevenue, totalSpend, totalRatio, totalRoas, avgDailyRatio, avgDailyRoas, activeDays } = useMemo(() => {

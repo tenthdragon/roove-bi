@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    await requireDashboardTabAccess('cashflow', 'Cash Flow');
+    const { workspaceId } = await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
     const url = new URL(req.url);
     const period = url.searchParams.get('period') || null;
@@ -54,6 +54,7 @@ export async function GET(req: NextRequest) {
       const { data: bizAccounts } = await supabase
         .from('bank_accounts')
         .select('account_no')
+        .eq('workspace_id', workspaceId)
         .eq('business_name', businessName);
       accountNos = (bizAccounts ?? []).map((a: any) => a.account_no);
       if (accountNos.length === 0) accountNos = ['__NONE__'];
@@ -66,6 +67,7 @@ export async function GET(req: NextRequest) {
     const { data: sessions, error: sessErr } = await supabase
       .from('bank_upload_sessions')
       .select('id, bank, period_label, period_start, period_end, account_no, opening_balance, closing_balance, total_credit, total_debit, transaction_count, uploaded_at')
+      .eq('workspace_id', workspaceId)
       .order('period_start', { ascending: false });
 
     if (sessErr) return NextResponse.json({ error: sessErr.message }, { status: 500 });
@@ -89,6 +91,7 @@ export async function GET(req: NextRequest) {
     let dailyQuery = supabase
       .from('bank_transactions')
       .select('transaction_date, bank, account_no, credit_amount, debit_amount')
+      .eq('workspace_id', workspaceId)
       .eq('period_label', activePeriod)
       .order('transaction_date', { ascending: true });
 
@@ -122,6 +125,7 @@ export async function GET(req: NextRequest) {
     let listQuery = supabase
       .from('bank_transactions')
       .select('id, transaction_date, transaction_time, bank, account_no, description, credit_amount, debit_amount, running_balance, tag, tag_auto', { count: 'exact' })
+      .eq('workspace_id', workspaceId)
       .eq('period_label', activePeriod)
       .order('transaction_date', { ascending: true })
       .order('transaction_time', { ascending: true })
@@ -170,7 +174,7 @@ export async function DELETE(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    await requireDashboardTabAccess('cashflow', 'Cash Flow');
+    const { workspaceId } = await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
     const url = new URL(req.url);
     const bank    = url.searchParams.get('bank');
@@ -183,6 +187,7 @@ export async function DELETE(req: NextRequest) {
     let query = supabase
       .from('bank_upload_sessions')
       .delete()
+      .eq('workspace_id', workspaceId)
       .eq('bank', bank)
       .eq('period_label', period);
 

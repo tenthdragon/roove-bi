@@ -4,6 +4,7 @@ import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from 
 import { runScalevSync, type ScalevSyncMode } from '@/lib/scalev-sync-runner';
 import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
+import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 export const maxDuration = 120;
 
@@ -59,6 +60,7 @@ export async function POST(req: NextRequest) {
   const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const requestMode = isCron ? 'cron_post' : 'dashboard_post';
   let requestedBy: string | null = null;
+  let workspaceId = ROOVE_WORKSPACE_ID;
 
   try {
     if (!isCron) {
@@ -78,8 +80,10 @@ export async function POST(req: NextRequest) {
       if (rateLimitError) return rateLimitError;
 
       try {
-        const { profile } = await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
+        const access = await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
+        const { profile } = access;
         requestedBy = profile.id;
+        workspaceId = access.workspaceId;
       } catch (authErr: any) {
         console.error('[scalev-sync] Auth error:', authErr.message);
         const status = /sesi|login/i.test(authErr.message || '') ? 401 : 403;
@@ -109,6 +113,7 @@ export async function POST(req: NextRequest) {
 
     if (syncMode === 'order_id' || syncMode === 'repair') {
       const result = await runScalevSync({
+        workspaceId,
         syncMode,
         targetDate,
         targetOrderIds,
@@ -138,6 +143,7 @@ export async function POST(req: NextRequest) {
     };
     const queueMode = isCron ? 'cron' : 'manual';
     const { job, isDuplicate } = await enqueueSyncJob({
+      workspaceId,
       jobName: 'scalev_sync',
       route: '/api/scalev-sync',
       mode: queueMode,

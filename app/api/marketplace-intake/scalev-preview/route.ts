@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { requireDashboardPermissionAccess, requireRooveOnlyFeature } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { buildScalevOpsProjectionForBatch } from '@/lib/marketplace-intake-scalev-export';
 
@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
     if (rateLimitError) return rateLimitError;
 
     try {
+      await requireRooveOnlyFeature('Marketplace Intake');
       await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;

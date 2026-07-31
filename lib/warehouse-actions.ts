@@ -4,9 +4,10 @@
 import { createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardTabAccess } from './dashboard-access';
 import { parseWarehouseSheet } from './warehouse-parser';
+import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 async function requireWarehouseAdminAccess(label: string) {
-  await requireDashboardPermissionAccess('admin:warehouse', label);
+  return requireDashboardPermissionAccess('admin:warehouse', label);
 }
 
 function getMonthDateRange(year: number, month: number) {
@@ -21,24 +22,31 @@ function getMonthDateRange(year: number, month: number) {
 // ============================================================
 
 export async function getWarehouseConnections() {
-  await requireWarehouseAdminAccess('Admin Warehouse');
+  const { workspaceId } = await requireWarehouseAdminAccess('Admin Warehouse');
 
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_sheet_connections')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
 }
 
 export async function addWarehouseConnection(spreadsheetId: string, label: string, warehouseName: string) {
-  await requireWarehouseAdminAccess('Admin Warehouse');
+  const { workspaceId } = await requireWarehouseAdminAccess('Admin Warehouse');
 
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_sheet_connections')
-    .insert({ spreadsheet_id: spreadsheetId, label, warehouse_name: warehouseName, is_active: true })
+    .insert({
+      workspace_id: workspaceId,
+      spreadsheet_id: spreadsheetId,
+      label,
+      warehouse_name: warehouseName,
+      is_active: true,
+    })
     .select()
     .single();
   if (error) throw error;
@@ -46,24 +54,26 @@ export async function addWarehouseConnection(spreadsheetId: string, label: strin
 }
 
 export async function removeWarehouseConnection(id: string) {
-  await requireWarehouseAdminAccess('Admin Warehouse');
+  const { workspaceId } = await requireWarehouseAdminAccess('Admin Warehouse');
 
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('warehouse_sheet_connections')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
   if (error) throw error;
 }
 
 export async function toggleWarehouseConnection(id: string, isActive: boolean) {
-  await requireWarehouseAdminAccess('Admin Warehouse');
+  const { workspaceId } = await requireWarehouseAdminAccess('Admin Warehouse');
 
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('warehouse_sheet_connections')
     .update({ is_active: isActive })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
   if (error) throw error;
 }
 
@@ -71,9 +81,14 @@ export async function toggleWarehouseConnection(id: string, isActive: boolean) {
 // SYNC
 // ============================================================
 
-export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
+export async function triggerWarehouseSync(options?: {
+  skipAuth?: boolean;
+  workspaceId?: string;
+}) {
+  let workspaceId = options?.workspaceId || ROOVE_WORKSPACE_ID;
   if (!options?.skipAuth) {
-    await requireWarehouseAdminAccess('Admin Warehouse');
+    const access = await requireWarehouseAdminAccess('Admin Warehouse');
+    workspaceId = access.workspaceId;
   }
 
   const svc = createServiceSupabase();
@@ -81,6 +96,7 @@ export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
   const { data: connections, error: connError } = await svc
     .from('warehouse_sheet_connections')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true);
 
   if (connError) throw connError;
@@ -114,6 +130,7 @@ export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
         const { error: summaryDeleteError } = await svc
           .from('warehouse_stock_summary')
           .delete()
+          .eq('workspace_id', workspaceId)
           .eq('warehouse', warehouse)
           .eq('period_month', parsed.period.month)
           .eq('period_year', parsed.period.year);
@@ -122,6 +139,7 @@ export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
         // Insert in batches of 200
         for (let i = 0; i < parsed.summary.length; i += 200) {
           const batch = parsed.summary.slice(i, i + 200).map(r => ({
+            workspace_id: workspaceId,
             warehouse,
             period_month: parsed.period.month,
             period_year: parsed.period.year,
@@ -147,6 +165,7 @@ export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
         const { error: dailyDeleteError } = await svc
           .from('warehouse_daily_stock')
           .delete()
+          .eq('workspace_id', workspaceId)
           .eq('warehouse', warehouse)
           .gte('date', firstDate)
           .lte('date', lastDate);
@@ -154,6 +173,7 @@ export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
 
         for (let i = 0; i < parsed.daily.length; i += 200) {
           const batch = parsed.daily.slice(i, i + 200).map(r => ({
+            workspace_id: workspaceId,
             warehouse,
             date: r.date,
             product_name: r.product_name,
@@ -174,6 +194,7 @@ export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
           const { error: deleteSoError } = await svc
             .from('warehouse_stock_opname')
             .delete()
+            .eq('workspace_id', workspaceId)
             .eq('warehouse', warehouse)
             .eq('opname_date', dt);
           if (deleteSoError) throw new Error(`Delete warehouse_stock_opname ${dt}: ${deleteSoError.message}`);
@@ -181,6 +202,7 @@ export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
 
         for (let i = 0; i < parsed.stockOpname.length; i += 200) {
           const batch = parsed.stockOpname.slice(i, i + 200).map(r => ({
+            workspace_id: workspaceId,
             warehouse,
             opname_date: r.opname_date,
             opname_label: r.opname_label,
@@ -203,7 +225,8 @@ export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
           last_sync_status: 'success',
           last_sync_message: `Summary: ${parsed.summary.length}, Daily: ${parsed.daily.length}, SO: ${parsed.stockOpname.length} rows. Period: ${parsed.period.month}/${parsed.period.year}${parsed.errors.length ? `. Warnings: ${parsed.errors.join('; ')}` : ''}`,
         })
-        .eq('id', conn.id);
+        .eq('id', conn.id)
+        .eq('workspace_id', workspaceId);
 
       results.push({
         label: conn.label,
@@ -223,7 +246,8 @@ export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
           last_sync_status: 'error',
           last_sync_message: e.message || 'Unknown error',
         })
-        .eq('id', conn.id);
+        .eq('id', conn.id)
+        .eq('workspace_id', workspaceId);
 
       results.push({
         label: conn.label,
@@ -246,11 +270,12 @@ export async function triggerWarehouseSync(options?: { skipAuth?: boolean }) {
 // ============================================================
 
 export async function getWarehouseSummary(month: number, year: number) {
-  await requireDashboardTabAccess('warehouse', 'Summary Gudang');
+  const { workspaceId } = await requireDashboardTabAccess('warehouse', 'Summary Gudang');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_stock_summary')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('period_month', month)
     .eq('period_year', year)
     .order('category')
@@ -260,12 +285,13 @@ export async function getWarehouseSummary(month: number, year: number) {
 }
 
 export async function getWarehouseDailyStock(month: number, year: number) {
-  await requireDashboardTabAccess('warehouse', 'Daily Stock Gudang');
+  const { workspaceId } = await requireDashboardTabAccess('warehouse', 'Daily Stock Gudang');
   const svc = createServiceSupabase();
   const { firstDate, lastDate } = getMonthDateRange(year, month);
   const { data, error } = await svc
     .from('warehouse_daily_stock')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .gte('date', firstDate)
     .lte('date', lastDate)
     .order('date')
@@ -275,11 +301,12 @@ export async function getWarehouseDailyStock(month: number, year: number) {
 }
 
 export async function getWarehouseStockOpname() {
-  await requireDashboardTabAccess('warehouse', 'Stock Opname');
+  const { workspaceId } = await requireDashboardTabAccess('warehouse', 'Stock Opname');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_stock_opname')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('opname_date', { ascending: false })
     .order('product_name');
   if (error) throw error;
@@ -287,33 +314,36 @@ export async function getWarehouseStockOpname() {
 }
 
 export async function getWarehouseSOSummary() {
-  await requireDashboardTabAccess('warehouse', 'Ringkasan Stock Opname');
+  const { workspaceId } = await requireDashboardTabAccess('warehouse', 'Ringkasan Stock Opname');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('v_warehouse_so_summary')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('opname_date', { ascending: false });
   if (error) throw error;
   return data || [];
 }
 
 export async function getWarehouseExpiring() {
-  await requireDashboardTabAccess('warehouse', 'Batch & Expiry');
+  const { workspaceId } = await requireDashboardTabAccess('warehouse', 'Batch & Expiry');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('v_warehouse_expiring')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('expired_date');
   if (error) throw error;
   return data || [];
 }
 
 export async function getWarehouseAvailablePeriods() {
-  await requireDashboardTabAccess('warehouse', 'Periode Gudang');
+  const { workspaceId } = await requireDashboardTabAccess('warehouse', 'Periode Gudang');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_stock_summary')
     .select('period_month, period_year')
+    .eq('workspace_id', workspaceId)
     .order('period_year', { ascending: false })
     .order('period_month', { ascending: false });
   if (error) throw error;

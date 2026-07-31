@@ -12,11 +12,17 @@ export async function getCurrentProfile(): Promise<Profile | null> {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  const { data } = await supabase
+  const directProfile = await supabase
     .from('profiles')
     .select('*')
     .eq('id', user.id)
-    .single();
+    .maybeSingle();
+
+  if (directProfile.data) return directProfile.data as Profile;
+
+  const { data } = await supabase
+    .rpc('get_my_dashboard_profile')
+    .maybeSingle();
 
   return data as Profile | null;
 }
@@ -24,12 +30,13 @@ export async function getCurrentProfile(): Promise<Profile | null> {
 // ── Dashboard Data Queries ──
 
 export async function fetchDailyProductSummary(from: string, to: string) {
-  await requireDashboardTabAccess('overview', 'Overview');
+  const { workspaceId } = await requireDashboardTabAccess('overview', 'Overview');
 
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('daily_product_summary')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .gte('date', from)
     .lte('date', to)
     .order('date', { ascending: true });
@@ -39,12 +46,13 @@ export async function fetchDailyProductSummary(from: string, to: string) {
 }
 
 export async function fetchDailyChannelData(from: string, to: string) {
-  await requireDashboardTabAccess('channels', 'Sales Channel');
+  const { workspaceId } = await requireDashboardTabAccess('channels', 'Sales Channel');
 
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('daily_channel_data')
     .select('date, product, channel, net_sales, gross_profit')
+    .eq('workspace_id', workspaceId)
     .gte('date', from)
     .lte('date', to)
     .order('date', { ascending: true });
@@ -54,12 +62,13 @@ export async function fetchDailyChannelData(from: string, to: string) {
 }
 
 export async function fetchDailyAdsSpend(from: string, to: string) {
-  await requireDashboardTabAccess('marketing', 'Marketing');
+  const { workspaceId } = await requireDashboardTabAccess('marketing', 'Marketing');
 
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('daily_ads_spend')
     .select('date, ad_account, spent, source, store')
+    .eq('workspace_id', workspaceId)
     .gte('date', from)
     .lte('date', to)
     .order('date', { ascending: true });
@@ -69,12 +78,13 @@ export async function fetchDailyAdsSpend(from: string, to: string) {
 }
 
 export async function fetchMonthlySummary(month: number, year: number) {
-  await requireDashboardTabAccess('overview', 'Overview');
+  const { workspaceId } = await requireDashboardTabAccess('overview', 'Overview');
 
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('monthly_product_summary')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('period_month', month)
     .eq('period_year', year)
     .order('sales_after_disc', { ascending: false });
@@ -84,12 +94,13 @@ export async function fetchMonthlySummary(month: number, year: number) {
 }
 
 export async function fetchAvailablePeriods() {
-  await requireDashboardTabAccess('overview', 'Overview');
+  const { workspaceId } = await requireDashboardTabAccess('overview', 'Overview');
 
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('data_imports')
     .select('period_month, period_year, imported_at, filename')
+    .eq('workspace_id', workspaceId)
     .eq('status', 'completed')
     .order('period_year', { ascending: false })
     .order('period_month', { ascending: false });
@@ -99,19 +110,21 @@ export async function fetchAvailablePeriods() {
 }
 
 export async function fetchDateRange() {
-  await requireDashboardTabAccess('overview', 'Overview');
+  const { workspaceId } = await requireDashboardTabAccess('overview', 'Overview');
 
   const supabase = createServerSupabase();
 
   const { data } = await supabase
     .from('daily_product_summary')
     .select('date')
+    .eq('workspace_id', workspaceId)
     .order('date', { ascending: true })
     .limit(1);
 
   const { data: lastData } = await supabase
     .from('daily_product_summary')
     .select('date')
+    .eq('workspace_id', workspaceId)
     .order('date', { ascending: false })
     .limit(1);
 
@@ -124,7 +137,10 @@ export async function fetchDateRange() {
 // ── Upload & Import ──
 
 export async function uploadExcelData(formData: FormData) {
-  const { profile } = await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
+  const { profile, workspaceId } = await requireDashboardPermissionAccess(
+    'admin:daily',
+    'Admin Daily Data',
+  );
 
   const file = formData.get('file') as File;
   if (!file) throw new Error('No file provided');
@@ -136,6 +152,7 @@ export async function uploadExcelData(formData: FormData) {
   const { data: brands, error: brandsError } = await svc
     .from('brands')
     .select('name, sheet_name')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true);
 
   if (brandsError) throw brandsError;
@@ -150,13 +167,14 @@ export async function uploadExcelData(formData: FormData) {
   const { data: importRecord, error: importError } = await svc
     .from('data_imports')
     .upsert({
+      workspace_id: workspaceId,
       filename: file.name,
       period_month: parsed.period.month,
       period_year: parsed.period.year,
       imported_by: profile.id,
       row_count: parsed.dailyProduct.length,
       status: 'processing',
-    }, { onConflict: 'period_month,period_year,filename' })
+    }, { onConflict: 'workspace_id,period_month,period_year,filename' })
     .select()
     .single();
 
@@ -170,32 +188,44 @@ export async function uploadExcelData(formData: FormData) {
     const periodEnd = `${parsed.period.year}-${String(parsed.period.month).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`;
 
     const del1 = await svc.from('summary_daily_product_complete').delete()
+      .eq('workspace_id', workspaceId)
       .gte('date', periodStart).lte('date', periodEnd);
     if (del1.error) throw new Error(`Delete summary_daily_product_complete failed: ${del1.error.message}`);
 
     const del2 = await svc.from('summary_daily_channel_complete').delete()
+      .eq('workspace_id', workspaceId)
       .gte('date', periodStart).lte('date', periodEnd);
     if (del2.error) throw new Error(`Delete summary_daily_channel_complete failed: ${del2.error.message}`);
 
     const del3 = await svc.from('daily_ads_spend').delete()
+      .eq('workspace_id', workspaceId)
       .gte('date', periodStart).lte('date', periodEnd);
     if (del3.error) throw new Error(`Delete daily_ads_spend failed: ${del3.error.message}`);
 
     const del4 = await svc.from('monthly_product_summary').delete()
+      .eq('workspace_id', workspaceId)
       .eq('period_month', parsed.period.month)
       .eq('period_year', parsed.period.year);
     if (del4.error) throw new Error(`Delete monthly_product_summary failed: ${del4.error.message}`);
 
     // Insert daily product data
     if (parsed.dailyProduct.length > 0) {
-      const rows = parsed.dailyProduct.map(d => ({ ...d, import_id: importId }));
+      const rows = parsed.dailyProduct.map(d => ({
+        ...d,
+        workspace_id: workspaceId,
+        import_id: importId,
+      }));
       const { error } = await svc.from('summary_daily_product_complete').insert(rows);
       if (error) throw error;
     }
 
     // Insert daily channel data
     if (parsed.dailyChannel.length > 0) {
-      const rows = parsed.dailyChannel.map(d => ({ ...d, import_id: importId }));
+      const rows = parsed.dailyChannel.map(d => ({
+        ...d,
+        workspace_id: workspaceId,
+        import_id: importId,
+      }));
       for (let i = 0; i < rows.length; i += 500) {
         const batch = rows.slice(i, i + 500);
         const { error } = await svc.from('summary_daily_channel_complete').insert(batch);
@@ -205,7 +235,11 @@ export async function uploadExcelData(formData: FormData) {
 
     // Insert ads data
     if (parsed.ads.length > 0) {
-      const rows = parsed.ads.map(d => ({ ...d, import_id: importId }));
+      const rows = parsed.ads.map(d => ({
+        ...d,
+        workspace_id: workspaceId,
+        import_id: importId,
+      }));
       for (let i = 0; i < rows.length; i += 500) {
         const batch = rows.slice(i, i + 500);
         const { error } = await svc.from('daily_ads_spend').insert(batch);
@@ -217,6 +251,7 @@ export async function uploadExcelData(formData: FormData) {
     if (parsed.monthlySummary.length > 0) {
       const rows = parsed.monthlySummary.map(d => ({
         ...d,
+        workspace_id: workspaceId,
         period_month: parsed.period.month,
         period_year: parsed.period.year,
         import_id: importId,
@@ -229,7 +264,8 @@ export async function uploadExcelData(formData: FormData) {
     await svc.from('data_imports').update({
       status: 'completed',
       row_count: parsed.dailyProduct.length + parsed.dailyChannel.length + parsed.ads.length,
-    }).eq('id', importId);
+    }).eq('id', importId)
+      .eq('workspace_id', workspaceId);
 
     return {
       success: true,
@@ -245,7 +281,8 @@ export async function uploadExcelData(formData: FormData) {
     await svc.from('data_imports').update({
       status: 'failed',
       notes: String(err)
-    }).eq('id', importId);
+    }).eq('id', importId)
+      .eq('workspace_id', workspaceId);
     throw err;
   }
 }
@@ -253,42 +290,66 @@ export async function uploadExcelData(formData: FormData) {
 // ── User Management ──
 
 export async function fetchAllUsers() {
-  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengakses daftar user.');
+  const { workspaceId } = await requireDashboardRoles(
+    ['owner'],
+    'Hanya owner yang bisa mengakses daftar user.',
+  );
 
   const svc = createServiceSupabase();
+  const { data: memberships, error: membershipsError } = await svc
+    .from('workspace_memberships')
+    .select('user_id, role, created_at')
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: true });
+  if (membershipsError) throw membershipsError;
+
+  const memberIds = (memberships || []).map((membership) => membership.user_id);
+  if (memberIds.length === 0) return [];
+
   const { data, error } = await svc
     .from('profiles')
     .select('*')
-    .order('created_at', { ascending: true });
+    .in('id', memberIds);
   if (error) throw error;
-  return data as Profile[];
+
+  const roleByUser = new Map(
+    (memberships || []).map((membership) => [
+      membership.user_id,
+      membership.role === 'workspace_owner' ? 'owner' : membership.role,
+    ]),
+  );
+  return (data || [])
+    .map((profile) => ({
+      ...profile,
+      role: roleByUser.get(profile.id) || profile.role,
+    }))
+    .sort(
+      (a, b) =>
+        memberIds.indexOf(a.id) - memberIds.indexOf(b.id),
+    ) as Profile[];
 }
 
 export async function updateUserRole(userId: string, role: string, allowedTabs: string[], allowedProducts: string[]) {
-  const supabase = createServerSupabase();
-
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profile?.role !== 'owner') throw new Error('Only owners can manage users');
+  const { workspaceId } = await requireDashboardRoles(
+    ['owner'],
+    'Hanya owner workspace yang bisa mengubah role user.',
+  );
+  const membershipRole = role === 'owner' ? 'workspace_owner' : role;
 
   const svc = createServiceSupabase();
   const { error } = await svc
-    .from('profiles')
+    .from('workspace_memberships')
     .update({
-      role,
-      allowed_tabs: allowedTabs,
-      allowed_products: allowedProducts,
+      role: membershipRole,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', userId);
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', userId)
+    .eq('status', 'active');
 
   if (error) throw error;
+  void allowedTabs;
+  void allowedProducts;
   return { success: true };
 }

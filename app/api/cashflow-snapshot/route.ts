@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardTabAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
+import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 function getServiceSupabase() {
   return createClient(
@@ -23,6 +24,7 @@ export async function POST(req: NextRequest) {
     let month: number;
     let year: number;
     let triggeredBy = 'manual';
+    let workspaceId = ROOVE_WORKSPACE_ID;
 
     if (isCron) {
       // Cron: capture previous month
@@ -47,7 +49,16 @@ export async function POST(req: NextRequest) {
       );
       if (rateLimitError) return rateLimitError;
 
-      await requireDashboardTabAccess('cashflow', 'Cash Flow');
+      const access = await requireDashboardTabAccess('cashflow', 'Cash Flow');
+      workspaceId = access.workspaceId;
+      if (workspaceId !== ROOVE_WORKSPACE_ID) {
+        return NextResponse.json(
+          {
+            error: 'Snapshot historis masih dalam rollout workspace. Cash flow live tetap dapat digunakan.',
+          },
+          { status: 409 },
+        );
+      }
 
       // Manual: read from body
       const body = await req.json().catch(() => ({}));
@@ -83,6 +94,7 @@ export async function POST(req: NextRequest) {
     const { data: snapshot } = await svc
       .from('monthly_cashflow_snapshot')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .eq('period_month', month)
       .eq('period_year', year)
       .eq('is_auto', isCron)
@@ -111,7 +123,7 @@ export async function GET(req: NextRequest) {
     const sessionError = rejectMissingDashboardSession(req);
     if (sessionError) return sessionError;
 
-    await requireDashboardTabAccess('cashflow', 'Cash Flow');
+    const { workspaceId } = await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
     const svc = getServiceSupabase();
     const url = new URL(req.url);
@@ -120,6 +132,7 @@ export async function GET(req: NextRequest) {
     const { data, error } = await svc
       .from('monthly_cashflow_snapshot')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .order('period_year', { ascending: false })
       .order('period_month', { ascending: false })
       .limit(months);

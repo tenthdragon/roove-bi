@@ -6,6 +6,10 @@ import {
   type MetaRemoteAdAccount,
 } from '@/lib/meta-marketing';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
+import {
+  resolveWorkspaceCredential,
+  resolveWorkspaceIntegrationValue,
+} from '@/lib/workspace-integration-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,20 +75,32 @@ export async function GET(req: NextRequest) {
     if (rateLimitError) return rateLimitError;
 
     // ── Auth: admin meta access ──
+    let workspaceId: string;
     try {
-      await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+      const access = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+      workspaceId = access.workspaceId;
     } catch (err: any) {
       const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
       return NextResponse.json({ error: err.message }, { status });
     }
 
     // ── Fetch from Meta API ──
-    const accessToken = process.env.META_ACCESS_TOKEN;
-    if (!accessToken) {
-      return NextResponse.json({ error: 'META_ACCESS_TOKEN not configured' }, { status: 500 });
-    }
+    const svc = getServiceSupabase();
+    const accessToken = await resolveWorkspaceCredential({
+      supabase: svc,
+      workspaceId,
+      provider: 'meta',
+      fallbackEnvKeys: ['META_ACCESS_TOKEN'],
+    });
 
-    const businessId = process.env.META_BUSINESS_ID;
+    const businessId = await resolveWorkspaceIntegrationValue({
+      supabase: svc,
+      workspaceId,
+      provider: 'meta',
+      configKey: 'business_id',
+      referenceConfigKey: 'business_id_reference',
+      fallbackEnvKeys: ['META_BUSINESS_ID'],
+    });
     const discoveryTargets = getMetaAdAccountDiscoveryTargets(businessId);
     const allAccounts: MetaRemoteAdAccount[] = [];
     const discoveryErrors: string[] = [];
@@ -113,10 +129,10 @@ export async function GET(req: NextRequest) {
     );
 
     // ── Fetch already-registered accounts from DB ──
-    const svc = getServiceSupabase();
     const { data: registered } = await svc
       .from('meta_ad_accounts')
-      .select('account_id, account_name, store, default_source, default_advertiser, is_active');
+      .select('account_id, account_name, store, default_source, default_advertiser, is_active')
+      .eq('workspace_id', workspaceId);
 
     const registeredMap = new Map(
       (registered || []).map((r: any) => [r.account_id, r])

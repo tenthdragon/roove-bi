@@ -14,6 +14,7 @@ export type SyncJobStatus = 'queued' | 'running' | SyncJobTerminalStatus | 'canc
 
 export type SyncJobRecord = {
   id: string;
+  workspace_id: string;
   job_name: SyncJobName;
   route: string;
   mode: string;
@@ -48,6 +49,7 @@ type JsonValue =
   | { [key: string]: JsonValue };
 
 type EnqueueSyncJobInput = {
+  workspaceId: string;
   jobName: SyncJobName;
   route: string;
   mode: string;
@@ -73,6 +75,7 @@ type FinalizeSyncJobInput = {
 function normalizeJob(row: any): SyncJobRecord {
   return {
     id: row.id,
+    workspace_id: row.workspace_id,
     job_name: row.job_name,
     route: row.route,
     mode: row.mode,
@@ -131,6 +134,7 @@ export function createSyncJobDedupeKey(
 export async function enqueueSyncJob(input: EnqueueSyncJobInput) {
   const svc = createServiceSupabase();
   const insertPayload = {
+    workspace_id: input.workspaceId,
     job_name: input.jobName,
     route: input.route,
     mode: input.mode,
@@ -158,6 +162,7 @@ export async function enqueueSyncJob(input: EnqueueSyncJobInput) {
     const { data: existing, error: existingError } = await svc
       .from('sync_jobs')
       .select('*')
+      .eq('workspace_id', input.workspaceId)
       .eq('dedupe_key', input.dedupeKey)
       .in('status', ['queued', 'running'])
       .order('created_at', { ascending: false })
@@ -227,11 +232,12 @@ export async function failSyncJob(jobId: string, errorMessage: string, durationM
   });
 }
 
-export async function getRecentSyncJobs(limit = 50) {
+export async function getRecentSyncJobs(workspaceId: string, limit = 50) {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('sync_jobs')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
     .limit(limit);
 

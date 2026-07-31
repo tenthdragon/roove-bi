@@ -1,5 +1,6 @@
 import { parseGoogleSheet } from './google-sheets';
 import { createServiceSupabase } from './service-supabase';
+import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 type DailyAdsPeriod = {
   month: number;
@@ -104,6 +105,7 @@ export function dedupeAdsRows<T extends DailyAdsRow>(rows: T[]) {
 
 async function deleteExistingGoogleSheetRows(
   rows: DailyAdsRow[],
+  workspaceId: string,
 ) {
   const dates = getUniqueAdsDates(rows);
   if (dates.length === 0) return;
@@ -136,6 +138,7 @@ async function deleteExistingGoogleSheetRows(
       const { error } = await svc
         .from('daily_ads_spend')
         .delete()
+        .eq('workspace_id', workspaceId)
         .eq('data_source', 'google_sheets')
         .in('date', dateBatch)
         .in('ad_account', accountBatch);
@@ -152,6 +155,7 @@ async function deleteExistingGoogleSheetRows(
       const { error } = await svc
         .from('daily_ads_spend')
         .delete()
+        .eq('workspace_id', workspaceId)
         .eq('data_source', 'google_sheets')
         .in('date', dateBatch)
         .eq('ad_account', '')
@@ -165,12 +169,15 @@ async function deleteExistingGoogleSheetRows(
   }
 }
 
-export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
+export async function runDailyAdsSync(
+  workspaceId = ROOVE_WORKSPACE_ID,
+): Promise<DailyAdsSyncResult> {
   const svc = createServiceSupabase();
 
   const { data: connections, error: connError } = await svc
     .from('sheet_connections')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true);
 
   if (connError) throw connError;
@@ -187,6 +194,7 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
   const { data: brands, error: brandsError } = await svc
     .from('brands')
     .select('name, sheet_name')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true);
 
   if (brandsError) throw brandsError;
@@ -231,6 +239,7 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
       const { data: metaAccounts, error: metaAccountsError } = await svc
         .from('meta_ad_accounts')
         .select('account_name')
+        .eq('workspace_id', workspaceId)
         .eq('is_active', true);
       if (metaAccountsError) {
         throw new Error(`Load meta_ad_accounts: ${metaAccountsError.message}`);
@@ -240,7 +249,7 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
         (metaAccounts || []).map((account: { account_name: string }) => account.account_name)
       );
 
-      await deleteExistingGoogleSheetRows(deleteScopeRows);
+      await deleteExistingGoogleSheetRows(deleteScopeRows, workspaceId);
 
       const filteredAds = parsed.ads
         .filter((row: { ad_account: string }) => !metaManagedNames.has(row.ad_account))
@@ -267,6 +276,7 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
       };
 
       const upsertResult = await svc.from('data_imports').upsert({
+        workspace_id: workspaceId,
         filename: importTarget.filename,
         period_month: importTarget.periodMonth,
         period_year: importTarget.periodYear,
@@ -274,14 +284,16 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
         row_count: dedupedAds.length,
         status: 'processing',
         notes: `Ads sync from Google Sheet: ${conn.label}. Range: ${importRange.start} to ${importRange.end}${skippedCount > 0 ? ` (${skippedCount} rows skipped — managed by Meta API)` : ''}${duplicateCount > 0 ? ` (${duplicateCount} duplicate rows dropped)` : ''}`,
-      }, { onConflict: 'period_month,period_year,filename' });
+      }, { onConflict: 'workspace_id,period_month,period_year,filename' });
       if (upsertResult.error) {
         throw new Error(`Upsert data_imports: ${upsertResult.error.message}`);
       }
 
       if (dedupedAds.length > 0) {
         for (let i = 0; i < dedupedAds.length; i += 500) {
-          const batch = dedupedAds.slice(i, i + 500);
+          const batch = dedupedAds
+            .slice(i, i + 500)
+            .map((row) => ({ ...row, workspace_id: workspaceId }));
           const { error } = await svc.from('daily_ads_spend').insert(batch);
           if (error) throw error;
           rowsInserted += batch.length;
@@ -292,6 +304,7 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
         status: 'completed',
         row_count: dedupedAds.length,
       }).eq('filename', importTarget.filename)
+        .eq('workspace_id', workspaceId)
         .eq('period_month', importTarget.periodMonth)
         .eq('period_year', importTarget.periodYear);
 
@@ -304,7 +317,8 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
         last_synced: new Date().toISOString(),
         last_sync_status: 'success',
         last_sync_message: syncMsg,
-      }).eq('id', conn.id);
+      }).eq('id', conn.id)
+        .eq('workspace_id', workspaceId);
 
       results.push({
         spreadsheet_id: conn.spreadsheet_id,
@@ -321,6 +335,7 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
           status: 'failed',
           notes: err.message || 'Unknown error',
         }).eq('filename', importTarget.filename)
+          .eq('workspace_id', workspaceId)
           .eq('period_month', importTarget.periodMonth)
           .eq('period_year', importTarget.periodYear);
       }
@@ -329,7 +344,8 @@ export async function runDailyAdsSync(): Promise<DailyAdsSyncResult> {
         last_synced: new Date().toISOString(),
         last_sync_status: 'error',
         last_sync_message: err.message || 'Unknown error',
-      }).eq('id', conn.id);
+      }).eq('id', conn.id)
+        .eq('workspace_id', workspaceId);
 
       results.push({
         spreadsheet_id: conn.spreadsheet_id,

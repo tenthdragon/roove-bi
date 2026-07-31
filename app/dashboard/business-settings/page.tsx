@@ -23,6 +23,7 @@ import {
   createWarehouseBusinessMapping,
   removeWarehouseBusinessMapping,
 } from '@/lib/warehouse-ledger-actions';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 
 // ── Types ──
 type Business = {
@@ -136,6 +137,7 @@ const labelStyle = { fontSize: 11, color: 'var(--dim)', fontWeight: 600, marginB
 // ============================================================
 export default function BusinessSettingsPage() {
   const supabase = useSupabase();
+  const { activeWorkspace } = useWorkspace();
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [warehouseMappings, setWarehouseMappings] = useState<WarehouseMapping[]>([]);
   const [loading, setLoading] = useState(true);
@@ -176,6 +178,7 @@ export default function BusinessSettingsPage() {
       const { data: entityData, error: entityError } = await supabase
         .from('warehouse_products')
         .select('entity, warehouse')
+        .eq('owner_workspace_id', activeWorkspace.id)
         .order('entity');
       if (entityError) throw entityError;
       const entities = [...new Set((entityData || []).map(e => e.entity))].filter(Boolean);
@@ -193,7 +196,7 @@ export default function BusinessSettingsPage() {
     setLoading(false);
   }
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); }, [activeWorkspace.id]);
 
   // ── Business CRUD ──
   function openAddForm() {

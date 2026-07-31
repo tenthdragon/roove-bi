@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { getDatePartsInTimeZone } from '@/lib/utils';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 
 interface DateRangeContextType {
   dateRange: { from: string; to: string };
@@ -24,6 +25,7 @@ export function useDateRange() {
 
 export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   const supabase = useSupabase();
+  const { activeWorkspace } = useWorkspace();
   const [dateRange, setDateRangeState] = useState({ from: '', to: '' });
   const [dateExtent, setDateExtent] = useState({ earliest: '', latest: '' });
   const [loading, setLoading] = useState(true);
@@ -41,11 +43,13 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
         supabase
           .from('daily_product_summary')
           .select('date')
+          .eq('workspace_id', activeWorkspace.id)
           .order('date', { ascending: true })
           .limit(1),
         supabase
           .from('daily_product_summary')
           .select('date')
+          .eq('workspace_id', activeWorkspace.id)
           .order('date', { ascending: false })
           .limit(1),
       ]);
@@ -74,7 +78,7 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }
     init();
-  }, [supabase]);
+  }, [activeWorkspace.id, supabase]);
 
   const setDateRange = (from: string, to: string) => {
     setDateRangeState({ from, to });

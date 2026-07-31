@@ -9,6 +9,7 @@ import { createServerSupabase, createServiceSupabase } from './supabase-server';
 
 export interface Brand {
   id: number;
+  workspace_id: string;
   name: string;
   sheet_name: string;
   keywords: string | null;
@@ -17,22 +18,25 @@ export interface Brand {
 }
 
 async function requireBrandManageAccess(label: string = 'Brand') {
-  await requireDashboardTabAccess('warehouse-settings', label);
+  const access = await requireDashboardTabAccess('warehouse-settings', label);
   await requireDashboardPermissionAccess('whs:brands', label);
+  return access;
 }
 
 async function requireBrandReadAccess(label: string = 'Brand') {
-  await requireDashboardTabAccess('warehouse-settings', label);
+  const access = await requireDashboardTabAccess('warehouse-settings', label);
   await requireAnyDashboardPermissionAccess(['whs:brands', 'whs:products'], label);
+  return access;
 }
 
 // ── Fetch all brands (active + inactive) ──
 export async function fetchAllBrands(): Promise<Brand[]> {
-  await requireBrandManageAccess('Daftar Brand');
+  const { workspaceId } = await requireBrandManageAccess('Daftar Brand');
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('brands')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('name', { ascending: true });
   if (error) throw error;
   return data as Brand[];
@@ -40,11 +44,12 @@ export async function fetchAllBrands(): Promise<Brand[]> {
 
 // ── Fetch only active brands ──
 export async function fetchActiveBrands(): Promise<Brand[]> {
-  await requireBrandReadAccess('Brand Aktif');
+  const { workspaceId } = await requireBrandReadAccess('Brand Aktif');
   const supabase = createServerSupabase();
   const { data, error } = await supabase
     .from('brands')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .order('name', { ascending: true });
   if (error) throw error;
@@ -59,13 +64,14 @@ export async function fetchActiveBrandNames(): Promise<string[]> {
 
 // ── Add a new brand ──
 export async function addBrand(name: string, sheetName: string): Promise<{ success: boolean; error?: string }> {
-  await requireBrandManageAccess('Brand');
+  const { workspaceId } = await requireBrandManageAccess('Brand');
   const svc = createServiceSupabase();
 
   // Check for case-insensitive duplicate
   const { data: existing } = await svc
     .from('brands')
     .select('id, name')
+    .eq('workspace_id', workspaceId)
     .ilike('name', name);
 
   if (existing && existing.length > 0) {
@@ -76,6 +82,7 @@ export async function addBrand(name: string, sheetName: string): Promise<{ succe
   const { data: existingSheet } = await svc
     .from('brands')
     .select('id, name, sheet_name')
+    .eq('workspace_id', workspaceId)
     .ilike('sheet_name', sheetName);
 
   if (existingSheet && existingSheet.length > 0) {
@@ -84,7 +91,11 @@ export async function addBrand(name: string, sheetName: string): Promise<{ succe
 
   const { error } = await svc
     .from('brands')
-    .insert({ name: name.trim(), sheet_name: sheetName.trim() });
+    .insert({
+      workspace_id: workspaceId,
+      name: name.trim(),
+      sheet_name: sheetName.trim(),
+    });
 
   if (error) {
     if (error.message.includes('duplicate') || error.message.includes('unique')) {
@@ -98,35 +109,42 @@ export async function addBrand(name: string, sheetName: string): Promise<{ succe
 
 // ── Update brand keywords ──
 export async function updateBrandKeywords(brandId: number, keywords: string): Promise<void> {
-  await requireBrandManageAccess('Brand');
+  const { workspaceId } = await requireBrandManageAccess('Brand');
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('brands')
     .update({ keywords: keywords.trim() || null })
-    .eq('id', brandId);
+    .eq('id', brandId)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
 }
 
 // ── Toggle brand active/inactive ──
 export async function toggleBrand(brandId: number, isActive: boolean): Promise<void> {
-  await requireBrandManageAccess('Brand');
+  const { workspaceId } = await requireBrandManageAccess('Brand');
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('brands')
     .update({ is_active: isActive })
-    .eq('id', brandId);
+    .eq('id', brandId)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
 }
 
 // ── Permanently delete brand + all its data ──
 export async function deleteBrandPermanently(brandId: number): Promise<{ success: boolean; deleted: Record<string, number> }> {
-  await requireBrandManageAccess('Brand');
+  const { workspaceId } = await requireBrandManageAccess('Brand');
   const svc = createServiceSupabase();
 
   // Get brand name first
-  const { data: brand } = await svc.from('brands').select('name').eq('id', brandId).single();
+  const { data: brand } = await svc
+    .from('brands')
+    .select('name')
+    .eq('id', brandId)
+    .eq('workspace_id', workspaceId)
+    .single();
   if (!brand) throw new Error('Brand not found');
 
   const brandName = brand.name;
@@ -134,21 +152,31 @@ export async function deleteBrandPermanently(brandId: number): Promise<{ success
 
   // Delete from daily_product_summary
   const { count: c1 } = await svc.from('daily_product_summary')
-    .delete({ count: 'exact' }).eq('product', brandName);
+    .delete({ count: 'exact' })
+    .eq('workspace_id', workspaceId)
+    .eq('product', brandName);
   deleted['daily_product_summary'] = c1 || 0;
 
   // Delete from daily_channel_data
   const { count: c2 } = await svc.from('daily_channel_data')
-    .delete({ count: 'exact' }).eq('product', brandName);
+    .delete({ count: 'exact' })
+    .eq('workspace_id', workspaceId)
+    .eq('product', brandName);
   deleted['daily_channel_data'] = c2 || 0;
 
   // Delete from monthly_product_summary
   const { count: c3 } = await svc.from('monthly_product_summary')
-    .delete({ count: 'exact' }).eq('product', brandName);
+    .delete({ count: 'exact' })
+    .eq('workspace_id', workspaceId)
+    .eq('product', brandName);
   deleted['monthly_product_summary'] = c3 || 0;
 
   // Finally delete the brand record
-  const { error } = await svc.from('brands').delete().eq('id', brandId);
+  const { error } = await svc
+    .from('brands')
+    .delete()
+    .eq('id', brandId)
+    .eq('workspace_id', workspaceId);
   if (error) throw error;
 
   return { success: true, deleted };

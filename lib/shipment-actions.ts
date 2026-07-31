@@ -17,12 +17,13 @@ export interface ShipmentChannelRow {
 }
 
 export async function fetchShipmentStatus(from: string, to: string): Promise<ShipmentChannelRow[]> {
-  await requireDashboardTabAccess('channels', 'Sales Channel');
+  const { workspaceId } = await requireDashboardTabAccess('channels', 'Sales Channel');
 
   const svc = createServiceSupabase();
 
   // Try RPC first
-  const { data, error } = await svc.rpc('get_shipment_status', {
+  const { data, error } = await svc.rpc('get_workspace_shipment_status', {
+    p_workspace_id: workspaceId,
     p_from: from,
     p_to: to,
   });
@@ -30,12 +31,12 @@ export async function fetchShipmentStatus(from: string, to: string): Promise<Shi
   // If RPC fails (schema cache), fallback to direct query
   if (error) {
     console.error('[ShipmentStatus] RPC failed, trying fallback:', error.message);
-    return fetchShipmentStatusFallback(from, to);
+    return fetchShipmentStatusFallback(workspaceId, from, to);
   }
 
   if (!data || data.length === 0) {
     console.log('[ShipmentStatus] RPC returned 0 rows, trying fallback');
-    return fetchShipmentStatusFallback(from, to);
+    return fetchShipmentStatusFallback(workspaceId, from, to);
   }
 
   return (data || []).map((row: any) => ({
@@ -53,7 +54,11 @@ export async function fetchShipmentStatus(from: string, to: string): Promise<Shi
 
 // Fallback: query scalev_orders + scalev_order_lines directly
 // Uses pagination to bypass Supabase default 1000-row limit
-async function fetchShipmentStatusFallback(from: string, to: string): Promise<ShipmentChannelRow[]> {
+async function fetchShipmentStatusFallback(
+  workspaceId: string,
+  from: string,
+  to: string,
+): Promise<ShipmentChannelRow[]> {
   const svc = createServiceSupabase();
 
   // ── 1. Fetch ALL shipped orders in current date range (paginated) ──
@@ -66,6 +71,7 @@ async function fetchShipmentStatusFallback(from: string, to: string): Promise<Sh
     const { data: batch, error: batchErr } = await svc
       .from('scalev_orders')
       .select('id, completed_time, status')
+      .eq('workspace_id', workspaceId)
       .not('shipped_time', 'is', null)
       .gte('shipped_time', from)
       .lte('shipped_time', to + 'T23:59:59')
@@ -94,6 +100,7 @@ async function fetchShipmentStatusFallback(from: string, to: string): Promise<Sh
     const { data: batch, error: batchErr } = await svc
       .from('scalev_orders')
       .select('id, status')
+      .eq('workspace_id', workspaceId)
       .not('shipped_time', 'is', null)
       .lt('shipped_time', from)
       .is('completed_time', null)
@@ -130,6 +137,7 @@ async function fetchShipmentStatusFallback(from: string, to: string): Promise<Sh
     const { data: lines, error: linesErr } = await svc
       .from('scalev_order_lines')
       .select('scalev_order_id, sales_channel, product_price_bt, discount_bt')
+      .eq('workspace_id', workspaceId)
       .in('scalev_order_id', batchIds)
       .limit(5000);
 

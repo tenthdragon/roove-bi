@@ -5,6 +5,8 @@ import {
   type MetaAdAccount,
 } from './meta-marketing';
 import { createServiceSupabase } from './service-supabase';
+import { ROOVE_WORKSPACE_ID } from './workspaces';
+import { resolveWorkspaceCredential } from './workspace-integration-server';
 
 export type MetaSyncResult = {
   success: boolean;
@@ -20,6 +22,7 @@ export type MetaSyncResult = {
 };
 
 type RunMetaSyncOptions = {
+  workspaceId?: string;
   dateStart?: string | null;
   dateEnd?: string | null;
 };
@@ -27,11 +30,13 @@ type RunMetaSyncOptions = {
 export async function runMetaSync(options: RunMetaSyncOptions = {}): Promise<MetaSyncResult> {
   const startTime = Date.now();
   const svc = createServiceSupabase();
-  const accessToken = process.env.META_ACCESS_TOKEN;
-
-  if (!accessToken) {
-    throw new Error('META_ACCESS_TOKEN not configured');
-  }
+  const workspaceId = options.workspaceId || ROOVE_WORKSPACE_ID;
+  const accessToken = await resolveWorkspaceCredential({
+    supabase: svc,
+    workspaceId,
+    provider: 'meta',
+    fallbackEnvKeys: ['META_ACCESS_TOKEN'],
+  });
 
   const dateStart = options.dateStart || getYesterdayWIB();
   const dateEnd = options.dateEnd || dateStart;
@@ -50,6 +55,7 @@ export async function runMetaSync(options: RunMetaSyncOptions = {}): Promise<Met
   const { data: accounts, error: accountsError } = await svc
     .from('meta_ad_accounts')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true);
 
   if (accountsError) throw accountsError;
@@ -71,6 +77,7 @@ export async function runMetaSync(options: RunMetaSyncOptions = {}): Promise<Met
   const { data: logEntry, error: logError } = await svc
     .from('meta_sync_log')
     .insert({
+      workspace_id: workspaceId,
       sync_date: new Date().toISOString().split('T')[0],
       date_range_start: dateStart,
       date_range_end: dateEnd,
@@ -107,6 +114,7 @@ export async function runMetaSync(options: RunMetaSyncOptions = {}): Promise<Met
       const { error: delError } = await svc
         .from('daily_ads_spend')
         .delete()
+        .eq('workspace_id', workspaceId)
         .gte('date', dateStart)
         .lte('date', dateEnd)
         .eq('data_source', 'meta_api')
@@ -120,7 +128,9 @@ export async function runMetaSync(options: RunMetaSyncOptions = {}): Promise<Met
 
       let accountInsertFailed = false;
       for (let i = 0; i < result.rows.length; i += 500) {
-        const batch = result.rows.slice(i, i + 500);
+        const batch = result.rows
+          .slice(i, i + 500)
+          .map((row) => ({ ...row, workspace_id: workspaceId }));
         const { error } = await svc.from('daily_ads_spend').insert(batch);
         if (error) {
           console.error(`[meta-sync] Insert batch error for ${result.account_name}:`, error);
@@ -150,7 +160,8 @@ export async function runMetaSync(options: RunMetaSyncOptions = {}): Promise<Met
         status,
         error_message: errors.length > 0 ? errors.join('; ') : null,
         duration_ms: duration,
-      }).eq('id', logId);
+      }).eq('id', logId)
+        .eq('workspace_id', workspaceId);
     }
 
     console.log(`[meta-sync] Done: ${accountsSynced}/${accounts.length} accounts, ${rowsInserted} rows, ${duration}ms`);
@@ -172,6 +183,7 @@ export async function runMetaSync(options: RunMetaSyncOptions = {}): Promise<Met
 
     const payload = {
       sync_date: new Date().toISOString().split('T')[0],
+      workspace_id: workspaceId,
       date_range_start: dateStart,
       date_range_end: dateEnd,
       status: 'failed',
@@ -181,7 +193,11 @@ export async function runMetaSync(options: RunMetaSyncOptions = {}): Promise<Met
 
     try {
       if (logId) {
-        await svc.from('meta_sync_log').update(payload).eq('id', logId);
+        await svc
+          .from('meta_sync_log')
+          .update(payload)
+          .eq('id', logId)
+          .eq('workspace_id', workspaceId);
       } else {
         await svc.from('meta_sync_log').insert(payload);
       }

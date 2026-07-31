@@ -3,6 +3,7 @@ import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
+import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 export const maxDuration = 60;
 
@@ -18,6 +19,7 @@ async function queueWarehouseSync(request: NextRequest, method: 'GET' | 'POST') 
   );
   const mode = `${isCron ? 'cron' : 'dashboard'}_${method.toLowerCase()}`;
   let requestedBy: string | null = null;
+  let workspaceId = ROOVE_WORKSPACE_ID;
 
   logRouteEvent({
     route: '/api/warehouse-sync',
@@ -44,8 +46,10 @@ async function queueWarehouseSync(request: NextRequest, method: 'GET' | 'POST') 
     if (rateLimitError) return rateLimitError;
 
     try {
-      const { profile } = await requireDashboardPermissionAccess('admin:warehouse', 'Admin Warehouse');
+      const access = await requireDashboardPermissionAccess('admin:warehouse', 'Admin Warehouse');
+      const { profile } = access;
       requestedBy = profile.id;
+      workspaceId = access.workspaceId;
     } catch (err: any) {
       const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
       logRouteEvent({
@@ -64,6 +68,7 @@ async function queueWarehouseSync(request: NextRequest, method: 'GET' | 'POST') 
   try {
     const queueMode = isCron ? 'cron' : 'manual';
     const { job, isDuplicate } = await enqueueSyncJob({
+      workspaceId,
       jobName: 'warehouse_sync',
       route: '/api/warehouse-sync',
       mode: queueMode,

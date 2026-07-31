@@ -21,51 +21,79 @@ export type ResolvedWarehouseOrderContext = {
 };
 
 const WAREHOUSE_LOOKUP_CACHE_TTL_MS = 60_000;
-let cachedBusinessDirectoryRows: Awaited<ReturnType<typeof fetchWarehouseBusinessDirectoryRows>> | null = null;
-let cachedBusinessDirectoryExpiry = 0;
-let cachedBusinessDirectoryPromise: Promise<Awaited<ReturnType<typeof fetchWarehouseBusinessDirectoryRows>>> | null = null;
-let cachedOriginRegistryRows: Awaited<ReturnType<typeof fetchWarehouseOriginRegistryRows>> | null = null;
-let cachedOriginRegistryExpiry = 0;
-let cachedOriginRegistryPromise: Promise<Awaited<ReturnType<typeof fetchWarehouseOriginRegistryRows>>> | null = null;
+const cachedBusinessDirectory = new Map<string, {
+  rows: Awaited<ReturnType<typeof fetchWarehouseBusinessDirectoryRows>>;
+  expiresAt: number;
+}>();
+const cachedBusinessDirectoryPromises = new Map<
+  string,
+  Promise<Awaited<ReturnType<typeof fetchWarehouseBusinessDirectoryRows>>>
+>();
+const cachedOriginRegistry = new Map<string, {
+  rows: Awaited<ReturnType<typeof fetchWarehouseOriginRegistryRows>>;
+  expiresAt: number;
+}>();
+const cachedOriginRegistryPromises = new Map<
+  string,
+  Promise<Awaited<ReturnType<typeof fetchWarehouseOriginRegistryRows>>>
+>();
 
 async function getCachedWarehouseBusinessDirectoryRows(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
 ) {
-  if (cachedBusinessDirectoryRows && Date.now() < cachedBusinessDirectoryExpiry) {
-    return cachedBusinessDirectoryRows;
+  const cached = cachedBusinessDirectory.get(workspaceId);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.rows;
   }
-  if (cachedBusinessDirectoryPromise) return cachedBusinessDirectoryPromise;
+  const pending = cachedBusinessDirectoryPromises.get(workspaceId);
+  if (pending) return pending;
 
-  cachedBusinessDirectoryPromise = (async () => {
-    const rows = await fetchWarehouseBusinessDirectoryRows(svc as any);
-    cachedBusinessDirectoryRows = rows;
-    cachedBusinessDirectoryExpiry = Date.now() + WAREHOUSE_LOOKUP_CACHE_TTL_MS;
+  const request = (async () => {
+    const rows = await fetchWarehouseBusinessDirectoryRows(
+      svc as any,
+      workspaceId,
+    );
+    cachedBusinessDirectory.set(workspaceId, {
+      rows,
+      expiresAt: Date.now() + WAREHOUSE_LOOKUP_CACHE_TTL_MS,
+    });
     return rows;
   })().finally(() => {
-    cachedBusinessDirectoryPromise = null;
+    cachedBusinessDirectoryPromises.delete(workspaceId);
   });
+  cachedBusinessDirectoryPromises.set(workspaceId, request);
 
-  return cachedBusinessDirectoryPromise;
+  return request;
 }
 
 async function getCachedWarehouseOriginRegistryRows(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
 ) {
-  if (cachedOriginRegistryRows && Date.now() < cachedOriginRegistryExpiry) {
-    return cachedOriginRegistryRows;
+  const cached = cachedOriginRegistry.get(workspaceId);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.rows;
   }
-  if (cachedOriginRegistryPromise) return cachedOriginRegistryPromise;
+  const pending = cachedOriginRegistryPromises.get(workspaceId);
+  if (pending) return pending;
 
-  cachedOriginRegistryPromise = (async () => {
-    const rows = await fetchWarehouseOriginRegistryRows(svc as any);
-    cachedOriginRegistryRows = rows;
-    cachedOriginRegistryExpiry = Date.now() + WAREHOUSE_LOOKUP_CACHE_TTL_MS;
+  const request = (async () => {
+    const rows = await fetchWarehouseOriginRegistryRows(
+      svc as any,
+      workspaceId,
+    );
+    cachedOriginRegistry.set(workspaceId, {
+      rows,
+      expiresAt: Date.now() + WAREHOUSE_LOOKUP_CACHE_TTL_MS,
+    });
     return rows;
   })().finally(() => {
-    cachedOriginRegistryPromise = null;
+    cachedOriginRegistryPromises.delete(workspaceId);
   });
+  cachedOriginRegistryPromises.set(workspaceId, request);
 
-  return cachedOriginRegistryPromise;
+  return request;
 }
 
 export function resolveWarehouseOrderContextFromLookups(args: {
@@ -112,10 +140,11 @@ export async function resolveWarehouseOrderContext(
   svc: ReturnType<typeof createServiceSupabase>,
   data: any,
   businessCode: string,
+  workspaceId: string,
 ): Promise<ResolvedWarehouseOrderContext> {
   const [businessDirectoryRows, originRegistryRows] = await Promise.all([
-    getCachedWarehouseBusinessDirectoryRows(svc),
-    getCachedWarehouseOriginRegistryRows(svc),
+    getCachedWarehouseBusinessDirectoryRows(svc, workspaceId),
+    getCachedWarehouseOriginRegistryRows(svc, workspaceId),
   ]);
 
   return resolveWarehouseOrderContextFromLookups({

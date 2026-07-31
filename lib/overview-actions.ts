@@ -59,6 +59,7 @@ async function fetchAllDateRangeRows(
   svc: ReturnType<typeof createServiceSupabase>,
   table: string,
   columns: string,
+  workspaceId: string,
   from: string,
   to: string,
 ) {
@@ -68,6 +69,7 @@ async function fetchAllDateRangeRows(
   for (let offset = 0; ; offset += pageSize) {
     const result = await svc.from(table)
       .select(columns)
+      .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to)
       .order('date')
@@ -82,24 +84,26 @@ async function fetchAllDateRangeRows(
   return rows;
 }
 
-async function loadOverviewCm3Month(from: string, to: string) {
+async function loadOverviewCm3Month(workspaceId: string, from: string, to: string) {
   const svc = createServiceSupabase();
   const [daily, ads, channel, shipping, overhead] = await Promise.all([
-    fetchAllDateRangeRows(svc, 'daily_product_summary', 'date, product, net_sales, gross_profit', from, to)
+    fetchAllDateRangeRows(svc, 'daily_product_summary', 'date, product, net_sales, gross_profit', workspaceId, from, to)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: `Histori CM3: ${error.message}` })),
-    fetchAllDateRangeRows(svc, 'daily_ads_spend', 'date, spent', from, to)
+    fetchAllDateRangeRows(svc, 'daily_ads_spend', 'date, spent', workspaceId, from, to)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: `Histori marketing fee CM3: ${error.message}` })),
-    fetchAllDateRangeRows(svc, 'daily_channel_data', 'date, product, mp_admin_cost', from, to)
+    fetchAllDateRangeRows(svc, 'daily_channel_data', 'date, product, mp_admin_cost', workspaceId, from, to)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: `Histori MP fee CM3: ${error.message}` })),
-    getShippingFeeRange(from, to)
+    getShippingFeeRange(workspaceId, from, to)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: `Histori shipping fee CM3: ${error.message}` })),
-    svc.from('monthly_overhead')
-      .select('year_month, amount')
-      .eq('year_month', from.slice(0, 7))
+    svc.rpc('get_workspace_monthly_overhead', {
+      p_workspace_id: workspaceId,
+      p_date_from: from,
+      p_date_to: to,
+    })
       .then(({ data, error }) => error
         ? { data: [], error: `Histori overhead: ${error.message}` }
         : { data: data || [], error: null }),
@@ -133,34 +137,37 @@ export async function getOverviewCoreData({
   prevFrom,
   prevTo,
 }: OverviewFeeDataParams) {
-  await requireDashboardTabAccess('overview', 'Overview');
+  const { workspaceId } = await requireDashboardTabAccess('overview', 'Overview');
 
   const svc = createServiceSupabase();
-  const fromYM = from.slice(0, 7);
-  const toYM = to.slice(0, 7);
-  const prevFromYM = prevFrom.slice(0, 7);
-  const prevToYM = prevTo.slice(0, 7);
-
   const [dailyRes, shipmentRes, overheadRes, prevDailyRes, prevOverheadRes] = await Promise.all([
     svc.from('daily_product_summary')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to)
       .order('date'),
-    svc.rpc('get_daily_shipment_counts', { p_from: from, p_to: to }),
-    svc.from('monthly_overhead')
-      .select('year_month, amount')
-      .gte('year_month', fromYM)
-      .lte('year_month', toYM),
+    svc.rpc('get_workspace_daily_shipment_counts', {
+      p_workspace_id: workspaceId,
+      p_from: from,
+      p_to: to,
+    }),
+    svc.rpc('get_workspace_monthly_overhead', {
+      p_workspace_id: workspaceId,
+      p_date_from: from,
+      p_date_to: to,
+    }),
     svc.from('daily_product_summary')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .gte('date', prevFrom)
       .lte('date', prevTo)
       .order('date'),
-    svc.from('monthly_overhead')
-      .select('year_month, amount')
-      .gte('year_month', prevFromYM)
-      .lte('year_month', prevToYM),
+    svc.rpc('get_workspace_monthly_overhead', {
+      p_workspace_id: workspaceId,
+      p_date_from: prevFrom,
+      p_date_to: prevTo,
+    }),
   ]);
 
   return {
@@ -178,31 +185,35 @@ export async function getOverviewFeeData({
   prevFrom,
   prevTo,
 }: OverviewFeeDataParams) {
-  await requireDashboardTabAccess('overview', 'Overview');
+  const { workspaceId } = await requireDashboardTabAccess('overview', 'Overview');
 
   const svc = createServiceSupabase();
 
   const [adsRes, channelRes, shippingRes, prevAdsRes, prevChannelRes, prevShippingRes] = await Promise.all([
     svc.from('daily_ads_spend')
       .select('date, source, spent, store')
+      .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to),
     svc.from('daily_channel_data')
       .select('date, channel, product, mp_admin_cost')
+      .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to),
-    getShippingFeeRange(from, to)
+    getShippingFeeRange(workspaceId, from, to)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: { message: error.message } })),
     svc.from('daily_ads_spend')
       .select('date, source, spent, store')
+      .eq('workspace_id', workspaceId)
       .gte('date', prevFrom)
       .lte('date', prevTo),
     svc.from('daily_channel_data')
       .select('date, channel, product, mp_admin_cost')
+      .eq('workspace_id', workspaceId)
       .gte('date', prevFrom)
       .lte('date', prevTo),
-    getShippingFeeRange(prevFrom, prevTo)
+    getShippingFeeRange(workspaceId, prevFrom, prevTo)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: { message: error.message } })),
   ]);
@@ -229,13 +240,12 @@ export async function getOverviewPageData({
   prevTo,
   accessScope = 'overview',
 }: OverviewFeeDataParams) {
-  await requireDashboardTabAccess(accessScope, accessScope === 'channels' ? 'Sales Channel' : 'Overview');
+  const { workspaceId } = await requireDashboardTabAccess(
+    accessScope,
+    accessScope === 'channels' ? 'Sales Channel' : 'Overview',
+  );
 
   const svc = createServiceSupabase();
-  const fromYM = from.slice(0, 7);
-  const toYM = to.slice(0, 7);
-  const prevFromYM = prevFrom.slice(0, 7);
-  const prevToYM = prevTo.slice(0, 7);
   const historyEnd = new Date(`${to}T00:00:00Z`);
   const historyStartDate = new Date(Date.UTC(historyEnd.getUTCFullYear(), historyEnd.getUTCMonth() - 11, 1));
   const historyFrom = historyStartDate.toISOString().slice(0, 10);
@@ -273,49 +283,61 @@ export async function getOverviewPageData({
   ] = await Promise.all([
     svc.from('daily_product_summary')
       .select(OVERVIEW_DAILY_SUMMARY_COLUMNS)
+      .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to)
       .order('date'),
-    svc.rpc('get_daily_shipment_counts', { p_from: from, p_to: to }),
-    svc.from('monthly_overhead')
-      .select('year_month, amount')
-      .gte('year_month', fromYM)
-      .lte('year_month', toYM),
+    svc.rpc('get_workspace_daily_shipment_counts', {
+      p_workspace_id: workspaceId,
+      p_from: from,
+      p_to: to,
+    }),
+    svc.rpc('get_workspace_monthly_overhead', {
+      p_workspace_id: workspaceId,
+      p_date_from: from,
+      p_date_to: to,
+    }),
     svc.from('daily_product_summary')
       .select(OVERVIEW_DAILY_SUMMARY_COLUMNS)
+      .eq('workspace_id', workspaceId)
       .gte('date', prevFrom)
       .lte('date', prevTo)
       .order('date'),
-    svc.from('monthly_overhead')
-      .select('year_month, amount')
-      .gte('year_month', prevFromYM)
-      .lte('year_month', prevToYM),
+    svc.rpc('get_workspace_monthly_overhead', {
+      p_workspace_id: workspaceId,
+      p_date_from: prevFrom,
+      p_date_to: prevTo,
+    }),
     svc.from('daily_ads_spend')
       .select('date, source, spent, store')
+      .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to),
     svc.from('daily_channel_data')
       .select('date, channel, product, mp_admin_cost')
+      .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to),
-    getShippingFeeRange(from, to)
+    getShippingFeeRange(workspaceId, from, to)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: { message: error.message } })),
     svc.from('daily_ads_spend')
       .select('date, source, spent, store')
+      .eq('workspace_id', workspaceId)
       .gte('date', prevFrom)
       .lte('date', prevTo),
     svc.from('daily_channel_data')
       .select('date, channel, product, mp_admin_cost')
+      .eq('workspace_id', workspaceId)
       .gte('date', prevFrom)
       .lte('date', prevTo),
-    getShippingFeeRange(prevFrom, prevTo)
+    getShippingFeeRange(workspaceId, prevFrom, prevTo)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: { message: error.message } })),
     Promise.all(historyMonths.map((range) =>
       range.active
-        ? getActiveOverviewCm3Month(range.from, range.to)
-        : getCompletedOverviewCm3Month(range.from, range.to)
+        ? getActiveOverviewCm3Month(workspaceId, range.from, range.to)
+        : getCompletedOverviewCm3Month(workspaceId, range.from, range.to)
     )),
   ]);
 
@@ -365,7 +387,10 @@ export async function getRevenueHistory({
   from,
   to,
 }: RevenueHistoryParams) {
-  await requireDashboardTabAccess('channels', 'Sales Channel');
+  const { workspaceId } = await requireDashboardTabAccess(
+    'channels',
+    'Sales Channel',
+  );
 
   const svc = createServiceSupabase();
   const monthRanges: Array<{ from: string; to: string }> = [];
@@ -387,6 +412,7 @@ export async function getRevenueHistory({
   const results = await Promise.all(monthRanges.map((range) =>
     svc.from('daily_product_summary')
       .select('date, product, net_sales')
+      .eq('workspace_id', workspaceId)
       .gte('date', range.from)
       .lte('date', range.to)
       .order('date')
@@ -426,7 +452,10 @@ export async function getCommercialMomentAttribution({
   monthsBack = 6,
   asOf,
 }: CommercialMomentAttributionParams) {
-  await requireDashboardTabAccess('channels', 'Sales Channel');
+  const { workspaceId } = await requireDashboardTabAccess(
+    'channels',
+    'Sales Channel',
+  );
   const svc = createServiceSupabase();
   const windows = Array.from({ length: monthsBack + 1 }, (_, index) => {
     const eventMonth = shiftCommercialMonth(year, month, -index);
@@ -470,6 +499,7 @@ export async function getCommercialMomentAttribution({
     const { data, error } = await svc
       .from('summary_commercial_order_entry_revenue')
       .select('order_date, product, total_net_sales, same_day_net_sales, carryover_net_sales, before_noon_net_sales')
+      .eq('workspace_id', workspaceId)
       .in('order_date', eventDates)
       .order('order_date')
       .order('product')

@@ -18,6 +18,7 @@ import {
   resolveWarehouseBusinessCode,
 } from '@/lib/warehouse-domain-helpers';
 import { limitByIp } from '@/lib/request-hardening';
+import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 export const maxDuration = 60;
 
@@ -34,7 +35,14 @@ function getServiceSupabase() {
 // Fallback: env vars SCALEV_WEBHOOK_SECRET_<CODE> or legacy SCALEV_WEBHOOK_SECRET
 // DB secrets are cached in memory for 60 seconds to avoid DB hits on every webhook
 
-type BusinessSecret = { id: number; code: string; name: string; secret: string; taxRateName: string };
+type BusinessSecret = {
+  id: number;
+  workspaceId: string;
+  code: string;
+  name: string;
+  secret: string;
+  taxRateName: string;
+};
 
 let cachedSecrets: BusinessSecret[] | null = null;
 let cacheExpiry = 0;
@@ -150,7 +158,12 @@ async function deriveChannelWithDbLookup(data: any, businessId: number): Promise
 }
 
 // ── Auto-register unknown store in scalev_store_channels ──
-async function autoRegisterStore(storeName: string, businessCode: string, businessId: number) {
+async function autoRegisterStore(
+  storeName: string,
+  businessCode: string,
+  businessId: number,
+  workspaceId: string,
+) {
   if (!storeName) return;
   const storeTypes = await getStoreTypeMap();
   if (lookupStoreType(storeTypes, businessId, storeName) !== undefined) return;
@@ -160,6 +173,7 @@ async function autoRegisterStore(storeName: string, businessCode: string, busine
     const { data: biz } = await svc
       .from('scalev_webhook_businesses')
       .select('id')
+      .eq('workspace_id', workspaceId)
       .eq('business_code', businessCode)
       .single();
     if (!biz) return;
@@ -167,7 +181,12 @@ async function autoRegisterStore(storeName: string, businessCode: string, busine
     const storeType = guessStoreType(storeName);
 
     await svc.from('scalev_store_channels').upsert(
-      { business_id: biz.id, store_name: storeName, store_type: storeType },
+      {
+        workspace_id: workspaceId,
+        business_id: biz.id,
+        store_name: storeName,
+        store_type: storeType,
+      },
       { onConflict: 'business_id,store_name', ignoreDuplicates: true }
     );
     cachedStoreTypes = null;
@@ -183,13 +202,14 @@ async function getBusinessSecretsFromDB(): Promise<BusinessSecret[]> {
     const svc = getServiceSupabase();
     const { data, error } = await svc
       .from('scalev_webhook_businesses')
-      .select('id, business_code, business_name, webhook_secret, tax_rate_name')
+      .select('id, workspace_id, business_code, business_name, webhook_secret, tax_rate_name')
       .eq('is_active', true);
 
     if (error || !data || data.length === 0) return [];
 
     return data.map((row: any) => ({
       id: row.id,
+      workspaceId: row.workspace_id,
       code: row.business_code,
       name: row.business_name,
       secret: row.webhook_secret,
@@ -225,7 +245,16 @@ async function getBusinessSecrets(): Promise<BusinessSecret[]> {
       RLT: 'Roove Lautan Timur',
     })) {
       const secret = process.env[`SCALEV_WEBHOOK_SECRET_${code}`];
-      if (secret) envSecrets.push({ id: envBizIds[code] || 0, code, name, secret, taxRateName: 'PPN' });
+      if (secret) {
+        envSecrets.push({
+          id: envBizIds[code] || 0,
+          workspaceId: ROOVE_WORKSPACE_ID,
+          code,
+          name,
+          secret,
+          taxRateName: 'PPN',
+        });
+      }
     }
 
     if (envSecrets.length > 0) {
@@ -236,7 +265,14 @@ async function getBusinessSecrets(): Promise<BusinessSecret[]> {
 
     // Legacy fallback: single secret
     if (process.env.SCALEV_WEBHOOK_SECRET) {
-      const legacy = [{ id: 4, code: 'RTI', name: 'Legacy', secret: process.env.SCALEV_WEBHOOK_SECRET, taxRateName: 'PPN' }];
+      const legacy: BusinessSecret[] = [{
+        id: 4,
+        workspaceId: ROOVE_WORKSPACE_ID,
+        code: 'RTI',
+        name: 'Legacy',
+        secret: process.env.SCALEV_WEBHOOK_SECRET,
+        taxRateName: 'PPN',
+      }];
       cachedSecrets = legacy;
       cacheExpiry = Date.now() + CACHE_TTL_MS;
       return legacy;
@@ -271,15 +307,23 @@ function verifyHmac(rawBody: string, signature: string, secret: string): boolean
  * Try each business secret to verify the signature.
  * Returns the business code and id if a match is found, null otherwise.
  */
-async function resolveBusinessFromSignature(rawBody: string, signature: string | null): Promise<{ code: string; id: number; taxRateName: string } | null> {
+async function resolveBusinessFromSignature(
+  rawBody: string,
+  signature: string | null,
+): Promise<{
+  code: string;
+  id: number;
+  workspaceId: string;
+  taxRateName: string;
+} | null> {
   if (!signature) return null;
 
   const secrets = await getBusinessSecrets();
   if (secrets.length === 0) return null;
 
-  for (const { id, code, secret, taxRateName } of secrets) {
+  for (const { id, workspaceId, code, secret, taxRateName } of secrets) {
     if (verifyHmac(rawBody, signature, secret)) {
-      return { code, id, taxRateName };
+      return { code, id, workspaceId, taxRateName };
     }
   }
 
@@ -341,6 +385,7 @@ function extractWebhookScalevId(data: any): string | null {
 async function recordMarketplaceWebhookQuarantine(args: {
   svc: ReturnType<typeof getServiceSupabase>;
   eventType: string;
+  workspaceId: string;
   businessId: number;
   businessCode: string;
   data: any;
@@ -359,6 +404,7 @@ async function recordMarketplaceWebhookQuarantine(args: {
   const { error } = await args.svc
     .from('scalev_marketplace_webhook_quarantine')
     .insert({
+      workspace_id: args.workspaceId,
       business_id: args.businessId,
       business_code: args.businessCode,
       event_type: args.eventType,
@@ -385,6 +431,7 @@ async function recordMarketplaceWebhookQuarantine(args: {
 async function maybeQuarantineMarketplaceWebhook(args: {
   svc: ReturnType<typeof getServiceSupabase>;
   eventType: string;
+  workspaceId: string;
   businessId: number;
   businessCode: string;
   data: any;
@@ -551,6 +598,7 @@ function getWarehouseReconcileWebhookTimeoutMs() {
 async function reconcileScalevOrderWarehouseBestEffort(
   orderId: string,
   scalevOrderDbId?: number | null,
+  workspaceId = ROOVE_WORKSPACE_ID,
 ) {
   const timeoutMs = getWarehouseReconcileWebhookTimeoutMs();
   const failedResult = (err: any) => {
@@ -579,7 +627,11 @@ async function reconcileScalevOrderWarehouseBestEffort(
   };
 
   let timeout: ReturnType<typeof setTimeout> | null = null;
-  const reconcilePromise = reconcileScalevOrderWarehouse(orderId, scalevOrderDbId)
+  const reconcilePromise = reconcileScalevOrderWarehouse(
+    orderId,
+    scalevOrderDbId,
+    workspaceId,
+  )
     .catch(failedResult);
 
   try {
@@ -635,28 +687,40 @@ const DEFAULT_TAX_RATE = 11;
 const DEFAULT_TAX_DIVISOR = 1 + DEFAULT_TAX_RATE / 100; // 1.11
 
 type TaxRateEntry = { name: string; rate: number; effective_from: string };
-let cachedTaxRates: TaxRateEntry[] | null = null;
-let taxRateCacheExpiry = 0;
+const cachedTaxRates = new Map<
+  string,
+  { rows: TaxRateEntry[]; expiresAt: number }
+>();
 
-async function getTaxRate(taxName = 'PPN'): Promise<{ rate: number; divisor: number }> {
+async function getTaxRate(
+  taxName = 'PPN',
+  workspaceId = ROOVE_WORKSPACE_ID,
+): Promise<{ rate: number; divisor: number }> {
+  let cached = cachedTaxRates.get(workspaceId);
   // Return cached if still valid
-  if (!cachedTaxRates || Date.now() >= taxRateCacheExpiry) {
+  if (!cached || Date.now() >= cached.expiresAt) {
     try {
       const svc = getServiceSupabase();
       const { data } = await svc
         .from('tax_rates')
         .select('name, rate, effective_from')
+        .eq('workspace_id', workspaceId)
         .order('effective_from', { ascending: false });
-      cachedTaxRates = (data || []) as TaxRateEntry[];
-      taxRateCacheExpiry = Date.now() + CACHE_TTL_MS;
+      cached = {
+        rows: (data || []) as TaxRateEntry[],
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      };
     } catch {
-      cachedTaxRates = [];
-      taxRateCacheExpiry = Date.now() + CACHE_TTL_MS;
+      cached = {
+        rows: [],
+        expiresAt: Date.now() + CACHE_TTL_MS,
+      };
     }
+    cachedTaxRates.set(workspaceId, cached);
   }
 
   // Find the most recent rate for the given tax name (already sorted desc by effective_from)
-  const entry = cachedTaxRates.find(r => r.name === taxName);
+  const entry = cached.rows.find(r => r.name === taxName);
   if (entry) {
     const rate = Number(entry.rate);
     return { rate, divisor: 1 + rate / 100 };
@@ -668,10 +732,17 @@ function calcBeforeTax(price: number, tax: { rate: number; divisor: number }): n
   return price / tax.divisor;
 }
 
-async function lookupOrderForBusiness(svc: any, orderId: string, businessCode: string, columns: string) {
+async function lookupOrderForBusiness(
+  svc: any,
+  orderId: string,
+  businessCode: string,
+  workspaceId: string,
+  columns: string,
+) {
   const scoped = await svc
     .from('scalev_orders')
     .select(columns)
+    .eq('workspace_id', workspaceId)
     .eq('order_id', orderId)
     .eq('business_code', businessCode)
     .maybeSingle();
@@ -681,6 +752,7 @@ async function lookupOrderForBusiness(svc: any, orderId: string, businessCode: s
   return svc
     .from('scalev_orders')
     .select(columns)
+    .eq('workspace_id', workspaceId)
     .eq('order_id', orderId)
     .is('business_code', null)
     .maybeSingle();
@@ -690,15 +762,23 @@ async function lookupOrderForBusinessOrExternal(
   svc: any,
   orderId: string,
   businessCode: string,
+  workspaceId: string,
   externalId: string | null | undefined,
   columns: string,
 ) {
-  const byOrderId = await lookupOrderForBusiness(svc, orderId, businessCode, columns);
+  const byOrderId = await lookupOrderForBusiness(
+    svc,
+    orderId,
+    businessCode,
+    workspaceId,
+    columns,
+  );
   if (byOrderId.error || byOrderId.data || !externalId) return byOrderId;
 
   const scoped = await svc
     .from('scalev_orders')
     .select(columns)
+    .eq('workspace_id', workspaceId)
     .eq('external_id', externalId)
     .eq('business_code', businessCode)
     .maybeSingle();
@@ -708,6 +788,7 @@ async function lookupOrderForBusinessOrExternal(
   return svc
     .from('scalev_orders')
     .select(columns)
+    .eq('workspace_id', workspaceId)
     .eq('external_id', externalId)
     .is('business_code', null)
     .maybeSingle();
@@ -717,6 +798,7 @@ async function lookupOrderByExternalForBusiness(
   svc: any,
   externalId: string | null | undefined,
   businessCode: string,
+  workspaceId: string,
   columns: string,
 ) {
   if (!externalId) return { data: null, error: null };
@@ -724,6 +806,7 @@ async function lookupOrderByExternalForBusiness(
   const scoped = await svc
     .from('scalev_orders')
     .select(columns)
+    .eq('workspace_id', workspaceId)
     .eq('external_id', externalId)
     .eq('business_code', businessCode)
     .maybeSingle();
@@ -733,6 +816,7 @@ async function lookupOrderByExternalForBusiness(
   return svc
     .from('scalev_orders')
     .select(columns)
+    .eq('workspace_id', workspaceId)
     .eq('external_id', externalId)
     .is('business_code', null)
     .maybeSingle();
@@ -741,6 +825,7 @@ async function lookupOrderByExternalForBusiness(
 async function lookupMarketplaceOrderForBusinessTracking(
   svc: any,
   businessCode: string,
+  workspaceId: string,
   storeName: string | null | undefined,
   trackingNumber: string | null | undefined,
   columns: string,
@@ -753,6 +838,7 @@ async function lookupMarketplaceOrderForBusinessTracking(
   let query = svc
     .from('scalev_orders')
     .select(columns)
+    .eq('workspace_id', workspaceId)
     .eq('business_code', businessCode)
     .eq('marketplace_tracking_number', normalizedTracking)
     .in('source', ['marketplace_api_upload', 'webhook', 'ops_upload'])
@@ -785,6 +871,7 @@ async function lookupOrderForBusinessConnector(
   args: {
     orderId: string;
     businessCode: string;
+    workspaceId: string;
     externalId: string | null | undefined;
     trackingNumber: string | null | undefined;
     storeName: string | null | undefined;
@@ -794,7 +881,13 @@ async function lookupOrderForBusinessConnector(
     };
   },
 ) {
-  const byOrderId = await lookupOrderForBusiness(svc, args.orderId, args.businessCode, args.columns);
+  const byOrderId = await lookupOrderForBusiness(
+    svc,
+    args.orderId,
+    args.businessCode,
+    args.workspaceId,
+    args.columns,
+  );
   if (byOrderId.error || byOrderId.data) return byOrderId;
 
   if (isMarketplaceSourceClass(args.sourceClassFields)) {
@@ -802,6 +895,7 @@ async function lookupOrderForBusinessConnector(
       svc,
       args.externalId,
       args.businessCode,
+      args.workspaceId,
       args.columns,
     );
     if (byExternalId.error || byExternalId.data) return byExternalId;
@@ -809,6 +903,7 @@ async function lookupOrderForBusinessConnector(
     return lookupMarketplaceOrderForBusinessTracking(
       svc,
       args.businessCode,
+      args.workspaceId,
       args.storeName,
       args.trackingNumber,
       args.columns,
@@ -819,6 +914,7 @@ async function lookupOrderForBusinessConnector(
     svc,
     args.orderId,
     args.businessCode,
+    args.workspaceId,
     args.externalId,
     args.columns,
   );
@@ -826,36 +922,51 @@ async function lookupOrderForBusinessConnector(
 
 // ── Brand detection from product name (dynamic from DB, cached) ──
 type BrandKeyword = { name: string; keywords: string[] };
-let cachedBrandKeywords: BrandKeyword[] | null = null;
-let brandCacheExpiry = 0;
+const cachedBrandKeywords = new Map<
+  string,
+  { rows: BrandKeyword[]; expiresAt: number }
+>();
 
-async function getBrandKeywords(): Promise<BrandKeyword[]> {
-  if (cachedBrandKeywords && Date.now() < brandCacheExpiry) {
-    return cachedBrandKeywords;
+async function getBrandKeywords(
+  workspaceId = ROOVE_WORKSPACE_ID,
+): Promise<BrandKeyword[]> {
+  const cached = cachedBrandKeywords.get(workspaceId);
+  if (cached && Date.now() < cached.expiresAt) {
+    return cached.rows;
   }
   try {
     const svc = getServiceSupabase();
     const { data } = await svc
       .from('brands')
       .select('name, keywords')
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true);
-    cachedBrandKeywords = (data || []).map((b: any) => ({
+    const rows = (data || []).map((b: any) => ({
       name: b.name,
       keywords: b.keywords
         ? b.keywords.split(',').map((k: string) => k.trim().toLowerCase()).filter(Boolean)
         : [b.name.toLowerCase()],
     }));
-    brandCacheExpiry = Date.now() + CACHE_TTL_MS;
+    cachedBrandKeywords.set(workspaceId, {
+      rows,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
+    return rows;
   } catch {
-    cachedBrandKeywords = [];
-    brandCacheExpiry = Date.now() + CACHE_TTL_MS;
+    cachedBrandKeywords.set(workspaceId, {
+      rows: [],
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
+    return [];
   }
-  return cachedBrandKeywords;
 }
 
-async function deriveBrandFromProduct(productName: string): Promise<string> {
+async function deriveBrandFromProduct(
+  productName: string,
+  workspaceId = ROOVE_WORKSPACE_ID,
+): Promise<string> {
   const n = (productName || '').toLowerCase();
-  const brands = await getBrandKeywords();
+  const brands = await getBrandKeywords(workspaceId);
   for (const brand of brands) {
     if (brand.keywords.some(kw => n.includes(kw))) {
       return brand.name;
@@ -960,6 +1071,7 @@ async function buildEnrichedLines(
   dbOrderId: number,
   data: any,
   businessId: number,
+  workspaceId: string,
   taxRateName = 'PPN',
   businessDirectoryRows?: Awaited<ReturnType<typeof fetchWarehouseBusinessDirectoryRows>>,
 ): Promise<any[]> {
@@ -971,7 +1083,7 @@ async function buildEnrichedLines(
   const shippedTime = ts(data.shipped_time) || ts(data.completed_time) || null;
   const tax = taxRateName === 'NONE'
     ? { rate: 0, divisor: 1.0 }
-    : await getTaxRate(taxRateName || 'PPN');
+    : await getTaxRate(taxRateName || 'PPN', workspaceId);
 
   const lines: any[] = [];
   const directoryRows = businessDirectoryRows || [];
@@ -982,7 +1094,10 @@ async function buildEnrichedLines(
     const cogs = num(line.cogs || line.variant_cogs);
     const itemNameRaw = extractScalevLineItemNameRaw(line);
     const itemOwnerRaw = extractScalevLineItemOwnerRaw(line);
-    const brand = await deriveBrandFromProduct(line.product_name || itemNameRaw || '');
+    const brand = await deriveBrandFromProduct(
+      line.product_name || itemNameRaw || '',
+      workspaceId,
+    );
     const ownerResolution = resolveWarehouseBusinessCode({
       rawValue: itemOwnerRaw,
       fallbackBusinessCode: null,
@@ -990,6 +1105,7 @@ async function buildEnrichedLines(
     });
 
     lines.push({
+      workspace_id: workspaceId,
       scalev_order_id: dbOrderId,
       order_id: orderId,
       product_name: line.product_name || itemNameRaw || null,
@@ -1015,7 +1131,13 @@ async function buildEnrichedLines(
 }
 
 // ── Handle order.created: insert new order into scalev_orders ──
-async function handleOrderCreated(data: any, businessCode: string, businessId: number, taxRateName = 'PPN'): Promise<NextResponse> {
+async function handleOrderCreated(
+  data: any,
+  businessCode: string,
+  businessId: number,
+  workspaceId: string,
+  taxRateName = 'PPN',
+): Promise<NextResponse> {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -1034,6 +1156,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
+    workspaceId,
     externalId: data.external_id,
     trackingNumber,
     storeName: data.store?.name || data.store_name || null,
@@ -1044,6 +1167,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
     eventType: 'order.created',
+    workspaceId,
     businessId,
     businessCode,
     data,
@@ -1064,19 +1188,31 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
 
   if (existing) {
     console.log(`[scalev-webhook][${businessCode}] order.created: ${orderId} already exists, treating as upsert`);
-    return handleOrderUpdated(data, businessCode, businessId, taxRateName);
+    return handleOrderUpdated(
+      data,
+      businessCode,
+      businessId,
+      workspaceId,
+      taxRateName,
+    );
   }
 
   // Extract customer info from destination_address
   const dest = data.destination_address || {};
   const storeName = data.store?.name || null;
   const financialEntity = data.financial_entity?.name || data.financial_entity?.code || null;
-  const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
+  const warehouseOrderContext = await resolveWarehouseOrderContext(
+    svc,
+    data,
+    businessCode,
+    workspaceId,
+  );
   const parsedHeaderFinancials = parseScalevHeaderFinancialFields(data);
 
   // Build order row
   const derivedPlatform = derivePlatformFromStore(storeName || '', data.external_id, data);
   const orderRow: Record<string, any> = {
+    workspace_id: workspaceId,
     scalev_id: null,
     order_id: orderId,
     external_id: data.external_id || null,
@@ -1138,7 +1274,12 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   }
 
   // Auto-register unknown store
-  await autoRegisterStore(storeName || '', businessCode, businessId);
+  await autoRegisterStore(
+    storeName || '',
+    businessCode,
+    businessId,
+    workspaceId,
+  );
 
   // Insert enriched order lines (with financial data) if present
   if (inserted) {
@@ -1147,6 +1288,7 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
       inserted.id,
       data,
       businessId,
+      workspaceId,
       taxRateName,
       warehouseOrderContext.businessDirectoryRows,
     );
@@ -1159,11 +1301,16 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
   }
 
   const warehouseResult = inserted
-    ? await reconcileScalevOrderWarehouseBestEffort(orderId, inserted.id)
+    ? await reconcileScalevOrderWarehouseBestEffort(
+        orderId,
+        inserted.id,
+        workspaceId,
+      )
     : null;
 
   // Log
   await svc.from('scalev_sync_log').insert({
+    workspace_id: workspaceId,
     status: 'success',
     sync_type: 'webhook_created',
     business_code: businessCode,
@@ -1186,7 +1333,13 @@ async function handleOrderCreated(data: any, businessCode: string, businessId: n
 }
 
 // ── Handle order.status_changed: update existing order ──
-async function handleStatusChanged(data: any, businessCode: string, businessId: number, taxRateName = 'PPN'): Promise<NextResponse> {
+async function handleStatusChanged(
+  data: any,
+  businessCode: string,
+  businessId: number,
+  workspaceId: string,
+  taxRateName = 'PPN',
+): Promise<NextResponse> {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -1207,6 +1360,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
   const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
+    workspaceId,
     externalId: data.external_id,
     trackingNumber,
     storeName: data.store?.name || data.store_name || null,
@@ -1223,6 +1377,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
     eventType: 'order.status_changed',
+    workspaceId,
     businessId,
     businessCode,
     data,
@@ -1243,7 +1398,13 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 
   if (!existing) {
     console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} not found, retrying via order.updated fallback`);
-    return handleOrderUpdated(data, businessCode, businessId, taxRateName);
+    return handleOrderUpdated(
+      data,
+      businessCode,
+      businessId,
+      workspaceId,
+      taxRateName,
+    );
   }
 
   if (isMarketplaceAuthoritativeSource(existing.source)) {
@@ -1270,16 +1431,22 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
     const { error: updateErr } = await svc
       .from('scalev_orders')
       .update(updateData)
-      .eq('id', existing.id);
+      .eq('id', existing.id)
+      .eq('workspace_id', workspaceId);
 
     if (updateErr) {
       console.error(`[scalev-webhook][${businessCode}] status_changed marketplace update error for ${orderId}:`, updateErr.message);
       return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
     }
 
-    const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
+    const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(
+      orderId,
+      existing.id,
+      workspaceId,
+    );
 
     await svc.from('scalev_sync_log').insert({
+      workspace_id: workspaceId,
       status: 'success',
       sync_type: 'webhook_status_changed',
       business_code: businessCode,
@@ -1307,7 +1474,11 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 
   // Skip if status hasn't actually changed
   if (existing.status === newStatus) {
-    const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
+    const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(
+      orderId,
+      existing.id,
+      workspaceId,
+    );
     return NextResponse.json({
       ok: true,
       skipped: true,
@@ -1317,7 +1488,12 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
   }
 
   // Build update
-  const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
+  const warehouseOrderContext = await resolveWarehouseOrderContext(
+    svc,
+    data,
+    businessCode,
+    workspaceId,
+  );
   const updateData: Record<string, any> = {
     status: newStatus,
     business_code: businessCode,
@@ -1349,7 +1525,8 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
   const { error: updateErr } = await svc
     .from('scalev_orders')
     .update(updateData)
-    .eq('id', existing.id);
+    .eq('id', existing.id)
+    .eq('workspace_id', workspaceId);
 
   if (updateErr) {
     console.error(`[scalev-webhook][${businessCode}] status_changed update error for ${orderId}:`, updateErr.message);
@@ -1366,6 +1543,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
         .from('scalev_orders')
         .select('id, external_id, store_name, is_purchase_fb, is_purchase_tiktok, is_purchase_kwai, raw_data')
         .eq('id', existing.id)
+        .eq('workspace_id', workspaceId)
         .single();
 
       if (orderData) {
@@ -1373,6 +1551,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
         const { data: genericLines } = await svc
           .from('scalev_order_lines')
           .select('id')
+          .eq('workspace_id', workspaceId)
           .eq('scalev_order_id', existing.id)
           .eq('sales_channel', 'Marketplace');
 
@@ -1389,6 +1568,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
             await svc
               .from('scalev_order_lines')
               .update({ sales_channel: resolvedChannel })
+              .eq('workspace_id', workspaceId)
               .eq('scalev_order_id', existing.id)
               .eq('sales_channel', 'Marketplace');
 
@@ -1396,7 +1576,8 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
             await svc
               .from('scalev_orders')
               .update({ platform })
-              .eq('id', existing.id);
+              .eq('id', existing.id)
+              .eq('workspace_id', workspaceId);
 
             console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} re-derived channel → ${resolvedChannel} (from external_id)`);
           }
@@ -1418,6 +1599,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
         const { data: mismatchedLines } = await svc
           .from('scalev_order_lines')
           .select('id')
+          .eq('workspace_id', workspaceId)
           .eq('scalev_order_id', existing.id)
           .neq('sales_channel', correctChannel);
 
@@ -1430,6 +1612,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
               is_purchase_tiktok: orderData.is_purchase_tiktok,
               is_purchase_kwai: orderData.is_purchase_kwai,
             })
+            .eq('workspace_id', workspaceId)
             .eq('scalev_order_id', existing.id);
 
           console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} re-classified ${mismatchedLines.length} lines → ${correctChannel}`);
@@ -1440,12 +1623,17 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
         const { data: emptyLines } = await svc
           .from('scalev_order_lines')
           .select('id')
+          .eq('workspace_id', workspaceId)
           .eq('scalev_order_id', existing.id)
           .or('product_price_bt.is.null,product_price_bt.eq.0');
 
         if (emptyLines && emptyLines.length > 0 && orderData.raw_data?.orderlines?.length > 0) {
           // Delete old lines and re-insert enriched ones
-          await svc.from('scalev_order_lines').delete().eq('scalev_order_id', existing.id);
+          await svc
+            .from('scalev_order_lines')
+            .delete()
+            .eq('workspace_id', workspaceId)
+            .eq('scalev_order_id', existing.id);
           const enrichedLines = await buildEnrichedLines(orderId, existing.id, {
             ...orderData.raw_data,
             external_id: orderData.external_id,
@@ -1453,7 +1641,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
             is_purchase_fb: orderData.is_purchase_fb,
             is_purchase_tiktok: orderData.is_purchase_tiktok,
             is_purchase_kwai: orderData.is_purchase_kwai,
-          }, businessId, taxRateName, warehouseOrderContext.businessDirectoryRows);
+          }, businessId, workspaceId, taxRateName, warehouseOrderContext.businessDirectoryRows);
           if (enrichedLines.length > 0) {
             const { error: reInsertErr } = await svc.from('scalev_order_lines').upsert(enrichedLines, { onConflict: 'scalev_order_id,product_name' });
             if (reInsertErr) {
@@ -1468,6 +1656,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
         const { count: lineCount } = await svc
           .from('scalev_order_lines')
           .select('id', { count: 'exact', head: true })
+          .eq('workspace_id', workspaceId)
           .eq('scalev_order_id', existing.id);
 
         if ((lineCount === 0 || lineCount === null) && orderData.raw_data?.orderlines?.length > 0) {
@@ -1478,7 +1667,7 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
             is_purchase_fb: orderData.is_purchase_fb,
             is_purchase_tiktok: orderData.is_purchase_tiktok,
             is_purchase_kwai: orderData.is_purchase_kwai,
-          }, businessId, taxRateName, warehouseOrderContext.businessDirectoryRows);
+          }, businessId, workspaceId, taxRateName, warehouseOrderContext.businessDirectoryRows);
           if (newLines.length > 0) {
             const { error: insertErr } = await svc.from('scalev_order_lines').upsert(newLines, { onConflict: 'scalev_order_id,product_name' });
             if (insertErr) {
@@ -1496,10 +1685,15 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 
   }
 
-  const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
+  const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(
+    orderId,
+    existing.id,
+    workspaceId,
+  );
 
   // Log
   await svc.from('scalev_sync_log').insert({
+    workspace_id: workspaceId,
     status: 'success',
     sync_type: 'webhook_status_changed',
     business_code: businessCode,
@@ -1523,7 +1717,13 @@ async function handleStatusChanged(data: any, businessCode: string, businessId: 
 }
 
 // ── Handle order.updated: full update of order data ──
-async function handleOrderUpdated(data: any, businessCode: string, businessId: number, taxRateName = 'PPN'): Promise<NextResponse> {
+async function handleOrderUpdated(
+  data: any,
+  businessCode: string,
+  businessId: number,
+  workspaceId: string,
+  taxRateName = 'PPN',
+): Promise<NextResponse> {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -1542,6 +1742,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
+    workspaceId,
     externalId: data.external_id,
     trackingNumber,
     storeName: data.store?.name || data.store_name || null,
@@ -1558,6 +1759,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
       svc,
       eventType: 'order.updated',
+      workspaceId,
       businessId,
       businessCode,
       data,
@@ -1578,14 +1780,25 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
 
     // Order not in DB yet — treat as create
     console.log(`[scalev-webhook][${businessCode}] order.updated: ${orderId} not found, treating as create`);
-    return handleOrderCreated(data, businessCode, businessId, taxRateName);
+    return handleOrderCreated(
+      data,
+      businessCode,
+      businessId,
+      workspaceId,
+      taxRateName,
+    );
   }
 
   // Build update with all available fields
   const dest = data.destination_address || {};
   const storeName = data.store?.name || null;
   const financialEntity = data.financial_entity?.name || data.financial_entity?.code || null;
-  const warehouseOrderContext = await resolveWarehouseOrderContext(svc, data, businessCode);
+  const warehouseOrderContext = await resolveWarehouseOrderContext(
+    svc,
+    data,
+    businessCode,
+    workspaceId,
+  );
   const sourceClassFields = await buildOrderSourceClassFields({
     data,
     existing,
@@ -1595,6 +1808,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
     eventType: 'order.updated',
+    workspaceId,
     businessId,
     businessCode,
     data,
@@ -1640,16 +1854,22 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     const { error: updateErr } = await svc
       .from('scalev_orders')
       .update(updateData)
-      .eq('id', existing.id);
+      .eq('id', existing.id)
+      .eq('workspace_id', workspaceId);
 
     if (updateErr) {
       console.error(`[scalev-webhook][${businessCode}] order.updated marketplace update error for ${orderId}:`, updateErr.message);
       return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
     }
 
-    const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
+    const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(
+      orderId,
+      existing.id,
+      workspaceId,
+    );
 
     await svc.from('scalev_sync_log').insert({
+      workspace_id: workspaceId,
       status: 'success',
       sync_type: 'webhook_updated',
       business_code: businessCode,
@@ -1727,7 +1947,8 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   const { error: updateErr } = await svc
     .from('scalev_orders')
     .update(updateData)
-    .eq('id', existing.id);
+    .eq('id', existing.id)
+    .eq('workspace_id', workspaceId);
 
   if (updateErr) {
     console.error(`[scalev-webhook][${businessCode}] order.updated update error for ${orderId}:`, updateErr.message);
@@ -1737,13 +1958,18 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
   // Replace order lines with enriched data (including financial fields)
   if (data.orderlines && Array.isArray(data.orderlines) && data.orderlines.length > 0) {
     // Delete old lines
-    await svc.from('scalev_order_lines').delete().eq('scalev_order_id', existing.id);
+    await svc
+      .from('scalev_order_lines')
+      .delete()
+      .eq('workspace_id', workspaceId)
+      .eq('scalev_order_id', existing.id);
 
     const lines = await buildEnrichedLines(
       orderId,
       existing.id,
       data,
       businessId,
+      workspaceId,
       taxRateName,
       warehouseOrderContext.businessDirectoryRows,
     );
@@ -1761,6 +1987,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
       .from('scalev_orders')
       .select('id, store_name, external_id, is_purchase_fb, is_purchase_tiktok, is_purchase_kwai, raw_data')
       .eq('id', existing.id)
+      .eq('workspace_id', workspaceId)
       .single();
 
     if (updatedOrder) {
@@ -1783,6 +2010,7 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
           is_purchase_tiktok: updatedOrder.is_purchase_tiktok,
           is_purchase_kwai: updatedOrder.is_purchase_kwai,
         })
+        .eq('workspace_id', workspaceId)
         .eq('scalev_order_id', existing.id);
 
       if (channelErr) {
@@ -1793,10 +2021,15 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
     }
   }
 
-  const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
+  const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(
+    orderId,
+    existing.id,
+    workspaceId,
+  );
 
   // Log
   await svc.from('scalev_sync_log').insert({
+    workspace_id: workspaceId,
     status: 'success',
     sync_type: 'webhook_updated',
     business_code: businessCode,
@@ -1821,7 +2054,12 @@ async function handleOrderUpdated(data: any, businessCode: string, businessId: n
 }
 
 // ── Handle order.deleted: soft-delete by marking as canceled ──
-async function handleOrderDeleted(data: any, businessCode: string, businessId: number) {
+async function handleOrderDeleted(
+  data: any,
+  businessCode: string,
+  businessId: number,
+  workspaceId: string,
+) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -1839,6 +2077,7 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
   const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
+    workspaceId,
     externalId: data.external_id,
     trackingNumber,
     storeName: data.store?.name || data.store_name || null,
@@ -1854,6 +2093,7 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
     eventType: 'order.deleted',
+    workspaceId,
     businessId,
     businessCode,
     data,
@@ -1902,16 +2142,22 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
   const { error: updateErr } = await svc
     .from('scalev_orders')
     .update(updateData)
-    .eq('id', existing.id);
+    .eq('id', existing.id)
+    .eq('workspace_id', workspaceId);
 
   if (updateErr) {
     console.error(`[scalev-webhook][${businessCode}] order.deleted update error for ${orderId}:`, updateErr.message);
     return NextResponse.json({ error: 'DB update failed' }, { status: 500 });
   }
-  const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id);
+  const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(
+    orderId,
+    existing.id,
+    workspaceId,
+  );
 
   // Log
   await svc.from('scalev_sync_log').insert({
+    workspace_id: workspaceId,
     status: 'success',
     sync_type: 'webhook_deleted',
     business_code: businessCode,
@@ -1936,7 +2182,12 @@ async function handleOrderDeleted(data: any, businessCode: string, businessId: n
 }
 
 // ── Handle order.payment_status_changed: update payment-related fields ──
-async function handlePaymentStatusChanged(data: any, businessCode: string, businessId: number) {
+async function handlePaymentStatusChanged(
+  data: any,
+  businessCode: string,
+  businessId: number,
+  workspaceId: string,
+) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -1954,6 +2205,7 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
   const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
+    workspaceId,
     externalId: data.external_id,
     trackingNumber,
     storeName: data.store?.name || data.store_name || null,
@@ -1970,6 +2222,7 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
     eventType: 'order.payment_status_changed',
+    workspaceId,
     businessId,
     businessCode,
     data,
@@ -1991,7 +2244,13 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
   if (!existing) {
     if (shouldFallbackMissingMarketplaceOrder(sourceClassFields)) {
       console.log(`[scalev-webhook][${businessCode}] payment_status_changed: ${orderId} not found, retrying via order.updated fallback`);
-      return handleOrderUpdated(data, businessCode, businessId, 'PPN');
+      return handleOrderUpdated(
+        data,
+        businessCode,
+        businessId,
+        workspaceId,
+        'PPN',
+      );
     }
     console.log(`[scalev-webhook][${businessCode}] payment_status_changed: ${orderId} not found, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
@@ -2026,7 +2285,8 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
   const { error: updateErr } = await svc
     .from('scalev_orders')
     .update(updateData)
-    .eq('id', existing.id);
+    .eq('id', existing.id)
+    .eq('workspace_id', workspaceId);
 
   if (updateErr) {
     console.error(`[scalev-webhook][${businessCode}] payment_status_changed update error for ${orderId}:`, updateErr.message);
@@ -2034,11 +2294,16 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
   }
 
   const warehouseResult = data.status
-    ? await reconcileScalevOrderWarehouseBestEffort(orderId, existing.id)
+    ? await reconcileScalevOrderWarehouseBestEffort(
+        orderId,
+        existing.id,
+        workspaceId,
+      )
     : null;
 
   // Log
   await svc.from('scalev_sync_log').insert({
+    workspace_id: workspaceId,
     status: 'success',
     sync_type: 'webhook_payment_changed',
     business_code: businessCode,
@@ -2061,7 +2326,12 @@ async function handlePaymentStatusChanged(data: any, businessCode: string, busin
 }
 
 // ── Handle order.e_payment_created: record e-payment info on order ──
-async function handleEPaymentCreated(data: any, businessCode: string, businessId: number) {
+async function handleEPaymentCreated(
+  data: any,
+  businessCode: string,
+  businessId: number,
+  workspaceId: string,
+) {
   const svc = getServiceSupabase();
 
   const orderId = data.order_id;
@@ -2079,6 +2349,7 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
   const { data: existing, error: lookupErr } = await lookupOrderForBusinessConnector(svc, {
     orderId,
     businessCode,
+    workspaceId,
     externalId: data.external_id,
     trackingNumber,
     storeName: data.store?.name || data.store_name || null,
@@ -2095,6 +2366,7 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
   const quarantineResponse = await maybeQuarantineMarketplaceWebhook({
     svc,
     eventType: 'order.e_payment_created',
+    workspaceId,
     businessId,
     businessCode,
     data,
@@ -2116,7 +2388,13 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
   if (!existing) {
     if (shouldFallbackMissingMarketplaceOrder(sourceClassFields)) {
       console.log(`[scalev-webhook][${businessCode}] e_payment_created: ${orderId} not found, retrying via order.updated fallback`);
-      return handleOrderUpdated(data, businessCode, businessId, 'PPN');
+      return handleOrderUpdated(
+        data,
+        businessCode,
+        businessId,
+        workspaceId,
+        'PPN',
+      );
     }
     console.log(`[scalev-webhook][${businessCode}] e_payment_created: ${orderId} not found, skipping`);
     return NextResponse.json({ ok: true, skipped: true, reason: 'order_not_found' });
@@ -2152,7 +2430,8 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
   const { error: updateErr } = await svc
     .from('scalev_orders')
     .update(updateData)
-    .eq('id', existing.id);
+    .eq('id', existing.id)
+    .eq('workspace_id', workspaceId);
 
   if (updateErr) {
     console.error(`[scalev-webhook][${businessCode}] e_payment_created update error for ${orderId}:`, updateErr.message);
@@ -2161,6 +2440,7 @@ async function handleEPaymentCreated(data: any, businessCode: string, businessId
 
   // Log
   await svc.from('scalev_sync_log').insert({
+    workspace_id: workspaceId,
     status: 'success',
     sync_type: 'webhook_epayment',
     business_code: businessCode,
@@ -2205,7 +2485,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
     }
 
-    const { code: businessCode, id: businessId, taxRateName } = matched;
+    const {
+      code: businessCode,
+      id: businessId,
+      workspaceId,
+      taxRateName,
+    } = matched;
     const businessName = getBusinessName(businessCode);
     console.log(`[scalev-webhook] Verified request from ${businessName} (${businessCode})`);
 
@@ -2227,22 +2512,55 @@ export async function POST(req: NextRequest) {
     // Route to appropriate handler — all handlers now receive businessCode + businessId
     switch (event) {
       case 'order.created':
-        return handleOrderCreated(data, businessCode, businessId, taxRateName);
+        return handleOrderCreated(
+          data,
+          businessCode,
+          businessId,
+          workspaceId,
+          taxRateName,
+        );
 
       case 'order.updated':
-        return handleOrderUpdated(data, businessCode, businessId, taxRateName);
+        return handleOrderUpdated(
+          data,
+          businessCode,
+          businessId,
+          workspaceId,
+          taxRateName,
+        );
 
       case 'order.deleted':
-        return handleOrderDeleted(data, businessCode, businessId);
+        return handleOrderDeleted(
+          data,
+          businessCode,
+          businessId,
+          workspaceId,
+        );
 
       case 'order.status_changed':
-        return handleStatusChanged(data, businessCode, businessId, taxRateName);
+        return handleStatusChanged(
+          data,
+          businessCode,
+          businessId,
+          workspaceId,
+          taxRateName,
+        );
 
       case 'order.payment_status_changed':
-        return handlePaymentStatusChanged(data, businessCode, businessId);
+        return handlePaymentStatusChanged(
+          data,
+          businessCode,
+          businessId,
+          workspaceId,
+        );
 
       case 'order.e_payment_created':
-        return handleEPaymentCreated(data, businessCode, businessId);
+        return handleEPaymentCreated(
+          data,
+          businessCode,
+          businessId,
+          workspaceId,
+        );
 
       default:
         console.log(`[scalev-webhook][${businessCode}] unhandled event: ${event}`);

@@ -23,6 +23,7 @@ import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
 import CashFlowSection from '@/components/CashFlowSection';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 
 // Daily trend color coding for margin
 const marginColor = (v: number) => v >= 30 ? 'var(--green)' : v >= 0 ? 'var(--yellow)' : 'var(--red)';
@@ -84,6 +85,7 @@ function buildOverheadPerDayLookup(rows: Array<{ year_month: string; amount: num
 }
 
 export default function OverviewPage() {
+  const { activeWorkspace } = useWorkspace();
   const supabase = useSupabase();
   const { dateRange, loading: dateLoading } = useDateRange();
   const { ready: authReady } = useSupabaseSessionReady();
@@ -201,7 +203,18 @@ export default function OverviewPage() {
       const user = session?.user;
       if (user) {
         supabase.from('profiles').select('role').eq('id', user.id).single()
-          .then(({ data }) => setUserRole(data?.role || null));
+          .then(async ({ data }) => {
+            if (data?.role) {
+              setUserRole(data.role);
+              return;
+            }
+
+            const { data: ownProfile } = await supabase
+              .rpc('get_my_dashboard_profile')
+              .select('role')
+              .maybeSingle();
+            setUserRole(ownProfile?.role || null);
+          });
       }
     });
   }, [supabase]);
@@ -210,7 +223,8 @@ export default function OverviewPage() {
     // Wait until auth has finished hydrating so server actions can read the same session cookies.
     if (dateLoading || activeBrandsLoading || !authReady || !dateRange.from || !dateRange.to || !prevRange) return;
     const { prevFrom, prevTo } = prevRange;
-    const cached = getCached<any>('overview_page_data_v6', dateRange.from, dateRange.to, `${prevFrom}|${prevTo}`);
+    const cacheExtra = `${activeWorkspace.id}|${prevFrom}|${prevTo}`;
+    const cached = getCached<any>('overview_page_data_v7_workspace', dateRange.from, dateRange.to, cacheExtra);
     if (cached) {
       setDailyData(cached.daily || []);
       setShipmentData(cached.shipment || []);
@@ -249,7 +263,7 @@ export default function OverviewPage() {
     })
       .then((data) => {
         if (cancelled) return;
-        setCache('overview_page_data_v6', dateRange.from, dateRange.to, data, `${prevFrom}|${prevTo}`);
+        setCache('overview_page_data_v7_workspace', dateRange.from, dateRange.to, data, cacheExtra);
         setDailyData(data.daily || []);
         setShipmentData(data.shipment || []);
         setOverheadData(data.overhead || []);
@@ -293,7 +307,7 @@ export default function OverviewPage() {
       });
 
     return () => { cancelled = true; };
-  }, [dateLoading, activeBrandsLoading, authReady, dateRange.from, dateRange.to, prevRange]);
+  }, [activeWorkspace.id, dateLoading, activeBrandsLoading, authReady, dateRange.from, dateRange.to, prevRange]);
 
   // Build overhead per-day lookup: date (YYYY-MM-DD) → daily overhead amount
   const overheadPerDay = useMemo(() => {

@@ -28,6 +28,7 @@ import CsvOrderUploader from '@/components/CsvOrderUploader';
 import MetaManager from '@/components/MetaManager';
 import ShopeeManager from '@/components/ShopeeManager';
 import WarehouseSheetManager from '@/components/WarehouseSheetManager';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 
 const TABS = [
   { id: 'daily', label: 'Daily Data' },
@@ -54,6 +55,7 @@ const MP_FEE_SETTING_LABELS = Object.fromEntries(
 
 export default function AdminPage() {
   const { can } = usePermissions();
+  const { activeWorkspace } = useWorkspace();
   const searchParams = useSearchParams();
   const showAdvanced = searchParams.get('advanced') === 'true';
 
@@ -395,6 +397,7 @@ export default function AdminPage() {
   const roleLabel = (r) => {
     switch (r) {
       case 'owner':              return { text: 'Owner',             bg: 'var(--accent-subtle)',    color: '#818cf8' };
+      case 'workspace_owner':    return { text: 'Owner Workspace',   bg: 'var(--accent-subtle)',    color: '#818cf8' };
       case 'admin':              return { text: 'Admin',             bg: 'var(--badge-green-bg)',   color: 'var(--green)' };
       case 'marketing_api_reviewer': return { text: 'Marketing API Reviewer', bg: 'var(--accent-subtle)', color: '#f97316' };
       case 'direktur_ops':       return { text: 'Direktur Ops',      bg: 'var(--badge-green-bg)',   color: '#34d399' };
@@ -527,7 +530,17 @@ export default function AdminPage() {
           )}
 
           {/* CSV Order Upload */}
-          <CsvOrderUploader />
+          {activeWorkspace.slug === 'roove' ? (
+            <CsvOrderUploader />
+          ) : (
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 5 }}>Order CSV Upload</div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6 }}>
+                Import order CSV legacy ditahan untuk workspace ini karena parser tersebut masih memakai aturan brand Roove.
+                Gunakan koneksi ScaleV Apurva agar order masuk dengan mapping baru.
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -535,7 +548,17 @@ export default function AdminPage() {
       {currentTabId === 'meta' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <MetaManager />
-          <ShopeeManager />
+          {activeWorkspace.slug === 'roove' ? (
+            <ShopeeManager />
+          ) : (
+            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 5 }}>Shopee Integration</div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6 }}>
+                Setup Shopee ditahan sementara sampai mapping marketplace Apurva diaktifkan.
+                Tidak ada konfigurasi atau daftar store Roove yang ditampilkan di workspace ini.
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -858,7 +881,16 @@ export default function AdminPage() {
           </div>
 
           {/* Monthly Overhead */}
-          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+          {activeWorkspace.slug !== 'roove' && (
+            <div style={{ background: 'var(--accent-subtle)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 5 }}>Fixed & Recurring Costs</div>
+              <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6 }}>
+                Workspace ini memakai rincian biaya per unit dan frekuensi, bukan satu angka overhead umum.
+                {' '}<a href="/dashboard/fixed-costs" style={{ color: 'var(--accent)', fontWeight: 700 }}>Buka halaman Fixed Costs →</a>
+              </div>
+            </div>
+          )}
+          <div style={{ display: activeWorkspace.slug === 'roove' ? 'block' : 'none', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Monthly Overhead</div>
               <button
@@ -1161,6 +1193,7 @@ export default function AdminPage() {
                   value={inviteRole} onChange={e => setInviteRole(e.target.value)}
                   style={{ width: '100%', padding: '8px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 13 }}
                 >
+                  <option value="workspace_owner">Owner Workspace / CEO</option>
                   {MATRIX_ROLES.map(mr => (
                     <option key={mr.id} value={mr.id}>{mr.label}</option>
                   ))}
@@ -1311,6 +1344,7 @@ export default function AdminPage() {
                           {MATRIX_ROLES.map(mr => (
                             <option key={mr.id} value={mr.id}>{mr.label}</option>
                           ))}
+                          <option value="owner">Owner Workspace / CEO</option>
                           <option value="pending">Revoke Access</option>
                         </select>
                       )}

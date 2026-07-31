@@ -24,8 +24,10 @@ function unixToIso(value: number | null | undefined) {
 }
 
 export async function GET(req: NextRequest) {
+  let workspaceId: string;
   try {
-    await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+    const access = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+    workspaceId = access.workspaceId;
   } catch (error: any) {
     return NextResponse.redirect(
       buildAdminRedirect(req, 'error', error.message || 'Login admin diperlukan untuk menyelesaikan koneksi Shopee.'),
@@ -67,12 +69,14 @@ export async function GET(req: NextRequest) {
     const { data: existingShop, error: existingError } = await svc
       .from('shopee_shops')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .eq('shop_id', numericShopId)
       .maybeSingle();
 
     if (existingError) throw existingError;
 
     const basePayload = {
+      workspace_id: workspaceId,
       shop_id: numericShopId,
       shop_name: String(shopInfo.shop_name || '').trim() || `Shopee Shop ${shopId}`,
       region: shopInfo.region || null,
@@ -95,7 +99,8 @@ export async function GET(req: NextRequest) {
           default_source: String(existingShop.default_source || '').trim() || 'Shopee Ads',
           default_advertiser: String(existingShop.default_advertiser || '').trim() || basePayload.shop_name,
         })
-        .eq('id', shopConfigId);
+        .eq('id', shopConfigId)
+        .eq('workspace_id', workspaceId);
 
       if (error) throw error;
     } else {
@@ -123,6 +128,7 @@ export async function GET(req: NextRequest) {
       existingShop?.default_source,
       existingShop?.default_advertiser,
     ).map((stream) => ({
+      workspace_id: workspaceId,
       shop_config_id: shopConfigId,
       ...stream,
       updated_at: new Date().toISOString(),
@@ -138,6 +144,7 @@ export async function GET(req: NextRequest) {
       .from('shopee_shop_tokens')
       .upsert(
         {
+          workspace_id: workspaceId,
           shop_config_id: shopConfigId,
           access_token: tokens.accessToken,
           refresh_token: tokens.refreshToken,

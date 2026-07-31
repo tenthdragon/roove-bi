@@ -7,6 +7,8 @@ import {
   fetchTemplateAnalyticsRaw,
   type MessageTemplate,
 } from '@/lib/meta-whatsapp';
+import { resolveWorkspaceCredential } from '@/lib/workspace-integration-server';
+import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 function getServiceSupabase() {
   return createClient(
@@ -37,6 +39,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
+  let workspaceId = ROOVE_WORKSPACE_ID;
 
   try {
     // ── Auth ──
@@ -60,20 +63,12 @@ export async function POST(req: NextRequest) {
       if (rateLimitError) return rateLimitError;
 
       try {
-        await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        const access = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        workspaceId = access.workspaceId;
       } catch (err: any) {
         const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
         return NextResponse.json({ error: err.message }, { status });
       }
-    }
-
-    // ── Validate environment ──
-    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: 'WHATSAPP_ACCESS_TOKEN or META_ACCESS_TOKEN not configured' },
-        { status: 500 }
-      );
     }
 
     const svc = getServiceSupabase();
@@ -83,11 +78,22 @@ export async function POST(req: NextRequest) {
     let body: Record<string, string> = {};
     try { body = await req.json(); } catch { /* no body */ }
     const mode = searchParams.get('mode') || body.mode || 'cron';
+    if (isCron) {
+      workspaceId = searchParams.get('workspace_id') || body.workspace_id || ROOVE_WORKSPACE_ID;
+    }
+
+    const accessToken = await resolveWorkspaceCredential({
+      supabase: svc,
+      workspaceId,
+      provider: 'whatsapp',
+      fallbackEnvKeys: ['WHATSAPP_ACCESS_TOKEN', 'META_ACCESS_TOKEN'],
+    });
 
     // ── Get active WABA accounts ──
     const { data: accounts, error: accountsError } = await svc
       .from('waba_accounts')
       .select('waba_id')
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true);
 
     if (accountsError) throw accountsError;
@@ -109,6 +115,7 @@ export async function POST(req: NextRequest) {
     const { data: logEntry } = await svc
       .from('waba_template_sync_log')
       .insert({
+        workspace_id: workspaceId,
         sync_type: mode === 'full' ? 'manual' : 'cron',
         date_range_start: startDate,
         date_range_end: endDate,
@@ -143,6 +150,7 @@ export async function POST(req: NextRequest) {
         // Batch upsert into waba_templates (500 at a time)
         for (let i = 0; i < allTemplates.length; i += 500) {
           const batch = allTemplates.slice(i, i + 500).map(t => ({
+            workspace_id: workspaceId,
             id: t.id,
             waba_id: account.waba_id,
             name: t.name,
@@ -171,6 +179,7 @@ export async function POST(req: NextRequest) {
         const { error: deleteError } = await svc
           .from('waba_templates')
           .update({ deleted_at: syncStart.toISOString() })
+          .eq('workspace_id', workspaceId)
           .eq('waba_id', account.waba_id)
           .lt('synced_at', syncStart.toISOString())
           .is('deleted_at', null);
@@ -195,6 +204,7 @@ export async function POST(req: NextRequest) {
         const { data: approvedTemplates } = await svc
           .from('waba_templates')
           .select('id')
+          .eq('workspace_id', workspaceId)
           .eq('waba_id', account.waba_id)
           .eq('status', 'APPROVED')
           .is('deleted_at', null);
@@ -218,6 +228,7 @@ export async function POST(req: NextRequest) {
         for (let i = 0; i < rows.length; i += 500) {
           const batch = rows.slice(i, i + 500).map(r => ({
             ...r,
+            workspace_id: workspaceId,
             synced_at: new Date().toISOString(),
           }));
 
@@ -272,6 +283,7 @@ export async function POST(req: NextRequest) {
     try {
       const svc = getServiceSupabase();
       await svc.from('waba_template_sync_log').insert({
+        workspace_id: workspaceId,
         sync_type: 'cron',
         status: 'failed',
         error_message: err.message,

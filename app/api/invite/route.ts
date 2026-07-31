@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
-import { createServerClient } from '@supabase/ssr';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { buildPublicSiteUrl } from '@/lib/site-config';
+import { requireDashboardRoles } from '@/lib/dashboard-access';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -14,29 +13,6 @@ function getServiceSupabase() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
-}
-
-// Verify the caller is an owner
-async function verifyOwner(): Promise<boolean> {
-  const cookieStore = cookies();
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        get(name: string) { return (cookieStore as any).get(name)?.value; },
-        set() {},
-        remove() {},
-      },
-    }
-  );
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return false;
-  
-  const svc = getServiceSupabase();
-  const { data: profile, error } = await svc.from('profiles').select('role').eq('id', user.id).maybeSingle();
-  if (error || !profile) return false;
-  return profile.role === 'owner';
 }
 
 export async function POST(req: NextRequest) {
@@ -56,15 +32,17 @@ export async function POST(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    // Only owner can invite
-    const isOwner = await verifyOwner();
-    if (!isOwner) {
-      return NextResponse.json({ error: 'Hanya Owner yang bisa invite user' }, { status: 403 });
-    }
+    const access = await requireDashboardRoles(
+      ['owner'],
+      'Hanya Owner Workspace yang bisa invite user.',
+    );
 
-    const { email, role } = await req.json();
+    const { email, role, workspaceId: requestedWorkspaceId } = await req.json();
     const normalizedEmail = String(email || '').trim().toLowerCase();
     const normalizedRole = String(role || '').trim().toLowerCase();
+    const targetWorkspaceId = requestedWorkspaceId
+      ? String(requestedWorkspaceId)
+      : access.workspaceId;
 
     // Validate input
     if (!normalizedEmail || !EMAIL_REGEX.test(normalizedEmail)) {
@@ -72,6 +50,7 @@ export async function POST(req: NextRequest) {
     }
 
     const allowedRoles = [
+      'workspace_owner',
       'admin',
       'marketing_api_reviewer',
       'direktur_ops', 'staf_ops',
@@ -89,10 +68,58 @@ export async function POST(req: NextRequest) {
     const warnings: string[] = [];
     const resetRedirectTo = buildPublicSiteUrl('/reset-password');
 
-    // Check if user already exists in profiles
-    const { data: existing } = await svc.from('profiles').select('email').eq('email', normalizedEmail).maybeSingle();
+    if (targetWorkspaceId !== access.workspaceId && !access.isPlatformOwner) {
+      return NextResponse.json(
+        { error: 'Anda tidak memiliki akses untuk invite ke workspace tersebut.' },
+        { status: 403 },
+      );
+    }
+
+    const { data: targetWorkspace, error: workspaceError } = await svc
+      .from('workspaces')
+      .select('id, name, status')
+      .eq('id', targetWorkspaceId)
+      .maybeSingle();
+    if (workspaceError || !targetWorkspace) {
+      return NextResponse.json({ error: 'Workspace tujuan tidak ditemukan.' }, { status: 404 });
+    }
+
+    const addMembership = async (userId: string, isDefault: boolean) => {
+      const { error } = await svc.from('workspace_memberships').upsert(
+        {
+          workspace_id: targetWorkspaceId,
+          user_id: userId,
+          role: normalizedRole,
+          status: 'active',
+          is_default: isDefault,
+        },
+        { onConflict: 'workspace_id,user_id' },
+      );
+      if (error) throw error;
+    };
+
+    // An existing login can join another workspace without creating a second
+    // authentication identity.
+    const { data: existing } = await svc
+      .from('profiles')
+      .select('id, email')
+      .eq('email', normalizedEmail)
+      .maybeSingle();
     if (existing) {
-      return NextResponse.json({ error: 'User dengan email ini sudah terdaftar' }, { status: 409 });
+      const { count } = await svc
+        .from('workspace_memberships')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', existing.id)
+        .eq('status', 'active');
+      await addMembership(existing.id, (count || 0) === 0);
+      return NextResponse.json({
+        success: true,
+        partial: false,
+        message: `${normalizedEmail} berhasil ditambahkan ke ${targetWorkspace.name} sebagai ${normalizedRole}.`,
+        userId: existing.id,
+        recoveryLink: null,
+        warnings: [],
+      });
     }
 
     // Create user via Supabase Admin API
@@ -120,7 +147,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Gagal membuat user' }, { status: 500 });
     }
 
-    // Update the profile role (trigger should have created it as 'pending')
+    // `profiles.role` stays as the legacy/global compatibility role. Workspace
+    // ownership is held only by workspace_memberships, never promoted globally.
+    const compatibilityRole =
+      normalizedRole === 'workspace_owner' ? 'admin' : normalizedRole;
+
+    // Update the compatibility profile role (trigger should have created it as
+    // 'pending').
     // Poll for profile existence (trigger may take a moment)
     let profileReady = false;
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -132,7 +165,10 @@ export async function POST(req: NextRequest) {
     if (profileReady) {
       const { error: updateError } = await svc
         .from('profiles')
-        .update({ role: normalizedRole })
+        .update({
+          role: compatibilityRole,
+          active_workspace_id: targetWorkspaceId,
+        })
         .eq('id', newUser.user.id);
       if (updateError) {
         console.error('[Invite] Update role error:', updateError);
@@ -143,11 +179,25 @@ export async function POST(req: NextRequest) {
       console.warn('[Invite] Profile trigger did not fire, inserting directly');
       const { error: insertError } = await svc
         .from('profiles')
-        .upsert({ id: newUser.user.id, email: normalizedEmail, role: normalizedRole });
+        .upsert({
+          id: newUser.user.id,
+          email: normalizedEmail,
+          role: compatibilityRole,
+          active_workspace_id: targetWorkspaceId,
+        });
       if (insertError) {
         console.error('[Invite] Insert profile error:', insertError);
         warnings.push('Profil user belum berhasil dibuat otomatis. Cek data user di Supabase.');
       }
+    }
+
+    try {
+      await addMembership(newUser.user.id, true);
+    } catch (membershipError: any) {
+      console.error('[Invite] Membership error:', membershipError);
+      warnings.push(
+        'User berhasil dibuat, tetapi membership workspace belum tersimpan. Cek Admin Users.',
+      );
     }
 
     // Generate a set-password link that the owner can share manually.
@@ -174,8 +224,8 @@ export async function POST(req: NextRequest) {
       success: true,
       partial,
       message: partial
-        ? `User ${normalizedEmail} berhasil dibuat sebagai ${normalizedRole}, tetapi masih ada langkah manual yang perlu dicek.`
-        : `User ${normalizedEmail} berhasil dibuat sebagai ${normalizedRole}. Bagikan link set password ke user.`,
+        ? `User ${normalizedEmail} berhasil dibuat di ${targetWorkspace.name}, tetapi masih ada langkah manual yang perlu dicek.`
+        : `User ${normalizedEmail} berhasil dibuat di ${targetWorkspace.name} sebagai ${normalizedRole}. Bagikan link set password ke user.`,
       userId: newUser.user.id,
       recoveryLink,
       warnings,

@@ -1,4 +1,5 @@
 import { createServiceSupabase } from './supabase-server';
+import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 export type WarehouseBusinessDirectoryRow = {
   id: number;
@@ -119,10 +120,12 @@ export function extractScalevLineItemOwnerRaw(line: any) {
 
 export async function fetchWarehouseBusinessDirectoryRows(
   svc: ReturnType<typeof createServiceSupabase> = createServiceSupabase(),
+  workspaceId: string = ROOVE_WORKSPACE_ID,
 ): Promise<WarehouseBusinessDirectoryRow[]> {
   const { data, error } = await svc
     .from('warehouse_business_directory')
     .select('id, external_name, external_name_normalized, business_id, business_code, is_active, notes')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .order('external_name', { ascending: true });
 
@@ -140,6 +143,7 @@ export async function fetchWarehouseBusinessDirectoryRows(
 
 export async function fetchWarehouseOriginRegistryRows(
   svc: ReturnType<typeof createServiceSupabase> = createServiceSupabase(),
+  workspaceId: string = ROOVE_WORKSPACE_ID,
 ): Promise<WarehouseOriginRegistryRow[]> {
   const { data, error } = await svc
     .from('warehouse_origin_registry')
@@ -155,6 +159,7 @@ export async function fetchWarehouseOriginRegistryRows(
       is_active,
       notes
     `)
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .order('external_origin_business_name', { ascending: true })
     .order('external_origin_name', { ascending: true });

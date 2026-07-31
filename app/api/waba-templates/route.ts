@@ -10,6 +10,7 @@ import {
   deleteMessageTemplate,
   type CreateTemplatePayload,
 } from '@/lib/meta-whatsapp';
+import { resolveWorkspaceCredential } from '@/lib/workspace-integration-server';
 
 type ActiveWabaAccount = {
   waba_id: string;
@@ -28,8 +29,8 @@ function getServiceSupabase() {
 
 async function requireReadAccess() {
   try {
-    await requireDashboardTabAccess('waba-management', 'WABA Management');
-    return {};
+    const { workspaceId } = await requireDashboardTabAccess('waba-management', 'WABA Management');
+    return { workspaceId };
   } catch (err: any) {
     return {
       error: err.message,
@@ -40,8 +41,8 @@ async function requireReadAccess() {
 
 async function requireManageAccess() {
   try {
-    await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
-    return {};
+    const { workspaceId } = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+    return { workspaceId };
   } catch (err: any) {
     return {
       error: err.message,
@@ -50,17 +51,21 @@ async function requireManageAccess() {
   }
 }
 
-function getAccessToken() {
-  const accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
-  if (!accessToken) throw new Error('WHATSAPP_ACCESS_TOKEN or META_ACCESS_TOKEN not configured');
-  return accessToken;
+async function getAccessToken(workspaceId: string) {
+  return resolveWorkspaceCredential({
+    supabase: getServiceSupabase(),
+    workspaceId,
+    provider: 'whatsapp',
+    fallbackEnvKeys: ['WHATSAPP_ACCESS_TOKEN', 'META_ACCESS_TOKEN'],
+  });
 }
 
-async function getActiveWabaAccounts(): Promise<ActiveWabaAccount[]> {
+async function getActiveWabaAccounts(workspaceId: string): Promise<ActiveWabaAccount[]> {
   const svc = getServiceSupabase();
   const { data: accounts, error } = await svc
     .from('waba_accounts')
     .select('waba_id, waba_name')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .order('waba_name');
 
@@ -107,7 +112,7 @@ export async function GET(req: NextRequest) {
     const auth = await requireReadAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-    const activeAccounts = await getActiveWabaAccounts();
+    const activeAccounts = await getActiveWabaAccounts(auth.workspaceId);
     const svc = getServiceSupabase();
 
     const templates = [];
@@ -117,6 +122,7 @@ export async function GET(req: NextRequest) {
       const { data, error } = await svc
         .from('waba_templates')
         .select('id, waba_id, name, status, category, language, components, is_auto_generated, tags')
+        .eq('workspace_id', auth.workspaceId)
         .in('waba_id', activeAccounts.map((account) => account.waba_id))
         .is('deleted_at', null)
         .order('name')
@@ -159,8 +165,8 @@ export async function POST(req: NextRequest) {
     const auth = await requireManageAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-    const accessToken = getAccessToken();
-    const activeAccounts = await getActiveWabaAccounts();
+    const accessToken = await getAccessToken(auth.workspaceId);
+    const activeAccounts = await getActiveWabaAccounts(auth.workspaceId);
     const body: CreateTemplatePayload & { waba_id?: string } = await req.json();
 
     if (!body.name || !body.category || !body.language || !body.components) {
@@ -177,6 +183,7 @@ export async function POST(req: NextRequest) {
     // Write-through: insert into DB so it appears immediately
     const svc = getServiceSupabase();
     await svc.from('waba_templates').upsert({
+      workspace_id: auth.workspaceId,
       id: result.id,
       waba_id: wabaId,
       name: body.name,
@@ -229,7 +236,8 @@ export async function PATCH(req: NextRequest) {
     const { error } = await svc
       .from('waba_templates')
       .update({ tags })
-      .eq('id', body.id);
+      .eq('id', body.id)
+      .eq('workspace_id', auth.workspaceId);
 
     if (error) throw error;
 
@@ -261,8 +269,8 @@ export async function DELETE(req: NextRequest) {
     const auth = await requireManageAccess();
     if ('error' in auth) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
-    const accessToken = getAccessToken();
-    const activeAccounts = await getActiveWabaAccounts();
+    const accessToken = await getAccessToken(auth.workspaceId);
+    const activeAccounts = await getActiveWabaAccounts(auth.workspaceId);
     const body = await req.json();
 
     if (!body.hsm_id || !body.name) {
@@ -274,6 +282,7 @@ export async function DELETE(req: NextRequest) {
       .from('waba_templates')
       .select('waba_id')
       .eq('id', body.hsm_id)
+      .eq('workspace_id', auth.workspaceId)
       .single();
 
     if (templateError) {
@@ -287,6 +296,7 @@ export async function DELETE(req: NextRequest) {
     await svc.from('waba_templates')
       .update({ deleted_at: new Date().toISOString() })
       .eq('id', body.hsm_id)
+      .eq('workspace_id', auth.workspaceId)
       .then(({ error }) => {
         if (error) console.error('[waba-templates] Write-through delete error:', error);
       });

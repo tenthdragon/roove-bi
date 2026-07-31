@@ -33,7 +33,7 @@ export async function PATCH(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    await requireDashboardTabAccess('cashflow', 'Cash Flow');
+    const { workspaceId } = await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
     const body = await req.json();
     const { id, tag } = body;
@@ -56,6 +56,7 @@ export async function PATCH(req: NextRequest) {
         tag_updated_by: user?.id ?? null,
       })
       .eq('id', id)
+      .eq('workspace_id', workspaceId)
       .select('id, tag, tag_auto, tag_updated_at')
       .single();
 
@@ -85,7 +86,7 @@ export async function POST(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    await requireDashboardTabAccess('cashflow', 'Cash Flow');
+    const { workspaceId } = await requireDashboardTabAccess('cashflow', 'Cash Flow');
 
     const body = await req.json().catch(() => ({}));
     const forceAll = body.force === true; // retag even manually-overridden ones
@@ -95,7 +96,8 @@ export async function POST(req: NextRequest) {
     // Fetch all transactions (only those not manually overridden, unless force)
     let query = supabase
       .from('bank_transactions')
-      .select('id, description, credit_amount, debit_amount, tag, tag_updated_at');
+      .select('id, description, credit_amount, debit_amount, tag, tag_updated_at')
+      .eq('workspace_id', workspaceId);
 
     if (!forceAll) {
       // Only retag transactions that haven't been manually changed
@@ -121,7 +123,8 @@ export async function POST(req: NextRequest) {
           const { error } = await supabase
             .from('bank_transactions')
             .update({ tag: newTag, tag_auto: newTag })
-            .eq('id', t.id);
+            .eq('id', t.id)
+            .eq('workspace_id', workspaceId);
           if (!error) updated++;
         }
       }

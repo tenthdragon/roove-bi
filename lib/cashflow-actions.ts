@@ -46,14 +46,25 @@ function deriveChannel(platform: string | null, isFb: boolean | null, payMethod:
 /* ── Fetch totals (existing) ── */
 
 export async function fetchLiveCashFlow(periodStart: string): Promise<CashFlowLive> {
-  await requireDashboardRoles(['owner', 'admin'], 'Hanya owner/admin yang bisa mengakses Cash Flow Status.');
+  const { workspaceId } = await requireDashboardRoles(
+    ['owner', 'admin'],
+    'Hanya owner/admin yang bisa mengakses Cash Flow Status.',
+  );
   const svc = createServiceSupabase();
   const [y, m] = periodStart.split('-').map(Number);
 
   // Fetch totals + channel breakdown in parallel
   const [totalsRes, channelRes] = await Promise.all([
-    svc.rpc('get_live_cashflow', { p_month: m, p_year: y }),
-    svc.rpc('get_live_cashflow_by_channel', { p_month: m, p_year: y }),
+    svc.rpc('get_workspace_live_cashflow', {
+      p_workspace_id: workspaceId,
+      p_month: m,
+      p_year: y,
+    }),
+    svc.rpc('get_workspace_live_cashflow_by_channel', {
+      p_workspace_id: workspaceId,
+      p_month: m,
+      p_year: y,
+    }),
   ]);
 
   if (totalsRes.error) {
@@ -109,12 +120,16 @@ export async function fetchLiveCashFlow(periodStart: string): Promise<CashFlowLi
 
 // Fetch historical snapshots
 export async function fetchCashFlowSnapshots(limit: number = 6) {
-  await requireDashboardRoles(['owner', 'admin'], 'Hanya owner/admin yang bisa mengakses snapshot cash flow.');
+  const { workspaceId } = await requireDashboardRoles(
+    ['owner', 'admin'],
+    'Hanya owner/admin yang bisa mengakses snapshot cash flow.',
+  );
   const svc = createServiceSupabase();
 
   const { data, error } = await svc
     .from('monthly_cashflow_snapshot')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('period_year', { ascending: false })
     .order('period_month', { ascending: false })
     .limit(limit);

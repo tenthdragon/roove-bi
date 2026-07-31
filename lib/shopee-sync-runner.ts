@@ -12,6 +12,7 @@ import {
   type ShopeeSpendStreamKey,
   type ShopeeSpendSyncMode,
 } from './shopee-streams';
+import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 type ShopeeShopRow = {
   id: number;
@@ -60,6 +61,7 @@ export type ShopeeSyncResult = {
 };
 
 type RunShopeeSyncOptions = {
+  workspaceId?: string;
   dateStart?: string | null;
   dateEnd?: string | null;
 };
@@ -116,6 +118,7 @@ function shouldRefreshToken(tokenExpiresAt: string | null | undefined) {
 async function ensureUsableToken(
   token: ShopeeTokenRow,
   shop: ShopeeShopRow,
+  workspaceId: string,
 ) {
   if (!shouldRefreshToken(token.token_expires_at)) {
     return {
@@ -139,7 +142,8 @@ async function ensureUsableToken(
       token_expires_at: refreshed.tokenExpiresAt,
       updated_at: new Date().toISOString(),
     })
-    .eq('shop_config_id', shop.id);
+    .eq('shop_config_id', shop.id)
+    .eq('workspace_id', workspaceId);
 
   if (error) {
     throw new Error(`Gagal menyimpan refresh token Shopee untuk ${shop.shop_name}: ${error.message}`);
@@ -236,12 +240,13 @@ async function insertInBatches(
 export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise<ShopeeSyncResult> {
   const startTime = Date.now();
   const svc = createServiceSupabase();
+  const workspaceId = options.workspaceId || ROOVE_WORKSPACE_ID;
   const dateStart = options.dateStart || getYesterdayWib();
   const dateEnd = options.dateEnd || dateStart;
 
   const [shopsRes, tokensRes] = await Promise.all([
-    svc.from('shopee_shops').select('*').eq('is_active', true).order('shop_name'),
-    svc.from('shopee_shop_tokens').select('shop_config_id, access_token, refresh_token, token_expires_at'),
+    svc.from('shopee_shops').select('*').eq('workspace_id', workspaceId).eq('is_active', true).order('shop_name'),
+    svc.from('shopee_shop_tokens').select('shop_config_id, access_token, refresh_token, token_expires_at').eq('workspace_id', workspaceId),
   ]);
 
   if (shopsRes.error) throw shopsRes.error;
@@ -254,6 +259,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
   const { data: rawStreamRows, error: streamError } = await svc
     .from('shopee_shop_spend_streams')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('sync_mode', 'api')
     .eq('is_enabled', true)
     .order('shop_config_id')
@@ -289,6 +295,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
   const { data: logEntry, error: logError } = await svc
     .from('shopee_sync_log')
     .insert({
+      workspace_id: workspaceId,
       sync_date: new Date().toISOString().slice(0, 10),
       date_range_start: dateStart,
       date_range_end: dateEnd,
@@ -330,7 +337,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
       }
 
       try {
-        const usableToken = await ensureUsableToken(token, shop);
+        const usableToken = await ensureUsableToken(token, shop, workspaceId);
         let shopHadSuccess = false;
 
         for (const stream of apiStreams) {
@@ -341,8 +348,10 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
             dateEnd,
           });
 
-          const metricsRows = buildMetricsRows(shop, stream, points);
-          const spendRows = buildSpendRows(shop, stream, points);
+          const metricsRows = buildMetricsRows(shop, stream, points)
+            .map((row) => ({ ...row, workspace_id: workspaceId }));
+          const spendRows = buildSpendRows(shop, stream, points)
+            .map((row) => ({ ...row, workspace_id: workspaceId }));
           const advertiser = normalizeAdvertiser(shop, stream);
           const source = getShopeeSpendStreamDefinition(stream.stream_key).defaultSource;
           const apiDataSource = getShopeeApiDataSourceForStream(stream.stream_key);
@@ -350,6 +359,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
           const { error: deleteMetricsError } = await svc
             .from('shopee_ads_daily_metrics')
             .delete()
+            .eq('workspace_id', workspaceId)
             .eq('shop_config_id', shop.id)
             .eq('spend_stream_key', stream.stream_key)
             .gte('metric_date', dateStart)
@@ -362,6 +372,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
           const { error: deleteSpendError } = await svc
             .from('daily_ads_spend')
             .delete()
+            .eq('workspace_id', workspaceId)
             .in('data_source', ['google_sheets', 'xlsx_upload', apiDataSource])
             .eq('source', source)
             .eq('advertiser', advertiser)
@@ -410,7 +421,8 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
           error_message: errors.length > 0 ? errors.join('; ') : null,
           duration_ms: duration,
         })
-        .eq('id', logId);
+        .eq('id', logId)
+        .eq('workspace_id', workspaceId);
     }
 
     return {
@@ -429,6 +441,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
   } catch (error: any) {
     const duration = Date.now() - startTime;
     const payload = {
+      workspace_id: workspaceId,
       sync_date: new Date().toISOString().slice(0, 10),
       date_range_start: dateStart,
       date_range_end: dateEnd,
@@ -439,7 +452,11 @@ export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise
 
     try {
       if (logId) {
-        await svc.from('shopee_sync_log').update(payload).eq('id', logId);
+        await svc
+          .from('shopee_sync_log')
+          .update(payload)
+          .eq('id', logId)
+          .eq('workspace_id', workspaceId);
       } else {
         await svc.from('shopee_sync_log').insert(payload);
       }

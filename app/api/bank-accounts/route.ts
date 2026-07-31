@@ -31,12 +31,16 @@ export async function GET(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    await requireAnyDashboardTabAccess(['cashflow', 'financial-settings'], 'rekening bank');
+    const { workspaceId } = await requireAnyDashboardTabAccess(
+      ['cashflow', 'financial-settings'],
+      'rekening bank',
+    );
 
     const supabase = getServiceSupabase();
     const { data, error } = await supabase
       .from('bank_accounts')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .order('business_name', { ascending: true })
       .order('bank', { ascending: true });
 
@@ -66,7 +70,10 @@ export async function POST(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    await requireDashboardTabAccess('financial-settings', 'Financial Settings');
+    const { workspaceId } = await requireDashboardTabAccess(
+      'financial-settings',
+      'Financial Settings',
+    );
 
     const body = await req.json();
     const { bank, account_no, account_name, business_name, description, is_active } = body;
@@ -78,7 +85,15 @@ export async function POST(req: NextRequest) {
     const supabase = getServiceSupabase();
     const { data, error } = await supabase
       .from('bank_accounts')
-      .insert({ bank, account_no: account_no.trim(), account_name: account_name.trim(), business_name: business_name.trim(), description: description?.trim() || null, is_active: is_active ?? true })
+      .insert({
+        workspace_id: workspaceId,
+        bank,
+        account_no: account_no.trim(),
+        account_name: account_name.trim(),
+        business_name: business_name.trim(),
+        description: description?.trim() || null,
+        is_active: is_active ?? true,
+      })
       .select('*')
       .single();
 
@@ -111,15 +126,31 @@ export async function PATCH(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    await requireDashboardTabAccess('financial-settings', 'Financial Settings');
+    const { workspaceId } = await requireDashboardTabAccess(
+      'financial-settings',
+      'Financial Settings',
+    );
 
     const body = await req.json();
     const { id, ...fields } = body;
     if (!id) return NextResponse.json({ error: 'id diperlukan' }, { status: 400 });
 
     const update: Record<string, any> = {};
-    for (const [k, v] of Object.entries(fields)) {
-      update[k] = typeof v === 'string' ? v.trim() : v;
+    const editableFields = [
+      'bank',
+      'account_no',
+      'account_name',
+      'business_name',
+      'description',
+      'is_active',
+    ];
+    for (const key of editableFields) {
+      if (!(key in fields)) continue;
+      const value = fields[key];
+      update[key] = typeof value === 'string' ? value.trim() : value;
+    }
+    if (Object.keys(update).length === 0) {
+      return NextResponse.json({ error: 'Tidak ada field yang dapat diubah' }, { status: 400 });
     }
 
     const supabase = getServiceSupabase();
@@ -127,6 +158,7 @@ export async function PATCH(req: NextRequest) {
       .from('bank_accounts')
       .update(update)
       .eq('id', id)
+      .eq('workspace_id', workspaceId)
       .select('*')
       .single();
 
@@ -159,7 +191,10 @@ export async function DELETE(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    await requireDashboardTabAccess('financial-settings', 'Financial Settings');
+    const { workspaceId } = await requireDashboardTabAccess(
+      'financial-settings',
+      'Financial Settings',
+    );
 
     const { id } = await req.json();
     if (!id) return NextResponse.json({ error: 'id diperlukan' }, { status: 400 });
@@ -169,6 +204,7 @@ export async function DELETE(req: NextRequest) {
       .from('bank_accounts')
       .select('bank, account_no')
       .eq('id', id)
+      .eq('workspace_id', workspaceId)
       .single();
 
     if (accountError || !account) {
@@ -178,6 +214,7 @@ export async function DELETE(req: NextRequest) {
     const { data: existingSessions, error: existingSessionsError } = await supabase
       .from('bank_upload_sessions')
       .select('id')
+      .eq('workspace_id', workspaceId)
       .eq('bank', account.bank)
       .eq('account_no', account.account_no)
       .limit(1);
@@ -192,7 +229,11 @@ export async function DELETE(req: NextRequest) {
       }, { status: 400 });
     }
 
-    const { error } = await supabase.from('bank_accounts').delete().eq('id', id);
+    const { error } = await supabase
+      .from('bank_accounts')
+      .delete()
+      .eq('id', id)
+      .eq('workspace_id', workspaceId);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ success: true });
   } catch (e: any) {

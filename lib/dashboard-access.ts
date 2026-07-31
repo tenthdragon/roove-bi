@@ -1,4 +1,6 @@
 import { createServerSupabase } from './supabase-server';
+import { requireWorkspaceAccess } from './workspace-access';
+import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 type DashboardProfile = {
   id: string;
@@ -7,6 +9,9 @@ type DashboardProfile = {
 
 type AccessContext = {
   profile: DashboardProfile;
+  workspaceId: string;
+  membershipRole: string;
+  isPlatformOwner: boolean;
 };
 
 async function getAuthenticatedDashboardProfile(): Promise<AccessContext> {
@@ -21,20 +26,43 @@ async function getAuthenticatedDashboardProfile(): Promise<AccessContext> {
     throw new Error('Sesi login tidak ditemukan. Silakan login ulang.');
   }
 
-  const { data: profile, error: profileError } = await supabase
+  const directProfile = await supabase
     .from('profiles')
     .select('id, role')
     .eq('id', user.id)
     .single();
 
-  if (profileError || !profile || profile.role === 'pending') {
+  let profile = directProfile.data;
+  if (!profile) {
+    const rpcProfile = await supabase
+      .rpc('get_my_dashboard_profile')
+      .select('id, role')
+      .maybeSingle();
+    profile = rpcProfile.data;
+  }
+
+  if (!profile || profile.role === 'pending') {
     throw new Error('Akses dashboard belum aktif untuk akun ini.');
   }
 
-  return { profile };
+  const workspaceAccess = await requireWorkspaceAccess();
+  const effectiveRole = workspaceAccess.hasFullWorkspaceAccess
+    ? 'owner'
+    : workspaceAccess.membershipRole;
+
+  return {
+    profile: {
+      id: profile.id,
+      role: effectiveRole,
+    },
+    workspaceId: workspaceAccess.workspaceId,
+    membershipRole: workspaceAccess.membershipRole,
+    isPlatformOwner: workspaceAccess.isPlatformOwner,
+  };
 }
 
 async function verifyPermissionKeys(
+  workspaceId: string,
   role: string,
   permissionKeys: string[],
   verifyErrorMessage: string,
@@ -42,8 +70,9 @@ async function verifyPermissionKeys(
 ) {
   const supabase = createServerSupabase();
   const { data: permissions, error } = await supabase
-    .from('role_permissions')
+    .from('workspace_role_permissions')
     .select('permission_key')
+    .eq('workspace_id', workspaceId)
     .eq('role', role)
     .in('permission_key', permissionKeys)
     .limit(1);
@@ -54,10 +83,17 @@ async function verifyPermissionKeys(
 
 export async function requireDashboardTabAccess(tabId: string, label?: string): Promise<AccessContext> {
   const ctx = await getAuthenticatedDashboardProfile();
+  if (
+    ctx.workspaceId !== ROOVE_WORKSPACE_ID
+    && ['ppic', 'warehouse-settings', 'marketplace-intake', 'customers', 'brand-analysis', 'sales-channel-analysis'].includes(tabId)
+  ) {
+    throw new Error(`${label || tabId} masih dalam rollout workspace dan belum diaktifkan.`);
+  }
   if (ctx.profile.role === 'owner') return ctx;
 
   const tabLabel = label || tabId;
   await verifyPermissionKeys(
+    ctx.workspaceId,
     ctx.profile.role,
     [`tab:${tabId}`],
     `Gagal memverifikasi akses ${tabLabel}.`,
@@ -69,11 +105,18 @@ export async function requireDashboardTabAccess(tabId: string, label?: string): 
 
 export async function requireAnyDashboardTabAccess(tabIds: string[], label: string): Promise<AccessContext> {
   const ctx = await getAuthenticatedDashboardProfile();
+  const allowedTabIds = ctx.workspaceId === ROOVE_WORKSPACE_ID
+    ? tabIds
+    : tabIds.filter((tabId) => !['ppic', 'warehouse-settings', 'marketplace-intake', 'customers', 'brand-analysis', 'sales-channel-analysis'].includes(tabId));
+  if (allowedTabIds.length === 0) {
+    throw new Error(`${label} masih dalam rollout workspace dan belum diaktifkan.`);
+  }
   if (ctx.profile.role === 'owner') return ctx;
 
   await verifyPermissionKeys(
+    ctx.workspaceId,
     ctx.profile.role,
-    tabIds.map((tabId) => `tab:${tabId}`),
+    allowedTabIds.map((tabId) => `tab:${tabId}`),
     `Gagal memverifikasi akses ${label}.`,
     `Akun ini tidak memiliki akses ke ${label}.`
   );
@@ -87,6 +130,7 @@ export async function requireDashboardPermissionAccess(permissionKey: string, la
 
   const permissionLabel = label || permissionKey;
   await verifyPermissionKeys(
+    ctx.workspaceId,
     ctx.profile.role,
     [permissionKey],
     `Gagal memverifikasi izin ${permissionLabel}.`,
@@ -101,6 +145,7 @@ export async function requireAnyDashboardPermissionAccess(permissionKeys: string
   if (ctx.profile.role === 'owner') return ctx;
 
   await verifyPermissionKeys(
+    ctx.workspaceId,
     ctx.profile.role,
     permissionKeys,
     `Gagal memverifikasi izin ${label}.`,
@@ -112,6 +157,17 @@ export async function requireAnyDashboardPermissionAccess(permissionKeys: string
 
 export async function requireDashboardRoles(roles: string[], denyMessage: string): Promise<AccessContext> {
   const ctx = await getAuthenticatedDashboardProfile();
+  if (ctx.workspaceId !== ROOVE_WORKSPACE_ID && /marketplace/i.test(denyMessage)) {
+    throw new Error('Marketplace Intake masih dalam rollout workspace dan belum diaktifkan.');
+  }
   if (roles.includes(ctx.profile.role)) return ctx;
   throw new Error(denyMessage);
+}
+
+export async function requireRooveOnlyFeature(label: string): Promise<AccessContext> {
+  const ctx = await getAuthenticatedDashboardProfile();
+  if (ctx.workspaceId !== ROOVE_WORKSPACE_ID) {
+    throw new Error(`${label} masih dalam rollout workspace dan belum diaktifkan.`);
+  }
+  return ctx;
 }

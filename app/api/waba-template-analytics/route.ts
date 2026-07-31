@@ -36,8 +36,8 @@ function getServiceSupabase() {
 
 async function authenticate() {
   try {
-    await requireDashboardTabAccess('waba-management', 'WABA Management');
-    return {};
+    const { workspaceId } = await requireDashboardTabAccess('waba-management', 'WABA Management');
+    return { workspaceId };
   } catch (err: any) {
     return {
       error: err.message,
@@ -71,6 +71,7 @@ async function fetchAnalyticsRows(
   templateIds: string[],
   start: string,
   end: string,
+  workspaceId: string,
 ) {
   const rows: AnalyticsRow[] = [];
 
@@ -82,6 +83,7 @@ async function fetchAnalyticsRows(
       const { data, error } = await svc
         .from('waba_template_daily_analytics')
         .select('template_id, date, sent, delivered, read, clicked, replied, cost')
+        .eq('workspace_id', workspaceId)
         .in('template_id', idBatch)
         .gte('date', start)
         .lte('date', end)
@@ -134,7 +136,7 @@ async function handleAnalyticsRequest(req: NextRequest, body?: AnalyticsInput) {
       return NextResponse.json({ error: 'start and end date required (YYYY-MM-DD)' }, { status: 400 });
     }
 
-    const analyticsRows = await fetchAnalyticsRows(svc, templateIds, start, end);
+    const analyticsRows = await fetchAnalyticsRows(svc, templateIds, start, end, auth.workspaceId);
 
     const byTemplate: Record<string, { sent: number; delivered: number; read: number; clicked: number; replied: number; cost: number }> = {};
     const dailyMap: Record<string, { date: string; sent: number; delivered: number; read: number; clicked: number; replied: number }> = {};

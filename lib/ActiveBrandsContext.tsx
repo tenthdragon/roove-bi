@@ -3,6 +3,7 @@
 
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 
 interface ActiveBrandsContextType {
   activeBrands: string[];      // list of active brand names
@@ -20,6 +21,7 @@ const ActiveBrandsContext = createContext<ActiveBrandsContextType>({
 
 export function ActiveBrandsProvider({ children }: { children: React.ReactNode }) {
   const supabase = useSupabase();
+  const { activeWorkspace } = useWorkspace();
   const [activeBrands, setActiveBrands] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +32,7 @@ export function ActiveBrandsProvider({ children }: { children: React.ReactNode }
     supabase
       .from('brands')
       .select('name')
+      .eq('workspace_id', activeWorkspace.id)
       .eq('is_active', true)
       .order('name')
       .then(({ data, error }) => {
@@ -56,7 +59,7 @@ export function ActiveBrandsProvider({ children }: { children: React.ReactNode }
     return () => {
       cancelled = true;
     };
-  }, [supabase]);
+  }, [activeWorkspace.id, supabase]);
 
   const activeSet = useMemo(() => new Set(activeBrands.map(b => b.toLowerCase())), [activeBrands]);
 

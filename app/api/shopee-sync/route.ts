@@ -3,6 +3,7 @@ import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 import { runShopeeSync } from '@/lib/shopee-sync-runner';
+import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 export const maxDuration = 60;
 
@@ -42,6 +43,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
   const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const mode = isCron ? `cron_${method.toLowerCase()}` : `dashboard_${method.toLowerCase()}`;
   let requestedBy: string | null = null;
+  let workspaceId = ROOVE_WORKSPACE_ID;
 
   logRouteEvent({
     route: '/api/shopee-sync',
@@ -69,8 +71,10 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
       if (rateLimitError) return rateLimitError;
 
       try {
-        const { profile } = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        const access = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        const { profile } = access;
         requestedBy = profile.id;
+        workspaceId = access.workspaceId;
       } catch (error: any) {
         const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
         logRouteEvent({
@@ -88,6 +92,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
 
     const payload = resolveDateRange(req);
     const result = await runShopeeSync({
+      workspaceId,
       dateStart: payload.date_start,
       dateEnd: payload.date_end,
     });

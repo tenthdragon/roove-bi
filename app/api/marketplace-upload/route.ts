@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
+import { requireDashboardPermissionAccess, requireRooveOnlyFeature } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createServerSupabase } from '@/lib/supabase-server';
 import { importMarketplaceWorkbook } from '@/lib/marketplace-upload';
@@ -35,6 +35,7 @@ export async function POST(req: NextRequest) {
     if (rateLimitError) return rateLimitError;
 
     try {
+      await requireRooveOnlyFeature('Marketplace Upload');
       await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;

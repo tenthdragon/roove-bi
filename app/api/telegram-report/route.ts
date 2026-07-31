@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { requireDashboardRoles, requireRooveOnlyFeature } from '@/lib/dashboard-access';
 import { buildDailyReport } from '@/lib/daily-report';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { sendTelegramMessage } from '@/lib/telegram';
@@ -35,6 +35,7 @@ export async function GET(req: NextRequest) {
       if (rateLimitError) return rateLimitError;
 
       try {
+        await requireRooveOnlyFeature('Telegram Report');
         await requireDashboardRoles(['owner'], 'Hanya owner yang bisa menjalankan Telegram report manual.');
       } catch (err: any) {
         const status = /sesi|login/i.test(err.message || '') ? 401 : 403;

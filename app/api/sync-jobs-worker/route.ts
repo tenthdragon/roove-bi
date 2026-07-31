@@ -48,6 +48,7 @@ async function runOneJob(requestId: string) {
 
     if (nextScalevPayload) {
       await enqueueSyncJob({
+        workspaceId: job.workspace_id,
         jobName: 'scalev_sync',
         route: job.route,
         mode: job.mode,

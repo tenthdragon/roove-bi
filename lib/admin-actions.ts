@@ -13,6 +13,7 @@ import {
   type ShopeeSpendStreamKey,
   type ShopeeSpendSyncMode,
 } from './shopee-streams';
+import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 const MATRIX_ROLE_IDS = new Set(MATRIX_ROLES.map((role) => role.id));
 const KNOWN_PERMISSION_KEYS = new Set(
@@ -35,11 +36,11 @@ function findShopeeMarketplaceSourceConfig(sourceKey: string | null | undefined)
 }
 
 async function requireOwnerAccess(label: string) {
-  await requireDashboardRoles(['owner'], `Hanya owner yang bisa mengakses ${label}.`);
+  return requireDashboardRoles(['owner'], `Hanya owner yang bisa mengakses ${label}.`);
 }
 
 async function requireAdminAccess(permissionKey: string, label: string) {
-  await requireDashboardPermissionAccess(permissionKey, label);
+  return requireDashboardPermissionAccess(permissionKey, label);
 }
 
 function sanitizePermissionMatrix(matrix: Record<string, string[]>) {
@@ -85,28 +86,61 @@ export async function getAdminBootstrap() {
     return { profile: null, users: [] };
   }
 
-  if (profile.role !== 'owner') {
+  let access;
+  try {
+    access = await requireOwnerAccess('Admin Users');
+  } catch {
     return { profile, users: [] };
   }
 
   const svc = createServiceSupabase();
-  const { data: users, error: usersError } = await svc
+  const { data: memberships, error: membershipsError } = await svc
+    .from('workspace_memberships')
+    .select('user_id, role, status, created_at')
+    .eq('workspace_id', access.workspaceId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: true });
+
+  if (membershipsError) throw membershipsError;
+
+  const memberIds = (memberships || []).map((membership) => membership.user_id);
+  if (memberIds.length === 0) {
+    return { profile: { ...profile, role: 'owner' }, users: [] };
+  }
+
+  const { data: profiles, error: usersError } = await svc
     .from('profiles')
     .select('*')
-    .order('created_at', { ascending: true });
+    .in('id', memberIds);
 
   if (usersError) throw usersError;
 
-  return { profile, users: users || [] };
+  const roleByUser = new Map(
+    (memberships || []).map((membership) => [
+      membership.user_id,
+      membership.role === 'workspace_owner' ? 'owner' : membership.role,
+    ]),
+  );
+  const users = (profiles || [])
+    .map((memberProfile) => ({
+      ...memberProfile,
+      role: roleByUser.get(memberProfile.id) || memberProfile.role,
+    }))
+    .sort(
+      (a, b) =>
+        memberIds.indexOf(a.id) - memberIds.indexOf(b.id),
+    );
+
+  return { profile: { ...profile, role: 'owner' }, users };
 }
 
 export async function getAdminLogsSnapshot() {
-  await requireAdminAccess('admin:logs', 'Admin Logs');
+  const { workspaceId } = await requireAdminAccess('admin:logs', 'Admin Logs');
 
   const svc = createServiceSupabase();
   const [syncLogsRes, importsRes] = await Promise.all([
-    svc.from('scalev_sync_log').select('*').order('started_at', { ascending: false }).limit(100),
-    svc.from('data_imports').select('*').order('imported_at', { ascending: false }).limit(100),
+    svc.from('scalev_sync_log').select('*').eq('workspace_id', workspaceId).order('started_at', { ascending: false }).limit(100),
+    svc.from('data_imports').select('*').eq('workspace_id', workspaceId).order('imported_at', { ascending: false }).limit(100),
   ]);
 
   if (syncLogsRes.error) throw syncLogsRes.error;
@@ -119,13 +153,13 @@ export async function getAdminLogsSnapshot() {
 }
 
 export async function getAdminDataReferenceSnapshot() {
-  await requireOwnerAccess('Admin Data Reference');
+  const { workspaceId } = await requireOwnerAccess('Admin Data Reference');
 
   const svc = createServiceSupabase();
   const [mpFeeRes, taxRes, overheadRes] = await Promise.all([
-    svc.from('marketplace_fee_estimate_rates').select('*').order('setting_key').order('effective_from', { ascending: false }),
-    svc.from('tax_rates').select('*').order('name').order('effective_from', { ascending: false }),
-    svc.from('monthly_overhead').select('*').order('year_month', { ascending: false }),
+    svc.from('marketplace_fee_estimate_rates').select('*').eq('workspace_id', workspaceId).order('setting_key').order('effective_from', { ascending: false }),
+    svc.from('tax_rates').select('*').eq('workspace_id', workspaceId).order('name').order('effective_from', { ascending: false }),
+    svc.from('monthly_overhead').select('*').eq('workspace_id', workspaceId).order('year_month', { ascending: false }),
   ]);
 
   if (mpFeeRes.error) throw mpFeeRes.error;
@@ -150,7 +184,7 @@ export async function saveMarketplaceFeeEstimateRate(row: {
   rate: number;
   effective_from: string;
 }) {
-  await requireOwnerAccess('Admin Data Reference');
+  const { workspaceId } = await requireOwnerAccess('Admin Data Reference');
 
   const settingKey = String(row.setting_key || '').trim();
   if (!MARKETPLACE_FEE_SETTING_KEYS.has(settingKey)) {
@@ -163,8 +197,9 @@ export async function saveMarketplaceFeeEstimateRate(row: {
       setting_key: settingKey,
       rate: row.rate,
       effective_from: row.effective_from,
+      workspace_id: workspaceId,
     },
-    { onConflict: 'setting_key,effective_from' }
+    { onConflict: 'workspace_id,setting_key,effective_from' }
   );
 
   if (error) throw error;
@@ -172,16 +207,16 @@ export async function saveMarketplaceFeeEstimateRate(row: {
 }
 
 export async function deleteMarketplaceFeeEstimateRate(id: number) {
-  await requireOwnerAccess('Admin Data Reference');
+  const { workspaceId } = await requireOwnerAccess('Admin Data Reference');
 
   const svc = createServiceSupabase();
-  const { error } = await svc.from('marketplace_fee_estimate_rates').delete().eq('id', id);
+  const { error } = await svc.from('marketplace_fee_estimate_rates').delete().eq('id', id).eq('workspace_id', workspaceId);
   if (error) throw error;
   return { success: true };
 }
 
 export async function saveCommissionRate(row: { channel: string; rate: number; effective_from: string }) {
-  await requireOwnerAccess('Admin Data Reference');
+  const { workspaceId } = await requireOwnerAccess('Admin Data Reference');
 
   const svc = createServiceSupabase();
   const { error } = await svc.from('marketplace_commission_rates').upsert(
@@ -189,8 +224,9 @@ export async function saveCommissionRate(row: { channel: string; rate: number; e
       channel: row.channel.trim(),
       rate: row.rate,
       effective_from: row.effective_from,
+      workspace_id: workspaceId,
     },
-    { onConflict: 'channel,effective_from' }
+    { onConflict: 'workspace_id,channel,effective_from' }
   );
 
   if (error) throw error;
@@ -198,16 +234,16 @@ export async function saveCommissionRate(row: { channel: string; rate: number; e
 }
 
 export async function deleteCommissionRate(id: number) {
-  await requireOwnerAccess('Admin Data Reference');
+  const { workspaceId } = await requireOwnerAccess('Admin Data Reference');
 
   const svc = createServiceSupabase();
-  const { error } = await svc.from('marketplace_commission_rates').delete().eq('id', id);
+  const { error } = await svc.from('marketplace_commission_rates').delete().eq('id', id).eq('workspace_id', workspaceId);
   if (error) throw error;
   return { success: true };
 }
 
 export async function saveTaxRate(row: { name: string; rate: number; effective_from: string }) {
-  await requireOwnerAccess('Admin Data Reference');
+  const { workspaceId } = await requireOwnerAccess('Admin Data Reference');
 
   const svc = createServiceSupabase();
   const { error } = await svc.from('tax_rates').upsert(
@@ -215,8 +251,9 @@ export async function saveTaxRate(row: { name: string; rate: number; effective_f
       name: row.name.trim(),
       rate: row.rate,
       effective_from: row.effective_from,
+      workspace_id: workspaceId,
     },
-    { onConflict: 'name,effective_from' }
+    { onConflict: 'workspace_id,name,effective_from' }
   );
 
   if (error) throw error;
@@ -224,25 +261,26 @@ export async function saveTaxRate(row: { name: string; rate: number; effective_f
 }
 
 export async function deleteTaxRate(id: number) {
-  await requireOwnerAccess('Admin Data Reference');
+  const { workspaceId } = await requireOwnerAccess('Admin Data Reference');
 
   const svc = createServiceSupabase();
-  const { error } = await svc.from('tax_rates').delete().eq('id', id);
+  const { error } = await svc.from('tax_rates').delete().eq('id', id).eq('workspace_id', workspaceId);
   if (error) throw error;
   return { success: true };
 }
 
 export async function saveMonthlyOverhead(row: { year_month: string; amount: number }) {
-  await requireOwnerAccess('Admin Data Reference');
+  const { workspaceId } = await requireOwnerAccess('Admin Data Reference');
 
   const svc = createServiceSupabase();
   const { error } = await svc.from('monthly_overhead').upsert(
     {
       year_month: row.year_month,
       amount: row.amount,
+      workspace_id: workspaceId,
       updated_at: new Date().toISOString(),
     },
-    { onConflict: 'year_month' }
+    { onConflict: 'workspace_id,year_month' }
   );
 
   if (error) throw error;
@@ -250,18 +288,29 @@ export async function saveMonthlyOverhead(row: { year_month: string; amount: num
 }
 
 export async function deleteMonthlyOverhead(id: number) {
-  await requireOwnerAccess('Admin Data Reference');
+  const { workspaceId } = await requireOwnerAccess('Admin Data Reference');
 
   const svc = createServiceSupabase();
-  const { error } = await svc.from('monthly_overhead').delete().eq('id', id);
+  const { error } = await svc.from('monthly_overhead').delete().eq('id', id).eq('workspace_id', workspaceId);
   if (error) throw error;
   return { success: true };
 }
 
 export async function updateTelegramChatId(userId: string, telegramChatId: string | null) {
-  await requireOwnerAccess('Admin Users');
+  const { workspaceId } = await requireOwnerAccess('Admin Users');
 
   const svc = createServiceSupabase();
+  const { data: membership } = await svc
+    .from('workspace_memberships')
+    .select('id')
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', userId)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (!membership) {
+    throw new Error('User tidak terdaftar di workspace aktif.');
+  }
+
   const { error } = await svc
     .from('profiles')
     .update({ telegram_chat_id: normalizeOptionalText(telegramChatId) })
@@ -272,51 +321,69 @@ export async function updateTelegramChatId(userId: string, telegramChatId: strin
 }
 
 export async function getRolePermissionsMatrix() {
-  await requireOwnerAccess('Permission Matrix');
+  const { workspaceId } = await requireOwnerAccess('Permission Matrix');
 
   const svc = createServiceSupabase();
   const { data, error } = await svc
-    .from('role_permissions')
-    .select('role, permission_key');
+    .from('workspace_role_permissions')
+    .select('role, permission_key')
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return data || [];
 }
 
 export async function saveRolePermissionsMatrix(matrix: Record<string, string[]>) {
-  await requireOwnerAccess('Permission Matrix');
+  const { workspaceId } = await requireOwnerAccess('Permission Matrix');
 
   const rows = sanitizePermissionMatrix(matrix);
   const svc = createServiceSupabase();
 
   const { error: deleteError } = await svc
-    .from('role_permissions')
+    .from('workspace_role_permissions')
     .delete()
-    .neq('role', 'owner');
+    .eq('workspace_id', workspaceId);
 
   if (deleteError) throw deleteError;
 
   if (rows.length > 0) {
     const { error: insertError } = await svc
-      .from('role_permissions')
-      .insert(rows);
+      .from('workspace_role_permissions')
+      .insert(rows.map((row) => ({ ...row, workspace_id: workspaceId })));
 
     if (insertError) throw insertError;
+  }
+
+  // Legacy warehouse SQL still reads the global matrix. Keep it synchronized
+  // only for Roove; Apurva permissions must never alter Roove behavior.
+  if (workspaceId === ROOVE_WORKSPACE_ID) {
+    const { error: legacyDeleteError } = await svc
+      .from('role_permissions')
+      .delete()
+      .neq('role', 'owner');
+    if (legacyDeleteError) throw legacyDeleteError;
+
+    if (rows.length > 0) {
+      const { error: legacyInsertError } = await svc
+        .from('role_permissions')
+        .insert(rows);
+      if (legacyInsertError) throw legacyInsertError;
+    }
   }
 
   return { success: true, count: rows.length };
 }
 
 export async function getMetaAdminSnapshot() {
-  await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
   const [accountsRes, logsRes, mappingsRes, wabaRes, wabaLogsRes] = await Promise.all([
-    svc.from('meta_ad_accounts').select('*').order('account_name'),
-    svc.from('meta_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
-    svc.from('ads_store_brand_mapping').select('store_pattern, brand').order('brand').order('store_pattern'),
-    svc.from('waba_accounts').select('*').order('waba_name'),
-    svc.from('waba_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
+    svc.from('meta_ad_accounts').select('*').eq('workspace_id', workspaceId).order('account_name'),
+    svc.from('meta_sync_log').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(5),
+    svc.from('ads_store_brand_mapping').select('store_pattern, brand').eq('workspace_id', workspaceId).order('brand').order('store_pattern'),
+    svc.from('waba_accounts').select('*').eq('workspace_id', workspaceId).order('waba_name'),
+    svc.from('waba_sync_log').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(5),
   ]);
 
   if (accountsRes.error) throw accountsRes.error;
@@ -343,10 +410,11 @@ export async function saveMetaAccounts(
     default_advertiser: string;
   }>
 ) {
-  await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const sanitizedRows = (rows || [])
     .map((row) => ({
+      workspace_id: workspaceId,
       account_id: String(row.account_id || '').trim(),
       account_name: String(row.account_name || '').trim(),
       store: String(row.store || '').trim(),
@@ -362,7 +430,7 @@ export async function saveMetaAccounts(
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('meta_ad_accounts')
-    .upsert(sanitizedRows, { onConflict: 'account_id' });
+    .upsert(sanitizedRows, { onConflict: 'workspace_id,account_id' });
 
   if (error) throw error;
   return { success: true, saved: sanitizedRows.length };
@@ -377,7 +445,7 @@ export async function updateMetaAccount(
     default_advertiser: string;
   }
 ) {
-  await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
   const { error } = await svc
@@ -389,14 +457,15 @@ export async function updateMetaAccount(
       default_advertiser: payload.default_advertiser.trim(),
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return { success: true };
 }
 
 export async function setMetaAccountActive(id: number, isActive: boolean) {
-  await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
   const { error } = await svc
@@ -405,7 +474,8 @@ export async function setMetaAccountActive(id: number, isActive: boolean) {
       is_active: isActive,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return { success: true };
@@ -418,7 +488,7 @@ export async function saveWabaAccount(payload: {
   default_source: string;
   default_advertiser: string;
 }) {
-  await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
   const { error } = await svc
@@ -426,12 +496,13 @@ export async function saveWabaAccount(payload: {
     .upsert(
       {
         waba_id: payload.waba_id.trim(),
+        workspace_id: workspaceId,
         waba_name: payload.waba_name.trim(),
         store: payload.store.trim(),
         default_source: payload.default_source.trim() || 'WhatsApp Marketing',
         default_advertiser: payload.default_advertiser.trim() || 'WhatsApp Team',
       },
-      { onConflict: 'waba_id' }
+      { onConflict: 'workspace_id,waba_id' }
     );
 
   if (error) throw error;
@@ -447,7 +518,7 @@ export async function updateWabaAccount(
     default_advertiser: string;
   }
 ) {
-  await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
   const { error } = await svc
@@ -459,14 +530,15 @@ export async function updateWabaAccount(
       default_advertiser: payload.default_advertiser.trim(),
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return { success: true };
 }
 
 export async function setWabaAccountActive(id: number, isActive: boolean) {
-  await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
   const { error } = await svc
@@ -475,21 +547,22 @@ export async function setWabaAccountActive(id: number, isActive: boolean) {
       is_active: isActive,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return { success: true };
 }
 
 export async function getShopeeAdminSnapshot() {
-  await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
   const [shopsRes, tokensRes, logsRes, streamsRes] = await Promise.all([
-    svc.from('shopee_shops').select('*').order('shop_name'),
-    svc.from('shopee_shop_tokens').select('shop_config_id, token_expires_at'),
-    svc.from('shopee_sync_log').select('*').order('created_at', { ascending: false }).limit(5),
-    svc.from('shopee_shop_spend_streams').select('*').order('shop_config_id').order('stream_key'),
+    svc.from('shopee_shops').select('*').eq('workspace_id', workspaceId).order('shop_name'),
+    svc.from('shopee_shop_tokens').select('shop_config_id, token_expires_at').eq('workspace_id', workspaceId),
+    svc.from('shopee_sync_log').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(5),
+    svc.from('shopee_shop_spend_streams').select('*').eq('workspace_id', workspaceId).order('shop_config_id').order('stream_key'),
   ]);
 
   if (shopsRes.error) throw shopsRes.error;
@@ -585,7 +658,7 @@ export async function updateShopeeShop(
     }>;
   }
 ) {
-  await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const sourceKey = normalizeOptionalText(payload.marketplace_source_key)?.toLowerCase() || null;
   const sourceConfig = findShopeeMarketplaceSourceConfig(sourceKey);
@@ -622,7 +695,8 @@ export async function updateShopeeShop(
       store: null,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
 
@@ -630,12 +704,14 @@ export async function updateShopeeShop(
     .from('shopee_shops')
     .select('shop_name')
     .eq('id', id)
+    .eq('workspace_id', workspaceId)
     .single();
 
   if (shopError) throw shopError;
 
   const shopName = String(shopRow.shop_name || '').trim() || 'Shopee Shop';
   const rows = normalizedStreams.map((stream) => ({
+    workspace_id: workspaceId,
     shop_config_id: id,
     stream_key: stream.stream_key,
     default_source: stream.default_source,
@@ -655,7 +731,7 @@ export async function updateShopeeShop(
 }
 
 export async function setShopeeShopActive(id: number, isActive: boolean) {
-  await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
   const { error } = await svc
@@ -664,19 +740,21 @@ export async function setShopeeShopActive(id: number, isActive: boolean) {
       is_active: isActive,
       updated_at: new Date().toISOString(),
     })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
 
   if (error) throw error;
   return { success: true };
 }
 
 export async function getCsvUploadHistory() {
-  await requireAdminAccess('admin:daily', 'Admin Daily Data');
+  const { workspaceId } = await requireAdminAccess('admin:daily', 'Admin Daily Data');
 
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_sync_log')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .in('sync_type', ['csv_upload', 'ops_upload', 'marketplace_api_upload'])
     .order('started_at', { ascending: false })
     .limit(5);

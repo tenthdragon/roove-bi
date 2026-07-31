@@ -4,13 +4,18 @@
 import { createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardRoles, requireDashboardTabAccess } from './dashboard-access';
 import { parseFinancialReport } from './financial-parser';
+import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 async function requireFinancialAdminAccess(label: string) {
-  await requireDashboardPermissionAccess('admin:financial', label);
+  return requireDashboardPermissionAccess('admin:financial', label);
 }
 
-async function deleteFinancialMonthOrThrow(svc: any, table: string, month: string) {
-  const { error } = await svc.from(table).delete().eq('month', month);
+async function deleteFinancialMonthOrThrow(svc: any, table: string, workspaceId: string, month: string) {
+  const { error } = await svc
+    .from(table)
+    .delete()
+    .eq('workspace_id', workspaceId)
+    .eq('month', month);
   if (error) {
     throw new Error(`Delete ${table} ${month}: ${error.message}`);
   }
@@ -21,24 +26,25 @@ async function deleteFinancialMonthOrThrow(svc: any, table: string, month: strin
 // ============================================================
 
 export async function getFinancialConnections() {
-  await requireFinancialAdminAccess('Admin Financial');
+  const { workspaceId } = await requireFinancialAdminAccess('Admin Financial');
 
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('financial_sheet_connections')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false });
   if (error) throw error;
   return data || [];
 }
 
 export async function addFinancialConnection(spreadsheetId: string, label: string) {
-  await requireFinancialAdminAccess('Admin Financial');
+  const { workspaceId } = await requireFinancialAdminAccess('Admin Financial');
 
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('financial_sheet_connections')
-    .insert({ spreadsheet_id: spreadsheetId, label, is_active: true })
+    .insert({ workspace_id: workspaceId, spreadsheet_id: spreadsheetId, label, is_active: true })
     .select()
     .single();
   if (error) throw error;
@@ -46,24 +52,26 @@ export async function addFinancialConnection(spreadsheetId: string, label: strin
 }
 
 export async function removeFinancialConnection(id: string) {
-  await requireFinancialAdminAccess('Admin Financial');
+  const { workspaceId } = await requireFinancialAdminAccess('Admin Financial');
 
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('financial_sheet_connections')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
   if (error) throw error;
 }
 
 export async function toggleFinancialConnection(id: string, isActive: boolean) {
-  await requireFinancialAdminAccess('Admin Financial');
+  const { workspaceId } = await requireFinancialAdminAccess('Admin Financial');
 
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('financial_sheet_connections')
     .update({ is_active: isActive })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
   if (error) throw error;
 }
 
@@ -71,9 +79,11 @@ export async function toggleFinancialConnection(id: string, isActive: boolean) {
 // SYNC
 // ============================================================
 
-export async function triggerFinancialSync(options?: { skipAuth?: boolean }) {
+export async function triggerFinancialSync(options?: { skipAuth?: boolean; workspaceId?: string }) {
+  let workspaceId = options?.workspaceId || ROOVE_WORKSPACE_ID;
   if (!options?.skipAuth) {
-    await requireFinancialAdminAccess('Admin Financial');
+    const access = await requireFinancialAdminAccess('Admin Financial');
+    workspaceId = access.workspaceId;
   }
 
   const svc = createServiceSupabase();
@@ -81,6 +91,7 @@ export async function triggerFinancialSync(options?: { skipAuth?: boolean }) {
   const { data: connections, error: connError } = await svc
     .from('financial_sheet_connections')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true);
 
   if (connError) throw connError;
@@ -114,11 +125,12 @@ export async function triggerFinancialSync(options?: { skipAuth?: boolean }) {
         // Delete existing data for months found, then insert
         const plMonths = Array.from(new Set(parsed.pl.map(r => r.month)));
         for (const month of plMonths) {
-          await deleteFinancialMonthOrThrow(svc, 'financial_pl_monthly', month);
+          await deleteFinancialMonthOrThrow(svc, 'financial_pl_monthly', workspaceId, month);
         }
         // Insert in batches of 200
         for (let i = 0; i < parsed.pl.length; i += 200) {
           const batch = parsed.pl.slice(i, i + 200).map(r => ({
+            workspace_id: workspaceId,
             month: r.month,
             line_item: r.line_item,
             line_item_label: r.line_item_label,
@@ -139,10 +151,11 @@ export async function triggerFinancialSync(options?: { skipAuth?: boolean }) {
       if (parsed.cf.length > 0) {
         const cfMonths = Array.from(new Set(parsed.cf.map(r => r.month)));
         for (const month of cfMonths) {
-          await deleteFinancialMonthOrThrow(svc, 'financial_cf_monthly', month);
+          await deleteFinancialMonthOrThrow(svc, 'financial_cf_monthly', workspaceId, month);
         }
         for (let i = 0; i < parsed.cf.length; i += 200) {
           const batch = parsed.cf.slice(i, i + 200).map(r => ({
+            workspace_id: workspaceId,
             month: r.month,
             section: r.section,
             line_item: r.line_item,
@@ -162,11 +175,12 @@ export async function triggerFinancialSync(options?: { skipAuth?: boolean }) {
       if (parsed.ratios.length > 0) {
         const ratioMonths = Array.from(new Set(parsed.ratios.map(r => r.month)));
         for (const month of ratioMonths) {
-          await deleteFinancialMonthOrThrow(svc, 'financial_ratios_monthly', month);
+          await deleteFinancialMonthOrThrow(svc, 'financial_ratios_monthly', workspaceId, month);
         }
         const { error: insertErr } = await svc
           .from('financial_ratios_monthly')
           .insert(parsed.ratios.map(r => ({
+            workspace_id: workspaceId,
             month: r.month,
             ratio_name: r.ratio_name,
             ratio_label: r.ratio_label,
@@ -186,10 +200,11 @@ export async function triggerFinancialSync(options?: { skipAuth?: boolean }) {
       if (parsed.bs.length > 0) {
         const bsMonths = Array.from(new Set(parsed.bs.map(r => r.month)));
         for (const month of bsMonths) {
-          await deleteFinancialMonthOrThrow(svc, 'financial_bs_monthly', month);
+          await deleteFinancialMonthOrThrow(svc, 'financial_bs_monthly', workspaceId, month);
         }
         for (let i = 0; i < parsed.bs.length; i += 200) {
           const batch = parsed.bs.slice(i, i + 200).map(r => ({
+            workspace_id: workspaceId,
             month: r.month,
             line_item: r.line_item,
             line_item_label: r.line_item_label,
@@ -258,9 +273,9 @@ export async function triggerFinancialSync(options?: { skipAuth?: boolean }) {
 // ============================================================
 
 export async function getFinancialPLSummary(months?: number) {
-  await requireDashboardTabAccess('finance', 'Finance Analysis');
+  const { workspaceId } = await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
-  let query = svc.from('v_pl_summary').select('*').order('month', { ascending: false });
+  let query = svc.from('v_pl_summary').select('*').eq('workspace_id', workspaceId).order('month', { ascending: false });
   if (months) query = query.limit(months);
   const { data, error } = await query;
   if (error) throw error;
@@ -268,9 +283,9 @@ export async function getFinancialPLSummary(months?: number) {
 }
 
 export async function getFinancialCFSummary(months?: number) {
-  await requireDashboardTabAccess('finance', 'Finance Analysis');
+  const { workspaceId } = await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
-  let query = svc.from('v_cf_summary').select('*').order('month', { ascending: false });
+  let query = svc.from('v_cf_summary').select('*').eq('workspace_id', workspaceId).order('month', { ascending: false });
   if (months) query = query.limit(months);
   const { data, error } = await query;
   if (error) throw error;
@@ -278,9 +293,9 @@ export async function getFinancialCFSummary(months?: number) {
 }
 
 export async function getFinancialRatios(months?: number) {
-  await requireDashboardTabAccess('finance', 'Finance Analysis');
+  const { workspaceId } = await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
-  let query = svc.from('financial_ratios_monthly').select('*').order('month', { ascending: false });
+  let query = svc.from('financial_ratios_monthly').select('*').eq('workspace_id', workspaceId).order('month', { ascending: false });
   if (months) query = query.limit(months * 12); // ~12 ratios per month
   const { data, error } = await query;
   if (error) throw error;
@@ -288,11 +303,12 @@ export async function getFinancialRatios(months?: number) {
 }
 
 export async function getFinancialPLDetail(month: string) {
-  await requireDashboardTabAccess('finance', 'Finance Analysis');
+  const { workspaceId } = await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('financial_pl_monthly')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('month', month)
     .order('section');
   if (error) throw error;
@@ -300,11 +316,12 @@ export async function getFinancialPLDetail(month: string) {
 }
 
 export async function getFinancialCFDetail(month: string) {
-  await requireDashboardTabAccess('finance', 'Finance Analysis');
+  const { workspaceId } = await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('financial_cf_monthly')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('month', month)
     .order('section');
   if (error) throw error;
@@ -316,11 +333,12 @@ async function requireFinancialAiAccess() {
 }
 
 export async function getLatestFinancialAnalysis() {
-  await requireFinancialAiAccess();
+  const { workspaceId } = await requireFinancialAiAccess();
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('financial_analyses')
     .select('analysis_data, created_at')
+    .eq('workspace_id', workspaceId)
     .eq('analysis_type', 'executive')
     .order('created_at', { ascending: false })
     .limit(1)
@@ -343,11 +361,12 @@ export async function getFinancialDataForAI(numMonths: number = 3) {
 }
 
 export async function getFinancialBS(months?: number) {
-  await requireDashboardTabAccess('finance', 'Finance Analysis');
+  const { workspaceId } = await requireDashboardTabAccess('finance', 'Finance Analysis');
   const svc = createServiceSupabase();
   let query = svc
     .from('financial_bs_monthly')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('month', { ascending: false });
   if (months) query = query.limit(months * 18); // ~18 line items per month
   const { data, error } = await query;

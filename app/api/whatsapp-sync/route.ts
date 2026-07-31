@@ -8,6 +8,8 @@ import {
   type WabaAccount,
 } from '@/lib/meta-whatsapp';
 import { type DailyAdSpendRow } from '@/lib/meta-marketing';
+import { resolveWorkspaceCredential } from '@/lib/workspace-integration-server';
+import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 
 function getServiceSupabase() {
@@ -48,6 +50,7 @@ export async function POST(req: NextRequest) {
   let dateStart = getYesterdayWIB();
   let dateEnd = dateStart;
   let logId: number | null = null;
+  let workspaceId = ROOVE_WORKSPACE_ID;
 
   try {
     // ── Auth ──
@@ -71,21 +74,12 @@ export async function POST(req: NextRequest) {
       if (rateLimitError) return rateLimitError;
 
       try {
-        await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        const access = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        workspaceId = access.workspaceId;
       } catch (err: any) {
         const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
         return NextResponse.json({ error: err.message }, { status });
       }
-    }
-
-    // ── Validate environment ──
-    // Use WHATSAPP_ACCESS_TOKEN if set, otherwise fall back to META_ACCESS_TOKEN
-    const accessToken = process.env.WHATSAPP_ACCESS_TOKEN || process.env.META_ACCESS_TOKEN;
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: 'WHATSAPP_ACCESS_TOKEN or META_ACCESS_TOKEN not configured' },
-        { status: 500 }
-      );
     }
 
     const svc = getServiceSupabase();
@@ -96,11 +90,22 @@ export async function POST(req: NextRequest) {
     try { body = await req.json(); } catch { /* no body */ }
     dateStart = searchParams.get('date_start') || body.startDate || getYesterdayWIB();
     dateEnd = searchParams.get('date_end') || body.endDate || dateStart;
+    if (isCron) {
+      workspaceId = searchParams.get('workspace_id') || body.workspace_id || ROOVE_WORKSPACE_ID;
+    }
+
+    const accessToken = await resolveWorkspaceCredential({
+      supabase: svc,
+      workspaceId,
+      provider: 'whatsapp',
+      fallbackEnvKeys: ['WHATSAPP_ACCESS_TOKEN', 'META_ACCESS_TOKEN'],
+    });
 
     // ── Get active WABA accounts ──
     const { data: accounts, error: accountsError } = await svc
       .from('waba_accounts')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true);
 
     if (accountsError) throw accountsError;
@@ -116,6 +121,7 @@ export async function POST(req: NextRequest) {
     const { data: logEntry, error: logError } = await svc
       .from('waba_sync_log')
       .insert({
+        workspace_id: workspaceId,
         sync_date: new Date().toISOString().split('T')[0],
         date_range_start: dateStart,
         date_range_end: dateEnd,
@@ -152,6 +158,7 @@ export async function POST(req: NextRequest) {
       const { error: delError } = await svc
         .from('daily_ads_spend')
         .delete()
+        .eq('workspace_id', workspaceId)
         .gte('date', dateStart)
         .lte('date', dateEnd)
         .eq('data_source', 'whatsapp_api')
@@ -165,7 +172,10 @@ export async function POST(req: NextRequest) {
 
       let accountInsertFailed = false;
       for (let i = 0; i < result.rows.length; i += 500) {
-        const batch = result.rows.slice(i, i + 500);
+        const batch = result.rows.slice(i, i + 500).map((row) => ({
+          ...row,
+          workspace_id: workspaceId,
+        }));
         const { error } = await svc.from('daily_ads_spend').insert(batch);
         if (error) {
           console.error(`[whatsapp-sync] Insert batch error for ${result.waba_name}:`, error);
@@ -217,6 +227,7 @@ export async function POST(req: NextRequest) {
     try {
       const svc = getServiceSupabase();
       const payload = {
+        workspace_id: workspaceId,
         sync_date: new Date().toISOString().split('T')[0],
         date_range_start: dateStart,
         date_range_end: dateEnd,

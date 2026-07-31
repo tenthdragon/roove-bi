@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
     const authHeader = req.headers.get('authorization');
     const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
 
+    let workspaceId = '00000000-0000-4000-8000-000000000001';
     if (!isCron) {
       const originError = rejectUntrustedOrigin(req);
       if (originError) return originError;
@@ -40,7 +41,8 @@ export async function POST(req: NextRequest) {
       if (rateLimitError) return rateLimitError;
 
       try {
-        await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
+        const access = await requireDashboardPermissionAccess('admin:sync', 'Admin Sync');
+        workspaceId = access.workspaceId;
       } catch (err: any) {
         const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
         return NextResponse.json({ error: err.message }, { status });
@@ -54,6 +56,9 @@ export async function POST(req: NextRequest) {
       const body = await req.json();
       fromDate = body.from || null;
       toDate = body.to || null;
+      if (isCron && body.workspace_id) {
+        workspaceId = String(body.workspace_id);
+      }
     } catch {
       // No body or invalid JSON — recalculate all
     }
@@ -61,18 +66,12 @@ export async function POST(req: NextRequest) {
     const svc = getServiceSupabase();
     const start = Date.now();
 
-    let error: any;
-    let mode: string;
-
-    if (fromDate && toDate) {
-      // Fast: recalculate only the specified date range
-      mode = `${fromDate} to ${toDate}`;
-      ({ error } = await svc.rpc('recalculate_summaries_range', { p_from: fromDate, p_to: toDate }));
-    } else {
-      // Full: recalculate everything
-      mode = 'all';
-      ({ error } = await svc.rpc('recalculate_all_summaries'));
-    }
+    const mode = fromDate && toDate ? `${fromDate} to ${toDate}` : 'all';
+    const { error } = await svc.rpc('recalculate_workspace_summaries', {
+      p_workspace_id: workspaceId,
+      p_from: fromDate,
+      p_to: toDate,
+    });
 
     const elapsed = Date.now() - start;
 

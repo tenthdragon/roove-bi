@@ -9,6 +9,7 @@ import { getChannelsPageData } from '@/lib/channels-actions';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import ChannelSlaSection from '@/components/ChannelSlaSection';
 import ShipmentStatusSection from '@/components/ShipmentStatusSection';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 
 function formatIsoDate(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -75,6 +76,7 @@ for (const [platform, channels] of Object.entries(PLATFORM_CHANNEL_MAP)) {
 }
 
 export default function ChannelsPage() {
+  const { activeWorkspace } = useWorkspace();
   const { dateRange, loading: dateLoading } = useDateRange();
   const [channelData, setChannelData] = useState([]);
   const [adsData, setAdsData] = useState([]);
@@ -100,7 +102,8 @@ export default function ChannelsPage() {
     const pf = shiftIsoDateByMonthsClamped(from, -1);
     const pt = shiftIsoDateByMonthsClamped(to, -1);
 
-    const cached = getCached<any>('channels_page_data_v6', from, to, `${pf}|${pt}`);
+    const cacheExtra = `${activeWorkspace.id}|${pf}|${pt}`;
+    const cached = getCached<any>('channels_page_data_v7_workspace', from, to, cacheExtra);
 
     if (cached) {
       setChannelData(cached.channel.filter(row => isActiveBrand(row.product)));
@@ -125,7 +128,7 @@ export default function ChannelsPage() {
     getChannelsPageData({ from, to, prevFrom: pf, prevTo: pt })
       .then((data) => {
         if (cancelled) return;
-        setCache('channels_page_data_v6', from, to, data, `${pf}|${pt}`);
+        setCache('channels_page_data_v7_workspace', from, to, data, cacheExtra);
         setChannelData(data.channel.filter(row => isActiveBrand(row.product)));
         setAdsData(data.ads);
         setShippingData(data.shipping.filter(row => isActiveBrand(row.product)));
@@ -157,7 +160,7 @@ export default function ChannelsPage() {
       });
 
     return () => { cancelled = true; };
-  }, [dateRange.from, dateRange.to, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [activeWorkspace.id, dateRange.from, dateRange.to, activeBrands, activeBrandsError, isActiveBrand]);
 
   // ── Store → Brand lookup ──
   const storeBrandMap = useMemo(() => {

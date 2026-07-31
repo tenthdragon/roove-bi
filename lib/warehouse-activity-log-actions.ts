@@ -5,6 +5,8 @@ import {
   requireDashboardPermissionAccess,
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
+import { requireWorkspaceAccess } from '@/lib/workspace-access';
+import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 export type WarehouseActivityLogRow = {
   id: number;
@@ -45,6 +47,7 @@ type WarehouseActivityLogInput = {
   afterState?: Record<string, any> | null;
   context?: Record<string, any> | null;
   createdAt?: string | null;
+  workspaceId?: string | null;
 };
 
 function isMissingActivityLogTableError(error: any) {
@@ -98,10 +101,17 @@ export async function recordWarehouseActivityLog(input: WarehouseActivityLogInpu
   try {
     const actor = await getCurrentActivityActor();
     const svc = createServiceSupabase();
+    let workspaceId = input.workspaceId || ROOVE_WORKSPACE_ID;
+    if (!input.workspaceId && actor.id) {
+      try {
+        workspaceId = (await requireWorkspaceAccess()).workspaceId;
+      } catch {}
+    }
 
     const { error } = await svc
       .from('warehouse_activity_log')
       .insert({
+        workspace_id: workspaceId,
         scope: input.scope,
         action: input.action,
         screen: input.screen,
@@ -132,7 +142,7 @@ export async function getWarehouseActivityLogs(input?: {
   scope?: string;
   limit?: number;
 }): Promise<WarehouseActivityLogPayload> {
-  await requireDashboardTabAccess('warehouse-settings', 'Log Aktivitas Warehouse');
+  const { workspaceId } = await requireDashboardTabAccess('warehouse-settings', 'Log Aktivitas Warehouse');
   await requireDashboardPermissionAccess('whs:mapping', 'Log Aktivitas Warehouse');
 
   const svc = createServiceSupabase();
@@ -158,6 +168,7 @@ export async function getWarehouseActivityLogs(input?: {
       acted_by_name,
       created_at
     `)
+    .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
     .limit(limit);
 

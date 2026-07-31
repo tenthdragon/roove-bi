@@ -16,12 +16,12 @@ async function requireBrandAnalysisAccess(label: string) {
 }
 
 async function requireAdminSyncAccess(label: string) {
-  await requireDashboardPermissionAccess('admin:sync', label);
+  return requireDashboardPermissionAccess('admin:sync', label);
 }
 
 // ── Get Scalev integration status ──
 export async function getScalevStatus() {
-  await requireAdminSyncAccess('Admin Sync');
+  const { workspaceId } = await requireAdminSyncAccess('Admin Sync');
 
   try {
     const svc = createServiceSupabase();
@@ -30,16 +30,19 @@ export async function getScalevStatus() {
     const { count: bizWithApiKeys } = await svc
       .from('scalev_webhook_businesses')
       .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true)
       .not('api_key', 'is', null);
 
     const { count: totalOrders } = await svc
       .from('scalev_orders')
-      .select('*', { count: 'exact', head: true });
+      .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId);
 
     const { count: shippedOrders } = await svc
       .from('scalev_orders')
       .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId)
       .not('shipped_time', 'is', null);
 
     const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready', 'in_process'];
@@ -50,12 +53,14 @@ export async function getScalevStatus() {
     const { count: pendingOrders } = await svc
       .from('scalev_orders')
       .select('*', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId)
       .in('status', PRE_TERMINAL)
       .lt('pending_time', todayISO);
 
     const { data: lastSync } = await svc
       .from('scalev_sync_log')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .order('started_at', { ascending: false })
       .limit(1)
       .maybeSingle();
@@ -63,6 +68,7 @@ export async function getScalevStatus() {
     const { data: recentSyncs } = await svc
       .from('scalev_sync_log')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .order('started_at', { ascending: false })
       .limit(5);
 
@@ -103,7 +109,7 @@ export type PendingOrder = {
 };
 
 export async function getPendingOrders(): Promise<PendingOrder[]> {
-  await requireAdminSyncAccess('Admin Sync');
+  const { workspaceId } = await requireAdminSyncAccess('Admin Sync');
 
   const svc = createServiceSupabase();
   const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready', 'in_process'];
@@ -116,6 +122,7 @@ export async function getPendingOrders(): Promise<PendingOrder[]> {
   const { data: orders, error } = await svc
     .from('scalev_orders')
     .select('id, order_id, scalev_id, status, store_name, business_code, pending_time, synced_at')
+    .eq('workspace_id', workspaceId)
     .in('status', PRE_TERMINAL)
     .lt('pending_time', todayISO)
     .order('pending_time', { ascending: false });
@@ -133,6 +140,7 @@ export async function getPendingOrders(): Promise<PendingOrder[]> {
     const { data: withLines } = await svc
       .from('scalev_order_lines')
       .select('scalev_order_id')
+      .eq('workspace_id', workspaceId)
       .in('scalev_order_id', chunk)
       .limit(10000);
     (withLines || []).forEach(r => idsWithLines.add(r.scalev_order_id));

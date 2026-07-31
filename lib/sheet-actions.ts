@@ -25,23 +25,28 @@ function normalizeSpreadsheetId(input: string): string {
 }
 
 export async function fetchSheetConnections() {
-  await requireDailyAdminAccess('Admin Daily Data');
+  const { workspaceId } = await requireDailyAdminAccess('Admin Daily Data');
 
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('sheet_connections')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('is_active', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) throw toActionError(error, 'Gagal memuat koneksi spreadsheet.');
   return data;
 }
 
-async function deactivateOtherSheetConnections(targetId: string) {
+async function deactivateOtherSheetConnections(
+  workspaceId: string,
+  targetId: string,
+) {
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('sheet_connections')
     .update({ is_active: false })
+    .eq('workspace_id', workspaceId)
     .neq('id', targetId)
     .eq('is_active', true);
 
@@ -51,7 +56,7 @@ async function deactivateOtherSheetConnections(targetId: string) {
 }
 
 export async function addSheetConnection(spreadsheetId: string, label: string) {
-  const { profile } = await requireDailyAdminAccess('Admin Daily Data');
+  const { profile, workspaceId } = await requireDailyAdminAccess('Admin Daily Data');
   const normalizedSpreadsheetId = normalizeSpreadsheetId(spreadsheetId);
   const normalizedLabel = String(label || '').trim();
 
@@ -72,6 +77,7 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
   const { data: existing, error: existingError } = await svc
     .from('sheet_connections')
     .select('id, spreadsheet_id, label, is_active')
+    .eq('workspace_id', workspaceId)
     .eq('spreadsheet_id', normalizedSpreadsheetId)
     .maybeSingle();
   if (existingError) throw toActionError(existingError, 'Gagal memeriksa spreadsheet yang sudah terhubung.');
@@ -79,6 +85,7 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
   const { data: activeConnection, error: activeConnectionError } = await svc
     .from('sheet_connections')
     .select('id, spreadsheet_id')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .order('created_at', { ascending: false })
     .limit(1)
@@ -93,10 +100,11 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
         is_active: true,
       })
       .eq('id', existing.id)
+      .eq('workspace_id', workspaceId)
       .select()
       .single();
     if (updateError) throw toActionError(updateError, 'Gagal memperbarui koneksi spreadsheet.');
-    await deactivateOtherSheetConnections(existing.id);
+    await deactivateOtherSheetConnections(workspaceId, existing.id);
     return updated;
   }
 
@@ -109,17 +117,19 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
         is_active: true,
       })
       .eq('id', activeConnection.id)
+      .eq('workspace_id', workspaceId)
       .select()
       .single();
 
     if (updateError) throw toActionError(updateError, 'Gagal memperbarui spreadsheet aktif.');
-    await deactivateOtherSheetConnections(activeConnection.id);
+    await deactivateOtherSheetConnections(workspaceId, activeConnection.id);
     return updated;
   }
 
   const { data, error } = await svc
     .from('sheet_connections')
     .insert({
+      workspace_id: workspaceId,
       spreadsheet_id: normalizedSpreadsheetId,
       label: normalizedLabel,
       is_active: true,
@@ -129,33 +139,35 @@ export async function addSheetConnection(spreadsheetId: string, label: string) {
     .single();
 
   if (error) throw toActionError(error, 'Gagal menambahkan koneksi spreadsheet.');
-  await deactivateOtherSheetConnections(data.id);
+  await deactivateOtherSheetConnections(workspaceId, data.id);
   return data;
 }
 
 export async function removeSheetConnection(connectionId: string) {
-  await requireDailyAdminAccess('Admin Daily Data');
+  const { workspaceId } = await requireDailyAdminAccess('Admin Daily Data');
 
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('sheet_connections')
     .delete()
-    .eq('id', connectionId);
+    .eq('id', connectionId)
+    .eq('workspace_id', workspaceId);
   if (error) throw toActionError(error, 'Gagal menghapus koneksi spreadsheet.');
   return { success: true };
 }
 
 export async function toggleSheetConnection(connectionId: string, isActive: boolean) {
-  await requireDailyAdminAccess('Admin Daily Data');
+  const { workspaceId } = await requireDailyAdminAccess('Admin Daily Data');
 
   const svc = createServiceSupabase();
   if (isActive) {
-    await deactivateOtherSheetConnections(connectionId);
+    await deactivateOtherSheetConnections(workspaceId, connectionId);
   }
   const { error } = await svc
     .from('sheet_connections')
     .update({ is_active: isActive })
-    .eq('id', connectionId);
+    .eq('id', connectionId)
+    .eq('workspace_id', workspaceId);
   if (error) throw toActionError(error, 'Gagal mengubah status koneksi spreadsheet.');
   return { success: true };
 }

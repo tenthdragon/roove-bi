@@ -120,9 +120,13 @@ function isStatementTimeoutError(error: unknown) {
   return /statement timeout|canceling statement due to statement timeout/i.test(error.message);
 }
 
-async function fetchShippingFeeChunk(from: string, to: string) {
+async function fetchShippingFeeChunk(workspaceId: string, from: string, to: string) {
   const svc = createServiceSupabase();
-  const result = await svc.rpc('get_daily_shipping_charge_data', { p_from: from, p_to: to });
+  const result = await svc.rpc('get_workspace_daily_shipping_charge_data', {
+    p_workspace_id: workspaceId,
+    p_from: from,
+    p_to: to,
+  });
 
   if (result.error) {
     throw new Error(result.error.message);
@@ -131,13 +135,17 @@ async function fetchShippingFeeChunk(from: string, to: string) {
   return (result.data ?? []) as ShippingFeeRow[];
 }
 
-async function fetchShippingFeeRangeUncached(from: string, to: string): Promise<ShippingFeeRow[]> {
+async function fetchShippingFeeRangeUncached(
+  workspaceId: string,
+  from: string,
+  to: string,
+): Promise<ShippingFeeRow[]> {
   const totalDays = countDaysInclusive(from, to);
   if (totalDays <= 0) return [];
 
   if (totalDays <= DIRECT_QUERY_DAY_THRESHOLD) {
     try {
-      return await fetchShippingFeeChunk(from, to);
+      return await fetchShippingFeeChunk(workspaceId, from, to);
     } catch (error) {
       if (!isStatementTimeoutError(error) || totalDays === 1) throw error;
     }
@@ -148,21 +156,27 @@ async function fetchShippingFeeRangeUncached(from: string, to: string): Promise<
   const chunkRows = await runWithConcurrency(
     chunks,
     CHUNK_CONCURRENCY,
-    async (chunk) => fetchShippingFeeRangeUncached(chunk.from, chunk.to),
+    async (chunk) =>
+      fetchShippingFeeRangeUncached(workspaceId, chunk.from, chunk.to),
   );
 
   return mergeShippingFeeRows(chunkRows);
 }
 
 const getCachedShippingFeeRange = unstable_cache(
-  async (from: string, to: string) => fetchShippingFeeRangeUncached(from, to),
-  ['shipping-fee-range-v1'],
+  async (workspaceId: string, from: string, to: string) =>
+    fetchShippingFeeRangeUncached(workspaceId, from, to),
+  ['shipping-fee-range-v2-workspace'],
   {
     revalidate: 300,
     tags: ['shipping-fee-range'],
   },
 );
 
-export async function getShippingFeeRange(from: string, to: string) {
-  return getCachedShippingFeeRange(from, to);
+export async function getShippingFeeRange(
+  workspaceId: string,
+  from: string,
+  to: string,
+) {
+  return getCachedShippingFeeRange(workspaceId, from, to);
 }

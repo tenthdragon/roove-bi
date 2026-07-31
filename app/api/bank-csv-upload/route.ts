@@ -475,9 +475,12 @@ export async function POST(req: NextRequest) {
     if (rateLimitError) return rateLimitError;
 
     let uploadedById: string | null = null;
+    let workspaceId: string;
     try {
-      const { profile } = await requireDashboardPermissionAccess('admin:financial', 'Admin Financial');
+      const { profile, workspaceId: authorizedWorkspaceId } =
+        await requireDashboardPermissionAccess('admin:financial', 'Admin Financial');
       uploadedById = profile.id;
+      workspaceId = authorizedWorkspaceId;
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
       return NextResponse.json({ error: error.message }, { status });
@@ -525,6 +528,7 @@ export async function POST(req: NextRequest) {
     const { data: session, error: sessionErr } = await supabase
       .from('bank_upload_sessions')
       .upsert({
+        workspace_id:      workspaceId,
         bank:              parsed.bank,
         period_label:      parsed.period_label,
         period_start:      parsed.period_start || null,
@@ -537,7 +541,7 @@ export async function POST(req: NextRequest) {
         transaction_count: parsed.transactions.length,
         uploaded_at:       new Date().toISOString(),
         uploaded_by:       uploadedById,
-      }, { onConflict: 'bank,account_no,period_label' })
+      }, { onConflict: 'workspace_id,bank,account_no,period_label' })
       .select('id')
       .single();
 
@@ -546,12 +550,17 @@ export async function POST(req: NextRequest) {
     const sessionId = session.id;
 
     // Delete existing transactions for this session
-    await supabase.from('bank_transactions').delete().eq('session_id', sessionId);
+    await supabase
+      .from('bank_transactions')
+      .delete()
+      .eq('session_id', sessionId)
+      .eq('workspace_id', workspaceId);
 
     // Batch insert (500 rows at a time) — auto-tag each transaction
     const rows = parsed.transactions.map(t => {
       const tag = classifyTransaction(t.description, t.credit_amount, t.debit_amount);
       return {
+        workspace_id:     workspaceId,
         session_id:       sessionId,
         bank:             parsed.bank,
         period_label:     parsed.period_label,

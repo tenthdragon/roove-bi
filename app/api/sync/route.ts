@@ -3,6 +3,7 @@ import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { runDailyAdsSync } from '@/lib/daily-ads-sync-runner';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
+import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 export const maxDuration = 60;
 
@@ -13,6 +14,7 @@ export async function POST(req: NextRequest) {
   const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const mode = isCron ? 'cron_post' : 'dashboard_post';
   let requestedBy: string | null = null;
+  let workspaceId = ROOVE_WORKSPACE_ID;
 
   logRouteEvent({
     route: '/api/sync',
@@ -40,8 +42,10 @@ export async function POST(req: NextRequest) {
       if (rateLimitError) return rateLimitError;
 
       try {
-        const { profile } = await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
+        const access = await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
+        const { profile } = access;
         requestedBy = profile.id;
+        workspaceId = access.workspaceId;
       } catch (err: any) {
         const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
         logRouteEvent({
@@ -57,7 +61,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const result = await runDailyAdsSync();
+    const result = await runDailyAdsSync(workspaceId);
     const status = result.failed === 0 ? 'success' : result.synced > 0 ? 'partial' : 'failed';
 
     logRouteEvent({

@@ -37,6 +37,7 @@ import {
   resolveWarehouseOrigin,
   type WarehouseBusinessDirectoryRow,
 } from './warehouse-domain-helpers';
+import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 // ============================================================
 // AUTH HELPER
@@ -66,40 +67,80 @@ async function getCurrentUserName(): Promise<string> {
 }
 
 async function requireWarehouseAccess(label: string = 'Warehouse') {
-  await requireDashboardTabAccess('warehouse', label);
+  const access = await requireDashboardTabAccess('warehouse', label);
+  if (access.workspaceId !== ROOVE_WORKSPACE_ID) {
+    throw new Error(
+      'Fitur warehouse legacy tidak tersedia untuk workspace ini. Gunakan halaman inventory workspace.',
+    );
+  }
+  return access;
 }
 
 async function requireWarehousePermission(permissionKey: string, label: string) {
-  await requireWarehouseAccess(label);
+  const access = await requireWarehouseAccess(label);
   await requireDashboardPermissionAccess(permissionKey, label);
+  return access;
 }
 
 async function requireWarehouseSettingsPermission(permissionKey: string, label: string) {
-  await requireDashboardTabAccess('warehouse-settings', label);
+  const access = await requireDashboardTabAccess('warehouse-settings', label);
   await requireDashboardPermissionAccess(permissionKey, label);
+  return access;
 }
 
 async function requireAnyWarehouseSettingsPermission(permissionKeys: string[], label: string) {
-  await requireDashboardTabAccess('warehouse-settings', label);
+  const access = await requireDashboardTabAccess('warehouse-settings', label);
   await requireAnyDashboardPermissionAccess(permissionKeys, label);
+  return access;
 }
 
 async function requireWarehouseReadForSharedProducts(label: string) {
   try {
-    await requireAnyDashboardTabAccess(['warehouse', 'ppic'], label);
-    return;
+    return await requireAnyDashboardTabAccess(['warehouse', 'ppic'], label);
   } catch {}
 
-  await requireAnyWarehouseSettingsPermission(['whs:products', 'whs:mapping', 'whs:warehouses'], label);
+  return requireAnyWarehouseSettingsPermission(['whs:products', 'whs:mapping', 'whs:warehouses'], label);
 }
 
 async function requireVendorReadAccess(label: string) {
   try {
-    await requireDashboardTabAccess('ppic', label);
-    return;
+    return await requireDashboardTabAccess('ppic', label);
   } catch {}
 
-  await requireAnyWarehouseSettingsPermission(['whs:vendors', 'whs:products'], label);
+  return requireAnyWarehouseSettingsPermission(['whs:vendors', 'whs:products'], label);
+}
+
+async function assertWarehouseProductOwnership(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  productId: number,
+) {
+  const { data, error } = await svc
+    .from('warehouse_products')
+    .select('id')
+    .eq('id', productId)
+    .eq('owner_workspace_id', workspaceId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error('Produk gudang tidak ditemukan di workspace aktif.');
+}
+
+async function assertWarehouseBatchOwnership(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  batchId: number | null | undefined,
+) {
+  if (!batchId) return;
+  const { data, error } = await svc
+    .from('warehouse_batches')
+    .select('id')
+    .eq('id', batchId)
+    .eq('workspace_id', workspaceId)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error('Batch gudang tidak ditemukan di workspace aktif.');
 }
 
 function getWarehouseMutationErrorMessage(error: unknown, fallback: string) {
@@ -560,10 +601,12 @@ function formatJakartaDateValue(value: string) {
 
 async function loadWarehouseGoLiveAt(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string = ROOVE_WORKSPACE_ID,
 ) {
   const { data, error } = await svc
     .from('warehouse_stock_opname_sessions')
     .select('completed_at')
+    .eq('workspace_id', workspaceId)
     .eq('status', 'completed')
     .eq('opname_date', WAREHOUSE_GO_LIVE_BASELINE_DATE)
     .not('completed_at', 'is', null)
@@ -604,9 +647,9 @@ function isScalevOrderOnOrAfterWarehouseGoLive(
 }
 
 export async function getWarehouseGoLiveState() {
-  await requireWarehouseAccess('Warehouse');
+  const { workspaceId } = await requireWarehouseAccess('Warehouse');
   const svc = createServiceSupabase();
-  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  const goLiveAt = await loadWarehouseGoLiveAt(svc, workspaceId);
   return {
     baselineDate: WAREHOUSE_GO_LIVE_BASELINE_DATE,
     baselineLabel: WAREHOUSE_GO_LIVE_BASELINE_LABEL,
@@ -849,6 +892,7 @@ async function loadScalevOrderWarehouseSnapshot(
   svc: ReturnType<typeof createServiceSupabase>,
   orderId: string,
   scalevOrderDbId?: number | null,
+  workspaceId = ROOVE_WORKSPACE_ID,
 ): Promise<ScalevOrderWarehouseSnapshot | null> {
   if (scalevOrderDbId != null) {
     const { data, error } = await svc
@@ -869,6 +913,7 @@ async function loadScalevOrderWarehouseSnapshot(
         completed_time
       `)
       .eq('id', scalevOrderDbId)
+      .eq('workspace_id', workspaceId)
       .maybeSingle();
     if (error) throw error;
     if (data) return data as ScalevOrderWarehouseSnapshot;
@@ -892,6 +937,7 @@ async function loadScalevOrderWarehouseSnapshot(
       completed_time
     `)
     .eq('order_id', orderId)
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (error) throw error;
   return (data as ScalevOrderWarehouseSnapshot | null) || null;
@@ -2943,6 +2989,7 @@ async function fetchDailyMovementRows(
   options?: {
     fromInclusive?: string | null;
     toExclusive?: string | null;
+    workspaceId?: string | null;
   },
 ) {
   const dayStart = options?.fromInclusive || `${date}T00:00:00+07:00`;
@@ -2959,6 +3006,7 @@ async function fetchDailyMovementRows(
         quantity,
         warehouse_products!inner(name, category, entity)
       `)
+      .eq('workspace_id', options?.workspaceId || ROOVE_WORKSPACE_ID)
       .gte('created_at', dayStart)
       .lt('created_at', dayEnd)
       .range(offset, offset + 999);
@@ -3178,7 +3226,12 @@ export async function recordStockIn(
   referenceId?: string,
   notes?: string,
 ) {
-  await requireWarehousePermission('wh:stock_masuk', 'Stock Masuk');
+  const { workspaceId } = await requireWarehousePermission('wh:stock_masuk', 'Stock Masuk');
+  const svc = createServiceSupabase();
+  await Promise.all([
+    assertWarehouseProductOwnership(svc, workspaceId, productId),
+    assertWarehouseBatchOwnership(svc, workspaceId, batchId),
+  ]);
   return recordStockInInternal(productId, batchId, quantity, referenceType, referenceId, notes);
 }
 
@@ -3194,9 +3247,13 @@ export async function recordStockOut(
   referenceId?: string,
   notes?: string,
 ) {
-  await requireWarehousePermission('wh:stock_keluar', 'Stock Keluar');
+  const { workspaceId } = await requireWarehousePermission('wh:stock_keluar', 'Stock Keluar');
   if (quantity <= 0) throw new Error('Stock OUT quantity must be positive');
   const svc = createServiceSupabase();
+  await Promise.all([
+    assertWarehouseProductOwnership(svc, workspaceId, productId),
+    assertWarehouseBatchOwnership(svc, workspaceId, batchId),
+  ]);
   const userId = await getCurrentUserId();
 
   // If no batch specified, use FIFO deduction
@@ -3253,11 +3310,15 @@ export async function recordStockRTS(
   resiNumber: string,
   notes?: string,
 ) {
-  await requireWarehousePermission('wh:stock_masuk', 'Stock RTS');
+  const { workspaceId } = await requireWarehousePermission('wh:stock_masuk', 'Stock RTS');
   if (quantity <= 0) throw new Error('RTS quantity must be positive');
   if (!resiNumber?.trim()) throw new Error('Nomor resi wajib diisi untuk RTS');
   if (!batchId) throw new Error('Batch wajib dipilih untuk RTS');
   const svc = createServiceSupabase();
+  await Promise.all([
+    assertWarehouseProductOwnership(svc, workspaceId, productId),
+    assertWarehouseBatchOwnership(svc, workspaceId, batchId),
+  ]);
   const userId = await getCurrentUserId();
 
   await incrementBatchQuantityOrThrow(svc, batchId, productId, quantity);
@@ -3396,7 +3457,12 @@ export async function recordStockAdjust(
   adjustmentQty: number,
   notes?: string,
 ) {
-  await requireWarehouseAccess('Adjust Stock');
+  const { workspaceId } = await requireWarehouseAccess('Adjust Stock');
+  const svc = createServiceSupabase();
+  await Promise.all([
+    assertWarehouseProductOwnership(svc, workspaceId, productId),
+    assertWarehouseBatchOwnership(svc, workspaceId, batchId),
+  ]);
   return recordStockAdjustInternal(productId, batchId, adjustmentQty, notes);
 }
 
@@ -3414,7 +3480,7 @@ export async function recordTransfer(
   toWarehouse: string = 'BTN',
   notes?: string,
 ) {
-  await requireWarehousePermission('wh:transfer', 'Transfer Stock');
+  const { workspaceId } = await requireWarehousePermission('wh:transfer', 'Transfer Stock');
   if (quantity <= 0) throw new Error('Transfer quantity must be positive');
   const svc = createServiceSupabase();
   const userId = await getCurrentUserId();
@@ -3423,6 +3489,7 @@ export async function recordTransfer(
     .from('warehouse_products')
     .select('id, name, warehouse, entity')
     .eq('id', productId)
+    .eq('owner_workspace_id', workspaceId)
     .single();
   if (sourceErr || !sourceProduct) throw new Error('Produk sumber tidak ditemukan');
 
@@ -3432,6 +3499,7 @@ export async function recordTransfer(
     .eq('name', sourceProduct.name)
     .eq('entity', toEntity)
     .eq('warehouse', toWarehouse)
+    .eq('owner_workspace_id', workspaceId)
     .maybeSingle();
   if (targetErr) throw targetErr;
   if (!targetProduct) {
@@ -3442,6 +3510,7 @@ export async function recordTransfer(
   const { data: transfer, error: tErr } = await svc
     .from('warehouse_transfers')
     .insert({
+      workspace_id: workspaceId,
       from_entity: fromEntity,
       to_entity: toEntity,
       from_warehouse: fromWarehouse,
@@ -3529,7 +3598,7 @@ export async function recordConversion(
   targetExpiredDate?: string | null,
   notes?: string,
 ) {
-  await requireWarehousePermission('wh:konversi', 'Konversi Produk');
+  const { workspaceId } = await requireWarehousePermission('wh:konversi', 'Konversi Produk');
   if (sources.length === 0) throw new Error('At least one source required');
   if (targetQty <= 0) throw new Error('Target quantity must be positive');
   for (const s of sources) {
@@ -3538,6 +3607,13 @@ export async function recordConversion(
   }
 
   const svc = createServiceSupabase();
+  await Promise.all([
+    assertWarehouseProductOwnership(svc, workspaceId, targetProductId),
+    ...sources.map(async (source) => {
+      await assertWarehouseProductOwnership(svc, workspaceId, source.productId);
+      await assertWarehouseBatchOwnership(svc, workspaceId, source.batchId);
+    }),
+  ]);
   const userId = await getCurrentUserId();
   const refId = `conv-${Date.now()}`;
 
@@ -3599,14 +3675,17 @@ export async function recordConversion(
 async function loadWarehouseProductsByIds(
   svc: ReturnType<typeof createServiceSupabase>,
   productIds: number[],
+  workspaceId?: string,
 ) {
   const uniqueIds = Array.from(new Set(productIds.filter(Boolean)));
   if (uniqueIds.length === 0) return new Map<number, any>();
 
-  const { data, error } = await svc
+  let query = svc
     .from('warehouse_products')
     .select('id, name, sku, category, unit, price_list, reorder_threshold, entity, warehouse, scalev_product_names, is_active, hpp, vendor, vendor_id, brand_id')
     .in('id', uniqueIds);
+  if (workspaceId) query = query.eq('owner_workspace_id', workspaceId);
+  const { data, error } = await query;
   if (error) throw error;
 
   return new Map((data || []).map((row: any) => [Number(row.id), row]));
@@ -3616,6 +3695,7 @@ async function resolveOrCreateStockReclassTargetProduct(
   svc: ReturnType<typeof createServiceSupabase>,
   sourceProduct: any,
   targetCategory: string,
+  workspaceId: string,
 ) {
   const normalizedTargetCategory = String(targetCategory || '').trim().toLowerCase();
   const normalizedSourceCategory = String(sourceProduct?.category || '').trim().toLowerCase();
@@ -3637,6 +3717,7 @@ async function resolveOrCreateStockReclassTargetProduct(
     .eq('entity', sourceProduct.entity)
     .eq('warehouse', sourceProduct.warehouse)
     .eq('category', normalizedTargetCategory)
+    .eq('owner_workspace_id', workspaceId)
     .maybeSingle();
   if (existingErr) throw existingErr;
   if (existing) {
@@ -3658,6 +3739,7 @@ async function resolveOrCreateStockReclassTargetProduct(
     vendor: sourceProduct.vendor || null,
     vendor_id: sourceProduct.vendor_id || null,
     brand_id: sourceProduct.brand_id || null,
+    owner_workspace_id: workspaceId,
   };
 
   const { data: created, error: createErr } = await svc
@@ -3675,6 +3757,7 @@ async function resolveOrCreateStockReclassTargetProduct(
       .eq('entity', sourceProduct.entity)
       .eq('warehouse', sourceProduct.warehouse)
       .eq('category', normalizedTargetCategory)
+      .eq('owner_workspace_id', workspaceId)
       .maybeSingle();
     if (existingAfterRaceErr) throw existingAfterRaceErr;
     if (!existingAfterRace) throw createErr;
@@ -3954,12 +4037,13 @@ async function applyStockReclassRequestInternal(
 }
 
 export async function getStockReclassRequests(status?: WarehouseStockReclassStatus) {
-  await requireWarehouseAccess('Reklasifikasi Stock');
+  const { workspaceId } = await requireWarehouseAccess('Reklasifikasi Stock');
   const svc = createServiceSupabase();
 
   let query = svc
     .from('warehouse_stock_reclass_requests')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('requested_at', { ascending: false })
     .limit(200);
 
@@ -3983,13 +4067,13 @@ export async function getStockReclassRequests(status?: WarehouseStockReclassStat
 
   const [productsRes, profilesRes, batchesRes, operationalProfilesRes] = await Promise.all([
     productIds.length > 0
-      ? svc.from('warehouse_products').select('id, name, category, entity, warehouse').in('id', Array.from(new Set(productIds)))
+      ? svc.from('warehouse_products').select('id, name, category, entity, warehouse').eq('owner_workspace_id', workspaceId).in('id', Array.from(new Set(productIds)))
       : Promise.resolve({ data: [], error: null } as any),
     userIds.length > 0
       ? svc.from('profiles').select('id, full_name, email').in('id', Array.from(new Set(userIds)))
       : Promise.resolve({ data: [], error: null } as any),
     batchIds.length > 0
-      ? svc.from('warehouse_batches').select('id, batch_code, expired_date').in('id', Array.from(new Set(batchIds)))
+      ? svc.from('warehouse_batches').select('id, batch_code, expired_date').eq('workspace_id', workspaceId).in('id', Array.from(new Set(batchIds)))
       : Promise.resolve({ data: [], error: null } as any),
     productIds.length > 0
       ? svc.from('v_warehouse_product_operational_profiles').select('*').in('product_id', Array.from(new Set(productIds)))
@@ -4056,7 +4140,7 @@ export async function getScalevAttributionProfiles(scalevProductNames?: string[]
 }
 
 export async function createStockReclassRequest(input: WarehouseStockReclassRequestInput) {
-  await requireWarehousePermission('wh:reclass_request', 'Reklasifikasi Stock');
+  const { workspaceId } = await requireWarehousePermission('wh:reclass_request', 'Reklasifikasi Stock');
 
   const quantity = Number(input.quantity || 0);
   if (quantity <= 0) throw new Error('Quantity harus lebih besar dari 0.');
@@ -4066,7 +4150,11 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
   const userId = await getCurrentUserId();
   if (!userId) throw new Error('Pengguna tidak ditemukan.');
 
-  const products = await loadWarehouseProductsByIds(svc, [input.sourceProductId, input.targetProductId || 0]);
+  const products = await loadWarehouseProductsByIds(
+    svc,
+    [input.sourceProductId, input.targetProductId || 0],
+    workspaceId,
+  );
   const sourceProduct = products.get(Number(input.sourceProductId));
   if (!sourceProduct) throw new Error('Produk sumber tidak ditemukan.');
 
@@ -4084,7 +4172,7 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
     if (!targetCategory) {
       throw new Error('Kategori tujuan reklasifikasi wajib dipilih.');
     }
-    const resolved = await resolveOrCreateStockReclassTargetProduct(svc, sourceProduct, targetCategory);
+    const resolved = await resolveOrCreateStockReclassTargetProduct(svc, sourceProduct, targetCategory, workspaceId);
     targetProduct = resolved.product;
     targetProductAutoCreated = resolved.autoCreated;
     validateStockReclassProducts(sourceProduct, targetProduct);
@@ -4107,6 +4195,7 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
   const { data, error } = await svc
     .from('warehouse_stock_reclass_requests')
     .insert({
+      workspace_id: workspaceId,
       source_warehouse_product_id: Number(sourceProduct.id),
       source_batch_id: input.sourceBatchId ? Number(input.sourceBatchId) : null,
       target_warehouse_product_id: Number(targetProduct.id),
@@ -4168,9 +4257,13 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
 async function approveStockReclassRequestAsActor(
   requestId: number,
   actor: { id: string; displayName: string },
+  workspaceId?: string,
 ) {
   const svc = createServiceSupabase();
   const { request, sourceProduct, targetProduct } = await loadStockReclassRequestWithProductsOrThrow(svc, requestId);
+  if (workspaceId && request.workspace_id !== workspaceId) {
+    throw new Error('Request reklasifikasi tidak ditemukan di workspace aktif.');
+  }
   if (request.status !== 'requested') {
     throw new Error('Request reklasifikasi ini tidak siap di-approve.');
   }
@@ -4227,9 +4320,13 @@ async function rejectStockReclassRequestAsActor(
   requestId: number,
   actor: { id: string; displayName: string },
   rejectionReason?: string | null,
+  workspaceId?: string,
 ) {
   const svc = createServiceSupabase();
   const { request } = await loadStockReclassRequestWithProductsOrThrow(svc, requestId);
+  if (workspaceId && request.workspace_id !== workspaceId) {
+    throw new Error('Request reklasifikasi tidak ditemukan di workspace aktif.');
+  }
   if (request.status !== 'requested') {
     throw new Error('Request reklasifikasi ini tidak bisa ditolak.');
   }
@@ -4269,25 +4366,25 @@ async function rejectStockReclassRequestAsActor(
 }
 
 export async function approveStockReclassRequest(requestId: number) {
-  await requireWarehousePermission('wh:reclass_approve', 'Approve Reklasifikasi Stock');
+  const { workspaceId } = await requireWarehousePermission('wh:reclass_approve', 'Approve Reklasifikasi Stock');
   const userId = await getCurrentUserId();
   if (!userId) throw new Error('Pengguna tidak ditemukan.');
   const approverName = await getCurrentUserName();
   return approveStockReclassRequestAsActor(requestId, {
     id: userId,
     displayName: approverName,
-  });
+  }, workspaceId);
 }
 
 export async function rejectStockReclassRequest(requestId: number, rejectionReason?: string | null) {
-  await requireWarehousePermission('wh:reclass_approve', 'Reject Reklasifikasi Stock');
+  const { workspaceId } = await requireWarehousePermission('wh:reclass_approve', 'Reject Reklasifikasi Stock');
   const userId = await getCurrentUserId();
   if (!userId) throw new Error('Pengguna tidak ditemukan.');
   const rejectorName = await getCurrentUserName();
   return rejectStockReclassRequestAsActor(requestId, {
     id: userId,
     displayName: rejectorName,
-  }, rejectionReason);
+  }, rejectionReason, workspaceId);
 }
 
 export async function approveStockReclassRequestViaTelegram(requestId: number, telegramChatId: string) {
@@ -4322,9 +4419,13 @@ export async function recordDispose(
   quantity: number,
   reason?: string,
 ) {
-  await requireWarehousePermission('wh:dispose', 'Dispose Stock');
+  const { workspaceId } = await requireWarehousePermission('wh:dispose', 'Dispose Stock');
   if (quantity <= 0) throw new Error('Dispose quantity must be positive');
   const svc = createServiceSupabase();
+  await Promise.all([
+    assertWarehouseProductOwnership(svc, workspaceId, productId),
+    assertWarehouseBatchOwnership(svc, workspaceId, batchId),
+  ]);
   const userId = await getCurrentUserId();
 
   if (batchId) {
@@ -4407,7 +4508,9 @@ export async function createBatch(
   initialQty: number = 0,
   notes?: string,
 ) {
-  await requireWarehousePermission('wh:stock_masuk', 'Batch Stock');
+  const { workspaceId } = await requireWarehousePermission('wh:stock_masuk', 'Batch Stock');
+  const svc = createServiceSupabase();
+  await assertWarehouseProductOwnership(svc, workspaceId, productId);
   return createBatchInternal(productId, batchCode, expiredDate, initialQty, notes);
 }
 
@@ -4422,9 +4525,12 @@ export async function getProductsFull(filters?: {
   brand_id?: number;
   includeInactive?: boolean;
 }) {
-  await requireAnyWarehouseSettingsPermission(['whs:products', 'whs:warehouses'], 'Master Produk Gudang');
+  const { workspaceId } = await requireAnyWarehouseSettingsPermission(['whs:products', 'whs:warehouses'], 'Master Produk Gudang');
   const svc = createServiceSupabase();
-  let query = svc.from('warehouse_products').select('*, brands(id, name), warehouse_vendors(id, name)');
+  let query = svc
+    .from('warehouse_products')
+    .select('*, brands(id, name), warehouse_vendors(id, name)')
+    .eq('owner_workspace_id', workspaceId);
 
   if (filters?.category) query = query.eq('category', filters.category);
   if (filters?.entity) query = query.eq('entity', filters.entity);
@@ -4442,11 +4548,11 @@ export async function createProduct(product: {
   price_list?: number; hpp?: number; vendor_id?: number | null; brand_id?: number;
   reorder_threshold?: number; scalev_product_names?: string[];
 }) {
-  await requireWarehouseSettingsPermission('whs:products', 'Master Produk Gudang');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:products', 'Master Produk Gudang');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_products')
-    .insert({ ...product, is_active: true })
+    .insert({ ...product, owner_workspace_id: workspaceId, is_active: true })
     .select()
     .single();
   if (error) throw error;
@@ -4498,12 +4604,13 @@ export async function createProduct(product: {
 }
 
 export async function updateProduct(id: number, updates: Record<string, any>) {
-  await requireWarehouseSettingsPermission('whs:products', 'Master Produk Gudang');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:products', 'Master Produk Gudang');
   const svc = createServiceSupabase();
   const { data: beforeRow, error: beforeError } = await svc
     .from('warehouse_products')
     .select('id, name, sku, category, unit, entity, warehouse, price_list, hpp, vendor_id, brand_id, reorder_threshold, scalev_product_names, is_active')
     .eq('id', id)
+    .eq('owner_workspace_id', workspaceId)
     .maybeSingle();
   if (beforeError) throw beforeError;
   if (!beforeRow) throw new Error('Produk gudang tidak ditemukan.');
@@ -4511,13 +4618,15 @@ export async function updateProduct(id: number, updates: Record<string, any>) {
   const { error } = await svc
     .from('warehouse_products')
     .update(updates)
-    .eq('id', id);
+    .eq('id', id)
+    .eq('owner_workspace_id', workspaceId);
   if (error) throw error;
 
   const { data: afterRow, error: afterError } = await svc
     .from('warehouse_products')
     .select('id, name, sku, category, unit, entity, warehouse, price_list, hpp, vendor_id, brand_id, reorder_threshold, scalev_product_names, is_active')
     .eq('id', id)
+    .eq('owner_workspace_id', workspaceId)
     .maybeSingle();
   if (afterError) throw afterError;
   if (!afterRow) return;
@@ -4585,12 +4694,13 @@ export async function updateProduct(id: number, updates: Record<string, any>) {
 }
 
 export async function deactivateProduct(id: number) {
-  await requireWarehouseSettingsPermission('whs:products', 'Master Produk Gudang');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:products', 'Master Produk Gudang');
   const svc = createServiceSupabase();
   const { data: beforeRow, error: beforeError } = await svc
     .from('warehouse_products')
     .select('id, name, category, unit, entity, warehouse, is_active')
     .eq('id', id)
+    .eq('owner_workspace_id', workspaceId)
     .maybeSingle();
   if (beforeError) throw beforeError;
   if (!beforeRow) throw new Error('Produk gudang tidak ditemukan.');
@@ -4598,7 +4708,8 @@ export async function deactivateProduct(id: number) {
   const { error } = await svc
     .from('warehouse_products')
     .update({ is_active: false })
-    .eq('id', id);
+    .eq('id', id)
+    .eq('owner_workspace_id', workspaceId);
   if (error) throw error;
 
   await recordWarehouseActivityLog({
@@ -4636,9 +4747,12 @@ export async function getProducts(filters?: {
   warehouse?: string;
   activeOnly?: boolean;
 }) {
-  await requireWarehouseReadForSharedProducts('Produk Gudang');
+  const { workspaceId } = await requireWarehouseReadForSharedProducts('Produk Gudang');
   const svc = createServiceSupabase();
-  let query = svc.from('warehouse_products').select('*');
+  let query = svc
+    .from('warehouse_products')
+    .select('*')
+    .eq('owner_workspace_id', workspaceId);
 
   if (filters?.category) query = query.eq('category', filters.category);
   if (filters?.entity) query = query.eq('entity', filters.entity);
@@ -4651,9 +4765,9 @@ export async function getProducts(filters?: {
 }
 
 export async function getStockBalance(productId?: number) {
-  await requireWarehouseAccess('Saldo Stock');
+  const { workspaceId } = await requireWarehouseAccess('Saldo Stock');
   const svc = createServiceSupabase();
-  let query = svc.from('v_warehouse_stock_balance').select('*');
+  let query = svc.from('v_warehouse_stock_balance').select('*').eq('workspace_id', workspaceId);
   if (productId) query = query.eq('product_id', productId);
   const { data, error } = await query.order('category').order('product_name');
   if (error) throw error;
@@ -4661,12 +4775,13 @@ export async function getStockBalance(productId?: number) {
 }
 
 export async function getWipEventHistory(limit: number = 100) {
-  await requireWarehouseAccess('Work in Process');
+  const { workspaceId } = await requireWarehouseAccess('Work in Process');
   const svc = createServiceSupabase();
 
   const { data: products, error: productError } = await svc
     .from('warehouse_products')
     .select('id, name, category, entity, warehouse, unit')
+    .eq('owner_workspace_id', workspaceId)
     .in('category', ['wip', 'wip_material'])
     .eq('is_active', true)
     .order('category')
@@ -4696,6 +4811,7 @@ export async function getWipEventHistory(limit: number = 100) {
     svc
       .from('warehouse_stock_ledger')
       .select(ledgerSelect)
+      .eq('workspace_id', workspaceId)
       .in('warehouse_product_id', productIds)
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
@@ -4703,6 +4819,7 @@ export async function getWipEventHistory(limit: number = 100) {
     svc
       .from('warehouse_stock_ledger')
       .select(ledgerSelect)
+      .eq('workspace_id', workspaceId)
       .like('reference_id', 'conv-%')
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
@@ -4839,9 +4956,9 @@ export async function getWipEventHistory(limit: number = 100) {
 }
 
 export async function getStockByBatch(productId?: number) {
-  await requireWarehouseAccess('Batch & Expiry');
+  const { workspaceId } = await requireWarehouseAccess('Batch & Expiry');
   const svc = createServiceSupabase();
-  let query = svc.from('v_warehouse_batch_stock').select('*');
+  let query = svc.from('v_warehouse_batch_stock').select('*').eq('workspace_id', workspaceId);
   if (productId) query = query.eq('product_id', productId);
   const { data, error } = await query.order('expired_date', { ascending: true, nullsFirst: false });
   if (error) throw error;
@@ -4856,7 +4973,7 @@ export async function getLedgerHistory(filters?: {
   limit?: number;
   shipmentGoLiveAt?: string | null;
 }) {
-  await requireWarehouseAccess('Movement Log');
+  const { workspaceId } = await requireWarehouseAccess('Movement Log');
   const svc = createServiceSupabase();
   const selectClause = `
     id,
@@ -4882,7 +4999,8 @@ export async function getLedgerHistory(filters?: {
   while (rows.length < requestedLimit) {
     let query = svc
       .from('warehouse_stock_ledger')
-      .select(selectClause);
+      .select(selectClause)
+      .eq('workspace_id', workspaceId);
 
     if (filters?.productId) query = query.eq('warehouse_product_id', filters.productId);
     if (filters?.movementType) query = query.eq('movement_type', filters.movementType);
@@ -4916,6 +5034,7 @@ export async function getLedgerHistory(filters?: {
     const { data: orders, error: ordersError } = await svc
       .from('scalev_orders')
       .select('order_id, shipped_time, completed_time')
+      .eq('workspace_id', workspaceId)
       .in('order_id', chunk);
     if (ordersError) throw ordersError;
 
@@ -4939,7 +5058,7 @@ export async function getLedgerQuantitySum(filters: {
   dateTo?: string;
   shipmentGoLiveAt?: string | null;
 }) {
-  await requireWarehouseAccess('Movement Log');
+  const { workspaceId } = await requireWarehouseAccess('Movement Log');
   const svc = createServiceSupabase();
   const pageSize = 1000;
   let offset = 0;
@@ -4949,6 +5068,7 @@ export async function getLedgerQuantitySum(filters: {
     let query = svc
       .from('warehouse_stock_ledger')
       .select('quantity, reference_type, created_at')
+      .eq('workspace_id', workspaceId)
       .eq('warehouse_product_id', filters.productId);
 
     if (filters.beforeDateExclusive) query = query.lt('created_at', filters.beforeDateExclusive);
@@ -4972,27 +5092,18 @@ export async function getLedgerQuantitySum(filters: {
 }
 
 export async function getDailyMovementSummary(date: string) {
-  await requireWarehouseAccess('Daily Summary');
+  const { workspaceId } = await requireWarehouseAccess('Daily Summary');
   const svc = createServiceSupabase();
-  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  const goLiveAt = await loadWarehouseGoLiveAt(svc, workspaceId);
   const isGoLiveDay = isWarehouseGoLiveActive(goLiveAt) && isWarehouseGoLiveDate(date, goLiveAt);
-
-  if (!isGoLiveDay) {
-    const rpcResult = await svc.rpc('warehouse_daily_movement_summary', { p_date: date });
-    if (rpcResult.error && !isMissingRpcFunctionError(rpcResult.error, 'warehouse_daily_movement_summary')) {
-      throw rpcResult.error;
-    }
-    if (!rpcResult.error && Array.isArray(rpcResult.data)) {
-      return (rpcResult.data || []).sort((a: any, b: any) =>
-        a.entity.localeCompare(b.entity) || a.product_name.localeCompare(b.product_name),
-      );
-    }
-  }
 
   const data = await fetchDailyMovementRows(
     svc,
     date,
-    isGoLiveDay ? { fromInclusive: goLiveAt } : undefined,
+    {
+      workspaceId,
+      fromInclusive: isGoLiveDay ? goLiveAt : undefined,
+    },
   );
   if (!data || data.length === 0) return [];
 
@@ -5032,11 +5143,13 @@ export async function getDailyMovementSummary(date: string) {
 }
 
 export async function getBatches(productId: number, options?: { includeInactive?: boolean }) {
-  await requireWarehouseAccess('Batch Stock');
+  const { workspaceId } = await requireWarehouseAccess('Batch Stock');
   const svc = createServiceSupabase();
+  await assertWarehouseProductOwnership(svc, workspaceId, productId);
   let query = svc
     .from('warehouse_batches')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('warehouse_product_id', productId);
 
   if (!options?.includeInactive) {
@@ -5052,12 +5165,13 @@ export async function getBatches(productId: number, options?: { includeInactive?
 }
 
 export async function getWarehouseRTSReturnTargets(sourceProductId: number) {
-  await requireWarehouseAccess('Verifikasi RTS');
+  const { workspaceId } = await requireWarehouseAccess('Verifikasi RTS');
   const svc = createServiceSupabase();
   const { data: sourceProduct, error: sourceErr } = await svc
     .from('warehouse_products')
     .select('id, name, category, entity, warehouse, unit, is_active')
     .eq('id', sourceProductId)
+    .eq('owner_workspace_id', workspaceId)
     .maybeSingle();
   if (sourceErr) throw sourceErr;
   if (!sourceProduct) throw new Error('Produk sumber RTS tidak ditemukan.');
@@ -5065,6 +5179,7 @@ export async function getWarehouseRTSReturnTargets(sourceProductId: number) {
   const { data: candidateRows, error: candidateErr } = await svc
     .from('warehouse_products')
     .select('id, name, category, entity, warehouse, unit, is_active')
+    .eq('owner_workspace_id', workspaceId)
     .eq('entity', sourceProduct.entity)
     .eq('warehouse', sourceProduct.warehouse)
     .eq('is_active', true)
@@ -5089,7 +5204,7 @@ export async function getWarehouseRTSReturnTargets(sourceProductId: number) {
 }
 
 export async function getWarehouseRTSVerifications(status: 'pending' | 'completed' | 'cancelled' | 'all' = 'pending') {
-  await requireWarehouseAccess('Verifikasi RTS');
+  const { workspaceId } = await requireWarehouseAccess('Verifikasi RTS');
   const svc = createServiceSupabase();
   let query = svc
     .from('warehouse_rts_verifications')
@@ -5120,6 +5235,7 @@ export async function getWarehouseRTSVerifications(status: 'pending' | 'complete
       )
     `);
 
+  query = query.eq('workspace_id', workspaceId);
   if (status !== 'all') query = query.eq('status', status);
 
   const { data, error } = await query
@@ -5183,7 +5299,7 @@ export async function completeWarehouseRTSVerification(
   },
 ) : Promise<WarehouseMutationResult<{ verificationId: number }>> {
   try {
-    await requireWarehousePermission('wh:stock_masuk', 'Verifikasi RTS');
+    const { workspaceId } = await requireWarehousePermission('wh:stock_masuk', 'Verifikasi RTS');
     const svc = createServiceSupabase();
     const userId = await getCurrentUserId();
     const now = new Date().toISOString();
@@ -5192,6 +5308,7 @@ export async function completeWarehouseRTSVerification(
       .from('warehouse_rts_verifications')
       .select('id, order_id, business_code, order_status, scope, status')
       .eq('id', verificationId)
+      .eq('workspace_id', workspaceId)
       .single();
     if (verificationErr || !verification) throw new Error('Verifikasi RTS tidak ditemukan.');
     if (verification.status !== 'pending') {
@@ -5206,6 +5323,7 @@ export async function completeWarehouseRTSVerification(
         expected_qty,
         warehouse_products(id, name, category, entity, warehouse, unit)
       `)
+      .eq('workspace_id', workspaceId)
       .eq('verification_id', verificationId)
       .order('id', { ascending: true });
     if (itemsErr) throw itemsErr;
@@ -5253,7 +5371,11 @@ export async function completeWarehouseRTSVerification(
       }
     }
 
-    const targetProducts = await loadWarehouseProductsByIds(svc, Array.from(requestedTargetProductIds));
+    const targetProducts = await loadWarehouseProductsByIds(
+      svc,
+      Array.from(requestedTargetProductIds),
+      workspaceId,
+    );
     for (const item of verificationItems) {
       const sourceProduct = item.warehouse_products as any;
       if (!sourceProduct) throw new Error('Produk sumber RTS tidak ditemukan.');
@@ -5540,9 +5662,31 @@ export async function reverseWarehouseDeductions(
   return reverseOutstandingWarehouseDeductions(svc, orderId, scalevOrderDbId, reason);
 }
 
-export async function reconcileScalevOrderWarehouse(orderId: string, scalevOrderDbId?: number | null) {
+export async function reconcileScalevOrderWarehouse(
+  orderId: string,
+  scalevOrderDbId?: number | null,
+  workspaceId = ROOVE_WORKSPACE_ID,
+) {
+  // Apurva's initial warehouse surface is intentionally manual. The legacy
+  // ScaleV catalog-to-FIFO resolver still contains Roove-specific mapping
+  // semantics, so never let an Apurva webhook touch Roove inventory.
+  if (workspaceId !== ROOVE_WORKSPACE_ID) {
+    return {
+      action: 'skipped_workspace_rollout',
+      reversed: 0,
+      deducted: 0,
+      skipped: 0,
+      unmapped_products: [],
+    };
+  }
+
   const svc = createServiceSupabase();
-  const order = await loadScalevOrderWarehouseSnapshot(svc, orderId, scalevOrderDbId);
+  const order = await loadScalevOrderWarehouseSnapshot(
+    svc,
+    orderId,
+    scalevOrderDbId,
+    workspaceId,
+  );
   if (!order) throw new Error(`Order ${orderId} tidak ditemukan`);
   const goLiveAt = await loadWarehouseGoLiveAt(svc);
 
@@ -6140,10 +6284,12 @@ function normalizeWarehouseBusinessAuditRow(row: Partial<WarehouseBusinessMappin
 async function listWarehouseBusinessMappingsForCode(
   svc: ReturnType<typeof createServiceSupabase>,
   businessCode: string,
+  workspaceId: string,
 ): Promise<WarehouseBusinessMappingAuditRow[]> {
   const { data, error } = await svc
     .from('warehouse_business_mapping')
     .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
+    .eq('workspace_id', workspaceId)
     .eq('business_code', businessCode)
     .order('is_primary', { ascending: false })
     .order('is_active', { ascending: false })
@@ -6155,9 +6301,10 @@ async function listWarehouseBusinessMappingsForCode(
 async function ensurePrimaryWarehouseBusinessMapping(
   svc: ReturnType<typeof createServiceSupabase>,
   businessCode: string,
+  workspaceId: string,
   preferredId?: number | null,
 ) {
-  const rows = await listWarehouseBusinessMappingsForCode(svc, businessCode);
+  const rows = await listWarehouseBusinessMappingsForCode(svc, businessCode, workspaceId);
   const activeRows = rows.filter((row) => Boolean(row.is_active));
 
   if (activeRows.length === 0) {
@@ -6166,6 +6313,7 @@ async function ensurePrimaryWarehouseBusinessMapping(
       const { error } = await svc
         .from('warehouse_business_mapping')
         .update({ is_primary: false })
+        .eq('workspace_id', workspaceId)
         .in('id', primaryIds);
       if (error) throw error;
     }
@@ -6185,6 +6333,7 @@ async function ensurePrimaryWarehouseBusinessMapping(
     const { error } = await svc
       .from('warehouse_business_mapping')
       .update({ is_primary: false })
+      .eq('workspace_id', workspaceId)
       .in('id', idsToClear);
     if (error) throw error;
   }
@@ -6193,6 +6342,7 @@ async function ensurePrimaryWarehouseBusinessMapping(
     const { error } = await svc
       .from('warehouse_business_mapping')
       .update({ is_primary: true })
+      .eq('workspace_id', workspaceId)
       .eq('id', desiredPrimary.id);
     if (error) throw error;
   }
@@ -6201,11 +6351,12 @@ async function ensurePrimaryWarehouseBusinessMapping(
 }
 
 export async function getWarehouseBusinessMappings() {
-  await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
+  const { workspaceId } = await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_business_mapping')
     .select('*, scalev_webhook_businesses!inner(business_name)')
+    .eq('workspace_id', workspaceId)
     .order('business_code', { ascending: true })
     .order('is_primary', { ascending: false })
     .order('is_active', { ascending: false })
@@ -6215,12 +6366,13 @@ export async function getWarehouseBusinessMappings() {
 }
 
 export async function updateWarehouseBusinessMapping(id: number, field: string, value: any) {
-  await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
+  const { workspaceId } = await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
   const svc = createServiceSupabase();
   const { data: beforeRow, error: beforeError } = await svc
     .from('warehouse_business_mapping')
     .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
     .eq('id', id)
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (beforeError) throw beforeError;
   if (!beforeRow) throw new Error('Business mapping tidak ditemukan.');
@@ -6233,44 +6385,48 @@ export async function updateWarehouseBusinessMapping(id: number, field: string, 
 
   if (field === 'is_primary') {
     if (normalizedValue) {
-      const existingPrimaryIds = (await listWarehouseBusinessMappingsForCode(svc, beforeRow.business_code))
+      const existingPrimaryIds = (await listWarehouseBusinessMappingsForCode(svc, beforeRow.business_code, workspaceId))
         .filter((row) => Number(row.id) !== Number(id) && Boolean(row.is_primary))
         .map((row) => Number(row.id));
       if (existingPrimaryIds.length > 0) {
         const { error } = await svc
           .from('warehouse_business_mapping')
           .update({ is_primary: false })
+          .eq('workspace_id', workspaceId)
           .in('id', existingPrimaryIds);
         if (error) throw error;
       }
       const { error } = await svc
         .from('warehouse_business_mapping')
         .update({ is_primary: true, is_active: true })
+        .eq('workspace_id', workspaceId)
         .eq('id', id);
       if (error) throw error;
-      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, id);
+      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, workspaceId, id);
     } else {
       const { error } = await svc
         .from('warehouse_business_mapping')
         .update({ is_primary: false })
+        .eq('workspace_id', workspaceId)
         .eq('id', id);
       if (error) throw error;
-      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code);
+      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, workspaceId);
     }
   } else {
     const updatePayload: Record<string, any> = { [field]: normalizedValue };
     const { error } = await svc
       .from('warehouse_business_mapping')
       .update(updatePayload)
+      .eq('workspace_id', workspaceId)
       .eq('id', id);
     if (error) throw error;
 
     if (field === 'is_active' && !normalizedValue && beforeRow.is_primary) {
-      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code);
+      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, workspaceId);
     } else if (field === 'is_active' && normalizedValue) {
-      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, beforeRow.is_primary ? id : null);
+      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, workspaceId, beforeRow.is_primary ? id : null);
     } else if (field === 'deduct_entity' || field === 'deduct_warehouse') {
-      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, beforeRow.is_primary ? id : null);
+      await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, workspaceId, beforeRow.is_primary ? id : null);
     }
   }
 
@@ -6278,6 +6434,7 @@ export async function updateWarehouseBusinessMapping(id: number, field: string, 
     .from('warehouse_business_mapping')
     .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
     .eq('id', id)
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (afterError) throw afterError;
   if (!afterRow) return;
@@ -6312,7 +6469,7 @@ export async function updateWarehouseBusinessMapping(id: number, field: string, 
 }
 
 export async function createWarehouseBusinessMapping(businessCode: string, deductEntity: string, deductWarehouse = 'BTN') {
-  await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
+  const { workspaceId } = await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
   const svc = createServiceSupabase();
   const normalizedBusinessCode = String(businessCode || '').trim().toUpperCase();
   const normalizedEntity = String(deductEntity || '').trim().toUpperCase();
@@ -6325,7 +6482,7 @@ export async function createWarehouseBusinessMapping(businessCode: string, deduc
     throw new Error('Entity gudang tidak valid.');
   }
 
-  const beforeRows = await listWarehouseBusinessMappingsForCode(svc, normalizedBusinessCode);
+  const beforeRows = await listWarehouseBusinessMappingsForCode(svc, normalizedBusinessCode, workspaceId);
   const beforeRow = beforeRows.find((row) => (
     row.deduct_entity === normalizedEntity
     && normalizeBusinessTargetWarehouse(row.deduct_warehouse) === normalizedWarehouse
@@ -6335,17 +6492,19 @@ export async function createWarehouseBusinessMapping(businessCode: string, deduc
   const { error } = await svc
     .from('warehouse_business_mapping')
     .upsert({
+      workspace_id: workspaceId,
       business_code: normalizedBusinessCode,
       deduct_entity: normalizedEntity,
       deduct_warehouse: normalizedWarehouse,
       is_active: true,
       is_primary: beforeRow ? beforeRow.is_primary : shouldBecomePrimary,
-    }, { onConflict: 'business_code,deduct_entity,deduct_warehouse' });
+    }, { onConflict: 'workspace_id,business_code,deduct_entity,deduct_warehouse' });
   if (error) throw error;
 
   const { data: afterRow, error: afterError } = await svc
     .from('warehouse_business_mapping')
     .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
+    .eq('workspace_id', workspaceId)
     .eq('business_code', normalizedBusinessCode)
     .eq('deduct_entity', normalizedEntity)
     .eq('deduct_warehouse', normalizedWarehouse)
@@ -6354,15 +6513,16 @@ export async function createWarehouseBusinessMapping(businessCode: string, deduc
   if (!afterRow) return;
 
   if (shouldBecomePrimary || beforeRow?.is_primary) {
-    await ensurePrimaryWarehouseBusinessMapping(svc, normalizedBusinessCode, Number(afterRow.id));
+    await ensurePrimaryWarehouseBusinessMapping(svc, normalizedBusinessCode, workspaceId, Number(afterRow.id));
   } else {
-    await ensurePrimaryWarehouseBusinessMapping(svc, normalizedBusinessCode);
+    await ensurePrimaryWarehouseBusinessMapping(svc, normalizedBusinessCode, workspaceId);
   }
 
   const { data: refreshedAfterRow, error: refreshedAfterError } = await svc
     .from('warehouse_business_mapping')
     .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
     .eq('id', afterRow.id)
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (refreshedAfterError) throw refreshedAfterError;
   if (!refreshedAfterRow) return;
@@ -6392,13 +6552,14 @@ export async function createWarehouseBusinessMapping(businessCode: string, deduc
 }
 
 export async function removeWarehouseBusinessMapping(id: number) {
-  await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
+  const { workspaceId } = await requireDashboardTabAccess('business-settings', 'Mapping Business Warehouse');
   const svc = createServiceSupabase();
 
   const { data: beforeRow, error: beforeError } = await svc
     .from('warehouse_business_mapping')
     .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
     .eq('id', id)
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (beforeError) throw beforeError;
   if (!beforeRow) throw new Error('Business mapping tidak ditemukan.');
@@ -6406,10 +6567,11 @@ export async function removeWarehouseBusinessMapping(id: number) {
   const { error } = await svc
     .from('warehouse_business_mapping')
     .delete()
+    .eq('workspace_id', workspaceId)
     .eq('id', id);
   if (error) throw error;
 
-  await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code);
+  await ensurePrimaryWarehouseBusinessMapping(svc, beforeRow.business_code, workspaceId);
 
   await recordWarehouseActivityLog({
     scope: 'warehouse_business_mapping',
@@ -6833,22 +6995,23 @@ export async function getDeductionLog(date: string) {
 // ============================================================
 
 export async function getVendors() {
-  await requireVendorReadAccess('Vendor Gudang');
+  const { workspaceId } = await requireVendorReadAccess('Vendor Gudang');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_vendors')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('name');
   if (error) throw error;
   return data || [];
 }
 
 export async function createVendor(vendor: { name: string; address?: string; phone?: string; pic_name?: string; notes?: string; is_pkp?: boolean }) {
-  await requireWarehouseSettingsPermission('whs:vendors', 'Vendor Gudang');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:vendors', 'Vendor Gudang');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_vendors')
-    .insert(vendor)
+    .insert({ ...vendor, workspace_id: workspaceId })
     .select()
     .single();
   if (error) throw error;
@@ -6856,22 +7019,24 @@ export async function createVendor(vendor: { name: string; address?: string; pho
 }
 
 export async function updateVendor(id: number, updates: Record<string, any>) {
-  await requireWarehouseSettingsPermission('whs:vendors', 'Vendor Gudang');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:vendors', 'Vendor Gudang');
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('warehouse_vendors')
     .update(updates)
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
   if (error) throw error;
 }
 
 export async function deleteVendor(id: number) {
-  await requireWarehouseSettingsPermission('whs:vendors', 'Vendor Gudang');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:vendors', 'Vendor Gudang');
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('warehouse_vendors')
     .delete()
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
   if (error) throw error;
 }
 
@@ -6880,17 +7045,18 @@ export async function deleteVendor(id: number) {
 // ============================================================
 
 export async function getActiveSOSession() {
-  await requireWarehouseAccess('Stock Opname');
+  const { workspaceId } = await requireWarehouseAccess('Stock Opname');
   const svc = createServiceSupabase();
-  return getLatestUsableActiveSOSession(svc);
+  return getLatestUsableActiveSOSession(svc, workspaceId);
 }
 
 export async function getSOSessionItems(sessionId: number) {
-  await requireWarehouseAccess('Stock Opname');
+  const { workspaceId } = await requireWarehouseAccess('Stock Opname');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_stock_opname')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .eq('session_id', sessionId)
     .order('product_name');
   if (error) throw error;
@@ -6900,10 +7066,12 @@ export async function getSOSessionItems(sessionId: number) {
 async function getSOSessionItemCount(
   svc: ReturnType<typeof createServiceSupabase>,
   sessionId: number,
+  workspaceId: string,
 ) {
   const { count, error } = await svc
     .from('warehouse_stock_opname')
     .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
     .eq('session_id', sessionId);
   if (error) throw error;
   return count || 0;
@@ -6912,16 +7080,19 @@ async function getSOSessionItemCount(
 async function deleteEmptySOSession(
   svc: ReturnType<typeof createServiceSupabase>,
   sessionId: number,
+  workspaceId: string,
 ) {
   const { error: deleteRowsErr } = await svc
     .from('warehouse_stock_opname')
     .delete()
+    .eq('workspace_id', workspaceId)
     .eq('session_id', sessionId);
   if (deleteRowsErr) throw deleteRowsErr;
 
   const { error: deleteSessionErr } = await svc
     .from('warehouse_stock_opname_sessions')
     .delete()
+    .eq('workspace_id', workspaceId)
     .eq('id', sessionId)
     .in('status', ['counting', 'reviewing']);
   if (deleteSessionErr) throw deleteSessionErr;
@@ -6929,18 +7100,20 @@ async function deleteEmptySOSession(
 
 async function getLatestUsableActiveSOSession(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
 ) {
   const { data: sessions, error } = await svc
     .from('warehouse_stock_opname_sessions')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .in('status', ['counting', 'reviewing'])
     .order('created_at', { ascending: false });
   if (error) throw error;
 
   for (const session of (sessions || [])) {
-    const itemCount = await getSOSessionItemCount(svc, Number(session.id));
+    const itemCount = await getSOSessionItemCount(svc, Number(session.id), workspaceId);
     if (itemCount > 0) return session;
-    await deleteEmptySOSession(svc, Number(session.id));
+    await deleteEmptySOSession(svc, Number(session.id), workspaceId);
   }
 
   return null;
@@ -6953,12 +7126,14 @@ export async function createStockOpnameSession(
   date: string,
 ) : Promise<WarehouseMutationResult<{ id: number }>> {
   let sessionId: number | null = null;
+  let activeWorkspaceId: string | null = null;
   try {
-    await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    const { workspaceId } = await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    activeWorkspaceId = workspaceId;
     const svc = createServiceSupabase();
     const userId = await getCurrentUserId();
 
-    const existingSession = await getLatestUsableActiveSOSession(svc);
+    const existingSession = await getLatestUsableActiveSOSession(svc, workspaceId);
     if (existingSession) {
       throw new Error(`Masih ada stock opname aktif (${existingSession.opname_label} - ${existingSession.entity} ${existingSession.opname_date})`);
     }
@@ -6966,7 +7141,7 @@ export async function createStockOpnameSession(
     // Create session
     const { data: session, error: sessErr } = await svc
       .from('warehouse_stock_opname_sessions')
-      .insert({ entity, warehouse, opname_date: date, opname_label: label, created_by: userId })
+      .insert({ workspace_id: workspaceId, entity, warehouse, opname_date: date, opname_label: label, created_by: userId })
       .select('id')
       .single();
     if (sessErr) throw sessErr;
@@ -6976,6 +7151,7 @@ export async function createStockOpnameSession(
     const { data: products, error: prodErr } = await svc
       .from('warehouse_products')
       .select('id, name, category')
+      .eq('owner_workspace_id', workspaceId)
       .eq('entity', entity)
       .eq('warehouse', warehouse)
       .eq('is_active', true)
@@ -6990,6 +7166,7 @@ export async function createStockOpnameSession(
     const { data: balances, error: balErr } = await svc
       .from('v_warehouse_stock_balance')
       .select('product_id, current_stock')
+      .eq('workspace_id', workspaceId)
       .eq('entity', entity)
       .eq('warehouse', warehouse);
     if (balErr) throw balErr;
@@ -6999,6 +7176,7 @@ export async function createStockOpnameSession(
 
     // Pre-populate opname rows (blind count — sesudah_so starts null)
     const rows = (products || []).map(p => ({
+      workspace_id: workspaceId,
       session_id: sessionId,
       warehouse: warehouse,
       opname_date: date,
@@ -7020,7 +7198,9 @@ export async function createStockOpnameSession(
     if (sessionId != null) {
       try {
         const svc = createServiceSupabase();
-        await deleteEmptySOSession(svc, sessionId);
+        if (activeWorkspaceId) {
+          await deleteEmptySOSession(svc, sessionId, activeWorkspaceId);
+        }
       } catch {}
     }
 
@@ -7044,13 +7224,14 @@ export async function saveStockOpnameCounts(
   counts: { id: number; sesudah_so: number | null; sebelum_so: number; is_skipped?: boolean }[],
 ) : Promise<WarehouseMutationResult> {
   try {
-    await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    const { workspaceId } = await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
     const svc = createServiceSupabase();
 
     const { data: session, error: sessionErr } = await svc
       .from('warehouse_stock_opname_sessions')
       .select('status')
       .eq('id', sessionId)
+      .eq('workspace_id', workspaceId)
       .maybeSingle();
     if (sessionErr) throw sessionErr;
     if (!session || session.status !== 'counting') {
@@ -7074,6 +7255,7 @@ export async function saveStockOpnameCounts(
         .from('warehouse_stock_opname')
         .update({ sesudah_so: sesudahSo, selisih, is_skipped: isSkipped })
         .eq('id', c.id)
+        .eq('workspace_id', workspaceId)
         .eq('session_id', sessionId);
       if (error) throw error;
     }
@@ -7089,13 +7271,14 @@ export async function saveStockOpnameCounts(
 
 export async function submitSOForReview(sessionId: number): Promise<WarehouseMutationResult> {
   try {
-    await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    const { workspaceId } = await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
     const svc = createServiceSupabase();
 
     const { data: session, error: sessionErr } = await svc
       .from('warehouse_stock_opname_sessions')
       .select('status')
       .eq('id', sessionId)
+      .eq('workspace_id', workspaceId)
       .maybeSingle();
     if (sessionErr) throw sessionErr;
     if (!session || session.status !== 'counting') {
@@ -7105,6 +7288,7 @@ export async function submitSOForReview(sessionId: number): Promise<WarehouseMut
     const { count: incompleteCount, error: incompleteErr } = await svc
       .from('warehouse_stock_opname')
       .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId)
       .eq('session_id', sessionId)
       .eq('is_skipped', false)
       .is('sesudah_so', null);
@@ -7117,6 +7301,7 @@ export async function submitSOForReview(sessionId: number): Promise<WarehouseMut
       .from('warehouse_stock_opname_sessions')
       .update({ status: 'reviewing' })
       .eq('id', sessionId)
+      .eq('workspace_id', workspaceId)
       .eq('status', 'counting');
     if (error) throw error;
 
@@ -7131,12 +7316,13 @@ export async function submitSOForReview(sessionId: number): Promise<WarehouseMut
 
 export async function revertSOToCounting(sessionId: number): Promise<WarehouseMutationResult> {
   try {
-    await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    const { workspaceId } = await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
     const svc = createServiceSupabase();
     const { error } = await svc
       .from('warehouse_stock_opname_sessions')
       .update({ status: 'counting' })
       .eq('id', sessionId)
+      .eq('workspace_id', workspaceId)
       .eq('status', 'reviewing');
     if (error) throw error;
     return { success: true };
@@ -7150,13 +7336,14 @@ export async function revertSOToCounting(sessionId: number): Promise<WarehouseMu
 
 export async function approveStockOpname(sessionId: number): Promise<WarehouseMutationResult<{ adjustedCount: number }>> {
   try {
-    await requireWarehousePermission('wh:opname_approve', 'Approve Stock Opname');
+    const { workspaceId } = await requireWarehousePermission('wh:opname_approve', 'Approve Stock Opname');
     const svc = createServiceSupabase();
 
     const { data: session, error: sessionErr } = await svc
       .from('warehouse_stock_opname_sessions')
       .select('status')
       .eq('id', sessionId)
+      .eq('workspace_id', workspaceId)
       .maybeSingle();
     if (sessionErr) throw sessionErr;
     if (!session || session.status !== 'reviewing') {
@@ -7166,6 +7353,7 @@ export async function approveStockOpname(sessionId: number): Promise<WarehouseMu
     const { count: incompleteCount, error: incompleteErr } = await svc
       .from('warehouse_stock_opname')
       .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', workspaceId)
       .eq('session_id', sessionId)
       .eq('is_skipped', false)
       .is('sesudah_so', null);
@@ -7177,6 +7365,7 @@ export async function approveStockOpname(sessionId: number): Promise<WarehouseMu
     const { data: existingAdjustments, error: adjustmentErr } = await svc
       .from('warehouse_stock_ledger')
       .select('id')
+      .eq('workspace_id', workspaceId)
       .eq('reference_type', 'opname')
       .like('notes', `[SO#${sessionId}]%`)
       .limit(1);
@@ -7189,6 +7378,7 @@ export async function approveStockOpname(sessionId: number): Promise<WarehouseMu
     const { data: items, error: itemErr } = await svc
       .from('warehouse_stock_opname')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .eq('session_id', sessionId)
       .eq('is_skipped', false)
       .neq('selisih', 0);
@@ -7205,6 +7395,7 @@ export async function approveStockOpname(sessionId: number): Promise<WarehouseMu
       .from('warehouse_stock_opname_sessions')
       .update({ status: 'completed', completed_at: new Date().toISOString() })
       .eq('id', sessionId)
+      .eq('workspace_id', workspaceId)
       .eq('status', 'reviewing');
     if (error) throw error;
 
@@ -7219,12 +7410,13 @@ export async function approveStockOpname(sessionId: number): Promise<WarehouseMu
 
 export async function cancelSOSession(sessionId: number): Promise<WarehouseMutationResult> {
   try {
-    await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
+    const { workspaceId } = await requireWarehousePermission('wh:opname_manage', 'Stock Opname');
     const svc = createServiceSupabase();
     const { error } = await svc
       .from('warehouse_stock_opname_sessions')
       .update({ status: 'canceled' })
       .eq('id', sessionId)
+      .eq('workspace_id', workspaceId)
       .eq('status', 'counting');
     if (error) throw error;
     return { success: true };

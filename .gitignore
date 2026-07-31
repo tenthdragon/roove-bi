@@ -48,9 +48,11 @@ scripts/*
 !scripts/ops/backfill-marketplace-tracking.ts
 
 # docs
-docs/
+docs/*
 !docs/runbooks/
+docs/runbooks/*
 !docs/runbooks/marketplace-tracking-backfill.md
+!docs/runbooks/workspace-rollout.md
 
 # supabase temp
 supabase/.temp/

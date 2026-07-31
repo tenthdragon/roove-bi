@@ -15,12 +15,13 @@ import { buildScalevSourceClassFields } from '@/lib/scalev-source-class';
 type BrandKeyword = { name: string; keywords: string[] };
 
 // ── Fetch brand keywords from DB (called once per upload) ──
-async function fetchBrandKeywords(): Promise<BrandKeyword[]> {
+async function fetchBrandKeywords(workspaceId: string): Promise<BrandKeyword[]> {
   try {
     const svc = createServiceSupabase();
     const { data } = await svc
       .from('brands')
       .select('name, keywords')
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true);
     return (data || []).map((b: any) => ({
       name: b.name,
@@ -34,12 +35,13 @@ async function fetchBrandKeywords(): Promise<BrandKeyword[]> {
 }
 
 // ── Fetch bonus item names from product_mapping ──
-async function fetchBonusItemNames(): Promise<Set<string>> {
+async function fetchBonusItemNames(workspaceId: string): Promise<Set<string>> {
   try {
     const svc = createServiceSupabase();
     const { data } = await svc
       .from('product_mapping')
       .select('product_name')
+      .eq('workspace_id', workspaceId)
       .eq('is_bonus', true);
     return new Set((data || []).map((r: any) => r.product_name.toLowerCase()));
   } catch {
@@ -82,7 +84,10 @@ function deriveSalesChannel(row: Record<string, string>): string {
 }
 
 export async function uploadCsvOrders(formData: FormData) {
-  await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
+  const { workspaceId } = await requireDashboardPermissionAccess(
+    'admin:daily',
+    'Admin Daily Data',
+  );
 
   const file = formData.get('file') as File;
   if (!file) throw new Error('No file provided');
@@ -101,13 +106,13 @@ export async function uploadCsvOrders(formData: FormData) {
   const isProductBased = headers.includes('item_name');
   const svc = createServiceSupabase();
   const [businessDirectoryRows, originRegistryRows] = await Promise.all([
-    fetchWarehouseBusinessDirectoryRows(svc),
-    fetchWarehouseOriginRegistryRows(svc),
+    fetchWarehouseBusinessDirectoryRows(svc, workspaceId),
+    fetchWarehouseOriginRegistryRows(svc, workspaceId),
   ]);
 
   // Fetch brand keywords from DB for dynamic detection
-  const brandKeywords = await fetchBrandKeywords();
-  const bonusNames = await fetchBonusItemNames();
+  const brandKeywords = await fetchBrandKeywords(workspaceId);
+  const bonusNames = await fetchBonusItemNames(workspaceId);
 
   // ── Collect CSV order IDs ──
   const csvOrderIdSet = new Set<string>();
@@ -127,6 +132,7 @@ export async function uploadCsvOrders(formData: FormData) {
     const { data, error } = await svc
       .from('scalev_orders')
       .select('id, order_id, customer_name, customer_phone, customer_email')
+      .eq('workspace_id', workspaceId)
       .in('order_id', chunk);
     if (error) throw error;
     if (data) existingOrders.push(...data);
@@ -330,6 +336,7 @@ export async function uploadCsvOrders(formData: FormData) {
       isNewOrder[orderId] = false;
     } else {
       toInsert.push({
+        workspace_id: workspaceId,
         scalev_id: null, order_id: orderId,
         customer_type: firstRow.customer_type || null,
         status: firstRow.order_status || 'unknown', shipped_time: shippedTime,
@@ -380,7 +387,10 @@ export async function uploadCsvOrders(formData: FormData) {
     const batch = toInsert.slice(i, i + BATCH);
     const { data: inserted, error: err } = await svc
       .from('scalev_orders')
-      .upsert(batch, { onConflict: 'order_id', ignoreDuplicates: true })
+      .upsert(batch, {
+        onConflict: 'workspace_id,order_id',
+        ignoreDuplicates: true,
+      })
       .select('id, order_id');
     if (err) { stats.errors.push(`Insert batch ${Math.floor(i / BATCH) + 1}: ${err.message}`); continue; }
     if (inserted) {
@@ -393,7 +403,12 @@ export async function uploadCsvOrders(formData: FormData) {
   const UPDATE_BATCH = 200;
   for (let i = 0; i < toUpdate.length; i += UPDATE_BATCH) {
     const batch = toUpdate.slice(i, i + UPDATE_BATCH);
-    const upsertRows = batch.map(upd => ({ id: upd.id, order_id: upd.orderId, ...upd.data }));
+    const upsertRows = batch.map(upd => ({
+      id: upd.id,
+      workspace_id: workspaceId,
+      order_id: upd.orderId,
+      ...upd.data,
+    }));
     const { error } = await svc.from('scalev_orders').upsert(upsertRows, { onConflict: 'id' });
     if (error) stats.errors.push(`Update batch ${Math.floor(i / UPDATE_BATCH) + 1}: ${error.message}`);
     else stats.updated += batch.length;
@@ -410,12 +425,22 @@ export async function uploadCsvOrders(formData: FormData) {
       const batchOrderIds = allOrderIds.slice(i, i + UPDATE_BATCH);
       const dbIds = batchOrderIds.map(oid => allIdMap[oid]).filter(Boolean);
       if (dbIds.length > 0) {
-        await svc.from('scalev_order_lines').delete().in('scalev_order_id', dbIds);
+        await svc
+          .from('scalev_order_lines')
+          .delete()
+          .eq('workspace_id', workspaceId)
+          .in('scalev_order_id', dbIds);
         const lineBatch: any[] = [];
         for (const oid of batchOrderIds) {
           const dbId = allIdMap[oid];
           if (!dbId) continue;
-          for (const line of orderLinesMap[oid]) lineBatch.push({ ...line, scalev_order_id: dbId });
+          for (const line of orderLinesMap[oid]) {
+            lineBatch.push({
+              ...line,
+              workspace_id: workspaceId,
+              scalev_order_id: dbId,
+            });
+          }
         }
         for (let j = 0; j < lineBatch.length; j += 500) {
           const subBatch = lineBatch.slice(j, j + 500);
@@ -433,7 +458,11 @@ export async function uploadCsvOrders(formData: FormData) {
         // New order — insert line items
         const dbId = insertedIdMap[orderId];
         if (!dbId) continue;
-        const lineBatch = lines.map(line => ({ ...line, scalev_order_id: dbId }));
+        const lineBatch = lines.map(line => ({
+          ...line,
+          workspace_id: workspaceId,
+          scalev_order_id: dbId,
+        }));
         const { error: lineErr } = await svc.from('scalev_order_lines').upsert(lineBatch, { onConflict: 'scalev_order_id,product_name' });
         if (lineErr) stats.errors.push(`Lines ${orderId}: ${lineErr.message}`);
       } else {
@@ -448,6 +477,7 @@ export async function uploadCsvOrders(formData: FormData) {
             is_purchase_kwai: lines[0].is_purchase_kwai,
             synced_at: new Date().toISOString(),
           })
+          .eq('workspace_id', workspaceId)
           .eq('scalev_order_id', dbId);
         if (updErr) stats.errors.push(`Lines update ${orderId}: ${updErr.message}`);
       }
@@ -458,6 +488,7 @@ export async function uploadCsvOrders(formData: FormData) {
   const uploadedBy = formData.get('uploaded_by') as string || null;
   const filename = formData.get('filename') as string || file.name;
   await svc.from('scalev_sync_log').insert({
+    workspace_id: workspaceId,
     status: stats.errors.length > 0 ? 'partial' : 'success',
     sync_type: 'csv_upload',
     orders_fetched: stats.totalRows,
