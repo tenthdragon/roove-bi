@@ -372,7 +372,6 @@ function WarehousePageContent() {
   const [batchStock, setBatchStock] = useState<any[]>([]);
   const [rtsVerifications, setRtsVerifications] = useState<any[]>([]);
   const [ledgerHistory, setLedgerHistory] = useState<any[]>([]);
-  const [mappingData, setMappingData] = useState<any[]>([]);
   const [reclassRequests, setReclassRequests] = useState<any[]>([]);
   const [dailySummary, setDailySummary] = useState<any[]>([]);
   const [deductionAlerts, setDeductionAlerts] = useState<WarehouseUndeductedOrdersResult>(EMPTY_DEDUCTION_ALERTS);
@@ -475,9 +474,6 @@ function WarehousePageContent() {
         } else if (activeTab === 'batch') {
           const data = await getStockByBatch();
           setBatchStock(data);
-        } else if (activeTab === 'mapping') {
-          const data = await getScalevMappings();
-          setMappingData(data);
         } else if (activeTab === 'stock-opname') {
           const [so, summary, activeSession] = await Promise.all([
             getWarehouseStockOpname(),
@@ -663,7 +659,6 @@ function WarehousePageContent() {
       )}
       {activeTab === 'reclass' && <StockReclassTab data={reclassRequests} onRefresh={refreshData} />}
       {activeTab === 'batch' && <BatchTab data={batchStock} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />}
-      {activeTab === 'mapping' && <MappingTab data={mappingData} onRefresh={refreshData} />}
       {activeTab === 'stock-opname' && <StockOpnameTab soData={soData} soSummary={soSummary} expandedSO={expandedSO} setExpandedSO={setExpandedSO} session={soSession} sessionItems={soSessionItems} onRefresh={refreshData} />}
       {/* Expired Monitor merged into Batch & Expiry tab */}
     </div>
@@ -1412,7 +1407,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                           RTS ini sudah tertangkap, tetapi belum bisa dibentuk menjadi item verifikasi.
                         </div>
                         <div>
-                          {row.notes || 'Benahi mapping produk/business terlebih dulu, lalu refresh queue RTS atau tunggu event webhook berikutnya memicu re-sync.'}
+                          {row.notes || 'Benahi Item Mapping/business terlebih dulu, lalu refresh queue RTS atau tunggu event webhook berikutnya memicu re-sync.'}
                         </div>
                         {isPending && can('wh:mapping_sync') && (
                           <div style={{ marginTop: 12, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -3551,276 +3546,6 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
 }
 
 // ============================================================
-// MAPPING SCALEV TAB
-// ============================================================
-
-function MappingTab({ data, onRefresh }: { data: any[]; onRefresh: () => void }) {
-  const { can } = usePermissions();
-  const [filter, setFilter] = useState('all');
-  const [search, setSearch] = useState('');
-  const [products, setProducts] = useState<any[]>([]);
-  const [freqMap, setFreqMap] = useState<Record<string, number>>({});
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [productSearch, setProductSearch] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-
-  const [priceTiers, setPriceTiers] = useState<Record<string, { price: number; count: number }[]>>({});
-
-  useEffect(() => { (async () => { try { setProducts(await getProducts()); } catch {} })(); }, []);
-  useEffect(() => { (async () => { try { setFreqMap(await getScalevFrequencies()); } catch {} })(); }, []);
-  useEffect(() => { (async () => { try { setPriceTiers(await getScalevPriceTiers()); } catch {} })(); }, []);
-
-  // Auto-suggest: find best matching warehouse product for unmapped items
-  const getSuggestion = (scalevName: string) => {
-    if (!products.length) return null;
-    const sn = scalevName.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-    const snWords = sn.split(' ');
-
-    let bestMatch: any = null;
-    let bestScore = 0;
-
-    for (const p of products) {
-      const pn = p.name.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-      const pnWords = pn.split(' ');
-
-      // Count matching words
-      let matches = 0;
-      for (const sw of snWords) {
-        if (sw.length < 2) continue;
-        for (const pw of pnWords) {
-          if (pw.includes(sw) || sw.includes(pw)) { matches++; break; }
-        }
-      }
-
-      const score = matches / Math.max(snWords.length, pnWords.length);
-      if (score > bestScore && score >= 0.3) {
-        bestScore = score;
-        bestMatch = { ...p, score };
-      }
-    }
-    return bestMatch;
-  };
-
-  // Merge frequency into data
-  const dataWithFreq = useMemo(() =>
-    data.map(r => ({ ...r, frequency: freqMap[r.scalev_product_name] || 0 })),
-    [data, freqMap]
-  );
-
-  const filtered = useMemo(() => {
-    let result = dataWithFreq;
-    if (filter === 'mapped') result = result.filter(r => r.warehouse_product_id && !r.is_ignored);
-    if (filter === 'unmapped') result = result.filter(r => !r.warehouse_product_id && !r.is_ignored);
-    if (filter === 'ignored') result = result.filter(r => r.is_ignored);
-    if (search) {
-      const q = search.toLowerCase();
-      result = result.filter(r => r.scalev_product_name?.toLowerCase().includes(q));
-    }
-    return result.sort((a, b) => (b.frequency || 0) - (a.frequency || 0));
-  }, [data, filter, search]);
-
-  const counts = useMemo(() => ({
-    all: dataWithFreq.length,
-    mapped: dataWithFreq.filter(r => r.warehouse_product_id && !r.is_ignored).length,
-    unmapped: dataWithFreq.filter(r => !r.warehouse_product_id && !r.is_ignored).length,
-    ignored: dataWithFreq.filter(r => r.is_ignored).length,
-  }), [dataWithFreq]);
-
-  const filteredProducts = useMemo(() => {
-    if (!productSearch) return [];
-    const q = productSearch.toLowerCase();
-    return products.filter(p => p.name.toLowerCase().includes(q));
-  }, [products, productSearch]);
-
-  const handleMap = async (mappingId: number, productId: number | null) => {
-    setSaving(true);
-    try {
-      await updateScalevMapping(mappingId, productId, undefined, false);
-      setEditingId(null);
-      setProductSearch('');
-      onRefresh();
-    } catch (e) { console.error(e); }
-    setSaving(false);
-  };
-
-  const handleIgnore = async (mappingId: number) => {
-    setSaving(true);
-    try {
-      await updateScalevMapping(mappingId, null, undefined, true);
-      onRefresh();
-    } catch (e) { console.error(e); }
-    setSaving(false);
-  };
-
-  const handleUnignore = async (mappingId: number) => {
-    setSaving(true);
-    try {
-      await updateScalevMapping(mappingId, null, undefined, false);
-      onRefresh();
-    } catch (e) { console.error(e); }
-    setSaving(false);
-  };
-
-  const handleSync = async () => {
-    setSyncing(true);
-    try {
-      await syncScalevProductNames();
-      onRefresh();
-    } catch (e) { console.error(e); }
-    setSyncing(false);
-  };
-
-  return (
-    <>
-      {/* KPI */}
-      <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
-        <KPICard label="Total Produk Scalev" value={String(counts.all)} color="var(--accent)" />
-        <KPICard label="Mapped" value={String(counts.mapped)} color="var(--green)" />
-        <KPICard label="Unmapped" value={String(counts.unmapped)} color={counts.unmapped > 0 ? 'var(--red)' : 'var(--green)'} />
-        <KPICard label="Ignored" value={String(counts.ignored)} color="var(--dim)" />
-      </div>
-
-      {/* Filter + Search + Sync */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        {(['all', 'unmapped', 'mapped', 'ignored'] as const).map(f => (
-          <button key={f} onClick={() => setFilter(f)}
-            style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${filter === f ? 'var(--accent)' : 'var(--border)'}`, background: filter === f ? 'var(--accent)' : 'transparent', color: filter === f ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
-            {f === 'all' ? 'Semua' : f === 'unmapped' ? 'Belum Map' : f === 'mapped' ? 'Sudah Map' : 'Ignored'} ({counts[f]})
-          </button>
-        ))}
-        <div style={{ flex: 1 }} />
-        <input type="text" placeholder="Cari nama Scalev..." value={search} onChange={(e) => setSearch(e.target.value)}
-          style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none', minWidth: 200 }} />
-        {can('wh:mapping_sync') && <button onClick={handleSync} disabled={syncing}
-          style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', cursor: syncing ? 'wait' : 'pointer', fontSize: 12, fontWeight: 600, background: 'transparent', color: 'var(--dim)' }}>
-          {syncing ? 'Syncing...' : 'Sync Baru'}
-        </button>}
-      </div>
-
-      {/* Table */}
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Scalev Product Name', 'Frek', 'Harga/unit', 'Mapped To', 'Qty', 'Status', 'Action'].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: ['Scalev Product Name', 'Mapped To', 'Harga/unit', 'Status', 'Action'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(r => {
-              const isEditing = editingId === r.id;
-              const wp = r.warehouse_products;
-              return (
-                <tr key={r.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                  <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {r.scalev_product_name}
-                  </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: 11 }}>
-                    {(r.frequency || 0).toLocaleString('id-ID')}
-                  </td>
-                  <td style={{ padding: '6px 10px', fontSize: 10 }}>
-                    {(priceTiers[r.scalev_product_name] || []).slice(0, 3).map((t, i) => (
-                      <div key={i} style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontFamily: 'monospace', color: 'var(--text)' }}>{Math.round(t.price).toLocaleString('id-ID')}</span>
-                        <span style={{ color: 'var(--dim)' }}> ({t.count.toLocaleString('id-ID')}x)</span>
-                      </div>
-                    ))}
-                  </td>
-                  <td style={{ padding: '6px 10px', minWidth: 250 }}>
-                    {isEditing ? (
-                      <div>
-                        <input type="text" placeholder="Cari warehouse product..." value={productSearch} onChange={(e) => setProductSearch(e.target.value)}
-                          style={{ ...inputStyle, marginBottom: 4 }} autoFocus />
-                        {productSearch && (
-                          <div style={{ maxHeight: 120, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6 }}>
-                            <div onClick={() => handleMap(r.id, null)}
-                              style={{ padding: '4px 8px', fontSize: 11, cursor: 'pointer', color: 'var(--dim)', borderBottom: '1px solid var(--bg-deep)' }}>
-                              -- Hapus Mapping --
-                            </div>
-                            {filteredProducts.slice(0, 15).map(p => (
-                              <div key={p.id} onClick={() => handleMap(r.id, p.id)}
-                                style={{ padding: '4px 8px', fontSize: 11, cursor: 'pointer', color: 'var(--text)', borderBottom: '1px solid var(--bg-deep)' }}>
-                                {p.name} <span style={{ color: 'var(--dim)' }}>({p.category}) [{p.warehouse}-{p.entity}]</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <button onClick={() => { setEditingId(null); setProductSearch(''); }}
-                          style={{ marginTop: 4, padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 10, cursor: 'pointer' }}>
-                          Batal
-                        </button>
-                      </div>
-                    ) : (
-                      (() => {
-                        if (wp) return <span style={{ color: 'var(--text)', fontSize: 12 }}>{wp.name} [{wp.warehouse}-{wp.entity}]</span>;
-                        if (r.is_ignored) return <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>-</span>;
-                        const suggestion = getSuggestion(r.scalev_product_name);
-                        return suggestion ? (
-                          <button onClick={() => handleMap(r.id, suggestion.id)} disabled={saving}
-                            style={{ padding: '4px 10px', borderRadius: 6, border: '1px dashed #8b5cf6', background: 'rgba(139,92,246,0.08)', color: '#c4b5fd', fontSize: 11, cursor: 'pointer', textAlign: 'left', width: '100%' }}>
-                            <span style={{ fontSize: 9, color: 'var(--dim)', display: 'block', marginBottom: 2 }}>Suggestion ({Math.round(suggestion.score * 100)}%)</span>
-                            {suggestion.name} <span style={{ color: 'var(--dim)' }}>[{suggestion.warehouse}-{suggestion.entity}]</span>
-                          </button>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>Belum dimapping</span>
-                        );
-                      })()
-                    )}
-                  </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--text-secondary)' }}>
-                    {r.deduct_qty_multiplier}x
-                  </td>
-                  <td style={{ padding: '6px 10px' }}>
-                    {r.is_ignored ? (
-                      <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--bg-deep)', color: 'var(--dim)' }}>Ignored</span>
-                    ) : r.warehouse_product_id ? (
-                      <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-green-bg)', color: '#6ee7b7' }}>Mapped</span>
-                    ) : (
-                      <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-red-bg)', color: '#fca5a5' }}>Unmapped</span>
-                    )}
-                  </td>
-                  <td style={{ padding: '6px 10px' }}>
-                    <div style={{ display: 'flex', gap: 4 }}>
-                      {!isEditing && !r.is_ignored && (
-                        <button onClick={() => setEditingId(r.id)} disabled={saving}
-                          style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--accent)', fontSize: 10, cursor: 'pointer', fontWeight: 600 }}>
-                          {r.warehouse_product_id ? 'Ubah' : 'Map'}
-                        </button>
-                      )}
-                      {!r.is_ignored && !r.warehouse_product_id && (
-                        <button onClick={() => handleIgnore(r.id)} disabled={saving}
-                          style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 10, cursor: 'pointer' }}>
-                          Ignore
-                        </button>
-                      )}
-                      {r.is_ignored && (
-                        <button onClick={() => handleUnignore(r.id)} disabled={saving}
-                          style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--accent)', fontSize: 10, cursor: 'pointer' }}>
-                          Unignore
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {filtered.length === 0 && (
-              <tr><td colSpan={7} style={{ padding: 24, textAlign: 'center', color: 'var(--text-muted)' }}>Tidak ada data mapping</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </>
-  );
-}
-
-// ============================================================
-// LEDGER (MOVEMENT LOG) TAB (NEW)
-// ============================================================
-
-// ============================================================
 // DAILY SUMMARY TAB
 // ============================================================
 function DailySummaryTab({
@@ -4176,7 +3901,7 @@ function DailySummaryTab({
             sub={alertsLoaded ? 'Pada halaman queue aktif' : 'Menunggu queue'}
           />
           <KPICard
-            label="Butuh Mapping"
+            label="Butuh Item Mapping"
             value={alertsLoaded ? (queuePageStats.needsProductMapping + queuePageStats.needsBusinessMapping).toLocaleString('id-ID') : '-'}
             color="#f59e0b"
             sub={alertsLoaded ? 'Produk/business mapping di page aktif' : 'Menunggu queue'}
@@ -4299,9 +4024,18 @@ function DailySummaryTab({
                         ) : !can('wh:mapping_sync') ? (
                           <span style={{ fontSize: 10, color: 'var(--dim)' }}>Read only</span>
                         ) : !canSyncThisOrder ? (
-                          <span style={{ fontSize: 10, color: 'var(--dim)' }}>
-                            {a.problem === 'no_business_mapping' ? 'Benahi mapping business' : a.problem === 'no_product_mapping' ? 'Benahi mapping produk' : 'Cek data order'}
-                          </span>
+                          a.problem === 'no_product_mapping' ? (
+                            <a
+                              href="/dashboard/warehouse-settings?tab=catalog-mapping"
+                              style={{ fontSize: 10, color: 'var(--accent)', textDecoration: 'none', fontWeight: 600 }}
+                            >
+                              Benahi Item Mapping
+                            </a>
+                          ) : (
+                            <span style={{ fontSize: 10, color: 'var(--dim)' }}>
+                              {a.problem === 'no_business_mapping' ? 'Benahi mapping business' : 'Cek data order'}
+                            </span>
+                          )
                         ) : (
                           <button
                             onClick={async () => {

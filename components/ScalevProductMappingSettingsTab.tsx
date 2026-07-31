@@ -490,13 +490,13 @@ export default function ScalevProductMappingSettingsTab() {
       >
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 12 }}>
           <div style={{ flex: 1, minWidth: 260 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Owner Item Mapping</div>
+            <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Item Mapping</div>
             <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
-              Halaman ini memetakan direct entity ScaleV yang visible di business terpilih ke master produk warehouse milik `item_owner`.
-              Untuk row shared, mapping yang disimpan akan menulis ke owner business sebagai sumber kebenaran stok.
+              Satu sumber mapping untuk menghubungkan produk/varian ScaleV yang stabil ke master produk warehouse milik `item_owner`.
+              Perubahan nama order tetap memakai mapping yang sama selama identitas produk atau variannya tidak berubah.
             </div>
             <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.6, marginTop: 6 }}>
-              Rekomendasi tetap memakai histori legacy, alias `scalev_product_names`, dan kemiripan nama, tetapi ranking produk sekarang memprioritaskan owner business dari entity tersebut.
+              Histori nama lama dan alias produk hanya dipakai sebagai sinyal rekomendasi. Mapping inventory yang disimpan tetap mapping canonical milik owner business.
             </div>
           </div>
           <div
@@ -508,12 +508,12 @@ export default function ScalevProductMappingSettingsTab() {
               border: '1px solid var(--border)',
             }}
           >
-            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 4 }}>Model Baru</div>
+            <div style={{ fontSize: 10, color: 'var(--dim)', marginBottom: 4 }}>Sumber Kebenaran</div>
             <div style={{ color: 'var(--text)', fontWeight: 700, fontSize: 13 }}>
-              owner-aware mapping
+              canonical owner mapping
             </div>
             <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 4, lineHeight: 1.5 }}>
-              Deduction live tidak lagi mengambil keputusan dari `Business Settings &gt; Gudang`. Origin fisik akan dibaca dari `Warehouse Registry`.
+              Identitas produk selalu berasal dari Item Mapping. Business Mapping dan Warehouse Registry hanya memvalidasi owner serta rute gudangnya.
             </div>
           </div>
         </div>

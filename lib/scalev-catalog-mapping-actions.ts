@@ -145,7 +145,7 @@ function scoreNameSimilarity(left: string | null | undefined, right: string | nu
   return matches / Math.max(leftTokens.length, rightTokens.length);
 }
 
-async function requireScalevCatalogMappingAccess(label = 'Product Mapping Scalev') {
+async function requireScalevCatalogMappingAccess(label = 'Item Mapping') {
   await requireDashboardTabAccess('warehouse-settings', label);
   return requireDashboardPermissionAccess('whs:mapping', label);
 }
@@ -639,7 +639,7 @@ export async function saveScalevCatalogProductMapping(input: {
       await recordWarehouseActivityLog({
         scope: 'scalev_catalog_product_mapping',
         action: 'clear',
-        screen: 'Product Mapping Scalev',
+        screen: 'Item Mapping',
         summary: `Menghapus mapping ${scalevEntityLabel}`,
         targetType: entityType,
         targetId: entityKey,
@@ -766,7 +766,7 @@ export async function saveScalevCatalogProductMapping(input: {
     await recordWarehouseActivityLog({
       scope: 'scalev_catalog_product_mapping',
       action,
-      screen: 'Product Mapping Scalev',
+      screen: 'Item Mapping',
       summary,
       targetType: entityType,
       targetId: entityKey,

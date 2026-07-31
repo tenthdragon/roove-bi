@@ -8,12 +8,6 @@ import {
   createProduct,
   updateProduct,
   deactivateProduct,
-  getScalevMappings,
-  getScalevFrequencies,
-  getScalevPriceTiers,
-  updateScalevMapping,
-  syncScalevProductNames,
-  getProducts,
   getVendors,
   createVendor,
   updateVendor,
@@ -38,10 +32,9 @@ const SUB_TABS = [
   { id: 'warehouses', label: 'Warehouse Registry', permissionKey: 'whs:warehouses' },
   { id: 'business-directory', label: 'Business Directory', permissionKey: 'whs:mapping' },
   { id: 'catalog', label: 'Katalog Scalev', permissionKey: 'whs:mapping' },
-  { id: 'catalog-mapping', label: 'Owner Item Mapping', permissionKey: 'whs:mapping' },
+  { id: 'catalog-mapping', label: 'Item Mapping', permissionKey: 'whs:mapping' },
   { id: 'bundle-mapping', label: 'Bundle Decomposition', permissionKey: 'whs:mapping' },
   { id: 'activity-log', label: 'Log Aktivitas', permissionKey: 'whs:mapping' },
-  { id: 'mapping', label: 'Mapping Scalev Legacy', permissionKey: 'whs:mapping' },
 ];
 
 const DEFAULT_CATEGORIES = ['fg', 'sachet', 'packaging', 'bonus', 'wip', 'wip_material', 'other'];
@@ -68,6 +61,13 @@ export default function WarehouseSettingsPage() {
   const { can } = usePermissions();
   const visibleTabs = SUB_TABS.filter(t => can((t as any).permissionKey || `whs:${t.id}`));
   const [activeTab, setActiveTab] = useState('brands');
+
+  useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (requestedTab && SUB_TABS.some((tab) => tab.id === requestedTab)) {
+      setActiveTab(requestedTab);
+    }
+  }, []);
 
   // Auto-switch if current tab is no longer visible
   const effectiveTab = visibleTabs.find(t => t.id === activeTab)?.id ?? visibleTabs[0]?.id ?? 'brands';
@@ -112,7 +112,6 @@ export default function WarehouseSettingsPage() {
       {effectiveTab === 'catalog-mapping' && <ScalevProductMappingSettingsTab />}
       {effectiveTab === 'bundle-mapping' && <ScalevBundleMappingSettingsTab />}
       {effectiveTab === 'activity-log' && <WarehouseActivityLogTab />}
-      {effectiveTab === 'mapping' && <MappingTabWrapper />}
     </div>
   );
 }
@@ -639,188 +638,6 @@ function ActiveWarehouseTab() {
       </div>
 
       {/* Business → Warehouse Mapping moved to Business Settings */}
-    </>
-  );
-}
-
-// ============================================================
-// MAPPING SCALEV TAB (moved from warehouse page)
-// ============================================================
-
-function MappingTabWrapper() {
-  const [data, setData] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try { setData(await getScalevMappings()); } catch {}
-      setLoading(false);
-    })();
-  }, [refreshKey]);
-
-  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: 'var(--dim)' }}>Memuat...</div>;
-
-  // Import and render the MappingTab from warehouse page
-  // For now, inline a simplified version
-  return <MappingTabInline data={data} onRefresh={() => setRefreshKey(k => k + 1)} />;
-}
-
-// Simplified inline MappingTab (same logic as warehouse page MappingTab)
-function MappingTabInline({ data, onRefresh }: { data: any[]; onRefresh: () => void }) {
-  const [filter, setFilter] = useState('all');
-  const [search, setSearch] = useState('');
-  const [products, setProducts] = useState<any[]>([]);
-  const [freqMap, setFreqMap] = useState<Record<string, number>>({});
-  const [priceTiers, setPriceTiers] = useState<Record<string, { price: number; count: number }[]>>({});
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [productSearch, setProductSearch] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [syncing, setSyncing] = useState(false);
-
-  useEffect(() => { (async () => { try { setProducts(await getProducts()); } catch {} })(); }, []);
-  useEffect(() => { (async () => { try { setFreqMap(await getScalevFrequencies()); } catch {} })(); }, []);
-  useEffect(() => { (async () => { try { setPriceTiers(await getScalevPriceTiers()); } catch {} })(); }, []);
-
-  const dataWithFreq = useMemo(() => data.map(r => ({ ...r, frequency: freqMap[r.scalev_product_name] || 0 })), [data, freqMap]);
-
-  const filtered = useMemo(() => {
-    let result = dataWithFreq;
-    if (filter === 'mapped') result = result.filter(r => r.warehouse_product_id && !r.is_ignored);
-    if (filter === 'unmapped') result = result.filter(r => !r.warehouse_product_id && !r.is_ignored);
-    if (filter === 'ignored') result = result.filter(r => r.is_ignored);
-    if (search) { const q = search.toLowerCase(); result = result.filter(r => r.scalev_product_name?.toLowerCase().includes(q)); }
-    return result.sort((a, b) => (b.frequency || 0) - (a.frequency || 0));
-  }, [dataWithFreq, filter, search]);
-
-  const counts = useMemo(() => ({
-    all: dataWithFreq.length,
-    mapped: dataWithFreq.filter(r => r.warehouse_product_id && !r.is_ignored).length,
-    unmapped: dataWithFreq.filter(r => !r.warehouse_product_id && !r.is_ignored).length,
-    ignored: dataWithFreq.filter(r => r.is_ignored).length,
-  }), [dataWithFreq]);
-
-  const filteredProducts = useMemo(() => {
-    if (!productSearch) return [];
-    const q = productSearch.toLowerCase();
-    return products.filter(p => p.name.toLowerCase().includes(q));
-  }, [products, productSearch]);
-
-  const getSuggestion = (scalevName: string) => {
-    if (!products.length) return null;
-    const sn = scalevName.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-    const snWords = sn.split(' ');
-    let bestMatch: any = null; let bestScore = 0;
-    for (const p of products) {
-      const pn = p.name.toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
-      const pnWords = pn.split(' ');
-      let matches = 0;
-      for (const sw of snWords) { if (sw.length < 2) continue; for (const pw of pnWords) { if (pw.includes(sw) || sw.includes(pw)) { matches++; break; } } }
-      const score = matches / Math.max(snWords.length, pnWords.length);
-      if (score > bestScore && score >= 0.3) { bestScore = score; bestMatch = { ...p, score }; }
-    }
-    return bestMatch;
-  };
-
-  const handleMap = async (mappingId: number, productId: number | null) => {
-    setSaving(true);
-    try { await updateScalevMapping(mappingId, productId, undefined, false); setEditingId(null); setProductSearch(''); onRefresh(); } catch (e) { console.error(e); }
-    setSaving(false);
-  };
-
-  const handleIgnore = async (id: number) => { setSaving(true); try { await updateScalevMapping(id, null, undefined, true); onRefresh(); } catch {} setSaving(false); };
-  const handleUnignore = async (id: number) => { setSaving(true); try { await updateScalevMapping(id, null, undefined, false); onRefresh(); } catch {} setSaving(false); };
-  const handleSync = async () => { setSyncing(true); try { await syncScalevProductNames(); onRefresh(); } catch {} setSyncing(false); };
-
-  return (
-    <>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-        {(['all', 'unmapped', 'mapped', 'ignored'] as const).map(f => (
-          <button key={f} onClick={() => setFilter(f)}
-            style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${filter === f ? 'var(--accent)' : 'var(--border)'}`, background: filter === f ? 'var(--accent)' : 'transparent', color: filter === f ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
-            {f === 'all' ? 'Semua' : f === 'unmapped' ? 'Belum Map' : f === 'mapped' ? 'Sudah Map' : 'Ignored'} ({counts[f]})
-          </button>
-        ))}
-        <div style={{ flex: 1 }} />
-        <input type="text" placeholder="Cari..." value={search} onChange={e => setSearch(e.target.value)}
-          style={{ ...inputStyle, minWidth: 200, width: 'auto' }} />
-        <button onClick={handleSync} disabled={syncing} style={{ padding: '6px 14px', borderRadius: 8, border: '1px solid var(--border)', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'transparent', color: 'var(--dim)' }}>
-          {syncing ? 'Syncing...' : 'Sync Baru'}
-        </button>
-      </div>
-
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              {['Scalev Name', 'Frek', 'Harga/unit', 'Mapped To', 'Status', 'Aksi'].map(h => (
-                <th key={h} style={{ padding: '6px 8px', textAlign: ['Scalev Name', 'Mapped To', 'Harga/unit', 'Status', 'Aksi'].includes(h) ? 'left' : 'right', color: 'var(--dim)', fontWeight: 600, whiteSpace: 'nowrap' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map(r => {
-              const isEditing = editingId === r.id;
-              const wp = r.warehouse_products;
-              return (
-                <tr key={r.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                  <td style={{ padding: '5px 8px', color: 'var(--text)', fontWeight: 500, maxWidth: 250, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.scalev_product_name}</td>
-                  <td style={{ padding: '5px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text-secondary)', fontSize: 10 }}>{(r.frequency || 0).toLocaleString('id-ID')}</td>
-                  <td style={{ padding: '5px 8px', fontSize: 9 }}>
-                    {(priceTiers[r.scalev_product_name] || []).slice(0, 2).map((t, i) => (
-                      <div key={i}><span style={{ fontFamily: 'monospace' }}>{Math.round(t.price).toLocaleString('id-ID')}</span> <span style={{ color: 'var(--dim)' }}>({t.count.toLocaleString('id-ID')}x)</span></div>
-                    ))}
-                  </td>
-                  <td style={{ padding: '5px 8px', minWidth: 200 }}>
-                    {isEditing ? (
-                      <div>
-                        <input type="text" placeholder="Cari produk..." value={productSearch} onChange={e => setProductSearch(e.target.value)} style={inputStyle} autoFocus />
-                        {productSearch && (
-                          <div style={{ maxHeight: 100, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 6, marginTop: 2 }}>
-                            <div onClick={() => handleMap(r.id, null)} style={{ padding: '3px 6px', fontSize: 10, cursor: 'pointer', color: 'var(--dim)' }}>-- Hapus --</div>
-                            {filteredProducts.slice(0, 10).map(p => (
-                              <div key={p.id} onClick={() => handleMap(r.id, p.id)} style={{ padding: '3px 6px', fontSize: 10, cursor: 'pointer', color: 'var(--text)', borderTop: '1px solid var(--bg-deep)' }}>
-                                {p.name} [{p.warehouse}-{p.entity}]
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <button onClick={() => { setEditingId(null); setProductSearch(''); }} style={{ marginTop: 2, padding: '1px 6px', borderRadius: 3, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 9, cursor: 'pointer' }}>Batal</button>
-                      </div>
-                    ) : (
-                      (() => {
-                        if (wp) return <span style={{ color: 'var(--text)', fontSize: 11 }}>{wp.name} [{wp.warehouse}-{wp.entity}]</span>;
-                        if (r.is_ignored) return <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>-</span>;
-                        const suggestion = getSuggestion(r.scalev_product_name);
-                        return suggestion ? (
-                          <button onClick={() => handleMap(r.id, suggestion.id)} disabled={saving}
-                            style={{ padding: '3px 8px', borderRadius: 5, border: '1px dashed #8b5cf6', background: 'rgba(139,92,246,0.08)', color: '#c4b5fd', fontSize: 10, cursor: 'pointer', textAlign: 'left', width: '100%' }}>
-                            <span style={{ fontSize: 8, color: 'var(--dim)', display: 'block' }}>Suggestion ({Math.round(suggestion.score * 100)}%)</span>
-                            {suggestion.name}
-                          </button>
-                        ) : <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>Belum dimapping</span>;
-                      })()
-                    )}
-                  </td>
-                  <td style={{ padding: '5px 8px' }}>
-                    {r.is_ignored ? <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 700, background: 'var(--bg-deep)', color: 'var(--dim)' }}>Ignored</span>
-                    : r.warehouse_product_id ? <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 700, background: 'var(--badge-green-bg)', color: '#6ee7b7' }}>Mapped</span>
-                    : <span style={{ padding: '1px 6px', borderRadius: 4, fontSize: 9, fontWeight: 700, background: 'var(--badge-red-bg)', color: '#fca5a5' }}>Unmapped</span>}
-                  </td>
-                  <td style={{ padding: '5px 8px' }}>
-                    <div style={{ display: 'flex', gap: 3 }}>
-                      {!isEditing && !r.is_ignored && <button onClick={() => setEditingId(r.id)} style={{ padding: '1px 6px', borderRadius: 3, border: '1px solid var(--border)', background: 'transparent', color: 'var(--accent)', fontSize: 9, cursor: 'pointer' }}>{r.warehouse_product_id ? 'Ubah' : 'Map'}</button>}
-                      {!r.is_ignored && !r.warehouse_product_id && <button onClick={() => handleIgnore(r.id)} style={{ padding: '1px 6px', borderRadius: 3, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 9, cursor: 'pointer' }}>Ignore</button>}
-                      {r.is_ignored && <button onClick={() => handleUnignore(r.id)} style={{ padding: '1px 6px', borderRadius: 3, border: '1px solid var(--border)', background: 'transparent', color: 'var(--accent)', fontSize: 9, cursor: 'pointer' }}>Unignore</button>}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
     </>
   );
 }

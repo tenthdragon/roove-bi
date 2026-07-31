@@ -37,7 +37,7 @@ import {
   resolveWarehouseOrigin,
   type WarehouseBusinessDirectoryRow,
 } from './warehouse-domain-helpers';
-import { buildWorkspaceWarehouseTargets } from './workspace-warehouse-reconcile';
+import { constrainCanonicalTargetsToWorkspace } from './warehouse-item-resolution';
 import { requireExplicitWorkspaceId } from './workspace-scope';
 
 // ============================================================
@@ -1297,6 +1297,31 @@ async function resolveWarehouseTargetsForOrder(
   }
 
   const allowedMappingsList = Array.from(allowedMappings.values());
+  const targetProductIds = Array.from(new Set(
+    targets
+      .map((target) => Number(target.warehouse_product_id || 0))
+      .filter((productId) => Number.isFinite(productId) && productId > 0),
+  ));
+  const { data: targetProductRows, error: targetProductError } = targetProductIds.length > 0
+    ? await svc
+        .from('warehouse_products')
+        .select('id, owner_workspace_id, is_active')
+        .in('id', targetProductIds)
+    : { data: [], error: null };
+  if (targetProductError) throw targetProductError;
+
+  const {
+    validTargets,
+    rejectedProductNames,
+  } = constrainCanonicalTargetsToWorkspace(
+    targets,
+    (targetProductRows || []) as any[],
+    workspaceId,
+  );
+  const finalUnmappedProducts = Array.from(new Set([
+    ...unmappedProducts,
+    ...rejectedProductNames,
+  ]));
   const derivedMapping = allowedMappingsList[0]
     ? {
         deduct_entity: allowedMappingsList[0].deduct_entity,
@@ -1306,9 +1331,9 @@ async function resolveWarehouseTargetsForOrder(
 
   return {
     productLines,
-    targets,
-    desiredByProduct: aggregateTargetsByProduct(targets),
-    unmappedProducts,
+    targets: validTargets,
+    desiredByProduct: aggregateTargetsByProduct(validTargets),
+    unmappedProducts: finalUnmappedProducts,
     skippedIgnored,
     mapping: derivedMapping
       ? {
@@ -2536,6 +2561,13 @@ function buildWarehouseIssueSummaryFromState(args: {
     };
   }
 
+  if (!args.mapping) {
+    return {
+      problem: 'no_business_mapping',
+      problem_detail: `Order ${args.orderId} belum punya seller/origin registry yang lengkap untuk deduction owner-aware.`,
+    };
+  }
+
   if (args.unmappedProducts.length > 0) {
     const allowedSummary = (args.allowedMappings || []).length > 0
       ? ` Target diizinkan: ${(args.allowedMappings || []).map(formatBusinessTargetLabel).join(', ')}.`
@@ -2543,13 +2575,6 @@ function buildWarehouseIssueSummaryFromState(args: {
     return {
       problem: 'no_product_mapping',
       problem_detail: `Produk belum punya owner item mapping atau origin registry yang valid: ${args.unmappedProducts.join(', ')}.${allowedSummary}`.replace(/\.\s+Target/, '. Target'),
-    };
-  }
-
-  if (!args.mapping) {
-    return {
-      problem: 'no_business_mapping',
-      problem_detail: `Order ${args.orderId} belum punya seller/origin registry yang lengkap untuk deduction owner-aware.`,
     };
   }
 
@@ -5982,64 +6007,16 @@ async function resolveIndependentWorkspaceOrderState(
   workspaceId: string,
   order: ScalevOrderWarehouseSnapshot,
 ) {
-  const { data: businessMapping, error: businessMappingError } = await svc
-    .from('warehouse_business_mapping')
-    .select('id, deduct_entity, deduct_warehouse')
-    .eq('workspace_id', workspaceId)
-    .eq('business_code', order.business_code)
-    .eq('is_active', true)
-    .eq('is_primary', true)
-    .maybeSingle();
-  if (businessMappingError) throw businessMappingError;
-
-  const { data: lineRows, error: lineError } = await svc
-    .from('scalev_order_lines')
-    .select('product_name, quantity')
-    .eq('workspace_id', workspaceId)
-    .eq('scalev_order_id', order.id);
-  if (lineError) throw lineError;
-  const lines = (lineRows || [])
-    .map((line: any) => ({
-      product_name: String(line.product_name || '').trim(),
-      quantity: Number(line.quantity || 0),
-    }))
-    .filter((line) => line.product_name && line.quantity > 0);
-
-  const names = Array.from(new Set(lines.map((line) => line.product_name)));
-  const { data: mappingRows, error: mappingError } = names.length > 0
-    ? await svc
-        .from('warehouse_scalev_mapping')
-        .select(`
-          scalev_product_name,
-          warehouse_product_id,
-          deduct_qty_multiplier,
-          is_ignored,
-          warehouse_products(id, owner_workspace_id, entity, warehouse, is_active)
-        `)
-        .eq('workspace_id', workspaceId)
-        .in('scalev_product_name', names)
-    : { data: [], error: null };
-  if (mappingError) throw mappingError;
-
-  const mappings = (mappingRows || []).map((mapping: any) => {
-    const product = Array.isArray(mapping.warehouse_products)
-      ? mapping.warehouse_products[0] || null
-      : mapping.warehouse_products || null;
-    const validTarget = product
-      && product.owner_workspace_id === workspaceId
-      && product.is_active
-      && (!businessMapping || (
-        product.entity === businessMapping.deduct_entity
-        && product.warehouse === businessMapping.deduct_warehouse
-      ));
-    return {
-      scalev_product_name: mapping.scalev_product_name,
-      warehouse_product_id: validTarget ? Number(mapping.warehouse_product_id) : null,
-      deduct_qty_multiplier: Number(mapping.deduct_qty_multiplier || 1),
-      is_ignored: Boolean(mapping.is_ignored),
-    };
-  });
-  const resolved = buildWorkspaceWarehouseTargets(lines, mappings);
+  // Every workspace uses this same canonical-first resolver. Product activity
+  // and workspace ownership are enforced inside it; the old name mapping is
+  // retained only as an internal compatibility fallback.
+  const canonical = await resolveWarehouseTargetsForOrder(svc, order, workspaceId);
+  const resolved = {
+    targets: canonical.targets,
+    desiredByProduct: canonical.desiredByProduct,
+    unmappedProducts: canonical.unmappedProducts,
+    skippedIgnored: canonical.skippedIgnored,
+  };
   const existingRows = await getIndependentWorkspaceOrderLedgerRows(
     svc,
     workspaceId,
@@ -6050,8 +6027,8 @@ async function resolveIndependentWorkspaceOrderState(
   const outstandingByProduct = aggregateOutstandingByProduct(outstandingGroups);
 
   return {
-    businessMapping,
-    lines,
+    businessMapping: canonical.mapping,
+    lines: canonical.productLines,
     resolved,
     outstandingGroups,
     outstandingByProduct,
@@ -7090,6 +7067,7 @@ export async function backfillWarehouseDeductions(date: string) {
   if (!isGoLiveDay && reconcileMode === 'legacy_attribution') {
     while (true) {
       const backlogResult = await svc.rpc('warehouse_daily_undeducted_orders', {
+        p_workspace_id: workspaceId,
         p_date: date,
         p_limit: backlogLimit,
         p_offset: backlogOffset,
@@ -7194,6 +7172,7 @@ export async function getUndeductedOrders(
 
   if (!isGoLiveDay && reconcileMode === 'legacy_attribution') {
     const rpcResult = await svc.rpc('warehouse_daily_undeducted_orders', {
+      p_workspace_id: workspaceId,
       p_date: date,
       p_limit: limit,
       p_offset: offset,
