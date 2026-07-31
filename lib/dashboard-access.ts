@@ -1,10 +1,11 @@
 import { createServerSupabase } from './supabase-server';
-import { requireWorkspaceAccess } from './workspace-access';
+import { getWorkspaceBootstrapForVerifiedProfile } from './workspace-access';
 import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 type DashboardProfile = {
   id: string;
   role: string;
+  active_workspace_id?: string | null;
 };
 
 type AccessContext = {
@@ -28,7 +29,7 @@ async function getAuthenticatedDashboardProfile(): Promise<AccessContext> {
 
   const directProfile = await supabase
     .from('profiles')
-    .select('id, role')
+    .select('id, role, active_workspace_id')
     .eq('id', user.id)
     .single();
 
@@ -36,7 +37,7 @@ async function getAuthenticatedDashboardProfile(): Promise<AccessContext> {
   if (!profile) {
     const rpcProfile = await supabase
       .rpc('get_my_dashboard_profile')
-      .select('id, role')
+      .select('id, role, active_workspace_id')
       .maybeSingle();
     profile = rpcProfile.data;
   }
@@ -45,19 +46,26 @@ async function getAuthenticatedDashboardProfile(): Promise<AccessContext> {
     throw new Error('Akses dashboard belum aktif untuk akun ini.');
   }
 
-  const workspaceAccess = await requireWorkspaceAccess();
-  const effectiveRole = workspaceAccess.hasFullWorkspaceAccess
+  const workspaceBootstrap = await getWorkspaceBootstrapForVerifiedProfile({
+    userId: user.id,
+    profile,
+  });
+  const activeWorkspace = workspaceBootstrap.activeWorkspace;
+  const hasFullWorkspaceAccess =
+    workspaceBootstrap.isPlatformOwner ||
+    activeWorkspace.membershipRole === 'workspace_owner';
+  const effectiveRole = hasFullWorkspaceAccess
     ? 'owner'
-    : workspaceAccess.membershipRole;
+    : activeWorkspace.membershipRole;
 
   return {
     profile: {
       id: profile.id,
       role: effectiveRole,
     },
-    workspaceId: workspaceAccess.workspaceId,
-    membershipRole: workspaceAccess.membershipRole,
-    isPlatformOwner: workspaceAccess.isPlatformOwner,
+    workspaceId: activeWorkspace.id,
+    membershipRole: activeWorkspace.membershipRole,
+    isPlatformOwner: workspaceBootstrap.isPlatformOwner,
   };
 }
 

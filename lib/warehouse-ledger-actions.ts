@@ -38,6 +38,7 @@ import {
   type WarehouseBusinessDirectoryRow,
 } from './warehouse-domain-helpers';
 import { ROOVE_WORKSPACE_ID } from './workspaces';
+import { buildWorkspaceWarehouseTargets } from './workspace-warehouse-reconcile';
 
 // ============================================================
 // AUTH HELPER
@@ -69,9 +70,7 @@ async function getCurrentUserName(): Promise<string> {
 async function requireWarehouseAccess(label: string = 'Warehouse') {
   const access = await requireDashboardTabAccess('warehouse', label);
   if (access.workspaceId !== ROOVE_WORKSPACE_ID) {
-    throw new Error(
-      'Fitur warehouse legacy tidak tersedia untuk workspace ini. Gunakan halaman inventory workspace.',
-    );
+    throw new Error(`${label} menggunakan modul warehouse independen workspace.`);
   }
   return access;
 }
@@ -565,6 +564,29 @@ export async function callWarehouseDeductFifoCompat(
   return result;
 }
 
+async function callWarehouseDeductFifoForWorkspace(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  params: WarehouseDeductFifoParams,
+) {
+  const result = await svc.rpc('warehouse_deduct_fifo_workspace', {
+    p_workspace_id: workspaceId,
+    p_product_id: params.p_product_id,
+    p_quantity: params.p_quantity,
+    p_reference_type: params.p_reference_type ?? 'scalev_order',
+    p_reference_id: params.p_reference_id ?? null,
+    p_notes: params.p_notes ?? null,
+    p_created_at: params.p_created_at ?? null,
+    p_scalev_order_id: params.p_scalev_order_id ?? null,
+  });
+
+  if (result.error && isMissingRpcFunctionError(result.error, 'warehouse_deduct_fifo_workspace')) {
+    throw new Error('Migration warehouse segregation belum diterapkan. Jalankan migration 173 terlebih dahulu.');
+  }
+
+  return result;
+}
+
 const TERMINAL_SCALEV_ORDER_STATUSES = new Set(['shipped', 'completed']);
 const RETURNED_SCALEV_ORDER_STATUSES = new Set(['returned', 'rts', 'shipped_rts']);
 const WAREHOUSE_GO_LIVE_BASELINE_DATE = '2026-04-21';
@@ -603,6 +625,24 @@ async function loadWarehouseGoLiveAt(
   svc: ReturnType<typeof createServiceSupabase>,
   workspaceId: string = ROOVE_WORKSPACE_ID,
 ) {
+  const { data: workspace, error: workspaceError } = await svc
+    .from('workspaces')
+    .select('settings')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  if (workspaceError) throw workspaceError;
+
+  const configuredGoLiveAt = String(
+    (workspace?.settings as any)?.warehouse_go_live_at || '',
+  ).trim();
+  if (configuredGoLiveAt) {
+    const parsed = new Date(configuredGoLiveAt);
+    if (Number.isNaN(parsed.getTime())) {
+      throw new Error('Konfigurasi tanggal go-live warehouse tidak valid.');
+    }
+    return parsed.toISOString();
+  }
+
   const { data, error } = await svc
     .from('warehouse_stock_opname_sessions')
     .select('completed_at')
@@ -650,10 +690,39 @@ export async function getWarehouseGoLiveState() {
   const { workspaceId } = await requireWarehouseAccess('Warehouse');
   const svc = createServiceSupabase();
   const goLiveAt = await loadWarehouseGoLiveAt(svc, workspaceId);
+  const { data: workspace, error } = await svc
+    .from('workspaces')
+    .select('settings')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  if (error) throw error;
+  const configuredBaseline = String(
+    (workspace?.settings as any)?.warehouse_baseline_date || '',
+  ).trim();
+  const baselineDate = configuredBaseline || WAREHOUSE_GO_LIVE_BASELINE_DATE;
+  const baselineDateValue = new Date(`${baselineDate}T00:00:00+07:00`);
+  const baselineLabel = Number.isNaN(baselineDateValue.getTime())
+    ? baselineDate
+    : baselineDateValue.toLocaleDateString('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+  const notBeforeLabel = goLiveAt
+    ? new Date(goLiveAt).toLocaleString('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    : WAREHOUSE_GO_LIVE_NOT_BEFORE_LABEL;
   return {
-    baselineDate: WAREHOUSE_GO_LIVE_BASELINE_DATE,
-    baselineLabel: WAREHOUSE_GO_LIVE_BASELINE_LABEL,
-    notBeforeLabel: WAREHOUSE_GO_LIVE_NOT_BEFORE_LABEL,
+    baselineDate,
+    baselineLabel,
+    notBeforeLabel,
     goLiveAt,
   };
 }
@@ -5653,6 +5722,327 @@ async function applyScalevWarehouseTargets(
   return deducted;
 }
 
+async function getIndependentWorkspaceOrderLedgerRows(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  orderId: string,
+  scalevOrderDbId?: number | null,
+) {
+  const selectFields = 'id, warehouse_product_id, batch_id, quantity, movement_type, notes, created_at, reference_id, scalev_order_id';
+
+  if (scalevOrderDbId != null) {
+    const { data, error } = await svc
+      .from('warehouse_stock_ledger')
+      .select(selectFields)
+      .eq('workspace_id', workspaceId)
+      .eq('reference_type', 'scalev_order')
+      .eq('scalev_order_id', scalevOrderDbId)
+      .order('created_at', { ascending: true });
+    if (error) throw error;
+    if (data && data.length > 0) {
+      return (data as any[]).map((row) => ({
+        ...row,
+        warehouse_product_id: Number(row.warehouse_product_id),
+        batch_id: row.batch_id == null ? null : Number(row.batch_id),
+        quantity: Number(row.quantity),
+      })) as WarehouseLedgerRow[];
+    }
+  }
+
+  const { data, error } = await svc
+    .from('warehouse_stock_ledger')
+    .select(selectFields)
+    .eq('workspace_id', workspaceId)
+    .eq('reference_type', 'scalev_order')
+    .eq('reference_id', orderId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+
+  return (data || []).map((row: any) => ({
+    ...row,
+    warehouse_product_id: Number(row.warehouse_product_id),
+    batch_id: row.batch_id == null ? null : Number(row.batch_id),
+    quantity: Number(row.quantity),
+  })) as WarehouseLedgerRow[];
+}
+
+async function getIndependentWorkspaceBalance(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  productId: number,
+) {
+  const { data, error } = await svc
+    .from('warehouse_stock_ledger')
+    .select('quantity')
+    .eq('workspace_id', workspaceId)
+    .eq('warehouse_product_id', productId);
+  if (error) throw error;
+  return (data || []).reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+}
+
+async function reverseIndependentWorkspaceDeductions(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  order: ScalevOrderWarehouseSnapshot,
+  reason: string,
+) {
+  const rows = await getIndependentWorkspaceOrderLedgerRows(
+    svc,
+    workspaceId,
+    order.order_id,
+    order.id,
+  );
+  const groups = summarizeOutstandingLedgerGroups(rows);
+  let reversed = 0;
+
+  for (const group of groups) {
+    if (group.batch_id != null) {
+      const { data: batch, error: batchError } = await svc
+        .from('warehouse_batches')
+        .select('id, current_qty')
+        .eq('id', group.batch_id)
+        .eq('workspace_id', workspaceId)
+        .eq('warehouse_product_id', group.warehouse_product_id)
+        .maybeSingle();
+      if (batchError) throw batchError;
+      if (!batch) throw new Error('Batch reversal tidak ditemukan di workspace order.');
+
+      const { error: updateError } = await svc
+        .from('warehouse_batches')
+        .update({
+          current_qty: Number(batch.current_qty || 0) + Number(group.quantity),
+          is_active: true,
+        })
+        .eq('id', batch.id)
+        .eq('workspace_id', workspaceId);
+      if (updateError) throw updateError;
+    }
+
+    const runningBalance = await getIndependentWorkspaceBalance(
+      svc,
+      workspaceId,
+      group.warehouse_product_id,
+    ) + Number(group.quantity);
+    const { error: ledgerError } = await svc
+      .from('warehouse_stock_ledger')
+      .insert({
+        workspace_id: workspaceId,
+        warehouse_product_id: group.warehouse_product_id,
+        batch_id: group.batch_id,
+        movement_type: 'IN',
+        quantity: Number(group.quantity),
+        running_balance: runningBalance,
+        reference_type: 'scalev_order',
+        reference_id: order.order_id,
+        scalev_order_id: order.id,
+        notes: `Reversal workspace: ${reason}`,
+      });
+    if (ledgerError) throw ledgerError;
+    reversed += 1;
+  }
+
+  return reversed;
+}
+
+async function reconcileIndependentWorkspaceScalevOrder(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  order: ScalevOrderWarehouseSnapshot,
+  goLiveAt: string | null,
+) {
+  if (!isWarehouseGoLiveActive(goLiveAt) || isScalevOrderBeforeWarehouseGoLive(order, goLiveAt)) {
+    return {
+      action: 'skipped_pre_go_live',
+      reversed: 0,
+      deducted: 0,
+      skipped: 0,
+      unmapped_products: [],
+    };
+  }
+
+  const { data: businessMapping, error: businessMappingError } = await svc
+    .from('warehouse_business_mapping')
+    .select('id, deduct_entity, deduct_warehouse')
+    .eq('workspace_id', workspaceId)
+    .eq('business_code', order.business_code)
+    .eq('is_active', true)
+    .eq('is_primary', true)
+    .maybeSingle();
+  if (businessMappingError) throw businessMappingError;
+
+  const { data: lineRows, error: lineError } = await svc
+    .from('scalev_order_lines')
+    .select('product_name, quantity')
+    .eq('workspace_id', workspaceId)
+    .eq('scalev_order_id', order.id);
+  if (lineError) throw lineError;
+  const lines = (lineRows || [])
+    .map((line: any) => ({
+      product_name: String(line.product_name || '').trim(),
+      quantity: Number(line.quantity || 0),
+    }))
+    .filter((line) => line.product_name && line.quantity > 0);
+
+  const names = Array.from(new Set(lines.map((line) => line.product_name)));
+  const { data: mappingRows, error: mappingError } = names.length > 0
+    ? await svc
+        .from('warehouse_scalev_mapping')
+        .select(`
+          scalev_product_name,
+          warehouse_product_id,
+          deduct_qty_multiplier,
+          is_ignored,
+          warehouse_products(id, owner_workspace_id, entity, warehouse, is_active)
+        `)
+        .eq('workspace_id', workspaceId)
+        .in('scalev_product_name', names)
+    : { data: [], error: null };
+  if (mappingError) throw mappingError;
+
+  const mappings = (mappingRows || []).map((mapping: any) => {
+    const product = Array.isArray(mapping.warehouse_products)
+      ? mapping.warehouse_products[0] || null
+      : mapping.warehouse_products || null;
+    const validTarget = product
+      && product.owner_workspace_id === workspaceId
+      && product.is_active
+      && (!businessMapping || (
+        product.entity === businessMapping.deduct_entity
+        && product.warehouse === businessMapping.deduct_warehouse
+      ));
+    return {
+      scalev_product_name: mapping.scalev_product_name,
+      warehouse_product_id: validTarget ? Number(mapping.warehouse_product_id) : null,
+      deduct_qty_multiplier: Number(mapping.deduct_qty_multiplier || 1),
+      is_ignored: Boolean(mapping.is_ignored),
+    };
+  });
+  const resolved = buildWorkspaceWarehouseTargets(lines, mappings);
+  const existingRows = await getIndependentWorkspaceOrderLedgerRows(
+    svc,
+    workspaceId,
+    order.order_id,
+    order.id,
+  );
+  const outstandingGroups = summarizeOutstandingLedgerGroups(existingRows);
+  const outstandingByProduct = aggregateOutstandingByProduct(outstandingGroups);
+
+  if (isReturnedScalevOrderStatus(order.status)) {
+    return {
+      action: 'rts_pending_manual',
+      reversed: 0,
+      deducted: 0,
+      skipped: resolved.skippedIgnored,
+      unmapped_products: resolved.unmappedProducts,
+    };
+  }
+
+  if (!isTerminalScalevOrderStatus(order.status)) {
+    const reversed = await reverseIndependentWorkspaceDeductions(
+      svc,
+      workspaceId,
+      order,
+      `status changed to ${order.status || 'unknown'}`,
+    );
+    return {
+      action: reversed > 0 ? 'reversed' : 'unchanged',
+      reversed,
+      deducted: 0,
+      skipped: resolved.skippedIgnored,
+      unmapped_products: resolved.unmappedProducts,
+    };
+  }
+
+  if (!businessMapping) {
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: resolved.skippedIgnored,
+      unmapped_products: resolved.unmappedProducts,
+      problem: 'no_business_mapping',
+      problem_detail: `Business ${order.business_code || '-'} tidak memiliki warehouse milik workspace ini.`,
+    };
+  }
+
+  if (lines.length === 0) {
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: resolved.skippedIgnored,
+      unmapped_products: [],
+      problem: 'no_order_lines',
+      problem_detail: `Order ${order.order_id} tidak memiliki order lines di workspace ini.`,
+    };
+  }
+
+  if (resolved.unmappedProducts.length > 0 && outstandingGroups.length > 0) {
+    return {
+      action: 'partial',
+      reversed: 0,
+      deducted: 0,
+      skipped: resolved.skippedIgnored,
+      unmapped_products: resolved.unmappedProducts,
+      problem: 'no_product_mapping',
+      problem_detail: `Mapping produk Apurva belum lengkap: ${resolved.unmappedProducts.join(', ')}`,
+    };
+  }
+
+  if (
+    resolved.unmappedProducts.length === 0
+    && mapsEqualWithTolerance(outstandingByProduct, resolved.desiredByProduct)
+  ) {
+    return {
+      action: 'unchanged',
+      reversed: 0,
+      deducted: 0,
+      skipped: resolved.skippedIgnored,
+      unmapped_products: [],
+    };
+  }
+
+  let reversed = 0;
+  if (resolved.unmappedProducts.length === 0 && outstandingGroups.length > 0) {
+    reversed = await reverseIndependentWorkspaceDeductions(
+      svc,
+      workspaceId,
+      order,
+      `reconcile before ${order.status || 'unknown'} deduction`,
+    );
+  }
+
+  const deductAt = order.shipped_time || order.completed_time || new Date().toISOString();
+  let deducted = 0;
+  for (const target of resolved.targets) {
+    const { error } = await callWarehouseDeductFifoForWorkspace(svc, workspaceId, {
+      p_product_id: target.warehouse_product_id,
+      p_quantity: target.quantity,
+      p_reference_type: 'scalev_order',
+      p_reference_id: order.order_id,
+      p_scalev_order_id: order.id,
+      p_created_at: deductAt,
+      p_notes: `Auto Apurva: ${target.scalev_product_name} x${target.quantity} [workspace:${workspaceId}]`,
+    });
+    if (error) throw error;
+    deducted += 1;
+  }
+
+  return {
+    action: resolved.unmappedProducts.length > 0 ? 'partial' : 'deducted',
+    reversed,
+    deducted,
+    skipped: resolved.skippedIgnored,
+    unmapped_products: resolved.unmappedProducts,
+    ...(resolved.unmappedProducts.length > 0
+      ? {
+          problem: 'no_product_mapping',
+          problem_detail: `Mapping produk Apurva belum lengkap: ${resolved.unmappedProducts.join(', ')}`,
+        }
+      : {}),
+  };
+}
+
 export async function reverseWarehouseDeductions(
   orderId: string,
   scalevOrderDbId?: number | null,
@@ -5667,19 +6057,6 @@ export async function reconcileScalevOrderWarehouse(
   scalevOrderDbId?: number | null,
   workspaceId = ROOVE_WORKSPACE_ID,
 ) {
-  // Apurva's initial warehouse surface is intentionally manual. The legacy
-  // ScaleV catalog-to-FIFO resolver still contains Roove-specific mapping
-  // semantics, so never let an Apurva webhook touch Roove inventory.
-  if (workspaceId !== ROOVE_WORKSPACE_ID) {
-    return {
-      action: 'skipped_workspace_rollout',
-      reversed: 0,
-      deducted: 0,
-      skipped: 0,
-      unmapped_products: [],
-    };
-  }
-
   const svc = createServiceSupabase();
   const order = await loadScalevOrderWarehouseSnapshot(
     svc,
@@ -5688,7 +6065,16 @@ export async function reconcileScalevOrderWarehouse(
     workspaceId,
   );
   if (!order) throw new Error(`Order ${orderId} tidak ditemukan`);
-  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  const goLiveAt = await loadWarehouseGoLiveAt(svc, workspaceId);
+
+  if (workspaceId !== ROOVE_WORKSPACE_ID) {
+    return reconcileIndependentWorkspaceScalevOrder(
+      svc,
+      workspaceId,
+      order,
+      goLiveAt,
+    );
+  }
 
   if (!isWarehouseGoLiveActive(goLiveAt)) {
     return {

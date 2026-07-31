@@ -13,6 +13,11 @@ interface OverviewFeeDataParams {
   accessScope?: 'overview' | 'channels';
 }
 
+interface OverviewCm3HistoryParams {
+  to: string;
+  accessScope?: 'overview' | 'channels';
+}
+
 interface RevenueHistoryParams {
   from: string;
   to: string;
@@ -131,6 +136,61 @@ const getActiveOverviewCm3Month = unstable_cache(
   { revalidate: 300, tags: ['overview-cm3-history-active'] },
 );
 
+export async function getOverviewCm3HistoryData({
+  to,
+  accessScope = 'overview',
+}: OverviewCm3HistoryParams) {
+  const { workspaceId } = await requireDashboardTabAccess(
+    accessScope,
+    accessScope === 'channels' ? 'Sales Channel' : 'Overview',
+  );
+  const historyEnd = new Date(`${to}T00:00:00Z`);
+  const historyStartDate = new Date(Date.UTC(
+    historyEnd.getUTCFullYear(),
+    historyEnd.getUTCMonth() - 11,
+    1,
+  ));
+  const historyFrom = historyStartDate.toISOString().slice(0, 10);
+  const historyMonths: Array<{ from: string; to: string; active: boolean }> = [];
+  const historyCursor = new Date(historyStartDate);
+  const historyEndMonth = to.slice(0, 7);
+
+  while (historyCursor.toISOString().slice(0, 7) <= historyEndMonth) {
+    const year = historyCursor.getUTCFullYear();
+    const monthIndex = historyCursor.getUTCMonth();
+    const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+    const monthFrom = `${monthKey}-01`;
+    const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0))
+      .toISOString()
+      .slice(0, 10);
+    historyMonths.push({
+      from: monthFrom,
+      to: monthKey === historyEndMonth ? to : monthEnd,
+      active: monthKey === historyEndMonth,
+    });
+    historyCursor.setUTCMonth(historyCursor.getUTCMonth() + 1);
+  }
+
+  const historyMonthResults = await Promise.all(historyMonths.map((range) =>
+    range.active
+      ? getActiveOverviewCm3Month(workspaceId, range.from, range.to)
+      : getCompletedOverviewCm3Month(workspaceId, range.from, range.to)
+  ));
+
+  return {
+    from: historyFrom,
+    to,
+    daily: historyMonthResults.flatMap((month) => month.daily),
+    ads: historyMonthResults.flatMap((month) => month.ads),
+    channel: historyMonthResults.flatMap((month) => month.channel),
+    shipping: historyMonthResults.flatMap((month) => month.shipping),
+    overhead: historyMonthResults.flatMap((month) => month.overhead),
+    error: historyMonthResults
+      .flatMap((month) => month.errors)
+      .join(' | ') || null,
+  };
+}
+
 export async function getOverviewCoreData({
   from,
   to,
@@ -246,26 +306,6 @@ export async function getOverviewPageData({
   );
 
   const svc = createServiceSupabase();
-  const historyEnd = new Date(`${to}T00:00:00Z`);
-  const historyStartDate = new Date(Date.UTC(historyEnd.getUTCFullYear(), historyEnd.getUTCMonth() - 11, 1));
-  const historyFrom = historyStartDate.toISOString().slice(0, 10);
-  const historyMonths: Array<{ from: string; to: string; active: boolean }> = [];
-  const historyCursor = new Date(historyStartDate);
-  const historyEndMonth = to.slice(0, 7);
-
-  while (historyCursor.toISOString().slice(0, 7) <= historyEndMonth) {
-    const year = historyCursor.getUTCFullYear();
-    const monthIndex = historyCursor.getUTCMonth();
-    const monthKey = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
-    const monthFrom = `${monthKey}-01`;
-    const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0)).toISOString().slice(0, 10);
-    historyMonths.push({
-      from: monthFrom,
-      to: monthKey === historyEndMonth ? to : monthEnd,
-      active: monthKey === historyEndMonth,
-    });
-    historyCursor.setUTCMonth(historyCursor.getUTCMonth() + 1);
-  }
 
   const [
     dailyRes,
@@ -279,7 +319,6 @@ export async function getOverviewPageData({
     prevAdsRes,
     prevChannelRes,
     prevShippingRes,
-    historyMonthResults,
   ] = await Promise.all([
     svc.from('daily_product_summary')
       .select(OVERVIEW_DAILY_SUMMARY_COLUMNS)
@@ -334,11 +373,6 @@ export async function getOverviewPageData({
     getShippingFeeRange(workspaceId, prevFrom, prevTo)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: { message: error.message } })),
-    Promise.all(historyMonths.map((range) =>
-      range.active
-        ? getActiveOverviewCm3Month(workspaceId, range.from, range.to)
-        : getCompletedOverviewCm3Month(workspaceId, range.from, range.to)
-    )),
   ]);
 
   const ads = unwrapOptional(adsRes, 'Gagal memuat marketing fee Overview');
@@ -347,13 +381,6 @@ export async function getOverviewPageData({
   const prevAds = unwrapOptional(prevAdsRes, 'Gagal memuat marketing fee bulan sebelumnya');
   const prevChannel = unwrapOptional(prevChannelRes, 'Gagal memuat MP fee bulan sebelumnya');
   const prevShipping = unwrapOptional(prevShippingRes, 'Gagal memuat shipping fee bulan sebelumnya');
-  const historyDaily = historyMonthResults.flatMap((month) => month.daily);
-  const historyAds = historyMonthResults.flatMap((month) => month.ads);
-  const historyChannel = historyMonthResults.flatMap((month) => month.channel);
-  const historyShipping = historyMonthResults.flatMap((month) => month.shipping);
-  const historyOverhead = historyMonthResults.flatMap((month) => month.overhead);
-  const historyErrors = historyMonthResults.flatMap((month) => month.errors);
-
   return {
     daily: unwrap(dailyRes, 'Gagal memuat data Overview'),
     shipment: unwrap(shipmentRes, 'Gagal memuat shipment Overview'),
@@ -370,16 +397,6 @@ export async function getOverviewPageData({
     prevFeeError: [prevAds.error, prevChannel.error].filter(Boolean).join(' | ') || null,
     shippingError: shipping.error,
     prevShippingError: prevShipping.error,
-    cm3History: {
-      from: historyFrom,
-      to,
-      daily: historyDaily,
-      ads: historyAds,
-      channel: historyChannel,
-      shipping: historyShipping,
-      overhead: historyOverhead,
-      error: historyErrors.join(' | ') || null,
-    },
   };
 }
 

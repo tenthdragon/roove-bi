@@ -422,16 +422,8 @@ export default function DashboardLayout({ children }) {
 
     const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
-    async function loadProfileWithRetry(userId: string) {
+    async function loadLegacyProfileWithRetry(userId: string) {
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const serverResponse = await fetch('/api/auth/profile', {
-          cache: 'no-store',
-        });
-        const serverPayload = await serverResponse.json().catch(() => ({}));
-        if (serverResponse.ok && serverPayload.profile) {
-          return { data: serverPayload.profile, error: null };
-        }
-
         const directResult = await supabase
           .from('profiles')
           .select('*')
@@ -463,25 +455,55 @@ export default function DashboardLayout({ children }) {
       setLoading(true);
       setAccessError('');
 
-      const {
-        data: { user },
-        error: userError,
-      } = await supabase.auth.getUser();
+      let serverPayload: any = {};
+      let serverResponse: Response | null = null;
+      try {
+        serverResponse = await fetch('/api/auth/profile', {
+          cache: 'no-store',
+        });
+        serverPayload = await serverResponse.json().catch(() => ({}));
+      } catch (error) {
+        console.warn('[dashboard-layout] bundled bootstrap request failed', error);
+      }
 
       if (cancelled) return;
 
-      if (userError || !user) {
+      if (serverResponse?.status === 401) {
         router.replace('/');
         return;
       }
 
-      const { data, error: profileError } = await loadProfileWithRetry(user.id);
+      let data = serverResponse?.ok ? serverPayload.profile : null;
+      let profileError: any = null;
+      let fallbackUserId: string | null = null;
+
+      // Compatibility fallback for transient API failures and rolling deploys.
+      // The normal path above returns profile, workspace and permissions in one
+      // request; these client-side lookups are only used if that bundle is not
+      // available.
+      if (!data) {
+        const {
+          data: { user },
+          error: userError,
+        } = await supabase.auth.getUser();
+
+        if (cancelled) return;
+        if (userError || !user) {
+          router.replace('/');
+          return;
+        }
+
+        fallbackUserId = user.id;
+        const legacyProfile = await loadLegacyProfileWithRetry(user.id);
+        data = legacyProfile.data;
+        profileError = legacyProfile.error;
+      }
 
       if (cancelled) return;
 
       if (profileError || !data) {
         console.warn('[dashboard-layout] profile lookup failed', {
-          userId: user.id,
+          userId: fallbackUserId,
           message: profileError?.message ?? null,
           code: (profileError as any)?.code ?? null,
         });
@@ -491,22 +513,30 @@ export default function DashboardLayout({ children }) {
       }
 
       setProfile(data);
-      let workspaceData = null;
-      if (data.role !== 'pending') {
-        const workspaceResponse = await fetch('/api/workspaces', {
-          cache: 'no-store',
-        });
-        workspaceData = await workspaceResponse.json().catch(() => ({}));
+      let workspaceData = serverPayload.workspaceBootstrap || null;
+      let bundledPermissions = Array.isArray(serverPayload.permissions)
+        ? serverPayload.permissions
+        : null;
 
-        if (!workspaceResponse.ok || workspaceData.error) {
-          setAccessError(
-            workspaceData.error ||
-              'Workspace dashboard gagal dimuat. Silakan hubungi owner.',
-          );
-          setLoading(false);
-          return;
+      if (data.role !== 'pending') {
+        if (!workspaceData) {
+          const workspaceResponse = await fetch('/api/workspaces', {
+            cache: 'no-store',
+          });
+          workspaceData = await workspaceResponse.json().catch(() => ({}));
+          bundledPermissions = null;
+
+          if (!workspaceResponse.ok || workspaceData.error) {
+            setAccessError(
+              workspaceData.error || serverPayload.error ||
+                'Workspace dashboard gagal dimuat. Silakan hubungi owner.',
+            );
+            setLoading(false);
+            return;
+          }
         }
 
+        if (cancelled) return;
         setWorkspaceBootstrap(workspaceData);
       }
 
@@ -517,21 +547,25 @@ export default function DashboardLayout({ children }) {
           : membershipRole || data.role;
 
       if (effectiveRole !== 'owner' && data.role !== 'pending') {
-        const { data: perms, error: permsError } = await supabase
-            .from('workspace_role_permissions')
-            .select('permission_key')
-            .eq('workspace_id', workspaceData.activeWorkspace.id)
-            .eq('role', effectiveRole);
+        if (bundledPermissions) {
+          setPermissions(new Set(bundledPermissions));
+        } else {
+          const { data: perms, error: permsError } = await supabase
+              .from('workspace_role_permissions')
+              .select('permission_key')
+              .eq('workspace_id', workspaceData.activeWorkspace.id)
+              .eq('role', effectiveRole);
 
-        if (cancelled) return;
+          if (cancelled) return;
 
-        if (permsError) {
-          setAccessError('Permission dashboard gagal dimuat. Silakan coba lagi atau hubungi owner.');
-          setLoading(false);
-          return;
+          if (permsError) {
+            setAccessError('Permission dashboard gagal dimuat. Silakan coba lagi atau hubungi owner.');
+            setLoading(false);
+            return;
+          }
+
+          setPermissions(new Set((perms ?? []).map((r: any) => r.permission_key)));
         }
-
-        setPermissions(new Set((perms ?? []).map((r: any) => r.permission_key)));
       }
       setLoading(false);
     }

@@ -39,10 +39,8 @@ export function useSupabaseSessionReady() {
 
     supabase.auth.getSession()
       .then(({ data: { session } }) => {
-        if (!session) {
-          window.clearTimeout(fallbackTimer);
-          settle(false);
-        }
+        window.clearTimeout(fallbackTimer);
+        settle(Boolean(session));
       })
       .catch(() => {
         window.clearTimeout(fallbackTimer);

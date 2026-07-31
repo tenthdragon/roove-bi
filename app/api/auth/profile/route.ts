@@ -4,6 +4,7 @@ import {
   createServerSupabase,
   createServiceSupabase,
 } from '@/lib/supabase-server';
+import { getWorkspaceBootstrapForVerifiedProfile } from '@/lib/workspace-access';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,8 +46,50 @@ export async function GET() {
     );
   }
 
-  return NextResponse.json(
-    { profile },
-    { headers: { 'Cache-Control': 'no-store' } },
-  );
+  try {
+    let workspaceBootstrap = null;
+    let permissions: string[] = [];
+
+    if (profile.role !== 'pending') {
+      workspaceBootstrap = await getWorkspaceBootstrapForVerifiedProfile({
+        userId: user.id,
+        profile,
+      });
+
+      const membershipRole = workspaceBootstrap.activeWorkspace.membershipRole;
+      const effectiveRole =
+        profile.role === 'owner' || membershipRole === 'workspace_owner'
+          ? 'owner'
+          : membershipRole || profile.role;
+
+      if (effectiveRole !== 'owner') {
+        const { data: permissionRows, error: permissionError } = await service
+          .from('workspace_role_permissions')
+          .select('permission_key')
+          .eq('workspace_id', workspaceBootstrap.activeWorkspace.id)
+          .eq('role', effectiveRole);
+
+        if (permissionError) {
+          return NextResponse.json(
+            { error: 'Permission dashboard gagal dimuat.' },
+            { status: 500 },
+          );
+        }
+
+        permissions = (permissionRows || []).map(
+          (row) => row.permission_key,
+        );
+      }
+    }
+
+    return NextResponse.json(
+      { profile, workspaceBootstrap, permissions },
+      { headers: { 'Cache-Control': 'no-store' } },
+    );
+  } catch (error: any) {
+    return NextResponse.json(
+      { error: error?.message || 'Workspace dashboard gagal dimuat.' },
+      { status: 403 },
+    );
+  }
 }

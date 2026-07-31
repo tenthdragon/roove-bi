@@ -3,12 +3,14 @@
 import { createContext, useContext, ReactNode } from 'react';
 
 interface PermissionsContextValue {
+  role: string | null;
   permissions: Set<string>;
   /** Returns true for owner (all access) or if the key is in the permissions set */
   can: (key: string) => boolean;
 }
 
 const PermissionsContext = createContext<PermissionsContextValue>({
+  role: null,
   permissions: new Set(),
   can: () => false,
 });
@@ -30,7 +32,7 @@ export function PermissionsProvider({
   const can = (key: string) => role === 'owner' || permissions.has(key);
 
   return (
-    <PermissionsContext.Provider value={{ permissions, can }}>
+    <PermissionsContext.Provider value={{ role: role || null, permissions, can }}>
       {children}
     </PermissionsContext.Provider>
   );

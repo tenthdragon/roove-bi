@@ -1,16 +1,21 @@
 import { cookies } from 'next/headers';
-import { createServerSupabase } from './supabase-server';
+import {
+  createServerSupabase,
+  createServiceSupabase,
+} from './supabase-server';
 import {
   ACTIVE_WORKSPACE_COOKIE,
   type AccessibleWorkspace,
   type WorkspaceBootstrap,
 } from './workspaces';
 
-type WorkspaceProfile = {
+export type WorkspaceProfile = {
   id: string;
   role: string;
   active_workspace_id?: string | null;
 };
+
+type WorkspaceDataClient = ReturnType<typeof createServerSupabase>;
 
 function normalizeWorkspaceRow(
   workspace: any,
@@ -71,6 +76,43 @@ export async function getWorkspaceBootstrap(): Promise<WorkspaceBootstrap> {
   const { supabase, user, profile, isPlatformOwner } =
     await getAuthenticatedWorkspaceProfile();
 
+  return getWorkspaceBootstrapForProfile({
+    supabase,
+    userId: user.id,
+    profile,
+    isPlatformOwner,
+  });
+}
+
+export async function getWorkspaceBootstrapForVerifiedProfile({
+  userId,
+  profile,
+}: {
+  userId: string;
+  profile: WorkspaceProfile;
+}): Promise<WorkspaceBootstrap> {
+  // This helper may only be called after the caller has verified the session
+  // and pinned the profile lookup to that session's user id.
+  return getWorkspaceBootstrapForProfile({
+    supabase: createServiceSupabase() as WorkspaceDataClient,
+    userId,
+    profile,
+    isPlatformOwner: profile.role === 'owner',
+  });
+}
+
+async function getWorkspaceBootstrapForProfile({
+  supabase,
+  userId,
+  profile,
+  isPlatformOwner,
+}: {
+  supabase: WorkspaceDataClient;
+  userId: string;
+  profile: WorkspaceProfile;
+  isPlatformOwner: boolean;
+}): Promise<WorkspaceBootstrap> {
+
   let workspaces: AccessibleWorkspace[] = [];
 
   if (isPlatformOwner) {
@@ -92,7 +134,7 @@ export async function getWorkspaceBootstrap(): Promise<WorkspaceBootstrap> {
       .select(
         'role, is_default, workspaces!inner(id, slug, name, status)',
       )
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .eq('status', 'active');
 
     if (error) throw new Error(`Gagal memuat membership workspace: ${error.message}`);

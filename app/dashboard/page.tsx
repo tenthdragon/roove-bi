@@ -14,16 +14,19 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { useSupabase } from '@/lib/supabase-browser';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
-import { getOverviewPageData } from '@/lib/overview-actions';
+import {
+  getOverviewCm3HistoryData,
+  getOverviewPageData,
+} from '@/lib/overview-actions';
 // Recharts removed — daily trend is now a table
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
 import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from '@/lib/utils';
 import CashFlowSection from '@/components/CashFlowSection';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import { usePermissions } from '@/lib/PermissionsContext';
 
 // Daily trend color coding for margin
 const marginColor = (v: number) => v >= 30 ? 'var(--green)' : v >= 0 ? 'var(--yellow)' : 'var(--red)';
@@ -86,7 +89,8 @@ function buildOverheadPerDayLookup(rows: Array<{ year_month: string; amount: num
 
 export default function OverviewPage() {
   const { activeWorkspace } = useWorkspace();
-  const supabase = useSupabase();
+  const { role, can } = usePermissions();
+  const canViewOverview = can('tab:overview');
   const { dateRange, loading: dateLoading } = useDateRange();
   const { ready: authReady } = useSupabaseSessionReady();
   const [dailyData, setDailyData] = useState([]);
@@ -108,7 +112,6 @@ export default function OverviewPage() {
   const [shippingError, setShippingError] = useState('');
   const [prevShippingError, setPrevShippingError] = useState('');
   const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
-  const [userRole, setUserRole] = useState(null);
   const [showDetail, setShowDetail] = useState(false);
   const [showTren, setShowTren] = useState(true);
   const [showOlderTrendDays, setShowOlderTrendDays] = useState(false);
@@ -199,33 +202,13 @@ export default function OverviewPage() {
   );
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const user = session?.user;
-      if (user) {
-        supabase.from('profiles').select('role').eq('id', user.id).single()
-          .then(async ({ data }) => {
-            if (data?.role) {
-              setUserRole(data.role);
-              return;
-            }
-
-            const { data: ownProfile } = await supabase
-              .rpc('get_my_dashboard_profile')
-              .select('role')
-              .maybeSingle();
-            setUserRole(ownProfile?.role || null);
-          });
-      }
-    });
-  }, [supabase]);
-
-  useEffect(() => {
     // Wait until auth has finished hydrating so server actions can read the same session cookies.
-    if (dateLoading || activeBrandsLoading || !authReady || !dateRange.from || !dateRange.to || !prevRange) return;
+    if (!canViewOverview || dateLoading || activeBrandsLoading || !authReady || !dateRange.from || !dateRange.to || !prevRange) return;
     const { prevFrom, prevTo } = prevRange;
     const cacheExtra = `${activeWorkspace.id}|${prevFrom}|${prevTo}`;
-    const cached = getCached<any>('overview_page_data_v7_workspace', dateRange.from, dateRange.to, cacheExtra);
+    const cached = getCached<any>('overview_page_data_v8_workspace', dateRange.from, dateRange.to, cacheExtra);
     if (cached) {
+      setCm3HistoryData(null);
       setDailyData(cached.daily || []);
       setShipmentData(cached.shipment || []);
       setOverheadData(cached.overhead || []);
@@ -237,7 +220,6 @@ export default function OverviewPage() {
       setPrevAdsData(cached.prevAds || []);
       setPrevChannelData(cached.prevChannel || []);
       setPrevShippingData(cached.prevShipping || []);
-      setCm3HistoryData(cached.cm3History || null);
       setFeeError(cached.feeError || '');
       setPrevFeeError(cached.prevFeeError || '');
       setShippingError(cached.shippingError || '');
@@ -254,6 +236,7 @@ export default function OverviewPage() {
     setPrevFeeError('');
     setShippingError('');
     setPrevShippingError('');
+    setCm3HistoryData(null);
 
     getOverviewPageData({
       from: dateRange.from,
@@ -263,7 +246,7 @@ export default function OverviewPage() {
     })
       .then((data) => {
         if (cancelled) return;
-        setCache('overview_page_data_v7_workspace', dateRange.from, dateRange.to, data, cacheExtra);
+        setCache('overview_page_data_v8_workspace', dateRange.from, dateRange.to, data, cacheExtra);
         setDailyData(data.daily || []);
         setShipmentData(data.shipment || []);
         setOverheadData(data.overhead || []);
@@ -275,7 +258,6 @@ export default function OverviewPage() {
         setPrevAdsData(data.prevAds || []);
         setPrevChannelData(data.prevChannel || []);
         setPrevShippingData(data.prevShipping || []);
-        setCm3HistoryData(data.cm3History || null);
         setFeeError(data.feeError || '');
         setPrevFeeError(data.prevFeeError || '');
         setShippingError(data.shippingError || '');
@@ -307,7 +289,58 @@ export default function OverviewPage() {
       });
 
     return () => { cancelled = true; };
-  }, [activeWorkspace.id, dateLoading, activeBrandsLoading, authReady, dateRange.from, dateRange.to, prevRange]);
+  }, [activeWorkspace.id, canViewOverview, dateLoading, activeBrandsLoading, authReady, dateRange.from, dateRange.to, prevRange]);
+
+  useEffect(() => {
+    if (!canViewOverview || loading || !authReady || !dateRange.to) return;
+
+    const cacheExtra = activeWorkspace.id;
+    const cached = getCached<any>(
+      'overview_cm3_history_v1_workspace',
+      dateRange.to,
+      dateRange.to,
+      cacheExtra,
+    );
+    if (cached) {
+      setCm3HistoryData(cached);
+      return;
+    }
+
+    let cancelled = false;
+    const loadHistory = () => {
+      getOverviewCm3HistoryData({ to: dateRange.to })
+        .then((data) => {
+          if (cancelled) return;
+          setCache(
+            'overview_cm3_history_v1_workspace',
+            dateRange.to,
+            dateRange.to,
+            data,
+            cacheExtra,
+          );
+          setCm3HistoryData(data);
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            console.error('[Overview] CM3 history load error:', error);
+          }
+        });
+    };
+
+    const usesIdleCallback = 'requestIdleCallback' in window;
+    const idleId = usesIdleCallback
+      ? window.requestIdleCallback(loadHistory, { timeout: 1500 })
+      : window.setTimeout(loadHistory, 0);
+
+    return () => {
+      cancelled = true;
+      if (usesIdleCallback) {
+        window.cancelIdleCallback(idleId);
+      } else {
+        window.clearTimeout(idleId);
+      }
+    };
+  }, [activeWorkspace.id, authReady, canViewOverview, dateRange.to, loading]);
 
   // Build overhead per-day lookup: date (YYYY-MM-DD) → daily overhead amount
   const overheadPerDay = useMemo(() => {
@@ -537,7 +570,7 @@ export default function OverviewPage() {
     return `${y}-${m}-01`;
   }, [dateRange.from, supportsCashFlowOverview]);
 
-  const isOwnerOrAdmin = userRole === 'owner' || userRole === 'admin';
+  const isOwnerOrAdmin = role === 'owner' || role === 'admin';
 
   const DeltaLine = ({ value, suffix, higherIsBetter, label: lbl }: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }) => (
     <div style={{ fontSize: 10, marginTop: 4, color: ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
