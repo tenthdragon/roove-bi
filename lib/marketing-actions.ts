@@ -87,7 +87,7 @@ export async function getMarketingPageData({
       .gte('date', from)
       .lte('date', to),
     svc.from('daily_channel_data')
-      .select('date, channel, product, net_sales, mp_admin_cost')
+      .select('date, channel, product, net_sales, gross_profit, mp_admin_cost')
       .gte('date', from)
       .lte('date', to),
     svc.from('ads_store_brand_mapping')
@@ -104,7 +104,7 @@ export async function getMarketingPageData({
       .gte('date', prevRangeFrom)
       .lte('date', prevRangeTo),
     svc.from('daily_channel_data')
-      .select('date, channel, product, net_sales, mp_admin_cost')
+      .select('date, channel, product, net_sales, gross_profit, mp_admin_cost')
       .gte('date', prevRangeFrom)
       .lte('date', prevRangeTo),
     getShippingFeeRange(prevRangeFrom, prevRangeTo)

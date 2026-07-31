@@ -27,6 +27,10 @@ function shiftIsoDateByMonthsClamped(value: string, deltaMonths: number): string
   return formatIsoDate(targetYear, targetMonth, targetDay);
 }
 
+function calculateCm3(grossProfit: number, mpFee: number, shipping: number, marketingFee: number): number {
+  return grossProfit - mpFee - shipping - marketingFee;
+}
+
 const LEGACY_STORE_BRAND_FALLBACKS: Record<string, string> = {
   'purvu store': 'Purvu',
   plume: 'Pluve',
@@ -253,12 +257,12 @@ export default function MarketingPage() {
 
     const cachedProd = getCached<any[]>('daily_product_summary_mkt_cm3_v1', from, to);
     const cachedAds = getCached<any[]>('daily_ads_spend', from, to);
-    const cachedCh = getCached<any[]>('daily_channel_data_mkt', from, to);
+    const cachedCh = getCached<any[]>('daily_channel_data_mkt_cm3_v1', from, to);
     const cachedBrandMapping = getCached<any[]>('ads_store_brand_mapping_mkt', 'all', 'all');
     const cachedShipping = getCached<any>('daily_shipping_mkt_cm3_v1', from, to);
     const cachedPrevRangeProd = getCached<any[]>('daily_product_summary_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo);
     const cachedPrevRangeAds = getCached<any[]>('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo);
-    const cachedPrevRangeCh = getCached<any[]>('daily_channel_data_prev_range', prevRangeFrom, prevRangeTo);
+    const cachedPrevRangeCh = getCached<any[]>('daily_channel_data_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo);
     const cachedPrevRangeShipping = getCached<any>('daily_shipping_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo);
 
     if (cachedProd && cachedAds && cachedCh && cachedBrandMapping && cachedShipping && cachedPrevRangeProd && cachedPrevRangeAds && cachedPrevRangeCh && cachedPrevRangeShipping) {
@@ -293,12 +297,12 @@ export default function MarketingPage() {
 
         setCache('daily_product_summary_mkt_cm3_v1', from, to, data.prod);
         setCache('daily_ads_spend', from, to, data.ads);
-        setCache('daily_channel_data_mkt', from, to, data.channel);
+        setCache('daily_channel_data_mkt_cm3_v1', from, to, data.channel);
         setCache('ads_store_brand_mapping_mkt', 'all', 'all', data.brandMapping);
         setCache('daily_shipping_mkt_cm3_v1', from, to, { rows: data.shipping, error: data.shippingError });
         setCache('daily_product_summary_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo, data.prevRangeProd);
         setCache('daily_ads_spend_prev_range', prevRangeFrom, prevRangeTo, data.prevRangeAds);
-        setCache('daily_channel_data_prev_range', prevRangeFrom, prevRangeTo, data.prevRangeChannel);
+        setCache('daily_channel_data_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo, data.prevRangeChannel);
         setCache('daily_shipping_prev_range_mkt_cm3_v1', prevRangeFrom, prevRangeTo, { rows: data.prevRangeShipping, error: data.prevRangeShippingError });
 
         setRawProdData(data.prod);
@@ -355,13 +359,13 @@ export default function MarketingPage() {
     const grossProfit = prodData.reduce((sum, row) => sum + Number(row.gross_profit || 0), 0);
     const mpFee = filteredChannelData.reduce((sum, row) => sum + Math.abs(Number(row.mp_admin_cost) || 0), 0);
     const shipping = filteredShippingData.reduce((sum, row) => sum + Number(row.shipping_charge || 0), 0);
-    const cm3 = grossProfit - mpFee - shipping - totalSpend;
+    const cm3 = calculateCm3(grossProfit, mpFee, shipping, totalSpend);
 
     const prevGrossProfit = filteredPrevRangeProdData.reduce((sum, row) => sum + Number(row.gross_profit || 0), 0);
     const prevMpFee = filteredPrevRangeChannelData.reduce((sum, row) => sum + Math.abs(Number(row.mp_admin_cost) || 0), 0);
     const prevShipping = filteredPrevRangeShippingData.reduce((sum, row) => sum + Number(row.shipping_charge || 0), 0);
     const prevMarketingFee = resolvedPrevRangeAdsData.reduce((sum, row) => sum + Math.abs(Number(row.spent || 0)), 0);
-    const prevCm3 = prevGrossProfit - prevMpFee - prevShipping - prevMarketingFee;
+    const prevCm3 = calculateCm3(prevGrossProfit, prevMpFee, prevShipping, prevMarketingFee);
     const prevRevenue = filteredPrevRangeProdData.reduce((sum, row) => sum + Number(row.net_sales || 0), 0);
 
     return {
@@ -475,10 +479,17 @@ const BRAND_COLORS = useMemo(() => {
 
     const currentChannels = filteredChannelData.filter(d => brandFilter === 'all' || d.product === brandFilter);
     const prevChannels = filteredPrevRangeChannelData.filter(d => brandFilter === 'all' || d.product === brandFilter);
+    const currentShipping = filteredShippingData.filter(d => brandFilter === 'all' || d.product === brandFilter);
+    const prevShipping = filteredPrevRangeShippingData.filter(d => brandFilter === 'all' || d.product === brandFilter);
+    const currentProducts = prodData.filter(d => brandFilter === 'all' || d.product === brandFilter);
+    const prevProducts = filteredPrevRangeProdData.filter(d => brandFilter === 'all' || d.product === brandFilter);
 
-    const buildSnapshot = (adsRows: any[], channelRows: any[]) => {
+    const buildSnapshot = (adsRows: any[], channelRows: any[], shippingRows: any[], productRows: any[]) => {
       const spendBySource: Record<string, number> = {};
       const revenueByChannel: Record<string, number> = {};
+      const grossProfitByChannel: Record<string, number> = {};
+      const mpFeeByChannel: Record<string, number> = {};
+      const shippingByChannel: Record<string, number> = {};
       const spendByChannel: Record<string, number> = {};
       const sourceDetailsByChannel: Record<string, { name: string; spent: number }[]> = {};
       const channels = new Set<string>();
@@ -492,7 +503,39 @@ const BRAND_COLORS = useMemo(() => {
         const channel = d.channel || 'Other';
         channels.add(channel);
         revenueByChannel[channel] = (revenueByChannel[channel] || 0) + Number(d.net_sales || 0);
+        grossProfitByChannel[channel] = (grossProfitByChannel[channel] || 0) + Number(d.gross_profit || 0);
+        mpFeeByChannel[channel] = (mpFeeByChannel[channel] || 0) + Math.abs(Number(d.mp_admin_cost) || 0);
       });
+
+      shippingRows.forEach(d => {
+        const channel = d.channel || 'Other';
+        channels.add(channel);
+        shippingByChannel[channel] = (shippingByChannel[channel] || 0) + Number(d.shipping_charge || 0);
+      });
+
+      // KPI CM3 uses daily_product_summary as the authoritative gross-profit source.
+      // Keep the existing channel mix, then reconcile any source delta by net-sales share.
+      const kpiRevenue = productRows.reduce((sum, row) => sum + Number(row.net_sales || 0), 0);
+      const kpiGrossProfit = productRows.reduce((sum, row) => sum + Number(row.gross_profit || 0), 0);
+      const channelGrossProfit = Object.values(grossProfitByChannel).reduce((sum, value) => sum + value, 0);
+      const grossProfitDelta = kpiGrossProfit - channelGrossProfit;
+
+      if (Math.abs(grossProfitDelta) > 0.01) {
+        const revenueBasis = Object.entries(revenueByChannel)
+          .map(([channel, revenue]) => ({ channel, revenue: Math.max(0, revenue) }))
+          .filter(item => item.revenue > 0);
+        const totalRevenueBasis = revenueBasis.reduce((sum, item) => sum + item.revenue, 0);
+
+        if (totalRevenueBasis > 0) {
+          revenueBasis.forEach(({ channel, revenue }) => {
+            grossProfitByChannel[channel] = (grossProfitByChannel[channel] || 0)
+              + grossProfitDelta * (revenue / totalRevenueBasis);
+          });
+        } else {
+          channels.add('Other');
+          grossProfitByChannel.Other = (grossProfitByChannel.Other || 0) + grossProfitDelta;
+        }
+      }
 
       Object.entries(DIRECT_PLATFORM_CHANNEL_MAP).forEach(([source, targetChannels]) => {
         const sourceSpend = spendBySource[source] || 0;
@@ -523,11 +566,22 @@ const BRAND_COLORS = useMemo(() => {
         sourceDetailsByChannel[source].push({ name: source, spent });
       });
 
-      return { spendBySource, revenueByChannel, spendByChannel, sourceDetailsByChannel, channels };
+      return {
+        spendBySource,
+        revenueByChannel,
+        grossProfitByChannel,
+        mpFeeByChannel,
+        shippingByChannel,
+        spendByChannel,
+        sourceDetailsByChannel,
+        channels,
+        kpiRevenue,
+        kpiGrossProfit,
+      };
     };
 
-    const current = buildSnapshot(currentAds, currentChannels);
-    const prev = buildSnapshot(prevAds, prevChannels);
+    const current = buildSnapshot(currentAds, currentChannels, currentShipping, currentProducts);
+    const prev = buildSnapshot(prevAds, prevChannels, prevShipping, prevProducts);
 
     const allChannels = new Set<string>([
       ...Array.from(current.channels),
@@ -546,6 +600,16 @@ const BRAND_COLORS = useMemo(() => {
         const prevRevenue = prev.revenueByChannel[channel] || 0;
         const mktFee = current.spendByChannel[channel] || 0;
         const prevMktFee = prev.spendByChannel[channel] || 0;
+        const grossProfit = current.grossProfitByChannel[channel] || 0;
+        const prevGrossProfit = prev.grossProfitByChannel[channel] || 0;
+        const mpFee = current.mpFeeByChannel[channel] || 0;
+        const prevMpFee = prev.mpFeeByChannel[channel] || 0;
+        const shipping = current.shippingByChannel[channel] || 0;
+        const prevShipping = prev.shippingByChannel[channel] || 0;
+        const cm3 = calculateCm3(grossProfit, mpFee, shipping, mktFee);
+        const prevCm3 = calculateCm3(prevGrossProfit, prevMpFee, prevShipping, prevMktFee);
+        const cm3Pct = revenue > 0 ? (cm3 / revenue) * 100 : 0;
+        const prevCm3Pct = prevRevenue > 0 ? (prevCm3 / prevRevenue) * 100 : 0;
         const mktFeePct = revenue > 0 ? (mktFee / revenue) * 100 : 0;
         const prevMktFeePct = prevRevenue > 0 ? (prevMktFee / prevRevenue) * 100 : 0;
         const roas = mktFee > 0 && revenue > 0 ? revenue / mktFee : 0;
@@ -554,6 +618,8 @@ const BRAND_COLORS = useMemo(() => {
         const mktFeeDelta = prevMktFee > 0 ? ((mktFee - prevMktFee) / prevMktFee) * 100 : null;
         const mktFeePctDelta = prevRevenue > 0 ? mktFeePct - prevMktFeePct : null;
         const roasDelta = prevRoas > 0 && roas > 0 ? roas - prevRoas : null;
+        const cm3Delta = prevCm3 !== 0 ? ((cm3 - prevCm3) / Math.abs(prevCm3)) * 100 : null;
+        const cm3PctDelta = prevRevenue > 0 ? cm3Pct - prevCm3Pct : null;
         const spendSalesGap = revenueDelta !== null && mktFeeDelta !== null ? mktFeeDelta - revenueDelta : null;
         const erosionScore = Math.max(0, mktFeePctDelta || 0) + Math.max(0, spendSalesGap || 0) / 5 + Math.max(0, -(roasDelta || 0));
         const sourceDetails = (current.sourceDetailsByChannel[channel] || [])
@@ -596,6 +662,18 @@ const BRAND_COLORS = useMemo(() => {
           prevRevenue,
           mktFee,
           prevMktFee,
+          grossProfit,
+          prevGrossProfit,
+          mpFee,
+          prevMpFee,
+          shipping,
+          prevShipping,
+          cm3,
+          prevCm3,
+          cm3Pct,
+          prevCm3Pct,
+          cm3Delta,
+          cm3PctDelta,
           mktFeePct,
           prevMktFeePct,
           roas,
@@ -614,7 +692,7 @@ const BRAND_COLORS = useMemo(() => {
 
     const rows = Array.from(allChannels)
       .map(buildRow)
-      .filter(row => row.revenue > 0 || row.mktFee > 0)
+      .filter(row => row.revenue > 0 || row.mktFee > 0 || row.mpFee > 0 || row.shipping > 0 || row.grossProfit !== 0)
       .sort((a, b) => {
         if (a.order !== b.order) return a.order - b.order;
         return b.revenue - a.revenue;
@@ -629,6 +707,16 @@ const BRAND_COLORS = useMemo(() => {
       const prevRevenue = SCALEV_ECOSYSTEM_CHANNELS.reduce((sum, channel) => sum + (prev.revenueByChannel[channel] || 0), 0);
       const mktFee = SCALEV_ECOSYSTEM_SOURCES.reduce((sum, source) => sum + (current.spendBySource[source] || 0), 0);
       const prevMktFee = SCALEV_ECOSYSTEM_SOURCES.reduce((sum, source) => sum + (prev.spendBySource[source] || 0), 0);
+      const grossProfit = SCALEV_ECOSYSTEM_CHANNELS.reduce((sum, channel) => sum + (current.grossProfitByChannel[channel] || 0), 0);
+      const prevGrossProfit = SCALEV_ECOSYSTEM_CHANNELS.reduce((sum, channel) => sum + (prev.grossProfitByChannel[channel] || 0), 0);
+      const mpFee = SCALEV_ECOSYSTEM_CHANNELS.reduce((sum, channel) => sum + (current.mpFeeByChannel[channel] || 0), 0);
+      const prevMpFee = SCALEV_ECOSYSTEM_CHANNELS.reduce((sum, channel) => sum + (prev.mpFeeByChannel[channel] || 0), 0);
+      const shipping = SCALEV_ECOSYSTEM_CHANNELS.reduce((sum, channel) => sum + (current.shippingByChannel[channel] || 0), 0);
+      const prevShipping = SCALEV_ECOSYSTEM_CHANNELS.reduce((sum, channel) => sum + (prev.shippingByChannel[channel] || 0), 0);
+      const cm3 = calculateCm3(grossProfit, mpFee, shipping, mktFee);
+      const prevCm3 = calculateCm3(prevGrossProfit, prevMpFee, prevShipping, prevMktFee);
+      const cm3Pct = revenue > 0 ? (cm3 / revenue) * 100 : 0;
+      const prevCm3Pct = prevRevenue > 0 ? (prevCm3 / prevRevenue) * 100 : 0;
       const mktFeePct = revenue > 0 ? (mktFee / revenue) * 100 : 0;
       const prevMktFeePct = prevRevenue > 0 ? (prevMktFee / prevRevenue) * 100 : 0;
       const roas = mktFee > 0 && revenue > 0 ? revenue / mktFee : 0;
@@ -637,6 +725,8 @@ const BRAND_COLORS = useMemo(() => {
       const mktFeeDelta = prevMktFee > 0 ? ((mktFee - prevMktFee) / prevMktFee) * 100 : null;
       const mktFeePctDelta = prevRevenue > 0 ? mktFeePct - prevMktFeePct : null;
       const roasDelta = prevRoas > 0 && roas > 0 ? roas - prevRoas : null;
+      const cm3Delta = prevCm3 !== 0 ? ((cm3 - prevCm3) / Math.abs(prevCm3)) * 100 : null;
+      const cm3PctDelta = prevRevenue > 0 ? cm3Pct - prevCm3Pct : null;
       const spendSalesGap = revenueDelta !== null && mktFeeDelta !== null ? mktFeeDelta - revenueDelta : null;
       const erosionScore = Math.max(0, mktFeePctDelta || 0) + Math.max(0, spendSalesGap || 0) / 5 + Math.max(0, -(roasDelta || 0));
       const sourceDetails = SCALEV_ECOSYSTEM_SOURCES
@@ -676,6 +766,18 @@ const BRAND_COLORS = useMemo(() => {
         prevRevenue,
         mktFee,
         prevMktFee,
+        grossProfit,
+        prevGrossProfit,
+        mpFee,
+        prevMpFee,
+        shipping,
+        prevShipping,
+        cm3,
+        prevCm3,
+        cm3Pct,
+        prevCm3Pct,
+        cm3Delta,
+        cm3PctDelta,
         mktFeePct,
         mktFeePctDelta,
         roas,
@@ -695,7 +797,31 @@ const BRAND_COLORS = useMemo(() => {
       .sort((a, b) => b.erosionScore - a.erosionScore)[0] || null;
     const attention = directAttention || (scalevEcosystem && scalevEcosystem.mktFee > 0 && (scalevEcosystem.revenueDelta || 0) < 0 && (scalevEcosystem.mktFeeDelta || 0) > 0 ? scalevEcosystem : null);
 
-    return { rows, worstErosion, attention, scalevEcosystem };
+    const buildTotals = (snapshot: ReturnType<typeof buildSnapshot>) => {
+      const revenue = snapshot.kpiRevenue;
+      const grossProfit = snapshot.kpiGrossProfit;
+      const mpFee = Object.values(snapshot.mpFeeByChannel).reduce((sum, value) => sum + value, 0);
+      const shipping = Object.values(snapshot.shippingByChannel).reduce((sum, value) => sum + value, 0);
+      const mktFee = Object.values(snapshot.spendByChannel).reduce((sum, value) => sum + value, 0);
+      const cm3 = calculateCm3(grossProfit, mpFee, shipping, mktFee);
+      return {
+        revenue,
+        mktFee,
+        mktFeePct: revenue > 0 ? (mktFee / revenue) * 100 : 0,
+        roas: mktFee > 0 ? revenue / mktFee : 0,
+        cm3,
+        cm3Pct: revenue > 0 ? (cm3 / revenue) * 100 : 0,
+      };
+    };
+
+    return {
+      rows,
+      worstErosion,
+      attention,
+      scalevEcosystem,
+      totals: buildTotals(current),
+      prevTotals: buildTotals(prev),
+    };
   }, [
     brandFilter,
     resolvedAdsData,
@@ -704,6 +830,10 @@ const BRAND_COLORS = useMemo(() => {
     attributedPrevRangeAdsData,
     filteredChannelData,
     filteredPrevRangeChannelData,
+    filteredShippingData,
+    filteredPrevRangeShippingData,
+    prodData,
+    filteredPrevRangeProdData,
   ]);
 
   // ── Delta helpers ──
@@ -823,6 +953,34 @@ const BRAND_COLORS = useMemo(() => {
             </div>
           )}
         </td>
+        <td
+          title={shippingError ? 'CM3 belum tersedia karena data shipping gagal dimuat' : 'Gross profit − MP fee − shipping − direct marketing fee'}
+          style={{
+            padding: '8px 10px',
+            textAlign: 'right',
+            fontFamily: 'monospace',
+            fontWeight: compact ? 600 : 800,
+            fontSize: 11,
+            whiteSpace: 'nowrap',
+            color: shippingError ? `${C.dim}66` : row.cm3 >= 0 ? 'var(--green)' : 'var(--red)',
+          }}
+        >
+          {shippingError ? (
+            <div>—</div>
+          ) : (
+            <>
+              <div>{fmtRupiah(row.cm3)}</div>
+              <div style={{ marginTop: 3, fontSize: 9, fontWeight: 700, color: row.cm3Pct >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                {row.revenue > 0 ? `${row.cm3Pct.toFixed(1)}%` : '—'}
+              </div>
+              {!prevRangeShippingError && row.cm3Delta !== null && (
+                <div style={{ marginTop: 3, fontSize: 10, fontWeight: 500, color: row.cm3Delta >= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                  {row.cm3Delta >= 0 ? '▲' : '▼'} {row.cm3Delta >= 0 ? '+' : ''}{row.cm3Delta.toFixed(1)}%
+                </div>
+              )}
+            </>
+          )}
+        </td>
         <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: compact ? 600 : 800, fontSize: 11, color: mktFeePctColor }}>
           <div>{row.mktFeePct > 0 ? `${row.mktFeePct.toFixed(1)}%` : '—'}</div>
           {row.mktFee > 0 && row.mktFeePctDelta !== null && (
@@ -877,6 +1035,9 @@ const BRAND_COLORS = useMemo(() => {
       <div style={{ fontSize: 13, color: C.dim }}>Upload data melalui halaman Admin atau ubah filter tanggal.</div>
     </div>
   );
+
+  const efficiencyTotals = marketingChannelBreakdown.totals;
+  const prevEfficiencyTotals = marketingChannelBreakdown.prevTotals;
 
   return (
     <div className="fade-in">
@@ -948,7 +1109,7 @@ const BRAND_COLORS = useMemo(() => {
       <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, overflowX: 'auto', marginBottom: 16 }}>
         <div style={{ fontSize: 15, fontWeight: 700 }}>Sales Channel Marketing Efficiency</div>
         <div style={{ fontSize: 11, color: C.dim, marginTop: 4, marginBottom: 12 }}>
-          Direct attribution mengikuti pola Sales Channel; klik Scalev untuk melihat detail channel.
+          Direct attribution mengikuti pola Sales Channel; CM3 = gross profit − MP fee − shipping − direct marketing fee. Klik Scalev untuk melihat detail channel.
         </div>
 
         {brandFilter === 'all' && unmappedAdsSummary.total > 0 && (
@@ -972,16 +1133,17 @@ const BRAND_COLORS = useMemo(() => {
 
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed', minWidth: 940 }}>
           <colgroup>
-            <col style={{ width: '26%' }} />
-            <col style={{ width: '18%' }} />
-            <col style={{ width: '18%' }} />
-            <col style={{ width: '12%' }} />
+            <col style={{ width: '23%' }} />
+            <col style={{ width: '15%' }} />
+            <col style={{ width: '15%' }} />
+            <col style={{ width: '17%' }} />
             <col style={{ width: '10%' }} />
-            <col style={{ width: '16%' }} />
+            <col style={{ width: '8%' }} />
+            <col style={{ width: '12%' }} />
           </colgroup>
           <thead>
             <tr style={{ borderBottom: `2px solid ${C.bdr}` }}>
-              {['Sales Channel', 'Net Sales', 'Direct Mkt Fee', 'Mkt Fee %', 'ROAS', 'Signal'].map(h => (
+              {['Sales Channel', 'Net Sales', 'Direct Mkt Fee', 'CM3', 'Mkt Fee %', 'ROAS', 'Signal'].map(h => (
                 <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Sales Channel' ? 'left' : 'right', color: C.dim, fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>{h}</th>
               ))}
             </tr>
@@ -1011,34 +1173,62 @@ const BRAND_COLORS = useMemo(() => {
                 <div style={{ color: C.dim, fontSize: 10, marginTop: 2 }}>Direct + assisted view</div>
               </td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, fontSize: 11, whiteSpace: 'nowrap' }}>
-                <div>{fmtRupiah(totalRevenue)}</div>
-                {prevAdSpend && prevAdSpend.revenue > 0 && (
-                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: totalRevenue >= prevAdSpend.revenue ? '#5b8a7a' : '#9b6b6b' }}>
-                    {totalRevenue >= prevAdSpend.revenue ? '▲' : '▼'} {((totalRevenue - prevAdSpend.revenue) / prevAdSpend.revenue) >= 0 ? '+' : ''}{(((totalRevenue - prevAdSpend.revenue) / prevAdSpend.revenue) * 100).toFixed(1)}%
+                <div>{fmtRupiah(efficiencyTotals.revenue)}</div>
+                {prevEfficiencyTotals.revenue > 0 && (
+                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.revenue >= prevEfficiencyTotals.revenue ? '#5b8a7a' : '#9b6b6b' }}>
+                    {efficiencyTotals.revenue >= prevEfficiencyTotals.revenue ? '▲' : '▼'} {((efficiencyTotals.revenue - prevEfficiencyTotals.revenue) / prevEfficiencyTotals.revenue) >= 0 ? '+' : ''}{(((efficiencyTotals.revenue - prevEfficiencyTotals.revenue) / prevEfficiencyTotals.revenue) * 100).toFixed(1)}%
                   </div>
                 )}
               </td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, fontSize: 11, whiteSpace: 'nowrap', color: 'var(--yellow)' }}>
-                <div>{fmtRupiah(totalSpend)}</div>
-                {prevAdSpend && prevAdSpend.total > 0 && (
-                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: totalSpend <= prevAdSpend.total ? '#5b8a7a' : '#9b6b6b' }}>
-                    {totalSpend >= prevAdSpend.total ? '▲' : '▼'} {((totalSpend - prevAdSpend.total) / prevAdSpend.total) >= 0 ? '+' : ''}{(((totalSpend - prevAdSpend.total) / prevAdSpend.total) * 100).toFixed(1)}%
+                <div>{fmtRupiah(efficiencyTotals.mktFee)}</div>
+                {prevEfficiencyTotals.mktFee > 0 && (
+                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.mktFee <= prevEfficiencyTotals.mktFee ? '#5b8a7a' : '#9b6b6b' }}>
+                    {efficiencyTotals.mktFee >= prevEfficiencyTotals.mktFee ? '▲' : '▼'} {((efficiencyTotals.mktFee - prevEfficiencyTotals.mktFee) / prevEfficiencyTotals.mktFee) >= 0 ? '+' : ''}{(((efficiencyTotals.mktFee - prevEfficiencyTotals.mktFee) / prevEfficiencyTotals.mktFee) * 100).toFixed(1)}%
+                  </div>
+                )}
+              </td>
+              <td
+                title={shippingError ? 'CM3 belum tersedia karena data shipping gagal dimuat' : 'Gross profit − MP fee − shipping − direct marketing fee'}
+                style={{
+                  padding: '8px 10px',
+                  textAlign: 'right',
+                  fontFamily: 'monospace',
+                  fontWeight: 800,
+                  fontSize: 11,
+                  whiteSpace: 'nowrap',
+                  color: shippingError ? C.dim : efficiencyTotals.cm3 >= 0 ? 'var(--green)' : 'var(--red)',
+                }}
+              >
+                {shippingError ? (
+                  <div>—</div>
+                ) : (
+                  <>
+                    <div>{fmtRupiah(efficiencyTotals.cm3)}</div>
+                    <div style={{ marginTop: 3, fontSize: 9, fontWeight: 700 }}>
+                      {efficiencyTotals.revenue > 0 ? `${efficiencyTotals.cm3Pct.toFixed(1)}%` : '—'}
+                    </div>
+                    {!prevRangeShippingError && prevEfficiencyTotals.cm3 !== 0 && (
+                      <div style={{ marginTop: 3, fontSize: 10, fontWeight: 500, color: efficiencyTotals.cm3 >= prevEfficiencyTotals.cm3 ? '#5b8a7a' : '#9b6b6b' }}>
+                        {efficiencyTotals.cm3 >= prevEfficiencyTotals.cm3 ? '▲' : '▼'} {((efficiencyTotals.cm3 - prevEfficiencyTotals.cm3) / Math.abs(prevEfficiencyTotals.cm3)) >= 0 ? '+' : ''}{(((efficiencyTotals.cm3 - prevEfficiencyTotals.cm3) / Math.abs(prevEfficiencyTotals.cm3)) * 100).toFixed(1)}%
+                      </div>
+                    )}
+                  </>
+                )}
+              </td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, fontSize: 11 }}>
+                <div>{efficiencyTotals.mktFeePct.toFixed(1)}%</div>
+                {prevEfficiencyTotals.mktFeePct > 0 && (
+                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.mktFeePct <= prevEfficiencyTotals.mktFeePct ? '#5b8a7a' : '#9b6b6b' }}>
+                    {(efficiencyTotals.mktFeePct - prevEfficiencyTotals.mktFeePct) >= 0 ? '▲' : '▼'} {(efficiencyTotals.mktFeePct - prevEfficiencyTotals.mktFeePct) >= 0 ? '+' : ''}{(efficiencyTotals.mktFeePct - prevEfficiencyTotals.mktFeePct).toFixed(1)}pp
                   </div>
                 )}
               </td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, fontSize: 11 }}>
-                <div>{totalRatio.toFixed(1)}%</div>
-                {prevAdSpend && prevAdSpend.ratio > 0 && (
-                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: totalRatio <= prevAdSpend.ratio ? '#5b8a7a' : '#9b6b6b' }}>
-                    {(totalRatio - prevAdSpend.ratio) >= 0 ? '▲' : '▼'} {(totalRatio - prevAdSpend.ratio) >= 0 ? '+' : ''}{(totalRatio - prevAdSpend.ratio).toFixed(1)}pp
-                  </div>
-                )}
-              </td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, fontSize: 11 }}>
-                <div>{totalRoas.toFixed(1)}x</div>
-                {prevAdSpend && prevAdSpend.roas > 0 && (
-                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: totalRoas >= prevAdSpend.roas ? '#5b8a7a' : '#9b6b6b' }}>
-                    {(totalRoas - prevAdSpend.roas) >= 0 ? '▲' : '▼'} {(totalRoas - prevAdSpend.roas) >= 0 ? '+' : ''}{(totalRoas - prevAdSpend.roas).toFixed(1)}x
+                <div>{efficiencyTotals.roas.toFixed(1)}x</div>
+                {prevEfficiencyTotals.roas > 0 && (
+                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.roas >= prevEfficiencyTotals.roas ? '#5b8a7a' : '#9b6b6b' }}>
+                    {(efficiencyTotals.roas - prevEfficiencyTotals.roas) >= 0 ? '▲' : '▼'} {(efficiencyTotals.roas - prevEfficiencyTotals.roas) >= 0 ? '+' : ''}{(efficiencyTotals.roas - prevEfficiencyTotals.roas).toFixed(1)}x
                   </div>
                 )}
               </td>
