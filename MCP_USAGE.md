@@ -1,6 +1,6 @@
 # Roove BI MCP Server
 
-Server MCP ini memberi Claude/Codex akses read-only ke konteks bisnis Roove BI:
+Server MCP ini memberi Claude/Codex akses read-only ke satu workspace bisnis:
 
 - snapshot KPI lintas sales, margin, marketing, customer, dan finance
 - katalog dataset aman untuk drilldown
@@ -19,7 +19,11 @@ Server membaca kredensial dari `.env.local` di root repo:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=...
 SUPABASE_SERVICE_ROLE_KEY=...
+MCP_WORKSPACE_ID=00000000-0000-4000-8000-000000000001
 ```
+
+`MCP_WORKSPACE_ID` wajib diisi. Jalankan instance MCP terpisah untuk setiap
+workspace yang ingin diakses; server tidak memiliki fallback ke Roove.
 
 ## Claude Desktop
 
@@ -67,4 +71,6 @@ Contoh pertanyaan:
 
 ## Catatan Keamanan
 
-Tool general hanya membaca dataset allowlist dan tidak menyediakan operasi tulis. Dataset customer yang dibuka bersifat agregat, bukan data individual/PII.
+Tool general hanya membaca dataset allowlist dan tidak menyediakan operasi
+tulis. Semua query dan RPC dikunci ke `MCP_WORKSPACE_ID`. Dataset customer yang
+dibuka bersifat agregat, bukan data individual/PII.

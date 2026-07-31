@@ -4,7 +4,7 @@ import { createServerSupabase, createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardRoles } from './dashboard-access';
 import { MATRIX_ROLES, PERMISSION_GROUPS } from './utils';
 import { getShopeeSetupInfo } from './shopee-open-platform';
-import { listMarketplaceIntakeSourceConfigs } from './marketplace-intake-sources';
+import { resolveWorkspaceMarketplaceIntakeSourceConfig } from './marketplace-intake-workspace-sources';
 import {
   buildDefaultShopeeSpendStreams,
   isShopeeSpendStreamKey,
@@ -13,7 +13,6 @@ import {
   type ShopeeSpendStreamKey,
   type ShopeeSpendSyncMode,
 } from './shopee-streams';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 const MATRIX_ROLE_IDS = new Set(MATRIX_ROLES.map((role) => role.id));
 const KNOWN_PERMISSION_KEYS = new Set(
@@ -23,16 +22,6 @@ const KNOWN_PERMISSION_KEYS = new Set(
 function normalizeOptionalText(value: string | null | undefined) {
   const trimmed = typeof value === 'string' ? value.trim() : '';
   return trimmed || null;
-}
-
-function findShopeeMarketplaceSourceConfig(sourceKey: string | null | undefined) {
-  const normalizedKey = String(sourceKey || '').trim().toLowerCase();
-  if (!normalizedKey) return null;
-  return (
-    listMarketplaceIntakeSourceConfigs().find(
-      (config) => config.platform === 'shopee' && config.sourceKey === normalizedKey,
-    ) || null
-  );
 }
 
 async function requireOwnerAccess(label: string) {
@@ -354,23 +343,6 @@ export async function saveRolePermissionsMatrix(matrix: Record<string, string[]>
     if (insertError) throw insertError;
   }
 
-  // Legacy warehouse SQL still reads the global matrix. Keep it synchronized
-  // only for Roove; Apurva permissions must never alter Roove behavior.
-  if (workspaceId === ROOVE_WORKSPACE_ID) {
-    const { error: legacyDeleteError } = await svc
-      .from('role_permissions')
-      .delete()
-      .neq('role', 'owner');
-    if (legacyDeleteError) throw legacyDeleteError;
-
-    if (rows.length > 0) {
-      const { error: legacyInsertError } = await svc
-        .from('role_permissions')
-        .insert(rows);
-      if (legacyInsertError) throw legacyInsertError;
-    }
-  }
-
   return { success: true, count: rows.length };
 }
 
@@ -661,8 +633,10 @@ export async function updateShopeeShop(
   const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const sourceKey = normalizeOptionalText(payload.marketplace_source_key)?.toLowerCase() || null;
-  const sourceConfig = findShopeeMarketplaceSourceConfig(sourceKey);
-  if (sourceKey && !sourceConfig) {
+  const sourceConfig = sourceKey
+    ? await resolveWorkspaceMarketplaceIntakeSourceConfig(workspaceId, sourceKey)
+    : null;
+  if (sourceConfig && sourceConfig.platform !== 'shopee') {
     throw new Error('Source marketplace Shopee tidak dikenali.');
   }
 

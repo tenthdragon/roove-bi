@@ -2,11 +2,8 @@
 'use client';
 
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  getMarketplaceIntakeSourceConfig,
-  listMarketplaceIntakeUploadSourceConfigs,
-} from '@/lib/marketplace-intake-sources';
 import { invalidateAll } from '@/lib/dashboard-cache';
+import { useMarketplaceIntakeSources } from '@/lib/use-marketplace-intake-sources';
 
 const panelStyle = {
   background: 'var(--card)',
@@ -31,12 +28,6 @@ const WAREHOUSE_STATUS_META = {
   hold: { label: 'Hold', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
   canceled: { label: 'Canceled', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
 };
-
-const MARKETPLACE_SOURCE_OPTIONS = listMarketplaceIntakeUploadSourceConfigs();
-const WORKSPACE_SOURCE_OPTIONS = [
-  { sourceKey: 'all', sourceLabel: 'Semua Marketplace', businessCode: 'ALL' },
-  ...MARKETPLACE_SOURCE_OPTIONS,
-];
 
 function fmtNumber(value) {
   return new Intl.NumberFormat('id-ID').format(Number(value || 0));
@@ -558,6 +549,11 @@ function groupOrdersByBatch(orders) {
 }
 
 export default function MarketplaceIntakeManager() {
+  const { sources: marketplaceSources, loading: sourcesLoading, error: sourcesError } = useMarketplaceIntakeSources();
+  const uploadSources = useMemo(
+    () => marketplaceSources.filter((source) => source.uploadEnabled),
+    [marketplaceSources],
+  );
   const inputRef = useRef(null);
   const [sourceKey, setSourceKey] = useState('all');
   const [dragOver, setDragOver] = useState(false);
@@ -594,14 +590,18 @@ export default function MarketplaceIntakeManager() {
   const [workspaceLoading, setWorkspaceLoading] = useState(false);
   const [workspaceError, setWorkspaceError] = useState('');
   const [workspace, setWorkspace] = useState(null);
+  const workspaceSourceOptions = useMemo(() => [
+    { sourceKey: 'all', sourceLabel: 'Semua Marketplace', businessCode: 'ALL' },
+    ...marketplaceSources,
+  ], [marketplaceSources]);
   const activeSource = useMemo(
-    () => (preview?.source?.sourceKey ? getMarketplaceIntakeSourceConfig(preview.source.sourceKey) : null),
-    [preview?.source?.sourceKey],
+    () => marketplaceSources.find((source) => source.sourceKey === preview?.source?.sourceKey) || null,
+    [marketplaceSources, preview?.source?.sourceKey],
   );
   const activePreviewSourceKey = preview?.source?.sourceKey || '';
   const workspaceSourceOption = useMemo(
-    () => WORKSPACE_SOURCE_OPTIONS.find((option) => option.sourceKey === sourceKey) || WORKSPACE_SOURCE_OPTIONS[0],
-    [sourceKey],
+    () => workspaceSourceOptions.find((option) => option.sourceKey === sourceKey) || workspaceSourceOptions[0],
+    [sourceKey, workspaceSourceOptions],
   );
   const previewSourceLabel = preview?.source?.sourceLabel || activeSource?.sourceLabel || 'Marketplace';
   const previewSearchPlaceholder = activeSource?.searchPlaceholder || 'Cari bundle marketplace…';
@@ -1383,6 +1383,10 @@ export default function MarketplaceIntakeManager() {
   }
 
   async function handleUpload(filesInput) {
+    if (uploadSources.length === 0) {
+      setError('Tambahkan business ScaleV workspace ini sebelum mengunggah order marketplace.');
+      return;
+    }
     const files = Array.from(filesInput || []).filter(Boolean);
     if (!files.length) return;
     setUploading(true);
@@ -2055,7 +2059,7 @@ export default function MarketplaceIntakeManager() {
           </div>
         </div>
 
-        {error ? (
+        {sourcesError || error ? (
           <div
             style={{
               marginBottom: 12,
@@ -2067,7 +2071,7 @@ export default function MarketplaceIntakeManager() {
               border: '1px solid rgba(239,68,68,0.24)',
             }}
           >
-            {error}
+            {sourcesError || error}
           </div>
         ) : null}
 
@@ -2090,6 +2094,12 @@ export default function MarketplaceIntakeManager() {
           }}
         />
 
+        {!sourcesLoading && uploadSources.length === 0 ? (
+          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--dim)', fontSize: 13 }}>
+            Workspace ini belum memiliki source marketplace. Tambahkan business ScaleV di Business Settings; source Shopee, TikTok, Blibli, dan Lazada akan dibentuk hanya untuk workspace ini.
+          </div>
+        ) : null}
+
         <div
           onDragOver={(event) => {
             event.preventDefault();
@@ -2103,7 +2113,7 @@ export default function MarketplaceIntakeManager() {
             if (files?.length) handleUpload(files);
           }}
           onClick={() => {
-            if (uploading) return;
+            if (uploading || sourcesLoading || uploadSources.length === 0) return;
             inputRef.current?.click();
           }}
           style={{
@@ -2112,7 +2122,7 @@ export default function MarketplaceIntakeManager() {
             padding: '26px 18px',
             textAlign: 'center',
             background: dragOver ? 'rgba(238,77,45,0.05)' : 'var(--bg)',
-            cursor: uploading ? 'wait' : 'pointer',
+            cursor: uploading || sourcesLoading || uploadSources.length === 0 ? 'not-allowed' : 'pointer',
             transition: 'all 0.2s ease',
           }}
         >
@@ -3021,7 +3031,7 @@ export default function MarketplaceIntakeManager() {
                   outline: 'none',
                 }}
               >
-                {WORKSPACE_SOURCE_OPTIONS.map((source) => (
+                {workspaceSourceOptions.map((source) => (
                   <option key={source.sourceKey} value={source.sourceKey}>
                     {source.sourceLabel} • {source.businessCode}
                   </option>

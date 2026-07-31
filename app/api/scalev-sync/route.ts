@@ -4,7 +4,7 @@ import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from 
 import { runScalevSync, type ScalevSyncMode } from '@/lib/scalev-sync-runner';
 import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
-import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
+import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
 
 export const maxDuration = 120;
 
@@ -60,7 +60,7 @@ export async function POST(req: NextRequest) {
   const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const requestMode = isCron ? 'cron_post' : 'dashboard_post';
   let requestedBy: string | null = null;
-  let workspaceId = ROOVE_WORKSPACE_ID;
+  let workspaceId: string | null = null;
 
   try {
     if (!isCron) {
@@ -102,6 +102,12 @@ export async function POST(req: NextRequest) {
 
     const body = await parseBody(req);
     const { syncMode, targetDate, targetOrderIds } = normalizeScalevPayload(body);
+    const workspaceIds = isCron
+      ? await resolveScheduledWorkspaceIds(
+          new URL(req.url).searchParams.get('workspace_id'),
+          'scalev',
+        )
+      : [workspaceId!];
 
     logRouteEvent({
       route: '/api/scalev-sync',
@@ -112,12 +118,28 @@ export async function POST(req: NextRequest) {
     });
 
     if (syncMode === 'order_id' || syncMode === 'repair') {
-      const result = await runScalevSync({
-        workspaceId,
-        syncMode,
-        targetDate,
-        targetOrderIds,
-      });
+      const results = [];
+      for (const scheduledWorkspaceId of workspaceIds) {
+        results.push(await runScalevSync({
+          workspaceId: scheduledWorkspaceId,
+          syncMode,
+          targetDate,
+          targetOrderIds,
+        }));
+      }
+      const result = results.length === 1 ? results[0] : {
+        success: results.every((item) => item.success),
+        sync_mode: syncMode,
+        pending_checked: results.reduce((sum, item) => sum + item.pending_checked, 0),
+        orders_updated: results.reduce((sum, item) => sum + item.orders_updated, 0),
+        orders_repaired: results.reduce((sum, item) => sum + item.orders_repaired, 0),
+        orders_still_pending: results.reduce((sum, item) => sum + item.orders_still_pending, 0),
+        orders_errored: results.reduce((sum, item) => sum + item.orders_errored, 0),
+        duration_ms: Date.now() - startTime,
+        has_more: results.some((item) => item.has_more),
+        next_after_id: null,
+        details: results.flatMap((item) => item.details || []),
+      };
 
       logRouteEvent({
         route: '/api/scalev-sync',
@@ -142,18 +164,22 @@ export async function POST(req: NextRequest) {
       ...(targetDate ? { date: targetDate } : {}),
     };
     const queueMode = isCron ? 'cron' : 'manual';
-    const { job, isDuplicate } = await enqueueSyncJob({
-      workspaceId,
-      jobName: 'scalev_sync',
-      route: '/api/scalev-sync',
-      mode: queueMode,
-      payload,
-      dedupeKey: createSyncJobDedupeKey('scalev_sync', queueMode, payload),
-      requestedBy,
-      requestId,
-      maxAttempts: 3,
-      priority: isCron ? 20 : 35,
-    });
+    const queuedJobs = [];
+    for (const scheduledWorkspaceId of workspaceIds) {
+      queuedJobs.push(await enqueueSyncJob({
+        workspaceId: scheduledWorkspaceId,
+        jobName: 'scalev_sync',
+        route: '/api/scalev-sync',
+        mode: queueMode,
+        payload,
+        dedupeKey: createSyncJobDedupeKey('scalev_sync', queueMode, payload),
+        requestedBy,
+        requestId,
+        maxAttempts: 3,
+        priority: isCron ? 20 : 35,
+      }));
+    }
+    const primary = queuedJobs[0] || null;
 
     logRouteEvent({
       route: '/api/scalev-sync',
@@ -165,19 +191,22 @@ export async function POST(req: NextRequest) {
       rows_processed: 1,
       extra: {
         queued: true,
-        duplicate: isDuplicate,
-        job_id: job.id,
+        duplicate: queuedJobs.every((item) => item.isDuplicate),
+        job_ids: queuedJobs.map((item) => item.job.id).join(','),
       },
     });
 
     return NextResponse.json({
       queued: true,
-      duplicate: isDuplicate,
-      job_id: job.id,
-      status: job.status,
-      message: isDuplicate
-        ? 'Sync Scalev sudah ada di antrean atau sedang berjalan.'
-        : 'Sync Scalev berhasil dimasukkan ke antrean.',
+      duplicate: queuedJobs.length > 0 && queuedJobs.every((item) => item.isDuplicate),
+      job_id: primary?.job.id || null,
+      job_ids: queuedJobs.map((item) => item.job.id),
+      status: primary?.job.status || 'success',
+      message: queuedJobs.length === 0
+        ? 'Tidak ada workspace dengan koneksi ScaleV aktif.'
+        : queuedJobs.every((item) => item.isDuplicate)
+          ? 'Sync Scalev sudah ada di antrean atau sedang berjalan.'
+          : `${queuedJobs.length} sync Scalev berhasil dimasukkan ke antrean.`,
     }, { status: 202 });
   } catch (err: any) {
     console.error('[scalev-sync] Fatal error:', err.message);

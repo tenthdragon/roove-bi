@@ -57,6 +57,7 @@ export type ScalevSourceClassBackfillSummary = {
 
 type RunScalevSourceClassBackfillParams = {
   supabase: any;
+  workspaceId: string;
   apply: boolean;
   batchSize: number;
   fromDate: string;
@@ -140,15 +141,17 @@ function isMissingSourceClassColumnError(error: any) {
     || message.includes('scalev_orders.source_class_reason does not exist');
 }
 
-async function loadStoreTypeMap(supabase: any) {
+async function loadStoreTypeMap(supabase: any, workspaceId: string) {
   const [{ data: businesses, error: businessError }, { data: stores, error: storeError }] = await Promise.all([
     supabase
       .from('scalev_webhook_businesses')
       .select('id, business_code')
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true),
     supabase
       .from('scalev_store_channels')
       .select('business_id, store_name, store_type')
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true),
   ]);
 
@@ -174,6 +177,7 @@ async function loadStoreTypeMap(supabase: any) {
 
 async function fetchOrderBatch(args: {
   supabase: any;
+  workspaceId: string;
   cursorId: number | null;
   batchSize: number;
   includeSourceClassColumns: boolean;
@@ -186,6 +190,7 @@ async function fetchOrderBatch(args: {
         : BASE_ORDER_SELECT
       ).join(','),
     )
+    .eq('workspace_id', args.workspaceId)
     .order('id', { ascending: false })
     .limit(args.batchSize);
 
@@ -205,6 +210,7 @@ async function fetchOrderBatch(args: {
 
 async function flushUpdates(args: {
   supabase: any;
+  workspaceId: string;
   updates: Array<{ id: number; source_class: string; source_class_reason: string }>;
 }) {
   if (args.updates.length === 0) return 0;
@@ -220,6 +226,7 @@ async function flushUpdates(args: {
           source_class: row.source_class,
           source_class_reason: row.source_class_reason,
         })
+        .eq('workspace_id', args.workspaceId)
         .eq('id', row.id);
       if (error) throw error;
       return row.id;
@@ -231,7 +238,7 @@ async function flushUpdates(args: {
 }
 
 export async function runScalevSourceClassBackfill(params: RunScalevSourceClassBackfillParams): Promise<ScalevSourceClassBackfillSummary> {
-  const storeTypeMap = await loadStoreTypeMap(params.supabase);
+  const storeTypeMap = await loadStoreTypeMap(params.supabase, params.workspaceId);
   const fromDateMs = Date.parse(`${params.fromDate}T00:00:00+07:00`);
   const toDateMs = Date.parse(`${params.toDate}T23:59:59.999+07:00`);
 
@@ -261,6 +268,7 @@ export async function runScalevSourceClassBackfill(params: RunScalevSourceClassB
     try {
       rows = await fetchOrderBatch({
         supabase: params.supabase,
+        workspaceId: params.workspaceId,
         cursorId,
         batchSize: params.batchSize,
         includeSourceClassColumns,
@@ -276,6 +284,7 @@ export async function runScalevSourceClassBackfill(params: RunScalevSourceClassB
       summary.schemaHasSourceClassColumns = false;
       rows = await fetchOrderBatch({
         supabase: params.supabase,
+        workspaceId: params.workspaceId,
         cursorId,
         batchSize: params.batchSize,
         includeSourceClassColumns: false,
@@ -348,6 +357,7 @@ export async function runScalevSourceClassBackfill(params: RunScalevSourceClassB
         const flushedRows = [...updateBuffer];
         const flushed = await flushUpdates({
           supabase: params.supabase,
+          workspaceId: params.workspaceId,
           updates: flushedRows.map(({ id, source_class, source_class_reason }) => ({
             id,
             source_class,
@@ -388,6 +398,7 @@ export async function runScalevSourceClassBackfill(params: RunScalevSourceClassB
     const flushedRows = [...updateBuffer];
     const flushed = await flushUpdates({
       supabase: params.supabase,
+      workspaceId: params.workspaceId,
       updates: flushedRows.map(({ id, source_class, source_class_reason }) => ({
         id,
         source_class,

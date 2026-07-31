@@ -19,7 +19,7 @@ export type ScalevSourceClassBackfillActionInput = {
 
 async function requireSourceClassBackfillAccess(label: string) {
   await requireDashboardTabAccess('warehouse', label);
-  await requireAnyDashboardPermissionAccess(['admin:sync', 'whs:mapping'], label);
+  return requireAnyDashboardPermissionAccess(['admin:sync', 'whs:mapping'], label);
 }
 
 function getTodayJakartaDate(): string {
@@ -42,7 +42,7 @@ function normalizeDate(value: string | null | undefined, fallback: string) {
 export async function runScalevSourceClassBackfillAction(
   input: ScalevSourceClassBackfillActionInput,
 ): Promise<ScalevSourceClassBackfillSummary> {
-  await requireSourceClassBackfillAccess('Backfill Source Class ScaleV');
+  const { workspaceId } = await requireSourceClassBackfillAccess('Backfill Source Class ScaleV');
 
   const fromDate = normalizeDate(input.fromDate, '2026-04-21');
   const toDate = normalizeDate(input.toDate, getTodayJakartaDate());
@@ -55,6 +55,7 @@ export async function runScalevSourceClassBackfillAction(
 
   return runScalevSourceClassBackfill({
     supabase: svc,
+    workspaceId,
     apply: input.apply === true,
     batchSize,
     fromDate,

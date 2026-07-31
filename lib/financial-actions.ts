@@ -4,7 +4,7 @@
 import { createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardRoles, requireDashboardTabAccess } from './dashboard-access';
 import { parseFinancialReport } from './financial-parser';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
+import { requireExplicitWorkspaceId } from './workspace-scope';
 
 async function requireFinancialAdminAccess(label: string) {
   return requireDashboardPermissionAccess('admin:financial', label);
@@ -80,8 +80,10 @@ export async function toggleFinancialConnection(id: string, isActive: boolean) {
 // ============================================================
 
 export async function triggerFinancialSync(options?: { skipAuth?: boolean; workspaceId?: string }) {
-  let workspaceId = options?.workspaceId || ROOVE_WORKSPACE_ID;
-  if (!options?.skipAuth) {
+  let workspaceId: string;
+  if (options?.skipAuth) {
+    workspaceId = requireExplicitWorkspaceId(options.workspaceId, 'Financial sync');
+  } else {
     const access = await requireFinancialAdminAccess('Admin Financial');
     workspaceId = access.workspaceId;
   }

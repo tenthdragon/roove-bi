@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireDashboardPermissionAccess, requireRooveOnlyFeature } from '@/lib/dashboard-access';
+import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { buildScalevOpsProjectionForBatch } from '@/lib/marketplace-intake-scalev-export';
 
@@ -20,9 +20,10 @@ export async function GET(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
+    let workspaceId: string;
     try {
-      await requireRooveOnlyFeature('Marketplace Intake');
-      await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
+      const access = await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
+      workspaceId = access.workspaceId;
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
       return NextResponse.json({ error: error.message }, { status });
@@ -40,6 +41,7 @@ export async function GET(req: NextRequest) {
     const shipmentDate = (req.nextUrl.searchParams.get('shipmentDate') || '').trim() || null;
 
     const result = await buildScalevOpsProjectionForBatch({
+      workspaceId,
       batchId,
       includeWarehouseStatuses: statuses,
       shipmentDate,

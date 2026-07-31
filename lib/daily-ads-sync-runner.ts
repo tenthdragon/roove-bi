@@ -1,6 +1,6 @@
 import { parseGoogleSheet } from './google-sheets';
 import { createServiceSupabase } from './service-supabase';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
+import { requireExplicitWorkspaceId } from './workspace-scope';
 
 type DailyAdsPeriod = {
   month: number;
@@ -170,8 +170,9 @@ async function deleteExistingGoogleSheetRows(
 }
 
 export async function runDailyAdsSync(
-  workspaceId = ROOVE_WORKSPACE_ID,
+  requestedWorkspaceId: string,
 ): Promise<DailyAdsSyncResult> {
+  const workspaceId = requireExplicitWorkspaceId(requestedWorkspaceId, 'Daily ads sync');
   const svc = createServiceSupabase();
 
   const { data: connections, error: connError } = await svc

@@ -1,5 +1,4 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
 
 type ResolveWorkspaceCredentialOptions = {
   supabase: SupabaseClient;
@@ -27,9 +26,8 @@ function readEnvironmentReference(reference: unknown, label: string) {
  * Resolve an integration secret without storing the secret value in Postgres.
  *
  * workspace_integrations.credential_reference contains an environment variable
- * name (for example APURVA_WHATSAPP_ACCESS_TOKEN). Only Roove may use the
- * legacy environment-variable fallback so a newly provisioned workspace can
- * never inherit Roove credentials by accident.
+ * name (for example APURVA_WHATSAPP_ACCESS_TOKEN). There is no tenant fallback:
+ * a workspace without its own integration record fails closed.
  */
 export async function resolveWorkspaceCredential({
   supabase,
@@ -59,13 +57,6 @@ export async function resolveWorkspaceCredential({
       throw new Error(`Kredensial ${provider} untuk workspace ini belum tersedia di runtime.`);
     }
     return value;
-  }
-
-  if (workspaceId === ROOVE_WORKSPACE_ID) {
-    for (const envKey of fallbackEnvKeys) {
-      const value = process.env[envKey];
-      if (value) return value;
-    }
   }
 
   throw new Error(`Integrasi ${provider} belum dikonfigurasi untuk workspace ini.`);
@@ -109,13 +100,6 @@ export async function resolveWorkspaceIntegrationValue({
     `${provider}.${referenceConfigKey}`,
   );
   if (referencedValue) return referencedValue;
-
-  if (workspaceId === ROOVE_WORKSPACE_ID) {
-    for (const envKey of fallbackEnvKeys) {
-      const value = process.env[envKey];
-      if (value) return value;
-    }
-  }
 
   return null;
 }

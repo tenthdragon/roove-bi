@@ -6,6 +6,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
+import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
 
 export const maxDuration = 300;
 
@@ -23,7 +24,7 @@ export async function POST(req: NextRequest) {
     const authHeader = req.headers.get('authorization');
     const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
 
-    let workspaceId = '00000000-0000-4000-8000-000000000001';
+    let workspaceId: string | null = null;
     if (!isCron) {
       const originError = rejectUntrustedOrigin(req);
       if (originError) return originError;
@@ -63,25 +64,38 @@ export async function POST(req: NextRequest) {
       // No body or invalid JSON — recalculate all
     }
 
+    const workspaceIds = isCron
+      ? await resolveScheduledWorkspaceIds(workspaceId, 'all')
+      : [workspaceId!];
     const svc = getServiceSupabase();
     const start = Date.now();
 
     const mode = fromDate && toDate ? `${fromDate} to ${toDate}` : 'all';
-    const { error } = await svc.rpc('recalculate_workspace_summaries', {
-      p_workspace_id: workspaceId,
-      p_from: fromDate,
-      p_to: toDate,
-    });
+    const results = [];
+    for (const scheduledWorkspaceId of workspaceIds) {
+      const { error } = await svc.rpc('recalculate_workspace_summaries', {
+        p_workspace_id: scheduledWorkspaceId,
+        p_from: fromDate,
+        p_to: toDate,
+      });
+      results.push({
+        workspace_id: scheduledWorkspaceId,
+        success: !error,
+        error: error?.message || null,
+      });
+    }
 
     const elapsed = Date.now() - start;
+    const failed = results.filter((result) => !result.success);
 
-    if (error) {
-      console.error(`[refresh-views] recalculate (${mode}) failed (${elapsed}ms):`, error.message);
+    if (failed.length > 0) {
+      console.error(`[refresh-views] recalculate (${mode}) failed (${elapsed}ms):`, failed);
       return NextResponse.json({
         success: false,
         elapsed_ms: elapsed,
         mode,
-        error: error.message,
+        results,
+        error: `${failed.length} workspace gagal direcalculate.`,
       }, { status: 500 });
     }
 
@@ -90,7 +104,9 @@ export async function POST(req: NextRequest) {
       success: true,
       elapsed_ms: elapsed,
       mode,
-      message: `Summaries recalculated (${mode}) in ${(elapsed / 1000).toFixed(1)}s`,
+      workspace_count: results.length,
+      results,
+      message: `${results.length} workspace summaries recalculated (${mode}) in ${(elapsed / 1000).toFixed(1)}s`,
     });
   } catch (err: any) {
     console.error('[refresh-views] Error:', err);

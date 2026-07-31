@@ -12,12 +12,12 @@ import { reconcileScalevOrderWarehouse } from './warehouse-ledger-actions';
 import { resolveWarehouseOrderContext } from './warehouse-order-context';
 import { extractMarketplaceTrackingFromWebhookData } from './marketplace-tracking';
 import { createServiceSupabase } from './service-supabase';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
+import { requireExplicitWorkspaceId } from './workspace-scope';
 
 export type ScalevSyncMode = 'full' | 'date' | 'order_id' | 'repair';
 
 export type ScalevSyncOptions = {
-  workspaceId?: string;
+  workspaceId: string;
   syncMode?: ScalevSyncMode;
   targetDate?: string | null;
   targetOrderIds?: string[] | null;
@@ -97,7 +97,7 @@ function buildSyncSourceClassFields(args: {
   });
 }
 
-export async function runScalevSync(options: ScalevSyncOptions = {}): Promise<ScalevSyncResult> {
+export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevSyncResult> {
   const startTime = Date.now();
   const startedAt = new Date().toISOString();
   const syncMode: ScalevSyncMode = options.syncMode || 'full';
@@ -106,7 +106,7 @@ export async function runScalevSync(options: ScalevSyncOptions = {}): Promise<Sc
   const startAfterId = Math.floor(Number(options.startAfterId || 0)) || null;
   const maxPendingOrders = normalizeFullSyncBatchLimit(options.maxPendingOrders);
   const svc = createServiceSupabase();
-  const workspaceId = options.workspaceId || ROOVE_WORKSPACE_ID;
+  const workspaceId = requireExplicitWorkspaceId(options.workspaceId, 'ScaleV sync');
 
   let pendingOrdersCount = 0;
   let logId: number | null = null;
@@ -511,8 +511,9 @@ async function processOrder(
   forceUpdate = false,
   lightweight = false,
   channelOverrideMap: Map<string, string> = new Map(),
-  workspaceId = ROOVE_WORKSPACE_ID,
+  workspaceId = '',
 ): Promise<'updated' | 'still_pending'> {
+  workspaceId = requireExplicitWorkspaceId(workspaceId, 'ScaleV order processing');
   const newStatus = apiOrder.status;
   let warehouseResult: Awaited<ReturnType<typeof reconcileScalevOrderWarehouse>> | null = null;
   const businessId = bizCodeToId.get(dbOrder.business_code) || 0;

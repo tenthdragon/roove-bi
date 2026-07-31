@@ -58,7 +58,7 @@ export async function saveWebhookBusiness(input: {
   webhook_secret: string;
   api_key?: string;
 }) {
-  const { workspaceId } = await requireOwner('Business Settings');
+  const { workspaceId, workspace } = await requireOwner('Business Settings');
   const svc = createServiceSupabase();
 
   const code = input.business_code.trim().toUpperCase();
@@ -123,14 +123,15 @@ export async function saveWebhookBusiness(input: {
     }
 
     // Auto-create warehouse mapping with default entity (first 3 chars of code)
-    const defaultEntity = code.slice(0, 3);
+    const defaultEntity = String(workspace.settings.inventory_entity || code.slice(0, 3)).trim().toUpperCase();
+    const defaultWarehouse = String(workspace.settings.warehouse_code || 'BTN').trim().toUpperCase();
     await svc
       .from('warehouse_business_mapping')
       .upsert({
         workspace_id: workspaceId,
         business_code: code,
         deduct_entity: defaultEntity,
-        deduct_warehouse: 'BTN',
+        deduct_warehouse: defaultWarehouse,
         is_active: true,
         is_primary: true,
         notes: 'Auto-created',

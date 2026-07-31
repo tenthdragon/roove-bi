@@ -2,8 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-
-import { listMarketplaceIntakeSourceConfigs } from '@/lib/marketplace-intake-sources';
+import { useMarketplaceIntakeSources } from '@/lib/use-marketplace-intake-sources';
 
 const panelStyle = {
   background: 'var(--card)',
@@ -12,8 +11,6 @@ const panelStyle = {
   padding: 16,
   boxShadow: 'var(--shadow)',
 };
-
-const SOURCE_OPTIONS = listMarketplaceIntakeSourceConfigs();
 
 function fmtNumber(value) {
   return new Intl.NumberFormat('id-ID').format(Number(value || 0));
@@ -112,7 +109,7 @@ function StatusPill({ active }) {
   );
 }
 
-function buildEmptyForm(sourceKey = 'tiktok_rti') {
+function buildEmptyForm(sourceKey = '') {
   return {
     id: null,
     sourceKey,
@@ -126,7 +123,7 @@ function buildEmptyForm(sourceKey = 'tiktok_rti') {
   };
 }
 
-function buildEmptyManualRuleForm(sourceKey = 'tiktok_rti') {
+function buildEmptyManualRuleForm(sourceKey = '') {
   return {
     id: null,
     sourceKey,
@@ -143,6 +140,7 @@ function buildEmptyManualRuleForm(sourceKey = 'tiktok_rti') {
 }
 
 export default function MarketplaceSkuAliasPanel() {
+  const { sources: SOURCE_OPTIONS, error: sourcesError } = useMarketplaceIntakeSources();
   const [resolverView, setResolverView] = useState('sku');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -236,7 +234,7 @@ export default function MarketplaceSkuAliasPanel() {
   const activeSourceConfig = useMemo(() => {
     if (sourceFilter === 'all') return null;
     return SOURCE_OPTIONS.find((source) => source.sourceKey === sourceFilter) || null;
-  }, [sourceFilter]);
+  }, [SOURCE_OPTIONS, sourceFilter]);
 
   const filteredItems = useMemo(() => {
     const query = cleanText(search).toLowerCase();
@@ -352,25 +350,25 @@ export default function MarketplaceSkuAliasPanel() {
     }
   }
 
-  function resetForm(sourceKey = form.sourceKey || 'tiktok_rti') {
+  function resetForm(sourceKey = form.sourceKey || SOURCE_OPTIONS[0]?.sourceKey || '') {
     setForm(buildEmptyForm(sourceKey));
   }
 
-  function resetManualRuleForm(sourceKey = manualRuleForm.sourceKey || 'tiktok_rti') {
+  function resetManualRuleForm(sourceKey = manualRuleForm.sourceKey || SOURCE_OPTIONS[0]?.sourceKey || '') {
     setManualRuleForm(buildEmptyManualRuleForm(sourceKey));
   }
 
   function startCreate() {
     setMessage('');
     setError('');
-    setForm(buildEmptyForm(sourceFilter !== 'all' ? sourceFilter : 'tiktok_rti'));
+    setForm(buildEmptyForm(sourceFilter !== 'all' ? sourceFilter : SOURCE_OPTIONS[0]?.sourceKey || ''));
     setFormOpen(true);
   }
 
   function startCreateManualRule() {
     setMessage('');
     setError('');
-    const sourceKey = sourceFilter !== 'all' ? sourceFilter : 'tiktok_rti';
+    const sourceKey = sourceFilter !== 'all' ? sourceFilter : SOURCE_OPTIONS[0]?.sourceKey || '';
     const preferredStoreName = activeSourceConfig && entityStoreFilter !== 'all' && entityStoreFilter !== '__unassigned__'
       ? entityStoreFilter
       : '';
@@ -653,9 +651,9 @@ export default function MarketplaceSkuAliasPanel() {
           </div>
         </div>
 
-        {error ? (
+        {sourcesError || error ? (
           <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#fca5a5', fontSize: 13 }}>
-            {error}
+            {sourcesError || error}
           </div>
         ) : null}
         {message ? (
@@ -840,7 +838,7 @@ export default function MarketplaceSkuAliasPanel() {
                 <input
                   value={manualRuleForm.mpProductName}
                   onChange={(event) => setManualRuleForm((current) => ({ ...current, mpProductName: event.target.value }))}
-                  placeholder="Contoh: Pluve Fiber Collagen Drink"
+                  placeholder="Contoh: Nama bundle ScaleV"
                   style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)' }}
                 />
               </label>

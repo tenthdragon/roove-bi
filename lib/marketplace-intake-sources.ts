@@ -1,12 +1,6 @@
-export type MarketplaceIntakeSourceKey =
-  | 'shopee_rlt'
-  | 'shopee_jhn'
-  | 'tiktok_rti'
-  | 'tiktok_jhn'
-  | 'blibli_rti'
-  | 'lazada_rlt';
+export type MarketplaceIntakeSourceKey = string;
 export type MarketplaceIntakePlatform = 'shopee' | 'tiktok' | 'blibli' | 'lazada';
-export type MarketplaceIntakeParserFamily = 'shopee' | 'tiktok' | 'blibli' | 'lazada' | 'none';
+export type MarketplaceIntakeParserFamily = MarketplaceIntakePlatform | 'none';
 
 export type MarketplaceIntakeSourceConfig = {
   id: number | null;
@@ -15,7 +9,7 @@ export type MarketplaceIntakeSourceConfig = {
   platform: MarketplaceIntakePlatform;
   parserFamily: MarketplaceIntakeParserFamily;
   uploadEnabled: boolean;
-  businessCode: 'RLT' | 'JHN' | 'RTI';
+  businessCode: string;
   allowedStores: string[];
   uploadTitle: string;
   uploadDescription: string;
@@ -26,167 +20,71 @@ export type MarketplaceIntakeSourceConfig = {
   pageDescription: string;
 };
 
-export const SHOPEE_RLT_ALLOWED_STORE_NAMES = [
-  'Roove Main Store - Marketplace',
-  'Globite Store - Marketplace',
-  'Pluve Main Store - Marketplace',
-  'Purvu Store - Marketplace',
-  'Purvu The Secret Store - Markerplace',
-  'YUV Deodorant Serum Store - Marketplace',
-  'Osgard Oil Store',
-  'drHyun Main Store - Marketplace',
-  'Calmara Main Store - Marketplace',
+export const MARKETPLACE_INTAKE_PLATFORMS: MarketplaceIntakePlatform[] = [
+  'shopee',
+  'tiktok',
+  'blibli',
+  'lazada',
 ];
 
-export const JHN_ALLOWED_STORE_NAMES = [
-  'Purvu Store',
-  'Purvu The Secret Store',
-  'drHyun Main Store',
-  'Calmara Main Store',
-];
-
-export const TIKTOK_RTI_ALLOWED_STORE_NAMES = [
-  'Roove Main Store - Marketplace',
-  'Globite Store - Marketplace',
-  'Pluve Main Store - Marketplace',
-  'Purvu Store - Marketplace',
-  'Purvu The Secret Store - Markerplace',
-  'YUV Deodorant Serum Store - Marketplace',
-  'Osgard Oil Store - Marketplace',
-  'drHyun Main Store - Marketplace',
-];
-
-export const BLIBLI_RTI_ALLOWED_STORE_NAMES = [
-  'Roove Main Store - Marketplace',
-  'Globite Store - Marketplace',
-  'Pluve Main Store - Marketplace',
-  'Purvu Store - Marketplace',
-  'Purvu The Secret Store - Markerplace',
-];
-
-export const LAZADA_RLT_ALLOWED_STORE_NAMES = [
-  'Roove Main Store - Marketplace',
-  'Globite Store - Marketplace',
-  'Pluve Main Store - Marketplace',
-  'Purvu Store - Marketplace',
-  'Purvu The Secret Store - Markerplace',
-  'Osgard Oil Store',
-];
-
-const MARKETPLACE_INTAKE_SOURCE_CONFIGS: Record<MarketplaceIntakeSourceKey, MarketplaceIntakeSourceConfig> = {
-  shopee_rlt: {
-    id: null,
-    sourceKey: 'shopee_rlt',
-    sourceLabel: 'Shopee RLT',
-    platform: 'shopee',
-    parserFamily: 'shopee',
-    uploadEnabled: true,
-    businessCode: 'RLT',
-    allowedStores: SHOPEE_RLT_ALLOWED_STORE_NAMES,
-    uploadTitle: 'Upload Shopee RLT',
-    uploadDescription: 'Halaman ini hanya membaca export Shopee RLT. File yang namanya mengandung SPX tetap diperlakukan sebagai Shopee. App akan match exact SKU Excel ke bundle custom_id di business RLT, lalu menebak store dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.',
-    dragDropTitle: 'Drag & drop file Shopee RLT di sini',
-    readingLabel: 'Membaca file Shopee RLT…',
-    previewLabel: 'Preview Mapping Shopee RLT',
-    searchPlaceholder: 'Cari bundle RLT…',
-    pageDescription: 'Tahap pertama untuk jalur baru marketplace. Upload file Shopee RLT, lalu app akan match exact SKU Excel ke bundle custom_id di business RLT, lalu mencari store dari nama bundle/produk dan menaruh hasilnya ke workspace warehouse. Data baru dianggap valid downstream setelah warehouse memberi shipment date.',
-  },
-  shopee_jhn: {
-    id: null,
-    sourceKey: 'shopee_jhn',
-    sourceLabel: 'Shopee JHN',
-    platform: 'shopee',
-    parserFamily: 'shopee',
-    uploadEnabled: true,
-    businessCode: 'JHN',
-    allowedStores: JHN_ALLOWED_STORE_NAMES,
-    uploadTitle: 'Upload Shopee JHN',
-    uploadDescription: 'Halaman ini hanya membaca export Shopee JHN. File yang namanya mengandung SPX tetap diperlakukan sebagai Shopee. App akan match exact SKU Excel ke bundle custom_id di business JHN, lalu menebak store dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.',
-    dragDropTitle: 'Drag & drop file Shopee JHN di sini',
-    readingLabel: 'Membaca file Shopee JHN…',
-    previewLabel: 'Preview Mapping Shopee JHN',
-    searchPlaceholder: 'Cari bundle JHN…',
-    pageDescription: 'Tahap pertama untuk jalur baru marketplace. Upload file Shopee JHN, lalu app akan match exact SKU Excel ke bundle custom_id di business JHN, lalu mencari store dari nama bundle/produk dan menaruh hasilnya ke workspace warehouse. Data baru dianggap valid downstream setelah warehouse memberi shipment date.',
-  },
-  tiktok_rti: {
-    id: null,
-    sourceKey: 'tiktok_rti',
-    sourceLabel: 'Tiktok RTI',
-    platform: 'tiktok',
-    parserFamily: 'tiktok',
-    uploadEnabled: true,
-    businessCode: 'RTI',
-    allowedStores: TIKTOK_RTI_ALLOWED_STORE_NAMES,
-    uploadTitle: 'Upload Tiktok RTI',
-    uploadDescription: 'Halaman ini membaca export TikTok Shop/Tokopedia dari seller center RTI. App akan match SKU workbook ke bundle custom_id di business RTI, lalu menebak store final dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.',
-    dragDropTitle: 'Drag & drop file Tiktok RTI di sini',
-    readingLabel: 'Membaca file Tiktok RTI…',
-    previewLabel: 'Preview Mapping Tiktok RTI',
-    searchPlaceholder: 'Cari bundle RTI…',
-    pageDescription: 'Tahap pertama untuk jalur baru marketplace TikTok RTI. Upload workbook seller center, lalu app akan match SKU workbook ke bundle custom_id di business RTI, mencari store final dari nama bundle/produk, dan menaruh hasilnya ke workspace warehouse. Data baru dianggap valid downstream setelah warehouse memberi shipment date.',
-  },
-  tiktok_jhn: {
-    id: null,
-    sourceKey: 'tiktok_jhn',
-    sourceLabel: 'Tiktok JHN',
-    platform: 'tiktok',
-    parserFamily: 'tiktok',
-    uploadEnabled: true,
-    businessCode: 'JHN',
-    allowedStores: JHN_ALLOWED_STORE_NAMES,
-    uploadTitle: 'Upload Tiktok JHN',
-    uploadDescription: 'Halaman ini membaca export TikTok Shop seller center JHN. App akan match SKU workbook ke bundle custom_id di business JHN, lalu menebak store final dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.',
-    dragDropTitle: 'Drag & drop file Tiktok JHN di sini',
-    readingLabel: 'Membaca file Tiktok JHN…',
-    previewLabel: 'Preview Mapping Tiktok JHN',
-    searchPlaceholder: 'Cari bundle JHN…',
-    pageDescription: 'Tahap pertama untuk jalur baru marketplace TikTok JHN. Upload workbook seller center, lalu app akan match SKU workbook ke bundle custom_id di business JHN, mencari store final dari nama bundle/produk, dan menaruh hasilnya ke workspace warehouse. Data baru dianggap valid downstream setelah warehouse memberi shipment date.',
-  },
-  blibli_rti: {
-    id: null,
-    sourceKey: 'blibli_rti',
-    sourceLabel: 'Blibli RTI',
-    platform: 'blibli',
-    parserFamily: 'blibli',
-    uploadEnabled: true,
-    businessCode: 'RTI',
-    allowedStores: BLIBLI_RTI_ALLOWED_STORE_NAMES,
-    uploadTitle: 'Upload Blibli RTI',
-    uploadDescription: 'Halaman ini membaca export order mentah Blibli RTI. App akan match Merchant SKU workbook ke bundle custom_id di business RTI, lalu menebak store final dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.',
-    dragDropTitle: 'Drag & drop file Blibli RTI di sini',
-    readingLabel: 'Membaca file Blibli RTI…',
-    previewLabel: 'Preview Mapping Blibli RTI',
-    searchPlaceholder: 'Cari bundle RTI…',
-    pageDescription: 'Tahap pertama untuk jalur marketplace Blibli RTI. Upload workbook order mentah, lalu app akan match Merchant SKU ke bundle custom_id di business RTI, mencari store final dari nama bundle/produk, dan menaruh hasilnya ke workspace warehouse. Data baru dianggap valid downstream setelah warehouse memberi shipment date.',
-  },
-  lazada_rlt: {
-    id: null,
-    sourceKey: 'lazada_rlt',
-    sourceLabel: 'Lazada RLT',
-    platform: 'lazada',
-    parserFamily: 'lazada',
-    uploadEnabled: true,
-    businessCode: 'RLT',
-    allowedStores: LAZADA_RLT_ALLOWED_STORE_NAMES,
-    uploadTitle: 'Upload Lazada RLT',
-    uploadDescription: 'Halaman ini membaca export order mentah Lazada RLT. App akan match Seller SKU workbook ke bundle custom_id di business RLT, lalu menebak store final dari nama bundle/produk. Jika belum yakin, warehouse bisa memilih store manual langsung di preview.',
-    dragDropTitle: 'Drag & drop file Lazada RLT di sini',
-    readingLabel: 'Membaca file Lazada RLT…',
-    previewLabel: 'Preview Mapping Lazada RLT',
-    searchPlaceholder: 'Cari bundle RLT…',
-    pageDescription: 'Tahap pertama untuk jalur marketplace Lazada RLT. Upload workbook order mentah, lalu app akan match Seller SKU ke bundle custom_id di business RLT, mencari store final dari nama bundle/produk, dan menaruh hasilnya ke workspace warehouse. Data baru dianggap valid downstream setelah warehouse memberi shipment date.',
-  },
+const PLATFORM_LABELS: Record<MarketplaceIntakePlatform, string> = {
+  shopee: 'Shopee',
+  tiktok: 'TikTok',
+  blibli: 'Blibli',
+  lazada: 'Lazada',
 };
 
-export function getMarketplaceIntakeSourceConfig(sourceKey?: string | null): MarketplaceIntakeSourceConfig {
-  const normalizedKey = String(sourceKey || '').trim().toLowerCase() as MarketplaceIntakeSourceKey;
-  return MARKETPLACE_INTAKE_SOURCE_CONFIGS[normalizedKey] || MARKETPLACE_INTAKE_SOURCE_CONFIGS.shopee_rlt;
+function cleanText(value: unknown): string {
+  return String(value ?? '').trim();
 }
 
-export function listMarketplaceIntakeSourceConfigs(): MarketplaceIntakeSourceConfig[] {
-  return Object.values(MARKETPLACE_INTAKE_SOURCE_CONFIGS);
+export function isMarketplaceIntakePlatform(value: unknown): value is MarketplaceIntakePlatform {
+  return MARKETPLACE_INTAKE_PLATFORMS.includes(cleanText(value).toLowerCase() as MarketplaceIntakePlatform);
 }
 
-export function listMarketplaceIntakeUploadSourceConfigs(): MarketplaceIntakeSourceConfig[] {
-  return listMarketplaceIntakeSourceConfigs().filter((config) => config.uploadEnabled);
+export function buildMarketplaceIntakeSourceKey(
+  platform: MarketplaceIntakePlatform,
+  businessCode: string,
+): MarketplaceIntakeSourceKey {
+  const normalizedBusinessCode = cleanText(businessCode)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (!normalizedBusinessCode) throw new Error('Business code source marketplace tidak valid.');
+  return `${platform}_${normalizedBusinessCode}`;
+}
+
+export function buildMarketplaceIntakeSourceConfig(input: {
+  id?: number | null;
+  platform: MarketplaceIntakePlatform;
+  businessCode: string;
+  sourceKey?: string | null;
+  sourceLabel?: string | null;
+  uploadEnabled?: boolean;
+  allowedStores?: string[];
+}): MarketplaceIntakeSourceConfig {
+  const businessCode = cleanText(input.businessCode).toUpperCase();
+  if (!businessCode) throw new Error('Business code source marketplace wajib diisi.');
+  const platformLabel = PLATFORM_LABELS[input.platform];
+  const sourceLabel = cleanText(input.sourceLabel) || `${platformLabel} ${businessCode}`;
+  const sourceKey = cleanText(input.sourceKey)
+    || buildMarketplaceIntakeSourceKey(input.platform, businessCode);
+
+  return {
+    id: input.id ?? null,
+    sourceKey,
+    sourceLabel,
+    platform: input.platform,
+    parserFamily: input.platform,
+    uploadEnabled: input.uploadEnabled !== false,
+    businessCode,
+    allowedStores: Array.from(new Set((input.allowedStores || []).map(cleanText).filter(Boolean))),
+    uploadTitle: `Upload ${sourceLabel}`,
+    uploadDescription: `Baca export ${platformLabel} untuk business ${businessCode}, cocokkan SKU ke katalog ScaleV workspace aktif, lalu review store sebelum disimpan.`,
+    dragDropTitle: `Drag & drop file ${sourceLabel} di sini`,
+    readingLabel: `Membaca file ${sourceLabel}…`,
+    previewLabel: `Preview Mapping ${sourceLabel}`,
+    searchPlaceholder: `Cari bundle ${businessCode}…`,
+    pageDescription: `Upload order ${platformLabel} untuk business ${businessCode}. Semua mapping, store, order, dan hasil warehouse tetap berada di workspace aktif.`,
+  };
 }

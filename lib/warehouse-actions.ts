@@ -4,7 +4,7 @@
 import { createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardTabAccess } from './dashboard-access';
 import { parseWarehouseSheet } from './warehouse-parser';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
+import { requireExplicitWorkspaceId } from './workspace-scope';
 
 async function requireWarehouseAdminAccess(label: string) {
   return requireDashboardPermissionAccess('admin:warehouse', label);
@@ -85,8 +85,10 @@ export async function triggerWarehouseSync(options?: {
   skipAuth?: boolean;
   workspaceId?: string;
 }) {
-  let workspaceId = options?.workspaceId || ROOVE_WORKSPACE_ID;
-  if (!options?.skipAuth) {
+  let workspaceId: string;
+  if (options?.skipAuth) {
+    workspaceId = requireExplicitWorkspaceId(options.workspaceId, 'Warehouse sync');
+  } else {
     const access = await requireWarehouseAdminAccess('Admin Warehouse');
     workspaceId = access.workspaceId;
   }

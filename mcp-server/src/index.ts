@@ -14,9 +14,14 @@ config({ path: resolve(__dirname, "../../.env.local") });
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const workspaceId = String(process.env.MCP_WORKSPACE_ID || "").trim();
 
-if (!supabaseUrl || !supabaseKey) {
-  console.error("Missing SUPABASE env vars in .env.local");
+if (!supabaseUrl || !supabaseKey || !workspaceId) {
+  console.error("Missing Supabase credentials or MCP_WORKSPACE_ID in .env.local");
+  process.exit(1);
+}
+if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(workspaceId)) {
+  console.error("MCP_WORKSPACE_ID must be a valid workspace UUID");
   process.exit(1);
 }
 
@@ -45,6 +50,7 @@ type SafeDataset = {
   defaultSelect: string;
   columns: string[];
   defaultOrder?: string;
+  tenantColumn?: "workspace_id" | "owner_workspace_id";
 };
 
 const SAFE_DATASETS: Record<string, SafeDataset> = {
@@ -116,23 +122,6 @@ const SAFE_DATASETS: Record<string, SafeDataset> = {
     ],
     defaultOrder: "date",
   },
-  customer_type_daily: {
-    table: "summary_daily_customer_type",
-    description:
-      "Daily customer split by new/repeat customer type and sales channel. No individual customer PII.",
-    defaultSelect:
-      "date, customer_type, sales_channel, order_count, customer_count, revenue, cogs",
-    columns: [
-      "date",
-      "customer_type",
-      "sales_channel",
-      "order_count",
-      "customer_count",
-      "revenue",
-      "cogs",
-    ],
-    defaultOrder: "date",
-  },
   financial_pl: {
     table: "v_pl_summary",
     description: "Monthly profit and loss summary.",
@@ -195,6 +184,7 @@ const SAFE_DATASETS: Record<string, SafeDataset> = {
       "is_active",
     ],
     defaultOrder: "name",
+    tenantColumn: "owner_workspace_id",
   },
 };
 
@@ -232,12 +222,12 @@ function buildSelect(dataset: SafeDataset, requested?: string): string {
 
 server.tool(
   "roove_mcp_guide",
-  "Explain the Roove BI MCP capabilities, safe datasets, and suggested workflows for Claude/Codex conversations.",
+  "Explain the workspace-scoped BI MCP capabilities, safe datasets, and suggested workflows for Claude/Codex conversations.",
   {},
   async () => {
     const guide = {
       business_context:
-        "Roove BI is an Indonesian D2C/FMCG analytics app covering marketplace/Scalev sales, ads, customer cohorts, finance, warehouse, PPIC, and cashflow.",
+        "This MCP instance is bound to one workspace and covers marketplace/ScaleV sales, ads, customer cohorts, finance, warehouse, PPIC, and cashflow without reading another tenant.",
       recommended_first_steps: [
         "Use business_snapshot for an executive read of a date range.",
         "Use roove_dataset_catalog to discover safe read-only datasets.",
@@ -325,7 +315,11 @@ server.tool(
     const dataset = SAFE_DATASETS[datasetKey];
     const selectedColumns = buildSelect(dataset, select);
 
-    let q: any = svc.from(dataset.table).select(selectedColumns).limit(limit);
+    let q: any = svc
+      .from(dataset.table)
+      .select(selectedColumns)
+      .eq(dataset.tenantColumn || "workspace_id", workspaceId)
+      .limit(limit);
 
     for (const filter of filters) {
       assertSafeColumn(dataset, filter.column);
@@ -371,25 +365,29 @@ server.tool(
       svc
         .from("summary_daily_product_complete")
         .select("date, product, net_sales, gross_profit, mkt_cost, mp_admin_cost, net_after_mkt")
+        .eq("workspace_id", workspaceId)
         .gte("date", from)
         .lte("date", to)
         .limit(10000),
       svc
         .from("summary_daily_channel_complete")
         .select("date, product, channel, net_sales, gross_profit, mkt_cost, mp_admin_cost, net_after_mkt")
+        .eq("workspace_id", workspaceId)
         .gte("date", from)
         .lte("date", to)
         .limit(10000),
       svc.rpc("get_customer_type_period_exact", {
+        p_workspace_id: workspaceId,
         p_from: from,
         p_to: to,
         p_brand: null,
       }),
-      svc.from("v_pl_summary").select("*").order("month", { ascending: false }).limit(6),
-      svc.from("v_cf_summary").select("*").order("month", { ascending: false }).limit(6),
+      svc.from("v_pl_summary").select("*").eq("workspace_id", workspaceId).order("month", { ascending: false }).limit(6),
+      svc.from("v_cf_summary").select("*").eq("workspace_id", workspaceId).order("month", { ascending: false }).limit(6),
       svc
         .from("financial_ratios_monthly")
         .select("month, ratio_name, ratio_label, category, value, benchmark_label")
+        .eq("workspace_id", workspaceId)
         .order("month", { ascending: false })
         .limit(72),
     ]);
@@ -507,6 +505,7 @@ server.tool(
     let q = svc
       .from("daily_ads_spend")
       .select("date, source, store, ad_account, spent, data_source, impressions, cpm")
+      .eq("workspace_id", workspaceId)
       .gte("date", from)
       .lte("date", to)
       .limit(20000);
@@ -577,13 +576,15 @@ server.tool(
       svc
         .from("daily_ads_spend")
         .select("date, source, store, ad_account, spent, data_source, impressions, cpm")
+        .eq("workspace_id", workspaceId)
         .gte("date", from)
         .lte("date", to)
         .eq("data_source", "meta_api")
         .limit(20000),
       svc
         .from("meta_ad_accounts")
-        .select("account_id, account_name, store, default_source, default_advertiser, is_active"),
+        .select("account_id, account_name, store, default_source, default_advertiser, is_active")
+        .eq("workspace_id", workspaceId),
     ]);
 
     const spendRows = unwrap(spendRes) as any[];
@@ -683,12 +684,13 @@ server.tool(
       await svc
         .from("warehouse_products")
         .select("id, name, sku, unit, hpp, price_list, lead_time_days, safety_stock_days")
+        .eq("owner_workspace_id", workspaceId)
         .eq("is_active", true)
         .order("name")
     );
 
     const balances = unwrap(
-      await svc.from("v_warehouse_stock_balance").select("*")
+      await svc.from("v_warehouse_stock_balance").select("*").eq("workspace_id", workspaceId)
     );
 
     const balMap = new Map((balances as any[]).map((b: any) => [b.product_id, b]));
@@ -713,30 +715,30 @@ server.tool(
     let movements: any[];
 
     if (source === "scalev") {
-      // Try summary table first (fast)
-      const now = new Date();
-      const cutoff = new Date(now.getFullYear(), now.getMonth() - months, 1)
-        .toISOString()
-        .slice(0, 7);
-      const { data } = await svc
-        .from("summary_scalev_monthly_movements")
-        .select("product_id, yr, mn, total_out")
-        .gte("yr", parseInt(cutoff.split("-")[0]))
-        .order("yr")
-        .order("mn");
-      movements = data ?? [];
-
-      if (movements.length === 0) {
-        // Fallback to RPC
-        movements = unwrap(await svc.rpc("ppic_monthly_movements_scalev", { p_months: months }));
-      }
+      movements = unwrap(await svc.rpc("ppic_monthly_movements_scalev", {
+        p_workspace_id: workspaceId,
+        p_months: months,
+      }));
     } else {
-      movements = unwrap(await svc.rpc("ppic_monthly_movements", { p_months: months }));
+      movements = unwrap(await svc.rpc("ppic_monthly_movements", {
+        p_workspace_id: workspaceId,
+        p_months: months,
+      }));
     }
+    movements = movements.map((row) => ({
+      ...row,
+      product_id: Number(row.product_id ?? row.warehouse_product_id),
+    }));
 
-    const balances = unwrap(await svc.from("v_warehouse_stock_balance").select("*"));
+    const balances = unwrap(
+      await svc.from("v_warehouse_stock_balance").select("*").eq("workspace_id", workspaceId)
+    );
     const products = unwrap(
-      await svc.from("warehouse_products").select("id, name, hpp, price_list").eq("is_active", true)
+      await svc
+        .from("warehouse_products")
+        .select("id, name, hpp, price_list")
+        .eq("owner_workspace_id", workspaceId)
+        .eq("is_active", true)
     );
 
     const balMap = new Map((balances as any[]).map((b: any) => [b.product_id, b.qty_on_hand]));
@@ -783,34 +785,22 @@ server.tool(
     demand_days: z.number().min(7).max(365).default(90).describe("Days of demand history to average"),
   },
   async ({ demand_days }) => {
-    // Try summary table first
-    const cutoff = new Date(Date.now() - demand_days * 86400000).toISOString().slice(0, 10);
-    let avgDaily: any[];
+    const avgDaily = (unwrap(await svc.rpc("ppic_avg_daily_demand", {
+      p_workspace_id: workspaceId,
+      p_days: demand_days,
+    })) as any[]).map((row) => ({
+      ...row,
+      product_id: Number(row.product_id ?? row.warehouse_product_id),
+    }));
 
-    const { data: summaryData } = await svc
-      .from("summary_scalev_monthly_movements")
-      .select("product_id, total_out, yr, mn")
-      .gte("yr", parseInt(cutoff.slice(0, 4)));
-
-    if (summaryData && summaryData.length > 0) {
-      // Calculate avg daily from monthly summary
-      const byProd = new Map<number, number>();
-      for (const r of summaryData) {
-        byProd.set(r.product_id, (byProd.get(r.product_id) ?? 0) + r.total_out);
-      }
-      avgDaily = Array.from(byProd.entries()).map(([product_id, total]) => ({
-        product_id,
-        avg_daily: total / demand_days,
-      }));
-    } else {
-      avgDaily = unwrap(await svc.rpc("ppic_avg_daily_demand", { p_days: demand_days }));
-    }
-
-    const balances = unwrap(await svc.from("v_warehouse_stock_balance").select("*"));
+    const balances = unwrap(
+      await svc.from("v_warehouse_stock_balance").select("*").eq("workspace_id", workspaceId)
+    );
     const products = unwrap(
       await svc
         .from("warehouse_products")
         .select("id, name, lead_time_days, safety_stock_days")
+        .eq("owner_workspace_id", workspaceId)
         .eq("is_active", true)
     );
 
@@ -856,17 +846,19 @@ server.tool(
       await svc
         .from("warehouse_demand_plans")
         .select("*, warehouse_products(name)")
+        .eq("workspace_id", workspaceId)
         .eq("month", month)
         .eq("year", year)
     );
 
     // Weekly breakdown
-    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-    const nextMonth = month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
+    const monthStart = `${year}-${String(month).padStart(2, "0")}-01T00:00:00+07:00`;
+    const monthEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
 
     const { data: weekly } = await svc.rpc("ppic_weekly_demand_scalev", {
+      p_workspace_id: workspaceId,
       p_month_start: monthStart,
-      p_month_end: nextMonth,
+      p_month_end: `${monthEnd}T23:59:59+07:00`,
     });
 
     return {
@@ -896,6 +888,7 @@ server.tool(
       .select(
         "*, warehouse_vendors(name), warehouse_po_items(*, warehouse_products(name))"
       )
+      .eq("workspace_id", workspaceId)
       .order("created_at", { ascending: false })
       .limit(limit);
 
@@ -920,11 +913,13 @@ server.tool(
   async ({ from, to }) => {
     const [periodResult, dailyResult] = await Promise.all([
       svc.rpc("get_customer_type_period_exact", {
+        p_workspace_id: workspaceId,
         p_from: from,
         p_to: to,
         p_brand: null,
       }),
       svc.rpc("get_customer_type_daily_exact", {
+        p_workspace_id: workspaceId,
         p_from: from,
         p_to: to,
         p_brand: null,
@@ -996,17 +991,17 @@ server.tool(
   async ({ by_channel }) => {
     if (by_channel) {
       const data = unwrap(
-        await svc
-          .from("v_monthly_cohort_channel")
-          .select("*")
-          .order("cohort_month")
-          .order("months_since_first")
+        await svc.rpc("workspace_monthly_cohort_channel", {
+          p_workspace_id: workspaceId,
+        })
       );
       return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
     }
 
     const data = unwrap(
-      await svc.from("v_monthly_cohort").select("*").order("cohort_month").order("months_since_first")
+      await svc.rpc("workspace_monthly_cohort", {
+        p_workspace_id: workspaceId,
+      })
     );
     return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
   }
@@ -1023,17 +1018,15 @@ server.tool(
     repeat_only: z.boolean().default(false).describe("Only show repeat customers"),
   },
   async ({ limit, offset, from, to, repeat_only }) => {
-    let q = svc
-      .from("v_customer_cohort")
-      .select("*")
-      .order("total_revenue", { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    if (from) q = q.gte("first_order_date", from);
-    if (to) q = q.lte("first_order_date", to);
-    if (repeat_only) q = q.eq("is_repeat", true);
-
-    const data = unwrap(await q);
+    const cohort = unwrap(await svc.rpc("workspace_customer_cohort", {
+      p_workspace_id: workspaceId,
+      p_from: from ?? null,
+      p_to: to ?? null,
+      p_limit: Math.min(offset + limit, 1000),
+    })) as any[];
+    const data = cohort
+      .filter((row) => !repeat_only || Boolean(row.is_repeat))
+      .slice(offset, offset + limit);
     return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
   }
 );
@@ -1047,17 +1040,25 @@ server.tool(
   },
   async ({ brand, trend }) => {
     const ltv = unwrap(
-      await svc.rpc("get_channel_ltv_90d", { brand_filter: brand ?? null })
+      await svc.rpc("get_channel_ltv_90d", {
+        p_workspace_id: workspaceId,
+        brand_filter: brand ?? null,
+      })
     );
 
     let trendData = null;
     if (trend) {
       trendData = unwrap(
-        await svc.rpc("get_ltv_trend_by_cohort", { brand_filter: brand ?? null })
+        await svc.rpc("get_ltv_trend_by_cohort", {
+          p_workspace_id: workspaceId,
+          brand_filter: brand ?? null,
+        })
       );
     }
 
-    const brands = unwrap(await svc.rpc("get_available_brands"));
+    const brands = unwrap(await svc.rpc("get_available_brands", {
+      p_workspace_id: workspaceId,
+    }));
 
     return {
       content: [
@@ -1082,12 +1083,17 @@ server.tool(
     monthly: z.boolean().default(false).describe("Include monthly breakdown"),
   },
   async ({ brand, monthly }) => {
-    const cac = unwrap(await svc.rpc("get_channel_cac"));
+    const cac = unwrap(await svc.rpc("get_channel_cac", {
+      p_workspace_id: workspaceId,
+    }));
 
     let monthlyData = null;
     if (monthly) {
       monthlyData = unwrap(
-        await svc.rpc("get_monthly_cac", { brand_filter: brand ?? null })
+        await svc.rpc("get_monthly_cac", {
+          p_workspace_id: workspaceId,
+          brand_filter: brand ?? null,
+        })
       );
     }
 
@@ -1111,12 +1117,11 @@ server.tool(
   "Get multi-brand customer analysis — cross-brand overlap, brand journeys, bundled orders, and multi-brand stats",
   {},
   async () => {
-    const [crossMatrix, journey, bundled, stats, summary] = await Promise.all([
-      svc.from("mv_cross_brand_matrix").select("*"),
-      svc.from("mv_brand_journey").select("*").order("transition_count", { ascending: false }).limit(20),
-      svc.from("mv_bundled_orders").select("*").order("order_date", { ascending: false }).limit(50),
-      svc.from("mv_multi_brand_stats").select("*"),
-      svc.from("v_brand_analysis_summary").select("*"),
+    const [crossMatrix, journey, summary, customerBrandMap] = await Promise.all([
+      svc.rpc("workspace_cross_brand_matrix", { p_workspace_id: workspaceId }),
+      svc.rpc("workspace_brand_journey", { p_workspace_id: workspaceId }),
+      svc.rpc("workspace_brand_analysis_summary", { p_workspace_id: workspaceId }),
+      svc.rpc("workspace_customer_brand_map", { p_workspace_id: workspaceId }),
     ]);
 
     return {
@@ -1126,9 +1131,8 @@ server.tool(
           text: JSON.stringify(
             {
               cross_brand_matrix: crossMatrix.data ?? [],
-              brand_journey_top20: journey.data ?? [],
-              recent_bundled_orders: bundled.data ?? [],
-              multi_brand_stats: stats.data ?? [],
+              brand_journey_top20: (journey.data ?? []).slice(0, 20),
+              customer_brand_map: customerBrandMap.data ?? [],
               summary: summary.data ?? [],
             },
             null,
@@ -1155,6 +1159,7 @@ server.tool(
       await svc
         .from("warehouse_products")
         .select("id, name, sku, unit, hpp, price_list, lead_time_days, safety_stock_days, is_active")
+        .eq("owner_workspace_id", workspaceId)
         .or(`name.ilike.%${query}%,sku.ilike.%${query}%`)
         .order("name")
         .limit(50)

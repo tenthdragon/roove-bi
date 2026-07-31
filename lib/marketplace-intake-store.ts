@@ -76,66 +76,30 @@ function normalizeReadable(value: string | null | undefined): string {
     .trim();
 }
 
-const MARKETPLACE_STORE_ALIASES: Array<{ storeName: string; aliases: string[] }> = [
-  {
-    storeName: 'Purvu The Secret Store - Markerplace',
-    aliases: ['purvu the secret', 'the secret'],
-  },
-  {
-    storeName: 'Purvu The Secret Store',
-    aliases: ['purvu the secret', 'the secret'],
-  },
-  {
-    storeName: 'Roove Main Store - Marketplace',
-    aliases: ['roove'],
-  },
-  {
-    storeName: 'Globite Store - Marketplace',
-    aliases: ['globite'],
-  },
-  {
-    storeName: 'Pluve Main Store - Marketplace',
-    aliases: ['pluve'],
-  },
-  {
-    storeName: 'Purvu Store - Marketplace',
-    aliases: ['purvu'],
-  },
-  {
-    storeName: 'Purvu Store',
-    aliases: ['purvu'],
-  },
-  {
-    storeName: 'YUV Deodorant Serum Store - Marketplace',
-    aliases: ['yuv deodorant serum', 'yuv'],
-  },
-  {
-    storeName: 'Osgard Oil Store',
-    aliases: ['osgard oil', 'osgard'],
-  },
-  {
-    storeName: 'drHyun Main Store - Marketplace',
-    aliases: ['drhyun', 'dr hyun'],
-  },
-  {
-    storeName: 'drHyun Main Store',
-    aliases: ['drhyun', 'dr hyun'],
-  },
-  {
-    storeName: 'Calmara Main Store - Marketplace',
-    aliases: ['calmara'],
-  },
-  {
-    storeName: 'Calmara Main Store',
-    aliases: ['calmara'],
-  },
-];
+const GENERIC_STORE_WORDS = new Set([
+  'store',
+  'shop',
+  'marketplace',
+  'markerplace',
+  'official',
+  'main',
+  'seller',
+]);
+
+function buildStoreAliases(storeName: string): string[] {
+  const normalized = normalizeReadable(storeName);
+  const meaningfulTokens = normalized
+    .split(' ')
+    .filter((token) => token && !GENERIC_STORE_WORDS.has(token));
+  const meaningfulName = meaningfulTokens.join(' ');
+  const firstToken = meaningfulTokens.find((token) => token.length >= 3) || '';
+  return Array.from(new Set([meaningfulName, firstToken].filter(Boolean)));
+}
 
 export function guessMarketplaceStoreFromTexts(
   texts: Array<string | null | undefined>,
   allowedStoreNames: string[] = [],
 ): GuessedStoreResolution {
-  const allowed = new Set(allowedStoreNames);
   const haystack = normalizeReadable(texts.filter(Boolean).join(' '));
   if (!haystack) {
     return {
@@ -146,8 +110,8 @@ export function guessMarketplaceStoreFromTexts(
     };
   }
 
-  const matches = MARKETPLACE_STORE_ALIASES
-    .filter((entry) => allowed.has(entry.storeName))
+  const matches = Array.from(new Set(allowedStoreNames.map((storeName) => String(storeName || '').trim()).filter(Boolean)))
+    .map((storeName) => ({ storeName, aliases: buildStoreAliases(storeName) }))
     .map((entry) => ({
       storeName: entry.storeName,
       matchedScore: Math.max(
@@ -306,6 +270,7 @@ async function fetchScalevStoreBundleAvailability(
 }
 
 async function loadCandidateStores(
+  workspaceId: string,
   business: IntakeBusiness,
   allowedStoreNames: string[],
 ): Promise<CandidateStore[]> {
@@ -317,6 +282,7 @@ async function loadCandidateStores(
   const { data, error } = await svc
     .from('scalev_store_channels')
     .select('store_name, store_type, is_active')
+    .eq('workspace_id', workspaceId)
     .eq('business_id', business.id)
     .eq('is_active', true)
     .in('store_name', allowedStoreNames);
@@ -352,6 +318,7 @@ async function loadCandidateStores(
 }
 
 async function loadBundleStoreLinks(
+  workspaceId: string,
   businessId: number,
   bundleId: number,
   storeNames: string[],
@@ -360,6 +327,7 @@ async function loadBundleStoreLinks(
   const { data, error } = await svc
     .from('scalev_catalog_bundle_store_links')
     .select('business_id, scalev_bundle_id, store_name, scalev_store_id, store_unique_id, is_available, last_checked_at')
+    .eq('workspace_id', workspaceId)
     .eq('business_id', businessId)
     .eq('scalev_bundle_id', bundleId)
     .in('store_name', storeNames);
@@ -373,6 +341,7 @@ async function loadBundleStoreLinks(
 }
 
 async function saveBundleStoreLinks(
+  workspaceId: string,
   business: IntakeBusiness,
   bundleId: number,
   rows: CandidateStore[],
@@ -381,6 +350,7 @@ async function saveBundleStoreLinks(
   const svc = createServiceSupabase();
   const timestamp = new Date().toISOString();
   const payload = rows.map((row) => ({
+    workspace_id: workspaceId,
     business_id: business.id,
     business_code: business.business_code,
     scalev_bundle_id: bundleId,
@@ -394,7 +364,7 @@ async function saveBundleStoreLinks(
 
   const { error } = await svc
     .from('scalev_catalog_bundle_store_links')
-    .upsert(payload, { onConflict: 'business_id,scalev_bundle_id,store_name' });
+    .upsert(payload, { onConflict: 'workspace_id,business_id,scalev_bundle_id,store_name' });
 
   if (error && !isMissingTableError(error)) {
     throw error;
@@ -451,6 +421,7 @@ export function createShopeeRltStoreResolverContext(): ShopeeRltStoreResolverCon
 }
 
 export async function resolveShopeeRltStoreForBundle(
+  workspaceId: string,
   business: IntakeBusiness,
   bundleId: number,
   allowedStoreNames: string[],
@@ -461,7 +432,7 @@ export async function resolveShopeeRltStoreForBundle(
 
   const nextPromise = (async () => {
     if (!context.candidateStoresPromise) {
-      context.candidateStoresPromise = loadCandidateStores(business, allowedStoreNames);
+      context.candidateStoresPromise = loadCandidateStores(workspaceId, business, allowedStoreNames);
     }
     const candidateStores = await context.candidateStoresPromise;
     if (candidateStores.length === 0) {
@@ -476,6 +447,7 @@ export async function resolveShopeeRltStoreForBundle(
     }
 
     const cachedRows = await loadBundleStoreLinks(
+      workspaceId,
       business.id,
       bundleId,
       candidateStores.map((row) => row.storeName),
@@ -562,7 +534,7 @@ export async function resolveShopeeRltStoreForBundle(
       throw error;
     }
 
-    await saveBundleStoreLinks(business, bundleId, candidateStores, availability);
+    await saveBundleStoreLinks(workspaceId, business, bundleId, candidateStores, availability);
 
     const resolvedRows = candidateStores.map((row) => ({
       storeName: row.storeName,

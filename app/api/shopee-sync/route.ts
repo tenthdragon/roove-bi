@@ -3,7 +3,7 @@ import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 import { runShopeeSync } from '@/lib/shopee-sync-runner';
-import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
+import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
 
 export const maxDuration = 60;
 
@@ -43,7 +43,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
   const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const mode = isCron ? `cron_${method.toLowerCase()}` : `dashboard_${method.toLowerCase()}`;
   let requestedBy: string | null = null;
-  let workspaceId = ROOVE_WORKSPACE_ID;
+  let workspaceId: string | null = null;
 
   logRouteEvent({
     route: '/api/shopee-sync',
@@ -91,11 +91,41 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
     }
 
     const payload = resolveDateRange(req);
-    const result = await runShopeeSync({
-      workspaceId,
-      dateStart: payload.date_start,
-      dateEnd: payload.date_end,
-    });
+    const workspaceIds = isCron
+      ? await resolveScheduledWorkspaceIds(
+          new URL(req.url).searchParams.get('workspace_id'),
+          'shopee',
+        )
+      : [workspaceId!];
+    const results = [];
+    const routeErrors: string[] = [];
+    for (const scheduledWorkspaceId of workspaceIds) {
+      try {
+        results.push(await runShopeeSync({
+          workspaceId: scheduledWorkspaceId,
+          dateStart: payload.date_start,
+          dateEnd: payload.date_end,
+        }));
+      } catch (error: any) {
+        routeErrors.push(`${scheduledWorkspaceId}: ${error?.message || 'Shopee sync gagal'}`);
+      }
+    }
+    const result = {
+      status: routeErrors.length === 0
+        ? 'success' as const
+        : results.length > 0
+          ? 'partial' as const
+          : 'failed' as const,
+      shops_synced: results.reduce((sum, item) => sum + item.shops_synced, 0),
+      shops_total: results.reduce((sum, item) => sum + item.shops_total, 0),
+      rows_inserted: results.reduce((sum, item) => sum + item.rows_inserted, 0),
+      spend_total: results.reduce((sum, item) => sum + item.spend_total, 0),
+      direct_gmv_total: results.reduce((sum, item) => sum + item.direct_gmv_total, 0),
+      broad_gmv_total: results.reduce((sum, item) => sum + item.broad_gmv_total, 0),
+      duration_ms: Date.now() - startTime,
+      errors: [...results.flatMap((item) => item.errors || []), ...routeErrors],
+      message: workspaceIds.length === 0 ? 'Tidak ada workspace dengan toko Shopee aktif.' : undefined,
+    };
 
     logRouteEvent({
       route: '/api/shopee-sync',

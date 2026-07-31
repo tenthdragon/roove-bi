@@ -21,7 +21,7 @@ async function getCurrentUserId(): Promise<string | null> {
 }
 
 async function requirePPICAccess(label: string = 'PPIC') {
-  await requireDashboardTabAccess('ppic', label);
+  return requireDashboardTabAccess('ppic', label);
 }
 
 function toYearMonthKey(year: number, month: number) {
@@ -73,12 +73,6 @@ interface LegacyScalevDemandMappingRow {
   is_ignored: boolean | null;
 }
 
-interface SummaryScalevDailyDemandRow {
-  demand_date: string;
-  scalev_product_name: string;
-  total_qty: number;
-}
-
 interface MappedScalevDailyDemandRow {
   demand_date: string;
   warehouse_product_id: number;
@@ -88,12 +82,6 @@ interface MappedScalevDailyDemandRow {
 function isStatementTimeoutError(error: any) {
   const message = String(error?.message || error || '').toLowerCase();
   return message.includes('statement timeout') || message.includes('canceling statement due to statement timeout');
-}
-
-function isMissingPpicDemandSummaryError(error: any) {
-  const code = String(error?.code || '');
-  const message = String(error?.message || '');
-  return code === 'PGRST205' || code === '42P01' || /does not exist/i.test(message) || /schema cache/i.test(message);
 }
 
 function getJakartaCurrentDateParts() {
@@ -138,6 +126,21 @@ function formatUtcDate(date: Date) {
 
 function formatDateParts(year: number, month: number, day: number) {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+function toJakartaDateString(value: string) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(value));
+
+  return formatDateParts(
+    Number(parts.find(part => part.type === 'year')?.value),
+    Number(parts.find(part => part.type === 'month')?.value),
+    Number(parts.find(part => part.type === 'day')?.value),
+  );
 }
 
 function getDaysInMonth(year: number, month: number) {
@@ -207,37 +210,87 @@ function buildDemandSnapshotFromRows(rows: MonthlyDemandRow[], targetMonth: numb
   return { productDemand, actualOutMap };
 }
 
-async function getMappedScalevDailyDemandRows(
+async function getMappedScalevDailyDemandRowsRaw(
   svc: any,
   startDate: string,
   endDate: string,
+  workspaceId: string,
 ): Promise<MappedScalevDailyDemandRow[]> {
-  const { data: summaryData, error: summaryErr } = await svc
-    .from('summary_scalev_daily_product_demand')
-    .select('demand_date, scalev_product_name, total_qty')
-    .gte('demand_date', startDate)
-    .lte('demand_date', endDate)
-    .order('demand_date', { ascending: true });
+  const startIso = `${startDate}T00:00:00+07:00`;
+  const endIso = `${endDate}T23:59:59.999+07:00`;
+  const orders: ScalevOrderWindowRow[] = [];
+  let orderOffset = 0;
 
-  if (summaryErr) throw summaryErr;
+  while (true) {
+    const { data, error } = await svc
+      .from('scalev_orders')
+      .select('id, shipped_time')
+      .eq('workspace_id', workspaceId)
+      .in('status', ['shipped', 'completed'])
+      .not('shipped_time', 'is', null)
+      .gte('shipped_time', startIso)
+      .lte('shipped_time', endIso)
+      .order('id', { ascending: true })
+      .range(orderOffset, orderOffset + 999);
 
-  const rows = (summaryData || []).map((row: any): SummaryScalevDailyDemandRow => ({
-    demand_date: String(row.demand_date),
-    scalev_product_name: String(row.scalev_product_name || ''),
-    total_qty: Number(row.total_qty || 0),
-  })).filter((row: SummaryScalevDailyDemandRow) => row.scalev_product_name && Number.isFinite(row.total_qty) && row.total_qty !== 0);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
 
-  if (rows.length === 0) {
+    orders.push(...(data as any[]).map(row => ({
+      id: Number(row.id),
+      shipped_time: String(row.shipped_time),
+    })));
+
+    if (data.length < 1000) break;
+    orderOffset += 1000;
+  }
+
+  if (orders.length === 0) {
     return [];
   }
 
+  const orderDateById = new Map<number, string>(
+    orders.map(order => [order.id, toJakartaDateString(order.shipped_time)]),
+  );
+  const lines: ScalevOrderLineDemandRow[] = [];
+
+  for (const orderIds of chunkArray(orders.map(order => order.id), 500)) {
+    let lineOffset = 0;
+    while (true) {
+      const { data, error } = await svc
+        .from('scalev_order_lines')
+        .select('scalev_order_id, product_name, quantity')
+        .eq('workspace_id', workspaceId)
+        .in('scalev_order_id', orderIds)
+        .range(lineOffset, lineOffset + 999);
+
+      if (error) throw error;
+      if (!data || data.length === 0) break;
+
+      for (const row of data as any[]) {
+        if (!row.product_name || Number(row.quantity) <= 0) continue;
+        lines.push({
+          scalev_order_id: Number(row.scalev_order_id),
+          product_name: String(row.product_name),
+          quantity: Number(row.quantity),
+        });
+      }
+
+      if (data.length < 1000) break;
+      lineOffset += 1000;
+    }
+  }
+
+  if (lines.length === 0) return [];
+
   const mappings: LegacyScalevDemandMappingRow[] = [];
-  const uniqueNames = Array.from(new Set(rows.map((row: SummaryScalevDailyDemandRow) => row.scalev_product_name)));
+  const uniqueNames = Array.from(new Set(lines.map(line => line.product_name)));
 
   for (const chunk of chunkArray(uniqueNames, 500)) {
     const { data, error } = await svc
       .from('warehouse_scalev_mapping')
       .select('scalev_product_name, warehouse_product_id, deduct_qty_multiplier, is_ignored')
+      .eq('workspace_id', workspaceId)
       .in('scalev_product_name', chunk);
 
     if (error) throw error;
@@ -250,31 +303,39 @@ async function getMappedScalevDailyDemandRows(
     mappingByName.set(mapping.scalev_product_name, mapping);
   }
 
-  const mappedRows: MappedScalevDailyDemandRow[] = [];
+  const totals = new Map<string, MappedScalevDailyDemandRow>();
 
-  for (const row of rows) {
-    const mapping = mappingByName.get(row.scalev_product_name);
+  for (const line of lines) {
+    const mapping = mappingByName.get(line.product_name);
     if (!mapping || mapping.is_ignored || !mapping.warehouse_product_id) continue;
+    const demandDate = orderDateById.get(line.scalev_order_id);
+    if (!demandDate) continue;
 
-    mappedRows.push({
-      demand_date: row.demand_date,
-      warehouse_product_id: Number(mapping.warehouse_product_id),
-      total_qty: row.total_qty * Number(mapping.deduct_qty_multiplier || 1),
+    const warehouseProductId = Number(mapping.warehouse_product_id);
+    const key = `${demandDate}:${warehouseProductId}`;
+    const existing = totals.get(key);
+    const totalQty = line.quantity * Number(mapping.deduct_qty_multiplier || 1);
+    totals.set(key, {
+      demand_date: demandDate,
+      warehouse_product_id: warehouseProductId,
+      total_qty: (existing?.total_qty || 0) + totalQty,
     });
   }
 
-  return mappedRows;
+  return Array.from(totals.values());
 }
 
-async function getMonthlyDemandRowsFromDailySummary(
+async function getMonthlyDemandRowsFromRawFacts(
   svc: any,
   month: number,
   year: number,
+  historyWindowMonths: number,
+  workspaceId: string,
 ): Promise<MonthlyDemandRow[]> {
-  const startWindow = shiftYearMonth(year, month, -6);
+  const startWindow = shiftYearMonth(year, month, -(Math.max(historyWindowMonths, 1) - 1));
   const startDate = formatDateParts(startWindow.year, startWindow.month, 1);
   const endDate = formatDateParts(year, month, getDaysInMonth(year, month));
-  const mappedRows = await getMappedScalevDailyDemandRows(svc, startDate, endDate);
+  const mappedRows = await getMappedScalevDailyDemandRowsRaw(svc, startDate, endDate, workspaceId);
   const totals = new Map<string, number>();
 
   for (const row of mappedRows) {
@@ -301,8 +362,12 @@ async function getMonthlyDemandRowsWithFallback(
   month: number,
   year: number,
   historyWindowMonths: number,
+  workspaceId: string,
 ) {
-  const { data, error } = await svc.rpc('ppic_monthly_demand', { p_months: historyWindowMonths });
+  const { data, error } = await svc.rpc('ppic_monthly_demand', {
+    p_workspace_id: workspaceId,
+    p_months: historyWindowMonths,
+  });
   if (!error) {
     return normalizeMonthlyDemandRows(data || []);
   }
@@ -311,138 +376,25 @@ async function getMonthlyDemandRowsWithFallback(
     throw error;
   }
 
-  console.warn(`[ppic] ppic_monthly_demand timed out for ${month}/${year}; falling back to summary tables`);
-
-  try {
-    return await getMonthlyDemandRowsFromDailySummary(svc, month, year);
-  } catch (summaryError) {
-    if (!isMissingPpicDemandSummaryError(summaryError)) {
-      throw summaryError;
-    }
-  }
-
-  const startWindow = shiftYearMonth(year, month, -6);
-  const startYm = toYearMonthKey(startWindow.year, startWindow.month);
-  const endYm = toYearMonthKey(year, month);
-
-  const { data: summaryData, error: summaryErr } = await svc
-    .from('summary_scalev_monthly_movements')
-    .select('warehouse_product_id, yr, mn, total_out')
-    .gte('yr', startWindow.year)
-    .lte('yr', year);
-
-  if (summaryErr) throw summaryErr;
-
-  return normalizeMonthlyDemandRows(
-    (summaryData || []).filter((row: any) => {
-      const ym = toYearMonthKey(Number(row.yr), Number(row.mn));
-      return ym >= startYm && ym <= endYm;
-    }),
-  );
+  console.warn(`[ppic] ppic_monthly_demand timed out for ${month}/${year}; using tenant raw facts`);
+  return getMonthlyDemandRowsFromRawFacts(svc, month, year, historyWindowMonths, workspaceId);
 }
 
-async function getExactDailyDemandMapRawFallback(svc: any, demandDays: number): Promise<Map<number, number>> {
+async function getExactDailyDemandMapRawFallback(svc: any, demandDays: number, workspaceId: string): Promise<Map<number, number>> {
   const safeDays = Math.max(Number(demandDays) || 0, 1);
   const today = getJakartaCurrentDateParts();
   const endDate = createUtcDate(today.year, today.month, today.day);
   const startDate = shiftUtcDays(endDate, -(safeDays - 1));
-  const startIso = `${formatUtcDate(startDate)}T00:00:00+07:00`;
-  const endIso = `${formatUtcDate(endDate)}T23:59:59.999+07:00`;
-
-  const orders: ScalevOrderWindowRow[] = [];
-  let orderOffset = 0;
-
-  while (true) {
-    const { data, error } = await svc
-      .from('scalev_orders')
-      .select('id, shipped_time')
-      .in('status', ['shipped', 'completed'])
-      .not('shipped_time', 'is', null)
-      .gte('shipped_time', startIso)
-      .lte('shipped_time', endIso)
-      .order('id', { ascending: true })
-      .range(orderOffset, orderOffset + 999);
-
-    if (error) throw error;
-    if (!data || data.length === 0) break;
-
-    orders.push(...(data as any[]).map((row) => ({
-      id: Number(row.id),
-      shipped_time: String(row.shipped_time),
-    })));
-
-    if (data.length < 1000) break;
-    orderOffset += 1000;
-  }
-
-  if (orders.length === 0) {
-    return new Map<number, number>();
-  }
-
-  const lines: ScalevOrderLineDemandRow[] = [];
-
-  for (const chunk of chunkArray(orders.map(order => order.id), 500)) {
-    let lineOffset = 0;
-
-    while (true) {
-      const { data, error } = await svc
-        .from('scalev_order_lines')
-        .select('scalev_order_id, product_name, quantity')
-        .in('scalev_order_id', chunk)
-        .range(lineOffset, lineOffset + 999);
-
-      if (error) throw error;
-      if (!data || data.length === 0) break;
-
-      for (const row of data as any[]) {
-        if (!row.product_name || Number(row.quantity) <= 0) continue;
-        lines.push({
-          scalev_order_id: Number(row.scalev_order_id),
-          product_name: String(row.product_name),
-          quantity: Number(row.quantity),
-        });
-      }
-
-      if (data.length < 1000) break;
-      lineOffset += 1000;
-    }
-  }
-
-  if (lines.length === 0) {
-    return new Map<number, number>();
-  }
-
-  const mappings: LegacyScalevDemandMappingRow[] = [];
-  const uniqueNames = Array.from(new Set(lines.map(line => line.product_name)));
-
-  for (const chunk of chunkArray(uniqueNames, 500)) {
-    const { data, error } = await svc
-      .from('warehouse_scalev_mapping')
-      .select('scalev_product_name, warehouse_product_id, deduct_qty_multiplier, is_ignored')
-      .in('scalev_product_name', chunk);
-
-    if (error) throw error;
-    mappings.push(...((data || []) as LegacyScalevDemandMappingRow[]));
-  }
-
-  const mappingByName = new Map<string, LegacyScalevDemandMappingRow>();
-  for (const mapping of mappings) {
-    if (!mapping.scalev_product_name || mappingByName.has(mapping.scalev_product_name)) continue;
-    mappingByName.set(mapping.scalev_product_name, mapping);
-  }
+  const mappedRows = await getMappedScalevDailyDemandRowsRaw(
+    svc,
+    formatUtcDate(startDate),
+    formatUtcDate(endDate),
+    workspaceId,
+  );
 
   const totals = new Map<number, number>();
-
-  for (const line of lines) {
-    const mapping = mappingByName.get(line.product_name);
-    if (!mapping || mapping.is_ignored || !mapping.warehouse_product_id) continue;
-
-    const multiplier = Number(mapping.deduct_qty_multiplier || 1);
-    const quantity = Number(line.quantity || 0) * multiplier;
-    totals.set(
-      Number(mapping.warehouse_product_id),
-      (totals.get(Number(mapping.warehouse_product_id)) || 0) + quantity,
-    );
+  for (const row of mappedRows) {
+    totals.set(row.warehouse_product_id, (totals.get(row.warehouse_product_id) || 0) + row.total_qty);
   }
 
   const avgDailyMap = new Map<number, number>();
@@ -453,43 +405,11 @@ async function getExactDailyDemandMapRawFallback(svc: any, demandDays: number): 
   return avgDailyMap;
 }
 
-async function getExactDailyDemandMapFallback(svc: any, demandDays: number): Promise<Map<number, number>> {
-  const safeDays = Math.max(Number(demandDays) || 0, 1);
-  const today = getJakartaCurrentDateParts();
-  const todayUtc = createUtcDate(today.year, today.month, today.day);
-  const startDateValue = shiftUtcDays(todayUtc, -(safeDays - 1));
-  const endDate = formatDateParts(today.year, today.month, today.day);
-  const startDate = formatDateParts(
-    startDateValue.getUTCFullYear(),
-    startDateValue.getUTCMonth() + 1,
-    startDateValue.getUTCDate(),
-  );
-
-  try {
-    const mappedRows = await getMappedScalevDailyDemandRows(svc, startDate, endDate);
-    const totals = new Map<number, number>();
-
-    for (const row of mappedRows) {
-      totals.set(row.warehouse_product_id, (totals.get(row.warehouse_product_id) || 0) + row.total_qty);
-    }
-
-    const avgDailyMap = new Map<number, number>();
-    for (const [productId, totalQty] of Array.from(totals.entries())) {
-      avgDailyMap.set(productId, Math.round((totalQty / safeDays) * 100) / 100);
-    }
-
-    return avgDailyMap;
-  } catch (error) {
-    if (!isMissingPpicDemandSummaryError(error)) {
-      throw error;
-    }
-  }
-
-  return getExactDailyDemandMapRawFallback(svc, demandDays);
-}
-
-async function getAverageDailyDemandMap(svc: any, demandDays: number): Promise<Map<number, number>> {
-  const { data, error } = await svc.rpc('ppic_avg_daily_demand', { p_days: demandDays });
+async function getAverageDailyDemandMap(svc: any, demandDays: number, workspaceId: string): Promise<Map<number, number>> {
+  const { data, error } = await svc.rpc('ppic_avg_daily_demand', {
+    p_workspace_id: workspaceId,
+    p_days: demandDays,
+  });
   if (!error) {
     return new Map<number, number>((data || []).map((row: any): [number, number] => [Number(row.warehouse_product_id), Number(row.avg_daily)]));
   }
@@ -498,51 +418,30 @@ async function getAverageDailyDemandMap(svc: any, demandDays: number): Promise<M
     throw error;
   }
 
-  console.warn(`[ppic] ppic_avg_daily_demand timed out for ${demandDays} days; using summary fallback`);
-  return getExactDailyDemandMapFallback(svc, demandDays);
+  console.warn(`[ppic] ppic_avg_daily_demand timed out for ${demandDays} days; using tenant raw facts`);
+  return getExactDailyDemandMapRawFallback(svc, demandDays, workspaceId);
 }
 
-async function getWeeklyDemandDataFallback(svc: any, month: number, year: number) {
+async function getWeeklyDemandDataFallback(svc: any, month: number, year: number, workspaceId: string) {
   const startDate = formatDateParts(year, month, 1);
   const endDate = formatDateParts(year, month, getDaysInMonth(year, month));
 
-  try {
-    const mappedRows = await getMappedScalevDailyDemandRows(svc, startDate, endDate);
-    const result: Record<number, any> = {};
-
-    for (const row of mappedRows) {
-      const day = Number(row.demand_date.slice(8, 10));
-      const weekNum = day <= 7 ? 1 : day <= 14 ? 2 : day <= 21 ? 3 : 4;
-      if (!result[row.warehouse_product_id]) {
-        result[row.warehouse_product_id] = { w1_out: 0, w2_out: 0, w3_out: 0, w4_out: 0 };
-      }
-      result[row.warehouse_product_id][`w${weekNum}_out`] += row.total_qty;
-    }
-
-    return result;
-  } catch (summaryError) {
-    if (!isMissingPpicDemandSummaryError(summaryError)) {
-      throw summaryError;
-    }
-  }
-
-  const { data: summaryData } = await svc
-    .from('summary_scalev_monthly_movements')
-    .select('warehouse_product_id, total_out')
-    .eq('yr', year).eq('mn', month);
-
-  if (!summaryData || summaryData.length === 0) return {};
+  const mappedRows = await getMappedScalevDailyDemandRowsRaw(svc, startDate, endDate, workspaceId);
 
   const result: Record<number, any> = {};
-  for (const s of summaryData) {
-    const weekly = Math.round(Number(s.total_out) / 4);
-    result[Number(s.warehouse_product_id)] = { w1_out: weekly, w2_out: weekly, w3_out: weekly, w4_out: weekly };
+  for (const row of mappedRows) {
+    const day = Number(row.demand_date.slice(8, 10));
+    const weekNum = day <= 7 ? 1 : day <= 14 ? 2 : day <= 21 ? 3 : 4;
+    if (!result[row.warehouse_product_id]) {
+      result[row.warehouse_product_id] = { w1_out: 0, w2_out: 0, w3_out: 0, w4_out: 0 };
+    }
+    result[row.warehouse_product_id][`w${weekNum}_out`] += row.total_qty;
   }
 
   return result;
 }
 
-async function getDemandPlanningSnapshot(svc: any, month: number, year: number) {
+async function getDemandPlanningSnapshot(svc: any, month: number, year: number, workspaceId: string) {
   const targetYm = toYearMonthKey(year, month);
   const historyWindowMonths = getDemandHistoryWindowMonths(month, year, 6);
 
@@ -550,12 +449,12 @@ async function getDemandPlanningSnapshot(svc: any, month: number, year: number) 
     { data: demandData, error: demandErr },
     { data: movData, error: movErr },
   ] = await Promise.all([
-    svc.rpc('ppic_monthly_demand', { p_months: historyWindowMonths }),
-    svc.rpc('ppic_monthly_movements', { p_months: historyWindowMonths }),
+    svc.rpc('ppic_monthly_demand', { p_workspace_id: workspaceId, p_months: historyWindowMonths }),
+    svc.rpc('ppic_monthly_movements', { p_workspace_id: workspaceId, p_months: historyWindowMonths }),
   ]);
 
   const normalizedDemandRows = demandErr
-    ? await getMonthlyDemandRowsWithFallback(svc, month, year, historyWindowMonths)
+    ? await getMonthlyDemandRowsWithFallback(svc, month, year, historyWindowMonths, workspaceId)
     : normalizeMonthlyDemandRows(demandData || []);
   if (movErr) throw movErr;
   const { productDemand, actualOutMap } = buildDemandSnapshotFromRows(normalizedDemandRows, month, year);
@@ -575,13 +474,12 @@ async function getDemandPlanningSnapshot(svc: any, month: number, year: number) 
 // TAX / PPN HELPER
 // ============================================================
 
-export async function getCurrentPPNRate(): Promise<number> {
-  await requirePPICAccess();
-  const svc = createServiceSupabase();
+async function getPPNRateForWorkspace(svc: any, workspaceId: string): Promise<number> {
   const today = new Date().toISOString().slice(0, 10);
   const { data, error } = await svc
     .from('tax_rates')
     .select('rate')
+    .eq('workspace_id', workspaceId)
     .eq('name', 'PPN')
     .lte('effective_from', today)
     .order('effective_from', { ascending: false })
@@ -589,6 +487,11 @@ export async function getCurrentPPNRate(): Promise<number> {
     .maybeSingle();
   if (error) throw error;
   return data?.rate ? Number(data.rate) : 0;
+}
+
+export async function getCurrentPPNRate(): Promise<number> {
+  const { workspaceId } = await requirePPICAccess();
+  return getPPNRateForWorkspace(createServiceSupabase(), workspaceId);
 }
 
 // ============================================================
@@ -614,17 +517,27 @@ export interface CreatePOParams {
 }
 
 export async function createPurchaseOrder(params: CreatePOParams) {
-  await requirePPICAccess('Purchase Orders');
+  const { workspaceId } = await requirePPICAccess('Purchase Orders');
   const { vendorId, entity, poDate, expectedDate, notes, shippingCost, otherCost, items } = params;
   if (!items || items.length === 0) throw new Error('PO harus memiliki minimal 1 item');
 
   const svc = createServiceSupabase();
   const userId = await getCurrentUserId();
+  const productIds = Array.from(new Set(items.map((item) => Number(item.warehouseProductId))));
+  const [{ data: vendor }, { data: products }] = await Promise.all([
+    svc.from('warehouse_vendors').select('id').eq('id', vendorId).eq('workspace_id', workspaceId).maybeSingle(),
+    svc.from('warehouse_products').select('id').eq('owner_workspace_id', workspaceId).in('id', productIds),
+  ]);
+  if (!vendor) throw new Error('Vendor tidak ditemukan di workspace aktif.');
+  if ((products || []).length !== productIds.length) {
+    throw new Error('Satu atau lebih produk PO tidak ditemukan di workspace aktif.');
+  }
 
   // Insert PO header (po_number auto-generated by trigger)
   const { data: po, error: poErr } = await svc
     .from('warehouse_purchase_orders')
     .insert({
+      workspace_id: workspaceId,
       po_number: '', // trigger will fill
       vendor_id: vendorId,
       entity,
@@ -642,6 +555,7 @@ export async function createPurchaseOrder(params: CreatePOParams) {
 
   // Insert items
   const itemRows = items.map(item => ({
+    workspace_id: workspaceId,
     po_id: po.id,
     warehouse_product_id: item.warehouseProductId,
     quantity_requested: item.quantityRequested,
@@ -666,7 +580,7 @@ export async function getPurchaseOrders(filters?: {
   dateTo?: string;
   limit?: number;
 }) {
-  await requirePPICAccess('Purchase Orders');
+  const { workspaceId } = await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
   let query = svc
     .from('warehouse_purchase_orders')
@@ -678,6 +592,7 @@ export async function getPurchaseOrders(filters?: {
         warehouse_products(id, name, category, entity, unit)
       )
     `)
+    .eq('workspace_id', workspaceId)
     .order('po_date', { ascending: false });
 
   if (filters?.status) query = query.eq('status', filters.status);
@@ -693,17 +608,18 @@ export async function getPurchaseOrders(filters?: {
 }
 
 export async function savePOCosts(poId: number, shippingCost: number, otherCost: number) {
-  await requirePPICAccess('Purchase Orders');
+  const { workspaceId } = await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('warehouse_purchase_orders')
     .update({ shipping_cost: shippingCost, other_cost: otherCost })
-    .eq('id', poId);
+    .eq('id', poId)
+    .eq('workspace_id', workspaceId);
   if (error) throw error;
 }
 
 export async function getPurchaseOrderDetail(poId: number) {
-  await requirePPICAccess('Purchase Orders');
+  const { workspaceId } = await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_purchase_orders')
@@ -716,6 +632,7 @@ export async function getPurchaseOrderDetail(poId: number) {
       )
     `)
     .eq('id', poId)
+    .eq('workspace_id', workspaceId)
     .single();
   if (error) throw error;
 
@@ -728,13 +645,14 @@ export async function getPurchaseOrderDetail(poId: number) {
 }
 
 export async function submitPurchaseOrder(poId: number) {
-  await requirePPICAccess('Purchase Orders');
+  const { workspaceId } = await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
 
   const { data: po } = await svc
     .from('warehouse_purchase_orders')
     .select('id, status')
     .eq('id', poId)
+    .eq('workspace_id', workspaceId)
     .single();
   if (!po) throw new Error('PO tidak ditemukan');
   if (po.status !== 'draft') throw new Error('Hanya PO draft yang bisa disubmit');
@@ -743,6 +661,7 @@ export async function submitPurchaseOrder(poId: number) {
   const { count } = await svc
     .from('warehouse_po_items')
     .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
     .eq('po_id', poId);
   if (!count || count === 0) throw new Error('PO harus memiliki minimal 1 item');
 
@@ -750,18 +669,19 @@ export async function submitPurchaseOrder(poId: number) {
     .from('warehouse_purchase_orders')
     .update({ status: 'submitted' })
     .eq('id', poId)
+    .eq('workspace_id', workspaceId)
     .select()
     .single();
   if (error) throw error;
 
   // Send Telegram notification to Dir Ops (fire-and-forget)
-  notifyPOSubmitted(svc, poId).catch(e => console.warn('[ppic] telegram PO notify failed:', e));
+  notifyPOSubmitted(svc, poId, workspaceId).catch(e => console.warn('[ppic] telegram PO notify failed:', e));
 
   return data;
 }
 
 // ── Telegram notification for PO submission ──
-async function notifyPOSubmitted(svc: any, poId: number) {
+async function notifyPOSubmitted(svc: any, poId: number, workspaceId: string) {
   // Fetch full PO data
   const { data: po } = await svc
     .from('warehouse_purchase_orders')
@@ -770,14 +690,15 @@ async function notifyPOSubmitted(svc: any, poId: number) {
       warehouse_po_items(warehouse_product_id, quantity_requested, unit_price, warehouse_products(id, name))
     `)
     .eq('id', poId)
+    .eq('workspace_id', workspaceId)
     .single();
   if (!po) return;
 
   // Fetch stock balance + avg daily demand for DOI
-  const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('product_id, current_stock');
+  const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('product_id, current_stock').eq('workspace_id', workspaceId);
   const stockMap = new Map<number, number>((stockData || []).map((s: any): [number, number] => [Number(s.product_id), Number(s.current_stock)]));
 
-  const demandMap = await getAverageDailyDemandMap(svc, 90);
+  const demandMap = await getAverageDailyDemandMap(svc, 90, workspaceId);
 
   const fmtRp = (n: number) => 'Rp ' + Math.round(n).toLocaleString('id-ID');
   const poDate = po.po_date ? new Date(po.po_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }) : '-';
@@ -807,7 +728,7 @@ async function notifyPOSubmitted(svc: any, poId: number) {
   let ppnLine = '';
   let grandTotal = subtotalBeforePPN;
   if (isVendorPKP) {
-    const ppnRate = await getCurrentPPNRate();
+    const ppnRate = await getPPNRateForWorkspace(svc, workspaceId);
     const ppnAmount = Math.round(subtotalBeforePPN * ppnRate / 100);
     grandTotal = subtotalBeforePPN + ppnAmount;
     ppnLine = `\nPPN (${ppnRate}%): ${fmtRp(ppnAmount)}`;
@@ -817,27 +738,37 @@ async function notifyPOSubmitted(svc: any, poId: number) {
   const msg = `\u{1F4CB} <b>Purchase Order Submitted</b>\n\nNo PO: <b>${po.po_number}</b>\nVendor: ${vendorLabel}\nTanggal PO: ${poDate}\nGudang: ${po.entity}\nExp. Delivery: ${expDate}\n${itemsText}\nOngkir: ${fmtRp(shippingCost)}\nBiaya Lain: ${fmtRp(otherCost)}${ppnLine}\n<b>Total: ${fmtRp(grandTotal)}</b>`;
 
   // Send to all direktur_ops (and legacy direktur_operasional)
-  const { data: direkturs } = await svc
-    .from('profiles')
-    .select('telegram_chat_id')
-    .in('role', ['direktur_ops', 'direktur_operasional'])
-    .not('telegram_chat_id', 'is', null);
+  const { data: directorMemberships } = await svc
+    .from('workspace_memberships')
+    .select('user_id')
+    .eq('workspace_id', workspaceId)
+    .eq('status', 'active')
+    .in('role', ['direktur_ops', 'direktur_operasional']);
+  const directorIds = (directorMemberships || []).map((membership: any) => membership.user_id);
+  const { data: direkturs } = directorIds.length > 0
+    ? await svc
+        .from('profiles')
+        .select('telegram_chat_id')
+        .in('id', directorIds)
+        .not('telegram_chat_id', 'is', null)
+    : { data: [] };
 
   if (direkturs && direkturs.length > 0) {
     await Promise.allSettled(
-      direkturs.map((d: any) => sendTelegramToChat(d.telegram_chat_id, msg))
+      direkturs.map((profile: any) => sendTelegramToChat(workspaceId, profile.telegram_chat_id, msg))
     );
   }
 }
 
 export async function cancelPurchaseOrder(poId: number) {
-  await requirePPICAccess('Purchase Orders');
+  const { workspaceId } = await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
 
   const { data: po } = await svc
     .from('warehouse_purchase_orders')
     .select('id, status')
     .eq('id', poId)
+    .eq('workspace_id', workspaceId)
     .single();
   if (!po) throw new Error('PO tidak ditemukan');
   if (!['draft', 'submitted'].includes(po.status)) throw new Error('Hanya PO draft/submitted yang bisa dibatalkan');
@@ -846,6 +777,7 @@ export async function cancelPurchaseOrder(poId: number) {
     .from('warehouse_purchase_orders')
     .update({ status: 'cancelled' })
     .eq('id', poId)
+    .eq('workspace_id', workspaceId)
     .select()
     .single();
   if (error) throw error;
@@ -864,7 +796,7 @@ export interface ReceiveItem {
 }
 
 export async function receivePOItems(poId: number, receivedItems: ReceiveItem[]) {
-  await requirePPICAccess('Purchase Orders');
+  const { workspaceId } = await requirePPICAccess('Purchase Orders');
   if (!receivedItems || receivedItems.length === 0) throw new Error('Tidak ada item yang diterima');
 
   const svc = createServiceSupabase();
@@ -877,6 +809,7 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
       warehouse_po_items(id, warehouse_product_id, quantity_requested, quantity_received, unit_price)
     `)
     .eq('id', poId)
+    .eq('workspace_id', workspaceId)
     .single();
   if (!po) throw new Error('PO tidak ditemukan');
   if (!['submitted', 'partial'].includes(po.status)) throw new Error('PO harus berstatus submitted atau partial');
@@ -904,6 +837,14 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
       throw new Error(`Qty melebihi sisa (${remaining}) untuk item #${item.poItemId}`);
     }
 
+    const { data: ownedProduct } = await svc
+      .from('warehouse_products')
+      .select('id')
+      .eq('id', poItem.warehouse_product_id)
+      .eq('owner_workspace_id', workspaceId)
+      .maybeSingle();
+    if (!ownedProduct) throw new Error('Produk PO tidak ditemukan di workspace aktif.');
+
     // Calculate landed cost per unit for this batch
     const unitPrice = Number(poItem.unit_price || 0);
     let costPerUnit = unitPrice;
@@ -916,6 +857,7 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
 
     // Create batch
     const batch = await createBatchInternal(
+      workspaceId,
       poItem.warehouse_product_id,
       item.batchCode,
       item.expiredDate || null,
@@ -926,10 +868,12 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
     await svc
       .from('warehouse_batches')
       .update({ cost_per_unit: Math.round(costPerUnit * 100) / 100 })
-      .eq('id', batch.id);
+      .eq('id', batch.id)
+      .eq('workspace_id', workspaceId);
 
     // Record stock in (creates ledger entry + updates batch qty)
     await recordStockInInternal(
+      workspaceId,
       poItem.warehouse_product_id,
       batch.id,
       item.quantityReceived,
@@ -943,7 +887,8 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
     await svc
       .from('warehouse_po_items')
       .update({ quantity_received: newReceived })
-      .eq('id', item.poItemId);
+      .eq('id', item.poItemId)
+      .eq('workspace_id', workspaceId);
 
     receivedByPoItem.set(item.poItemId, cumulativeReceived);
     poItem.quantity_received = newReceived;
@@ -953,13 +898,14 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
 
   // Recalculate weighted avg HPP for each affected product
   for (const productId of Array.from(affectedProductIds)) {
-    await recalculateProductHpp(svc, productId);
+    await recalculateProductHpp(svc, productId, workspaceId);
   }
 
   // Check if all items fully received → set PO status
   const { data: allItems } = await svc
     .from('warehouse_po_items')
     .select('quantity_requested, quantity_received')
+    .eq('workspace_id', workspaceId)
     .eq('po_id', poId);
 
   const allFullyReceived = (allItems || []).every(
@@ -973,16 +919,18 @@ export async function receivePOItems(poId: number, receivedItems: ReceiveItem[])
   await svc
     .from('warehouse_purchase_orders')
     .update({ status: newStatus })
-    .eq('id', poId);
+    .eq('id', poId)
+    .eq('workspace_id', workspaceId);
 
   return { poId, status: newStatus, items: results };
 }
 
 // Recalculate product-level HPP from weighted average of active batches
-async function recalculateProductHpp(svc: any, productId: number) {
+async function recalculateProductHpp(svc: any, productId: number, workspaceId: string) {
   const { data: batches } = await svc
     .from('warehouse_batches')
     .select('current_qty, cost_per_unit')
+    .eq('workspace_id', workspaceId)
     .eq('warehouse_product_id', productId)
     .eq('is_active', true)
     .gt('current_qty', 0);
@@ -1002,7 +950,8 @@ async function recalculateProductHpp(svc: any, productId: number) {
   await svc
     .from('warehouse_products')
     .update({ hpp: avgHpp })
-    .eq('id', productId);
+    .eq('id', productId)
+    .eq('owner_workspace_id', workspaceId);
 }
 
 // ============================================================
@@ -1010,7 +959,7 @@ async function recalculateProductHpp(svc: any, productId: number) {
 // ============================================================
 
 export async function getWeeklyDemandData(month: number, year: number) {
-  await requirePPICAccess('Demand Planning');
+  const { workspaceId } = await requirePPICAccess('Demand Planning');
   const svc = createServiceSupabase();
   const daysInMonth = new Date(year, month, 0).getDate();
   const mm = String(month).padStart(2, '0');
@@ -1019,12 +968,13 @@ export async function getWeeklyDemandData(month: number, year: number) {
 
   // Use single RPC to get weekly breakdown (much faster than multiple paginated queries)
   const { data, error } = await svc.rpc('ppic_weekly_demand_scalev', {
+    p_workspace_id: workspaceId,
     p_month_start: monthStart,
     p_month_end: monthEnd,
   });
 
   if (error) {
-    return getWeeklyDemandDataFallback(svc, month, year);
+    return getWeeklyDemandDataFallback(svc, month, year, workspaceId);
   }
 
   // Build result from RPC
@@ -1039,7 +989,7 @@ export async function getWeeklyDemandData(month: number, year: number) {
 }
 
 export async function getDemandPlans(month: number, year: number) {
-  await requirePPICAccess('Demand Planning');
+  const { workspaceId } = await requirePPICAccess('Demand Planning');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_demand_plans')
@@ -1047,12 +997,13 @@ export async function getDemandPlans(month: number, year: number) {
       *,
       warehouse_products(id, name, category, entity, unit)
     `)
+    .eq('workspace_id', workspaceId)
     .eq('month', month)
     .eq('year', year)
     .order('warehouse_product_id');
   if (error) throw error;
 
-  const { actualInMap, actualOutMap } = await getDemandPlanningSnapshot(svc, month, year);
+  const { actualInMap, actualOutMap } = await getDemandPlanningSnapshot(svc, month, year, workspaceId);
 
   return (data || []).map((plan: any) => ({
     ...plan,
@@ -1062,19 +1013,21 @@ export async function getDemandPlans(month: number, year: number) {
 }
 
 export async function initDemandPlans(month: number, year: number) {
-  await requirePPICAccess('Demand Planning');
+  const { workspaceId } = await requirePPICAccess('Demand Planning');
   const svc = createServiceSupabase();
-  const { productDemand, actualInMap, actualOutMap } = await getDemandPlanningSnapshot(svc, month, year);
+  const { productDemand, actualInMap, actualOutMap } = await getDemandPlanningSnapshot(svc, month, year, workspaceId);
 
   // Get all active products
   const { data: products } = await svc
     .from('warehouse_products')
     .select('id')
+    .eq('owner_workspace_id', workspaceId)
     .eq('is_active', true);
 
   // Upsert demand plans
   const rows = (products || []).map(p => {
     return {
+      workspace_id: workspaceId,
       warehouse_product_id: p.id,
       month,
       year,
@@ -1089,7 +1042,7 @@ export async function initDemandPlans(month: number, year: number) {
     const batch = rows.slice(i, i + 50);
     const { error } = await svc
       .from('warehouse_demand_plans')
-      .upsert(batch, { onConflict: 'warehouse_product_id,month,year' });
+      .upsert(batch, { onConflict: 'workspace_id,warehouse_product_id,month,year' });
     if (error) throw error;
   }
 
@@ -1103,17 +1056,25 @@ export async function updateDemandPlan(
   manualDemand: number | null,
   notes?: string,
 ) {
-  await requirePPICAccess('Demand Planning');
+  const { workspaceId } = await requirePPICAccess('Demand Planning');
   const svc = createServiceSupabase();
+  const { data: ownedProduct } = await svc
+    .from('warehouse_products')
+    .select('id')
+    .eq('id', productId)
+    .eq('owner_workspace_id', workspaceId)
+    .maybeSingle();
+  if (!ownedProduct) throw new Error('Produk tidak ditemukan di workspace aktif.');
   const { data, error } = await svc
     .from('warehouse_demand_plans')
     .upsert({
+      workspace_id: workspaceId,
       warehouse_product_id: productId,
       month,
       year,
       manual_demand: manualDemand,
       notes: notes || null,
-    }, { onConflict: 'warehouse_product_id,month,year' })
+    }, { onConflict: 'workspace_id,warehouse_product_id,month,year' })
     .select()
     .single();
   if (error) throw error;
@@ -1125,21 +1086,25 @@ export async function updateDemandPlan(
 // ============================================================
 
 export async function getITOData(months: number = 6, source: 'warehouse' | 'scalev' = 'warehouse') {
-  await requirePPICAccess('Inventory Turn Over');
+  const { workspaceId } = await requirePPICAccess('Inventory Turn Over');
   const svc = createServiceSupabase();
 
   // Get monthly movements (from warehouse ledger or Scalev orders)
   const rpcName = source === 'scalev' ? 'ppic_monthly_movements_scalev' : 'ppic_monthly_movements';
-  const { data: movements, error: movErr } = await svc.rpc(rpcName, { p_months: months });
+  const { data: movements, error: movErr } = await svc.rpc(rpcName, {
+    p_workspace_id: workspaceId,
+    p_months: months,
+  });
   if (movErr) throw movErr;
 
   // Get current stock balance
-  const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('*');
+  const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('*').eq('workspace_id', workspaceId);
 
   // Get products with HPP
   const { data: products } = await svc
     .from('warehouse_products')
     .select('id, name, category, entity, hpp, price_list, unit')
+    .eq('owner_workspace_id', workspaceId)
     .eq('is_active', true)
     .order('name');
 
@@ -1214,13 +1179,13 @@ export async function getITOData(months: number = 6, source: 'warehouse' | 'scal
 // ============================================================
 
 export async function getROPAnalysis(demandDays: number = 90) {
-  await requirePPICAccess('Reorder Point');
+  const { workspaceId } = await requirePPICAccess('Reorder Point');
   const svc = createServiceSupabase();
 
-  const demandMap = await getAverageDailyDemandMap(svc, demandDays);
+  const demandMap = await getAverageDailyDemandMap(svc, demandDays, workspaceId);
 
   // Get current stock
-  const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('*');
+  const { data: stockData } = await svc.from('v_warehouse_stock_balance').select('*').eq('workspace_id', workspaceId);
   const stockMap = new Map<number, number>();
   for (const s of (stockData || [])) {
     stockMap.set(s.product_id, Number(s.current_stock || 0));
@@ -1230,6 +1195,7 @@ export async function getROPAnalysis(demandDays: number = 90) {
   const { data: products } = await svc
     .from('warehouse_products')
     .select('id, name, category, entity, unit, lead_time_days, safety_stock_days')
+    .eq('owner_workspace_id', workspaceId)
     .eq('is_active', true);
 
   const result = (products || []).map(p => {
@@ -1273,12 +1239,13 @@ export async function updateProductROPConfig(
   leadTimeDays: number,
   safetyStockDays: number,
 ) {
-  await requirePPICAccess('Reorder Point');
+  const { workspaceId } = await requirePPICAccess('Reorder Point');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_products')
     .update({ lead_time_days: leadTimeDays, safety_stock_days: safetyStockDays })
     .eq('id', productId)
+    .eq('owner_workspace_id', workspaceId)
     .select()
     .single();
   if (error) throw error;
@@ -1290,11 +1257,12 @@ export async function updateProductROPConfig(
 // ============================================================
 
 export async function getVendors() {
-  await requirePPICAccess('Purchase Orders');
+  const { workspaceId } = await requirePPICAccess('Purchase Orders');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('warehouse_vendors')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .order('name');
   if (error) throw error;
   return data || [];

@@ -23,8 +23,10 @@ export async function POST(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
+    let workspaceId: string;
     try {
-      await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengirim Marketplace Intake ke Scalev.');
+      const access = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengirim Marketplace Intake ke Scalev.');
+      workspaceId = access.workspaceId;
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
       return NextResponse.json({ error: error.message }, { status });
@@ -48,6 +50,7 @@ export async function POST(req: NextRequest) {
     } = await authSupabase.auth.getUser();
 
     const result = await sendMarketplaceIntakeBatchToScalev({
+      workspaceId,
       batchId,
       shipmentDate,
       includeWarehouseStatuses,

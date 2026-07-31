@@ -30,8 +30,10 @@ export async function GET(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
+    let workspaceId: string;
     try {
-      await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat workspace Marketplace Intake.');
+      const access = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat workspace Marketplace Intake.');
+      workspaceId = access.workspaceId;
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
       return NextResponse.json({ error: error.message }, { status });
@@ -39,7 +41,7 @@ export async function GET(req: NextRequest) {
 
     const shipmentDate = String(req.nextUrl.searchParams.get('shipmentDate') || getCurrentDateValue());
     const sourceKey = String(req.nextUrl.searchParams.get('sourceKey') || '').trim() || null;
-    const result = await listMarketplaceIntakeWorkspace({ shipmentDate, sourceKey });
+    const result = await listMarketplaceIntakeWorkspace({ workspaceId, shipmentDate, sourceKey });
     return NextResponse.json(result);
   } catch (error: any) {
     console.error('Marketplace intake workspace error:', error);

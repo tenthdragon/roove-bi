@@ -3,7 +3,7 @@ import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { runDailyAdsSync } from '@/lib/daily-ads-sync-runner';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
-import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
+import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
 
 export const maxDuration = 60;
 
@@ -14,7 +14,7 @@ export async function POST(req: NextRequest) {
   const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const mode = isCron ? 'cron_post' : 'dashboard_post';
   let requestedBy: string | null = null;
-  let workspaceId = ROOVE_WORKSPACE_ID;
+  let workspaceId: string | null = null;
 
   logRouteEvent({
     route: '/api/sync',
@@ -61,7 +61,25 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const result = await runDailyAdsSync(workspaceId);
+    const workspaceIds = isCron
+      ? await resolveScheduledWorkspaceIds(
+          new URL(req.url).searchParams.get('workspace_id'),
+          'daily_ads',
+        )
+      : [workspaceId!];
+    const results = [];
+    for (const scheduledWorkspaceId of workspaceIds) {
+      results.push(await runDailyAdsSync(scheduledWorkspaceId));
+    }
+    const result = {
+      message: workspaceIds.length === 0
+        ? 'Tidak ada workspace dengan koneksi daily data aktif.'
+        : `${workspaceIds.length} workspace selesai diproses.`,
+      synced: results.reduce((sum, item) => sum + item.synced, 0),
+      failed: results.reduce((sum, item) => sum + item.failed, 0),
+      rows_inserted: results.reduce((sum, item) => sum + item.rows_inserted, 0),
+      results: results.flatMap((item) => item.results),
+    };
     const status = result.failed === 0 ? 'success' : result.synced > 0 ? 'partial' : 'failed';
 
     logRouteEvent({

@@ -55,20 +55,21 @@ function registerNextAliasResolution() {
   };
 }
 
-async function reconcileWarehouse(orderId: string, dbOrderId: number) {
+async function reconcileWarehouse(workspaceId: string, orderId: string, dbOrderId: number) {
   registerNextAliasResolution();
   const mod = await import('../../lib/warehouse-ledger-actions');
-  return mod.reconcileScalevOrderWarehouse(orderId, dbOrderId);
+  return mod.reconcileScalevOrderWarehouse(orderId, dbOrderId, workspaceId);
 }
 
 async function main() {
+  const workspaceId = cleanText(argValue('workspace-id'));
   const businessCode = cleanText(argValue('business'));
   const orderId = cleanText(argValue('order-id'));
   const apply = process.argv.includes('--apply');
   const skipWarehouse = process.argv.includes('--skip-warehouse');
 
-  if (!businessCode || !orderId) {
-    throw new Error('Use --business=CODE --order-id=ORDER_ID.');
+  if (!workspaceId || !businessCode || !orderId) {
+    throw new Error('Use --workspace-id=UUID --business=CODE --order-id=ORDER_ID.');
   }
 
   const env = parseEnvFile('.env.local');
@@ -82,6 +83,7 @@ async function main() {
   const { data: business, error: businessError } = await supabase
     .from('scalev_webhook_businesses')
     .select('business_code, api_key')
+    .eq('workspace_id', workspaceId)
     .eq('business_code', businessCode)
     .single();
   if (businessError) throw businessError;
@@ -89,6 +91,7 @@ async function main() {
   const { data: existing, error: existingError } = await supabase
     .from('scalev_orders')
     .select('id, order_id, scalev_id, status, raw_data')
+    .eq('workspace_id', workspaceId)
     .eq('business_code', businessCode)
     .eq('order_id', orderId)
     .single();
@@ -123,6 +126,7 @@ async function main() {
 
   const summary: Record<string, unknown> = {
     apply,
+    workspace_id: workspaceId,
     business_code: businessCode,
     order_id: orderId,
     scalev_id: updateData.scalev_id,
@@ -138,12 +142,13 @@ async function main() {
     const { error: updateError } = await supabase
       .from('scalev_orders')
       .update(updateData)
+      .eq('workspace_id', workspaceId)
       .eq('id', existing.id);
     if (updateError) throw updateError;
 
     if (!skipWarehouse) {
       try {
-        summary.warehouse = await reconcileWarehouse(orderId, Number(existing.id));
+        summary.warehouse = await reconcileWarehouse(workspaceId, orderId, Number(existing.id));
       } catch (error) {
         summary.warehouse_error = error instanceof Error ? error.message : String(error);
       }

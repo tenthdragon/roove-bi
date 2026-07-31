@@ -18,7 +18,7 @@ import {
   resolveWarehouseBusinessCode,
 } from '@/lib/warehouse-domain-helpers';
 import { limitByIp } from '@/lib/request-hardening';
-import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
+import { requireExplicitWorkspaceId } from '@/lib/workspace-scope';
 
 export const maxDuration = 60;
 
@@ -236,48 +236,6 @@ async function getBusinessSecrets(): Promise<BusinessSecret[]> {
       return dbSecrets;
     }
 
-    // Fallback: env vars (backward compatible)
-    const envSecrets: BusinessSecret[] = [];
-    const envBizIds: Record<string, number> = { RTI: 4, RLB: 5, RLT: 1 };
-    for (const [code, name] of Object.entries({
-      RTI: 'Roove Tijara Internasional',
-      RLB: 'Roove Lautan Barat',
-      RLT: 'Roove Lautan Timur',
-    })) {
-      const secret = process.env[`SCALEV_WEBHOOK_SECRET_${code}`];
-      if (secret) {
-        envSecrets.push({
-          id: envBizIds[code] || 0,
-          workspaceId: ROOVE_WORKSPACE_ID,
-          code,
-          name,
-          secret,
-          taxRateName: 'PPN',
-        });
-      }
-    }
-
-    if (envSecrets.length > 0) {
-      cachedSecrets = envSecrets;
-      cacheExpiry = Date.now() + CACHE_TTL_MS;
-      return envSecrets;
-    }
-
-    // Legacy fallback: single secret
-    if (process.env.SCALEV_WEBHOOK_SECRET) {
-      const legacy: BusinessSecret[] = [{
-        id: 4,
-        workspaceId: ROOVE_WORKSPACE_ID,
-        code: 'RTI',
-        name: 'Legacy',
-        secret: process.env.SCALEV_WEBHOOK_SECRET,
-        taxRateName: 'PPN',
-      }];
-      cachedSecrets = legacy;
-      cacheExpiry = Date.now() + CACHE_TTL_MS;
-      return legacy;
-    }
-
     return [];
   })().finally(() => {
     cachedSecretsPromise = null;
@@ -331,9 +289,11 @@ async function resolveBusinessFromSignature(
 }
 
 /** Get business display name from cached secrets */
-function getBusinessName(code: string): string {
+function getBusinessName(id: number, workspaceId: string, code: string): string {
   if (!cachedSecrets) return code;
-  const found = cachedSecrets.find((s) => s.code === code);
+  const found = cachedSecrets.find((secret) => (
+    secret.id === id && secret.workspaceId === workspaceId
+  ));
   return found?.name || code;
 }
 
@@ -598,8 +558,12 @@ function getWarehouseReconcileWebhookTimeoutMs() {
 async function reconcileScalevOrderWarehouseBestEffort(
   orderId: string,
   scalevOrderDbId?: number | null,
-  workspaceId = ROOVE_WORKSPACE_ID,
+  requestedWorkspaceId?: string,
 ) {
+  const workspaceId = requireExplicitWorkspaceId(
+    requestedWorkspaceId,
+    'ScaleV webhook warehouse reconciliation',
+  );
   const timeoutMs = getWarehouseReconcileWebhookTimeoutMs();
   const failedResult = (err: any) => {
     const message = err instanceof Error ? err.message : String(err);
@@ -694,8 +658,9 @@ const cachedTaxRates = new Map<
 
 async function getTaxRate(
   taxName = 'PPN',
-  workspaceId = ROOVE_WORKSPACE_ID,
+  requestedWorkspaceId?: string,
 ): Promise<{ rate: number; divisor: number }> {
+  const workspaceId = requireExplicitWorkspaceId(requestedWorkspaceId, 'ScaleV webhook tax rate');
   let cached = cachedTaxRates.get(workspaceId);
   // Return cached if still valid
   if (!cached || Date.now() >= cached.expiresAt) {
@@ -928,8 +893,9 @@ const cachedBrandKeywords = new Map<
 >();
 
 async function getBrandKeywords(
-  workspaceId = ROOVE_WORKSPACE_ID,
+  requestedWorkspaceId?: string,
 ): Promise<BrandKeyword[]> {
+  const workspaceId = requireExplicitWorkspaceId(requestedWorkspaceId, 'ScaleV webhook brand lookup');
   const cached = cachedBrandKeywords.get(workspaceId);
   if (cached && Date.now() < cached.expiresAt) {
     return cached.rows;
@@ -963,8 +929,9 @@ async function getBrandKeywords(
 
 async function deriveBrandFromProduct(
   productName: string,
-  workspaceId = ROOVE_WORKSPACE_ID,
+  requestedWorkspaceId?: string,
 ): Promise<string> {
+  const workspaceId = requireExplicitWorkspaceId(requestedWorkspaceId, 'ScaleV webhook brand derivation');
   const n = (productName || '').toLowerCase();
   const brands = await getBrandKeywords(workspaceId);
   for (const brand of brands) {
@@ -2478,7 +2445,7 @@ export async function POST(req: NextRequest) {
     const signature = req.headers.get('x-scalev-hmac-sha256');
 
     // Verify signature and resolve which business sent this webhook
-    // (reads from DB with in-memory cache, falls back to env vars)
+    // (reads tenant integration records from DB with an in-memory cache)
     const matched = await resolveBusinessFromSignature(rawBody, signature);
     if (!matched) {
       console.error('[scalev-webhook] invalid signature — no matching business secret');
@@ -2491,7 +2458,7 @@ export async function POST(req: NextRequest) {
       workspaceId,
       taxRateName,
     } = matched;
-    const businessName = getBusinessName(businessCode);
+    const businessName = getBusinessName(businessId, workspaceId, businessCode);
     console.log(`[scalev-webhook] Verified request from ${businessName} (${businessCode})`);
 
     let body: any;

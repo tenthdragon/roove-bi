@@ -1,7 +1,7 @@
 import { promoteMarketplaceIntakeBatchToApp } from './marketplace-intake-app-promote';
 import { reconcileMarketplaceIntakeBatchScalevIdentity } from './marketplace-intake-scalev-reconcile';
 import { resolveMarketplaceIntakeSourceConfig } from './marketplace-intake-source-store-scopes';
-import { listMarketplaceIntakeUploadSourceConfigs } from './marketplace-intake-sources';
+import { listWorkspaceMarketplaceIntakeSourceConfigs } from './marketplace-intake-workspace-sources';
 import {
   extractMarketplaceTrackingFromScalevOrder,
   normalizeMarketplaceTracking,
@@ -203,21 +203,26 @@ function pickBestAppRowForOrder(
   })[0] || null;
 }
 
-async function resolveScopeSourceKeys(sourceKey?: string | null): Promise<string[]> {
+async function resolveScopeSourceKeys(workspaceId: string, sourceKey?: string | null): Promise<string[]> {
   const normalizedSourceKey = cleanText(sourceKey).toLowerCase();
   if (!normalizedSourceKey || normalizedSourceKey === 'all') {
-    return listMarketplaceIntakeUploadSourceConfigs().map((config) => config.sourceKey);
+    return (await listWorkspaceMarketplaceIntakeSourceConfigs(workspaceId))
+      .map((config) => config.sourceKey);
   }
-  const config = await resolveMarketplaceIntakeSourceConfig(normalizedSourceKey);
+  const config = await resolveMarketplaceIntakeSourceConfig(workspaceId, normalizedSourceKey);
   return [config.sourceKey];
 }
 
-async function loadScopeBatches(sourceKey?: string | null): Promise<Map<number, WorkspaceScalevBatchRow>> {
-  const scopeSourceKeys = await resolveScopeSourceKeys(sourceKey);
+async function loadScopeBatches(
+  workspaceId: string,
+  sourceKey?: string | null,
+): Promise<Map<number, WorkspaceScalevBatchRow>> {
+  const scopeSourceKeys = await resolveScopeSourceKeys(workspaceId, sourceKey);
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('marketplace_intake_batches')
     .select('id, filename, business_code, source_key, scalev_last_send_status')
+    .eq('workspace_id', workspaceId)
     .in('source_key', scopeSourceKeys)
     .order('confirmed_at', { ascending: false })
     .order('id', { ascending: false });
@@ -240,10 +245,11 @@ async function loadScopeBatches(sourceKey?: string | null): Promise<Map<number, 
 }
 
 async function loadEligibleWorkspaceOrders(input: {
+  workspaceId: string;
   shipmentDate: string;
   sourceKey?: string | null;
 }): Promise<EligibleWorkspaceOrder[]> {
-  const batchMap = await loadScopeBatches(input.sourceKey);
+  const batchMap = await loadScopeBatches(input.workspaceId, input.sourceKey);
   const eligibleBatches = Array.from(batchMap.values()).filter((batch) => cleanText(batch.scalev_last_send_status) === 'success');
   if (eligibleBatches.length === 0) return [];
 
@@ -260,6 +266,7 @@ async function loadEligibleWorkspaceOrders(input: {
       shipment_date,
       warehouse_status
     `)
+    .eq('workspace_id', input.workspaceId)
     .in('batch_id', batchIds)
     .eq('shipment_date', input.shipmentDate)
     .eq('warehouse_status', 'scheduled')
@@ -290,6 +297,7 @@ async function loadEligibleWorkspaceOrders(input: {
 }
 
 async function loadAppRowsByExternalIds(
+  workspaceId: string,
   businessCode: string,
   externalIds: string[],
 ): Promise<AppScalevOrderRow[]> {
@@ -299,6 +307,7 @@ async function loadAppRowsByExternalIds(
     const { data, error } = await svc
       .from('scalev_orders')
       .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, shipped_time, raw_data')
+      .eq('workspace_id', workspaceId)
       .eq('business_code', businessCode)
       .in('external_id', chunk);
     if (error) throw error;
@@ -308,6 +317,7 @@ async function loadAppRowsByExternalIds(
 }
 
 async function loadAppRowsByTracking(
+  workspaceId: string,
   businessCode: string,
   trackingNumbers: string[],
 ): Promise<AppScalevOrderRow[]> {
@@ -317,6 +327,7 @@ async function loadAppRowsByTracking(
     const { data, error } = await svc
       .from('scalev_orders')
       .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, shipped_time, raw_data')
+      .eq('workspace_id', workspaceId)
       .eq('business_code', businessCode)
       .in('marketplace_tracking_number', chunk);
     if (error) throw error;
@@ -326,6 +337,7 @@ async function loadAppRowsByTracking(
 }
 
 async function loadCandidateAppRows(
+  workspaceId: string,
   orders: EligibleWorkspaceOrder[],
 ): Promise<Map<string, AppScalevOrderRow[]>> {
   const rowsByBusiness = new Map<string, EligibleWorkspaceOrder[]>();
@@ -350,8 +362,12 @@ async function loadCandidateAppRows(
     }
 
     const [rowsByExternal, rowsByTracking] = await Promise.all([
-      externalIds.size > 0 ? loadAppRowsByExternalIds(businessCode, Array.from(externalIds)) : Promise.resolve([]),
-      trackingNumbers.size > 0 ? loadAppRowsByTracking(businessCode, Array.from(trackingNumbers)) : Promise.resolve([]),
+      externalIds.size > 0
+        ? loadAppRowsByExternalIds(workspaceId, businessCode, Array.from(externalIds))
+        : Promise.resolve([]),
+      trackingNumbers.size > 0
+        ? loadAppRowsByTracking(workspaceId, businessCode, Array.from(trackingNumbers))
+        : Promise.resolve([]),
     ]);
 
     const externalIndex = new Map<string, AppScalevOrderRow[]>();
@@ -388,12 +404,14 @@ async function loadCandidateAppRows(
 }
 
 export async function inspectMarketplaceIntakeWorkspaceScalevSync(input: {
+  workspaceId: string;
   shipmentDate: string;
   sourceKey?: string | null;
 }): Promise<MarketplaceIntakeWorkspaceScalevSyncInspection> {
   const shipmentDate = normalizeShipmentDate(input.shipmentDate);
   const checkedAt = new Date().toISOString();
   const eligibleOrders = await loadEligibleWorkspaceOrders({
+    workspaceId: input.workspaceId,
     shipmentDate,
     sourceKey: input.sourceKey,
   });
@@ -414,7 +432,7 @@ export async function inspectMarketplaceIntakeWorkspaceScalevSync(input: {
     };
   }
 
-  const candidateRowsByOrderKey = await loadCandidateAppRows(eligibleOrders);
+  const candidateRowsByOrderKey = await loadCandidateAppRows(input.workspaceId, eligibleOrders);
   let matchedOrderCount = 0;
   let missingOrderCount = 0;
   let wrongDateCount = 0;
@@ -503,12 +521,14 @@ export async function inspectMarketplaceIntakeWorkspaceScalevSync(input: {
 }
 
 export async function repairMarketplaceIntakeWorkspaceScalevSync(input: {
+  workspaceId: string;
   shipmentDate: string;
   sourceKey?: string | null;
   repairedByEmail?: string | null;
 }): Promise<MarketplaceIntakeWorkspaceScalevSyncRepairResult> {
   const shipmentDate = normalizeShipmentDate(input.shipmentDate);
   const inspected = await inspectMarketplaceIntakeWorkspaceScalevSync({
+    workspaceId: input.workspaceId,
     shipmentDate,
     sourceKey: input.sourceKey,
   });
@@ -529,6 +549,7 @@ export async function repairMarketplaceIntakeWorkspaceScalevSync(input: {
   for (const batch of inspected.affectedBatches) {
     try {
       const promoteResult = await promoteMarketplaceIntakeBatchToApp({
+        workspaceId: input.workspaceId,
         batchId: batch.batchId,
         shipmentDate,
         includeWarehouseStatuses: ['scheduled'],
@@ -543,6 +564,7 @@ export async function repairMarketplaceIntakeWorkspaceScalevSync(input: {
       promoteSkippedCount += Number(promoteResult.skippedCount || 0);
 
       const reconcileResult = await reconcileMarketplaceIntakeBatchScalevIdentity({
+        workspaceId: input.workspaceId,
         batchId: batch.batchId,
         reconciledByEmail: input.repairedByEmail || null,
       });
@@ -560,6 +582,7 @@ export async function repairMarketplaceIntakeWorkspaceScalevSync(input: {
   }
 
   const inspection = await inspectMarketplaceIntakeWorkspaceScalevSync({
+    workspaceId: input.workspaceId,
     shipmentDate,
     sourceKey: input.sourceKey,
   });

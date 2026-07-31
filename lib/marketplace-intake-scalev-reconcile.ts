@@ -56,6 +56,7 @@ export type MarketplaceIntakeScalevReconcileResult = {
 };
 
 export type MarketplaceIntakeScalevReconcileInput = {
+  workspaceId: string;
   batchId: number;
   reconciledByEmail?: string | null;
   concurrency?: number;
@@ -72,11 +73,12 @@ function pushLimited(target: string[], value: string) {
   target.push(value);
 }
 
-async function loadReconcileBatch(batchId: number): Promise<ReconcileBatchRow> {
+async function loadReconcileBatch(workspaceId: string, batchId: number): Promise<ReconcileBatchRow> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('marketplace_intake_batches')
     .select('id, filename, business_id, business_code, scalev_last_send_status')
+    .eq('workspace_id', workspaceId)
     .eq('id', batchId)
     .single<ReconcileBatchRow>();
 
@@ -84,11 +86,12 @@ async function loadReconcileBatch(batchId: number): Promise<ReconcileBatchRow> {
   return data;
 }
 
-async function loadReconcileBusiness(businessId: number): Promise<ReconcileBusinessRow> {
+async function loadReconcileBusiness(workspaceId: string, businessId: number): Promise<ReconcileBusinessRow> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id, business_code, api_key')
+    .eq('workspace_id', workspaceId)
     .eq('id', businessId)
     .single<ReconcileBusinessRow>();
 
@@ -99,11 +102,16 @@ async function loadReconcileBusiness(businessId: number): Promise<ReconcileBusin
   return data;
 }
 
-async function loadAuthoritativeOrders(batchId: number, businessCode: string): Promise<AuthoritativeOrderRow[]> {
+async function loadAuthoritativeOrders(
+  workspaceId: string,
+  batchId: number,
+  businessCode: string,
+): Promise<AuthoritativeOrderRow[]> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_orders')
     .select('id, order_id, external_id, scalev_id, source, business_code')
+    .eq('workspace_id', workspaceId)
     .eq('marketplace_intake_batch_id', batchId)
     .eq('business_code', businessCode)
     .eq('source', 'marketplace_api_upload')
@@ -114,6 +122,7 @@ async function loadAuthoritativeOrders(batchId: number, businessCode: string): P
 }
 
 async function persistReconcileResult(
+  workspaceId: string,
   batchId: number,
   result: MarketplaceIntakeScalevReconcileResult,
 ): Promise<void> {
@@ -149,12 +158,14 @@ async function persistReconcileResult(
         errorExternalIds: result.errorExternalIds,
       },
     })
+    .eq('workspace_id', workspaceId)
     .eq('id', batchId);
 
   if (error) throw error;
 }
 
 async function logReconcileSync(input: {
+  workspaceId: string;
   batch: ReconcileBatchRow;
   result: MarketplaceIntakeScalevReconcileResult;
   reconciledByEmail: string | null;
@@ -163,6 +174,7 @@ async function logReconcileSync(input: {
   const { error } = await svc
     .from('scalev_sync_log')
     .insert({
+      workspace_id: input.workspaceId,
       status: input.result.status === 'success' ? 'success' : 'failed',
       sync_type: 'marketplace_intake_scalev_reconcile',
       business_code: input.batch.business_code,
@@ -179,6 +191,7 @@ async function logReconcileSync(input: {
 }
 
 async function findIdentityConflict(params: {
+  workspaceId: string;
   rowId: number;
   businessCode: string;
   orderId: string;
@@ -189,6 +202,7 @@ async function findIdentityConflict(params: {
     const { data, error } = await svc
       .from('scalev_orders')
       .select('id, order_id, external_id, scalev_id, source')
+      .eq('workspace_id', params.workspaceId)
       .eq('business_code', params.businessCode)
       .eq('order_id', params.orderId)
       .neq('id', params.rowId)
@@ -201,6 +215,7 @@ async function findIdentityConflict(params: {
     const { data, error } = await svc
       .from('scalev_orders')
       .select('id, order_id, external_id, scalev_id, source')
+      .eq('workspace_id', params.workspaceId)
       .eq('business_code', params.businessCode)
       .eq('scalev_id', params.scalevId)
       .neq('id', params.rowId)
@@ -257,7 +272,7 @@ export async function reconcileMarketplaceIntakeBatchScalevIdentity(
     throw new Error('batchId tidak valid.');
   }
 
-  const batch = await loadReconcileBatch(batchId);
+  const batch = await loadReconcileBatch(input.workspaceId, batchId);
   const reconciledAt = new Date().toISOString();
   const emptyResultBase = {
     batchId,
@@ -281,8 +296,8 @@ export async function reconcileMarketplaceIntakeBatchScalevIdentity(
       throw new Error('Batch ini belum punya push Scalev yang sukses. Push ke Scalev dulu sebelum menarik identity order.');
     }
 
-    const business = await loadReconcileBusiness(batch.business_id);
-    const authoritativeOrders = await loadAuthoritativeOrders(batchId, batch.business_code);
+    const business = await loadReconcileBusiness(input.workspaceId, batch.business_id);
+    const authoritativeOrders = await loadAuthoritativeOrders(input.workspaceId, batchId, batch.business_code);
     if (authoritativeOrders.length === 0) {
       throw new Error('Belum ada row authoritative marketplace_api_upload untuk batch ini. Jalankan "Masuk ke App" dulu sebelum reconcile Scalev ID.');
     }
@@ -341,6 +356,7 @@ export async function reconcileMarketplaceIntakeBatchScalevIdentity(
         }
 
         const conflict = await findIdentityConflict({
+          workspaceId: input.workspaceId,
           rowId: order.id,
           businessCode: batch.business_code,
           orderId: nextOrderId,
@@ -371,6 +387,7 @@ export async function reconcileMarketplaceIntakeBatchScalevIdentity(
         const { error } = await svc
           .from('scalev_orders')
           .update(payload)
+          .eq('workspace_id', input.workspaceId)
           .eq('id', order.id);
         if (error) throw error;
 
@@ -386,8 +403,9 @@ export async function reconcileMarketplaceIntakeBatchScalevIdentity(
       status: resolveSummaryStatus(summary),
     };
 
-    await persistReconcileResult(batchId, result);
+    await persistReconcileResult(input.workspaceId, batchId, result);
     await logReconcileSync({
+      workspaceId: input.workspaceId,
       batch,
       result,
       reconciledByEmail: input.reconciledByEmail || null,
@@ -400,8 +418,9 @@ export async function reconcileMarketplaceIntakeBatchScalevIdentity(
       status: 'failed',
       errorMessage: error?.message || 'Reconcile Scalev ID gagal.',
     };
-    await persistReconcileResult(batchId, failed);
+    await persistReconcileResult(input.workspaceId, batchId, failed);
     await logReconcileSync({
+      workspaceId: input.workspaceId,
       batch,
       result: failed,
       reconciledByEmail: input.reconciledByEmail || null,

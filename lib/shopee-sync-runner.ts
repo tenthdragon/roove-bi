@@ -1,5 +1,4 @@
 import { createServiceSupabase } from './service-supabase';
-import { listMarketplaceIntakeSourceConfigs } from './marketplace-intake-sources';
 import {
   fetchShopeeAdsPerformanceRange,
   refreshShopeeAccessToken,
@@ -12,7 +11,7 @@ import {
   type ShopeeSpendStreamKey,
   type ShopeeSpendSyncMode,
 } from './shopee-streams';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
+import { requireExplicitWorkspaceId } from './workspace-scope';
 
 type ShopeeShopRow = {
   id: number;
@@ -61,7 +60,7 @@ export type ShopeeSyncResult = {
 };
 
 type RunShopeeSyncOptions = {
-  workspaceId?: string;
+  workspaceId: string;
   dateStart?: string | null;
   dateEnd?: string | null;
 };
@@ -82,22 +81,11 @@ function normalizeAdvertiser(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow) 
   return String(stream.default_advertiser || '').trim() || shop.shop_name || 'Shopee Shop';
 }
 
-function findShopeeMarketplaceSourceConfig(sourceKey: string | null | undefined) {
-  const normalizedKey = String(sourceKey || '').trim().toLowerCase();
-  if (!normalizedKey) return null;
-  return (
-    listMarketplaceIntakeSourceConfigs().find(
-      (config) => config.platform === 'shopee' && config.sourceKey === normalizedKey,
-    ) || null
-  );
-}
-
 function resolveCommerceBusinessCode(shop: ShopeeShopRow) {
   return (
     String(shop.revenue_business_code || '').trim()
     || String(shop.viewer_business_code || '').trim()
     || String(shop.account_business_code || '').trim()
-    || findShopeeMarketplaceSourceConfig(shop.marketplace_source_key)?.businessCode
     || null
   );
 }
@@ -237,10 +225,10 @@ async function insertInBatches(
   }
 }
 
-export async function runShopeeSync(options: RunShopeeSyncOptions = {}): Promise<ShopeeSyncResult> {
+export async function runShopeeSync(options: RunShopeeSyncOptions): Promise<ShopeeSyncResult> {
   const startTime = Date.now();
   const svc = createServiceSupabase();
-  const workspaceId = options.workspaceId || ROOVE_WORKSPACE_ID;
+  const workspaceId = requireExplicitWorkspaceId(options.workspaceId, 'Shopee sync');
   const dateStart = options.dateStart || getYesterdayWib();
   const dateEnd = options.dateEnd || dateStart;
 

@@ -12,7 +12,6 @@ import {
   resolveWarehouseOrigin,
 } from '@/lib/warehouse-domain-helpers';
 import { buildScalevSourceClassFields } from '@/lib/scalev-source-class';
-import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 
 function getServiceSupabase() {
@@ -234,14 +233,16 @@ export async function POST(req: NextRequest) {
     if (rateLimitError) return rateLimitError;
 
     let workspaceId: string;
+    let legacyCsvEnabled = false;
     try {
       const access = await requireDashboardPermissionAccess('admin:daily', 'Admin Daily Data');
       workspaceId = access.workspaceId;
+      legacyCsvEnabled = access.workspace.settings.legacy_order_csv_enabled === true;
     } catch (err: any) {
       const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
       return NextResponse.json({ error: err.message }, { status });
     }
-    if (workspaceId !== ROOVE_WORKSPACE_ID) {
+    if (!legacyCsvEnabled) {
       return NextResponse.json(
         {
           error:

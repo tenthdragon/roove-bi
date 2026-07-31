@@ -13,6 +13,7 @@ import { ActiveBrandsProvider } from '@/lib/ActiveBrandsContext';
 import ThemeToggle from '@/components/ThemeToggle';
 import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
 import { WorkspaceProvider, useWorkspace } from '@/lib/WorkspaceContext';
+import { isWorkspaceModuleEnabled } from '@/lib/workspaces';
 
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
@@ -82,15 +83,6 @@ function findTabLabel(tabs, targetId) {
   }
   return null;
 }
-
-const APURVA_ROLLOUT_BLOCKED_TABS = new Set([
-  'ppic',
-  'warehouse-settings',
-  'marketplace-intake',
-  'customers',
-  'brand-analysis',
-  'sales-channel-analysis',
-]);
 
 // getAllowedTabs is now driven by role_permissions — see usePermissions() hook below
 
@@ -590,9 +582,10 @@ export default function DashboardLayout({ children }) {
   const accessibleTabIds = useMemo(() => {
     if (!profile || accessRole === 'pending') return [];
     const ids = getOrderedAccessibleTabIds(accessRole, permissions);
-    return workspaceBootstrap?.activeWorkspace?.slug === 'roove'
-      ? ids
-      : ids.filter((tabId) => !APURVA_ROLLOUT_BLOCKED_TABS.has(tabId));
+    const workspace = workspaceBootstrap?.activeWorkspace;
+    return workspace
+      ? ids.filter((tabId) => isWorkspaceModuleEnabled(workspace, tabId))
+      : ids;
   }, [profile, accessRole, permissions, workspaceBootstrap]);
 
   // Close mobile menu on route change
@@ -639,12 +632,13 @@ export default function DashboardLayout({ children }) {
   let visibleTabs = profile && !isPending
     ? buildVisibleTabs(accessRole, permissions)
     : [];
-  if (workspaceBootstrap?.activeWorkspace?.slug !== 'roove') {
+  if (workspaceBootstrap?.activeWorkspace) {
+    const workspace = workspaceBootstrap.activeWorkspace;
     visibleTabs = visibleTabs
-      .filter((tab) => !APURVA_ROLLOUT_BLOCKED_TABS.has(tab.id))
+      .filter((tab) => isWorkspaceModuleEnabled(workspace, tab.id))
       .map((tab) => ({
         ...tab,
-        children: tab.children?.filter((child) => !APURVA_ROLLOUT_BLOCKED_TABS.has(child.id)),
+        children: tab.children?.filter((child) => isWorkspaceModuleEnabled(workspace, child.id)),
       }));
   }
 

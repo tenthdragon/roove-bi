@@ -2,8 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-
-import { listMarketplaceIntakeSourceConfigs } from '@/lib/marketplace-intake-sources';
+import { useMarketplaceIntakeSources } from '@/lib/use-marketplace-intake-sources';
 
 const panelStyle = {
   background: 'var(--card)',
@@ -12,8 +11,6 @@ const panelStyle = {
   padding: 16,
   boxShadow: 'var(--shadow)',
 };
-
-const SOURCE_OPTIONS = listMarketplaceIntakeSourceConfigs();
 
 function fmtNumber(value) {
   return new Intl.NumberFormat('id-ID').format(Number(value || 0));
@@ -46,18 +43,43 @@ function ActionButton({ children, onClick, tone = 'default', disabled = false, t
 }
 
 export default function MarketplaceStoreScopePanel() {
-  const [sourceKey, setSourceKey] = useState(SOURCE_OPTIONS[0]?.sourceKey || 'shopee_rlt');
+  const {
+    sources,
+    businesses,
+    loading: sourcesLoading,
+    error: sourcesError,
+    refresh: refreshSources,
+  } = useMarketplaceIntakeSources();
+  const [sourceKey, setSourceKey] = useState('');
+  const [newPlatform, setNewPlatform] = useState('shopee');
+  const [newBusinessId, setNewBusinessId] = useState('');
+  const [creatingSource, setCreatingSource] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [scope, setScope] = useState(null);
   const [draft, setDraft] = useState([]);
+  const [warehouseDraft, setWarehouseDraft] = useState({});
 
   const activeSource = useMemo(
-    () => SOURCE_OPTIONS.find((source) => source.sourceKey === sourceKey) || SOURCE_OPTIONS[0] || null,
-    [sourceKey],
+    () => sources.find((source) => source.sourceKey === sourceKey) || sources[0] || null,
+    [sourceKey, sources],
   );
+
+  useEffect(() => {
+    if (sources.length === 0) {
+      setSourceKey('');
+      setScope(null);
+      setDraft([]);
+      setWarehouseDraft({});
+      setLoading(false);
+      return;
+    }
+    if (!sources.some((source) => source.sourceKey === sourceKey)) {
+      setSourceKey(sources[0].sourceKey);
+    }
+  }, [sourceKey, sources]);
 
   async function loadScope(nextSourceKey = sourceKey) {
     if (!nextSourceKey) return;
@@ -69,10 +91,14 @@ export default function MarketplaceStoreScopePanel() {
       if (!res.ok) throw new Error(next.error || 'Gagal memuat store scope marketplace.');
       setScope(next);
       setDraft(next.selectedStoreNames || []);
+      setWarehouseDraft(Object.fromEntries(
+        (next.availableStores || []).map((store) => [store.storeName, store.scalevWarehouseName || '']),
+      ));
     } catch (err) {
       console.error(err);
       setScope(null);
       setDraft([]);
+      setWarehouseDraft({});
       setError(err?.message || 'Gagal memuat store scope marketplace.');
     } finally {
       setLoading(false);
@@ -94,18 +120,44 @@ export default function MarketplaceStoreScopePanel() {
         body: JSON.stringify({
           sourceKey,
           selectedStoreNames: draft,
+          scalevWarehouseNames: warehouseDraft,
         }),
       });
       const next = await res.json();
       if (!res.ok) throw new Error(next.error || 'Gagal menyimpan store scope marketplace.');
       setScope(next);
       setDraft(next.selectedStoreNames || []);
+      setWarehouseDraft(Object.fromEntries(
+        (next.availableStores || []).map((store) => [store.storeName, store.scalevWarehouseName || '']),
+      ));
       setMessage(`Whitelist store untuk ${next.sourceLabel} berhasil disimpan.`);
     } catch (err) {
       console.error(err);
       setError(err?.message || 'Gagal menyimpan store scope marketplace.');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function createSource() {
+    if (!newBusinessId) return;
+    setCreatingSource(true);
+    setError('');
+    setMessage('');
+    try {
+      const response = await fetch('/api/marketplace-intake/sources', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform: newPlatform, businessId: Number(newBusinessId) }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload?.error || 'Gagal menambahkan source marketplace.');
+      await refreshSources();
+      setMessage('Source marketplace workspace berhasil ditambahkan.');
+    } catch (nextError) {
+      setError(nextError?.message || 'Gagal menambahkan source marketplace.');
+    } finally {
+      setCreatingSource(false);
     }
   }
 
@@ -134,7 +186,8 @@ export default function MarketplaceStoreScopePanel() {
                 outline: 'none',
               }}
             >
-              {SOURCE_OPTIONS.map((source) => (
+              <option value="">- Pilih source -</option>
+              {sources.map((source) => (
                 <option key={source.sourceKey} value={source.sourceKey}>
                   {source.sourceLabel}
                 </option>
@@ -143,7 +196,12 @@ export default function MarketplaceStoreScopePanel() {
             <ActionButton onClick={() => loadScope(sourceKey)} disabled={loading || saving}>
               {loading ? 'Memuat…' : 'Refresh'}
             </ActionButton>
-            <ActionButton onClick={() => setDraft(scope?.selectedStoreNames || [])} disabled={loading || saving}>
+            <ActionButton onClick={() => {
+              setDraft(scope?.selectedStoreNames || []);
+              setWarehouseDraft(Object.fromEntries(
+                (scope?.availableStores || []).map((store) => [store.storeName, store.scalevWarehouseName || '']),
+              ));
+            }} disabled={loading || saving}>
               Reset
             </ActionButton>
             <ActionButton onClick={saveScope} tone="primary" disabled={loading || saving || draft.length === 0}>
@@ -152,9 +210,38 @@ export default function MarketplaceStoreScopePanel() {
           </div>
         </div>
 
-        {error ? (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap', marginBottom: 14, padding: 12, borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg)' }}>
+          <label style={{ display: 'grid', gap: 5, fontSize: 11, color: 'var(--dim)' }}>
+            Platform baru
+            <select value={newPlatform} onChange={(event) => setNewPlatform(event.target.value)} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)' }}>
+              <option value="shopee">Shopee</option>
+              <option value="tiktok">TikTok</option>
+              <option value="blibli">Blibli</option>
+              <option value="lazada">Lazada</option>
+            </select>
+          </label>
+          <label style={{ display: 'grid', gap: 5, fontSize: 11, color: 'var(--dim)' }}>
+            Business ScaleV workspace
+            <select value={newBusinessId} onChange={(event) => setNewBusinessId(event.target.value)} style={{ minWidth: 220, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text)' }}>
+              <option value="">- Pilih business -</option>
+              {businesses.filter((business) => business.is_active !== false).map((business) => (
+                <option key={business.id} value={business.id}>
+                  {business.business_code} • {business.business_name || 'Tanpa nama'}
+                </option>
+              ))}
+            </select>
+          </label>
+          <ActionButton onClick={createSource} tone="primary" disabled={!newBusinessId || creatingSource || sourcesLoading}>
+            {creatingSource ? 'Menambahkan…' : 'Tambah Source Workspace'}
+          </ActionButton>
+          <div style={{ fontSize: 11, color: 'var(--dim)', maxWidth: 500, lineHeight: 1.5 }}>
+            Source adalah konfigurasi tenant. Workspace baru tidak menerima source milik company lain secara otomatis.
+          </div>
+        </div>
+
+        {sourcesError || error ? (
           <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#fca5a5', fontSize: 13 }}>
-            {error}
+            {sourcesError || error}
           </div>
         ) : null}
         {message ? (
@@ -163,7 +250,11 @@ export default function MarketplaceStoreScopePanel() {
           </div>
         ) : null}
 
-        {loading ? (
+        {!sourcesLoading && sources.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+            Workspace ini masih kosong. Tambahkan business ScaleV di Business Settings untuk membentuk source marketplace milik workspace ini.
+          </div>
+        ) : loading || sourcesLoading ? (
           <div style={{ fontSize: 12, color: 'var(--dim)' }}>Memuat daftar store business…</div>
         ) : (
           <>
@@ -184,6 +275,7 @@ export default function MarketplaceStoreScopePanel() {
                     <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>Store</th>
                     <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>Tipe Store</th>
                     <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>Status</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: 12, color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>Nama Gudang di ScaleV</th>
                     <th style={{ padding: '10px 12px', textAlign: 'right', fontSize: 12, color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>Whitelist</th>
                   </tr>
                 </thead>
@@ -205,6 +297,17 @@ export default function MarketplaceStoreScopePanel() {
                         </td>
                         <td style={{ padding: '10px 12px', fontSize: 12, color: store.isActive ? '#86efac' : '#fca5a5', borderBottom: '1px solid var(--border)' }}>
                           {store.isActive ? 'Aktif di Business Settings' : 'Tidak aktif di Business Settings'}
+                        </td>
+                        <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>
+                          <input
+                            value={warehouseDraft[store.storeName] || ''}
+                            onChange={(event) => setWarehouseDraft((current) => ({
+                              ...current,
+                              [store.storeName]: event.target.value,
+                            }))}
+                            placeholder="Nama persis gudang ScaleV"
+                            style={{ minWidth: 230, padding: '7px 9px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}
+                          />
                         </td>
                         <td style={{ padding: '10px 12px', textAlign: 'right', borderBottom: '1px solid var(--border)' }}>
                           <input

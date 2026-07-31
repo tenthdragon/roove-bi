@@ -315,6 +315,7 @@ export function buildViewerEntityLookupKey(businessId: number, entityKey: string
 
 export async function fetchVisibleDirectCatalogEntities(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   businessId: number,
   options?: {
     entityKeys?: string[] | null;
@@ -354,6 +355,7 @@ export async function fetchVisibleDirectCatalogEntities(
           processor_business_id,
           processor_business_code
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', requestedBusinessId)
         .in('scalev_variant_id', chunk);
       if (error) throw error;
@@ -378,6 +380,7 @@ export async function fetchVisibleDirectCatalogEntities(
           processor_business_id,
           processor_business_code
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', requestedBusinessId)
         .order('product_name', { ascending: true })
         .order('name', { ascending: true })
@@ -407,6 +410,7 @@ export async function fetchVisibleDirectCatalogEntities(
           processor_business_id,
           processor_business_code
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', requestedBusinessId)
         .in('scalev_product_id', chunk);
       if (error) throw error;
@@ -432,6 +436,7 @@ export async function fetchVisibleDirectCatalogEntities(
           processor_business_id,
           processor_business_code
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', requestedBusinessId)
         .order('name', { ascending: true })
         .range(from, to)
@@ -453,6 +458,7 @@ export async function fetchVisibleDirectCatalogEntities(
     const { data, error } = await svc
       .from('scalev_catalog_identifiers')
       .select('entity_key, identifier')
+      .eq('workspace_id', workspaceId)
       .eq('business_id', requestedBusinessId)
       .in('entity_key', chunk);
     if (error) throw error;
@@ -535,13 +541,14 @@ export async function fetchVisibleDirectCatalogEntities(
 
 export async function fetchVisibleDirectCatalogEntitiesByBusinessRequests(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   requests: Map<number, { variantIds?: Set<number>; productIds?: Set<number> }>,
   options?: { includeProductsWithVariants?: boolean },
 ): Promise<VisibleDirectCatalogEntityRow[]> {
   const rows: VisibleDirectCatalogEntityRow[] = [];
 
   for (const [businessId, request] of Array.from(requests.entries())) {
-    const response = await fetchVisibleDirectCatalogEntities(svc, businessId, {
+    const response = await fetchVisibleDirectCatalogEntities(svc, workspaceId, businessId, {
       variantIds: Array.from(request.variantIds || []),
       productIds: Array.from(request.productIds || []),
       includeProductsWithVariants: options?.includeProductsWithVariants,
@@ -562,6 +569,7 @@ export function buildVisibleDirectEntityLookup(rows: VisibleDirectCatalogEntityR
 
 export async function fetchVisibleBundleCatalogEntities(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   businessId: number,
   options?: { entityKeys?: string[] | null; bundleIds?: number[] | null },
 ): Promise<{ businessCode: string; rows: VisibleBundleCatalogEntityRow[] }> {
@@ -605,6 +613,7 @@ export async function fetchVisibleBundleCatalogEntities(
           processor_business_id,
           processor_business_code
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', requestedBusinessId)
         .in('scalev_bundle_id', chunk);
       if (error) throw error;
@@ -630,6 +639,7 @@ export async function fetchVisibleBundleCatalogEntities(
           processor_business_id,
           processor_business_code
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', requestedBusinessId)
         .order('name', { ascending: true })
         .range(from, to)
@@ -645,6 +655,7 @@ export async function fetchVisibleBundleCatalogEntities(
     const { data, error } = await svc
       .from('scalev_catalog_identifiers')
       .select('entity_key, identifier')
+      .eq('workspace_id', workspaceId)
       .eq('business_id', requestedBusinessId)
       .eq('entity_type', 'bundle')
       .in('entity_key', chunk);
@@ -691,6 +702,7 @@ export async function fetchVisibleBundleCatalogEntities(
 
 export async function fetchCanonicalCatalogMappingsByRequests(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   requestsByBusinessId: Map<number, Set<string>>,
 ): Promise<CanonicalCatalogMappingRow[]> {
   const rows: CanonicalCatalogMappingRow[] = [];
@@ -716,6 +728,7 @@ export async function fetchCanonicalCatalogMappingsByRequests(
           notes,
           warehouse_products(id, name, category, entity, warehouse, scalev_product_names)
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', normalizedBusinessId)
         .in('scalev_entity_key', chunk);
       if (error) throw error;

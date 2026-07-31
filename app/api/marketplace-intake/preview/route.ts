@@ -35,8 +35,10 @@ export async function POST(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
+    let workspaceId: string;
     try {
-      await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengakses Marketplace Intake.');
+      const access = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengakses Marketplace Intake.');
+      workspaceId = access.workspaceId;
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
       return NextResponse.json({ error: error.message }, { status });
@@ -61,6 +63,7 @@ export async function POST(req: NextRequest) {
     const filename = (formData.get('filename') as string | null) || file.name;
     const sourceKey = (formData.get('sourceKey') as string | null) || null;
     const preview = await previewMarketplaceIntake({
+      workspaceId,
       file,
       filenameOverride: filename,
       sourceKey,

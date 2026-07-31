@@ -6,7 +6,7 @@ import {
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
 import { requireWorkspaceAccess } from '@/lib/workspace-access';
-import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
+import { requireExplicitWorkspaceId } from '@/lib/workspace-scope';
 
 export type WarehouseActivityLogRow = {
   id: number;
@@ -101,12 +101,9 @@ export async function recordWarehouseActivityLog(input: WarehouseActivityLogInpu
   try {
     const actor = await getCurrentActivityActor();
     const svc = createServiceSupabase();
-    let workspaceId = input.workspaceId || ROOVE_WORKSPACE_ID;
-    if (!input.workspaceId && actor.id) {
-      try {
-        workspaceId = (await requireWorkspaceAccess()).workspaceId;
-      } catch {}
-    }
+    const workspaceId = input.workspaceId
+      ? requireExplicitWorkspaceId(input.workspaceId, 'Warehouse activity log')
+      : (await requireWorkspaceAccess()).workspaceId;
 
     const { error } = await svc
       .from('warehouse_activity_log')

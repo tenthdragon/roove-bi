@@ -21,18 +21,21 @@ export const maxDuration = 250;
 
 async function requireOwnerAccess(req: NextRequest) {
   const originError = rejectUntrustedOrigin(req);
-  if (originError) return { response: originError, userEmail: null };
+  if (originError) return { response: originError, userEmail: null, workspaceId: null };
 
   const sessionError = rejectMissingDashboardSession(req);
-  if (sessionError) return { response: sessionError, userEmail: null };
+  if (sessionError) return { response: sessionError, userEmail: null, workspaceId: null };
 
+  let workspaceId: string;
   try {
-    await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat sinkronisasi Marketplace Intake.');
+    const access = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat sinkronisasi Marketplace Intake.');
+    workspaceId = access.workspaceId;
   } catch (error: any) {
     const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
     return {
       response: NextResponse.json({ error: error.message }, { status }),
       userEmail: null,
+      workspaceId: null,
     };
   }
 
@@ -44,6 +47,7 @@ async function requireOwnerAccess(req: NextRequest) {
   return {
     response: null,
     userEmail: user?.email || null,
+    workspaceId,
   };
 }
 
@@ -64,6 +68,7 @@ export async function GET(req: NextRequest) {
     const shipmentDate = String(req.nextUrl.searchParams.get('shipmentDate') || getCurrentDateValue());
     const sourceKey = String(req.nextUrl.searchParams.get('sourceKey') || '').trim() || null;
     const result = await inspectMarketplaceIntakeWorkspaceScalevSync({
+      workspaceId: access.workspaceId!,
       shipmentDate,
       sourceKey,
     });
@@ -97,6 +102,7 @@ export async function POST(req: NextRequest) {
     const sourceKey = String(body?.sourceKey || '').trim() || null;
 
     const result = await repairMarketplaceIntakeWorkspaceScalevSync({
+      workspaceId: access.workspaceId!,
       shipmentDate,
       sourceKey,
       repairedByEmail: access.userEmail,

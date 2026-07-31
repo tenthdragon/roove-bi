@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardTabAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
-import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
 
 function getServiceSupabase() {
   return createClient(
@@ -24,9 +23,28 @@ export async function POST(req: NextRequest) {
     let month: number;
     let year: number;
     let triggeredBy = 'manual';
-    let workspaceId = ROOVE_WORKSPACE_ID;
+    let workspaceId: string;
 
     if (isCron) {
+      const svc = getServiceSupabase();
+      const { data: snapshotWorkspaces, error: workspaceError } = await svc
+        .from('workspaces')
+        .select('id, settings')
+        .eq('status', 'active');
+      if (workspaceError) throw workspaceError;
+      const eligible = (snapshotWorkspaces || []).filter((workspace: any) =>
+        workspace?.settings?.legacy_cashflow_snapshot_enabled === true,
+      );
+      if (eligible.length !== 1) {
+        return NextResponse.json({
+          success: true,
+          skipped: true,
+          message: eligible.length === 0
+            ? 'Tidak ada workspace yang memakai snapshot cashflow legacy.'
+            : 'Snapshot cashflow legacy harus menunjuk tepat satu workspace.',
+        });
+      }
+      workspaceId = String(eligible[0].id);
       // Cron: capture previous month
       const now = new Date();
       const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -51,10 +69,10 @@ export async function POST(req: NextRequest) {
 
       const access = await requireDashboardTabAccess('cashflow', 'Cash Flow');
       workspaceId = access.workspaceId;
-      if (workspaceId !== ROOVE_WORKSPACE_ID) {
+      if (access.workspace.settings.legacy_cashflow_snapshot_enabled !== true) {
         return NextResponse.json(
           {
-            error: 'Snapshot historis masih dalam rollout workspace. Cash flow live tetap dapat digunakan.',
+            error: 'Workspace ini menggunakan cash flow tenant-native; snapshot legacy tidak berlaku.',
           },
           { status: 409 },
         );

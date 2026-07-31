@@ -511,23 +511,16 @@ export async function getCommercialMomentAttribution({
   const eventDates = Array.from(assignmentsByDate.keys()).sort();
   if (eventDates.length === 0) return [];
 
-  const summaryRows: any[] = [];
-  for (let page = 0; ; page += 1) {
-    const { data, error } = await svc
-      .from('summary_commercial_order_entry_revenue')
-      .select('order_date, product, total_net_sales, same_day_net_sales, carryover_net_sales, before_noon_net_sales')
-      .eq('workspace_id', workspaceId)
-      .in('order_date', eventDates)
-      .order('order_date')
-      .order('product')
-      .range(page * 1000, page * 1000 + 999);
+  const { data: summaryRows, error } = await svc.rpc(
+    'workspace_commercial_order_entry_revenue',
+    {
+      p_workspace_id: workspaceId,
+      p_dates: eventDates,
+    },
+  );
+  if (error) throw new Error(`Gagal memuat revenue event workspace: ${error.message}`);
 
-    if (error) throw new Error(`Gagal memuat summary revenue event: ${error.message}`);
-    summaryRows.push(...(data || []));
-    if ((data || []).length < 1000) break;
-  }
-
-  return summaryRows.flatMap((row) =>
+  return (summaryRows || []).flatMap((row: any) =>
     (assignmentsByDate.get(row.order_date) || []).map((assignment) => ({
       event_year: assignment.eventYear,
       event_month: assignment.eventMonth,

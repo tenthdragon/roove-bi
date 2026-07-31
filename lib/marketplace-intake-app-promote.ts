@@ -95,6 +95,7 @@ type ProjectionOrderGroup = {
 };
 
 export type MarketplaceIntakePromoteToAppInput = {
+  workspaceId: string;
   batchId: number;
   shipmentDate?: string | null;
   includeWarehouseStatuses?: string[];
@@ -307,20 +308,7 @@ function buildProductMappingIndexes(rows: ProductMappingRow[]) {
 }
 
 function deriveBrandFallback(values: Array<string | null | undefined>): string {
-  const joined = values
-    .map((value) => cleanText(value).toLowerCase())
-    .filter(Boolean)
-    .join(' ');
-
-  if (!joined) return 'Other';
-  if (joined.includes('osgard')) return 'Osgard';
-  if (joined.includes('the secret') || joined.includes('purvu') || joined.includes('srt')) return 'Purvu';
-  if (joined.includes('pluve') || joined.includes('plv')) return 'Pluve';
-  if (joined.includes('globite') || joined.includes('glb')) return 'Globite';
-  if (joined.includes('drhyun') || joined.includes('dr hyun') || joined.includes('drh')) return 'DrHyun';
-  if (joined.includes('calmara') || joined.includes('clm') || joined.includes('cal')) return 'Calmara';
-  if (joined.includes('yuv')) return 'YUV';
-  if (joined.includes('roove') || joined.includes('rov') || joined.includes('shaker')) return 'Roove';
+  void values;
   return 'Other';
 }
 
@@ -436,11 +424,12 @@ function resolvePromoteShipping(input: {
   };
 }
 
-async function loadPromoteBatch(batchId: number): Promise<PromoteBatchRow> {
+async function loadPromoteBatch(workspaceId: string, batchId: number): Promise<PromoteBatchRow> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('marketplace_intake_batches')
     .select('id, source_key, source_label, business_id, business_code, platform, filename')
+    .eq('workspace_id', workspaceId)
     .eq('id', batchId)
     .single<PromoteBatchRow>();
 
@@ -449,6 +438,7 @@ async function loadPromoteBatch(batchId: number): Promise<PromoteBatchRow> {
 }
 
 async function loadPromoteOrdersAndLines(input: {
+  workspaceId: string;
   batchId: number;
   statuses: string[];
   shipmentDate: string | null;
@@ -476,6 +466,7 @@ async function loadPromoteOrdersAndLines(input: {
       'mp_marketplace_fee_amount',
       'raw_meta',
     ].join(','))
+    .eq('workspace_id', input.workspaceId)
     .eq('batch_id', input.batchId)
     .order('external_order_id', { ascending: true });
 
@@ -509,6 +500,7 @@ async function loadPromoteOrdersAndLines(input: {
           'mapped_store_name',
           'raw_row',
         ].join(','))
+        .eq('workspace_id', input.workspaceId)
         .in('intake_order_id', orderIds)
         .order('intake_order_id', { ascending: true })
         .order('line_index', { ascending: true });
@@ -528,6 +520,7 @@ async function loadPromoteOrdersAndLines(input: {
         'mapped_store_name',
         'raw_row',
       ].join(','))
+      .eq('workspace_id', input.workspaceId)
       .in('intake_order_id', orderIds)
       .order('intake_order_id', { ascending: true })
       .order('line_index', { ascending: true });
@@ -558,6 +551,7 @@ async function loadPromoteOrdersAndLines(input: {
 }
 
 async function loadExistingScalevOrders(input: {
+  workspaceId: string;
   externalIds: string[];
   businessCode: string;
   shipmentDate: string | null;
@@ -573,6 +567,7 @@ async function loadExistingScalevOrders(input: {
     const { data, error } = await svc
       .from('scalev_orders')
       .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, shipping_cost, shipping_discount, store_name')
+      .eq('workspace_id', input.workspaceId)
       .eq('business_code', input.businessCode)
       .eq('source', MARKETPLACE_APP_SOURCE)
       .in('external_id', chunk);
@@ -598,6 +593,7 @@ async function loadExistingScalevOrders(input: {
     const { data, error } = await svc
       .from('scalev_orders')
       .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, shipping_cost, shipping_discount, store_name, raw_data, shipped_time')
+      .eq('workspace_id', input.workspaceId)
       .eq('business_code', input.businessCode)
       .eq('source', 'webhook')
       .gte('shipped_time', lookupStart)
@@ -627,6 +623,7 @@ async function loadExistingScalevOrders(input: {
 }
 
 async function findExistingWebhookOrderByTracking(input: {
+  workspaceId: string;
   businessCode: string;
   shipmentDate: string;
   trackingNumber: string;
@@ -638,6 +635,7 @@ async function findExistingWebhookOrderByTracking(input: {
   let query = svc
     .from('scalev_orders')
     .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, shipping_cost, shipping_discount, store_name, raw_data, shipped_time')
+    .eq('workspace_id', input.workspaceId)
     .eq('business_code', input.businessCode)
     .eq('source', 'webhook')
     .eq('marketplace_tracking_number', input.trackingNumber)
@@ -668,6 +666,7 @@ async function findExistingWebhookOrderByTracking(input: {
     let fallbackQuery = svc
       .from('scalev_orders')
       .select('id, order_id, external_id, marketplace_tracking_number, source, business_code, scalev_id, shipping_cost, shipping_discount, store_name, raw_data, shipped_time')
+      .eq('workspace_id', input.workspaceId)
       .eq('business_code', input.businessCode)
       .eq('source', 'webhook')
       .gte('shipped_time', lookupStart)
@@ -696,16 +695,18 @@ async function findExistingWebhookOrderByTracking(input: {
   });
 }
 
-async function loadProductMappings() {
+async function loadProductMappings(workspaceId: string) {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('product_mapping')
-    .select('sku, product_name, cogs, brand, product_type');
+    .select('sku, product_name, cogs, brand, product_type')
+    .eq('workspace_id', workspaceId);
   if (error) throw error;
   return buildProductMappingIndexes((data || []) as ProductMappingRow[]);
 }
 
 async function replaceOrderLines(input: {
+  workspaceId: string;
   dbOrderId: number;
   orderId: string;
   projectionRows: ScalevOpsCsvRow[];
@@ -715,7 +716,11 @@ async function replaceOrderLines(input: {
   salesChannel: string;
 }) {
   const svc = createServiceSupabase();
-  await svc.from('scalev_order_lines').delete().eq('scalev_order_id', input.dbOrderId);
+  await svc
+    .from('scalev_order_lines')
+    .delete()
+    .eq('workspace_id', input.workspaceId)
+    .eq('scalev_order_id', input.dbOrderId);
 
   const usedProductNames = new Set<string>();
   const lineRows: Record<string, unknown>[] = [];
@@ -738,6 +743,7 @@ async function replaceOrderLines(input: {
     );
 
     lineRows.push({
+      workspace_id: input.workspaceId,
       scalev_order_id: input.dbOrderId,
       order_id: input.orderId,
       product_name: productName,
@@ -765,7 +771,11 @@ async function replaceOrderLines(input: {
   if (error) throw error;
 }
 
-async function persistBatchPromoteResult(batchId: number, payload: Record<string, unknown>) {
+async function persistBatchPromoteResult(
+  workspaceId: string,
+  batchId: number,
+  payload: Record<string, unknown>,
+) {
   const svc = createServiceSupabase();
   const promoteAuditKeys = new Set([
     'app_last_promote_updated_webhook_count',
@@ -776,6 +786,7 @@ async function persistBatchPromoteResult(batchId: number, payload: Record<string
   const runUpdate = async (nextPayload: Record<string, unknown>) => svc
     .from('marketplace_intake_batches')
     .update(nextPayload)
+    .eq('workspace_id', workspaceId)
     .eq('id', batchId);
 
   let { error } = await runUpdate(payload);
@@ -794,6 +805,7 @@ async function persistBatchPromoteResult(batchId: number, payload: Record<string
 }
 
 async function logPromoteSync(input: {
+  workspaceId: string;
   batch: PromoteBatchRow;
   status: 'success' | 'failed';
   promotedByEmail: string | null;
@@ -804,6 +816,7 @@ async function logPromoteSync(input: {
   const { error } = await svc
     .from('scalev_sync_log')
     .insert({
+      workspace_id: input.workspaceId,
       status: input.status,
       sync_type: 'marketplace_intake_app_promote',
       business_code: input.batch.business_code,
@@ -836,8 +849,9 @@ export async function promoteMarketplaceIntakeBatchToApp(
     ? normalizeShipmentDate(String(input.shipmentDate))
     : null;
 
-  const batch = await loadPromoteBatch(batchId);
+  const batch = await loadPromoteBatch(input.workspaceId, batchId);
   const projection = await buildScalevOpsProjectionForBatch({
+    workspaceId: input.workspaceId,
     batchId,
     includeWarehouseStatuses,
     shipmentDate,
@@ -849,13 +863,19 @@ export async function promoteMarketplaceIntakeBatchToApp(
   }
 
   const [{ ordersByExternalId, linesByOrderId }, existingRows, mappingIndexes] = await Promise.all([
-    loadPromoteOrdersAndLines({ batchId, statuses: includeWarehouseStatuses, shipmentDate }),
+    loadPromoteOrdersAndLines({
+      workspaceId: input.workspaceId,
+      batchId,
+      statuses: includeWarehouseStatuses,
+      shipmentDate,
+    }),
     loadExistingScalevOrders({
+      workspaceId: input.workspaceId,
       externalIds: groupedOrders.map((row) => row.externalId),
       businessCode: batch.business_code,
       shipmentDate,
     }),
-    loadProductMappings(),
+    loadProductMappings(input.workspaceId),
   ]);
 
   const svc = createServiceSupabase();
@@ -896,6 +916,7 @@ export async function promoteMarketplaceIntakeBatchToApp(
 
       if (!existing && trackingNumber) {
         existing = await findExistingWebhookOrderByTracking({
+          workspaceId: input.workspaceId,
           businessCode: batch.business_code,
           shipmentDate: targetShipmentDate,
           trackingNumber,
@@ -1007,6 +1028,7 @@ export async function promoteMarketplaceIntakeBatchToApp(
         projection_rows: projectionRows,
       };
       const orderPayload: Record<string, unknown> = {
+        workspace_id: input.workspaceId,
         order_id: orderId,
         external_id: group.externalId,
         marketplace_tracking_number: trackingNumber,
@@ -1065,6 +1087,7 @@ export async function promoteMarketplaceIntakeBatchToApp(
         const { error } = await svc
           .from('scalev_orders')
           .update(orderPayload)
+          .eq('workspace_id', input.workspaceId)
           .eq('id', existing.id);
         if (error) throw error;
         updatedCount += 1;
@@ -1103,6 +1126,7 @@ export async function promoteMarketplaceIntakeBatchToApp(
       }
 
       await replaceOrderLines({
+        workspaceId: input.workspaceId,
         dbOrderId,
         orderId,
         projectionRows,
@@ -1113,7 +1137,7 @@ export async function promoteMarketplaceIntakeBatchToApp(
       });
     }
 
-    await persistBatchPromoteResult(batchId, {
+    await persistBatchPromoteResult(input.workspaceId, batchId, {
       app_last_promote_status: 'success',
       app_last_promote_at: promotedAt,
       app_last_promote_order_count: groupedOrders.length,
@@ -1128,6 +1152,7 @@ export async function promoteMarketplaceIntakeBatchToApp(
     });
 
     await logPromoteSync({
+      workspaceId: input.workspaceId,
       batch,
       status: 'success',
       promotedByEmail: input.promotedByEmail || null,
@@ -1150,7 +1175,7 @@ export async function promoteMarketplaceIntakeBatchToApp(
       promotedAt,
     };
   } catch (error: any) {
-    await persistBatchPromoteResult(batchId, {
+    await persistBatchPromoteResult(input.workspaceId, batchId, {
       app_last_promote_status: 'failed',
       app_last_promote_at: promotedAt,
       app_last_promote_order_count: groupedOrders.length,
@@ -1165,6 +1190,7 @@ export async function promoteMarketplaceIntakeBatchToApp(
     });
 
     await logPromoteSync({
+      workspaceId: input.workspaceId,
       batch,
       status: 'failed',
       promotedByEmail: input.promotedByEmail || null,

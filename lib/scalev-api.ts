@@ -3,7 +3,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { parseScalevHeaderFinancialFields } from './scalev-header-financials';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
+import { requireExplicitWorkspaceId } from './workspace-scope';
 
 function getServiceSupabase() {
   return createClient(
@@ -32,11 +32,12 @@ export type FetchOrderListOptions = {
 };
 
 // ── Get Scalev config from DB ──
-export async function getScalevConfig(): Promise<ScalevConfig | null> {
+export async function getScalevConfig(workspaceId: string): Promise<ScalevConfig | null> {
   const svc = getServiceSupabase();
   const { data, error } = await svc
     .from('scalev_config')
     .select('id, api_key, base_url, last_sync_id')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .single();
 
@@ -309,8 +310,9 @@ interface ProductInfo { type: string; isBonus: boolean }
 const productMappingCaches = new Map<string, Map<string, ProductInfo>>();
 
 export async function loadProductMappings(
-  workspaceId = ROOVE_WORKSPACE_ID,
+  requestedWorkspaceId: string,
 ): Promise<Map<string, ProductInfo>> {
+  const workspaceId = requireExplicitWorkspaceId(requestedWorkspaceId, 'ScaleV product mapping');
   const cached = productMappingCaches.get(workspaceId);
   if (cached) return cached;
 
@@ -343,8 +345,9 @@ export function clearProductMappingCache(workspaceId?: string) {
 
 export async function lookupProductInfo(
   productName: string,
-  workspaceId = ROOVE_WORKSPACE_ID,
+  requestedWorkspaceId: string,
 ): Promise<ProductInfo> {
+  const workspaceId = requireExplicitWorkspaceId(requestedWorkspaceId, 'ScaleV product lookup');
   const mappings = await loadProductMappings(workspaceId);
   const nameLower = productName.toLowerCase().trim();
 
@@ -360,9 +363,14 @@ export async function lookupProductInfo(
     }
   }
 
-  // Roove keeps its historical keyword fallback. A new workspace must build
-  // its own product mapping and never inherit Roove brand assumptions.
-  if (workspaceId !== ROOVE_WORKSPACE_ID) {
+  const svc = getServiceSupabase();
+  const { data: workspace, error: workspaceError } = await svc
+    .from('workspaces')
+    .select('settings')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  if (workspaceError) throw workspaceError;
+  if (workspace?.settings?.legacy_product_keywords_enabled !== true) {
     return { type: 'Unknown', isBonus: false };
   }
 
@@ -404,7 +412,7 @@ export async function lookupProductInfo(
 // Backward-compatible wrapper
 export async function lookupProductType(
   productName: string,
-  workspaceId = ROOVE_WORKSPACE_ID,
+  workspaceId: string,
 ): Promise<string> {
   return (await lookupProductInfo(productName, workspaceId)).type;
 }
@@ -453,7 +461,7 @@ export async function fetchStoreList(
 }
 
 // ── Get all active businesses with API keys ──
-export async function getBusinessConfigs(): Promise<{
+export async function getBusinessConfigs(workspaceId: string): Promise<{
   id: number;
   business_code: string;
   api_key: string;
@@ -463,6 +471,7 @@ export async function getBusinessConfigs(): Promise<{
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id, business_code, api_key')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .not('api_key', 'is', null);
 
@@ -478,7 +487,7 @@ export async function getBusinessConfigs(): Promise<{
 }
 
 // ── Parse order data into DB-ready format ──
-export async function parseOrderForDb(order: any) {
+export async function parseOrderForDb(order: any, workspaceId: string) {
   const salesChannel = deriveSalesChannel(order);
   const shippedTime = order.shipped_time || order.completed_time || null;
   const completedTime = order.completed_time || null;
@@ -519,7 +528,7 @@ export async function parseOrderForDb(order: any) {
   const items = order.order_line || order.items || [];
   for (const item of items) {
     const productName = item.product?.name || item.product_name || 'Unknown';
-    const info = await lookupProductInfo(productName);
+    const info = await lookupProductInfo(productName, workspaceId);
 
     const idx = orderLines.length;
     orderLines.push({

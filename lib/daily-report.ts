@@ -94,33 +94,36 @@ function monthLabel(dateStr: string): string {
 
 // ── Data fetching ──
 
-async function fetchProductSummary(svc: any, from: string, to: string) {
+async function fetchProductSummary(svc: any, workspaceId: string, from: string, to: string) {
   const { data, error } = await svc.from('summary_daily_product_complete')
-    .select('date, net_sales, net_after_mkt, mkt_cost').gte('date', from).lte('date', to).limit(5000);
+    .select('date, net_sales, net_after_mkt, mkt_cost')
+    .eq('workspace_id', workspaceId).gte('date', from).lte('date', to).limit(5000);
   if (error) throw new Error(`fetchProductSummary failed: ${error.message}`);
   return data || [];
 }
 
-async function fetchChannelSummary(svc: any, from: string, to: string) {
+async function fetchChannelSummary(svc: any, workspaceId: string, from: string, to: string) {
   const { data, error } = await svc.from('summary_daily_order_channel')
-    .select('date, channel, net_sales').gte('date', from).lte('date', to).limit(5000);
+    .select('date, channel, net_sales')
+    .eq('workspace_id', workspaceId).gte('date', from).lte('date', to).limit(5000);
   if (error) throw new Error(`fetchChannelSummary failed: ${error.message}`);
   return data || [];
 }
 
-async function fetchShipmentCount(svc: any, from: string, to: string): Promise<number> {
+async function fetchShipmentCount(svc: any, workspaceId: string, from: string, to: string): Promise<number> {
   const { utcFrom, utcTo } = wibRangeToUtc(from, to);
   const { count, error } = await svc.from('scalev_orders')
     .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
     .in('status', ['shipped', 'completed'])
     .gte('shipped_time', utcFrom).lt('shipped_time', utcTo);
   if (error) throw new Error(`fetchShipmentCount failed: ${error.message}`);
   return count || 0;
 }
 
-async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
+async function fetchMetaAdsSpend(svc: any, workspaceId: string, from: string, to: string) {
   const { data, error } = await svc.from('daily_ads_spend')
-    .select('date, spent').gte('date', from).lte('date', to)
+    .select('date, spent').eq('workspace_id', workspaceId).gte('date', from).lte('date', to)
     .eq('data_source', 'meta_api').limit(5000);
   if (error) throw new Error(`fetchMetaAdsSpend failed: ${error.message}`);
   const byDate: Record<string, number> = {};
@@ -128,8 +131,12 @@ async function fetchMetaAdsSpend(svc: any, from: string, to: string) {
   return byDate;
 }
 
-async function fetchCRForRange(svc: any, from: string, to: string): Promise<{ created: number; shipped: number }> {
-  const { data, error } = await svc.rpc('get_cr_counts', { p_from: from, p_to: to });
+async function fetchCRForRange(svc: any, workspaceId: string, from: string, to: string): Promise<{ created: number; shipped: number }> {
+  const { data, error } = await svc.rpc('get_cr_counts', {
+    p_workspace_id: workspaceId,
+    p_from: from,
+    p_to: to,
+  });
   if (error) throw new Error(`get_cr_counts failed: ${error.message}`);
   const row = data?.[0] || {};
   return { created: Number(row.total_leads || 0), shipped: Number(row.total_shipped || 0) };
@@ -159,7 +166,7 @@ function computeRange(from: string, to: string, productRows: any[], channelRows:
 //  /report — Daily report (yesterday vs daily avg this month)
 // ════════════════════════════════════════════
 
-export async function buildDailyReport(): Promise<string> {
+export async function buildDailyReport(workspaceId: string): Promise<string> {
   // @ts-ignore
   buildDailyReport._debug = {};
   const svc = getServiceSupabase();
@@ -169,20 +176,20 @@ export async function buildDailyReport(): Promise<string> {
 
   // Batch 1: summary tables (lightweight)
   const [productRows, channelRows, metaByDate] = await Promise.all([
-    fetchProductSummary(svc, mFrom, yd),
-    fetchChannelSummary(svc, mFrom, yd),
-    fetchMetaAdsSpend(svc, mFrom, yd),
+    fetchProductSummary(svc, workspaceId, mFrom, yd),
+    fetchChannelSummary(svc, workspaceId, mFrom, yd),
+    fetchMetaAdsSpend(svc, workspaceId, mFrom, yd),
   ]);
 
   // Batch 2: shipment counts
   const [shipYd, shipMtd] = await Promise.all([
-    fetchShipmentCount(svc, yd, yd),
-    fetchShipmentCount(svc, mFrom, yd),
+    fetchShipmentCount(svc, workspaceId, yd, yd),
+    fetchShipmentCount(svc, workspaceId, mFrom, yd),
   ]);
 
   // Batch 3: CR counts (each does 2 internal queries — run sequentially)
-  const crYd = await fetchCRForRange(svc, yd, yd);
-  const crMtd = await fetchCRForRange(svc, mFrom, yd);
+  const crYd = await fetchCRForRange(svc, workspaceId, yd, yd);
+  const crMtd = await fetchCRForRange(svc, workspaceId, mFrom, yd);
 
   // @ts-ignore
   buildDailyReport._debug = { yesterday: yd, days, shipYd, shipMtd, crYd, crMtd };
@@ -236,7 +243,7 @@ export interface MonthlyReportResult {
   prevMonthTo: string;
 }
 
-export async function buildMonthlyReport(): Promise<MonthlyReportResult> {
+export async function buildMonthlyReport(workspaceId: string): Promise<MonthlyReportResult> {
   const svc = getServiceSupabase();
   const mTo = yesterdayWIB();
   const mFrom = monthStart(mTo);
@@ -247,19 +254,19 @@ export async function buildMonthlyReport(): Promise<MonthlyReportResult> {
 
   // Fetch summary data first (lightweight)
   const [productRows, channelRows, metaByDate] = await Promise.all([
-    fetchProductSummary(svc, prev.from, mTo),
-    fetchChannelSummary(svc, prev.from, mTo),
-    fetchMetaAdsSpend(svc, prev.from, mTo),
+    fetchProductSummary(svc, workspaceId, prev.from, mTo),
+    fetchChannelSummary(svc, workspaceId, prev.from, mTo),
+    fetchMetaAdsSpend(svc, workspaceId, prev.from, mTo),
   ]);
 
   // Fetch counts separately to avoid concurrent connection limits
   const [shipThis, shipPrev] = await Promise.all([
-    fetchShipmentCount(svc, mFrom, mTo),
-    fetchShipmentCount(svc, prev.from, prev.to),
+    fetchShipmentCount(svc, workspaceId, mFrom, mTo),
+    fetchShipmentCount(svc, workspaceId, prev.from, prev.to),
   ]);
   // CR queries each do 2 internal parallel calls — run sequentially to avoid connection limits
-  const crThis = await fetchCRForRange(svc, mFrom, mTo);
-  const crPrev = await fetchCRForRange(svc, prev.from, prev.to);
+  const crThis = await fetchCRForRange(svc, workspaceId, mFrom, mTo);
+  const crPrev = await fetchCRForRange(svc, workspaceId, prev.from, prev.to);
 
   const thisR = computeRange(mFrom, mTo, productRows, channelRows, metaByDate);
   const prevR = computeRange(prev.from, prev.to, productRows, channelRows, metaByDate);

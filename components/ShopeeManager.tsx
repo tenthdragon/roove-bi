@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { listMarketplaceIntakeSourceConfigs } from '@/lib/marketplace-intake-sources';
+import { useMarketplaceIntakeSources } from '@/lib/use-marketplace-intake-sources';
 import {
   getShopeeSpendStreamDefinition,
   listShopeeSpendStreamDefinitions,
@@ -80,14 +80,6 @@ type EditFormState = {
   spend_streams: EditableShopeeSpendStream[];
 };
 
-const SHOPEE_SOURCE_OPTIONS = listMarketplaceIntakeSourceConfigs()
-  .filter((config) => config.platform === 'shopee')
-  .map((config) => ({
-    value: config.sourceKey,
-    label: config.sourceLabel,
-    businessCode: config.businessCode,
-  }));
-
 const SHOPEE_STREAM_DEFINITIONS = listShopeeSpendStreamDefinitions();
 
 function getYesterday() {
@@ -161,6 +153,7 @@ function buildEditForm(shop: ShopeeShop): EditFormState {
 }
 
 export default function ShopeeManager() {
+  const { sources: marketplaceSources, error: marketplaceSourcesError } = useMarketplaceIntakeSources();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -194,11 +187,19 @@ export default function ShopeeManager() {
     marginBottom: 4,
   };
 
+  const shopeeSourceOptions = useMemo(() => marketplaceSources
+    .filter((config) => config.platform === 'shopee' && config.uploadEnabled)
+    .map((config) => ({
+      value: config.sourceKey,
+      label: config.sourceLabel,
+      businessCode: config.businessCode,
+    })), [marketplaceSources]);
+
   const sourceOptionMetaMap = useMemo(
     () => new Map<string, { label: string; businessCode: string }>(
-      SHOPEE_SOURCE_OPTIONS.map((option) => [option.value, { label: option.label, businessCode: option.businessCode }]),
+      shopeeSourceOptions.map((option) => [option.value, { label: option.label, businessCode: option.businessCode }]),
     ),
-    [],
+    [shopeeSourceOptions],
   );
 
   const getSourceDisplay = useCallback((sourceKey: string | null) => {
@@ -427,16 +428,16 @@ export default function ShopeeManager() {
           </div>
         )}
 
-        {message && (
+        {(marketplaceSourcesError || message) && (
           <div style={{
             marginBottom: 12,
             padding: 12,
             borderRadius: 8,
             fontSize: 13,
-            background: message.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
-            color: message.type === 'success' ? 'var(--green)' : 'var(--red)',
+            background: message?.type === 'success' && !marketplaceSourcesError ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+            color: message?.type === 'success' && !marketplaceSourcesError ? 'var(--green)' : 'var(--red)',
           }}>
-            {message.text}
+            {marketplaceSourcesError || message?.text}
           </div>
         )}
 
@@ -547,7 +548,7 @@ export default function ShopeeManager() {
                                   style={inputStyle}
                                 >
                                   <option value="">- Pilih Source Shopee -</option>
-                                  {SHOPEE_SOURCE_OPTIONS.map((option) => (
+                                  {shopeeSourceOptions.map((option) => (
                                     <option key={option.value} value={option.value}>{option.label}</option>
                                   ))}
                                 </select>

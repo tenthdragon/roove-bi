@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireDashboardRoles, requireRooveOnlyFeature } from '@/lib/dashboard-access';
+import { requireDashboardRoles } from '@/lib/dashboard-access';
 import { buildDailyReport } from '@/lib/daily-report';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { sendTelegramMessage } from '@/lib/telegram';
+import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 250;
@@ -17,6 +18,7 @@ export async function GET(req: NextRequest) {
     const secret = req.nextUrl.searchParams.get('secret');
     const cronSecret = process.env.CRON_SECRET;
     const isCron = !!cronSecret && (authHeader === `Bearer ${cronSecret}` || secret === cronSecret);
+    let workspaceIds: string[] = [];
 
     if (!isCron) {
       const originError = rejectUntrustedOrigin(req);
@@ -35,24 +37,34 @@ export async function GET(req: NextRequest) {
       if (rateLimitError) return rateLimitError;
 
       try {
-        await requireRooveOnlyFeature('Telegram Report');
-        await requireDashboardRoles(['owner'], 'Hanya owner yang bisa menjalankan Telegram report manual.');
+        const access = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa menjalankan Telegram report manual.');
+        workspaceIds = [access.workspaceId];
       } catch (err: any) {
         const status = /sesi|login/i.test(err.message || '') ? 401 : 403;
         return NextResponse.json({ ok: false, error: err.message, serverTime: wibStr }, { status });
       }
+    } else {
+      workspaceIds = await resolveScheduledWorkspaceIds(
+        req.nextUrl.searchParams.get('workspace_id'),
+        'telegram',
+      );
     }
-
-    const message = await buildDailyReport();
-    // @ts-ignore — debug data from buildDailyReport
-    const debug = (buildDailyReport as any)._debug || {};
 
     const isDebug = req.nextUrl.searchParams.get('debug') === '1';
-    if (!isDebug) {
-      const sent = await sendTelegramMessage(message);
-      if (!sent) return NextResponse.json({ ok: false, error: 'Failed to send', serverTime: wibStr }, { status: 500 });
+    const results = [];
+    for (const workspaceId of workspaceIds) {
+      const message = await buildDailyReport(workspaceId);
+      const sent = isDebug
+        ? true
+        : await sendTelegramMessage(workspaceId, message);
+      results.push({ workspaceId, sent, message });
     }
-    return NextResponse.json({ ok: true, serverTime: wibStr, debug, message });
+    const failed = results.filter((result) => !result.sent);
+    return NextResponse.json({
+      ok: failed.length === 0,
+      serverTime: wibStr,
+      results,
+    }, { status: failed.length === 0 ? 200 : 500 });
   } catch (err: any) {
     console.error('[telegram-report] Error:', err);
     return NextResponse.json({ ok: false, error: err.message, serverTime: wibStr }, { status: 500 });

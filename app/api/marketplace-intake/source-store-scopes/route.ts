@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import {
-  assertMarketplaceIntakeSourceKey,
   listMarketplaceIntakeStoreScope,
   upsertMarketplaceIntakeStoreScope,
 } from '@/lib/marketplace-intake-source-store-scopes';
@@ -24,15 +23,17 @@ export async function GET(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
+    let workspaceId: string;
     try {
-      await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat store scope Marketplace Intake.');
+      const access = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat store scope Marketplace Intake.');
+      workspaceId = access.workspaceId;
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
       return NextResponse.json({ error: error.message }, { status });
     }
 
-    const sourceKey = assertMarketplaceIntakeSourceKey(req.nextUrl.searchParams.get('sourceKey'));
-    const result = await listMarketplaceIntakeStoreScope(sourceKey);
+    const sourceKey = req.nextUrl.searchParams.get('sourceKey');
+    const result = await listMarketplaceIntakeStoreScope(workspaceId, sourceKey);
     return NextResponse.json(result);
   } catch (error: any) {
     console.error('Marketplace intake source store scope GET error:', error);
@@ -57,19 +58,26 @@ export async function POST(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
+    let workspaceId: string;
     try {
-      await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengubah store scope Marketplace Intake.');
+      const access = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengubah store scope Marketplace Intake.');
+      workspaceId = access.workspaceId;
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
       return NextResponse.json({ error: error.message }, { status });
     }
 
     const body = await req.json();
-    const sourceKey = assertMarketplaceIntakeSourceKey(body?.sourceKey);
+    const sourceKey = String(body?.sourceKey || '').trim();
     const selectedStoreNames = Array.isArray(body?.selectedStoreNames) ? body.selectedStoreNames : [];
+    const scalevWarehouseNames = body?.scalevWarehouseNames && typeof body.scalevWarehouseNames === 'object'
+      ? body.scalevWarehouseNames
+      : undefined;
     const result = await upsertMarketplaceIntakeStoreScope({
+      workspaceId,
       sourceKey,
       selectedStoreNames,
+      scalevWarehouseNames,
     });
     return NextResponse.json(result);
   } catch (error: any) {

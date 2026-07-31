@@ -29,6 +29,7 @@ import WarehouseActivityLogTab from '@/components/WarehouseActivityLogTab';
 import WarehouseBusinessDirectoryTab from '@/components/WarehouseBusinessDirectoryTab';
 import WarehouseOriginRegistryTab from '@/components/WarehouseOriginRegistryTab';
 import { usePermissions } from '@/lib/PermissionsContext';
+import { useWorkspace } from '@/lib/WorkspaceContext';
 
 const SUB_TABS = [
   { id: 'brands', label: 'Brand' },
@@ -44,8 +45,6 @@ const SUB_TABS = [
 ];
 
 const DEFAULT_CATEGORIES = ['fg', 'sachet', 'packaging', 'bonus', 'wip', 'wip_material', 'other'];
-const ENTITIES = ['RTI', 'RLB', 'RLT', 'JHN'];
-
 function compareCategoryOption(a: string, b: string) {
   const left = String(a || '').trim().toLowerCase();
   const right = String(b || '').trim().toLowerCase();
@@ -123,6 +122,9 @@ export default function WarehouseSettingsPage() {
 // ============================================================
 
 function MasterProdukTab() {
+  const { activeWorkspace } = useWorkspace();
+  const defaultEntity = String(activeWorkspace.settings.inventory_entity || 'RLB');
+  const defaultWarehouse = String(activeWorkspace.settings.warehouse_code || 'BTN');
   const [products, setProducts] = useState<any[]>([]);
   const [brands, setBrands] = useState<any[]>([]);
   const [vendors, setVendorList] = useState<any[]>([]);
@@ -133,7 +135,7 @@ function MasterProdukTab() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editData, setEditData] = useState<any>({});
   const [showAdd, setShowAdd] = useState(false);
-  const [newProduct, setNewProduct] = useState({ name: '', sku: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor_id: '', brand_id: '' });
+  const [newProduct, setNewProduct] = useState({ name: '', sku: '', category: 'fg', unit: 'pcs', entity: defaultEntity, warehouse: defaultWarehouse, price_list: '', hpp: '', vendor_id: '', brand_id: '' });
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: string; text: string } | null>(null);
 
@@ -176,6 +178,15 @@ function MasterProdukTab() {
     products.forEach(p => set.add(`${p.warehouse}-${p.entity}`));
     return Array.from(set).sort();
   }, [products]);
+
+  const entityOptions = useMemo(() => {
+    const values = new Set<string>([defaultEntity]);
+    products.forEach((product) => {
+      const entity = String(product?.entity || '').trim();
+      if (entity) values.add(entity);
+    });
+    return Array.from(values).sort();
+  }, [defaultEntity, products]);
 
   const categoryOptions = useMemo(() => {
     const set = new Set(DEFAULT_CATEGORIES);
@@ -228,7 +239,7 @@ function MasterProdukTab() {
         brand_id: newProduct.brand_id ? Number(newProduct.brand_id) : undefined,
       });
       setShowAdd(false);
-      setNewProduct({ name: '', sku: '', category: 'fg', unit: 'pcs', entity: 'RLB', warehouse: 'BTN', price_list: '', hpp: '', vendor_id: '', brand_id: '' });
+      setNewProduct({ name: '', sku: '', category: 'fg', unit: 'pcs', entity: defaultEntity, warehouse: defaultWarehouse, price_list: '', hpp: '', vendor_id: '', brand_id: '' });
       setMessage({ type: 'success', text: 'Produk ditambahkan' });
       await loadData();
     } catch (e: any) { setMessage({ type: 'error', text: e.message }); }
@@ -282,7 +293,7 @@ function MasterProdukTab() {
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>SKU</label><input value={newProduct.sku} onChange={e => setNewProduct({...newProduct, sku: e.target.value})} style={inputStyle} /></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Kategori</label><select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} style={inputStyle}>{categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}</select></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Unit</label><input value={newProduct.unit} onChange={e => setNewProduct({...newProduct, unit: e.target.value})} style={inputStyle} /></div>
-            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Entity</label><select value={newProduct.entity} onChange={e => setNewProduct({...newProduct, entity: e.target.value})} style={inputStyle}>{ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}</select></div>
+            <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Entity</label><select value={newProduct.entity} onChange={e => setNewProduct({...newProduct, entity: e.target.value})} style={inputStyle}>{entityOptions.map(e => <option key={e} value={e}>{e}</option>)}</select></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Gudang</label><input value={newProduct.warehouse} onChange={e => setNewProduct({...newProduct, warehouse: e.target.value})} style={inputStyle} /></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Brand</label><select value={newProduct.brand_id} onChange={e => setNewProduct({...newProduct, brand_id: e.target.value})} style={inputStyle}><option value="">-</option>{brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>HPP</label><input type="number" value={newProduct.hpp} onChange={e => setNewProduct({...newProduct, hpp: e.target.value})} style={inputStyle} /></div>

@@ -246,6 +246,7 @@ export type SingleMarketplaceOrderImportResult = {
 };
 
 type ImportContext = {
+  workspaceId: string;
   svc: ReturnType<typeof createServiceSupabase>;
   businesses: BusinessRow[];
   businessById: Map<number, BusinessRow>;
@@ -801,6 +802,7 @@ function buildIdentifierLookupMap(rows: CatalogIdentifierRow[]): Map<number, Map
 
 async function loadImportContext(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   orders: CanonicalOrder[],
 ): Promise<ImportContext> {
   const identifierCandidates = Array.from(new Set(
@@ -817,6 +819,7 @@ async function loadImportContext(
     svc
       .from('scalev_webhook_businesses')
       .select('id, business_code, business_name, api_key, tax_rate_name')
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true)
       .not('api_key', 'is', null),
     identifierCandidates.length > 0
@@ -835,17 +838,20 @@ async function loadImportContext(
             identifier_normalized,
             source
           `)
+          .eq('workspace_id', workspaceId)
           .in('identifier_normalized', identifierCandidates)
       : Promise.resolve({ data: [], error: null }),
     externalIds.length > 0
       ? svc
           .from('scalev_orders')
           .select('id, order_id, external_id, source, business_code, store_name')
+          .eq('workspace_id', workspaceId)
           .in('external_id', externalIds)
       : Promise.resolve({ data: [], error: null }),
     svc
       .from('product_mapping')
-      .select('sku, product_name, cogs, brand, product_type'),
+      .select('sku, product_name, cogs, brand, product_type')
+      .eq('workspace_id', workspaceId),
   ]);
 
   let storesData: StoreChannelRow[] | null = null;
@@ -854,6 +860,7 @@ async function loadImportContext(
     const fullStoresRes = await svc
       .from('scalev_store_channels')
       .select('id, business_id, store_name, store_type, channel_override, scalev_store_id, store_unique_id')
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true)
       .eq('store_type', 'marketplace');
 
@@ -861,6 +868,7 @@ async function loadImportContext(
       const legacyStoresRes = await svc
         .from('scalev_store_channels')
         .select('id, business_id, store_name, store_type, channel_override')
+        .eq('workspace_id', workspaceId)
         .eq('is_active', true)
         .eq('store_type', 'marketplace');
 
@@ -899,6 +907,7 @@ async function loadImportContext(
   }
 
   return {
+    workspaceId,
     svc,
     businesses,
     businessById: new Map(businesses.map((business) => [business.id, business])),
@@ -923,6 +932,7 @@ async function getStoreUsageCount(context: ImportContext, businessCode: string, 
   const { count, error } = await context.svc
     .from('scalev_orders')
     .select('id', { count: 'exact', head: true })
+    .eq('workspace_id', context.workspaceId)
     .eq('business_code', businessCode)
     .eq('store_name', storeName);
 
@@ -1113,6 +1123,7 @@ async function resolveFromExistingAuthoritativeOrder(
   const { data: storeRows, error } = await context.svc
     .from('scalev_store_channels')
     .select('id, business_id, store_name, store_type, channel_override')
+    .eq('workspace_id', context.workspaceId)
     .eq('is_active', true)
     .eq('business_id', business.id)
     .eq('store_name', storeName)
@@ -1155,6 +1166,7 @@ async function maybePersistResolvedStore(context: ImportContext, store: Resolved
         scalev_store_id: store.live.id,
         store_unique_id: store.live.unique_id || null,
       })
+      .eq('workspace_id', context.workspaceId)
       .eq('id', store.row.id);
   } catch {
     // best-effort only
@@ -1268,6 +1280,7 @@ async function fetchVariantRow(
   const { data, error } = await context.svc
     .from('scalev_catalog_variants')
     .select('business_id, scalev_product_id, scalev_variant_id, scalev_variant_unique_id, sku, name, product_name')
+    .eq('workspace_id', context.workspaceId)
     .eq('business_id', businessId)
     .eq('scalev_variant_id', variantId)
     .maybeSingle();
@@ -1302,6 +1315,7 @@ async function fetchBundleIdentifiers(
       identifier_normalized,
       source
     `)
+    .eq('workspace_id', context.workspaceId)
     .eq('business_id', businessId)
     .eq('entity_key', entityKey)
     .eq('entity_type', 'bundle');
@@ -1625,6 +1639,7 @@ async function upsertLocalMarketplaceOrder(
   const taxDivisor = 1 + (taxRate / 100);
 
   const rowPayload: Record<string, any> = {
+    workspace_id: context.workspaceId,
     order_id: orderId,
     external_id: order.externalId,
     marketplace_tracking_number: normalizeMarketplaceTracking(order.trackingNumber),
@@ -1696,6 +1711,7 @@ async function upsertLocalMarketplaceOrder(
     const { error } = await context.svc
       .from('scalev_orders')
       .update(rowPayload)
+      .eq('workspace_id', context.workspaceId)
       .eq('id', existing.id);
     if (error) throw error;
   } else {
@@ -1712,7 +1728,11 @@ async function upsertLocalMarketplaceOrder(
 
   if (!dbOrderId) throw new Error(`Order lokal ${order.externalId} gagal mendapatkan id.`);
 
-  await context.svc.from('scalev_order_lines').delete().eq('scalev_order_id', dbOrderId);
+  await context.svc
+    .from('scalev_order_lines')
+    .delete()
+    .eq('workspace_id', context.workspaceId)
+    .eq('scalev_order_id', dbOrderId);
 
   const lineMap = new Map<string, Record<string, any>>();
   for (const line of order.lines) {
@@ -1728,6 +1748,7 @@ async function upsertLocalMarketplaceOrder(
       continue;
     }
     lineMap.set(key, {
+      workspace_id: context.workspaceId,
       scalev_order_id: dbOrderId,
       order_id: orderId,
       product_name: line.productName,
@@ -1761,6 +1782,7 @@ async function upsertLocalMarketplaceOrder(
 }
 
 export async function importSingleMarketplaceOrderFromWorkbook(input: {
+  workspaceId: string;
   file: File;
   externalId: string;
   uploadedBy: string | null;
@@ -1778,7 +1800,7 @@ export async function importSingleMarketplaceOrderFromWorkbook(input: {
     throw new Error(`Order ${targetExternalId} tidak ditemukan di workbook.`);
   }
 
-  const context = await loadImportContext(svc, [order]);
+  const context = await loadImportContext(svc, input.workspaceId, [order]);
   const resolved = await resolveOrderBusinessAndStore(context, order);
   await maybePersistResolvedStore(context, resolved.store);
   const built = await buildScalevPayload(context, resolved.business, resolved.store, order, resolved.resolvedLines);
@@ -1794,6 +1816,7 @@ export async function importSingleMarketplaceOrderFromWorkbook(input: {
 
   const responseData = created.data || created;
   await svc.from('scalev_sync_log').insert({
+    workspace_id: input.workspaceId,
     status: 'success',
     sync_type: `${MARKETPLACE_API_SYNC_TYPE}_single`,
     business_code: resolved.business.business_code,
@@ -1880,6 +1903,7 @@ function buildCanonicalOrderFromMarketplaceIntake(
 }
 
 export async function importSingleMarketplaceIntakeOrder(input: {
+  workspaceId: string;
   intakeOrderId: number;
   uploadedBy: string | null;
   debug?: boolean;
@@ -1922,6 +1946,7 @@ export async function importSingleMarketplaceIntakeOrder(input: {
       mp_shipping_cost_buyer,
       mp_estimated_shipping_cost
     `)
+    .eq('workspace_id', input.workspaceId)
     .eq('id', intakeOrderId)
     .single<IntakeOrderCreateRow>();
   if (orderError) throw orderError;
@@ -1941,6 +1966,7 @@ export async function importSingleMarketplaceIntakeOrder(input: {
       mp_price_after_discount,
       raw_row
     `)
+    .eq('workspace_id', input.workspaceId)
     .eq('intake_order_id', intakeOrderId)
     .order('line_index', { ascending: true });
   if (lineRes.error && String(lineRes.error?.message || '').toLowerCase().includes('column')) {
@@ -1958,6 +1984,7 @@ export async function importSingleMarketplaceIntakeOrder(input: {
         mp_price_after_discount,
         raw_row
       `)
+      .eq('workspace_id', input.workspaceId)
       .eq('intake_order_id', intakeOrderId)
       .order('line_index', { ascending: true });
   }
@@ -1980,7 +2007,7 @@ export async function importSingleMarketplaceIntakeOrder(input: {
   }
   let context: ImportContext;
   try {
-    context = await loadImportContext(svc, [canonicalOrder]);
+    context = await loadImportContext(svc, input.workspaceId, [canonicalOrder]);
   } catch (error) {
     throw new Error(`Load import context gagal untuk order ${canonicalOrder.externalId}: ${describeUnknownError(error)}`);
   }
@@ -2060,6 +2087,7 @@ export async function importSingleMarketplaceIntakeOrder(input: {
 
   const responseData = created.data || created;
   await svc.from('scalev_sync_log').insert({
+    workspace_id: input.workspaceId,
     status: 'success',
     sync_type: `${MARKETPLACE_API_SYNC_TYPE}_single_intake`,
     business_code: resolved.business.business_code,
@@ -2084,6 +2112,7 @@ export async function importSingleMarketplaceIntakeOrder(input: {
 }
 
 export async function importMarketplaceWorkbook(input: {
+  workspaceId: string;
   file: File;
   uploadedBy: string | null;
   filenameOverride?: string | null;
@@ -2104,7 +2133,7 @@ export async function importMarketplaceWorkbook(input: {
   };
 
   const importableOrders = parsed.orders.filter((order) => !shouldSkipOrderStatus(order.status));
-  const context = await loadImportContext(svc, importableOrders);
+  const context = await loadImportContext(svc, input.workspaceId, importableOrders);
   const businessesTouched = new Set<string>();
 
   for (const order of importableOrders) {
@@ -2139,6 +2168,7 @@ export async function importMarketplaceWorkbook(input: {
   stats.skipped = parsed.orders.length - importableOrders.length;
 
   await svc.from('scalev_sync_log').insert({
+    workspace_id: input.workspaceId,
     status: stats.errors.length > 0 ? (stats.scalevCreated > 0 ? 'partial' : 'failed') : 'success',
     sync_type: MARKETPLACE_API_SYNC_TYPE,
     business_code: businessesTouched.size === 1 ? Array.from(businessesTouched)[0] : null,

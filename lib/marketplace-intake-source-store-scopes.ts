@@ -1,16 +1,16 @@
 import { createServiceSupabase } from './supabase-server';
 import {
-  getMarketplaceIntakeSourceConfig,
-  listMarketplaceIntakeSourceConfigs,
   type MarketplaceIntakeSourceConfig,
   type MarketplaceIntakeSourceKey,
 } from './marketplace-intake-sources';
+import { resolveWorkspaceMarketplaceIntakeSourceConfig } from './marketplace-intake-workspace-sources';
 
 type ScopeRow = {
   id: number;
   source_key: string;
   store_name: string;
   is_enabled: boolean | null;
+  scalev_warehouse_name: string | null;
 };
 
 type StoreChannelRow = {
@@ -26,6 +26,7 @@ export type MarketplaceIntakeStoreScopeStoreItem = {
   isActive: boolean;
   storeType: string | null;
   channelOverride: string | null;
+  scalevWarehouseName: string | null;
 };
 
 export type MarketplaceIntakeStoreScope = {
@@ -58,20 +59,12 @@ function getSchemaMessage() {
   return 'Schema store scope marketplace belum siap. Jalankan migration intake terbaru lalu reload schema PostgREST.';
 }
 
-export function assertMarketplaceIntakeSourceKey(sourceKey: unknown): MarketplaceIntakeSourceKey {
-  const normalized = cleanText(sourceKey);
-  const match = listMarketplaceIntakeSourceConfigs().find((config) => config.sourceKey === normalized);
-  if (!match) {
-    throw new Error('sourceKey intake tidak valid.');
-  }
-  return match.sourceKey;
-}
-
-async function loadBusinessId(sourceConfig: MarketplaceIntakeSourceConfig): Promise<number | null> {
+async function loadBusinessId(workspaceId: string, sourceConfig: MarketplaceIntakeSourceConfig): Promise<number | null> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id')
+    .eq('workspace_id', workspaceId)
     .eq('business_code', sourceConfig.businessCode)
     .maybeSingle();
 
@@ -83,11 +76,12 @@ async function loadBusinessId(sourceConfig: MarketplaceIntakeSourceConfig): Prom
   return data?.id ? Number(data.id) : null;
 }
 
-async function loadScopeRows(sourceKey: MarketplaceIntakeSourceKey): Promise<ScopeRow[]> {
+async function loadScopeRows(workspaceId: string, sourceKey: MarketplaceIntakeSourceKey): Promise<ScopeRow[]> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('marketplace_intake_source_store_scopes')
-    .select('id, source_key, store_name, is_enabled')
+    .select('id, source_key, store_name, is_enabled, scalev_warehouse_name')
+    .eq('workspace_id', workspaceId)
     .eq('source_key', sourceKey)
     .order('store_name', { ascending: true });
 
@@ -99,12 +93,13 @@ async function loadScopeRows(sourceKey: MarketplaceIntakeSourceKey): Promise<Sco
   return (data || []) as ScopeRow[];
 }
 
-async function loadAvailableStoreRows(businessId: number | null): Promise<StoreChannelRow[]> {
+async function loadAvailableStoreRows(workspaceId: string, businessId: number | null): Promise<StoreChannelRow[]> {
   if (!businessId) return [];
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_store_channels')
     .select('store_name, store_type, is_active, channel_override')
+    .eq('workspace_id', workspaceId)
     .eq('business_id', businessId)
     .order('store_name', { ascending: true });
 
@@ -116,13 +111,13 @@ async function loadAvailableStoreRows(businessId: number | null): Promise<StoreC
   return (data || []) as StoreChannelRow[];
 }
 
-export async function listMarketplaceIntakeStoreScope(sourceKey: unknown): Promise<MarketplaceIntakeStoreScope> {
-  const normalizedSourceKey = assertMarketplaceIntakeSourceKey(sourceKey);
-  const sourceConfig = getMarketplaceIntakeSourceConfig(normalizedSourceKey);
-  const businessId = await loadBusinessId(sourceConfig);
+export async function listMarketplaceIntakeStoreScope(workspaceId: string, sourceKey: unknown): Promise<MarketplaceIntakeStoreScope> {
+  const sourceConfig = await resolveWorkspaceMarketplaceIntakeSourceConfig(workspaceId, sourceKey);
+  const normalizedSourceKey = sourceConfig.sourceKey;
+  const businessId = await loadBusinessId(workspaceId, sourceConfig);
   const [scopeRows, availableRows] = await Promise.all([
-    loadScopeRows(normalizedSourceKey),
-    loadAvailableStoreRows(businessId),
+    loadScopeRows(workspaceId, normalizedSourceKey),
+    loadAvailableStoreRows(workspaceId, businessId),
   ]);
 
   const enabledScopeNames = scopeRows
@@ -140,16 +135,20 @@ export async function listMarketplaceIntakeStoreScope(sourceKey: unknown): Promi
   const hasCustomSelection = scopeRows.length > 0;
   const selectedStoreNames = hasCustomSelection
     ? Array.from(new Set(enabledScopeNames)).sort((left, right) => left.localeCompare(right))
-    : Array.from(new Set(
-        availableStoreNames.length > 0
-          ? sourceConfig.allowedStores.filter((storeName) => availableByName.has(storeName))
-          : sourceConfig.allowedStores,
-      )).sort((left, right) => left.localeCompare(right));
+    : availableRows
+        .filter((row) => row.is_active !== false)
+        .map((row) => cleanText(row.store_name))
+        .filter((value): value is string => Boolean(value))
+        .filter((value, index, rows) => rows.indexOf(value) === index)
+        .sort((left, right) => left.localeCompare(right));
 
   const allNames = Array.from(new Set([
     ...Array.from(availableByName.keys()),
     ...selectedStoreNames,
   ])).sort((left, right) => left.localeCompare(right));
+  const scopeByName = new Map(
+    scopeRows.map((row) => [String(row.store_name || '').trim(), row]),
+  );
 
   return {
     sourceKey: sourceConfig.sourceKey,
@@ -166,18 +165,21 @@ export async function listMarketplaceIntakeStoreScope(sourceKey: unknown): Promi
         isActive: row?.is_active !== false,
         storeType: row?.store_type || null,
         channelOverride: row?.channel_override || null,
+        scalevWarehouseName: cleanText(scopeByName.get(storeName)?.scalev_warehouse_name),
       };
     }),
   };
 }
 
 export async function upsertMarketplaceIntakeStoreScope(input: {
+  workspaceId: string;
   sourceKey: MarketplaceIntakeSourceKey;
   selectedStoreNames: string[];
+  scalevWarehouseNames?: Record<string, string | null | undefined>;
 }): Promise<MarketplaceIntakeStoreScope> {
-  const sourceConfig = getMarketplaceIntakeSourceConfig(assertMarketplaceIntakeSourceKey(input.sourceKey));
-  const businessId = await loadBusinessId(sourceConfig);
-  const availableRows = await loadAvailableStoreRows(businessId);
+  const sourceConfig = await resolveWorkspaceMarketplaceIntakeSourceConfig(input.workspaceId, input.sourceKey);
+  const businessId = await loadBusinessId(input.workspaceId, sourceConfig);
+  const availableRows = await loadAvailableStoreRows(input.workspaceId, businessId);
   const availableStoreNames = new Set(
     availableRows
       .map((row) => cleanText(row.store_name))
@@ -201,22 +203,29 @@ export async function upsertMarketplaceIntakeStoreScope(input: {
   }
 
   const svc = createServiceSupabase();
-  const existingRows = await loadScopeRows(sourceConfig.sourceKey);
+  const existingRows = await loadScopeRows(input.workspaceId, sourceConfig.sourceKey);
   const existingNames = new Set(existingRows.map((row) => cleanText(row.store_name)).filter((value): value is string => Boolean(value)));
+  const existingByName = new Map(
+    existingRows.map((row) => [String(row.store_name || '').trim(), row]),
+  );
 
   const payload = Array.from(availableStoreNames).map((storeName) => ({
+    workspace_id: input.workspaceId,
     source_key: sourceConfig.sourceKey,
     business_id: businessId,
     business_code: sourceConfig.businessCode,
     platform: sourceConfig.platform,
     store_name: storeName,
     is_enabled: selectedStoreNames.includes(storeName),
+    scalev_warehouse_name: input.scalevWarehouseNames
+      ? cleanText(input.scalevWarehouseNames[storeName])
+      : cleanText(existingByName.get(storeName)?.scalev_warehouse_name),
   }));
 
   if (payload.length > 0) {
     const { error } = await svc
       .from('marketplace_intake_source_store_scopes')
-      .upsert(payload, { onConflict: 'source_key,store_name' });
+      .upsert(payload, { onConflict: 'workspace_id,source_key,store_name' });
 
     if (error) {
       if (isMissingSchemaError(error)) throw new Error(getSchemaMessage());
@@ -229,6 +238,7 @@ export async function upsertMarketplaceIntakeStoreScope(input: {
     const { error } = await svc
       .from('marketplace_intake_source_store_scopes')
       .delete()
+      .eq('workspace_id', input.workspaceId)
       .eq('source_key', sourceConfig.sourceKey)
       .in('store_name', obsoleteNames);
 
@@ -238,15 +248,16 @@ export async function upsertMarketplaceIntakeStoreScope(input: {
     }
   }
 
-  return listMarketplaceIntakeStoreScope(sourceConfig.sourceKey);
+  return listMarketplaceIntakeStoreScope(input.workspaceId, sourceConfig.sourceKey);
 }
 
 export async function resolveMarketplaceIntakeSourceConfig(
+  workspaceId: string,
   sourceKey?: string | null,
 ): Promise<MarketplaceIntakeSourceConfig> {
-  const baseConfig = getMarketplaceIntakeSourceConfig(sourceKey);
+  const baseConfig = await resolveWorkspaceMarketplaceIntakeSourceConfig(workspaceId, sourceKey);
   try {
-    const scope = await listMarketplaceIntakeStoreScope(baseConfig.sourceKey);
+    const scope = await listMarketplaceIntakeStoreScope(workspaceId, baseConfig.sourceKey);
     return {
       ...baseConfig,
       allowedStores: scope.selectedStoreNames.length > 0 ? scope.selectedStoreNames : baseConfig.allowedStores,

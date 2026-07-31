@@ -24,15 +24,17 @@ export async function GET(req: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
+    let workspaceId: string;
     try {
-      await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mencari bundle Marketplace Intake.');
+      const access = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mencari bundle Marketplace Intake.');
+      workspaceId = access.workspaceId;
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
       return NextResponse.json({ error: error.message }, { status });
     }
 
     const query = String(req.nextUrl.searchParams.get('q') || '').trim();
-    const sourceConfig = await resolveMarketplaceIntakeSourceConfig(req.nextUrl.searchParams.get('sourceKey'));
+    const sourceConfig = await resolveMarketplaceIntakeSourceConfig(workspaceId, req.nextUrl.searchParams.get('sourceKey'));
     if (query.length < 2) {
       return NextResponse.json({ results: [] });
     }
@@ -41,6 +43,7 @@ export async function GET(req: NextRequest) {
     const businessRes = await svc
       .from('scalev_webhook_businesses')
       .select('id, business_code')
+      .eq('workspace_id', workspaceId)
       .eq('business_code', sourceConfig.businessCode)
       .maybeSingle();
     if (businessRes.error || !businessRes.data) {
@@ -50,6 +53,7 @@ export async function GET(req: NextRequest) {
     const bundlesRes = await svc
       .from('scalev_catalog_bundles')
       .select('scalev_bundle_id, name, public_name, display, custom_id')
+      .eq('workspace_id', workspaceId)
       .eq('business_id', businessRes.data.id)
       .or(`custom_id.ilike.%${query}%,name.ilike.%${query}%,public_name.ilike.%${query}%,display.ilike.%${query}%`)
       .limit(20);

@@ -40,6 +40,12 @@ function parseArgs() {
       || '1000',
     ) || 1000,
   );
+  const workspaceId = process.argv.find((arg) => arg.startsWith('--workspace-id='))?.split('=')[1]
+    || process.env.WORKSPACE_ID
+    || '';
+  if (!workspaceId) {
+    throw new Error('Workspace wajib diisi melalui --workspace-id=<uuid> atau WORKSPACE_ID.');
+  }
 
   const fromDate = dateArg || fromArg || DEFAULT_FROM_DATE;
   const toDate = dateArg || toArg || getTodayJakartaDate();
@@ -55,6 +61,7 @@ function parseArgs() {
   return {
     apply: process.argv.includes('--apply'),
     batchSize,
+    workspaceId,
     fromDate,
     toDate,
   };
@@ -72,6 +79,7 @@ async function main() {
   const config = parseArgs();
   const summary = await runScalevSourceClassBackfill({
     supabase,
+    workspaceId: config.workspaceId,
     apply: config.apply,
     batchSize: config.batchSize,
     fromDate: config.fromDate,

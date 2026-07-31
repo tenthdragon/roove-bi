@@ -262,7 +262,7 @@ type IdentifierSeed = {
 
 async function requireScalevCatalogAccess(label = 'Katalog Scalev') {
   await requireDashboardTabAccess('warehouse-settings', label);
-  await requireDashboardPermissionAccess('whs:mapping', label);
+  return requireDashboardPermissionAccess('whs:mapping', label);
 }
 
 function isCatalogSchemaMissingError(error: any): boolean {
@@ -441,11 +441,12 @@ function getScalevRetryDelayMs(response: Response, attempt: number): number {
   return SCALEV_RETRY_BASE_MS * Math.max(1, attempt + 1);
 }
 
-async function getCatalogSchemaState(): Promise<{ ready: boolean; message: string | null }> {
+async function getCatalogSchemaState(workspaceId: string): Promise<{ ready: boolean; message: string | null }> {
   const svc = createServiceSupabase();
   const { error: productError } = await svc
     .from('scalev_catalog_products')
     .select('id, owner_business_code, processor_business_code')
+    .eq('workspace_id', workspaceId)
     .limit(1);
 
   if (productError) {
@@ -459,6 +460,7 @@ async function getCatalogSchemaState(): Promise<{ ready: boolean; message: strin
   const { error: bundleError } = await svc
     .from('scalev_catalog_bundles')
     .select('id, owner_business_code, processor_business_code')
+    .eq('workspace_id', workspaceId)
     .limit(1);
 
   if (!bundleError) {
@@ -528,6 +530,7 @@ async function fetchScalevPaginatedResults<T>(
 }
 
 async function batchUpsert(
+  workspaceId: string,
   table: string,
   rows: Record<string, any>[],
   onConflict: string,
@@ -535,7 +538,8 @@ async function batchUpsert(
   if (rows.length === 0) return;
 
   const svc = createServiceSupabase();
-  for (const chunk of chunkArray(rows, UPSERT_CHUNK_SIZE)) {
+  const tenantRows = rows.map((row) => ({ ...row, workspace_id: workspaceId }));
+  for (const chunk of chunkArray(tenantRows, UPSERT_CHUNK_SIZE)) {
     const { error } = await svc
       .from(table)
       .upsert(chunk, { onConflict });
@@ -544,6 +548,7 @@ async function batchUpsert(
 }
 
 async function cleanupStaleCatalogRows(
+  workspaceId: string,
   table: string,
   businessId: number,
   syncAt: string,
@@ -552,6 +557,7 @@ async function cleanupStaleCatalogRows(
   const { error } = await svc
     .from(table)
     .delete()
+    .eq('workspace_id', workspaceId)
     .eq('business_id', businessId)
     .neq('last_synced_at', syncAt);
   if (error) throw error;
@@ -1001,6 +1007,7 @@ function buildCatalogPayload(
 }
 
 async function upsertSyncState(input: {
+  workspace_id: string;
   business_id: number;
   business_code: string;
   sync_status: 'idle' | 'running' | 'success' | 'failed';
@@ -1015,6 +1022,7 @@ async function upsertSyncState(input: {
   const { error } = await svc
     .from('scalev_catalog_sync_state')
     .upsert({
+      workspace_id: input.workspace_id,
       business_id: input.business_id,
       business_code: input.business_code,
       sync_status: input.sync_status,
@@ -1028,11 +1036,12 @@ async function upsertSyncState(input: {
   if (error) throw error;
 }
 
-async function getBusinessById(businessId: number): Promise<ScalevBusinessConfig> {
+async function getBusinessById(workspaceId: string, businessId: number): Promise<ScalevBusinessConfig> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id, business_code, business_name, api_key, is_active')
+    .eq('workspace_id', workspaceId)
     .eq('id', businessId)
     .single();
 
@@ -1043,11 +1052,12 @@ async function getBusinessById(businessId: number): Promise<ScalevBusinessConfig
   return data as ScalevBusinessConfig;
 }
 
-async function getActiveScalevBusinessesForSync() {
+async function getActiveScalevBusinessesForSync(workspaceId: string) {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id, business_code, business_name, api_key, is_active')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .not('api_key', 'is', null)
     .order('business_code', { ascending: true });
@@ -1056,12 +1066,13 @@ async function getActiveScalevBusinessesForSync() {
   return (data || []) as ScalevBusinessConfig[];
 }
 
-async function getLatestVisibleCutoverRunMetadata() {
+async function getLatestVisibleCutoverRunMetadata(workspaceId: string) {
   const svc = createServiceSupabase();
 
   const { data: startedRow, error: startedError } = await svc
     .from('warehouse_activity_log')
     .select('created_at, action, summary, business_code, after_state, context')
+    .eq('workspace_id', workspaceId)
     .eq('scope', 'scalev_catalog_sync')
     .eq('action', 'sync_visible_cutover_started')
     .order('created_at', { ascending: false })
@@ -1105,6 +1116,7 @@ async function getLatestVisibleCutoverRunMetadata() {
   const { data: terminalRow, error: terminalError } = await svc
     .from('warehouse_activity_log')
     .select('created_at, action, summary, business_code, after_state, context')
+    .eq('workspace_id', workspaceId)
     .eq('scope', 'scalev_catalog_sync')
     .in('action', ['sync_visible_cutover', 'sync_visible_cutover_failed'])
     .gte('created_at', normalizedStarted.created_at)
@@ -1146,6 +1158,7 @@ async function getLatestVisibleCutoverRunMetadata() {
 }
 
 async function performScalevCatalogSync(
+  workspaceId: string,
   business: ScalevBusinessConfig,
   trigger: 'single' | 'bulk' = 'single',
 ) {
@@ -1154,6 +1167,7 @@ async function performScalevCatalogSync(
   }
 
   await upsertSyncState({
+    workspace_id: workspaceId,
     business_id: business.id,
     business_code: business.business_code,
     sync_status: 'running',
@@ -1168,21 +1182,23 @@ async function performScalevCatalogSync(
 
     const payload = buildCatalogPayload(business, products, bundles, syncAt);
 
-    await batchUpsert('scalev_catalog_products', payload.productRows, 'business_id,scalev_product_id');
-    await batchUpsert('scalev_catalog_variants', payload.variantRows, 'business_id,scalev_variant_id');
-    await batchUpsert('scalev_catalog_bundles', payload.bundleRows, 'business_id,scalev_bundle_id');
+    await batchUpsert(workspaceId, 'scalev_catalog_products', payload.productRows, 'business_id,scalev_product_id');
+    await batchUpsert(workspaceId, 'scalev_catalog_variants', payload.variantRows, 'business_id,scalev_variant_id');
+    await batchUpsert(workspaceId, 'scalev_catalog_bundles', payload.bundleRows, 'business_id,scalev_bundle_id');
     await batchUpsert(
+      workspaceId,
       'scalev_catalog_identifiers',
       payload.identifierRows,
       'business_id,identifier_normalized,entity_type,source,entity_key',
     );
 
-    await cleanupStaleCatalogRows('scalev_catalog_identifiers', business.id, syncAt);
-    await cleanupStaleCatalogRows('scalev_catalog_bundles', business.id, syncAt);
-    await cleanupStaleCatalogRows('scalev_catalog_variants', business.id, syncAt);
-    await cleanupStaleCatalogRows('scalev_catalog_products', business.id, syncAt);
+    await cleanupStaleCatalogRows(workspaceId, 'scalev_catalog_identifiers', business.id, syncAt);
+    await cleanupStaleCatalogRows(workspaceId, 'scalev_catalog_bundles', business.id, syncAt);
+    await cleanupStaleCatalogRows(workspaceId, 'scalev_catalog_variants', business.id, syncAt);
+    await cleanupStaleCatalogRows(workspaceId, 'scalev_catalog_products', business.id, syncAt);
 
     await upsertSyncState({
+      workspace_id: workspaceId,
       business_id: business.id,
       business_code: business.business_code,
       sync_status: 'success',
@@ -1231,6 +1247,7 @@ async function performScalevCatalogSync(
     };
   } catch (error: any) {
     await upsertSyncState({
+      workspace_id: workspaceId,
       business_id: business.id,
       business_code: business.business_code,
       sync_status: 'failed',
@@ -1261,13 +1278,14 @@ async function performScalevCatalogSync(
 }
 
 export async function getScalevCatalogBusinesses(): Promise<ScalevCatalogBusinessSummary[]> {
-  await requireScalevCatalogAccess();
+  const { workspaceId } = await requireScalevCatalogAccess();
   const svc = createServiceSupabase();
-  const schema = await getCatalogSchemaState();
+  const schema = await getCatalogSchemaState(workspaceId);
 
   const { data: businesses, error: businessError } = await svc
     .from('scalev_webhook_businesses')
     .select('id, business_code, business_name, is_active, api_key')
+    .eq('workspace_id', workspaceId)
     .order('business_code', { ascending: true });
 
   if (businessError) throw businessError;
@@ -1293,7 +1311,8 @@ export async function getScalevCatalogBusinesses(): Promise<ScalevCatalogBusines
 
   const { data: syncStates, error: syncError } = await svc
     .from('scalev_catalog_sync_state')
-    .select('business_id, sync_status, last_synced_at, last_error, products_count, variants_count, bundles_count, identifiers_count');
+    .select('business_id, sync_status, last_synced_at, last_error, products_count, variants_count, bundles_count, identifiers_count')
+    .eq('workspace_id', workspaceId);
 
   if (syncError) {
     if (isCatalogSchemaMissingError(syncError)) {
@@ -1343,20 +1362,20 @@ export async function getScalevCatalogBusinesses(): Promise<ScalevCatalogBusines
 }
 
 export async function syncScalevCatalogBusiness(businessId: number) {
-  await requireScalevCatalogAccess();
-  const business = await getBusinessById(businessId);
-  return performScalevCatalogSync(business, 'single');
+  const { workspaceId } = await requireScalevCatalogAccess();
+  const business = await getBusinessById(workspaceId, businessId);
+  return performScalevCatalogSync(workspaceId, business, 'single');
 }
 
 export async function syncScalevCatalogAllBusinesses(preloadedBusinesses?: ScalevBusinessConfig[]) {
-  await requireScalevCatalogAccess();
-  const activeBusinesses = preloadedBusinesses || await getActiveScalevBusinessesForSync();
+  const { workspaceId } = await requireScalevCatalogAccess();
+  const activeBusinesses = preloadedBusinesses || await getActiveScalevBusinessesForSync(workspaceId);
   const results = await mapWithConcurrency(
     activeBusinesses,
     CATALOG_SYNC_BUSINESS_CONCURRENCY,
     async (business) => {
       try {
-        return await performScalevCatalogSync(business, 'bulk');
+        return await performScalevCatalogSync(workspaceId, business, 'bulk');
       } catch (syncError: any) {
         return {
           success: false,
@@ -1397,10 +1416,10 @@ export async function syncScalevCatalogAllBusinesses(preloadedBusinesses?: Scale
 }
 
 export async function getScalevVisibleCatalogCutoverProgress(): Promise<ScalevVisibleCatalogCutoverProgress> {
-  await requireScalevCatalogAccess();
+  const { workspaceId } = await requireScalevCatalogAccess();
 
-  const schema = await getCatalogSchemaState();
-  const activeBusinesses = await getActiveScalevBusinessesForSync();
+  const schema = await getCatalogSchemaState(workspaceId);
+  const activeBusinesses = await getActiveScalevBusinessesForSync(workspaceId);
   const idleBusinesses: ScalevVisibleCatalogCutoverBusinessProgress[] = activeBusinesses.map((business) => ({
     business_id: business.id,
     business_code: business.business_code,
@@ -1441,7 +1460,7 @@ export async function getScalevVisibleCatalogCutoverProgress(): Promise<ScalevVi
     };
   }
 
-  const run = await getLatestVisibleCutoverRunMetadata();
+  const run = await getLatestVisibleCutoverRunMetadata(workspaceId);
   if (!run.schemaReady) {
     return {
       schema_ready: false,
@@ -1500,10 +1519,12 @@ export async function getScalevVisibleCatalogCutoverProgress(): Promise<ScalevVi
     svc
       .from('scalev_catalog_sync_state')
       .select('business_id, business_code, sync_status, last_synced_at, last_error, bundles_count')
+      .eq('workspace_id', workspaceId)
       .order('business_code', { ascending: true }),
     svc
       .from('warehouse_activity_log')
       .select('created_at, action, business_code, summary, after_state, context')
+      .eq('workspace_id', workspaceId)
       .eq('scope', 'scalev_catalog_sync')
       .in('action', ['sync_success', 'sync_failed'])
       .gte('created_at', startedAt)
@@ -1512,6 +1533,7 @@ export async function getScalevVisibleCatalogCutoverProgress(): Promise<ScalevVi
     svc
       .from('warehouse_activity_log')
       .select('created_at, action, business_code, summary, after_state, context')
+      .eq('workspace_id', workspaceId)
       .eq('scope', 'scalev_bundle_sync')
       .in('action', ['sync_success', 'sync_partial', 'sync_failed'])
       .gte('created_at', startedAt)
@@ -1766,13 +1788,13 @@ export async function getScalevVisibleCatalogCutoverProgress(): Promise<ScalevVi
 }
 
 export async function syncScalevVisibleCatalogCutoverAllBusinesses() {
-  await requireScalevCatalogAccess();
-  const existingRun = await getLatestVisibleCutoverRunMetadata();
+  const { workspaceId } = await requireScalevCatalogAccess();
+  const existingRun = await getLatestVisibleCutoverRunMetadata(workspaceId);
   if (existingRun.active) {
     throw new Error('Sync Semua Business + Bundle masih berjalan. Tunggu run aktif selesai atau refresh progress terlebih dahulu.');
   }
 
-  const activeBusinesses = await getActiveScalevBusinessesForSync();
+  const activeBusinesses = await getActiveScalevBusinessesForSync(workspaceId);
   const startedAt = new Date().toISOString();
 
   await recordWarehouseActivityLog({
@@ -1909,8 +1931,8 @@ export async function getScalevCatalogEntries(input: {
   search?: string;
   limit?: number;
 }): Promise<ScalevCatalogEntryRow[]> {
-  await requireScalevCatalogAccess();
-  const schema = await getCatalogSchemaState();
+  const { workspaceId } = await requireScalevCatalogAccess();
+  const schema = await getCatalogSchemaState(workspaceId);
   if (!schema.ready) return [];
   const svc = createServiceSupabase();
   const limit = Math.min(Math.max(Number(input.limit || 200), 1), 500);
@@ -1938,6 +1960,7 @@ export async function getScalevCatalogEntries(input: {
         owner_business_code,
         processor_business_code
       `)
+      .eq('workspace_id', workspaceId)
       .eq('business_id', input.businessId)
       .order('name', { ascending: true })
       .limit(limit);
@@ -1975,6 +1998,7 @@ export async function getScalevCatalogEntries(input: {
         owner_business_code,
         processor_business_code
       `)
+      .eq('workspace_id', workspaceId)
       .eq('business_id', input.businessId)
       .order('product_name', { ascending: true })
       .order('name', { ascending: true })
@@ -2009,6 +2033,7 @@ export async function getScalevCatalogEntries(input: {
         owner_business_code,
         processor_business_code
       `)
+      .eq('workspace_id', workspaceId)
       .eq('business_id', input.businessId)
       .order('name', { ascending: true })
       .limit(limit);
@@ -2038,6 +2063,7 @@ export async function getScalevCatalogEntries(input: {
       owner_business_code,
       processor_business_code
     `)
+    .eq('workspace_id', workspaceId)
     .eq('business_id', input.businessId)
     .order('identifier', { ascending: true })
     .limit(limit);

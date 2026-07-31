@@ -8,9 +8,9 @@ import {
   type MarketplaceIntakePlatform,
   type MarketplaceIntakeParserFamily,
   type MarketplaceIntakeSourceConfig,
-  listMarketplaceIntakeUploadSourceConfigs,
 } from './marketplace-intake-sources';
 import { resolveMarketplaceIntakeSourceConfig } from './marketplace-intake-source-store-scopes';
+import { listWorkspaceMarketplaceIntakeSourceConfigs } from './marketplace-intake-workspace-sources';
 import { resolveMarketplaceIntakeFeeFinancials } from './marketplace-intake-fee';
 import { resolveMarketplaceIntakeShippingFinancials } from './marketplace-intake-shipping';
 
@@ -498,6 +498,7 @@ function scoreSourceByFilename(sourceConfig: MarketplaceIntakeSourceConfig, file
 }
 
 async function detectMarketplaceIntakeSourceConfig(input: {
+  workspaceId: string;
   file: File;
   filenameOverride?: string | null;
 }): Promise<MarketplaceIntakeSourceConfig> {
@@ -520,12 +521,15 @@ async function detectMarketplaceIntakeSourceConfig(input: {
     throw new Error('Format marketplace tidak dikenali. Gunakan export Shopee, TikTok Shop, Blibli, atau Lazada yang didukung.');
   }
 
-  const candidates = listMarketplaceIntakeUploadSourceConfigs()
+  const candidateShells = (await listWorkspaceMarketplaceIntakeSourceConfigs(input.workspaceId, { uploadOnly: true }))
     .filter((config) => config.parserFamily === parserFamily);
-  if (candidates.length === 1) return candidates[0];
-  if (!candidates.length) {
+  if (!candidateShells.length) {
     throw new Error('Source marketplace untuk format file ini belum aktif di intake.');
   }
+  const candidates = await Promise.all(
+    candidateShells.map((candidate) => resolveMarketplaceIntakeSourceConfig(input.workspaceId, candidate.sourceKey)),
+  );
+  if (candidates.length === 1) return candidates[0];
 
   const genericOrders = parserFamily === 'shopee'
     ? parseShopeeOrders(stringRows)
@@ -547,8 +551,8 @@ async function detectMarketplaceIntakeSourceConfig(input: {
   ));
 
   const sourceScores = await Promise.all(candidates.map(async (candidate) => {
-    const business = await loadBusinessForSource(candidate);
-    const identifierLookup = await loadBundleIdentifierLookup(business.id, normalizedIdentifiers);
+    const business = await loadBusinessForSource(candidate, input.workspaceId);
+    const identifierLookup = await loadBundleIdentifierLookup(input.workspaceId, business.id, normalizedIdentifiers);
 
     let bundleMatchCount = 0;
     let guessedStoreCount = 0;
@@ -1240,11 +1244,12 @@ async function insertRowsWithSchemaFallback<T extends Record<string, any>>(input
   }
 }
 
-async function loadBusinessForSource(source: MarketplaceIntakeSourceConfig): Promise<BusinessRow> {
+async function loadBusinessForSource(source: MarketplaceIntakeSourceConfig, workspaceId: string): Promise<BusinessRow> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id, business_code, business_name, api_key, is_active')
+    .eq('workspace_id', workspaceId)
     .eq('business_code', source.businessCode)
     .maybeSingle();
 
@@ -1259,7 +1264,7 @@ async function loadBusinessForSource(source: MarketplaceIntakeSourceConfig): Pro
   return data as BusinessRow;
 }
 
-async function loadBundleIdentifierLookup(businessId: number, normalizedIdentifiers: string[]) {
+async function loadBundleIdentifierLookup(workspaceId: string, businessId: number, normalizedIdentifiers: string[]) {
   const svc = createServiceSupabase();
   if (normalizedIdentifiers.length === 0) return new Map<string, BundleIdentifierRow[]>();
 
@@ -1275,6 +1280,7 @@ async function loadBundleIdentifierLookup(businessId: number, normalizedIdentifi
       identifier_normalized,
       source
     `)
+    .eq('workspace_id', workspaceId)
     .eq('business_id', businessId)
     .eq('entity_type', 'bundle')
     .eq('source', 'bundle.custom_id')
@@ -1295,11 +1301,12 @@ async function loadBundleIdentifierLookup(businessId: number, normalizedIdentifi
   return lookup;
 }
 
-async function loadBundleCatalog(businessId: number): Promise<BundleCatalogRow[]> {
+async function loadBundleCatalog(workspaceId: string, businessId: number): Promise<BundleCatalogRow[]> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_catalog_bundles')
     .select('business_id, scalev_bundle_id, name, public_name, display, custom_id')
+    .eq('workspace_id', workspaceId)
     .eq('business_id', businessId)
     .order('scalev_bundle_id', { ascending: true });
 
@@ -1312,6 +1319,7 @@ async function loadBundleCatalog(businessId: number): Promise<BundleCatalogRow[]
 }
 
 async function loadManualMemoryMap(
+  workspaceId: string,
   businessId: number,
   source: MarketplaceIntakeSourceConfig,
 ): Promise<Map<string, ManualMemoryRow>> {
@@ -1331,6 +1339,7 @@ async function loadManualMemoryMap(
       usage_count,
       is_active
     `)
+    .eq('workspace_id', workspaceId)
     .eq('source_key', source.sourceKey)
     .eq('business_id', businessId)
     .eq('is_active', true);
@@ -1348,6 +1357,7 @@ async function loadManualMemoryMap(
 }
 
 async function loadSkuAliasRules(
+  workspaceId: string,
   source: MarketplaceIntakeSourceConfig,
   business: BusinessRow,
 ): Promise<SkuAliasRuleRow[]> {
@@ -1367,6 +1377,7 @@ async function loadSkuAliasRules(
       reason,
       is_active
     `)
+    .eq('workspace_id', workspaceId)
     .eq('source_key', source.sourceKey)
     .eq('business_code', business.business_code)
     .eq('platform', source.platform)
@@ -2126,17 +2137,19 @@ function buildPreviewSummary(orders: MarketplaceIntakePreviewOrder[]): Marketpla
 }
 
 export async function previewMarketplaceIntake(input: {
+  workspaceId: string;
   file: File;
   filenameOverride?: string | null;
   sourceKey?: string | null;
 }): Promise<MarketplaceIntakePreview> {
   const sourceConfig = cleanText(input.sourceKey)
-    ? await resolveMarketplaceIntakeSourceConfig(input.sourceKey)
+    ? await resolveMarketplaceIntakeSourceConfig(input.workspaceId, input.sourceKey)
     : await detectMarketplaceIntakeSourceConfig({
+      workspaceId: input.workspaceId,
       file: input.file,
       filenameOverride: input.filenameOverride,
     });
-  const business = await loadBusinessForSource(sourceConfig);
+  const business = await loadBusinessForSource(sourceConfig, input.workspaceId);
   const { orders, rowCount, headers } = await parseMarketplaceWorkbook({
     file: input.file,
     sourceConfig,
@@ -2149,9 +2162,9 @@ export async function previewMarketplaceIntake(input: {
     orders,
   });
   const [bundleCatalog, manualMemoryMap, skuAliasRules] = await Promise.all([
-    loadBundleCatalog(business.id),
-    loadManualMemoryMap(business.id, sourceConfig),
-    loadSkuAliasRules(sourceConfig, business),
+    loadBundleCatalog(input.workspaceId, business.id),
+    loadManualMemoryMap(input.workspaceId, business.id, sourceConfig),
+    loadSkuAliasRules(input.workspaceId, sourceConfig, business),
   ]);
   const normalizedOrders = applySkuAliasesToOrders(orders, skuAliasRules);
 
@@ -2160,7 +2173,7 @@ export async function previewMarketplaceIntake(input: {
       .flatMap((order) => order.lines.map((line) => normalizeIdentifier(line.normalizedSku || line.sku)))
       .filter(Boolean),
   ));
-  const identifierLookup = await loadBundleIdentifierLookup(business.id, normalizedIdentifiers);
+  const identifierLookup = await loadBundleIdentifierLookup(input.workspaceId, business.id, normalizedIdentifiers);
 
   const previewOrders: MarketplaceIntakePreviewOrder[] = [];
   for (const order of normalizedOrders) {
@@ -2190,21 +2203,15 @@ export async function previewMarketplaceIntake(input: {
   };
 }
 
-export async function previewShopeeRltIntake(input: {
-  file: File;
-  filenameOverride?: string | null;
-}): Promise<MarketplaceIntakePreview> {
-  return previewMarketplaceIntake({ ...input, sourceKey: 'shopee_rlt' });
-}
-
 export async function saveMarketplaceIntakePreview(input: {
+  workspaceId: string;
   preview: MarketplaceIntakePreview;
   uploadedByEmail: string | null;
   manualSelections?: MarketplaceIntakeManualSelectionInput[];
 }) {
   const preview = input.preview;
-  const sourceConfig = await resolveMarketplaceIntakeSourceConfig(preview?.source?.sourceKey);
-  const business = await loadBusinessForSource(sourceConfig);
+  const sourceConfig = await resolveMarketplaceIntakeSourceConfig(input.workspaceId, preview?.source?.sourceKey);
+  const business = await loadBusinessForSource(sourceConfig, input.workspaceId);
 
   if (!preview?.source || preview.source.sourceKey !== sourceConfig.sourceKey) {
     throw new Error(`Preview intake tidak valid untuk ${sourceConfig.sourceLabel}.`);
@@ -2213,7 +2220,7 @@ export async function saveMarketplaceIntakePreview(input: {
     throw new Error('Business preview berubah. Refresh preview lalu coba simpan lagi.');
   }
 
-  const bundleCatalog = await loadBundleCatalog(business.id);
+  const bundleCatalog = await loadBundleCatalog(input.workspaceId, business.id);
   const bundleById = new Map<number, BundleCatalogRow>(bundleCatalog.map((bundle) => [bundle.scalev_bundle_id, bundle]));
   const selectionMap = new Map<string, MarketplaceIntakeManualSelectionInput>();
   for (const selection of input.manualSelections || []) {
@@ -2418,6 +2425,7 @@ export async function saveMarketplaceIntakePreview(input: {
   const duplicateRes = await createServiceSupabase()
     .from('marketplace_intake_batches')
     .select('id')
+    .eq('workspace_id', input.workspaceId)
     .eq('source_key', sourceConfig.sourceKey)
     .eq('business_code', business.business_code)
     .eq('batch_fingerprint', fingerprint)
@@ -2432,6 +2440,7 @@ export async function saveMarketplaceIntakePreview(input: {
 
   const svc = createServiceSupabase();
   const batchInsert = {
+    workspace_id: input.workspaceId,
     source_id: null,
     source_key: sourceConfig.sourceKey,
     source_label: sourceConfig.sourceLabel,
@@ -2495,6 +2504,7 @@ export async function saveMarketplaceIntakePreview(input: {
       };
 
       return {
+        workspace_id: input.workspaceId,
         batch_id: batchId,
         external_order_id: order.externalOrderId,
         order_status: order.orderStatus,
@@ -2596,6 +2606,7 @@ export async function saveMarketplaceIntakePreview(input: {
       const intakeOrderId = orderIdByExternalId.get(order.externalOrderId);
       if (!intakeOrderId) return [];
       return (order.lines || []).map((line) => ({
+      workspace_id: input.workspaceId,
       intake_order_id: intakeOrderId,
       line_index: line.lineIndex,
       line_status: line.lineStatus,
@@ -2722,6 +2733,7 @@ export async function saveMarketplaceIntakePreview(input: {
         ].join('::');
 
         const nextRow = {
+          workspace_id: input.workspaceId,
           source_key: sourceConfig.sourceKey,
           source_label: sourceConfig.sourceLabel,
           platform: sourceConfig.platform,
@@ -2772,7 +2784,7 @@ export async function saveMarketplaceIntakePreview(input: {
     if (manualMemoryUpserts.length > 0) {
       const memoryRes = await svc
         .from('marketplace_intake_manual_memory')
-        .upsert(manualMemoryUpserts, { onConflict: 'source_key,business_code,match_signature' });
+        .upsert(manualMemoryUpserts, { onConflict: 'workspace_id,source_key,business_code,match_signature' });
       if (memoryRes.error && !isMissingTableError(memoryRes.error)) throw memoryRes.error;
     }
 
@@ -2783,10 +2795,10 @@ export async function saveMarketplaceIntakePreview(input: {
   } catch (error) {
     try {
       if (insertedOrderIds.length > 0) {
-        await svc.from('marketplace_intake_order_lines').delete().in('intake_order_id', insertedOrderIds);
-        await svc.from('marketplace_intake_orders').delete().in('id', insertedOrderIds);
+        await svc.from('marketplace_intake_order_lines').delete().eq('workspace_id', input.workspaceId).in('intake_order_id', insertedOrderIds);
+        await svc.from('marketplace_intake_orders').delete().eq('workspace_id', input.workspaceId).in('id', insertedOrderIds);
       }
-      await svc.from('marketplace_intake_batches').delete().eq('id', batchId);
+      await svc.from('marketplace_intake_batches').delete().eq('workspace_id', input.workspaceId).eq('id', batchId);
     } catch (cleanupError) {
       console.error('Marketplace intake cleanup after failed save error:', cleanupError);
     }
@@ -2876,6 +2888,7 @@ export type MarketplaceIntakeWorkspaceResponse = {
 };
 
 export type MarketplaceIntakeWorkspaceUpdateInput = {
+  workspaceId: string;
   orderIds: number[];
   shipmentDate: string | null;
   warehouseStatus: MarketplaceIntakeWarehouseStatus;
@@ -2939,6 +2952,7 @@ function normalizeShipmentDate(value: string): string {
 }
 
 async function loadWorkspaceBatchMeta(
+  workspaceId: string,
   sourceConfigs: MarketplaceIntakeSourceConfig[],
 ): Promise<Map<number, MarketplaceIntakeBatchMetaRow>> {
   const svc = createServiceSupabase();
@@ -2979,6 +2993,7 @@ async function loadWorkspaceBatchMeta(
       scalev_last_reconcile_error_count,
       scalev_last_reconcile_error
     `)
+    .eq('workspace_id', workspaceId)
     .order('confirmed_at', { ascending: false })
     .order('id', { ascending: false });
   primaryQuery = sourceKeys.length === 1
@@ -3014,6 +3029,7 @@ async function loadWorkspaceBatchMeta(
         scalev_last_send_row_count,
         scalev_last_send_error
       `)
+      .eq('workspace_id', workspaceId)
       .order('confirmed_at', { ascending: false })
       .order('id', { ascending: false });
     fallbackQuery = sourceKeys.length === 1
@@ -3039,6 +3055,7 @@ async function loadWorkspaceBatchMeta(
         scalev_last_send_row_count,
         scalev_last_send_error
       `)
+      .eq('workspace_id', workspaceId)
       .order('confirmed_at', { ascending: false })
       .order('id', { ascending: false });
     fallbackQuery = sourceKeys.length === 1
@@ -3117,7 +3134,7 @@ function mapWorkspaceLineRow(row: any): MarketplaceIntakeWorkspaceLineRow {
   };
 }
 
-async function loadWorkspaceLinesByOrderIds(orderIds: number[]): Promise<Map<number, MarketplaceIntakeWorkspaceLineRow[]>> {
+async function loadWorkspaceLinesByOrderIds(workspaceId: string, orderIds: number[]): Promise<Map<number, MarketplaceIntakeWorkspaceLineRow[]>> {
   const linesByOrderId = new Map<number, MarketplaceIntakeWorkspaceLineRow[]>();
   if (orderIds.length === 0) return linesByOrderId;
 
@@ -3143,6 +3160,7 @@ async function loadWorkspaceLinesByOrderIds(orderIds: number[]): Promise<Map<num
       line_status,
       issue_codes
     `)
+    .eq('workspace_id', workspaceId)
     .in('intake_order_id', orderIds)
     .order('intake_order_id', { ascending: true })
     .order('line_index', { ascending: true });
@@ -3164,6 +3182,7 @@ async function loadWorkspaceLinesByOrderIds(orderIds: number[]): Promise<Map<num
         line_status,
         issue_codes
       `)
+      .eq('workspace_id', workspaceId)
       .in('intake_order_id', orderIds)
       .order('intake_order_id', { ascending: true })
       .order('line_index', { ascending: true });
@@ -3243,6 +3262,7 @@ function mapWorkspaceOrderRow(
 }
 
 async function loadWorkspaceOrders(input: {
+  workspaceId: string;
   batchIds: number[];
   stagedOnly?: boolean;
   shipmentDate?: string;
@@ -3271,6 +3291,7 @@ async function loadWorkspaceOrders(input: {
       warehouse_updated_at,
       warehouse_updated_by_email
     `)
+    .eq('workspace_id', input.workspaceId)
     .in('batch_id', input.batchIds);
 
   if (input.stagedOnly) {
@@ -3296,7 +3317,7 @@ async function loadWorkspaceOrders(input: {
   const orderIds = (ordersRes.data || [])
     .map((row: any) => Number(row.id || 0))
     .filter((id) => Number.isFinite(id) && id > 0);
-  const linesByOrderId = await loadWorkspaceLinesByOrderIds(orderIds);
+  const linesByOrderId = await loadWorkspaceLinesByOrderIds(input.workspaceId, orderIds);
 
   return (ordersRes.data || [])
     .map((row: any) => mapWorkspaceOrderRow(row, input.batchMetaById, linesByOrderId))
@@ -3304,24 +3325,27 @@ async function loadWorkspaceOrders(input: {
 }
 
 export async function listMarketplaceIntakeWorkspace(input: {
+  workspaceId: string;
   shipmentDate: string;
   sourceKey?: string | null;
 }): Promise<MarketplaceIntakeWorkspaceResponse> {
   const shipmentDate = normalizeShipmentDate(input.shipmentDate);
   const normalizedSourceKey = cleanText(input.sourceKey);
   const sourceConfigs = !normalizedSourceKey || normalizedSourceKey === 'all'
-    ? listMarketplaceIntakeUploadSourceConfigs()
-    : [await resolveMarketplaceIntakeSourceConfig(normalizedSourceKey)];
-  const batchMetaById = await loadWorkspaceBatchMeta(sourceConfigs);
+    ? await listWorkspaceMarketplaceIntakeSourceConfigs(input.workspaceId)
+    : [await resolveMarketplaceIntakeSourceConfig(input.workspaceId, normalizedSourceKey)];
+  const batchMetaById = await loadWorkspaceBatchMeta(input.workspaceId, sourceConfigs);
   const batchIds = Array.from(batchMetaById.keys());
 
   const [stagedOrders, shipmentOrders] = await Promise.all([
     loadWorkspaceOrders({
+      workspaceId: input.workspaceId,
       batchIds,
       stagedOnly: true,
       batchMetaById,
     }),
     loadWorkspaceOrders({
+      workspaceId: input.workspaceId,
       batchIds,
       shipmentDate,
       batchMetaById,
@@ -3361,14 +3385,15 @@ export async function updateMarketplaceIntakeWorkspace(input: MarketplaceIntakeW
 
   const normalizedSourceKey = cleanText(input.sourceKey);
   const sourceConfigs = !normalizedSourceKey || normalizedSourceKey === 'all'
-    ? listMarketplaceIntakeUploadSourceConfigs()
-    : [await resolveMarketplaceIntakeSourceConfig(normalizedSourceKey)];
-  const batchMetaById = await loadWorkspaceBatchMeta(sourceConfigs);
+    ? await listWorkspaceMarketplaceIntakeSourceConfigs(input.workspaceId)
+    : [await resolveMarketplaceIntakeSourceConfig(input.workspaceId, normalizedSourceKey)];
+  const batchMetaById = await loadWorkspaceBatchMeta(input.workspaceId, sourceConfigs);
   const allowedBatchIds = new Set<number>(batchMetaById.keys());
   const svc = createServiceSupabase();
   const existingRes = await svc
     .from('marketplace_intake_orders')
     .select('id, batch_id')
+    .eq('workspace_id', input.workspaceId)
     .in('id', orderIds);
 
   if (existingRes.error) {
@@ -3397,6 +3422,7 @@ export async function updateMarketplaceIntakeWorkspace(input: MarketplaceIntakeW
       warehouse_updated_at: new Date().toISOString(),
       warehouse_updated_by_email: input.updatedByEmail,
     })
+    .eq('workspace_id', input.workspaceId)
     .in('id', orderIds);
 
   if (updateRes.error) {

@@ -36,7 +36,7 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: 'brand_breakdown',
-    description: 'Get Net Sales, Gross Profit, GP Margin %, net_after_mkt (GP after marketing + admin fees), Marketing Cost, and Shipment count per brand (Roove, Purvu, DrHyun, etc.) for the date range. Use this to compare brand performance.',
+    description: 'Get Net Sales, Gross Profit, GP Margin %, net_after_mkt (GP after marketing + admin fees), Marketing Cost, and Shipment count per brand in the active workspace for the date range. Use this to compare brand performance.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -122,28 +122,29 @@ export const TOOL_DEFINITIONS = [
 
 // ── Tool executors ──
 
-export async function executeTool(name: string, input: { from: string; to: string }): Promise<string> {
+export async function executeTool(workspaceId: string, name: string, input: { from: string; to: string }): Promise<string> {
   const { from, to } = input;
   const svc = getSvc();
 
   switch (name) {
-    case 'daily_trend': return JSON.stringify(await dailyTrend(svc, from, to));
-    case 'brand_breakdown': return JSON.stringify(await brandBreakdown(svc, from, to));
-    case 'channel_breakdown': return JSON.stringify(await channelBreakdown(svc, from, to));
-    case 'brand_channel_detail': return JSON.stringify(await brandChannelDetail(svc, from, to));
-    case 'ads_spend_by_source': return JSON.stringify(await adsSpendBySource(svc, from, to));
-    case 'top_products': return JSON.stringify(await topProducts(svc, from, to));
-    case 'closing_rate_by_brand': return JSON.stringify(await closingRateByBrand(svc, from, to));
-    case 'repeat_rate_by_brand': return JSON.stringify(await repeatRateByBrand(svc, from, to));
+    case 'daily_trend': return JSON.stringify(await dailyTrend(svc, workspaceId, from, to));
+    case 'brand_breakdown': return JSON.stringify(await brandBreakdown(svc, workspaceId, from, to));
+    case 'channel_breakdown': return JSON.stringify(await channelBreakdown(svc, workspaceId, from, to));
+    case 'brand_channel_detail': return JSON.stringify(await brandChannelDetail(svc, workspaceId, from, to));
+    case 'ads_spend_by_source': return JSON.stringify(await adsSpendBySource(svc, workspaceId, from, to));
+    case 'top_products': return JSON.stringify(await topProducts(svc, workspaceId, from, to));
+    case 'closing_rate_by_brand': return JSON.stringify(await closingRateByBrand(svc, workspaceId, from, to));
+    case 'repeat_rate_by_brand': return JSON.stringify(await repeatRateByBrand(svc, workspaceId, from, to));
     default: return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
 }
 
 // ── Implementations ──
 
-async function dailyTrend(svc: any, from: string, to: string) {
+async function dailyTrend(svc: any, workspaceId: string, from: string, to: string) {
   const { data } = await svc.from('summary_daily_product_complete')
     .select('date, net_sales, gross_profit, net_after_mkt, mkt_cost')
+    .eq('workspace_id', workspaceId)
     .gte('date', from).lte('date', to).limit(5000);
 
   const byDate: Record<string, any> = {};
@@ -160,20 +161,26 @@ async function dailyTrend(svc: any, from: string, to: string) {
   return Object.values(byDate).sort((a: any, b: any) => a.date.localeCompare(b.date));
 }
 
-async function brandBreakdown(svc: any, from: string, to: string) {
+async function brandBreakdown(svc: any, workspaceId: string, from: string, to: string) {
   const { data: prodData } = await svc.from('summary_daily_product_complete')
     .select('product, net_sales, gross_profit, net_after_mkt, mkt_cost, mp_admin_cost')
+    .eq('workspace_id', workspaceId)
     .gte('date', from).lte('date', to).limit(5000);
 
   const { utcFrom, utcTo } = wibToUtc(from, to);
   // Shipment per brand via order lines
   const { data: shipData } = await svc.from('scalev_order_lines')
     .select('product_type, scalev_order_id')
+    .eq('workspace_id', workspaceId)
     .gte('synced_at', '2000-01-01') // just need the join
     .limit(1); // can't easily do this via REST, use summary instead
 
   // Use get_daily_shipment_counts for single-day or short ranges
-  const { data: shipRpc } = await svc.rpc('get_daily_shipment_counts', { p_from: from, p_to: to });
+  const { data: shipRpc } = await svc.rpc('get_daily_shipment_counts', {
+    p_workspace_id: workspaceId,
+    p_from: from,
+    p_to: to,
+  });
 
   const byBrand: Record<string, any> = {};
   for (const r of prodData || []) {
@@ -202,9 +209,10 @@ async function brandBreakdown(svc: any, from: string, to: string) {
   return Object.values(byBrand).sort((a: any, b: any) => b.net_sales - a.net_sales);
 }
 
-async function channelBreakdown(svc: any, from: string, to: string) {
+async function channelBreakdown(svc: any, workspaceId: string, from: string, to: string) {
   const { data } = await svc.from('summary_daily_order_channel')
     .select('channel, net_sales, gross_profit')
+    .eq('workspace_id', workspaceId)
     .gte('date', from).lte('date', to).limit(5000);
 
   const byCh: Record<string, any> = {};
@@ -216,9 +224,10 @@ async function channelBreakdown(svc: any, from: string, to: string) {
   return Object.values(byCh).sort((a: any, b: any) => b.net_sales - a.net_sales);
 }
 
-async function brandChannelDetail(svc: any, from: string, to: string) {
+async function brandChannelDetail(svc: any, workspaceId: string, from: string, to: string) {
   const { data } = await svc.from('summary_daily_order_channel')
     .select('product, channel, net_sales, gross_profit')
+    .eq('workspace_id', workspaceId)
     .gte('date', from).lte('date', to).limit(5000);
 
   const byKey: Record<string, any> = {};
@@ -231,9 +240,10 @@ async function brandChannelDetail(svc: any, from: string, to: string) {
   return Object.values(byKey).sort((a: any, b: any) => b.net_sales - a.net_sales);
 }
 
-async function adsSpendBySource(svc: any, from: string, to: string) {
+async function adsSpendBySource(svc: any, workspaceId: string, from: string, to: string) {
   const { data } = await svc.from('daily_ads_spend')
     .select('source, spent')
+    .eq('workspace_id', workspaceId)
     .gte('date', from).lte('date', to).limit(5000);
 
   const bySrc: Record<string, number> = {};
@@ -246,9 +256,10 @@ async function adsSpendBySource(svc: any, from: string, to: string) {
     .sort((a, b) => b.total_spent - a.total_spent);
 }
 
-async function topProducts(svc: any, from: string, to: string) {
+async function topProducts(svc: any, workspaceId: string, from: string, to: string) {
   const { data } = await svc.from('scalev_order_lines')
     .select('product_name, product_type, product_price_bt, discount_bt, quantity, scalev_order_id')
+    .eq('workspace_id', workspaceId)
     .limit(1); // Can't aggregate via REST — need a different approach
 
   // Use summary_daily_order_channel which has product dimension but not SKU level
@@ -260,12 +271,14 @@ async function topProducts(svc: any, from: string, to: string) {
   // Query product-level from summary
   const { data: prodData } = await svc.from('summary_daily_product_complete')
     .select('product, net_sales')
+    .eq('workspace_id', workspaceId)
     .gte('date', from).lte('date', to).limit(5000);
 
   // For actual SKU detail, query order lines with limit
   const { utcFrom, utcTo } = wibToUtc(from, to);
   const { data: lineData } = await svc.from('scalev_order_lines')
     .select('product_name, product_type, product_price_bt, discount_bt, quantity')
+    .eq('workspace_id', workspaceId)
     .limit(1000);
   // This won't work well for large ranges — let's return brand-level as fallback
   // and note that SKU-level is available
@@ -282,12 +295,13 @@ async function topProducts(svc: any, from: string, to: string) {
   };
 }
 
-async function closingRateByBrand(svc: any, from: string, to: string) {
+async function closingRateByBrand(svc: any, workspaceId: string, from: string, to: string) {
   const { utcFrom, utcTo } = wibToUtc(from, to);
 
   // Total leads = all orders created (draft_time), excluding marketplace
   const { data: createdOrders } = await svc.from('scalev_orders')
     .select('id, store_name')
+    .eq('workspace_id', workspaceId)
     .gte('draft_time', utcFrom).lt('draft_time', utcTo)
     .not('store_name', 'ilike', '%marketplace%')
     .not('store_name', 'ilike', '%shopee%')
@@ -296,6 +310,7 @@ async function closingRateByBrand(svc: any, from: string, to: string) {
 
   const { data: shippedOrders } = await svc.from('scalev_orders')
     .select('id, store_name')
+    .eq('workspace_id', workspaceId)
     .gte('shipped_time', utcFrom).lt('shipped_time', utcTo)
     .in('status', ['shipped', 'completed'])
     .not('store_name', 'ilike', '%marketplace%')
@@ -319,6 +334,7 @@ async function closingRateByBrand(svc: any, from: string, to: string) {
     const batch = allIds.slice(i, i + 500);
     const { data } = await svc.from('scalev_order_lines')
       .select('scalev_order_id, product_type, product_price_bt, discount_bt')
+      .eq('workspace_id', workspaceId)
       .in('scalev_order_id', batch)
       .limit(5000);
     lines.push(...(data || []));
@@ -356,14 +372,13 @@ async function closingRateByBrand(svc: any, from: string, to: string) {
     .sort((a, b) => b.created - a.created);
 }
 
-async function repeatRateByBrand(svc: any, from: string, to: string) {
-  const { data } = await svc.from('summary_customer_ltv')
-    .select('brand, is_repeater_90d')
-    .gte('first_order_date', from).lte('first_order_date', to)
-    .limit(50000);
+async function repeatRateByBrand(svc: any, workspaceId: string, from: string, to: string) {
+  const { data } = await svc.rpc('workspace_customer_ltv_rows', {
+    p_workspace_id: workspaceId,
+  });
 
   const byBrand: Record<string, { brand: string; total_customers: number; repeaters: number }> = {};
-  for (const r of data || []) {
+  for (const r of (data || []).filter((row: any) => row.first_order_date >= from && row.first_order_date <= to)) {
     const b = r.brand || 'Unknown';
     if (!byBrand[b]) byBrand[b] = { brand: b, total_customers: 0, repeaters: 0 };
     byBrand[b].total_customers++;

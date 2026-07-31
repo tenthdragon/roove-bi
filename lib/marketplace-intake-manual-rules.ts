@@ -2,11 +2,11 @@
 
 import { requireDashboardRoles } from './dashboard-access';
 import { createServiceSupabase } from './supabase-server';
+import { type MarketplaceIntakeSourceKey } from './marketplace-intake-sources';
 import {
-  getMarketplaceIntakeSourceConfig,
-  listMarketplaceIntakeSourceConfigs,
-  type MarketplaceIntakeSourceKey,
-} from './marketplace-intake-sources';
+  listWorkspaceMarketplaceIntakeSourceConfigs,
+  resolveWorkspaceMarketplaceIntakeSourceConfig,
+} from './marketplace-intake-workspace-sources';
 
 export type MarketplaceManualRuleListItem = {
   id: number;
@@ -95,20 +95,12 @@ function getSchemaMessage() {
   return 'Schema resolver rules marketplace belum siap. Jalankan migration intake terbaru lalu reload schema PostgREST.';
 }
 
-function assertSourceKey(sourceKey: unknown): MarketplaceIntakeSourceKey {
-  const normalized = cleanText(sourceKey);
-  const match = listMarketplaceIntakeSourceConfigs().find((config) => config.sourceKey === normalized);
-  if (!match) {
-    throw new Error('sourceKey intake tidak valid.');
-  }
-  return match.sourceKey;
-}
-
-async function loadBusinessId(businessCode: string): Promise<number> {
+async function loadBusinessId(workspaceId: string, businessCode: string): Promise<number> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id')
+    .eq('workspace_id', workspaceId)
     .eq('business_code', businessCode)
     .single();
 
@@ -124,7 +116,7 @@ export async function listMarketplaceManualRules(params?: {
   sourceKey?: string | null;
   limit?: number;
 }): Promise<MarketplaceManualRuleListResult> {
-  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat resolver rule marketplace.');
+  const { workspaceId } = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat resolver rule marketplace.');
 
   const svc = createServiceSupabase();
   const limit = Math.min(Math.max(Number(params?.limit || 500), 1), 1000);
@@ -153,6 +145,7 @@ export async function listMarketplaceManualRules(params?: {
       last_confirmed_at,
       updated_at
     `)
+    .eq('workspace_id', workspaceId)
     .order('is_active', { ascending: false })
     .order('updated_at', { ascending: false })
     .limit(limit);
@@ -169,7 +162,8 @@ export async function listMarketplaceManualRules(params?: {
   }
 
   const sourceLabelByKey = new Map<string, string>(
-    listMarketplaceIntakeSourceConfigs().map((config) => [config.sourceKey, config.sourceLabel]),
+    (await listWorkspaceMarketplaceIntakeSourceConfigs(workspaceId))
+      .map((config) => [config.sourceKey, config.sourceLabel]),
   );
 
   const items = (data || []).map((row: any) => ({
@@ -208,9 +202,9 @@ export async function listMarketplaceManualRules(params?: {
 export async function upsertMarketplaceManualRule(
   input: UpsertMarketplaceManualRuleInput,
 ): Promise<MarketplaceManualRuleListItem> {
-  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengubah resolver rule marketplace.');
+  const { workspaceId } = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengubah resolver rule marketplace.');
 
-  const sourceConfig = getMarketplaceIntakeSourceConfig(assertSourceKey(input.sourceKey));
+  const sourceConfig = await resolveWorkspaceMarketplaceIntakeSourceConfig(workspaceId, input.sourceKey);
   const mpProductName = cleanText(input.mpProductName);
   const targetEntityKey = cleanText(input.targetEntityKey);
   const targetEntityLabel = cleanText(input.targetEntityLabel);
@@ -224,12 +218,13 @@ export async function upsertMarketplaceManualRule(
   const mpSku = cleanText(input.mpSku);
   const mpVariation = cleanText(input.mpVariation);
   const matchSignature = buildMatchSignature({ mpSku, mpProductName, mpVariation });
-  const businessId = await loadBusinessId(sourceConfig.businessCode);
+  const businessId = await loadBusinessId(workspaceId, sourceConfig.businessCode);
   const isActive = input.isActive !== false;
   const updatedByEmail = cleanText(input.updatedByEmail);
   const now = new Date().toISOString();
 
   const payload = {
+    workspace_id: workspaceId,
     source_key: sourceConfig.sourceKey,
     source_label: sourceConfig.sourceLabel,
     platform: sourceConfig.platform,
@@ -258,6 +253,7 @@ export async function upsertMarketplaceManualRule(
     result = await svc
       .from('marketplace_intake_manual_memory')
       .update(payload)
+      .eq('workspace_id', workspaceId)
       .eq('id', id)
       .select(`
         id,
@@ -286,6 +282,7 @@ export async function upsertMarketplaceManualRule(
     const existing = await svc
       .from('marketplace_intake_manual_memory')
       .select('id, usage_count, created_by_email')
+      .eq('workspace_id', workspaceId)
       .eq('source_key', sourceConfig.sourceKey)
       .eq('business_code', sourceConfig.businessCode)
       .eq('match_signature', matchSignature)
@@ -304,7 +301,7 @@ export async function upsertMarketplaceManualRule(
 
     result = await svc
       .from('marketplace_intake_manual_memory')
-      .upsert(createPayload, { onConflict: 'source_key,business_code,match_signature' })
+      .upsert(createPayload, { onConflict: 'workspace_id,source_key,business_code,match_signature' })
       .select(`
         id,
         source_key,

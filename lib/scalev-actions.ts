@@ -1,18 +1,18 @@
 // lib/scalev-actions.ts
 'use server';
 
-import { createServerSupabase, createServiceSupabase } from '@/lib/supabase-server';
+import { createServiceSupabase } from '@/lib/supabase-server';
 import {
   requireDashboardPermissionAccess,
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
 
 async function requireCustomerAnalyticsAccess(label: string) {
-  await requireDashboardTabAccess('customers', label);
+  return requireDashboardTabAccess('customers', label);
 }
 
 async function requireBrandAnalysisAccess(label: string) {
-  await requireDashboardTabAccess('brand-analysis', label);
+  return requireDashboardTabAccess('brand-analysis', label);
 }
 
 async function requireAdminSyncAccess(label: string) {
@@ -203,7 +203,7 @@ export async function getScalevOrderFinancialsV2Reconciliation(sampleLimit = 20)
     shippingDiscountUnknownWithShipping: ScalevFinancialsV2SampleOrder[];
   };
 }> {
-  await requireAdminSyncAccess('Admin Sync');
+  const { workspaceId } = await requireAdminSyncAccess('Admin Sync');
 
   const svc = createServiceSupabase();
   const safeLimit = Math.min(Math.max(Math.trunc(sampleLimit) || 20, 1), 100);
@@ -230,20 +230,24 @@ export async function getScalevOrderFinancialsV2Reconciliation(sampleLimit = 20)
     svc
       .from('v_scalev_order_financials_v2_reconciliation')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .maybeSingle(),
     svc
       .from('v_scalev_order_financials_v2_gap_distribution')
       .select('*')
+      .eq('workspace_id', workspaceId)
       .order('gap_amount', { ascending: true }),
     svc
       .from('v_scalev_order_financials_v2')
       .select(sampleColumns)
+      .eq('workspace_id', workspaceId)
       .eq('audit_header_minus_line_product_net', 0)
       .order('scalev_order_id', { ascending: false })
       .limit(safeLimit),
     svc
       .from('v_scalev_order_financials_v2')
       .select(sampleColumns)
+      .eq('workspace_id', workspaceId)
       .not('audit_header_minus_line_product_net', 'is', null)
       .neq('audit_header_minus_line_product_net', 0)
       .order('scalev_order_id', { ascending: false })
@@ -251,6 +255,7 @@ export async function getScalevOrderFinancialsV2Reconciliation(sampleLimit = 20)
     svc
       .from('v_scalev_order_financials_v2')
       .select(sampleColumns)
+      .eq('workspace_id', workspaceId)
       .gt('shipping_gross_amount', 0)
       .is('shipping_discount_amount', null)
       .order('scalev_order_id', { ascending: false })
@@ -286,23 +291,18 @@ export async function getScalevOrderFinancialsV2Reconciliation(sampleLimit = 20)
 
 // ── Save Scalev API key (owner only) ──
 export async function saveScalevApiKey(apiKey: string) {
-  const supabase = createServerSupabase();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) throw new Error('Not authenticated');
-
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', user.id)
-    .single();
-
-  if (profile?.role !== 'owner') throw new Error('Only owners can configure Scalev');
+  const { workspaceId } = await requireAdminSyncAccess('Admin Sync');
 
   const svc = createServiceSupabase();
 
-  await svc.from('scalev_config').update({ is_active: false }).eq('is_active', true);
+  await svc
+    .from('scalev_config')
+    .update({ is_active: false })
+    .eq('workspace_id', workspaceId)
+    .eq('is_active', true);
 
   const { error } = await svc.from('scalev_config').insert({
+    workspace_id: workspaceId,
     api_key: apiKey,
     base_url: 'https://api.scalev.id/v2',
     is_active: true,
@@ -316,11 +316,13 @@ export async function saveScalevApiKey(apiKey: string) {
 
 // ── Get daily order summary (for dashboard) ──
 export async function fetchScalevDailySummary(from: string, to: string) {
+  const { workspaceId } = await requireDashboardTabAccess('overview', 'Overview');
   const svc = createServiceSupabase();
 
   const { data, error } = await svc
     .from('v_daily_order_summary')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .gte('date', from)
     .lte('date', to)
     .order('date', { ascending: true });
@@ -331,10 +333,12 @@ export async function fetchScalevDailySummary(from: string, to: string) {
 
 // ── Get daily channel summary (for dashboard) ──
 export async function fetchScalevChannelSummary(from: string, to: string) {
+  const { workspaceId } = await requireDashboardTabAccess('channels', 'Sales Channel');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('v_daily_channel_summary')
     .select('*')
+    .eq('workspace_id', workspaceId)
     .gte('date', from)
     .lte('date', to)
     .order('date', { ascending: true });
@@ -349,10 +353,11 @@ export async function fetchCustomerTypeDaily(
   brand: string | null = null,
   salesChannel: string | null = null,
 ) {
-  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .rpc('get_customer_type_daily_exact', {
+      p_workspace_id: workspaceId,
       p_from: from,
       p_to: to,
       p_brand: brand,
@@ -368,10 +373,11 @@ export async function fetchCustomerTypePeriod(
   to: string,
   brand: string | null = null,
 ) {
-  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .rpc('get_customer_type_period_exact', {
+      p_workspace_id: workspaceId,
       p_from: from,
       p_to: to,
       p_brand: brand,
@@ -381,18 +387,14 @@ export async function fetchCustomerTypePeriod(
 }
 
 export async function fetchCustomerCohort(limit: number = 100, from?: string, to?: string) {
-  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
-  let query = svc
-    .from('v_customer_cohort')
-    .select('*');
-
-  if (from) query = query.gte('last_order_date', from);
-  if (to) query = query.lte('last_order_date', to);
-
-  const { data, error } = await query
-    .order('total_revenue', { ascending: false })
-    .limit(limit);
+  const { data, error } = await svc.rpc('workspace_customer_cohort', {
+    p_workspace_id: workspaceId,
+    p_from: from || null,
+    p_to: to || null,
+    p_limit: Math.max(1, Math.min(limit, 1000)),
+  });
 
   if (error) throw error;
   return data || [];
@@ -400,11 +402,12 @@ export async function fetchCustomerCohort(limit: number = 100, from?: string, to
 
 // ── Get overall customer KPIs ──
 export async function fetchCustomerKPIs(from: string, to: string) {
-  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
 
   const { data: periodData, error } = await svc
     .rpc('get_customer_type_period_exact', {
+      p_workspace_id: workspaceId,
       p_from: from,
       p_to: to,
       p_brand: null,
@@ -477,34 +480,30 @@ export async function fetchCustomerKPIs(from: string, to: string) {
 
 // ── Get monthly cohort data ──
 export async function fetchMonthlyCohort() {
-  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
   const { data, error } = await svc
-    .from('v_monthly_cohort')
-    .select('*')
-    .order('cohort_month', { ascending: true });
+    .rpc('workspace_monthly_cohort', { p_workspace_id: workspaceId });
   if (error) throw error;
   return data || [];
 }
 
 // ── Get monthly cohort data per channel group ──
 export async function fetchMonthlyCohortByChannel() {
-  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
   const { data, error } = await svc
-    .from('v_monthly_cohort_channel')
-    .select('*')
-    .order('channel_group', { ascending: true })
-    .order('cohort_month', { ascending: true });
+    .rpc('workspace_monthly_cohort_channel', { p_workspace_id: workspaceId });
   if (error) throw error;
   return data || [];
 }
 
-// ── Get per-channel LTV 90-day for Roove brand ──
+// ── Get per-channel LTV 90-day for the selected workspace brand ──
 export async function fetchChannelLtv90d(brand?: string | null) {
-  await requireCustomerAnalyticsAccess('LTV Customer Analytics');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('LTV Customer Analytics');
   const svc = createServiceSupabase();
   const { data, error } = await svc.rpc('get_channel_ltv_90d', {
+    p_workspace_id: workspaceId,
     brand_filter: brand || null,
   });
   if (error) throw error;
@@ -513,18 +512,21 @@ export async function fetchChannelLtv90d(brand?: string | null) {
 
 // ── Get conservative CAC per channel ──
 export async function fetchChannelCac() {
-  await requireCustomerAnalyticsAccess('CAC Customer Analytics');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('CAC Customer Analytics');
   const svc = createServiceSupabase();
-  const { data, error } = await svc.rpc('get_channel_cac');
+  const { data, error } = await svc.rpc('get_channel_cac', {
+    p_workspace_id: workspaceId,
+  });
   if (error) throw error;
   return data || [];
 }
 
 // ── Get LTV 90d trend per cohort month per channel ──
 export async function fetchLtvTrend(brand?: string | null) {
-  await requireCustomerAnalyticsAccess('LTV Customer Analytics');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('LTV Customer Analytics');
   const svc = createServiceSupabase();
   const { data, error } = await svc.rpc('get_ltv_trend_by_cohort', {
+    p_workspace_id: workspaceId,
     brand_filter: brand || null,
   });
   if (error) throw error;
@@ -533,18 +535,21 @@ export async function fetchLtvTrend(brand?: string | null) {
 
 // ── Get available brands for selector ──
 export async function fetchAvailableBrands() {
-  await requireCustomerAnalyticsAccess('Brand Customer Analytics');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('Brand Customer Analytics');
   const svc = createServiceSupabase();
-  const { data, error } = await svc.rpc('get_available_brands');
+  const { data, error } = await svc.rpc('get_available_brands', {
+    p_workspace_id: workspaceId,
+  });
   if (error) throw error;
   return data || [];
 }
 
 // ── Get monthly CAC per channel ──
 export async function fetchMonthlyCac(brand?: string | null) {
-  await requireCustomerAnalyticsAccess('CAC Customer Analytics');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('CAC Customer Analytics');
   const svc = createServiceSupabase();
   const { data, error } = await svc.rpc('get_monthly_cac', {
+    p_workspace_id: workspaceId,
     brand_filter: brand || null,
   });
   if (error) throw error;
@@ -553,13 +558,14 @@ export async function fetchMonthlyCac(brand?: string | null) {
 
 // ── Get RTS and Canceled order stats with platform breakdown ──
 export async function fetchRtsCancelStats(from?: string, to?: string) {
-  await requireCustomerAnalyticsAccess('Analytics Pelanggan');
+  const { workspaceId } = await requireCustomerAnalyticsAccess('Analytics Pelanggan');
   const svc = createServiceSupabase();
 
   // Get total shipped+completed for percentage denominator
   let baseQuery = svc
     .from('scalev_orders')
     .select('*', { count: 'exact', head: true })
+    .eq('workspace_id', workspaceId)
     .in('status', ['completed', 'shipped']);
   if (from) baseQuery = baseQuery.gte('shipped_time', from);
   if (to) baseQuery = baseQuery.lte('shipped_time', to + 'T23:59:59');
@@ -569,6 +575,7 @@ export async function fetchRtsCancelStats(from?: string, to?: string) {
   let query = svc
     .from('scalev_orders')
     .select('status, platform')
+    .eq('workspace_id', workspaceId)
     .in('status', ['rts', 'canceled']);
   if (from) query = query.gte('shipped_time', from);
   if (to) query = query.lte('shipped_time', to + 'T23:59:59');
@@ -601,23 +608,20 @@ export async function fetchRtsCancelStats(from?: string, to?: string) {
 
 // ── Cross-brand matrix ──
 export async function fetchCrossBrandMatrix() {
-  await requireBrandAnalysisAccess('Brand Analysis');
+  const { workspaceId } = await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
-    .from('mv_cross_brand_matrix')
-    .select('*')
-    .order('brand_from', { ascending: true });
+    .rpc('workspace_cross_brand_matrix', { p_workspace_id: workspaceId });
   if (error) throw error;
   return data || [];
 }
 
 // ── Multi-brand customer stats (pre-aggregated) ──
 export async function fetchMultiBrandStats() {
-  await requireBrandAnalysisAccess('Brand Analysis');
+  const { workspaceId } = await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
-    .from('v_brand_analysis_summary')
-    .select('*');
+    .rpc('workspace_brand_analysis_summary', { p_workspace_id: workspaceId });
   if (error) throw error;
 
   const segments: Record<string, any> = {};
@@ -647,23 +651,20 @@ export async function fetchMultiBrandStats() {
 
 // ── Brand journey transitions ──
 export async function fetchBrandJourney() {
-  await requireBrandAnalysisAccess('Brand Analysis');
+  const { workspaceId } = await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
-    .from('mv_brand_journey')
-    .select('*')
-    .order('customer_count', { ascending: false });
+    .rpc('workspace_brand_journey', { p_workspace_id: workspaceId });
   if (error) throw error;
   return data || [];
 }
 
 // ── Customer-brand map (per brand summary) ──
 export async function fetchBrandSummary() {
-  await requireBrandAnalysisAccess('Brand Analysis');
+  const { workspaceId } = await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
-    .from('mv_customer_brand_map')
-    .select('brand, customer_identifier, order_count, total_revenue');
+    .rpc('workspace_customer_brand_map', { p_workspace_id: workspaceId });
   if (error) throw error;
   return data || [];
 }
@@ -840,11 +841,14 @@ function summarizeBuyerHealthPoints(pointsByBrand: Map<string, BrandBuyerHealthP
 
 // ── Owned-channel brand health: trailing 90D active base + weekly new-to-brand buyers ──
 export async function fetchOwnedBrandBuyerHealth(options?: { weeks?: number }): Promise<BrandBuyerHealthData> {
-  await requireBrandAnalysisAccess('Brand Analysis');
+  const { workspaceId } = await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const weekCount = Math.max(13, Math.min(Number(options?.weeks || BUYER_HEALTH_DEFAULT_WEEKS), 52));
 
-  const { data: rpcData, error: rpcError } = await svc.rpc('get_owned_brand_buyer_health', { p_weeks: weekCount });
+  const { data: rpcData, error: rpcError } = await svc.rpc('get_owned_brand_buyer_health', {
+    p_workspace_id: workspaceId,
+    p_weeks: weekCount,
+  });
   if (!rpcError) {
     const rows = (rpcData || []) as OwnedBuyerHealthRpcRow[];
     const pointsByBrand = new Map<string, BrandBuyerHealthPoint[]>();
@@ -905,11 +909,12 @@ export async function fetchOwnedBrandBuyerHealth(options?: { weeks?: number }): 
 
 // ── Last refresh time ──
 export async function fetchBrandAnalysisRefreshTime() {
-  await requireBrandAnalysisAccess('Brand Analysis');
+  const { workspaceId } = await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('mv_refresh_log')
     .select('refreshed_at, triggered_by')
+    .eq('workspace_id', workspaceId)
     .eq('view_name', 'brand_analysis')
     .order('refreshed_at', { ascending: false })
     .limit(1)
@@ -920,14 +925,13 @@ export async function fetchBrandAnalysisRefreshTime() {
 
 // ── Trigger refresh ──
 export async function refreshBrandAnalysis() {
-  await requireBrandAnalysisAccess('Brand Analysis');
+  const { workspaceId } = await requireBrandAnalysisAccess('Brand Analysis');
   const svc = createServiceSupabase();
-  const { error } = await svc.rpc('refresh_brand_analysis');
-  if (error) throw error;
-  
+
   const { error: logError } = await svc.from('mv_refresh_log').insert({
+    workspace_id: workspaceId,
     view_name: 'brand_analysis',
-    triggered_by: 'manual',
+    triggered_by: 'live_workspace_read',
   });
   if (logError) throw logError;
   

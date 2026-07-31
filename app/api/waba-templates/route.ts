@@ -70,9 +70,7 @@ async function getActiveWabaAccounts(workspaceId: string): Promise<ActiveWabaAcc
     .order('waba_name');
 
   if (error) throw error;
-  if (!accounts || accounts.length === 0) throw new Error('No active WABA account configured');
-
-  return accounts;
+  return accounts || [];
 }
 
 function resolveTargetWabaId(accounts: ActiveWabaAccount[], requestedWabaId?: string | null) {
@@ -86,6 +84,9 @@ function resolveTargetWabaId(accounts: ActiveWabaAccount[], requestedWabaId?: st
 
   if (accounts.length === 1) {
     return accounts[0].waba_id;
+  }
+  if (accounts.length === 0) {
+    throw new Error('Belum ada akun WABA aktif di workspace ini.');
   }
 
   throw new Error('Multiple active WABA accounts configured. Please select a target WABA account.');
@@ -118,7 +119,7 @@ export async function GET(req: NextRequest) {
     const templates = [];
     let offset = 0;
 
-    while (true) {
+    while (activeAccounts.length > 0) {
       const { data, error } = await svc
         .from('waba_templates')
         .select('id, waba_id, name, status, category, language, components, is_auto_generated, tags')
@@ -137,7 +138,20 @@ export async function GET(req: NextRequest) {
       offset += SUPABASE_PAGE_SIZE;
     }
 
-    return NextResponse.json({ data: templates, accounts: activeAccounts });
+    const { data: lastSync } = await svc
+      .from('waba_template_sync_log')
+      .select('created_at')
+      .eq('workspace_id', auth.workspaceId)
+      .in('status', ['success', 'partial'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    return NextResponse.json({
+      data: templates,
+      accounts: activeAccounts,
+      lastSynced: lastSync?.created_at || null,
+    });
   } catch (err: any) {
     console.error('[waba-templates] GET error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
@@ -194,7 +208,7 @@ export async function POST(req: NextRequest) {
       is_auto_generated: false,
       synced_at: new Date().toISOString(),
       deleted_at: null,
-      }, { onConflict: 'id' }).then(({ error }) => {
+      }, { onConflict: 'workspace_id,id' }).then(({ error }) => {
       if (error) console.error('[waba-templates] Write-through insert error:', error);
     });
 

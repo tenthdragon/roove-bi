@@ -3,7 +3,7 @@ import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
-import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
+import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
 
 export const maxDuration = 60;
 
@@ -19,7 +19,7 @@ async function queueWarehouseSync(request: NextRequest, method: 'GET' | 'POST') 
   );
   const mode = `${isCron ? 'cron' : 'dashboard'}_${method.toLowerCase()}`;
   let requestedBy: string | null = null;
-  let workspaceId = ROOVE_WORKSPACE_ID;
+  let workspaceId: string | null = null;
 
   logRouteEvent({
     route: '/api/warehouse-sync',
@@ -67,18 +67,28 @@ async function queueWarehouseSync(request: NextRequest, method: 'GET' | 'POST') 
 
   try {
     const queueMode = isCron ? 'cron' : 'manual';
-    const { job, isDuplicate } = await enqueueSyncJob({
-      workspaceId,
-      jobName: 'warehouse_sync',
-      route: '/api/warehouse-sync',
-      mode: queueMode,
-      payload: {},
-      dedupeKey: createSyncJobDedupeKey('warehouse_sync', queueMode, {}),
-      requestedBy,
-      requestId,
-      maxAttempts: 3,
-      priority: isCron ? 35 : 45,
-    });
+    const workspaceIds = isCron
+      ? await resolveScheduledWorkspaceIds(
+          new URL(request.url).searchParams.get('workspace_id'),
+          'warehouse',
+        )
+      : [workspaceId!];
+    const queuedJobs = [];
+    for (const scheduledWorkspaceId of workspaceIds) {
+      queuedJobs.push(await enqueueSyncJob({
+        workspaceId: scheduledWorkspaceId,
+        jobName: 'warehouse_sync',
+        route: '/api/warehouse-sync',
+        mode: queueMode,
+        payload: {},
+        dedupeKey: createSyncJobDedupeKey('warehouse_sync', queueMode, {}),
+        requestedBy,
+        requestId,
+        maxAttempts: 3,
+        priority: isCron ? 35 : 45,
+      }));
+    }
+    const primary = queuedJobs[0] || null;
 
     logRouteEvent({
       route: '/api/warehouse-sync',
@@ -90,19 +100,20 @@ async function queueWarehouseSync(request: NextRequest, method: 'GET' | 'POST') 
       rows_processed: 1,
       extra: {
         queued: true,
-        duplicate: isDuplicate,
-        job_id: job.id,
+        duplicate: queuedJobs.length > 0 && queuedJobs.every((item) => item.isDuplicate),
+        job_ids: queuedJobs.map((item) => item.job.id).join(','),
       },
     });
 
     return NextResponse.json({
       queued: true,
-      duplicate: isDuplicate,
-      job_id: job.id,
-      status: job.status,
-      message: isDuplicate
-        ? 'Sync warehouse sudah ada di antrean atau sedang berjalan.'
-        : 'Sync warehouse berhasil dimasukkan ke antrean.',
+      duplicate: queuedJobs.length > 0 && queuedJobs.every((item) => item.isDuplicate),
+      job_id: primary?.job.id || null,
+      job_ids: queuedJobs.map((item) => item.job.id),
+      status: primary?.job.status || 'success',
+      message: queuedJobs.length === 0
+        ? 'Tidak ada workspace dengan koneksi warehouse aktif.'
+        : `${queuedJobs.length} sync warehouse diproses.`,
     }, { status: 202 });
   } catch (err: any) {
     console.error('[Warehouse Sync API] Error:', err);

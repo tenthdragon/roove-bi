@@ -60,7 +60,7 @@ function extractStoreName(payload: any) {
 export async function listMarketplaceWebhookQuarantine(params?: {
   limit?: number;
 }) : Promise<MarketplaceWebhookQuarantineListResult> {
-  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat webhook quarantine marketplace.');
+  const { workspaceId } = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat webhook quarantine marketplace.');
 
   const svc = createServiceSupabase();
   const limit = Math.min(Math.max(Number(params?.limit || 100), 1), 500);
@@ -68,6 +68,7 @@ export async function listMarketplaceWebhookQuarantine(params?: {
   const { data, error } = await svc
     .from('scalev_marketplace_webhook_quarantine')
     .select('id, created_at, business_code, event_type, order_id, external_id, scalev_id, source_class, source_class_reason, matched_scalev_order_id, reason, payload')
+    .eq('workspace_id', workspaceId)
     .order('created_at', { ascending: false })
     .limit(limit);
 

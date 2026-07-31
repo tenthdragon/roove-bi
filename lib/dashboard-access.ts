@@ -1,6 +1,9 @@
 import { createServerSupabase } from './supabase-server';
 import { getWorkspaceBootstrapForVerifiedProfile } from './workspace-access';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
+import {
+  isWorkspaceModuleEnabled,
+  type AccessibleWorkspace,
+} from './workspaces';
 
 type DashboardProfile = {
   id: string;
@@ -13,6 +16,7 @@ type AccessContext = {
   workspaceId: string;
   membershipRole: string;
   isPlatformOwner: boolean;
+  workspace: AccessibleWorkspace;
 };
 
 async function getAuthenticatedDashboardProfile(): Promise<AccessContext> {
@@ -66,6 +70,7 @@ async function getAuthenticatedDashboardProfile(): Promise<AccessContext> {
     workspaceId: activeWorkspace.id,
     membershipRole: activeWorkspace.membershipRole,
     isPlatformOwner: workspaceBootstrap.isPlatformOwner,
+    workspace: activeWorkspace,
   };
 }
 
@@ -91,11 +96,8 @@ async function verifyPermissionKeys(
 
 export async function requireDashboardTabAccess(tabId: string, label?: string): Promise<AccessContext> {
   const ctx = await getAuthenticatedDashboardProfile();
-  if (
-    ctx.workspaceId !== ROOVE_WORKSPACE_ID
-    && ['ppic', 'warehouse-settings', 'marketplace-intake', 'customers', 'brand-analysis', 'sales-channel-analysis'].includes(tabId)
-  ) {
-    throw new Error(`${label || tabId} masih dalam rollout workspace dan belum diaktifkan.`);
+  if (!isWorkspaceModuleEnabled(ctx.workspace, tabId)) {
+    throw new Error(`${label || tabId} tidak diaktifkan untuk workspace ini.`);
   }
   if (ctx.profile.role === 'owner') return ctx;
 
@@ -113,11 +115,11 @@ export async function requireDashboardTabAccess(tabId: string, label?: string): 
 
 export async function requireAnyDashboardTabAccess(tabIds: string[], label: string): Promise<AccessContext> {
   const ctx = await getAuthenticatedDashboardProfile();
-  const allowedTabIds = ctx.workspaceId === ROOVE_WORKSPACE_ID
-    ? tabIds
-    : tabIds.filter((tabId) => !['ppic', 'warehouse-settings', 'marketplace-intake', 'customers', 'brand-analysis', 'sales-channel-analysis'].includes(tabId));
+  const allowedTabIds = tabIds.filter((tabId) =>
+    isWorkspaceModuleEnabled(ctx.workspace, tabId),
+  );
   if (allowedTabIds.length === 0) {
-    throw new Error(`${label} masih dalam rollout workspace dan belum diaktifkan.`);
+    throw new Error(`${label} tidak diaktifkan untuk workspace ini.`);
   }
   if (ctx.profile.role === 'owner') return ctx;
 
@@ -165,17 +167,6 @@ export async function requireAnyDashboardPermissionAccess(permissionKeys: string
 
 export async function requireDashboardRoles(roles: string[], denyMessage: string): Promise<AccessContext> {
   const ctx = await getAuthenticatedDashboardProfile();
-  if (ctx.workspaceId !== ROOVE_WORKSPACE_ID && /marketplace/i.test(denyMessage)) {
-    throw new Error('Marketplace Intake masih dalam rollout workspace dan belum diaktifkan.');
-  }
   if (roles.includes(ctx.profile.role)) return ctx;
   throw new Error(denyMessage);
-}
-
-export async function requireRooveOnlyFeature(label: string): Promise<AccessContext> {
-  const ctx = await getAuthenticatedDashboardProfile();
-  if (ctx.workspaceId !== ROOVE_WORKSPACE_ID) {
-    throw new Error(`${label} masih dalam rollout workspace dan belum diaktifkan.`);
-  }
-  return ctx;
 }

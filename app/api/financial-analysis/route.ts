@@ -37,7 +37,7 @@ export async function POST(request: NextRequest) {
     );
     if (rateLimitError) return rateLimitError;
 
-    const { profile, workspaceId } = await requireDashboardRoles(
+    const { profile, workspaceId, workspace } = await requireDashboardRoles(
       ['owner'],
       'Hanya owner yang bisa menjalankan AI Finance Analysis.',
     );
@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     const financialData = await getFinancialDataForAI(numMonths);
 
     const systemPrompt = USE_OPUS
-      ? buildFullSystemPrompt(mode)
+      ? buildFullSystemPrompt(mode, workspace.name)
       : buildTestSystemPrompt();
     const userPrompt = USE_OPUS
       ? buildFullUserPrompt(financialData, mode)
@@ -195,8 +195,9 @@ Respond JSON singkat:
 // FULL MODE — Opus deep analysis
 // ============================================================
 
-function buildFullSystemPrompt(mode: string): string {
-  const base = `Kamu adalah penasihat strategis senior — "truth-teller" pribadi untuk CEO RTI Group, perusahaan e-commerce Indonesia dengan multiple brands (Roove, Purvu, Pluve, Osgard, Dr Hyun, Globite, Calmara).
+function buildFullSystemPrompt(mode: string, workspaceName: string): string {
+  const companyName = String(workspaceName || '').trim() || 'workspace aktif';
+  const base = `Kamu adalah penasihat strategis senior — "truth-teller" pribadi untuk CEO ${companyName}, perusahaan e-commerce Indonesia. Analisis hanya data yang diberikan dari workspace ini; jangan mengasumsikan brand, company, atau data dari workspace lain.
 
 FILOSOFI:
 - Berani mengatakan apa yang tidak ingin didengar CEO tetapi HARUS didengar.
@@ -207,7 +208,7 @@ FILOSOFI:
 KONTEKS BISNIS:
 - Consumer goods via marketplace Indonesia (Shopee, TikTok Shop, Tokopedia, BliBli, Lazada) plus Scalev dan reseller.
 - Sangat bergantung pada paid ads (Meta, TikTok, marketplace ads).
-- 7+ brands sekaligus — perhatikan brand dilution.
+- Jika ada beberapa brand, perhatikan konsentrasi dan brand dilution berdasarkan data aktual.
 - SME Indonesia — benchmark realistis.
 
 DATA RULES:

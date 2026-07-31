@@ -8,7 +8,7 @@ import {
   type MessageTemplate,
 } from '@/lib/meta-whatsapp';
 import { resolveWorkspaceCredential } from '@/lib/workspace-integration-server';
-import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
+import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
 
 function getServiceSupabase() {
   return createClient(
@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const startTime = Date.now();
-  let workspaceId = ROOVE_WORKSPACE_ID;
+  let workspaceId: string | null = null;
 
   try {
     // ── Auth ──
@@ -79,12 +79,35 @@ export async function POST(req: NextRequest) {
     try { body = await req.json(); } catch { /* no body */ }
     const mode = searchParams.get('mode') || body.mode || 'cron';
     if (isCron) {
-      workspaceId = searchParams.get('workspace_id') || body.workspace_id || ROOVE_WORKSPACE_ID;
+      const requestedWorkspaceId = searchParams.get('workspace_id') || body.workspace_id;
+      if (!requestedWorkspaceId) {
+        const workspaceIds = await resolveScheduledWorkspaceIds(null, 'whatsapp');
+        const results = [];
+        for (const scheduledWorkspaceId of workspaceIds) {
+          const childUrl = new URL(req.url);
+          childUrl.searchParams.set('workspace_id', scheduledWorkspaceId);
+          childUrl.searchParams.set('mode', mode);
+          const response = await fetch(childUrl, {
+            method: 'POST',
+            headers: { authorization: req.headers.get('authorization') || '' },
+          });
+          results.push({
+            workspace_id: scheduledWorkspaceId,
+            ok: response.ok,
+            result: await response.json().catch(() => ({})),
+          });
+        }
+        return NextResponse.json({
+          workspaces_processed: results.length,
+          results,
+        }, { status: results.some((item) => !item.ok) ? 207 : 200 });
+      }
+      [workspaceId] = await resolveScheduledWorkspaceIds(requestedWorkspaceId, 'whatsapp');
     }
 
     const accessToken = await resolveWorkspaceCredential({
       supabase: svc,
-      workspaceId,
+      workspaceId: workspaceId!,
       provider: 'whatsapp',
       fallbackEnvKeys: ['WHATSAPP_ACCESS_TOKEN', 'META_ACCESS_TOKEN'],
     });
@@ -93,7 +116,7 @@ export async function POST(req: NextRequest) {
     const { data: accounts, error: accountsError } = await svc
       .from('waba_accounts')
       .select('waba_id')
-      .eq('workspace_id', workspaceId)
+      .eq('workspace_id', workspaceId!)
       .eq('is_active', true);
 
     if (accountsError) throw accountsError;
@@ -165,7 +188,7 @@ export async function POST(req: NextRequest) {
 
           const { error } = await svc
             .from('waba_templates')
-            .upsert(batch, { onConflict: 'id' });
+            .upsert(batch, { onConflict: 'workspace_id,id' });
 
           if (error) {
             console.error(`[waba-template-sync] Upsert templates error:`, error);
@@ -234,7 +257,7 @@ export async function POST(req: NextRequest) {
 
           const { error } = await svc
             .from('waba_template_daily_analytics')
-            .upsert(batch, { onConflict: 'template_id,date' });
+            .upsert(batch, { onConflict: 'workspace_id,template_id,date' });
 
           if (error) {
             console.error(`[waba-template-sync] Upsert analytics error:`, error);
@@ -260,7 +283,8 @@ export async function POST(req: NextRequest) {
         status,
         error_message: errors.length > 0 ? errors.join('; ') : null,
         duration_ms: duration,
-      }).eq('id', logId);
+      }).eq('id', logId)
+        .eq('workspace_id', workspaceId);
     }
 
     console.log(`[waba-template-sync] Done: ${templatesSynced} templates, ${analyticsRowsUpserted} analytics rows, ${duration}ms`);

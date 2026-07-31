@@ -37,8 +37,8 @@ import {
   resolveWarehouseOrigin,
   type WarehouseBusinessDirectoryRow,
 } from './warehouse-domain-helpers';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
 import { buildWorkspaceWarehouseTargets } from './workspace-warehouse-reconcile';
+import { requireExplicitWorkspaceId } from './workspace-scope';
 
 // ============================================================
 // AUTH HELPER
@@ -68,11 +68,7 @@ async function getCurrentUserName(): Promise<string> {
 }
 
 async function requireWarehouseAccess(label: string = 'Warehouse') {
-  const access = await requireDashboardTabAccess('warehouse', label);
-  if (access.workspaceId !== ROOVE_WORKSPACE_ID) {
-    throw new Error(`${label} menggunakan modul warehouse independen workspace.`);
-  }
-  return access;
+  return requireDashboardTabAccess('warehouse', label);
 }
 
 async function requireWarehousePermission(permissionKey: string, label: string) {
@@ -154,18 +150,26 @@ function getWarehouseMutationErrorMessage(error: unknown, fallback: string) {
 // TELEGRAM NOTIFICATION (fire-and-forget)
 // ============================================================
 
-async function notifyDirekturs(message: string) {
+async function notifyDirekturs(workspaceId: string, message: string) {
   try {
     const svc = createServiceSupabase();
+    const { data: memberships } = await svc
+      .from('workspace_memberships')
+      .select('user_id')
+      .eq('workspace_id', workspaceId)
+      .eq('status', 'active')
+      .in('role', ['direktur_ops', 'direktur_operasional']);
+    const userIds = (memberships || []).map((membership) => membership.user_id);
+    if (userIds.length === 0) return;
     const { data: direkturs } = await svc
       .from('profiles')
       .select('telegram_chat_id')
-      .in('role', ['direktur_ops', 'direktur_operasional'])
+      .in('id', userIds)
       .not('telegram_chat_id', 'is', null);
 
     if (direkturs && direkturs.length > 0) {
       await Promise.allSettled(
-        direkturs.map(d => sendTelegramToChat(d.telegram_chat_id, message))
+        direkturs.map(d => sendTelegramToChat(workspaceId, d.telegram_chat_id, message))
       );
     }
   } catch (e) {
@@ -173,18 +177,26 @@ async function notifyDirekturs(message: string) {
   }
 }
 
-async function notifyDirektursWithMarkup(message: string, replyMarkup?: any) {
+async function notifyDirektursWithMarkup(workspaceId: string, message: string, replyMarkup?: any) {
   try {
     const svc = createServiceSupabase();
+    const { data: memberships } = await svc
+      .from('workspace_memberships')
+      .select('user_id')
+      .eq('workspace_id', workspaceId)
+      .eq('status', 'active')
+      .in('role', ['direktur_ops', 'direktur_operasional']);
+    const userIds = (memberships || []).map((membership) => membership.user_id);
+    if (userIds.length === 0) return;
     const { data: direkturs } = await svc
       .from('profiles')
       .select('telegram_chat_id')
-      .in('role', ['direktur_ops', 'direktur_operasional'])
+      .in('id', userIds)
       .not('telegram_chat_id', 'is', null);
 
     if (direkturs && direkturs.length > 0) {
       await Promise.allSettled(
-        direkturs.map(d => sendTelegramToChat(d.telegram_chat_id, message, { replyMarkup }))
+        direkturs.map(d => sendTelegramToChat(workspaceId, d.telegram_chat_id, message, { replyMarkup }))
       );
     }
   } catch (e) {
@@ -213,6 +225,7 @@ type WarehouseMutationResult<T = void> =
   | { success: false; error: string };
 
 export interface LedgerEntry {
+  workspace_id: string;
   warehouse_product_id: number;
   batch_id?: number | null;
   movement_type: MovementType;
@@ -623,8 +636,9 @@ function formatJakartaDateValue(value: string) {
 
 async function loadWarehouseGoLiveAt(
   svc: ReturnType<typeof createServiceSupabase>,
-  workspaceId: string = ROOVE_WORKSPACE_ID,
+  requestedWorkspaceId: string,
 ) {
+  const workspaceId = requireExplicitWorkspaceId(requestedWorkspaceId, 'Warehouse go-live');
   const { data: workspace, error: workspaceError } = await svc
     .from('workspaces')
     .select('settings')
@@ -663,6 +677,29 @@ async function loadWarehouseGoLiveAt(
   return approvedAt.getTime() > notBeforeAt.getTime()
     ? approvedAt.toISOString()
     : notBeforeAt.toISOString();
+}
+
+async function loadWarehouseReconcileMode(
+  svc: ReturnType<typeof createServiceSupabase>,
+  requestedWorkspaceId: string,
+) {
+  const workspaceId = requireExplicitWorkspaceId(
+    requestedWorkspaceId,
+    'Warehouse reconciliation mode',
+  );
+  const { data, error } = await svc
+    .from('workspaces')
+    .select('settings')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  if (error) throw error;
+  const mode = String(
+    (data?.settings as Record<string, unknown> | null)?.warehouse_reconcile_mode || '',
+  );
+  if (mode !== 'legacy_attribution' && mode !== 'strict_mapping') {
+    throw new Error('Mode rekonsiliasi warehouse workspace belum dikonfigurasi.');
+  }
+  return mode;
 }
 
 function isScalevOrderBeforeWarehouseGoLive(
@@ -876,10 +913,11 @@ function aggregateOutstandingByProduct(groups: OutstandingWarehouseLedgerGroup[]
 async function resolveScalevOrderWarehouseContext(
   svc: ReturnType<typeof createServiceSupabase>,
   order: ScalevOrderWarehouseSnapshot,
+  workspaceId: string,
 ): Promise<ResolvedScalevOrderWarehouseContext> {
   const [businessDirectoryRows, originRegistryRows] = await Promise.all([
-    fetchWarehouseBusinessDirectoryRows(svc),
-    fetchWarehouseOriginRegistryRows(svc),
+    fetchWarehouseBusinessDirectoryRows(svc, workspaceId),
+    fetchWarehouseOriginRegistryRows(svc, workspaceId),
   ]);
 
   const rawBusinessName = cleanWarehouseDomainText(order.business_name_raw)
@@ -929,6 +967,7 @@ async function resolveScalevLineOwnerBusinessCode(
   line: ScalevOrderLineForWarehouse,
   fallbackOwnerBusinessCode?: string | null,
   businessDirectoryRows?: WarehouseBusinessDirectoryRow[],
+  workspaceId: string = '',
 ) {
   const rawOwner = cleanWarehouseDomainText(line.item_owner_raw);
   if (line.stock_owner_business_code) {
@@ -939,7 +978,7 @@ async function resolveScalevLineOwnerBusinessCode(
     };
   }
 
-  const rows = businessDirectoryRows || await fetchWarehouseBusinessDirectoryRows(svc);
+  const rows = businessDirectoryRows || await fetchWarehouseBusinessDirectoryRows(svc, workspaceId);
   const resolution = resolveWarehouseBusinessCode({
     rawValue: rawOwner,
     fallbackBusinessCode: rawOwner ? null : cleanWarehouseDomainText(fallbackOwnerBusinessCode) || null,
@@ -961,8 +1000,9 @@ async function loadScalevOrderWarehouseSnapshot(
   svc: ReturnType<typeof createServiceSupabase>,
   orderId: string,
   scalevOrderDbId?: number | null,
-  workspaceId = ROOVE_WORKSPACE_ID,
+  workspaceId = '',
 ): Promise<ScalevOrderWarehouseSnapshot | null> {
+  workspaceId = requireExplicitWorkspaceId(workspaceId, 'Warehouse order lookup');
   if (scalevOrderDbId != null) {
     const { data, error } = await svc
       .from('scalev_orders')
@@ -1015,10 +1055,12 @@ async function loadScalevOrderWarehouseSnapshot(
 async function getScalevOrderWarehouseLines(
   svc: ReturnType<typeof createServiceSupabase>,
   scalevOrderDbId: number,
+  workspaceId: string,
 ) {
   const { data, error } = await svc
     .from('scalev_order_lines')
     .select('product_name, quantity, variant_sku, item_name_raw, item_owner_raw, stock_owner_business_code')
+    .eq('workspace_id', workspaceId)
     .eq('scalev_order_id', scalevOrderDbId);
   if (error) throw error;
 
@@ -1037,14 +1079,15 @@ async function getScalevOrderWarehouseLines(
 async function resolveWarehouseTargetsForOrder(
   svc: ReturnType<typeof createServiceSupabase>,
   order: ScalevOrderWarehouseSnapshot,
+  workspaceId: string,
 ) {
-  const productLines = await getScalevOrderWarehouseLines(svc, order.id);
-  const orderContext = await resolveScalevOrderWarehouseContext(svc, order);
+  const productLines = await getScalevOrderWarehouseLines(svc, order.id, workspaceId);
+  const orderContext = await resolveScalevOrderWarehouseContext(svc, order, workspaceId);
   const mappingBusinessCode = cleanWarehouseDomainText(orderContext.seller_business_code)
     || cleanWarehouseDomainText(order.business_code)
     || null;
   const mappingRows = mappingBusinessCode
-    ? await fetchBusinessMappingsByCodes(svc, [mappingBusinessCode])
+    ? await fetchBusinessMappingsByCodes(svc, workspaceId, [mappingBusinessCode])
     : [];
   const mappingGroups = groupBusinessMappingsByCode(mappingRows);
   const mappings = mappingBusinessCode
@@ -1067,7 +1110,7 @@ async function resolveWarehouseTargetsForOrder(
     };
   }
 
-  const businessDirectoryRows = await fetchWarehouseBusinessDirectoryRows(svc);
+  const businessDirectoryRows = await fetchWarehouseBusinessDirectoryRows(svc, workspaceId);
   const linesByBusinessCode = new Map<string, ScalevOrderLineForWarehouse[]>();
   if (catalogBusinessCode) {
     linesByBusinessCode.set(catalogBusinessCode, productLines);
@@ -1075,6 +1118,7 @@ async function resolveWarehouseTargetsForOrder(
 
   const context = await buildCatalogResolutionContext(
     svc,
+    workspaceId,
     catalogBusinessCode ? [catalogBusinessCode] : [],
     linesByBusinessCode,
   );
@@ -1083,6 +1127,7 @@ async function resolveWarehouseTargetsForOrder(
     : null;
   const scalevMappings = await fetchScalevMappingsByProductNames(
     svc,
+    workspaceId,
     Array.from(new Set(productLines.map(line => line.product_name))),
   );
   const scalevMappingByName = new Map<string, WarehouseScalevMappingRow>();
@@ -1126,6 +1171,7 @@ async function resolveWarehouseTargetsForOrder(
         line,
         catalogTarget.owner_business_code,
         businessDirectoryRows,
+        workspaceId,
       );
       const ownerBusinessCode = cleanWarehouseDomainText(ownerResolution.owner_business_code);
       const targetEntity = cleanWarehouseDomainText(catalogTarget.entity);
@@ -1410,8 +1456,9 @@ function summarizePositiveLedgerByProduct(rows: WarehouseLedgerRow[]) {
 async function assessScalevOrderWarehouseState(
   svc: ReturnType<typeof createServiceSupabase>,
   order: ScalevOrderWarehouseSnapshot,
+  workspaceId: string,
 ): Promise<ScalevOrderWarehouseAssessment> {
-  const resolved = await resolveWarehouseTargetsForOrder(svc, order);
+  const resolved = await resolveWarehouseTargetsForOrder(svc, order, workspaceId);
   const ledgerRows = await getScalevOrderLedgerRowsDetailed(svc, order.order_id, order.id);
   const outstandingGroups = summarizeOutstandingLedgerGroups(ledgerRows);
 
@@ -1438,6 +1485,7 @@ function buildWarehousePreGoLiveRtsNote(order: ScalevOrderWarehouseSnapshot) {
 async function applyPreGoLiveScalevReturn(
   svc: ReturnType<typeof createServiceSupabase>,
   assessment: ScalevOrderWarehouseAssessment,
+  workspaceId: string,
 ) {
   if (!assessment.mapping || assessment.productLines.length === 0) {
     return {
@@ -1491,6 +1539,7 @@ async function applyPreGoLiveScalevReturn(
     if (remainingQty <= QUANTITY_EPSILON) continue;
 
     await insertLedgerEntry(svc, {
+      workspace_id: workspaceId,
       warehouse_product_id: warehouseProductId,
       batch_id: null,
       movement_type: 'IN',
@@ -1577,12 +1626,14 @@ function buildWarehouseRtsVerificationQueueItems(
 
 async function syncWarehouseRtsVerificationItems(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   verificationId: number,
   items: WarehouseRtsVerificationQueueItem[],
 ) {
   const { data: existingRows, error: existingErr } = await svc
     .from('warehouse_rts_verification_items')
     .select('id, warehouse_product_id')
+    .eq('workspace_id', workspaceId)
     .eq('verification_id', verificationId);
   if (existingErr) throw existingErr;
 
@@ -1599,6 +1650,7 @@ async function syncWarehouseRtsVerificationItems(
     const existing = existingByProductId.get(Number(item.warehouse_product_id));
 
     const payload: Record<string, any> = {
+      workspace_id: workspaceId,
       verification_id: verificationId,
       warehouse_product_id: Number(item.warehouse_product_id),
       scalev_product_summary: item.scalev_product_summary || null,
@@ -1610,7 +1662,8 @@ async function syncWarehouseRtsVerificationItems(
       const { error: updateErr } = await svc
         .from('warehouse_rts_verification_items')
         .update(payload)
-        .eq('id', Number(existing.id));
+        .eq('id', Number(existing.id))
+        .eq('workspace_id', workspaceId);
       if (updateErr) throw updateErr;
     } else {
       const { error: insertErr } = await svc
@@ -1631,6 +1684,7 @@ async function syncWarehouseRtsVerificationItems(
     const { error: deleteErr } = await svc
       .from('warehouse_rts_verification_items')
       .delete()
+      .eq('workspace_id', workspaceId)
       .in('id', staleIds);
     if (deleteErr) throw deleteErr;
   }
@@ -1638,6 +1692,7 @@ async function syncWarehouseRtsVerificationItems(
 
 async function cancelPendingWarehouseRtsVerification(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   scalevOrderId: number,
   orderStatus?: string | null,
 ) {
@@ -1648,6 +1703,7 @@ async function cancelPendingWarehouseRtsVerification(
       order_status: orderStatus || null,
       updated_at: new Date().toISOString(),
     })
+    .eq('workspace_id', workspaceId)
     .eq('scalev_order_id', scalevOrderId)
     .eq('status', 'pending')
     .select('id')
@@ -1658,6 +1714,7 @@ async function cancelPendingWarehouseRtsVerification(
 
 async function upsertPendingWarehouseRtsVerification(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   input: {
     assessment: ScalevOrderWarehouseAssessment;
     scope: WarehouseRtsVerificationScope;
@@ -1670,6 +1727,7 @@ async function upsertPendingWarehouseRtsVerification(
   const { data: existing, error: existingErr } = await svc
     .from('warehouse_rts_verifications')
     .select('id, status')
+    .eq('workspace_id', workspaceId)
     .eq('scalev_order_id', assessment.order.id)
     .maybeSingle();
   if (existingErr) throw existingErr;
@@ -1682,6 +1740,7 @@ async function upsertPendingWarehouseRtsVerification(
   }
 
   const payload = {
+    workspace_id: workspaceId,
     scalev_order_id: assessment.order.id,
     order_id: assessment.order.order_id,
     business_code: assessment.order.business_code || null,
@@ -1703,6 +1762,7 @@ async function upsertPendingWarehouseRtsVerification(
         reviewed_by: null,
       })
       .eq('id', Number(existing.id))
+      .eq('workspace_id', workspaceId)
       .select('id')
       .single();
     if (updateErr) throw updateErr;
@@ -1731,18 +1791,19 @@ async function upsertPendingWarehouseRtsVerification(
 
 async function queueWarehouseRtsVerification(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   assessment: ScalevOrderWarehouseAssessment,
   scope: WarehouseRtsVerificationScope,
 ) {
   const issueSummary = buildWarehouseIssueSummary(assessment);
   if (!assessment.mapping || assessment.productLines.length === 0) {
-    const header = await upsertPendingWarehouseRtsVerification(svc, {
+    const header = await upsertPendingWarehouseRtsVerification(svc, workspaceId, {
       assessment,
       scope,
       expectedTotalQty: assessment.productLines.reduce((sum, line) => sum + Number(line.quantity || 0), 0),
       notes: issueSummary.problem_detail,
     });
-    await syncWarehouseRtsVerificationItems(svc, header.verificationId, []);
+    await syncWarehouseRtsVerificationItems(svc, workspaceId, header.verificationId, []);
 
     if (header.existingCompleted) {
       return {
@@ -1768,13 +1829,13 @@ async function queueWarehouseRtsVerification(
 
   const items = buildWarehouseRtsVerificationQueueItems(assessment);
   if (items.length === 0) {
-    const header = await upsertPendingWarehouseRtsVerification(svc, {
+    const header = await upsertPendingWarehouseRtsVerification(svc, workspaceId, {
       assessment,
       scope,
       expectedTotalQty: assessment.productLines.reduce((sum, line) => sum + Number(line.quantity || 0), 0),
       notes: issueSummary.problem_detail,
     });
-    await syncWarehouseRtsVerificationItems(svc, header.verificationId, []);
+    await syncWarehouseRtsVerificationItems(svc, workspaceId, header.verificationId, []);
 
     if (header.existingCompleted) {
       return {
@@ -1799,7 +1860,7 @@ async function queueWarehouseRtsVerification(
   }
 
   const expectedTotalQty = items.reduce((sum, item) => sum + Number(item.expected_qty || 0), 0);
-  const header = await upsertPendingWarehouseRtsVerification(svc, {
+  const header = await upsertPendingWarehouseRtsVerification(svc, workspaceId, {
     assessment,
     scope,
     expectedTotalQty,
@@ -1816,7 +1877,7 @@ async function queueWarehouseRtsVerification(
     };
   }
   const verificationId = header.verificationId;
-  await syncWarehouseRtsVerificationItems(svc, verificationId, items);
+  await syncWarehouseRtsVerificationItems(svc, workspaceId, verificationId, items);
 
   const action = assessment.unmappedProducts.length > 0
     ? 'rts_verification_partial'
@@ -2202,10 +2263,11 @@ function buildVisibleDirectEntityRequests(
 
 async function buildCatalogResolutionContext(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   businessCodes: string[],
   linesByBusinessCode: Map<string, ScalevOrderLineForWarehouse[]>,
 ): Promise<CatalogResolutionContext> {
-  const catalogBusinesses = await fetchScalevCatalogBusinessesByCodes(svc, businessCodes);
+  const catalogBusinesses = await fetchScalevCatalogBusinessesByCodes(svc, workspaceId, businessCodes);
   const catalogBusinessIdByCode = new Map<string, number>();
   for (const business of catalogBusinesses) {
     catalogBusinessIdByCode.set(business.business_code, Number(business.id));
@@ -2213,14 +2275,15 @@ async function buildCatalogResolutionContext(
 
   const identifierRows = await fetchScalevCatalogIdentifiersForBusinesses(
     svc,
+    workspaceId,
     catalogBusinesses,
     linesByBusinessCode,
   );
-  const bundleLineRows = await fetchScalevCatalogBundleLinesByBusinesses(svc, identifierRows);
-  const entityOwners = await fetchScalevCatalogEntityOwnersByBundleLines(svc, bundleLineRows);
+  const bundleLineRows = await fetchScalevCatalogBundleLinesByBusinesses(svc, workspaceId, identifierRows);
+  const entityOwners = await fetchScalevCatalogEntityOwnersByBundleLines(svc, workspaceId, bundleLineRows);
   const visibleEntityRequests = buildVisibleDirectEntityRequests(identifierRows, bundleLineRows);
   const directEntities = visibleEntityRequests.size > 0
-    ? await fetchVisibleDirectCatalogEntitiesByBusinessRequests(svc, visibleEntityRequests, {
+    ? await fetchVisibleDirectCatalogEntitiesByBusinessRequests(svc, workspaceId, visibleEntityRequests, {
         includeProductsWithVariants: true,
       })
     : [];
@@ -2250,7 +2313,7 @@ async function buildCatalogResolutionContext(
   }
 
   const canonicalMappings = mappingRequestsByBusinessId.size > 0
-    ? await fetchCanonicalCatalogMappingsByRequests(svc, mappingRequestsByBusinessId)
+    ? await fetchCanonicalCatalogMappingsByRequests(svc, workspaceId, mappingRequestsByBusinessId)
     : [];
 
   return {
@@ -2499,6 +2562,7 @@ function buildWarehouseIssueSummaryFromState(args: {
 async function fetchScalevOrdersForDate(
   svc: ReturnType<typeof createServiceSupabase>,
   date: string,
+  workspaceId: string,
 ) {
   const dayStart = `${date}T00:00:00+07:00`;
   const dayEnd = `${date}T23:59:59.999+07:00`;
@@ -2522,6 +2586,7 @@ async function fetchScalevOrdersForDate(
         shipped_time,
         completed_time
       `)
+      .eq('workspace_id', workspaceId)
       .in('status', ['shipped', 'completed'])
       .gte('shipped_time', dayStart)
       .lt('shipped_time', dayEnd)
@@ -2538,6 +2603,7 @@ async function fetchScalevOrdersForDate(
 
 async function fetchScalevOrderLinesByOrderIds(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   orderDbIds: number[],
 ) {
   const rows: {
@@ -2556,6 +2622,7 @@ async function fetchScalevOrderLinesByOrderIds(
         const { data, error } = await svc
           .from('scalev_order_lines')
           .select('scalev_order_id, product_name, quantity, variant_sku, item_name_raw, item_owner_raw, stock_owner_business_code')
+          .eq('workspace_id', workspaceId)
           .in('scalev_order_id', chunk)
           .range(offset, offset + 999);
       if (error) throw error;
@@ -2582,6 +2649,7 @@ async function fetchScalevOrderLinesByOrderIds(
 
 async function fetchBusinessMappingsByCodes(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   businessCodes: string[],
 ) {
   const rows: WarehouseBusinessTargetRow[] = [];
@@ -2590,6 +2658,7 @@ async function fetchBusinessMappingsByCodes(
     const { data, error } = await svc
       .from('warehouse_business_mapping')
       .select('id, business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true)
       .in('business_code', chunk);
     if (error) throw error;
@@ -2606,6 +2675,7 @@ async function fetchBusinessMappingsByCodes(
 
 async function fetchScalevCatalogBusinessesByCodes(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   businessCodes: string[],
 ) {
   const rows: ScalevCatalogBusinessLookupRow[] = [];
@@ -2616,6 +2686,7 @@ async function fetchScalevCatalogBusinessesByCodes(
     const { data, error } = await svc
       .from('scalev_webhook_businesses')
       .select('id, business_code')
+      .eq('workspace_id', workspaceId)
       .in('business_code', chunk);
     if (error) {
       if (isMissingWarehouseTableError(error)) return [];
@@ -2629,6 +2700,7 @@ async function fetchScalevCatalogBusinessesByCodes(
 
 async function fetchScalevMappingsByProductNames(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   productNames: string[],
 ) {
   const rows: WarehouseScalevMappingRow[] = [];
@@ -2643,6 +2715,7 @@ async function fetchScalevMappingsByProductNames(
         is_ignored,
         warehouse_products(id, name, entity, warehouse, scalev_product_names)
       `)
+      .eq('workspace_id', workspaceId)
       .in('scalev_product_name', chunk);
     if (error) throw error;
     rows.push(...((data || []).map((row: any) => {
@@ -2675,6 +2748,7 @@ async function fetchScalevMappingsByProductNames(
 
 async function fetchScalevCatalogIdentifiersForBusinesses(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   businessRows: ScalevCatalogBusinessLookupRow[],
   linesByBusinessCode: Map<string, ScalevOrderLineForWarehouse[]>,
 ) {
@@ -2710,6 +2784,7 @@ async function fetchScalevCatalogIdentifiersForBusinesses(
           processor_business_id,
           processor_business_code
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', business.id)
         .in('identifier_normalized', chunk);
       if (error) {
@@ -2737,6 +2812,7 @@ async function fetchScalevCatalogIdentifiersForBusinesses(
 
 async function fetchScalevCatalogBundleLinesByBusinesses(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   identifierRows: ScalevCatalogIdentifierLookupRow[],
 ) {
   const rows: ScalevCatalogBundleLineLookupRow[] = [];
@@ -2770,6 +2846,7 @@ async function fetchScalevCatalogBundleLinesByBusinesses(
           scalev_variant_name,
           scalev_variant_product_name
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', businessId)
         .in('scalev_bundle_id', chunk);
       if (error) {
@@ -2785,6 +2862,7 @@ async function fetchScalevCatalogBundleLinesByBusinesses(
 
 async function fetchScalevCatalogEntityOwnersByBundleLines(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   bundleLineRows: ScalevCatalogBundleLineLookupRow[],
 ): Promise<ScalevCatalogEntityOwnerLookups> {
   const variantRows: ScalevCatalogEntityOwnerLookupRow[] = [];
@@ -2806,6 +2884,7 @@ async function fetchScalevCatalogEntityOwnersByBundleLines(
     const { data, error } = await svc
       .from('scalev_catalog_variants')
       .select('business_id, business_code, scalev_product_id, scalev_variant_id')
+      .eq('workspace_id', workspaceId)
       .in('scalev_variant_id', chunk);
     if (error) {
       if (isMissingWarehouseTableError(error)) {
@@ -2833,6 +2912,7 @@ async function fetchScalevCatalogEntityOwnersByBundleLines(
     const { data, error } = await svc
       .from('scalev_catalog_products')
       .select('business_id, business_code, scalev_product_id')
+      .eq('workspace_id', workspaceId)
       .in('scalev_product_id', chunk);
     if (error) {
       if (isMissingWarehouseTableError(error)) {
@@ -2863,6 +2943,7 @@ async function fetchScalevCatalogEntityOwnersByBundleLines(
 
 async function fetchScalevCatalogMappingsByBusinesses(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   identifierRows: ScalevCatalogIdentifierLookupRow[],
   bundleLineRows: ScalevCatalogBundleLineLookupRow[] = [],
   entityOwners?: ScalevCatalogEntityOwnerLookups | null,
@@ -2915,6 +2996,7 @@ async function fetchScalevCatalogMappingsByBusinesses(
           warehouse_product_id,
           warehouse_products(id, name, entity, warehouse, scalev_product_names)
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', businessId)
         .in('scalev_entity_key', chunk)
         .not('warehouse_product_id', 'is', null);
@@ -2979,6 +3061,7 @@ async function fetchFallbackWarehouseProducts(
 async function fetchOutstandingLedgerByOrderProduct(
   svc: ReturnType<typeof createServiceSupabase>,
   orders: ScalevOrderWarehouseSnapshot[],
+  workspaceId: string,
 ) {
   if (orders.length === 0) return new Map<string, Map<number, number>>();
   const loadRows = async (useScalevOrderId: boolean) => {
@@ -3004,6 +3087,7 @@ async function fetchOutstandingLedgerByOrderProduct(
         let query = svc
           .from('warehouse_stock_ledger')
           .select(selectFields)
+          .eq('workspace_id', workspaceId)
           .eq('reference_type', 'scalev_order');
 
         query = useScalevOrderId
@@ -3075,7 +3159,10 @@ async function fetchDailyMovementRows(
         quantity,
         warehouse_products!inner(name, category, entity)
       `)
-      .eq('workspace_id', options?.workspaceId || ROOVE_WORKSPACE_ID)
+      .eq(
+        'workspace_id',
+        requireExplicitWorkspaceId(options?.workspaceId, 'Daily warehouse movement'),
+      )
       .gte('created_at', dayStart)
       .lt('created_at', dayEnd)
       .range(offset, offset + 999);
@@ -3110,17 +3197,22 @@ function normalizeWarehouseOrderLines(input: any): ScalevOrderLineForWarehouse[]
     .filter((line) => line.product_name && Number.isFinite(line.quantity) && line.quantity > 0);
 }
 
-async function getCurrentBalance(svc: ReturnType<typeof createServiceSupabase>, productId: number): Promise<number> {
+async function getCurrentBalance(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  productId: number,
+): Promise<number> {
   const { data, error } = await svc
     .from('warehouse_stock_ledger')
     .select('quantity')
+    .eq('workspace_id', workspaceId)
     .eq('warehouse_product_id', productId);
   if (error) throw error;
   return (data || []).reduce((sum, r) => sum + Number(r.quantity), 0);
 }
 
 async function insertLedgerEntry(svc: ReturnType<typeof createServiceSupabase>, entry: LedgerEntry) {
-  const runningBalance = await getCurrentBalance(svc, entry.warehouse_product_id) + entry.quantity;
+  const runningBalance = await getCurrentBalance(svc, entry.workspace_id, entry.warehouse_product_id) + entry.quantity;
 
   const { data, error } = await svc
     .from('warehouse_stock_ledger')
@@ -3250,6 +3342,7 @@ async function findOrCreateTargetBatch(
 // ============================================================
 
 export async function recordStockInInternal(
+  workspaceId: string,
   productId: number,
   batchId: number | null,
   quantity: number,
@@ -3267,6 +3360,7 @@ export async function recordStockInInternal(
   }
 
   const result = await insertLedgerEntry(svc, {
+    workspace_id: workspaceId,
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'IN',
@@ -3281,7 +3375,7 @@ export async function recordStockInInternal(
   const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
   if (prod) {
     const userName = await getCurrentUserName();
-    notifyDirekturs(formatNotification('Stock Masuk', prod.name, quantity, `${prod.warehouse} - ${prod.entity}`, userName));
+    notifyDirekturs(workspaceId, formatNotification('Stock Masuk', prod.name, quantity, `${prod.warehouse} - ${prod.entity}`, userName));
   }
 
   return result;
@@ -3301,7 +3395,7 @@ export async function recordStockIn(
     assertWarehouseProductOwnership(svc, workspaceId, productId),
     assertWarehouseBatchOwnership(svc, workspaceId, batchId),
   ]);
-  return recordStockInInternal(productId, batchId, quantity, referenceType, referenceId, notes);
+  return recordStockInInternal(workspaceId, productId, batchId, quantity, referenceType, referenceId, notes);
 }
 
 // ============================================================
@@ -3340,7 +3434,7 @@ export async function recordStockOut(
     const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
     if (prod) {
       const userName = await getCurrentUserName();
-      notifyDirekturs(formatNotification('Stock Keluar', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName));
+      notifyDirekturs(workspaceId, formatNotification('Stock Keluar', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName));
     }
     return data;
   }
@@ -3349,6 +3443,7 @@ export async function recordStockOut(
   await deductBatchQuantityOrThrow(svc, batchId, productId, quantity);
 
   const result = await insertLedgerEntry(svc, {
+    workspace_id: workspaceId,
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'OUT',
@@ -3362,7 +3457,7 @@ export async function recordStockOut(
   const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
   if (prod) {
     const userName = await getCurrentUserName();
-    notifyDirekturs(formatNotification('Stock Keluar', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName));
+    notifyDirekturs(workspaceId, formatNotification('Stock Keluar', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName));
   }
 
   return result;
@@ -3393,6 +3488,7 @@ export async function recordStockRTS(
   await incrementBatchQuantityOrThrow(svc, batchId, productId, quantity);
 
   const result = await insertLedgerEntry(svc, {
+    workspace_id: workspaceId,
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'IN',
@@ -3406,7 +3502,7 @@ export async function recordStockRTS(
   const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
   if (prod) {
     const userName = await getCurrentUserName();
-    notifyDirekturs(formatNotification('Stock Masuk (RTS)', prod.name, quantity, `${prod.warehouse} - ${prod.entity}`, userName, `Resi: ${resiNumber.trim()}`));
+    notifyDirekturs(workspaceId, formatNotification('Stock Masuk (RTS)', prod.name, quantity, `${prod.warehouse} - ${prod.entity}`, userName, `Resi: ${resiNumber.trim()}`));
   }
 
   return result;
@@ -3417,6 +3513,7 @@ export async function recordStockRTS(
 // ============================================================
 
 async function recordStockAdjustInternal(
+  workspaceId: string,
   productId: number,
   batchId: number | null,
   adjustmentQty: number, // positive = surplus, negative = deficit
@@ -3440,6 +3537,7 @@ async function recordStockAdjustInternal(
   }
 
   return insertLedgerEntry(svc, {
+    workspace_id: workspaceId,
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'ADJUST',
@@ -3452,6 +3550,7 @@ async function recordStockAdjustInternal(
 
 async function recordStockOpnameAdjustInternal(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   item: {
     warehouse_product_id?: number | null;
     selisih?: number | null;
@@ -3494,7 +3593,7 @@ async function recordStockOpnameAdjustInternal(
       if (batchQty <= 0) continue;
 
       const deductedQty = Math.min(batchQty, remaining);
-      await recordStockAdjustInternal(
+      await recordStockAdjustInternal(workspaceId,
         productId,
         Number(batch.id),
         -deductedQty,
@@ -3508,7 +3607,7 @@ async function recordStockOpnameAdjustInternal(
   if (adjustmentQty > 0 && activeBatches.length > 0) {
     const adjustmentBatchCode = `SO-ADJ-${sessionId}`;
     const adjustmentBatch = await findOrCreateTargetBatch(svc, productId, adjustmentBatchCode, null);
-    await recordStockAdjustInternal(
+    await recordStockAdjustInternal(workspaceId,
       productId,
       Number(adjustmentBatch.id),
       adjustmentQty,
@@ -3517,7 +3616,7 @@ async function recordStockOpnameAdjustInternal(
     return;
   }
 
-  await recordStockAdjustInternal(productId, null, adjustmentQty, baseNote);
+  await recordStockAdjustInternal(workspaceId, productId, null, adjustmentQty, baseNote);
 }
 
 export async function recordStockAdjust(
@@ -3532,7 +3631,7 @@ export async function recordStockAdjust(
     assertWarehouseProductOwnership(svc, workspaceId, productId),
     assertWarehouseBatchOwnership(svc, workspaceId, batchId),
   ]);
-  return recordStockAdjustInternal(productId, batchId, adjustmentQty, notes);
+  return recordStockAdjustInternal(workspaceId, productId, batchId, adjustmentQty, notes);
 }
 
 // ============================================================
@@ -3619,6 +3718,7 @@ export async function recordTransfer(
 
   // Ledger: OUT from source
   await insertLedgerEntry(svc, {
+    workspace_id: workspaceId,
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'TRANSFER_OUT',
@@ -3631,6 +3731,7 @@ export async function recordTransfer(
 
   // Ledger: IN to target
   await insertLedgerEntry(svc, {
+    workspace_id: workspaceId,
     warehouse_product_id: targetProduct.id,
     batch_id: targetBatchId,
     movement_type: 'TRANSFER_IN',
@@ -3643,7 +3744,7 @@ export async function recordTransfer(
 
   if (sourceProduct) {
     const userName = await getCurrentUserName();
-    notifyDirekturs(formatNotification('Transfer', sourceProduct.name, quantity, `${fromEntity} → ${toEntity}`, userName, `Dari: ${fromWarehouse} - ${fromEntity}\nKe: ${toWarehouse} - ${toEntity}`));
+    notifyDirekturs(workspaceId, formatNotification('Transfer', sourceProduct.name, quantity, `${fromEntity} → ${toEntity}`, userName, `Dari: ${fromWarehouse} - ${fromEntity}\nKe: ${toWarehouse} - ${toEntity}`));
   }
 
   return transfer;
@@ -3693,6 +3794,7 @@ export async function recordConversion(
     await deductBatchQuantityOrThrow(svc, batchId, src.productId, src.quantity);
 
     await insertLedgerEntry(svc, {
+      workspace_id: workspaceId,
       warehouse_product_id: src.productId,
       batch_id: batchId,
       movement_type: 'OUT',
@@ -3724,6 +3826,7 @@ export async function recordConversion(
 
   // Ledger IN for target
   await insertLedgerEntry(svc, {
+    workspace_id: workspaceId,
     warehouse_product_id: targetProductId,
     batch_id: targetBatchId,
     movement_type: 'IN',
@@ -3865,6 +3968,7 @@ function isUniqueViolation(error: any) {
 
 async function resolveTelegramWarehouseActorOrThrow(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   telegramChatId: string,
   permissionKey: string,
 ): Promise<TelegramWarehouseActor> {
@@ -3884,11 +3988,24 @@ async function resolveTelegramWarehouseActorOrThrow(
   }
 
   const profile = profiles[0];
-  if (profile.role !== 'owner') {
+  const { data: membership, error: membershipError } = await svc
+    .from('workspace_memberships')
+    .select('role')
+    .eq('workspace_id', workspaceId)
+    .eq('user_id', profile.id)
+    .eq('status', 'active')
+    .maybeSingle();
+  if (membershipError) throw membershipError;
+  if (!membership) {
+    throw new Error('Akun Telegram ini bukan anggota workspace terkait.');
+  }
+
+  if (membership.role !== 'workspace_owner') {
     const { data: permissions, error: permissionErr } = await svc
-      .from('role_permissions')
+      .from('workspace_role_permissions')
       .select('permission_key')
-      .eq('role', profile.role)
+      .eq('workspace_id', workspaceId)
+      .eq('role', membership.role)
       .eq('permission_key', permissionKey)
       .limit(1);
     if (permissionErr) throw permissionErr;
@@ -3899,7 +4016,7 @@ async function resolveTelegramWarehouseActorOrThrow(
 
   return {
     id: profile.id,
-    role: profile.role,
+    role: membership.role,
     displayName: profile.full_name || profile.email || 'Unknown',
   };
 }
@@ -3907,11 +4024,13 @@ async function resolveTelegramWarehouseActorOrThrow(
 async function loadStockReclassRequestWithProductsOrThrow(
   svc: ReturnType<typeof createServiceSupabase>,
   requestId: number,
+  workspaceId: string,
 ) {
   const { data: request, error: requestErr } = await svc
     .from('warehouse_stock_reclass_requests')
     .select('*')
     .eq('id', requestId)
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (requestErr) throw requestErr;
   if (!request) throw new Error(`Request reklasifikasi #${requestId} tidak ditemukan.`);
@@ -3966,6 +4085,7 @@ async function applyStockReclassRequestInternal(
     }
 
     await insertLedgerEntry(svc, {
+      workspace_id: request.workspace_id,
       warehouse_product_id: Number(sourceProduct.id),
       batch_id: Number(request.source_batch_id),
       movement_type: 'OUT',
@@ -3977,6 +4097,7 @@ async function applyStockReclassRequestInternal(
     });
 
     await insertLedgerEntry(svc, {
+      workspace_id: request.workspace_id,
       warehouse_product_id: Number(targetProduct.id),
       batch_id: targetBatchId,
       movement_type: 'IN',
@@ -4000,12 +4121,13 @@ async function applyStockReclassRequestInternal(
   if (batchErr) throw batchErr;
 
   if ((availableBatches || []).length === 0) {
-    const currentBalance = await getCurrentBalance(svc, Number(sourceProduct.id));
+    const currentBalance = await getCurrentBalance(svc, request.workspace_id, Number(sourceProduct.id));
     if (quantity > currentBalance) {
       throw new Error(`Qty melebihi saldo produk sumber (${currentBalance}).`);
     }
 
     await insertLedgerEntry(svc, {
+      workspace_id: request.workspace_id,
       warehouse_product_id: Number(sourceProduct.id),
       batch_id: null,
       movement_type: 'OUT',
@@ -4017,6 +4139,7 @@ async function applyStockReclassRequestInternal(
     });
 
     await insertLedgerEntry(svc, {
+      workspace_id: request.workspace_id,
       warehouse_product_id: Number(targetProduct.id),
       batch_id: null,
       movement_type: 'IN',
@@ -4074,6 +4197,7 @@ async function applyStockReclassRequestInternal(
     if (targetBatchErr) throw targetBatchErr;
 
     await insertLedgerEntry(svc, {
+      workspace_id: request.workspace_id,
       warehouse_product_id: Number(sourceProduct.id),
       batch_id: Number(sourceBatch.id),
       movement_type: 'OUT',
@@ -4085,6 +4209,7 @@ async function applyStockReclassRequestInternal(
     });
 
     await insertLedgerEntry(svc, {
+      workspace_id: request.workspace_id,
       warehouse_product_id: Number(targetProduct.id),
       batch_id: targetBatchId,
       movement_type: 'IN',
@@ -4254,7 +4379,7 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
       throw new Error(`Qty melebihi stok batch ${sourceBatch.batch_code} (${sourceBatch.current_qty}).`);
     }
   } else {
-    const currentBalance = await getCurrentBalance(svc, Number(sourceProduct.id));
+    const currentBalance = await getCurrentBalance(svc, workspaceId, Number(sourceProduct.id));
     if (quantity > currentBalance) {
       throw new Error(`Qty melebihi saldo produk sumber (${currentBalance}).`);
     }
@@ -4300,7 +4425,7 @@ export async function createStockReclassRequest(input: WarehouseStockReclassRequ
     hour: '2-digit',
     minute: '2-digit',
   });
-  await notifyDirektursWithMarkup(
+  await notifyDirektursWithMarkup(workspaceId,
     `📌 <b>Request Reklasifikasi Stock</b>\n` +
     `Request ID: ${data.id}\n` +
     `Dari: ${sourceProduct.name} (${sourceProduct.category})\n` +
@@ -4329,10 +4454,8 @@ async function approveStockReclassRequestAsActor(
   workspaceId?: string,
 ) {
   const svc = createServiceSupabase();
-  const { request, sourceProduct, targetProduct } = await loadStockReclassRequestWithProductsOrThrow(svc, requestId);
-  if (workspaceId && request.workspace_id !== workspaceId) {
-    throw new Error('Request reklasifikasi tidak ditemukan di workspace aktif.');
-  }
+  if (!workspaceId) throw new Error('Workspace reklasifikasi wajib ditentukan.');
+  const { request, sourceProduct, targetProduct } = await loadStockReclassRequestWithProductsOrThrow(svc, requestId, workspaceId);
   if (request.status !== 'requested') {
     throw new Error('Request reklasifikasi ini tidak siap di-approve.');
   }
@@ -4360,6 +4483,7 @@ async function approveStockReclassRequestAsActor(
       updated_at: nowIso,
     })
     .eq('id', requestId)
+    .eq('workspace_id', workspaceId)
     .eq('status', 'requested');
   if (updateErr) throw updateErr;
 
@@ -4371,7 +4495,7 @@ async function approveStockReclassRequestAsActor(
     hour: '2-digit',
     minute: '2-digit',
   });
-  await notifyDirekturs(
+  await notifyDirekturs(request.workspace_id,
     `✅ <b>Reklasifikasi Stock Applied</b>\n` +
     `Request ID: ${requestId}\n` +
     `Dari: ${sourceProduct.name} (${sourceProduct.category})\n` +
@@ -4392,10 +4516,8 @@ async function rejectStockReclassRequestAsActor(
   workspaceId?: string,
 ) {
   const svc = createServiceSupabase();
-  const { request } = await loadStockReclassRequestWithProductsOrThrow(svc, requestId);
-  if (workspaceId && request.workspace_id !== workspaceId) {
-    throw new Error('Request reklasifikasi tidak ditemukan di workspace aktif.');
-  }
+  if (!workspaceId) throw new Error('Workspace reklasifikasi wajib ditentukan.');
+  const { request } = await loadStockReclassRequestWithProductsOrThrow(svc, requestId, workspaceId);
   if (request.status !== 'requested') {
     throw new Error('Request reklasifikasi ini tidak bisa ditolak.');
   }
@@ -4412,6 +4534,7 @@ async function rejectStockReclassRequestAsActor(
       updated_at: nowIso,
     })
     .eq('id', requestId)
+    .eq('workspace_id', workspaceId)
     .eq('status', 'requested');
   if (error) throw error;
 
@@ -4423,7 +4546,7 @@ async function rejectStockReclassRequestAsActor(
     hour: '2-digit',
     minute: '2-digit',
   });
-  await notifyDirekturs(
+  await notifyDirekturs(request.workspace_id,
     `❌ <b>Reklasifikasi Stock Rejected</b>\n` +
     `Request ID: ${requestId}\n` +
     `Alasan reject: ${normalizedReason || '-'}\n` +
@@ -4456,21 +4579,21 @@ export async function rejectStockReclassRequest(requestId: number, rejectionReas
   }, rejectionReason, workspaceId);
 }
 
-export async function approveStockReclassRequestViaTelegram(requestId: number, telegramChatId: string) {
+export async function approveStockReclassRequestViaTelegram(workspaceId: string, requestId: number, telegramChatId: string) {
   const svc = createServiceSupabase();
-  const actor = await resolveTelegramWarehouseActorOrThrow(svc, telegramChatId, 'wh:reclass_approve');
-  const result = await approveStockReclassRequestAsActor(requestId, actor);
+  const actor = await resolveTelegramWarehouseActorOrThrow(svc, workspaceId, telegramChatId, 'wh:reclass_approve');
+  const result = await approveStockReclassRequestAsActor(requestId, actor, workspaceId);
   return {
     ...result,
     actorName: actor.displayName,
   };
 }
 
-export async function rejectStockReclassRequestViaTelegram(requestId: number, telegramChatId: string) {
+export async function rejectStockReclassRequestViaTelegram(workspaceId: string, requestId: number, telegramChatId: string) {
   const svc = createServiceSupabase();
-  const actor = await resolveTelegramWarehouseActorOrThrow(svc, telegramChatId, 'wh:reclass_approve');
+  const actor = await resolveTelegramWarehouseActorOrThrow(svc, workspaceId, telegramChatId, 'wh:reclass_approve');
   const reason = `Rejected via Telegram oleh ${actor.displayName}`;
-  const result = await rejectStockReclassRequestAsActor(requestId, actor, reason);
+  const result = await rejectStockReclassRequestAsActor(requestId, actor, reason, workspaceId);
   return {
     ...result,
     actorName: actor.displayName,
@@ -4502,6 +4625,7 @@ export async function recordDispose(
   }
 
   const result = await insertLedgerEntry(svc, {
+    workspace_id: workspaceId,
     warehouse_product_id: productId,
     batch_id: batchId,
     movement_type: 'DISPOSE',
@@ -4514,7 +4638,7 @@ export async function recordDispose(
   const { data: prod } = await svc.from('warehouse_products').select('name, warehouse, entity').eq('id', productId).single();
   if (prod) {
     const userName = await getCurrentUserName();
-    notifyDirekturs(formatNotification('Dispose', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName, reason ? `Alasan: ${reason}` : undefined));
+    notifyDirekturs(workspaceId, formatNotification('Dispose', prod.name, -quantity, `${prod.warehouse} - ${prod.entity}`, userName, reason ? `Alasan: ${reason}` : undefined));
   }
 
   return result;
@@ -4525,6 +4649,7 @@ export async function recordDispose(
 // ============================================================
 
 export async function createBatchInternal(
+  workspaceId: string,
   productId: number,
   batchCode: string,
   expiredDate: string | null,
@@ -4554,6 +4679,7 @@ export async function createBatchInternal(
     }
 
     await recordStockInInternal(
+      workspaceId,
       productId,
       batch.id,
       initialQty,
@@ -4580,7 +4706,7 @@ export async function createBatch(
   const { workspaceId } = await requireWarehousePermission('wh:stock_masuk', 'Batch Stock');
   const svc = createServiceSupabase();
   await assertWarehouseProductOwnership(svc, workspaceId, productId);
-  return createBatchInternal(productId, batchCode, expiredDate, initialQty, notes);
+  return createBatchInternal(workspaceId, productId, batchCode, expiredDate, initialQty, notes);
 }
 
 // ============================================================
@@ -5480,6 +5606,7 @@ export async function completeWarehouseRTSVerification(
           targetBatchCodeSnapshot = batch.batch_code || null;
           targetBatchId = Number(submitted.targetBatchId);
           await recordStockInInternal(
+            workspaceId,
             Number(item.warehouse_product_id),
             Number(submitted.targetBatchId),
             restockQty,
@@ -5529,6 +5656,7 @@ export async function completeWarehouseRTSVerification(
 
           const batch = await getBatchOrThrow(svc, Number(allocation.targetBatchId), Number(allocation.targetProductId));
           await recordStockInInternal(
+            workspaceId,
             Number(allocation.targetProductId),
             Number(allocation.targetBatchId),
             quantity,
@@ -5576,7 +5704,8 @@ export async function completeWarehouseRTSVerification(
           notes: storedNotes,
           updated_at: now,
         })
-        .eq('id', Number(item.id));
+        .eq('id', Number(item.id))
+        .eq('workspace_id', workspaceId);
       if (itemUpdateErr) throw itemUpdateErr;
     }
 
@@ -5590,7 +5719,8 @@ export async function completeWarehouseRTSVerification(
         updated_at: now,
         order_status: verification.order_status || null,
       })
-      .eq('id', verificationId);
+      .eq('id', verificationId)
+      .eq('workspace_id', workspaceId);
     if (headerUpdateErr) throw headerUpdateErr;
 
     return {
@@ -5610,6 +5740,7 @@ export async function completeWarehouseRTSVerification(
 // ============================================================
 
 export async function deductStockFifo(
+  workspaceId: string,
   scalevProductName: string,
   quantity: number,
   scalevOrderId: string,
@@ -5618,7 +5749,7 @@ export async function deductStockFifo(
   const svc = createServiceSupabase();
 
   // Deprecated compatibility helper: only allow an exact legacy mapping.
-  const legacyMappings = await fetchScalevMappingsByProductNames(svc, [scalevProductName]);
+  const legacyMappings = await fetchScalevMappingsByProductNames(svc, workspaceId, [scalevProductName]);
   const mapping = legacyMappings.find((row) =>
     row.scalev_product_name === scalevProductName
     && row.warehouse_product_id != null
@@ -5649,6 +5780,7 @@ export async function deductStockFifo(
 
 async function reverseOutstandingWarehouseDeductions(
   svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
   orderId: string,
   scalevOrderDbId?: number | null,
   reason: string = 'order no longer shipped/completed',
@@ -5658,7 +5790,7 @@ async function reverseOutstandingWarehouseDeductions(
   const outstandingGroups = summarizeOutstandingLedgerGroups(ledgerRows);
   if (outstandingGroups.length === 0) return 0;
   const orderContext = orderSnapshot === undefined
-    ? await loadScalevOrderWarehouseSnapshot(svc, orderId, scalevOrderDbId)
+    ? await loadScalevOrderWarehouseSnapshot(svc, orderId, scalevOrderDbId, workspaceId)
     : orderSnapshot;
   const reversalNote = buildWarehouseReversalNote(orderId, reason, orderContext);
 
@@ -5674,6 +5806,7 @@ async function reverseOutstandingWarehouseDeductions(
     }
 
     await insertLedgerEntry(svc, {
+      workspace_id: workspaceId,
       warehouse_product_id: group.warehouse_product_id,
       batch_id: group.batch_id,
       movement_type: 'IN',
@@ -5844,22 +5977,11 @@ async function reverseIndependentWorkspaceDeductions(
   return reversed;
 }
 
-async function reconcileIndependentWorkspaceScalevOrder(
+async function resolveIndependentWorkspaceOrderState(
   svc: ReturnType<typeof createServiceSupabase>,
   workspaceId: string,
   order: ScalevOrderWarehouseSnapshot,
-  goLiveAt: string | null,
 ) {
-  if (!isWarehouseGoLiveActive(goLiveAt) || isScalevOrderBeforeWarehouseGoLive(order, goLiveAt)) {
-    return {
-      action: 'skipped_pre_go_live',
-      reversed: 0,
-      deducted: 0,
-      skipped: 0,
-      unmapped_products: [],
-    };
-  }
-
   const { data: businessMapping, error: businessMappingError } = await svc
     .from('warehouse_business_mapping')
     .select('id, deduct_entity, deduct_warehouse')
@@ -5927,6 +6049,39 @@ async function reconcileIndependentWorkspaceScalevOrder(
   const outstandingGroups = summarizeOutstandingLedgerGroups(existingRows);
   const outstandingByProduct = aggregateOutstandingByProduct(outstandingGroups);
 
+  return {
+    businessMapping,
+    lines,
+    resolved,
+    outstandingGroups,
+    outstandingByProduct,
+  };
+}
+
+async function reconcileIndependentWorkspaceScalevOrder(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  order: ScalevOrderWarehouseSnapshot,
+  goLiveAt: string | null,
+) {
+  if (!isWarehouseGoLiveActive(goLiveAt) || isScalevOrderBeforeWarehouseGoLive(order, goLiveAt)) {
+    return {
+      action: 'skipped_pre_go_live',
+      reversed: 0,
+      deducted: 0,
+      skipped: 0,
+      unmapped_products: [],
+    };
+  }
+
+  const {
+    businessMapping,
+    lines,
+    resolved,
+    outstandingGroups,
+    outstandingByProduct,
+  } = await resolveIndependentWorkspaceOrderState(svc, workspaceId, order);
+
   if (isReturnedScalevOrderStatus(order.status)) {
     return {
       action: 'rts_pending_manual',
@@ -5985,7 +6140,7 @@ async function reconcileIndependentWorkspaceScalevOrder(
       skipped: resolved.skippedIgnored,
       unmapped_products: resolved.unmappedProducts,
       problem: 'no_product_mapping',
-      problem_detail: `Mapping produk Apurva belum lengkap: ${resolved.unmappedProducts.join(', ')}`,
+      problem_detail: `Mapping produk workspace belum lengkap: ${resolved.unmappedProducts.join(', ')}`,
     };
   }
 
@@ -6022,7 +6177,7 @@ async function reconcileIndependentWorkspaceScalevOrder(
       p_reference_id: order.order_id,
       p_scalev_order_id: order.id,
       p_created_at: deductAt,
-      p_notes: `Auto Apurva: ${target.scalev_product_name} x${target.quantity} [workspace:${workspaceId}]`,
+      p_notes: `Auto workspace: ${target.scalev_product_name} x${target.quantity} [workspace:${workspaceId}]`,
     });
     if (error) throw error;
     deducted += 1;
@@ -6037,27 +6192,33 @@ async function reconcileIndependentWorkspaceScalevOrder(
     ...(resolved.unmappedProducts.length > 0
       ? {
           problem: 'no_product_mapping',
-          problem_detail: `Mapping produk Apurva belum lengkap: ${resolved.unmappedProducts.join(', ')}`,
+          problem_detail: `Mapping produk workspace belum lengkap: ${resolved.unmappedProducts.join(', ')}`,
         }
       : {}),
   };
 }
 
 export async function reverseWarehouseDeductions(
+  requestedWorkspaceId: string,
   orderId: string,
   scalevOrderDbId?: number | null,
   reason: string = 'order no longer shipped/completed',
 ): Promise<number> {
   const svc = createServiceSupabase();
-  return reverseOutstandingWarehouseDeductions(svc, orderId, scalevOrderDbId, reason);
+  const workspaceId = requireExplicitWorkspaceId(requestedWorkspaceId, 'Warehouse reversal');
+  return reverseOutstandingWarehouseDeductions(svc, workspaceId, orderId, scalevOrderDbId, reason);
 }
 
 export async function reconcileScalevOrderWarehouse(
   orderId: string,
   scalevOrderDbId?: number | null,
-  workspaceId = ROOVE_WORKSPACE_ID,
+  requestedWorkspaceId?: string,
 ) {
   const svc = createServiceSupabase();
+  const workspaceId = requireExplicitWorkspaceId(
+    requestedWorkspaceId,
+    'Warehouse reconciliation',
+  );
   const order = await loadScalevOrderWarehouseSnapshot(
     svc,
     orderId,
@@ -6067,7 +6228,9 @@ export async function reconcileScalevOrderWarehouse(
   if (!order) throw new Error(`Order ${orderId} tidak ditemukan`);
   const goLiveAt = await loadWarehouseGoLiveAt(svc, workspaceId);
 
-  if (workspaceId !== ROOVE_WORKSPACE_ID) {
+  const reconcileMode = await loadWarehouseReconcileMode(svc, workspaceId);
+
+  if (reconcileMode === 'strict_mapping') {
     return reconcileIndependentWorkspaceScalevOrder(
       svc,
       workspaceId,
@@ -6088,17 +6251,17 @@ export async function reconcileScalevOrderWarehouse(
 
   if (isScalevOrderBeforeWarehouseGoLive(order, goLiveAt)) {
     if (isReturnedScalevOrderStatus(order.status)) {
-      const assessment = await assessScalevOrderWarehouseState(svc, order);
+      const assessment = await assessScalevOrderWarehouseState(svc, order, workspaceId);
       try {
-        return await queueWarehouseRtsVerification(svc, assessment, 'pre_go_live');
+        return await queueWarehouseRtsVerification(svc, workspaceId, assessment, 'pre_go_live');
       } catch (error) {
         if (!isMissingWarehouseTableError(error)) throw error;
-        return applyPreGoLiveScalevReturn(svc, assessment);
+        return applyPreGoLiveScalevReturn(svc, assessment, workspaceId);
       }
     }
 
     try {
-      await cancelPendingWarehouseRtsVerification(svc, order.id, order.status || null);
+      await cancelPendingWarehouseRtsVerification(svc, workspaceId, order.id, order.status || null);
     } catch (error) {
       if (!isMissingWarehouseTableError(error)) throw error;
     }
@@ -6111,19 +6274,19 @@ export async function reconcileScalevOrderWarehouse(
     };
   }
 
-  const assessment = await assessScalevOrderWarehouseState(svc, order);
+  const assessment = await assessScalevOrderWarehouseState(svc, order, workspaceId);
   const isTerminal = isTerminalScalevOrderStatus(order.status);
 
   if (isReturnedScalevOrderStatus(order.status)) {
     try {
-      return await queueWarehouseRtsVerification(svc, assessment, 'post_go_live');
+      return await queueWarehouseRtsVerification(svc, workspaceId, assessment, 'post_go_live');
     } catch (error) {
       if (!isMissingWarehouseTableError(error)) throw error;
     }
   }
 
   try {
-    await cancelPendingWarehouseRtsVerification(svc, order.id, order.status || null);
+    await cancelPendingWarehouseRtsVerification(svc, workspaceId, order.id, order.status || null);
   } catch (error) {
     if (!isMissingWarehouseTableError(error)) throw error;
   }
@@ -6131,6 +6294,7 @@ export async function reconcileScalevOrderWarehouse(
   if (!isTerminal) {
     const reversed = await reverseOutstandingWarehouseDeductions(
       svc,
+      workspaceId,
       order.order_id,
       order.id,
       `status changed to ${order.status || 'unknown'}`,
@@ -6203,6 +6367,7 @@ export async function reconcileScalevOrderWarehouse(
 
   const reversed = await reverseOutstandingWarehouseDeductions(
     svc,
+    workspaceId,
     order.order_id,
     order.id,
     `reconcile before ${order.status || 'unknown'} deduction`,
@@ -6221,17 +6386,17 @@ export async function reconcileScalevOrderWarehouse(
 }
 
 export async function repairPreGoLiveWrongAttributionOrder(orderId: string, scalevOrderDbId?: number | null) {
-  await requireWarehousePermission('wh:mapping_sync', 'Sync Deduction Gudang');
+  const { workspaceId } = await requireWarehousePermission('wh:mapping_sync', 'Sync Deduction Gudang');
   const svc = createServiceSupabase();
-  const order = await loadScalevOrderWarehouseSnapshot(svc, orderId, scalevOrderDbId);
+  const order = await loadScalevOrderWarehouseSnapshot(svc, orderId, scalevOrderDbId, workspaceId);
   if (!order) throw new Error(`Order ${orderId} tidak ditemukan`);
 
-  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  const goLiveAt = await loadWarehouseGoLiveAt(svc, workspaceId);
   if (isWarehouseGoLiveActive(goLiveAt) && !isScalevOrderBeforeWarehouseGoLive(order, goLiveAt)) {
     throw new Error(`Order ${orderId} bukan order pra-go-live.`);
   }
 
-  const assessment = await assessScalevOrderWarehouseState(svc, order);
+  const assessment = await assessScalevOrderWarehouseState(svc, order, workspaceId);
   const isTerminal = isTerminalScalevOrderStatus(order.status);
   if (!isTerminal) {
     return {
@@ -6298,6 +6463,7 @@ export async function repairPreGoLiveWrongAttributionOrder(orderId: string, scal
 
   const reversed = await reverseOutstandingWarehouseDeductions(
     svc,
+    workspaceId,
     order.order_id,
     order.id,
     'Deduction lama dibatalkan karena target produk warehouse salah.',
@@ -6345,113 +6511,19 @@ export async function repairPreGoLiveWrongAttributionOrder(orderId: string, scal
 }
 
 // ============================================================
-// PURCHASE ORDERS
-// ============================================================
-
-export async function createPurchaseOrder(
-  productId: number,
-  quantityRequested: number,
-  vendor?: string,
-  poDate?: string,
-  expectedDate?: string,
-  notes?: string,
-) {
-  const svc = createServiceSupabase();
-  const { data, error } = await svc
-    .from('warehouse_purchase_orders')
-    .insert({
-      warehouse_product_id: productId,
-      quantity_requested: quantityRequested,
-      vendor,
-      po_date: poDate || new Date().toISOString().slice(0, 10),
-      expected_date: expectedDate,
-      notes,
-    })
-    .select()
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function receivePurchaseOrder(
-  poId: number,
-  quantityReceived: number,
-  batchId?: number,
-  notes?: string,
-) {
-  const svc = createServiceSupabase();
-
-  // Get PO details
-  const { data: po, error: poErr } = await svc
-    .from('warehouse_purchase_orders')
-    .select('*')
-    .eq('id', poId)
-    .single();
-  if (poErr) throw poErr;
-
-  const newReceived = Number(po.quantity_received) + quantityReceived;
-  const isComplete = newReceived >= Number(po.quantity_requested);
-
-  // Update PO
-  await svc
-    .from('warehouse_purchase_orders')
-    .update({
-      quantity_received: newReceived,
-      received_date: new Date().toISOString().slice(0, 10),
-      status: isComplete ? 'completed' : 'partial',
-      notes: notes ? `${po.notes || ''}\n${notes}`.trim() : po.notes,
-    })
-    .eq('id', poId);
-
-  // Record stock IN
-  await recordStockIn(
-    po.warehouse_product_id,
-    batchId || null,
-    quantityReceived,
-    'purchase_order',
-    String(poId),
-    `PO #${poId} received: ${quantityReceived} units`,
-  );
-
-  return { po_id: poId, quantity_received: newReceived, status: isComplete ? 'completed' : 'partial' };
-}
-
-export async function getPurchaseOrders(filters?: {
-  productId?: number;
-  status?: string;
-  limit?: number;
-}) {
-  const svc = createServiceSupabase();
-  let query = svc
-    .from('warehouse_purchase_orders')
-    .select(`
-      *,
-      warehouse_products!inner(name, category, entity)
-    `);
-
-  if (filters?.productId) query = query.eq('warehouse_product_id', filters.productId);
-  if (filters?.status) query = query.eq('status', filters.status);
-
-  const { data, error } = await query
-    .order('po_date', { ascending: false })
-    .limit(filters?.limit || 50);
-  if (error) throw error;
-  return data || [];
-}
-
-// ============================================================
 // SCALEV PRODUCT MAPPING
 // ============================================================
 
 export async function getScalevMappings(filter?: 'all' | 'mapped' | 'unmapped' | 'ignored') {
-  await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
   const svc = createServiceSupabase();
   let query = svc
     .from('warehouse_scalev_mapping')
     .select(`
       *,
       warehouse_products(id, name, category, entity, warehouse)
-    `);
+    `)
+    .eq('workspace_id', workspaceId);
 
   if (filter === 'mapped') query = query.not('warehouse_product_id', 'is', null).eq('is_ignored', false);
   if (filter === 'unmapped') query = query.is('warehouse_product_id', null).eq('is_ignored', false);
@@ -6467,10 +6539,12 @@ export async function getScalevMappings(filter?: 'all' | 'mapped' | 'unmapped' |
 }
 
 export async function getScalevFrequencies(): Promise<Record<string, number>> {
-  await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
   const svc = createServiceSupabase();
   try {
-    const { data } = await svc.rpc('warehouse_scalev_mapping_frequencies');
+    const { data } = await svc.rpc('warehouse_scalev_mapping_frequencies', {
+      p_workspace_id: workspaceId,
+    });
     const map: Record<string, number> = {};
     if (data) for (const r of data) map[r.product_name] = r.cnt;
     return map;
@@ -6480,10 +6554,12 @@ export async function getScalevFrequencies(): Promise<Record<string, number>> {
 }
 
 export async function getScalevPriceTiers(): Promise<Record<string, { price: number; count: number }[]>> {
-  await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
   const svc = createServiceSupabase();
   try {
-    const { data } = await svc.rpc('warehouse_scalev_price_tiers');
+    const { data } = await svc.rpc('warehouse_scalev_price_tiers', {
+      p_workspace_id: workspaceId,
+    });
     const map: Record<string, { price: number; count: number }[]> = {};
     if (data) {
       for (const r of data) {
@@ -6504,8 +6580,11 @@ export async function updateScalevMapping(
   isIgnored?: boolean,
   notes?: string,
 ) {
-  await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
   const svc = createServiceSupabase();
+  if (warehouseProductId !== undefined && warehouseProductId !== null) {
+    await assertWarehouseProductOwnership(svc, workspaceId, warehouseProductId);
+  }
   const { data: beforeRow, error: beforeError } = await svc
     .from('warehouse_scalev_mapping')
     .select(`
@@ -6518,6 +6597,7 @@ export async function updateScalevMapping(
       warehouse_products(id, name, entity, warehouse, category)
     `)
     .eq('id', id)
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (beforeError) throw beforeError;
   if (!beforeRow) throw new Error('Mapping Scalev tidak ditemukan.');
@@ -6531,7 +6611,8 @@ export async function updateScalevMapping(
   const { error } = await svc
     .from('warehouse_scalev_mapping')
     .update(update)
-    .eq('id', id);
+    .eq('id', id)
+    .eq('workspace_id', workspaceId);
   if (error) throw error;
 
   const { data: afterRow, error: afterError } = await svc
@@ -6546,6 +6627,7 @@ export async function updateScalevMapping(
       warehouse_products(id, name, entity, warehouse, category)
     `)
     .eq('id', id)
+    .eq('workspace_id', workspaceId)
     .maybeSingle();
   if (afterError) throw afterError;
   if (!afterRow) return;
@@ -6625,10 +6707,12 @@ export async function updateScalevMapping(
 }
 
 export async function syncScalevProductNames() {
-  await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
+  const { workspaceId } = await requireWarehouseSettingsPermission('whs:mapping', 'Mapping Scalev');
   const svc = createServiceSupabase();
   // Insert any new product_names not yet in mapping table
-  const { error } = await svc.rpc('warehouse_sync_scalev_names');
+  const { error } = await svc.rpc('warehouse_sync_scalev_names', {
+    p_workspace_id: workspaceId,
+  });
   if (error) throw error;
 
   await recordWarehouseActivityLog({
@@ -6977,8 +7061,10 @@ export async function removeWarehouseBusinessMapping(id: number) {
 
 // ── Backfill warehouse deductions for shipped orders missing deductions ──
 export async function backfillWarehouseDeductions(date: string) {
+  const { workspaceId } = await requireWarehousePermission('wh:mapping_sync', 'Sync Deduction Gudang');
   const svc = createServiceSupabase();
-  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  const goLiveAt = await loadWarehouseGoLiveAt(svc, workspaceId);
+  const reconcileMode = await loadWarehouseReconcileMode(svc, workspaceId);
   if (!isWarehouseGoLiveActive(goLiveAt) || isDateBeforeWarehouseGoLive(date, goLiveAt)) {
     return { checked: 0, deducted: 0, reversed: 0, skipped: 0 };
   }
@@ -7001,7 +7087,7 @@ export async function backfillWarehouseDeductions(date: string) {
   const backlogLimit = 500;
   let backlogOffset = 0;
   const backlogOrderIds: string[] = [];
-  if (!isGoLiveDay) {
+  if (!isGoLiveDay && reconcileMode === 'legacy_attribution') {
     while (true) {
       const backlogResult = await svc.rpc('warehouse_daily_undeducted_orders', {
         p_date: date,
@@ -7041,6 +7127,7 @@ export async function backfillWarehouseDeductions(date: string) {
       const { data: pageOrders, error: ordErr } = await svc
         .from('scalev_orders')
         .select('id, order_id, business_code, status, shipped_time, completed_time')
+        .eq('workspace_id', workspaceId)
         .in('order_id', chunk)
         .in('status', ['shipped', 'completed']);
       if (ordErr) throw ordErr;
@@ -7048,12 +7135,13 @@ export async function backfillWarehouseDeductions(date: string) {
     }
   } else {
     if (isGoLiveDay) {
-      orders = (await fetchScalevOrdersForDate(svc, date)) as any[];
+      orders = (await fetchScalevOrdersForDate(svc, date, workspaceId)) as any[];
     } else {
       // Fallback for older databases without the backlog RPC.
       const { data: allOrders, error: ordErr } = await svc
         .from('scalev_orders')
         .select('id, order_id, business_code, status, shipped_time, completed_time')
+        .eq('workspace_id', workspaceId)
         .in('status', ['shipped', 'completed'])
         .gte('shipped_time', dayStart)
         .lt('shipped_time', dayEnd)
@@ -7077,7 +7165,7 @@ export async function backfillWarehouseDeductions(date: string) {
   for (const order of orders) {
     checked++;
 
-    const result = await reconcileScalevOrderWarehouse(order.order_id, order.id);
+    const result = await reconcileScalevOrderWarehouse(order.order_id, order.id, workspaceId);
     totalDeducted += Number(result.deducted || 0);
     totalReversed += Number(result.reversed || 0);
     totalSkipped += Number(result.skipped || 0) + Number((result.unmapped_products || []).length);
@@ -7091,19 +7179,20 @@ export async function getUndeductedOrders(
   date: string,
   options?: { limit?: number; offset?: number },
 ): Promise<WarehouseUndeductedOrdersResult> {
-  await requireWarehouseAccess('Daily Summary');
+  const { workspaceId } = await requireWarehouseAccess('Daily Summary');
   const svc = createServiceSupabase();
   const limit = Math.min(Math.max(Number(options?.limit || 100), 1), 500);
   const offset = Math.max(Number(options?.offset || 0), 0);
   const emptyResult = { rows: [], totalCount: 0, limit, offset, hasMore: false };
-  const goLiveAt = await loadWarehouseGoLiveAt(svc);
+  const goLiveAt = await loadWarehouseGoLiveAt(svc, workspaceId);
+  const reconcileMode = await loadWarehouseReconcileMode(svc, workspaceId);
   if (!isWarehouseGoLiveActive(goLiveAt) || isDateBeforeWarehouseGoLive(date, goLiveAt)) {
     return emptyResult;
   }
 
   const isGoLiveDay = isWarehouseGoLiveDate(date, goLiveAt);
 
-  if (!isGoLiveDay) {
+  if (!isGoLiveDay && reconcileMode === 'legacy_attribution') {
     const rpcResult = await svc.rpc('warehouse_daily_undeducted_orders', {
       p_date: date,
       p_limit: limit,
@@ -7131,18 +7220,51 @@ export async function getUndeductedOrders(
     }
   }
 
-  const orders = (await fetchScalevOrdersForDate(svc, date))
+  const orders = (await fetchScalevOrdersForDate(svc, date, workspaceId))
     .filter((order) => !isGoLiveDay || isScalevOrderOnOrAfterWarehouseGoLive(order, goLiveAt));
   if (orders.length === 0) {
     return emptyResult;
   }
 
-  const outstandingByOrder = await fetchOutstandingLedgerByOrderProduct(svc, orders);
+  const outstandingByOrder = reconcileMode === 'legacy_attribution'
+    ? await fetchOutstandingLedgerByOrderProduct(svc, orders, workspaceId)
+    : new Map<string, Map<number, number>>();
 
   const results: WarehouseUndeductedOrderIssue[] = [];
 
   for (const order of orders) {
-    const resolved = await resolveWarehouseTargetsForOrder(svc, order);
+    if (reconcileMode === 'strict_mapping') {
+      const state = await resolveIndependentWorkspaceOrderState(svc, workspaceId, order);
+      const hasIssue = state.lines.length === 0
+        || !state.businessMapping
+        || state.resolved.unmappedProducts.length > 0
+        || !mapsEqualWithTolerance(state.outstandingByProduct, state.resolved.desiredByProduct);
+      if (!hasIssue) continue;
+
+      let problem = 'unknown';
+      let problemDetail = `Deduction order ${order.order_id} tidak sesuai mapping workspace.`;
+      if (!state.businessMapping) {
+        problem = 'no_business_mapping';
+        problemDetail = `Business ${order.business_code || '-'} belum memiliki mapping warehouse.`;
+      } else if (state.lines.length === 0) {
+        problem = 'no_order_lines';
+        problemDetail = `Order ${order.order_id} tidak memiliki order lines di workspace ini.`;
+      } else if (state.resolved.unmappedProducts.length > 0) {
+        problem = 'no_product_mapping';
+        problemDetail = `Mapping produk belum lengkap: ${state.resolved.unmappedProducts.join(', ')}`;
+      }
+
+      results.push({
+        order_id: order.order_id,
+        business_code: order.business_code || null,
+        product_lines: state.lines,
+        problem,
+        problem_detail: problemDetail,
+      });
+      continue;
+    }
+
+    const resolved = await resolveWarehouseTargetsForOrder(svc, order, workspaceId);
     const outstanding = outstandingByOrder.get(order.order_id) || new Map<number, number>();
     const hasIssue = resolved.productLines.length === 0
       || resolved.unmappedProducts.length > 0
@@ -7192,7 +7314,7 @@ export async function getUndeductedOrders(
 
 // ── Backfill a single order's warehouse deduction ──
 export async function backfillSingleOrder(orderId: string) {
-  await requireWarehousePermission('wh:mapping_sync', 'Sync Deduction Gudang');
+  const { workspaceId } = await requireWarehousePermission('wh:mapping_sync', 'Sync Deduction Gudang');
   const svc = createServiceSupabase();
 
   // Get order
@@ -7213,9 +7335,10 @@ export async function backfillSingleOrder(orderId: string) {
       completed_time
     `)
     .eq('order_id', orderId)
+    .eq('workspace_id', workspaceId)
     .single();
   if (ordErr || !order) throw new Error(`Order ${orderId} tidak ditemukan`);
-  const result = await reconcileScalevOrderWarehouse(order.order_id, order.id);
+  const result = await reconcileScalevOrderWarehouse(order.order_id, order.id, workspaceId);
   return {
     deducted: Number(result.deducted || 0),
     reversed: Number(result.reversed || 0),
@@ -7227,10 +7350,13 @@ export async function backfillSingleOrder(orderId: string) {
 
 // ── Get deduction log for a date (side-by-side scalev vs warehouse product) ──
 export async function getDeductionLog(date: string) {
-  await requireWarehouseAccess('Daily Summary');
+  const { workspaceId } = await requireWarehouseAccess('Daily Summary');
   const svc = createServiceSupabase();
-  const rpcResult = await svc.rpc('warehouse_daily_deduction_summary', { p_date: date });
-  if (rpcResult.error && !isMissingRpcFunctionError(rpcResult.error, 'warehouse_daily_deduction_summary')) {
+  const rpcResult = await svc.rpc('workspace_daily_deduction_summary', {
+    p_workspace_id: workspaceId,
+    p_date: date,
+  });
+  if (rpcResult.error && !isMissingRpcFunctionError(rpcResult.error, 'workspace_daily_deduction_summary')) {
     throw rpcResult.error;
   }
   if (!rpcResult.error && Array.isArray(rpcResult.data)) {
@@ -7277,6 +7403,7 @@ export async function getDeductionLog(date: string) {
     const { data: page, error: pgErr } = await svc
       .from('warehouse_stock_ledger')
       .select(selectFields)
+      .eq('workspace_id', workspaceId)
       .eq('reference_type', 'scalev_order')
       .eq('movement_type', 'OUT')
       .gte('created_at', dayStart)
@@ -7312,6 +7439,7 @@ export async function getDeductionLog(date: string) {
     const { data: orders } = await svc
       .from('scalev_orders')
       .select('id, business_code')
+      .eq('workspace_id', workspaceId)
       .in('id', chunk);
     (orders || []).forEach(o => bizByDbId.set(o.id, o.business_code));
   }
@@ -7321,6 +7449,7 @@ export async function getDeductionLog(date: string) {
     const { data: orders } = await svc
       .from('scalev_orders')
       .select('order_id, business_code')
+      .eq('workspace_id', workspaceId)
       .in('order_id', chunk);
     (orders || []).forEach(o => bizByOrderId.set(o.order_id, o.business_code));
   }
@@ -7773,7 +7902,7 @@ export async function approveStockOpname(sessionId: number): Promise<WarehouseMu
     // Create ADJUST entries for each variance
     for (const item of (items || [])) {
       if (!item.warehouse_product_id || item.selisih === 0) continue;
-      await recordStockOpnameAdjustInternal(svc, item, sessionId);
+      await recordStockOpnameAdjustInternal(svc, workspaceId, item, sessionId);
     }
 
     // Mark session completed

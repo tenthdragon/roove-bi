@@ -148,16 +148,24 @@ function rawString(line: IntakeLineRow, key: string): string {
   return cleanText((line.raw_row || {})[key]);
 }
 
+function getSourcePlatform(sourceKey: string): 'shopee' | 'tiktok' | 'blibli' | 'lazada' {
+  const normalized = cleanText(sourceKey).toLowerCase();
+  if (normalized.startsWith('tiktok_')) return 'tiktok';
+  if (normalized.startsWith('blibli_')) return 'blibli';
+  if (normalized.startsWith('lazada_')) return 'lazada';
+  return 'shopee';
+}
+
 function isTikTokSourceKey(sourceKey: string): boolean {
-  return sourceKey === 'tiktok_rti' || sourceKey === 'tiktok_jhn';
+  return getSourcePlatform(sourceKey) === 'tiktok';
 }
 
 function isBlibliSourceKey(sourceKey: string): boolean {
-  return sourceKey === 'blibli_rti';
+  return getSourcePlatform(sourceKey) === 'blibli';
 }
 
 function isLazadaSourceKey(sourceKey: string): boolean {
-  return sourceKey === 'lazada_rlt';
+  return getSourcePlatform(sourceKey) === 'lazada';
 }
 
 function resolveOpsCustomerName(order: IntakeOrderRow): string {
@@ -204,68 +212,11 @@ function resolveOpsPrice(sourceKey: string, line: IntakeLineRow): string {
   return formatInteger(price);
 }
 
-function resolveOpsWarehouse(sourceKey: string, storeName: string | null): string {
-  if (sourceKey === 'tiktok_jhn') {
-    switch (cleanText(storeName)) {
-      case 'Purvu Store':
-      case 'Purvu The Secret Store':
-      case 'drHyun Main Store':
-      case 'Calmara Main Store':
-        return "Jejak Herba Nusantara's Warehouse";
-      default:
-        return '';
-    }
-  }
-
-  if (sourceKey === 'tiktok_rti') {
-    switch (cleanText(storeName)) {
-      case 'Purvu The Secret Store - Markerplace':
-      case 'Purvu The Secret Store - Marketplace':
-      case 'Purvu The Secret Store':
-        return "Jejak Herba Nusantara's Warehouse";
-      case 'Roove Main Store - Marketplace':
-      case 'Globite Store - Marketplace':
-      case 'Pluve Main Store - Marketplace':
-      case 'Purvu Store - Marketplace':
-      case 'YUV Deodorant Serum Store - Marketplace':
-      case 'Osgard Oil Store - Marketplace':
-      case 'drHyun Main Store - Marketplace':
-      case 'Osgard Oil Store':
-        return "Roove Lautan Barat's Warehouse";
-      default:
-        return '';
-    }
-  }
-
-  if (sourceKey === 'shopee_jhn') {
-    switch (cleanText(storeName)) {
-      case 'Purvu Store':
-      case 'Purvu The Secret Store':
-      case 'drHyun Main Store':
-      case 'Calmara Main Store':
-        return "Jejak Herba Nusantara's Warehouse";
-      default:
-        return '';
-    }
-  }
-
-  switch (cleanText(storeName)) {
-    case 'Purvu The Secret Store - Markerplace':
-    case 'Purvu The Secret Store - Marketplace':
-    case 'Purvu The Secret Store':
-      return "Jejak Herba Nusantara's Warehouse";
-    case 'Roove Main Store - Marketplace':
-    case 'Globite Store - Marketplace':
-    case 'Pluve Main Store - Marketplace':
-    case 'Purvu Store - Marketplace':
-    case 'YUV Deodorant Serum Store - Marketplace':
-    case 'Osgard Oil Store':
-    case 'drHyun Main Store - Marketplace':
-    case 'Calmara Main Store - Marketplace':
-      return "Roove Lautan Barat's Warehouse";
-    default:
-      return '';
-  }
+function resolveOpsWarehouse(
+  warehouseByStore: Map<string, string>,
+  storeName: string | null,
+): string {
+  return warehouseByStore.get(cleanText(storeName)) || '';
 }
 
 function resolveOpsCourier(
@@ -298,7 +249,7 @@ function resolveOpsCourier(
     return { courier: 'JNE Express Cashless', courierService: 'REG' };
   }
 
-  if (sourceKey === 'shopee_rlt' || sourceKey === 'shopee_jhn') {
+  if (getSourcePlatform(sourceKey) === 'shopee') {
     return { courier: 'SiCepat Express Cashless', courierService: 'REG' };
   }
 
@@ -317,17 +268,12 @@ function resolveOpsCourier(
 }
 
 function resolveOpsPlatform(sourceKey: string): string {
-  if (isTikTokSourceKey(sourceKey)) return 'tiktokshop';
-  if (isLazadaSourceKey(sourceKey)) return 'lazada';
-  if (isBlibliSourceKey(sourceKey)) return 'blibli';
-  return 'shopee';
+  const platform = getSourcePlatform(sourceKey);
+  return platform === 'tiktok' ? 'tiktokshop' : platform;
 }
 
 function resolveOpsBank(sourceKey: string): string {
-  if (isTikTokSourceKey(sourceKey)) return 'tiktokshop';
-  if (isLazadaSourceKey(sourceKey)) return 'lazada';
-  if (isBlibliSourceKey(sourceKey)) return 'blibli';
-  return 'shopee';
+  return resolveOpsPlatform(sourceKey);
 }
 
 function buildCsv(rows: ScalevOpsCsvRow[]): string {
@@ -339,6 +285,7 @@ function buildCsv(rows: ScalevOpsCsvRow[]): string {
 }
 
 export async function buildScalevOpsProjectionForBatch(input: {
+  workspaceId: string;
   batchId: number;
   includeWarehouseStatuses?: string[];
   shipmentDate?: string | null;
@@ -348,9 +295,24 @@ export async function buildScalevOpsProjectionForBatch(input: {
   const { data: batch, error: batchError } = await svc
     .from('marketplace_intake_batches')
     .select('id, source_key, source_label, business_code, filename, source_order_date, raw_snapshot')
+    .eq('workspace_id', input.workspaceId)
     .eq('id', input.batchId)
     .single<IntakeBatchRow>();
   if (batchError) throw batchError;
+
+  const { data: warehouseScopes, error: warehouseScopesError } = await svc
+    .from('marketplace_intake_source_store_scopes')
+    .select('store_name, scalev_warehouse_name')
+    .eq('workspace_id', input.workspaceId)
+    .eq('source_key', batch.source_key)
+    .eq('is_enabled', true);
+  if (warehouseScopesError) throw warehouseScopesError;
+  const warehouseByStore = new Map<string, string>();
+  for (const scope of warehouseScopes || []) {
+    const storeName = cleanText((scope as any).store_name);
+    const warehouseName = cleanText((scope as any).scalev_warehouse_name);
+    if (storeName && warehouseName) warehouseByStore.set(storeName, warehouseName);
+  }
 
   let ordersQuery = svc
     .from('marketplace_intake_orders')
@@ -367,6 +329,7 @@ export async function buildScalevOpsProjectionForBatch(input: {
       'mp_customer_username',
       'raw_meta',
     ].join(','))
+    .eq('workspace_id', input.workspaceId)
     .eq('batch_id', input.batchId)
     .order('external_order_id', { ascending: true });
 
@@ -399,6 +362,7 @@ export async function buildScalevOpsProjectionForBatch(input: {
           'quantity',
           'raw_row',
         ].join(','))
+        .eq('workspace_id', input.workspaceId)
         .in('intake_order_id', orderIds)
         .order('intake_order_id', { ascending: true })
         .order('line_index', { ascending: true });
@@ -418,6 +382,7 @@ export async function buildScalevOpsProjectionForBatch(input: {
         'quantity',
         'raw_row',
       ].join(','))
+      .eq('workspace_id', input.workspaceId)
       .in('intake_order_id', orderIds)
       .order('intake_order_id', { ascending: true })
       .order('line_index', { ascending: true });
@@ -452,7 +417,7 @@ export async function buildScalevOpsProjectionForBatch(input: {
     const timestamp = formatDate(order.shipment_date) || formatDate(batch.source_order_date);
     const customerName = resolveOpsCustomerName(order);
     const { courier, courierService } = resolveOpsCourier(batch.source_key, order.shipping_provider, order.tracking_number);
-    const warehouse = resolveOpsWarehouse(batch.source_key, order.final_store_name);
+    const warehouse = resolveOpsWarehouse(warehouseByStore, order.final_store_name);
     const shippingCost = resolveMarketplaceIntakeShippingCost(
       order.raw_meta,
       orderLines.map((line) => line.raw_row || {}),
@@ -464,6 +429,14 @@ export async function buildScalevOpsProjectionForBatch(input: {
         lineIndex: null,
         code: 'missing_store',
         message: 'Order belum memiliki final_store_name untuk formatter Scalev.',
+      });
+    }
+    if (cleanText(order.final_store_name) && !warehouse) {
+      warnings.push({
+        externalOrderId: order.external_order_id,
+        lineIndex: null,
+        code: 'missing_scalev_warehouse',
+        message: `Nama gudang ScaleV untuk store "${cleanText(order.final_store_name)}" belum dikonfigurasi pada Store Scope workspace.`,
       });
     }
     if (!timestamp) {

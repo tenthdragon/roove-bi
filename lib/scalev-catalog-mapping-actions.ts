@@ -147,7 +147,7 @@ function scoreNameSimilarity(left: string | null | undefined, right: string | nu
 
 async function requireScalevCatalogMappingAccess(label = 'Product Mapping Scalev') {
   await requireDashboardTabAccess('warehouse-settings', label);
-  await requireDashboardPermissionAccess('whs:mapping', label);
+  return requireDashboardPermissionAccess('whs:mapping', label);
 }
 
 function isMissingTableError(error: any): boolean {
@@ -361,16 +361,19 @@ function dedupeIdentifiers(values: Array<string | null | undefined>): string[] {
   return result;
 }
 
-async function getCatalogEntityRows(businessId: number): Promise<{ businessCode: string; rows: CatalogEntityRow[] }> {
+async function getCatalogEntityRows(
+  workspaceId: string,
+  businessId: number,
+): Promise<{ businessCode: string; rows: CatalogEntityRow[] }> {
   const svc = createServiceSupabase();
-  return fetchVisibleDirectCatalogEntities(svc, businessId);
+  return fetchVisibleDirectCatalogEntities(svc, workspaceId, businessId);
 }
 
 export async function getScalevCatalogProductMappings(businessId: number): Promise<ScalevCatalogMappingPayload> {
-  await requireScalevCatalogMappingAccess();
+  const { workspaceId } = await requireScalevCatalogMappingAccess();
   const svc = createServiceSupabase();
 
-  const { businessCode, rows } = await getCatalogEntityRows(businessId);
+  const { businessCode, rows } = await getCatalogEntityRows(workspaceId, businessId);
   const mappingRequestsByBusinessId = new Map<number, Set<string>>();
   for (const row of rows) {
     if (!mappingRequestsByBusinessId.has(row.owner_business_id)) {
@@ -383,8 +386,9 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
     svc
       .from('scalev_catalog_identifiers')
       .select('entity_key, identifier, identifier_normalized')
+      .eq('workspace_id', workspaceId)
       .eq('business_id', businessId),
-    fetchCanonicalCatalogMappingsByRequests(svc, mappingRequestsByBusinessId),
+    fetchCanonicalCatalogMappingsByRequests(svc, workspaceId, mappingRequestsByBusinessId),
     svc
       .from('warehouse_scalev_mapping')
       .select(`
@@ -392,15 +396,17 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
         warehouse_product_id,
         warehouse_products(id, name, category, entity, warehouse)
       `)
+      .eq('workspace_id', workspaceId)
       .not('warehouse_product_id', 'is', null)
       .eq('is_ignored', false),
     svc
       .from('warehouse_products')
       .select('id, name, category, entity, warehouse, scalev_product_names')
+      .eq('owner_workspace_id', workspaceId)
       .eq('is_active', true)
       .order('category', { ascending: true })
       .order('name', { ascending: true }),
-    svc.rpc('warehouse_scalev_mapping_frequencies'),
+    svc.rpc('warehouse_scalev_mapping_frequencies', { p_workspace_id: workspaceId }),
   ]);
 
   if (identifierError) throw identifierError;
@@ -551,7 +557,7 @@ export async function saveScalevCatalogProductMapping(input: {
   warehouseProductId: number | null;
   notes?: string | null;
 }) {
-  await requireScalevCatalogMappingAccess();
+  const { workspaceId } = await requireScalevCatalogMappingAccess();
   const svc = createServiceSupabase();
 
   const entityKey = String(input.entityKey || '').trim();
@@ -571,7 +577,7 @@ export async function saveScalevCatalogProductMapping(input: {
     throw new Error('Tipe entity Scalev tidak didukung.');
   }
 
-  const { rows } = await fetchVisibleDirectCatalogEntities(svc, input.businessId, {
+  const { rows } = await fetchVisibleDirectCatalogEntities(svc, workspaceId, input.businessId, {
     entityKeys: [entityKey],
     includeProductsWithVariants: true,
   });
@@ -598,6 +604,7 @@ export async function saveScalevCatalogProductMapping(input: {
       notes,
       warehouse_products(id, name, category, entity, warehouse)
     `)
+    .eq('workspace_id', workspaceId)
     .eq('business_id', canonicalBusinessId)
     .eq('scalev_entity_key', entityKey)
     .maybeSingle();
@@ -610,6 +617,7 @@ export async function saveScalevCatalogProductMapping(input: {
     const { error } = await svc
       .from('warehouse_scalev_catalog_mapping')
       .delete()
+      .eq('workspace_id', workspaceId)
       .eq('business_id', canonicalBusinessId)
       .eq('scalev_entity_key', entityKey);
     if (error) {
@@ -663,6 +671,7 @@ export async function saveScalevCatalogProductMapping(input: {
   }
 
   const payload = {
+    workspace_id: workspaceId,
     business_id: canonicalBusinessId,
     business_code: canonicalBusinessCode,
     scalev_entity_type: entityType,
@@ -697,6 +706,7 @@ export async function saveScalevCatalogProductMapping(input: {
       notes,
       warehouse_products(id, name, category, entity, warehouse)
     `)
+    .eq('workspace_id', workspaceId)
     .eq('business_id', canonicalBusinessId)
     .eq('scalev_entity_key', entityKey)
     .maybeSingle();

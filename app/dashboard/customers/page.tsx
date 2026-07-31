@@ -734,7 +734,7 @@ const TREND_COLORS = { 'Global': '#3b82f6', 'Scalev': '#8b5cf6', 'Shopee': '#f97
 function LtvTab() {
   const [trendChannel, setTrendChannel] = useState('Global');
   const [hoveredBar, setHoveredBar] = useState(null);
-  const [selectedBrand, setSelectedBrand] = useState('Roove');
+  const [selectedBrand, setSelectedBrand] = useState('');
   const [brands, setBrands] = useState([]);
   const [data, setData] = useState([]);
   const [trendData, setTrendData] = useState([]);

@@ -3,7 +3,7 @@ import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { runMetaSync } from '@/lib/meta-sync-runner';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
-import { ROOVE_WORKSPACE_ID } from '@/lib/workspaces';
+import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
 
 export const maxDuration = 60;
 
@@ -48,7 +48,7 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
   const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const mode = isCron ? `cron_${method.toLowerCase()}` : `dashboard_${method.toLowerCase()}`;
   let requestedBy: string | null = null;
-  let workspaceId = ROOVE_WORKSPACE_ID;
+  let workspaceId: string | null = null;
 
   logRouteEvent({
     route: '/api/meta-sync',
@@ -93,16 +93,45 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
         });
         return NextResponse.json({ error: err.message }, { status });
       }
-    } else {
-      workspaceId = new URL(req.url).searchParams.get('workspace_id') || ROOVE_WORKSPACE_ID;
     }
 
     const payload = resolveDateRange(req);
-    const result = await runMetaSync({
-      workspaceId,
-      dateStart: payload.date_start,
-      dateEnd: payload.date_end,
-    });
+    const workspaceIds = isCron
+      ? await resolveScheduledWorkspaceIds(
+          new URL(req.url).searchParams.get('workspace_id'),
+          'meta',
+        )
+      : [workspaceId!];
+    const results = [];
+    const routeErrors: string[] = [];
+    for (const scheduledWorkspaceId of workspaceIds) {
+      try {
+        results.push(await runMetaSync({
+          workspaceId: scheduledWorkspaceId,
+          dateStart: payload.date_start,
+          dateEnd: payload.date_end,
+        }));
+      } catch (error: any) {
+        routeErrors.push(`${scheduledWorkspaceId}: ${error?.message || 'Meta sync gagal'}`);
+      }
+    }
+    const accountsTotal = results.reduce((sum, item) => sum + item.accounts_total, 0);
+    const accountsSynced = results.reduce((sum, item) => sum + item.accounts_synced, 0);
+    const rowsInserted = results.reduce((sum, item) => sum + item.rows_inserted, 0);
+    const result = {
+      status: routeErrors.length === 0
+        ? 'success' as const
+        : results.length > 0
+          ? 'partial' as const
+          : 'failed' as const,
+      accounts_total: accountsTotal,
+      accounts_synced: accountsSynced,
+      rows_inserted: rowsInserted,
+      duration_ms: Date.now() - startTime,
+      token_warning: results.find((item) => item.token_warning)?.token_warning || null,
+      errors: [...results.flatMap((item) => item.errors || []), ...routeErrors],
+      message: workspaceIds.length === 0 ? 'Tidak ada workspace dengan akun Meta aktif.' : undefined,
+    };
 
     logRouteEvent({
       route: '/api/meta-sync',

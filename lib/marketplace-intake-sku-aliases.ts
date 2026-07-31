@@ -2,11 +2,11 @@
 
 import { requireDashboardRoles } from './dashboard-access';
 import { createServiceSupabase } from './supabase-server';
+import { type MarketplaceIntakeSourceKey } from './marketplace-intake-sources';
 import {
-  getMarketplaceIntakeSourceConfig,
-  listMarketplaceIntakeSourceConfigs,
-  type MarketplaceIntakeSourceKey,
-} from './marketplace-intake-sources';
+  listWorkspaceMarketplaceIntakeSourceConfigs,
+  resolveWorkspaceMarketplaceIntakeSourceConfig,
+} from './marketplace-intake-workspace-sources';
 
 export type MarketplaceSkuAliasListItem = {
   id: number;
@@ -66,20 +66,12 @@ function getSchemaMessage() {
   return 'Schema SKU alias marketplace belum siap. Jalankan migration 135 lalu reload schema PostgREST.';
 }
 
-function assertSourceKey(sourceKey: unknown): MarketplaceIntakeSourceKey {
-  const normalized = cleanText(sourceKey);
-  const match = listMarketplaceIntakeSourceConfigs().find((config) => config.sourceKey === normalized);
-  if (!match) {
-    throw new Error('sourceKey intake tidak valid.');
-  }
-  return match.sourceKey;
-}
-
-async function loadBusinessId(businessCode: string): Promise<number | null> {
+async function loadBusinessId(workspaceId: string, businessCode: string): Promise<number | null> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id')
+    .eq('workspace_id', workspaceId)
     .eq('business_code', businessCode)
     .maybeSingle();
 
@@ -95,7 +87,7 @@ export async function listMarketplaceSkuAliases(params?: {
   sourceKey?: string | null;
   limit?: number;
 }): Promise<MarketplaceSkuAliasListResult> {
-  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat SKU alias marketplace.');
+  const { workspaceId } = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa melihat SKU alias marketplace.');
 
   const svc = createServiceSupabase();
   const limit = Math.min(Math.max(Number(params?.limit || 500), 1), 1000);
@@ -117,6 +109,7 @@ export async function listMarketplaceSkuAliases(params?: {
       created_at,
       updated_at
     `)
+    .eq('workspace_id', workspaceId)
     .order('is_active', { ascending: false })
     .order('updated_at', { ascending: false })
     .limit(limit);
@@ -133,7 +126,8 @@ export async function listMarketplaceSkuAliases(params?: {
   }
 
   const sourceLabelByKey = new Map<string, string>(
-    listMarketplaceIntakeSourceConfigs().map((config) => [config.sourceKey, config.sourceLabel]),
+    (await listWorkspaceMarketplaceIntakeSourceConfigs(workspaceId))
+      .map((config) => [config.sourceKey, config.sourceLabel]),
   );
 
   const items = (data || []).map((row: any) => ({
@@ -166,9 +160,9 @@ export async function listMarketplaceSkuAliases(params?: {
 export async function upsertMarketplaceSkuAlias(
   input: UpsertMarketplaceSkuAliasInput,
 ): Promise<MarketplaceSkuAliasListItem> {
-  await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengubah SKU alias marketplace.');
+  const { workspaceId } = await requireDashboardRoles(['owner'], 'Hanya owner yang bisa mengubah SKU alias marketplace.');
 
-  const sourceConfig = getMarketplaceIntakeSourceConfig(assertSourceKey(input.sourceKey));
+  const sourceConfig = await resolveWorkspaceMarketplaceIntakeSourceConfig(workspaceId, input.sourceKey);
   const normalizedSku = cleanText(input.normalizedSku);
   const rawPlatformSkuId = cleanText(input.rawPlatformSkuId);
   const rawSellerSku = cleanText(input.rawSellerSku);
@@ -185,9 +179,10 @@ export async function upsertMarketplaceSkuAlias(
     throw new Error('Isi minimal salah satu matcher: platform SKU ID, seller SKU, atau nama produk.');
   }
 
-  const businessId = await loadBusinessId(sourceConfig.businessCode);
+  const businessId = await loadBusinessId(workspaceId, sourceConfig.businessCode);
 
   const payload = {
+    workspace_id: workspaceId,
     source_key: sourceConfig.sourceKey,
     business_id: businessId,
     business_code: sourceConfig.businessCode,
@@ -207,6 +202,7 @@ export async function upsertMarketplaceSkuAlias(
     ? await svc
         .from('marketplace_intake_sku_aliases')
         .update(payload)
+        .eq('workspace_id', workspaceId)
         .eq('id', id)
         .select(`
           id,

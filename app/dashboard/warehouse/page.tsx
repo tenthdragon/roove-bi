@@ -52,8 +52,6 @@ import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { getCurrentProfile } from '@/lib/actions';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
-import { useWorkspace } from '@/lib/WorkspaceContext';
-import WorkspaceWarehousePage from '@/components/WorkspaceWarehousePage';
 
 // ── Types ──
 
@@ -353,14 +351,10 @@ function KPICard({ label, value, color = 'var(--accent)', sub }: { label: string
 // ============================================================
 
 export default function WarehousePage() {
-  const { activeWorkspace } = useWorkspace();
-  if (activeWorkspace.slug !== 'roove') {
-    return <WorkspaceWarehousePage />;
-  }
-  return <LegacyWarehousePage />;
+  return <WarehousePageContent />;
 }
 
-function LegacyWarehousePage() {
+function WarehousePageContent() {
   const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('daily-summary');
   const [loading, setLoading] = useState(true);

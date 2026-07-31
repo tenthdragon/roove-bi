@@ -1,6 +1,7 @@
 // lib/opus-analyst.ts — Pre-fetch data + Opus single-shot with optional tool follow-up
 import Anthropic from '@anthropic-ai/sdk';
 import { TOOL_DEFINITIONS, executeTool } from '@/lib/report-tools';
+import { createServiceSupabase } from '@/lib/supabase-server';
 
 const MODEL = 'claude-sonnet-4-20250514';
 const MAX_FOLLOWUP = 3;
@@ -19,7 +20,8 @@ const PREFETCH_TOOLS = [
   'repeat_rate_by_brand',
 ];
 
-const SYSTEM_PROMPT = `You are a senior business analyst for an Indonesian D2C/FMCG company called Roove.
+function buildSystemPrompt(workspaceName: string) {
+  return `You are a senior business analyst for the Indonesian D2C/FMCG company workspace "${workspaceName}". Analyze only the supplied workspace data. Never assume brands, companies, or facts from another workspace.
 You are given a monthly performance report along with detailed data from the database.
 
 YOUR JOB:
@@ -72,6 +74,7 @@ ANALYTICAL DEPTH:
 
 Write in Bahasa Indonesia. Be concise — max 3-4 paragraphs.
 When using tools, parameters "from" and "to" must be YYYY-MM-DD format.`;
+}
 
 /** Convert any remaining markdown to Telegram HTML */
 function sanitizeForTelegram(text: string): string {
@@ -97,11 +100,20 @@ export interface AnalysisResult {
 }
 
 export async function analyzeMonthlyReport(
+  workspaceId: string,
   reportText: string,
   thisMonthFrom: string, thisMonthTo: string,
   prevMonthFrom: string, prevMonthTo: string,
 ): Promise<AnalysisResult> {
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const svc = createServiceSupabase();
+  const { data: workspace, error: workspaceError } = await svc
+    .from('workspaces')
+    .select('name')
+    .eq('id', workspaceId)
+    .single();
+  if (workspaceError) throw workspaceError;
+  const systemPrompt = buildSystemPrompt(String(workspace?.name || 'Workspace'));
 
   // ── Stage 1: Pre-fetch all standard data (free, ~2 sec) ──
   console.log('[analyst] Pre-fetching data...');
@@ -109,8 +121,8 @@ export async function analyzeMonthlyReport(
 
   for (const tool of PREFETCH_TOOLS) {
     const [thisData, prevData] = await Promise.all([
-      executeTool(tool, { from: thisMonthFrom, to: thisMonthTo }),
-      executeTool(tool, { from: prevMonthFrom, to: prevMonthTo }),
+      executeTool(workspaceId, tool, { from: thisMonthFrom, to: thisMonthTo }),
+      executeTool(workspaceId, tool, { from: prevMonthFrom, to: prevMonthTo }),
     ]);
     dataBlocks.push(
       `=== ${tool} | ${thisMonthFrom} to ${thisMonthTo} ===\n${thisData}`,
@@ -140,7 +152,7 @@ export async function analyzeMonthlyReport(
     const response = await client.messages.create({
       model: MODEL,
       max_tokens: 4096,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt,
       tools: TOOL_DEFINITIONS as any,
       messages,
     });
@@ -156,7 +168,7 @@ export async function analyzeMonthlyReport(
         if (block.type === 'tool_use') {
           console.log(`[analyst] Follow-up tool: ${block.name}(${JSON.stringify(block.input)})`);
           toolCalls.push(block.name);
-          const result = await executeTool(block.name, block.input as any);
+          const result = await executeTool(workspaceId, block.name, block.input as any);
           toolResults.push({
             type: 'tool_result',
             tool_use_id: block.id,

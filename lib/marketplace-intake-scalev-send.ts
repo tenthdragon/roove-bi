@@ -28,6 +28,7 @@ type SenderBusinessRow = {
 };
 
 export type MarketplaceIntakeScalevSendInput = {
+  workspaceId: string;
   batchId: number;
   shipmentDate?: string | null;
   includeWarehouseStatuses?: string[];
@@ -95,11 +96,12 @@ function tryParseJson(text: string): unknown {
   }
 }
 
-async function loadSenderBatch(batchId: number): Promise<SenderBatchRow> {
+async function loadSenderBatch(workspaceId: string, batchId: number): Promise<SenderBatchRow> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('marketplace_intake_batches')
     .select('id, source_key, source_label, business_id, business_code, filename')
+    .eq('workspace_id', workspaceId)
     .eq('id', batchId)
     .single<SenderBatchRow>();
 
@@ -107,11 +109,12 @@ async function loadSenderBatch(batchId: number): Promise<SenderBatchRow> {
   return data;
 }
 
-async function loadSenderBusiness(businessId: number): Promise<SenderBusinessRow> {
+async function loadSenderBusiness(workspaceId: string, businessId: number): Promise<SenderBusinessRow> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id, business_code, api_key')
+    .eq('workspace_id', workspaceId)
     .eq('id', businessId)
     .single<SenderBusinessRow>();
 
@@ -122,7 +125,12 @@ async function loadSenderBusiness(businessId: number): Promise<SenderBusinessRow
   return data;
 }
 
-async function persistScalevProjectionSnapshot(batchId: number, snapshot: Record<string, unknown>, csv: string) {
+async function persistScalevProjectionSnapshot(
+  workspaceId: string,
+  batchId: number,
+  snapshot: Record<string, unknown>,
+  csv: string,
+) {
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('marketplace_intake_batches')
@@ -131,22 +139,25 @@ async function persistScalevProjectionSnapshot(batchId: number, snapshot: Record
       scalev_projection_csv: csv,
       scalev_projection_generated_at: new Date().toISOString(),
     })
+    .eq('workspace_id', workspaceId)
     .eq('id', batchId);
 
   if (error) throw error;
 }
 
-async function persistScalevSendResult(batchId: number, payload: Record<string, unknown>) {
+async function persistScalevSendResult(workspaceId: string, batchId: number, payload: Record<string, unknown>) {
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('marketplace_intake_batches')
     .update(payload)
+    .eq('workspace_id', workspaceId)
     .eq('id', batchId);
 
   if (error) throw error;
 }
 
 async function logScalevSendSync(input: {
+  workspaceId: string;
   batch: SenderBatchRow;
   status: 'success' | 'failed';
   sentByEmail: string | null;
@@ -157,6 +168,7 @@ async function logScalevSendSync(input: {
   const { error } = await svc
     .from('scalev_sync_log')
     .insert({
+      workspace_id: input.workspaceId,
       status: input.status,
       sync_type: 'marketplace_intake_scalev_upload',
       business_code: input.batch.business_code,
@@ -228,9 +240,10 @@ export async function sendMarketplaceIntakeBatchToScalev(
       .filter(Boolean),
   ));
 
-  const batch = await loadSenderBatch(batchId);
-  const business = await loadSenderBusiness(batch.business_id);
+  const batch = await loadSenderBatch(input.workspaceId, batchId);
+  const business = await loadSenderBusiness(input.workspaceId, batch.business_id);
   const projection = await buildScalevOpsProjectionForBatch({
+    workspaceId: input.workspaceId,
     batchId,
     shipmentDate,
     includeWarehouseStatuses,
@@ -255,7 +268,7 @@ export async function sendMarketplaceIntakeBatchToScalev(
     tz,
   }, csvFilename);
 
-  await persistScalevProjectionSnapshot(batchId, projectionSnapshot, projection.csv);
+  await persistScalevProjectionSnapshot(input.workspaceId, batchId, projectionSnapshot, projection.csv);
 
   const sentAt = new Date().toISOString();
 
@@ -268,7 +281,7 @@ export async function sendMarketplaceIntakeBatchToScalev(
       tz,
     });
 
-    await persistScalevSendResult(batchId, {
+    await persistScalevSendResult(input.workspaceId, batchId, {
       scalev_last_send_status: 'success',
       scalev_last_send_mode: createType,
       scalev_last_send_shipment_date: shipmentDate,
@@ -279,6 +292,7 @@ export async function sendMarketplaceIntakeBatchToScalev(
     });
 
     await logScalevSendSync({
+      workspaceId: input.workspaceId,
       batch,
       status: 'success',
       sentByEmail: input.sentByEmail || null,
@@ -290,6 +304,7 @@ export async function sendMarketplaceIntakeBatchToScalev(
     let reconcileError: string | null = null;
     try {
       reconcile = await reconcileMarketplaceIntakeBatchScalevIdentity({
+        workspaceId: input.workspaceId,
         batchId,
         reconciledByEmail: input.sentByEmail || null,
       });
@@ -313,7 +328,7 @@ export async function sendMarketplaceIntakeBatchToScalev(
       reconcileError,
     };
   } catch (error: any) {
-    await persistScalevSendResult(batchId, {
+    await persistScalevSendResult(input.workspaceId, batchId, {
       scalev_last_send_status: 'failed',
       scalev_last_send_mode: createType,
       scalev_last_send_shipment_date: shipmentDate,
@@ -326,6 +341,7 @@ export async function sendMarketplaceIntakeBatchToScalev(
     });
 
     await logScalevSendSync({
+      workspaceId: input.workspaceId,
       batch,
       status: 'failed',
       sentByEmail: input.sentByEmail || null,

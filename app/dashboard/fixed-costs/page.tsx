@@ -360,7 +360,7 @@ export default function FixedCostsPage() {
       </div>
 
       <div style={{ padding: 14, border: '1px solid var(--border)', borderRadius: 10, color: 'var(--dim)', fontSize: 12, lineHeight: 1.6 }}>
-        Kompatibilitas Roove tetap dijaga: angka <em>monthly overhead</em> lama masih dipakai sampai ada minimal satu rincian fixed cost. Apurva tidak mewarisi angka lama tersebut.
+        Workspace dengan model overhead lama tetap memakai <em>monthly overhead</em> sampai ada minimal satu rincian fixed cost. Workspace baru selalu memulai tanpa angka overhead dari tenant lain.
       </div>
     </div>
   );

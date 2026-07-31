@@ -31,6 +31,7 @@ import WarehouseSheetManager from '@/components/WarehouseSheetManager';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 
 const TABS = [
+  { id: 'workspaces', label: 'Workspaces' },
   { id: 'daily', label: 'Daily Data' },
   { id: 'meta', label: 'Marketing APIs' },
   { id: 'financial', label: 'Financial' },
@@ -55,7 +56,7 @@ const MP_FEE_SETTING_LABELS = Object.fromEntries(
 
 export default function AdminPage() {
   const { can } = usePermissions();
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, isPlatformOwner } = useWorkspace();
   const searchParams = useSearchParams();
   const showAdvanced = searchParams.get('advanced') === 'true';
 
@@ -106,7 +107,19 @@ export default function AdminPage() {
   const [inviting, setInviting] = useState(false);
   const [inviteMsg, setInviteMsg] = useState(null);
 
+  // Workspace provisioning is platform-level. The new tenant starts empty;
+  // only its shell, permission template and warehouse identity are created.
+  const [workspaceDraft, setWorkspaceDraft] = useState({
+    name: '',
+    slug: '',
+    inventoryEntity: '',
+    warehouseCode: 'BTN',
+  });
+  const [workspaceCreating, setWorkspaceCreating] = useState(false);
+  const [workspaceMessage, setWorkspaceMessage] = useState(null);
+
   const visibleTabs = TABS.filter((tab) => {
+    if (tab.id === 'workspaces') return isPlatformOwner;
     if ((tab.id === 'users' || tab.id === 'permissions') && profile?.role !== 'owner') return false;
     if (tab.id === 'data_ref' && profile?.role !== 'owner') return false;
     if (profile?.role === 'owner') return true;
@@ -394,6 +407,34 @@ export default function AdminPage() {
     }
   };
 
+  const handleCreateWorkspace = async () => {
+    setWorkspaceCreating(true);
+    setWorkspaceMessage(null);
+    try {
+      const response = await fetch('/api/workspaces/provision', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(workspaceDraft),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.error) {
+        throw new Error(result.error || 'Gagal membuat workspace.');
+      }
+      setWorkspaceMessage({
+        type: 'success',
+        text: 'Workspace kosong berhasil dibuat. Memuat ulang daftar workspace…',
+      });
+      setTimeout(() => window.location.reload(), 700);
+    } catch (error) {
+      setWorkspaceMessage({
+        type: 'error',
+        text: error?.message || 'Gagal membuat workspace.',
+      });
+    } finally {
+      setWorkspaceCreating(false);
+    }
+  };
+
   const roleLabel = (r) => {
     switch (r) {
       case 'owner':              return { text: 'Owner',             bg: 'var(--accent-subtle)',    color: '#818cf8' };
@@ -474,6 +515,77 @@ export default function AdminPage() {
         ))}
       </div>
 
+      {/* ═══ TAB: WORKSPACES ═══ */}
+      {currentTabId === 'workspaces' && isPlatformOwner && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 5 }}>Buat Workspace Kosong</div>
+            <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6, marginBottom: 16 }}>
+              Workspace baru memakai fitur aplikasi yang sama, tetapi tidak menyalin tim, integrasi, produk,
+              stok, order, biaya, atau data lain dari workspace mana pun.
+            </div>
+
+            {workspaceMessage && (
+              <div style={{
+                marginBottom: 14,
+                padding: 10,
+                borderRadius: 7,
+                fontSize: 12,
+                background: workspaceMessage.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+                color: workspaceMessage.type === 'success' ? 'var(--green)' : 'var(--red)',
+              }}>
+                {workspaceMessage.text}
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
+              {[
+                { key: 'name', label: 'Nama Workspace', placeholder: 'Contoh: Company Baru Workspace' },
+                { key: 'slug', label: 'Slug', placeholder: 'contoh: company-baru' },
+                { key: 'inventoryEntity', label: 'Entity Inventory', placeholder: 'Contoh: APV' },
+                { key: 'warehouseCode', label: 'Kode Warehouse', placeholder: 'Contoh: BTN' },
+              ].map((field) => (
+                <label key={field.key} style={{ display: 'block' }}>
+                  <span style={{ display: 'block', color: 'var(--dim)', fontSize: 11, marginBottom: 5 }}>{field.label}</span>
+                  <input
+                    value={workspaceDraft[field.key]}
+                    onChange={(event) => setWorkspaceDraft((draft) => ({
+                      ...draft,
+                      [field.key]: field.key === 'slug'
+                        ? event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '')
+                        : field.key === 'inventoryEntity' || field.key === 'warehouseCode'
+                          ? event.target.value.toUpperCase().replace(/[^A-Z0-9_-]/g, '')
+                          : event.target.value,
+                    }))}
+                    placeholder={field.placeholder}
+                    style={{ width: '100%', padding: '9px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}
+                  />
+                </label>
+              ))}
+            </div>
+
+            <button
+              onClick={handleCreateWorkspace}
+              disabled={workspaceCreating || !workspaceDraft.name || !workspaceDraft.slug || !workspaceDraft.inventoryEntity || !workspaceDraft.warehouseCode}
+              style={{
+                marginTop: 16,
+                padding: '9px 16px',
+                borderRadius: 7,
+                border: 'none',
+                background: 'var(--accent)',
+                color: '#fff',
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: workspaceCreating ? 'wait' : 'pointer',
+                opacity: workspaceCreating ? 0.65 : 1,
+              }}
+            >
+              {workspaceCreating ? 'Membuat…' : 'Buat Workspace'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ═══ TAB: DAILY DATA ═══ */}
       {currentTabId === 'daily' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -530,14 +642,14 @@ export default function AdminPage() {
           )}
 
           {/* CSV Order Upload */}
-          {activeWorkspace.slug === 'roove' ? (
+          {activeWorkspace.settings.legacy_order_csv_enabled ? (
             <CsvOrderUploader />
           ) : (
             <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 5 }}>Order CSV Upload</div>
               <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6 }}>
-                Import order CSV legacy ditahan untuk workspace ini karena parser tersebut masih memakai aturan brand Roove.
-                Gunakan koneksi ScaleV Apurva agar order masuk dengan mapping baru.
+                Import order CSV legacy dinonaktifkan untuk workspace ini karena parser tersebut memakai aturan data lama.
+                Gunakan koneksi ScaleV milik workspace aktif agar order masuk dengan mapping tenant yang baru.
               </div>
             </div>
           )}
@@ -548,17 +660,7 @@ export default function AdminPage() {
       {currentTabId === 'meta' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <MetaManager />
-          {activeWorkspace.slug === 'roove' ? (
-            <ShopeeManager />
-          ) : (
-            <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 5 }}>Shopee Integration</div>
-              <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6 }}>
-                Setup Shopee ditahan sementara sampai mapping marketplace Apurva diaktifkan.
-                Tidak ada konfigurasi atau daftar store Roove yang ditampilkan di workspace ini.
-              </div>
-            </div>
-          )}
+          <ShopeeManager />
         </div>
       )}
 
@@ -881,7 +983,7 @@ export default function AdminPage() {
           </div>
 
           {/* Monthly Overhead */}
-          {activeWorkspace.slug !== 'roove' && (
+          {activeWorkspace.settings.cost_model === 'detailed_fixed_costs' && (
             <div style={{ background: 'var(--accent-subtle)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
               <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 5 }}>Fixed & Recurring Costs</div>
               <div style={{ color: 'var(--text-secondary)', fontSize: 12, lineHeight: 1.6 }}>
@@ -890,7 +992,7 @@ export default function AdminPage() {
               </div>
             </div>
           )}
-          <div style={{ display: activeWorkspace.slug === 'roove' ? 'block' : 'none', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+          <div style={{ display: activeWorkspace.settings.cost_model === 'legacy_monthly_overhead' ? 'block' : 'none', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
               <div style={{ fontSize: 14, fontWeight: 700 }}>Monthly Overhead</div>
               <button

@@ -5,8 +5,8 @@ import {
   type MetaAdAccount,
 } from './meta-marketing';
 import { createServiceSupabase } from './service-supabase';
-import { ROOVE_WORKSPACE_ID } from './workspaces';
 import { resolveWorkspaceCredential } from './workspace-integration-server';
+import { requireExplicitWorkspaceId } from './workspace-scope';
 
 export type MetaSyncResult = {
   success: boolean;
@@ -22,15 +22,15 @@ export type MetaSyncResult = {
 };
 
 type RunMetaSyncOptions = {
-  workspaceId?: string;
+  workspaceId: string;
   dateStart?: string | null;
   dateEnd?: string | null;
 };
 
-export async function runMetaSync(options: RunMetaSyncOptions = {}): Promise<MetaSyncResult> {
+export async function runMetaSync(options: RunMetaSyncOptions): Promise<MetaSyncResult> {
   const startTime = Date.now();
   const svc = createServiceSupabase();
-  const workspaceId = options.workspaceId || ROOVE_WORKSPACE_ID;
+  const workspaceId = requireExplicitWorkspaceId(options.workspaceId, 'Meta sync');
   const accessToken = await resolveWorkspaceCredential({
     supabase: svc,
     workspaceId,

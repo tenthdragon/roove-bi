@@ -28,6 +28,10 @@ function normalizeWorkspaceRow(
     slug: String(workspace.slug),
     name: String(workspace.name),
     status: workspace.status,
+    settings:
+      workspace.settings && typeof workspace.settings === 'object'
+        ? workspace.settings
+        : {},
     membershipRole,
     isDefault,
   };
@@ -118,7 +122,7 @@ async function getWorkspaceBootstrapForProfile({
   if (isPlatformOwner) {
     const { data, error } = await supabase
       .from('workspaces')
-      .select('id, slug, name, status')
+      .select('id, slug, name, status, settings')
       .in('status', ['active', 'provisioning'])
       .order('created_at');
 
@@ -132,7 +136,7 @@ async function getWorkspaceBootstrapForProfile({
     const { data, error } = await supabase
       .from('workspace_memberships')
       .select(
-        'role, is_default, workspaces!inner(id, slug, name, status)',
+        'role, is_default, workspaces!inner(id, slug, name, status, settings)',
       )
       .eq('user_id', userId)
       .eq('status', 'active');

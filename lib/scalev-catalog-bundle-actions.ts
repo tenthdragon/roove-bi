@@ -194,6 +194,7 @@ function pickPreferredFallbackComponentRow<T extends { business_id?: number | nu
 async function fetchFallbackDirectEntitiesForBundleComponents(
   svc: ReturnType<typeof createServiceSupabase>,
   args: {
+    workspaceId: string;
     viewerBusinessId: number;
     viewerBusinessCode: string;
     variantIds: number[];
@@ -221,6 +222,7 @@ async function fetchFallbackDirectEntitiesForBundleComponents(
         processor_business_id,
         processor_business_code
       `)
+      .eq('workspace_id', args.workspaceId)
       .in('scalev_variant_id', chunk);
     if (error) throw error;
 
@@ -278,6 +280,7 @@ async function fetchFallbackDirectEntitiesForBundleComponents(
         processor_business_id,
         processor_business_code
       `)
+      .eq('workspace_id', args.workspaceId)
       .in('scalev_product_id', chunk);
     if (error) throw error;
 
@@ -363,14 +366,15 @@ async function fetchAllPagesSafe<T>(
 
 async function requireScalevBundleMappingAccess(label = 'Bundle Mapping Scalev') {
   await requireDashboardTabAccess('warehouse-settings', label);
-  await requireDashboardPermissionAccess('whs:mapping', label);
+  return requireDashboardPermissionAccess('whs:mapping', label);
 }
 
-async function getBusinessById(businessId: number): Promise<ScalevBusinessConfig> {
+async function getBusinessById(workspaceId: string, businessId: number): Promise<ScalevBusinessConfig> {
   const svc = createServiceSupabase();
   const { data, error } = await svc
     .from('scalev_webhook_businesses')
     .select('id, business_code, business_name, api_key')
+    .eq('workspace_id', workspaceId)
     .eq('id', businessId)
     .maybeSingle();
 
@@ -382,11 +386,12 @@ async function getBusinessById(businessId: number): Promise<ScalevBusinessConfig
   return data as ScalevBusinessConfig;
 }
 
-async function assertBundleLineSchemaReady() {
+async function assertBundleLineSchemaReady(workspaceId: string) {
   const svc = createServiceSupabase();
   const { error } = await svc
     .from('scalev_catalog_bundle_lines')
     .select('id')
+    .eq('workspace_id', workspaceId)
     .limit(1);
 
   if (!error) return;
@@ -485,6 +490,7 @@ async function fetchScalevBundleDetailsResilient(
 }
 
 async function replaceBundleLinesForBundles(
+  workspaceId: string,
   businessId: number,
   bundleIds: number[],
   rows: Record<string, any>[],
@@ -495,13 +501,15 @@ async function replaceBundleLinesForBundles(
   const { error: deleteError } = await svc
     .from('scalev_catalog_bundle_lines')
     .delete()
+    .eq('workspace_id', workspaceId)
     .eq('business_id', businessId)
     .in('scalev_bundle_id', bundleIds);
   if (deleteError) throw deleteError;
 
   if (rows.length === 0) return;
 
-  for (const chunk of chunkArray(rows, UPSERT_CHUNK_SIZE)) {
+  const tenantRows = rows.map((row) => ({ ...row, workspace_id: workspaceId }));
+  for (const chunk of chunkArray(tenantRows, UPSERT_CHUNK_SIZE)) {
     const { error } = await svc
       .from('scalev_catalog_bundle_lines')
       .insert(chunk);
@@ -595,10 +603,10 @@ export async function syncScalevCatalogBundleLines(
     limit?: number;
   },
 ) {
-  await requireScalevBundleMappingAccess();
-  await assertBundleLineSchemaReady();
+  const { workspaceId } = await requireScalevBundleMappingAccess();
+  await assertBundleLineSchemaReady(workspaceId);
 
-  const business = await getBusinessById(businessId);
+  const business = await getBusinessById(workspaceId, businessId);
   if (!business.api_key) {
     throw new Error(`Business ${business.business_code} belum punya API key.`);
   }
@@ -613,6 +621,7 @@ export async function syncScalevCatalogBundleLines(
     const { data, error, count } = await svc
       .from('scalev_catalog_bundles')
       .select('scalev_bundle_id', { count: 'exact' })
+      .eq('workspace_id', workspaceId)
       .eq('business_id', businessId)
       .order('scalev_bundle_id', { ascending: true })
       .range(offset, offset + limit - 1);
@@ -679,7 +688,7 @@ export async function syncScalevCatalogBundleLines(
   );
 
   const rows = buildBundleLineRows(business, results, syncAt);
-  await replaceBundleLinesForBundles(businessId, bundleIds, rows);
+  await replaceBundleLinesForBundles(workspaceId, businessId, bundleIds, rows);
 
   const nextOffset = offset + bundleIds.length;
   const completed = nextOffset >= totalBundles;
@@ -742,8 +751,8 @@ export async function syncScalevCatalogBundleLinesUntilComplete(
     batchSize?: number;
   },
 ) {
-  await requireScalevBundleMappingAccess();
-  await assertBundleLineSchemaReady();
+  const { workspaceId } = await requireScalevBundleMappingAccess();
+  await assertBundleLineSchemaReady(workspaceId);
 
   let offset = 0;
   let totalBundles = 0;
@@ -792,12 +801,13 @@ export async function syncScalevCatalogBundleLinesUntilComplete(
 }
 
 export async function getScalevCatalogBundleMappings(businessId: number): Promise<ScalevBundleMappingPayload> {
-  await requireScalevBundleMappingAccess();
+  const { workspaceId } = await requireScalevBundleMappingAccess();
 
   const svc = createServiceSupabase();
   const { data: businessRow, error: businessError } = await svc
     .from('scalev_webhook_businesses')
     .select('business_code')
+    .eq('workspace_id', workspaceId)
     .eq('id', businessId)
     .maybeSingle();
   if (businessError) throw businessError;
@@ -827,6 +837,7 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
           processor_business_id,
           processor_business_code
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', businessId)
         .order('name', { ascending: true })
         .order('scalev_bundle_id', { ascending: true })
@@ -850,6 +861,7 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
           scalev_variant_product_name,
           last_synced_at
         `)
+        .eq('workspace_id', workspaceId)
         .eq('business_id', businessId)
         .order('scalev_bundle_id', { ascending: true })
         .order('line_position', { ascending: true })
@@ -860,6 +872,7 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
       svc
         .from('scalev_catalog_identifiers')
         .select('entity_key, identifier')
+        .eq('workspace_id', workspaceId)
         .eq('business_id', businessId)
         .eq('entity_type', 'bundle')
         .order('entity_key', { ascending: true })
@@ -870,6 +883,7 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
       ? svc
           .from('warehouse_business_mapping')
           .select('deduct_entity, deduct_warehouse, is_active, is_primary, notes')
+          .eq('workspace_id', workspaceId)
           .eq('business_code', businessCode)
           .order('is_primary', { ascending: false })
           .order('id', { ascending: true })
@@ -915,7 +929,7 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
   }
 
   try {
-    const directEntities = await fetchVisibleDirectCatalogEntities(svc, businessId, {
+    const directEntities = await fetchVisibleDirectCatalogEntities(svc, workspaceId, businessId, {
       variantIds: Array.from(componentVariantIds),
       productIds: Array.from(componentProductIds),
       includeProductsWithVariants: true,
@@ -933,6 +947,7 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
         .filter((value) => value > 0),
     );
     const fallbackDirectEntities = await fetchFallbackDirectEntitiesForBundleComponents(svc, {
+      workspaceId,
       viewerBusinessId: businessId,
       viewerBusinessCode: businessCode,
       variantIds: Array.from(componentVariantIds).filter((variantId) => !directVariantIds.has(variantId)),
@@ -954,7 +969,7 @@ export async function getScalevCatalogBundleMappings(businessId: number): Promis
       mappingRequestsByBusinessId.get(entity.owner_business_id)!.add(entity.entity_key);
     }
 
-    const mappingRows = await fetchCanonicalCatalogMappingsByRequests(svc, mappingRequestsByBusinessId);
+    const mappingRows = await fetchCanonicalCatalogMappingsByRequests(svc, workspaceId, mappingRequestsByBusinessId);
     const mappingByCanonicalKey = new Map<string, any>();
     for (const row of mappingRows) {
       mappingByCanonicalKey.set(buildCanonicalMappingLookupKey(row.business_id, row.scalev_entity_key), row);

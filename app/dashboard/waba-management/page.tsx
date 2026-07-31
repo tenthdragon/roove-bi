@@ -446,37 +446,6 @@ export default function WabaManagementPage() {
   const [shipmentCounts, setShipmentCounts] = useState([]);
   const [loadingAnalytics, setLoadingAnalytics] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    supabase.from('waba_accounts').select('waba_id, waba_name').eq('is_active', true).order('waba_name').then((accountsRes) => {
-      if (cancelled) return;
-
-      if (accountsRes.error) {
-        console.error('[WABA] active accounts error:', accountsRes.error);
-      } else {
-        const accounts = accountsRes.data || [];
-        setActiveWabaAccounts(accounts);
-        setSelectedCreateWabaId((prev) => {
-          if (prev && accounts.some((account) => account.waba_id === prev)) return prev;
-          return accounts[0]?.waba_id || '';
-        });
-      }
-
-      if (!cancelled) {
-        setLoadingAccounts(false);
-      }
-    }).catch((err) => {
-      if (cancelled) return;
-      console.error('[WABA] page bootstrap error:', err);
-      setLoadingAccounts(false);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase]);
-
   // ── Fetch templates from DB ──
   const fetchTemplates = useCallback(async () => {
     setLoadingTemplates(true);
@@ -493,27 +462,16 @@ export default function WabaManagementPage() {
           return json.accounts[0]?.waba_id || '';
         });
       }
+      setLastSynced(json.lastSynced || null);
     } catch (err: any) {
       setTemplateError(err.message);
     } finally {
       setLoadingTemplates(false);
+      setLoadingAccounts(false);
     }
   }, []);
 
   useEffect(() => { fetchTemplates(); }, [fetchTemplates]);
-
-  // ── Fetch last sync time ──
-  useEffect(() => {
-    supabase
-      .from('waba_template_sync_log')
-      .select('created_at')
-      .in('status', ['success', 'partial'])
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .then(({ data }) => {
-        if (data?.[0]?.created_at) setLastSynced(data[0].created_at);
-      });
-  }, [supabase]);
 
   // ── Sync templates ──
   const handleSync = useCallback(async (mode: 'cron' | 'full') => {
@@ -608,10 +566,12 @@ export default function WabaManagementPage() {
     Promise.all([
       supabase.from('daily_ads_spend')
         .select('date, source, spent, data_source, impressions, cpm')
+        .eq('workspace_id', activeWorkspace.id)
         .gte('date', from).lte('date', to)
         .eq('data_source', 'whatsapp_api'),
       supabase.from('daily_channel_data')
         .select('date, product, channel, net_sales')
+        .eq('workspace_id', activeWorkspace.id)
         .gte('date', from).lte('date', to)
         .eq('channel', 'WABA'),
       supabase.rpc('get_workspace_customer_type_daily_exact', {
