@@ -852,10 +852,22 @@ const BRAND_COLORS = useMemo(() => {
     if (brandFilter !== 'all') return [];
     const matrix: Record<string, Record<string, number>> = {};
     const revenueByBrand: Record<string, number> = {};
+    const grossProfitByBrand: Record<string, number> = {};
+    const mpFeeByBrand: Record<string, number> = {};
+    const shippingByBrand: Record<string, number> = {};
     const allPlatforms = new Set<string>();
     prodData.forEach(d => {
       const brand = d.product;
       revenueByBrand[brand] = (revenueByBrand[brand] || 0) + Number(d.net_sales || 0);
+      grossProfitByBrand[brand] = (grossProfitByBrand[brand] || 0) + Number(d.gross_profit || 0);
+    });
+    filteredChannelData.forEach(d => {
+      const brand = d.product;
+      mpFeeByBrand[brand] = (mpFeeByBrand[brand] || 0) + Math.abs(Number(d.mp_admin_cost) || 0);
+    });
+    filteredShippingData.forEach(d => {
+      const brand = d.product;
+      shippingByBrand[brand] = (shippingByBrand[brand] || 0) + Number(d.shipping_charge || 0);
     });
     resolvedAdsData.forEach(d => {
       const platform = normPlatform(d.source);
@@ -872,17 +884,23 @@ const BRAND_COLORS = useMemo(() => {
       .map(([brand, pd]) => {
         const totalSpend = Object.values(pd).reduce((a, b) => a + b, 0);
         const revenue = revenueByBrand[brand] || 0;
+        const grossProfit = grossProfitByBrand[brand] || 0;
+        const mpFee = mpFeeByBrand[brand] || 0;
+        const shipping = shippingByBrand[brand] || 0;
+        const cm3 = calculateCm3(grossProfit, mpFee, shipping, totalSpend);
         return {
           brand,
           ...pd,
           _total: totalSpend,
           _revenue: revenue,
           _roas: totalSpend > 0 ? revenue / totalSpend : null,
+          _cm3: cm3,
+          _cm3Pct: revenue > 0 ? (cm3 / revenue) * 100 : null,
         };
       })
       .sort((a, b) => b._total - a._total);
     return { rows, platforms };
-  }, [resolvedAdsData, attributedAdsData, brandFilter, prodData]);
+  }, [resolvedAdsData, attributedAdsData, brandFilter, prodData, filteredChannelData, filteredShippingData]);
 
   // ── Styles ──
   const C = { bg: 'var(--bg)', card: 'var(--card)', bdr: 'var(--border)', dim: 'var(--dim)', txt: 'var(--text)' };
@@ -1260,6 +1278,7 @@ const BRAND_COLORS = useMemo(() => {
                   ))}
                   <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f1f5f9', fontWeight: 700, fontSize: 11 }}>Total</th>
                   <th title="Net Sales brand ÷ total marketing spend seluruh traffic source" style={{ padding: '8px 10px', textAlign: 'right', color: '#06b6d4', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>ROAS Total</th>
+                  <th title="Gross profit − MP fee − shipping − total marketing spend brand" style={{ padding: '8px 10px', textAlign: 'right', color: '#8b5cf6', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>CM3</th>
                 </tr>
               </thead>
               <tbody>
@@ -1284,6 +1303,22 @@ const BRAND_COLORS = useMemo(() => {
                       color: row._roas == null ? C.dim : row._roas >= 3 ? 'var(--green)' : row._roas >= 2 ? 'var(--yellow)' : 'var(--red)',
                     }}>
                       {row._roas == null ? '—' : `${row._roas.toFixed(1)}x`}
+                    </td>
+                    <td title={shippingError ? 'CM3 belum tersedia karena data shipping gagal dimuat' : `CM3 Rp ${fmtCompact(row._cm3)} · ${row._cm3Pct == null ? 'margin tidak tersedia' : `${row._cm3Pct.toFixed(1)}% dari Net Sales`}`} style={{
+                      padding: '8px 10px',
+                      textAlign: 'right',
+                      fontFamily: 'monospace',
+                      fontWeight: 700,
+                      fontSize: 11,
+                      whiteSpace: 'nowrap',
+                      color: shippingError ? C.dim : row._cm3 >= 0 ? 'var(--green)' : 'var(--red)',
+                    }}>
+                      {shippingError ? '—' : (
+                        <>
+                          <div>{fmtCompact(row._cm3)}</div>
+                          <div style={{ marginTop: 2, fontSize: 9 }}>{row._cm3Pct == null ? '—' : `${row._cm3Pct.toFixed(1)}%`}</div>
+                        </>
+                      )}
                     </td>
                   </tr>
                 ))}
