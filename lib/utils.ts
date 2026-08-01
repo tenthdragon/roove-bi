@@ -309,9 +309,9 @@ export const ALL_TABS: TabDef[] = [
   { id: 'customers',      label: 'Customer Analysis',  icon: 'Users', group: 'Analysis' },
   { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers', group: 'Analysis' },
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign', group: 'Analysis' },
-  // Ungrouped (bottom)
-  { id: 'business-settings', label: 'Business & Fulfillment', icon: 'Building2', ownerOnly: true },
-  { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true },
+  // Settings
+  { id: 'business-settings', label: 'Business & Fulfillment', icon: 'Building2', ownerOnly: true, group: 'Settings' },
+  { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true, group: 'Settings' },
 ];
 
 export type TabId = string;
