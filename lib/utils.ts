@@ -46,7 +46,7 @@ export const PERMISSION_GROUPS = [
       { key: 'tab:waba-management',    label: '↳ WABA Management' },
       { key: 'tab:ppic',               label: 'PPIC' },
       { key: 'tab:warehouse',          label: 'Warehouse' },
-      { key: 'tab:warehouse-settings', label: '↳ Warehouse Settings' },
+      { key: 'tab:warehouse-settings', label: 'Catalog & Master Data' },
       { key: 'tab:customers',          label: 'Customer Analysis' },
       { key: 'tab:brand-analysis',     label: 'Brand Analysis' },
       { key: 'tab:finance',            label: 'Finance Analysis' },
@@ -70,11 +70,11 @@ export const PERMISSION_GROUPS = [
     ],
   },
   {
-    label: 'Warehouse Settings — Sub-tab',
+    label: 'Catalog & Master Data — Sub-tab',
     keys: [
       { key: 'whs:brands',     label: 'Brand' },
       { key: 'whs:vendors',    label: 'Vendor' },
-      { key: 'whs:products',   label: 'Master Produk' },
+      { key: 'whs:products',   label: 'Products & Variants' },
       { key: 'whs:warehouses', label: 'Active Warehouse' },
       { key: 'whs:mapping',    label: 'Mapping Scalev' },
     ],
@@ -301,7 +301,6 @@ export const ALL_TABS: TabDef[] = [
   ]},
   { id: 'ppic',           label: 'PPIC',               icon: 'ClipboardList', group: 'Main Menu' },
   { id: 'warehouse',      label: 'Warehouse',          icon: 'Warehouse', group: 'Main Menu', children: [
-    { id: 'warehouse-settings', label: 'Warehouse Settings', icon: 'Wrench' },
     { id: 'marketplace-intake', label: 'Marketplace Intake', icon: 'Inbox', ownerOnly: true },
   ]},
   // Analysis
@@ -311,6 +310,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign', group: 'Analysis' },
   // Settings
   { id: 'business-settings', label: 'Business & Fulfillment', icon: 'Building2', ownerOnly: true, group: 'Settings' },
+  { id: 'warehouse-settings', label: 'Catalog & Master Data', icon: 'Wrench', group: 'Settings' },
   { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true, group: 'Settings' },
 ];
 

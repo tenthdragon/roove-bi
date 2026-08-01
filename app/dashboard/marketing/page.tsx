@@ -152,6 +152,15 @@ export default function MarketingPage() {
     return map;
   }, [brandMapping]);
 
+  const brandIdMap = useMemo(() => {
+    const map: Record<number, string> = {};
+    brandMapping.forEach(row => {
+      if (!row.brand_id || !row.brand) return;
+      map[Number(row.brand_id)] = row.brand;
+    });
+    return map;
+  }, [brandMapping]);
+
   const activeBrandMap = useMemo(() => {
     const map: Record<string, string> = {};
     activeBrands.forEach((brand) => {
@@ -161,7 +170,8 @@ export default function MarketingPage() {
     return map;
   }, [activeBrands]);
 
-  const getAdBrand = (store: string) => {
+  const getAdBrand = (store: string, brandId?: number | null) => {
+    if (brandId && brandIdMap[Number(brandId)]) return brandIdMap[Number(brandId)];
     if (!store) return null;
     const key = store.trim().toLowerCase();
     return storeBrandMap[key] || activeBrandMap[key] || LEGACY_STORE_BRAND_FALLBACKS[key] || null;
@@ -175,11 +185,11 @@ export default function MarketingPage() {
   const resolvedAdsData = useMemo(() => {
     return adsData
       .map((d) => {
-        const brand = getAdBrand(d.store);
+        const brand = getAdBrand(d.store, d.brand_id);
         return { ...d, brand };
       })
       .filter((d) => !d.brand || isActiveBrand(d.brand));
-  }, [adsData, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [adsData, brandIdMap, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
 
   const attributedAdsData = useMemo(
     () => resolvedAdsData.filter((d) => Boolean(d.brand)),
@@ -194,11 +204,11 @@ export default function MarketingPage() {
   const resolvedPrevRangeAdsData = useMemo(() => {
     return prevRangeAdsData
       .map((d) => {
-        const brand = getAdBrand(d.store);
+        const brand = getAdBrand(d.store, d.brand_id);
         return { ...d, brand };
       })
       .filter((d) => !d.brand || isActiveBrand(d.brand));
-  }, [prevRangeAdsData, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [prevRangeAdsData, brandIdMap, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
 
   const attributedPrevRangeAdsData = useMemo(
     () => resolvedPrevRangeAdsData.filter((d) => Boolean(d.brand)),

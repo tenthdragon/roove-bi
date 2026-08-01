@@ -354,25 +354,39 @@ export async function getMetaAdminSnapshot() {
   const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
-  const [accountsRes, logsRes, mappingsRes, wabaRes, wabaLogsRes] = await Promise.all([
+  const [accountsRes, logsRes, brandsRes, wabaRes, wabaLogsRes] = await Promise.all([
     svc.from('meta_ad_accounts').select('*').eq('workspace_id', workspaceId).order('account_name'),
     svc.from('meta_sync_log').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(5),
-    svc.from('ads_store_brand_mapping').select('store_pattern, brand').eq('workspace_id', workspaceId).order('brand').order('store_pattern'),
+    svc.from('brands').select('id, name, is_active').eq('workspace_id', workspaceId).order('name'),
     svc.from('waba_accounts').select('*').eq('workspace_id', workspaceId).order('waba_name'),
     svc.from('waba_sync_log').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(5),
   ]);
 
   if (accountsRes.error) throw accountsRes.error;
   if (logsRes.error) throw logsRes.error;
-  if (mappingsRes.error) throw mappingsRes.error;
+  if (brandsRes.error) throw brandsRes.error;
   if (wabaRes.error) throw wabaRes.error;
   if (wabaLogsRes.error) throw wabaLogsRes.error;
 
+  const brandNameById = new Map(
+    (brandsRes.data || []).map(brand => [Number(brand.id), String(brand.name)]),
+  );
+
   return {
-    accounts: accountsRes.data || [],
+    accounts: (accountsRes.data || []).map(account => ({
+      ...account,
+      brand_name: account.default_brand_id
+        ? brandNameById.get(Number(account.default_brand_id)) || null
+        : null,
+    })),
     recentLogs: logsRes.data || [],
-    brandMappings: mappingsRes.data || [],
-    wabaAccounts: wabaRes.data || [],
+    brands: brandsRes.data || [],
+    wabaAccounts: (wabaRes.data || []).map(account => ({
+      ...account,
+      brand_name: account.default_brand_id
+        ? brandNameById.get(Number(account.default_brand_id)) || null
+        : null,
+    })),
     wabaLogs: wabaLogsRes.data || [],
   };
 }
@@ -579,29 +593,55 @@ export async function saveMetaAccounts(
   rows: Array<{
     account_id: string;
     account_name: string;
-    store: string;
+    brand_id: number;
     default_source: string;
     default_advertiser: string;
   }>
 ) {
   const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
-  const sanitizedRows = (rows || [])
-    .map((row) => ({
-      workspace_id: workspaceId,
+  const requestedRows = (rows || [])
+    .map(row => ({
       account_id: String(row.account_id || '').trim(),
       account_name: String(row.account_name || '').trim(),
-      store: String(row.store || '').trim(),
+      brand_id: Number(row.brand_id),
       default_source: String(row.default_source || '').trim() || 'Facebook Ads',
       default_advertiser: String(row.default_advertiser || '').trim() || 'Meta Team',
     }))
-    .filter((row) => row.account_id && row.account_name && row.store);
+    .filter(row => row.account_id && row.account_name && Number.isInteger(row.brand_id));
 
-  if (sanitizedRows.length === 0) {
-    throw new Error('Tidak ada akun Meta yang valid untuk disimpan.');
+  if (requestedRows.length === 0) {
+    throw new Error('Tidak ada akun Meta dengan brand canonical yang valid untuk disimpan.');
   }
 
   const svc = createServiceSupabase();
+  const brandIds = Array.from(new Set(requestedRows.map(row => row.brand_id)));
+  const { data: brands, error: brandsError } = await svc
+    .from('brands')
+    .select('id, name, is_active')
+    .eq('workspace_id', workspaceId)
+    .in('id', brandIds);
+  if (brandsError) throw brandsError;
+
+  const brandById = new Map((brands || []).map(brand => [Number(brand.id), brand]));
+  const missingBrand = brandIds.find(brandId => !brandById.get(brandId)?.is_active);
+  if (missingBrand !== undefined) {
+    throw new Error(`Brand ${missingBrand} tidak tersedia atau tidak aktif di workspace ini.`);
+  }
+
+  const sanitizedRows = requestedRows.map(row => {
+    const brand = brandById.get(row.brand_id)!;
+    return {
+      workspace_id: workspaceId,
+      account_id: row.account_id,
+      account_name: row.account_name,
+      default_brand_id: row.brand_id,
+      store: String(brand.name),
+      default_source: row.default_source,
+      default_advertiser: row.default_advertiser,
+    };
+  });
+
   const { error } = await svc
     .from('meta_ad_accounts')
     .upsert(sanitizedRows, { onConflict: 'workspace_id,account_id' });
@@ -614,7 +654,7 @@ export async function updateMetaAccount(
   id: number,
   payload: {
     account_name: string;
-    store: string;
+    brand_id: number;
     default_source: string;
     default_advertiser: string;
   }
@@ -622,11 +662,21 @@ export async function updateMetaAccount(
   const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
+  const { data: brand, error: brandError } = await svc
+    .from('brands')
+    .select('id, name, is_active')
+    .eq('workspace_id', workspaceId)
+    .eq('id', Number(payload.brand_id))
+    .maybeSingle();
+  if (brandError) throw brandError;
+  if (!brand?.is_active) throw new Error('Brand canonical tidak tersedia atau tidak aktif.');
+
   const { error } = await svc
     .from('meta_ad_accounts')
     .update({
       account_name: payload.account_name.trim(),
-      store: payload.store.trim(),
+      default_brand_id: Number(brand.id),
+      store: String(brand.name),
       default_source: payload.default_source.trim(),
       default_advertiser: payload.default_advertiser.trim(),
       updated_at: new Date().toISOString(),
@@ -658,13 +708,22 @@ export async function setMetaAccountActive(id: number, isActive: boolean) {
 export async function saveWabaAccount(payload: {
   waba_id: string;
   waba_name: string;
-  store: string;
+  brand_id: number;
   default_source: string;
   default_advertiser: string;
 }) {
   const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
+  const { data: brand, error: brandError } = await svc
+    .from('brands')
+    .select('id, name, is_active')
+    .eq('workspace_id', workspaceId)
+    .eq('id', Number(payload.brand_id))
+    .maybeSingle();
+  if (brandError) throw brandError;
+  if (!brand?.is_active) throw new Error('Brand canonical tidak tersedia atau tidak aktif.');
+
   const { error } = await svc
     .from('waba_accounts')
     .upsert(
@@ -672,7 +731,8 @@ export async function saveWabaAccount(payload: {
         waba_id: payload.waba_id.trim(),
         workspace_id: workspaceId,
         waba_name: payload.waba_name.trim(),
-        store: payload.store.trim(),
+        default_brand_id: Number(brand.id),
+        store: String(brand.name),
         default_source: payload.default_source.trim() || 'WhatsApp Marketing',
         default_advertiser: payload.default_advertiser.trim() || 'WhatsApp Team',
       },
@@ -687,7 +747,7 @@ export async function updateWabaAccount(
   id: number,
   payload: {
     waba_name: string;
-    store: string;
+    brand_id: number;
     default_source: string;
     default_advertiser: string;
   }
@@ -695,11 +755,21 @@ export async function updateWabaAccount(
   const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
 
   const svc = createServiceSupabase();
+  const { data: brand, error: brandError } = await svc
+    .from('brands')
+    .select('id, name, is_active')
+    .eq('workspace_id', workspaceId)
+    .eq('id', Number(payload.brand_id))
+    .maybeSingle();
+  if (brandError) throw brandError;
+  if (!brand?.is_active) throw new Error('Brand canonical tidak tersedia atau tidak aktif.');
+
   const { error } = await svc
     .from('waba_accounts')
     .update({
       waba_name: payload.waba_name.trim(),
-      store: payload.store.trim(),
+      default_brand_id: Number(brand.id),
+      store: String(brand.name),
       default_source: payload.default_source.trim(),
       default_advertiser: payload.default_advertiser.trim(),
       updated_at: new Date().toISOString(),

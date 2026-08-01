@@ -3,6 +3,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { getScalevWebhookUrl } from '@/lib/site-config';
 import { useSupabase } from '@/lib/supabase-browser';
 import {
@@ -24,6 +25,7 @@ import {
   removeWarehouseBusinessMapping,
 } from '@/lib/warehouse-ledger-actions';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import { getBrandCatalogSnapshot, type BrandCatalogSnapshot } from '@/lib/brand-actions';
 import WarehouseBusinessDirectoryTab from '@/components/WarehouseBusinessDirectoryTab';
 import WarehouseOriginRegistryTab from '@/components/WarehouseOriginRegistryTab';
 
@@ -142,6 +144,7 @@ export default function BusinessSettingsPage() {
   const { activeWorkspace } = useWorkspace();
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [warehouseMappings, setWarehouseMappings] = useState<WarehouseMapping[]>([]);
+  const [brandCatalog, setBrandCatalog] = useState<BrandCatalogSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -154,7 +157,7 @@ export default function BusinessSettingsPage() {
 
   // Expanded business detail
   const [expandedBiz, setExpandedBiz] = useState<number | null>(null);
-  const [detailSection, setDetailSection] = useState<'identity' | 'stores' | 'aliases' | 'fulfillment'>('identity');
+  const [detailSection, setDetailSection] = useState<'identity' | 'brands' | 'stores' | 'aliases' | 'fulfillment'>('identity');
   const [storeChannels, setStoreChannels] = useState<StoreChannel[]>([]);
   const [loadingStores, setLoadingStores] = useState(false);
   const [fetchingStores, setFetchingStores] = useState(false);
@@ -170,12 +173,14 @@ export default function BusinessSettingsPage() {
     setLoading(true);
     setLoadError('');
     try {
-      const [bizData, whData] = await Promise.all([
+      const [bizData, whData, brandData] = await Promise.all([
         getWebhookBusinesses(),
         getWarehouseBusinessMappings(),
+        getBrandCatalogSnapshot(),
       ]);
       setBusinesses(bizData);
       setWarehouseMappings(whData);
+      setBrandCatalog(brandData);
 
       // Get distinct entities from warehouse_products
       const { data: entityData, error: entityError } = await supabase
@@ -193,6 +198,7 @@ export default function BusinessSettingsPage() {
       setLoadError(err?.message || 'Gagal memuat Business Settings.');
       setBusinesses([]);
       setWarehouseMappings([]);
+      setBrandCatalog(null);
       setWarehouseEntities([]);
       setWarehouseCodes(['BTN']);
     }
@@ -539,6 +545,7 @@ export default function BusinessSettingsPage() {
                     <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--border)', overflowX: 'auto' }}>
                       {[
                         { id: 'identity', label: 'Identitas' },
+                        { id: 'brands', label: 'Brands' },
                         { id: 'stores', label: 'Stores & Penjualan' },
                         { id: 'aliases', label: 'External Aliases' },
                         { id: 'fulfillment', label: 'Warehouse & Fulfillment' },
@@ -709,6 +716,44 @@ export default function BusinessSettingsPage() {
                         businessCode={biz.business_code}
                         embedded
                       />
+                    )}
+
+                    {detailSection === 'brands' && (
+                      <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase' }}>Brand Roles</div>
+                            <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 3 }}>Business dapat menjadi owner dan/atau seller untuk beberapa brand.</div>
+                          </div>
+                          <Link href="/dashboard/warehouse-settings?tab=brands" style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 700, textDecoration: 'none' }}>
+                            Kelola di Master Data →
+                          </Link>
+                        </div>
+                        {(() => {
+                          const roles = (brandCatalog?.roles || []).filter(role => role.business_id === biz.id && role.is_active);
+                          const owned = roles.filter(role => role.role === 'owner');
+                          const sold = roles.filter(role => role.role === 'seller');
+                          const brandName = (brandId: number) => brandCatalog?.brands.find(brand => brand.id === brandId)?.name || `Brand #${brandId}`;
+                          return (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
+                              <div style={{ padding: 11, borderRadius: 8, background: 'var(--card)', border: '1px solid var(--border)' }}>
+                                <div style={{ color: 'var(--dim)', fontSize: 10, marginBottom: 7 }}>DIMILIKI</div>
+                                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                  {owned.map(role => <span key={role.id} style={{ padding: '3px 8px', borderRadius: 5, background: 'var(--accent-subtle)', color: 'var(--accent)', fontSize: 11, fontWeight: 700 }}>{brandName(role.brand_id)}</span>)}
+                                  {owned.length === 0 && <span style={{ color: 'var(--dim)', fontSize: 11 }}>Belum ada brand owner.</span>}
+                                </div>
+                              </div>
+                              <div style={{ padding: 11, borderRadius: 8, background: 'var(--card)', border: '1px solid var(--border)' }}>
+                                <div style={{ color: 'var(--dim)', fontSize: 10, marginBottom: 7 }}>DIJUAL</div>
+                                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                                  {sold.map(role => <span key={role.id} style={{ padding: '3px 8px', borderRadius: 5, background: 'var(--badge-green-bg)', color: 'var(--green)', fontSize: 11, fontWeight: 700 }}>{brandName(role.brand_id)}</span>)}
+                                  {sold.length === 0 && <span style={{ color: 'var(--dim)', fontSize: 11 }}>Belum ada brand seller.</span>}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
                     )}
 
                     {detailSection === 'fulfillment' && (

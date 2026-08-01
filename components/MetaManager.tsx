@@ -2,6 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import Link from 'next/link';
 import {
   getMetaCredentialStatus,
   getMetaAdminSnapshot,
@@ -20,6 +21,8 @@ interface MetaAccount {
   account_id: string;
   account_name: string;
   store: string;
+  default_brand_id: number | null;
+  brand_name: string | null;
   default_source: string;
   default_advertiser: string;
   is_active: boolean;
@@ -52,14 +55,17 @@ interface WabaAccount {
   waba_id: string;
   waba_name: string;
   store: string;
+  default_brand_id: number | null;
+  brand_name: string | null;
   default_source: string;
   default_advertiser: string;
   is_active: boolean;
 }
 
-interface AdsStoreBrandMapping {
-  store_pattern: string;
-  brand: string;
+interface CanonicalBrand {
+  id: number;
+  name: string;
+  is_active: boolean;
 }
 
 interface MetaCredentialStatus {
@@ -78,7 +84,7 @@ interface MetaCredentialStatus {
 interface SelectedAccountMapping {
   account_id: string;
   name: string;
-  store: string;
+  brand_id: string;
   default_source: string;
   default_advertiser: string;
 }
@@ -125,13 +131,13 @@ export default function MetaManager() {
   const [wabaSyncDateStart, setWabaSyncDateStart] = useState(getYesterday);
   const [wabaSyncDateEnd, setWabaSyncDateEnd] = useState(getYesterday);
   const [showWabaForm, setShowWabaForm] = useState(false);
-  const [wabaForm, setWabaForm] = useState({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
+  const [wabaForm, setWabaForm] = useState({ waba_id: '', waba_name: '', brand_id: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
   const [savingWaba, setSavingWaba] = useState(false);
   const [wabaEditingId, setWabaEditingId] = useState<number | null>(null);
-  const [wabaEditForm, setWabaEditForm] = useState({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
+  const [wabaEditForm, setWabaEditForm] = useState({ waba_id: '', waba_name: '', brand_id: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
 
   // Dropdown options loaded from DB
-  const [brandMappings, setBrandMappings] = useState<AdsStoreBrandMapping[]>([]);
+  const [brands, setBrands] = useState<CanonicalBrand[]>([]);
   const [sourceOptions] = useState<string[]>([
     'Facebook Ads', 'Facebook CPAS', 'Google Ads', 'TikTok Ads', 'Shopee', 'Lazada',
     'BliBli', 'Tokopedia', 'SnackVideo Ads', 'Organik', 'Reseller',
@@ -148,37 +154,23 @@ export default function MetaManager() {
   // Edit form state (for existing accounts)
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editForm, setEditForm] = useState({
-    account_id: '', account_name: '', store: '',
+    account_id: '', account_name: '', brand_id: '',
     default_source: 'Facebook Ads', default_advertiser: 'Meta Team',
   });
 
   const brandOptions = useMemo<{ value: string; label: string }[]>(() => {
-    const brandCounts: Record<string, number> = {};
-    brandMappings.forEach(mapping => {
-      const brand = mapping.brand?.trim() || mapping.store_pattern?.trim() || '';
-      if (!brand) return;
-      brandCounts[brand] = (brandCounts[brand] || 0) + 1;
-    });
-
-    return brandMappings
-      .map(mapping => {
-        const value = mapping.store_pattern?.trim() || '';
-        const brand = mapping.brand?.trim() || value;
-        if (!value) return null;
-        const needsDisambiguation = (brandCounts[brand] || 0) > 1 && value.toLowerCase() !== brand.toLowerCase();
-        return {
-          value,
-          label: needsDisambiguation ? `${brand} (${value})` : brand,
-        };
-      })
-      .filter((option): option is { value: string; label: string } => Boolean(option))
+    return brands
+      .filter(brand => brand.is_active)
+      .map(brand => ({ value: String(brand.id), label: brand.name }))
       .sort((a, b) => a.label.localeCompare(b.label));
-  }, [brandMappings]);
+  }, [brands]);
 
-  const getBrandDisplay = useCallback((storeValue: string) => {
-    if (!storeValue) return '—';
-    return brandOptions.find(option => option.value === storeValue)?.label || storeValue;
-  }, [brandOptions]);
+  const getBrandDisplay = useCallback((brandId: number | null, fallback: string | null) => {
+    if (brandId) {
+      return brands.find(brand => brand.id === brandId)?.name || fallback || `Brand #${brandId}`;
+    }
+    return fallback || 'Belum dimapping';
+  }, [brands]);
 
   const loadData = useCallback(async () => {
     try {
@@ -188,7 +180,7 @@ export default function MetaManager() {
       ]);
       setAccounts(snapshot.accounts || []);
       setRecentLogs(snapshot.recentLogs || []);
-      setBrandMappings(snapshot.brandMappings || []);
+      setBrands(snapshot.brands || []);
       setWabaAccounts(snapshot.wabaAccounts || []);
       setWabaLogs(snapshot.wabaLogs || []);
       setCredentialStatus(credential);
@@ -265,7 +257,7 @@ export default function MetaManager() {
         next.set(acc.account_id, {
           account_id: acc.account_id,
           name: acc.name,
-          store: '',
+          brand_id: '',
           default_source: 'Facebook Ads',
           default_advertiser: 'Meta Team',
         });
@@ -288,13 +280,13 @@ export default function MetaManager() {
 
   // ── Bulk save selected accounts ──
   const handleBulkSave = async () => {
-    const toSave = Array.from(selectedMappings.values()).filter(m => m.store.trim());
+    const toSave = Array.from(selectedMappings.values()).filter(m => m.brand_id.trim());
     if (toSave.length === 0) {
       setMessage({ type: 'error', text: 'Pilih minimal 1 akun dan isi Brand mapping-nya' });
       return;
     }
 
-    const missing = Array.from(selectedMappings.values()).filter(m => !m.store.trim());
+    const missing = Array.from(selectedMappings.values()).filter(m => !m.brand_id.trim());
     if (missing.length > 0) {
       setMessage({ type: 'error', text: `${missing.length} akun belum diisi Brand mapping-nya` });
       return;
@@ -306,7 +298,7 @@ export default function MetaManager() {
       const rows = toSave.map(m => ({
         account_id: m.account_id,
         account_name: m.name,
-        store: m.store.trim(),
+        brand_id: Number(m.brand_id),
         default_source: m.default_source.trim() || 'Facebook',
         default_advertiser: m.default_advertiser.trim() || 'Meta Team',
       }));
@@ -329,21 +321,21 @@ export default function MetaManager() {
   const handleEdit = (acc: MetaAccount) => {
     setEditForm({
       account_id: acc.account_id, account_name: acc.account_name,
-      store: acc.store, default_source: acc.default_source,
+      brand_id: acc.default_brand_id ? String(acc.default_brand_id) : '', default_source: acc.default_source,
       default_advertiser: acc.default_advertiser,
     });
     setEditingId(acc.id);
   };
 
   const handleEditSave = async () => {
-    if (!editForm.store.trim()) {
+    if (!editForm.brand_id.trim()) {
       setMessage({ type: 'error', text: 'Brand wajib diisi' });
       return;
     }
     try {
       await updateMetaAccount(editingId!, {
         account_name: editForm.account_name.trim(),
-        store: editForm.store.trim(),
+        brand_id: Number(editForm.brand_id),
         default_source: editForm.default_source.trim(),
         default_advertiser: editForm.default_advertiser.trim(),
       });
@@ -390,7 +382,7 @@ export default function MetaManager() {
 
   // ── WABA handlers ──
   const handleWabaSave = async () => {
-    if (!wabaForm.waba_id.trim() || !wabaForm.waba_name.trim() || !wabaForm.store.trim()) {
+    if (!wabaForm.waba_id.trim() || !wabaForm.waba_name.trim() || !wabaForm.brand_id.trim()) {
       setWabaMessage({ type: 'error', text: 'WABA ID, Nama, dan Brand wajib diisi' });
       return;
     }
@@ -400,13 +392,13 @@ export default function MetaManager() {
       await saveWabaAccount({
         waba_id: wabaForm.waba_id.trim(),
         waba_name: wabaForm.waba_name.trim(),
-        store: wabaForm.store.trim(),
+        brand_id: Number(wabaForm.brand_id),
         default_source: wabaForm.default_source.trim() || 'WhatsApp Marketing',
         default_advertiser: wabaForm.default_advertiser.trim() || 'WhatsApp Team',
       });
       setWabaMessage({ type: 'success', text: 'WABA account berhasil disimpan' });
       setShowWabaForm(false);
-      setWabaForm({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
+      setWabaForm({ waba_id: '', waba_name: '', brand_id: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' });
       await loadData();
     } catch (err: any) {
       setWabaMessage({ type: 'error', text: err.message || 'Gagal menyimpan' });
@@ -418,21 +410,21 @@ export default function MetaManager() {
   const handleWabaEdit = (acc: WabaAccount) => {
     setWabaEditForm({
       waba_id: acc.waba_id, waba_name: acc.waba_name,
-      store: acc.store, default_source: acc.default_source,
+      brand_id: acc.default_brand_id ? String(acc.default_brand_id) : '', default_source: acc.default_source,
       default_advertiser: acc.default_advertiser,
     });
     setWabaEditingId(acc.id);
   };
 
   const handleWabaEditSave = async () => {
-    if (!wabaEditForm.store.trim()) {
+    if (!wabaEditForm.brand_id.trim()) {
       setWabaMessage({ type: 'error', text: 'Brand wajib diisi' });
       return;
     }
     try {
       await updateWabaAccount(wabaEditingId!, {
         waba_name: wabaEditForm.waba_name.trim(),
-        store: wabaEditForm.store.trim(),
+        brand_id: Number(wabaEditForm.brand_id),
         default_source: wabaEditForm.default_source.trim(),
         default_advertiser: wabaEditForm.default_advertiser.trim(),
       });
@@ -652,20 +644,41 @@ export default function MetaManager() {
           <div style={{ fontSize: 14, fontWeight: 700 }}>Meta Ad Accounts</div>
           <button
             onClick={handleLoadRemoteAccounts}
-            disabled={loadingRemote || !credentialStatus?.available}
-            title={!credentialStatus?.available ? 'Tambahkan Meta API Credential terlebih dahulu' : undefined}
+            disabled={loadingRemote || !credentialStatus?.available || brandOptions.length === 0}
+            title={!credentialStatus?.available
+              ? 'Tambahkan Meta API Credential terlebih dahulu'
+              : brandOptions.length === 0
+                ? 'Tambahkan brand canonical terlebih dahulu'
+                : undefined}
             style={{
-              padding: '6px 14px', borderRadius: 6, border: 'none', cursor: loadingRemote || !credentialStatus?.available ? 'not-allowed' : 'pointer',
-              background: loadingRemote || !credentialStatus?.available ? 'var(--border)' : 'var(--accent)', color: '#fff',
-              fontSize: 12, fontWeight: 600, opacity: loadingRemote || !credentialStatus?.available ? 0.6 : 1,
+              padding: '6px 14px', borderRadius: 6, border: 'none', cursor: loadingRemote || !credentialStatus?.available || brandOptions.length === 0 ? 'not-allowed' : 'pointer',
+              background: loadingRemote || !credentialStatus?.available || brandOptions.length === 0 ? 'var(--border)' : 'var(--accent)', color: '#fff',
+              fontSize: 12, fontWeight: 600, opacity: loadingRemote || !credentialStatus?.available || brandOptions.length === 0 ? 0.6 : 1,
             }}
           >
-            {loadingRemote ? 'Memuat...' : credentialStatus?.available ? '+ Tambah Akun' : 'Credential diperlukan'}
+            {loadingRemote
+              ? 'Memuat...'
+              : !credentialStatus?.available
+                ? 'Credential diperlukan'
+                : brandOptions.length === 0
+                  ? 'Brand diperlukan'
+                  : '+ Tambah Akun'}
           </button>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
-          Daftar akun Meta Ads yang datanya ditarik otomatis via Marketing API.
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+          <div style={{ fontSize: 12, color: 'var(--dim)' }}>
+            Daftar akun Meta Ads yang datanya ditarik otomatis via Marketing API. Setiap akun memakai brand canonical dari Master Data.
+          </div>
+          <Link href="/dashboard/warehouse-settings?tab=brands" style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 700, textDecoration: 'none' }}>
+            Kelola Brand →
+          </Link>
         </div>
+
+        {brandOptions.length === 0 && (
+          <div style={{ marginBottom: 14, padding: 10, borderRadius: 8, background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 11 }}>
+            Belum ada brand aktif. Tambahkan brand di Catalog &amp; Master Data sebelum menghubungkan akun marketing.
+          </div>
+        )}
 
         {/* ─── Sync Controls with Date Picker ─── */}
         {accounts.filter(a => a.is_active).length > 0 && (
@@ -802,8 +815,8 @@ export default function MetaManager() {
                         <div>
                           <label style={labelStyle}>Brand (wajib)</label>
                           <select
-                            value={mapping.store}
-                            onChange={e => updateMapping(acc.account_id, 'store', e.target.value)}
+                            value={mapping.brand_id}
+                            onChange={e => updateMapping(acc.account_id, 'brand_id', e.target.value)}
                             style={{ ...inputStyle, padding: '6px 10px', fontSize: 12 }}
                             onClick={e => e.stopPropagation()}
                           >
@@ -903,7 +916,7 @@ export default function MetaManager() {
                             style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }} />
                         </td>
                         <td style={{ padding: '8px 6px' }}>
-                          <select value={editForm.store} onChange={e => setEditForm(f => ({ ...f, store: e.target.value }))}
+                          <select value={editForm.brand_id} onChange={e => setEditForm(f => ({ ...f, brand_id: e.target.value }))}
                             style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}>
                             <option value="">— Pilih Brand —</option>
                             {brandOptions.map(option => (
@@ -952,7 +965,7 @@ export default function MetaManager() {
                           {acc.account_id}
                         </td>
                         <td style={{ padding: '10px 12px', color: 'var(--text)', fontWeight: 600 }}>{acc.account_name}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{getBrandDisplay(acc.store)}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{getBrandDisplay(acc.default_brand_id, acc.brand_name || acc.store)}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_source}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_advertiser}</td>
                         <td style={{ padding: '10px 12px' }}>
@@ -1115,7 +1128,7 @@ export default function MetaManager() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
               <div style={{ fontSize: 13, fontWeight: 600 }}>Tambah WABA Account</div>
               <button
-                onClick={() => { setShowWabaForm(false); setWabaForm({ waba_id: '', waba_name: '', store: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' }); }}
+                onClick={() => { setShowWabaForm(false); setWabaForm({ waba_id: '', waba_name: '', brand_id: '', default_source: 'WhatsApp Marketing', default_advertiser: 'WhatsApp Team' }); }}
                 style={{
                   padding: '4px 12px', borderRadius: 4, border: '1px solid var(--border)',
                   background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer',
@@ -1146,8 +1159,8 @@ export default function MetaManager() {
               <div>
                 <label style={labelStyle}>Brand (wajib)</label>
                 <select
-                  value={wabaForm.store}
-                  onChange={e => setWabaForm(f => ({ ...f, store: e.target.value }))}
+                  value={wabaForm.brand_id}
+                  onChange={e => setWabaForm(f => ({ ...f, brand_id: e.target.value }))}
                   style={inputStyle}
                 >
                   <option value="">— Pilih Brand —</option>
@@ -1221,7 +1234,7 @@ export default function MetaManager() {
                             style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }} />
                         </td>
                         <td style={{ padding: '8px 6px' }}>
-                          <select value={wabaEditForm.store} onChange={e => setWabaEditForm(f => ({ ...f, store: e.target.value }))}
+                          <select value={wabaEditForm.brand_id} onChange={e => setWabaEditForm(f => ({ ...f, brand_id: e.target.value }))}
                             style={{ ...inputStyle, padding: '5px 8px', fontSize: 11 }}>
                             <option value="">— Pilih Brand —</option>
                             {brandOptions.map(option => (
@@ -1265,7 +1278,7 @@ export default function MetaManager() {
                           {acc.waba_id}
                         </td>
                         <td style={{ padding: '10px 12px', color: 'var(--text)', fontWeight: 600 }}>{acc.waba_name}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{getBrandDisplay(acc.store)}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{getBrandDisplay(acc.default_brand_id, acc.brand_name || acc.store)}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_source}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_advertiser}</td>
                         <td style={{ padding: '10px 12px' }}>

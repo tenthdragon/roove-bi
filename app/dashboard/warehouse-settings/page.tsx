@@ -25,13 +25,13 @@ import { usePermissions } from '@/lib/PermissionsContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 
 const SUB_TABS = [
-  { id: 'brands', label: 'Brand' },
-  { id: 'vendors', label: 'Vendor' },
-  { id: 'products', label: 'Master Produk' },
-  { id: 'catalog', label: 'Katalog Scalev', permissionKey: 'whs:mapping' },
-  { id: 'catalog-mapping', label: 'Item Mapping', permissionKey: 'whs:mapping' },
-  { id: 'bundle-mapping', label: 'Bundle Decomposition', permissionKey: 'whs:mapping' },
-  { id: 'activity-log', label: 'Log Aktivitas', permissionKey: 'whs:mapping' },
+  { id: 'brands', label: 'Brands' },
+  { id: 'products', label: 'Products & Variants' },
+  { id: 'vendors', label: 'Vendors' },
+  { id: 'catalog', label: 'External Catalog · Scalev', permissionKey: 'whs:mapping' },
+  { id: 'catalog-mapping', label: 'External Item Mapping', permissionKey: 'whs:mapping' },
+  { id: 'bundle-mapping', label: 'Bundle Composition', permissionKey: 'whs:mapping' },
+  { id: 'activity-log', label: 'Audit Log', permissionKey: 'whs:mapping' },
 ];
 
 const DEFAULT_CATEGORIES = ['fg', 'sachet', 'packaging', 'bonus', 'wip', 'wip_material', 'other'];
@@ -76,9 +76,9 @@ export default function WarehouseSettingsPage() {
   if (visibleTabs.length === 0) {
     return (
       <div className="fade-in">
-        <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Warehouse Settings</h2>
+        <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Catalog &amp; Master Data</h2>
         <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, color: 'var(--dim)', fontSize: 13 }}>
-          Akun ini belum punya akses ke sub-tab Warehouse Settings.
+          Akun ini belum punya akses ke Catalog &amp; Master Data.
         </div>
       </div>
     );
@@ -86,15 +86,20 @@ export default function WarehouseSettingsPage() {
 
   return (
     <div className="fade-in">
-      <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Warehouse Settings</h2>
+      <div style={{ marginBottom: 16 }}>
+        <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700 }}>Catalog &amp; Master Data</h2>
+        <div style={{ color: 'var(--dim)', fontSize: 12 }}>
+          Satu sumber canonical untuk brand, product, SKU, vendor, external catalog, dan bundle.
+        </div>
+      </div>
 
       {role === 'owner' ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 12px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(96,165,250,0.22)', borderRadius: 10 }}>
           <div style={{ color: 'var(--dim)', fontSize: 12, lineHeight: 1.6 }}>
-            Business Directory dan Warehouse Registry sekarang dikelola terpusat per business.
+            Kepemilikan business dan routing warehouse tetap dikelola terpusat di Business &amp; Fulfillment.
           </div>
           <Link href="/dashboard/business-settings" style={{ color: '#93c5fd', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
-            Buka Business &amp; Fulfillment →
+            Kelola Business &amp; Fulfillment →
           </Link>
         </div>
       ) : null}

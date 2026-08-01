@@ -172,6 +172,15 @@ export default function ChannelsPage() {
     return map;
   }, [brandMapping]);
 
+  const brandIdMap = useMemo(() => {
+    const map = {};
+    brandMapping.forEach(r => {
+      if (!r.brand_id || !r.brand) return;
+      map[Number(r.brand_id)] = r.brand;
+    });
+    return map;
+  }, [brandMapping]);
+
   const activeBrandMap = useMemo(() => {
     const map = {};
     activeBrands.forEach((brand) => {
@@ -181,7 +190,8 @@ export default function ChannelsPage() {
     return map;
   }, [activeBrands]);
 
-  function getAdBrand(store) {
+  function getAdBrand(store, brandId = null) {
+    if (brandId && brandIdMap[Number(brandId)]) return brandIdMap[Number(brandId)];
     if (!store) return null;
     const key = store.trim().toLowerCase();
     return storeBrandMap[key] || activeBrandMap[key] || LEGACY_STORE_BRAND_FALLBACKS[key] || null;
@@ -190,20 +200,20 @@ export default function ChannelsPage() {
   const resolvedAdsData = useMemo(() => {
     return adsData
       .map((row) => {
-        const brand = getAdBrand(row.store);
+        const brand = getAdBrand(row.store, row.brand_id);
         return { ...row, brand };
       })
       .filter((row) => !row.brand || isActiveBrand(row.brand));
-  }, [adsData, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [adsData, brandIdMap, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
 
   const resolvedPrevAdsData = useMemo(() => {
     return prevAdsData
       .map((row) => {
-        const brand = getAdBrand(row.store);
+        const brand = getAdBrand(row.store, row.brand_id);
         return { ...row, brand };
       })
       .filter((row) => !row.brand || isActiveBrand(row.brand));
-  }, [prevAdsData, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
+  }, [prevAdsData, brandIdMap, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
 
   const unmappedAdsSummary = useMemo(() => {
     let total = 0;

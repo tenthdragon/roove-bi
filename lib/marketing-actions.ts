@@ -60,7 +60,7 @@ export async function getMarketingPageData({
       .gte('date', from)
       .lte('date', to),
     svc.from('daily_ads_spend')
-      .select('date, source, spent, store')
+      .select('date, source, spent, store, brand_id')
       .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to),
@@ -70,7 +70,7 @@ export async function getMarketingPageData({
       .gte('date', from)
       .lte('date', to),
     svc.from('ads_store_brand_mapping')
-      .select('store_pattern, brand')
+      .select('store_pattern, brand, brand_id')
       .eq('workspace_id', workspaceId),
     getShippingFeeRange(workspaceId, from, to)
       .then((data) => ({ data, error: null }))
@@ -81,7 +81,7 @@ export async function getMarketingPageData({
       .gte('date', prevRangeFrom)
       .lte('date', prevRangeTo),
     svc.from('daily_ads_spend')
-      .select('date, source, spent, store')
+      .select('date, source, spent, store, brand_id')
       .eq('workspace_id', workspaceId)
       .gte('date', prevRangeFrom)
       .lte('date', prevRangeTo),

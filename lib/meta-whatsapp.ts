@@ -15,6 +15,7 @@ export interface WabaAccount {
   waba_id: string;
   waba_name: string;
   store: string;
+  default_brand_id: number | null;
   default_source: string;
   default_advertiser: string;
   is_active: boolean;
@@ -156,6 +157,7 @@ export function mapWabaToSpendRows(
         objective: 'Marketing Message',
         source: account.default_source,
         store: account.store,
+        brand_id: account.default_brand_id || null,
         advertiser: account.default_advertiser,
         data_source: 'whatsapp_api',
       };

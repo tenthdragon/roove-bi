@@ -12,6 +12,7 @@ export interface MetaAdAccount {
   account_id: string;       // act_xxx
   account_name: string;
   store: string;
+  default_brand_id: number | null;
   default_source: string;
   default_advertiser: string;
   is_active: boolean;
@@ -49,6 +50,7 @@ export interface DailyAdSpendRow {
   objective: string;
   source: string;
   store: string;
+  brand_id: number | null;
   advertiser: string;
   data_source: string;
 }
@@ -156,6 +158,7 @@ function mapInsightsToRows(
       objective: insight.objective || 'Unknown',
       source: account.default_source,
       store: account.store,
+      brand_id: account.default_brand_id || null,
       advertiser: account.default_advertiser,
       data_source: 'meta_api',
     }));
