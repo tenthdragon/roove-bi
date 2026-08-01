@@ -12,6 +12,10 @@ import {
   type ScalevCatalogMappingPayload,
   type ScalevCatalogMappingRow,
 } from '@/lib/scalev-catalog-mapping-actions';
+import {
+  filterWarehouseProductsForMapping,
+  formatWarehouseTargets,
+} from '@/lib/warehouse-mapping-targets';
 
 const inputStyle: CSSProperties = {
   background: 'var(--bg)',
@@ -321,36 +325,13 @@ export default function ScalevProductMappingSettingsTab() {
   }, [mappingData?.rows]);
 
   const filteredProducts = useMemo(() => {
-    const query = productSearch.trim().toLowerCase();
-    if (!query) return [];
-    const preferredOwnerCode = editingRow?.owner_business_code || null;
-
-    return [...products]
-      .filter((product) => {
-        if (preferredOwnerCode && product.entity !== preferredOwnerCode) return false;
-        const haystack = [
-          product.name,
-          product.category,
-          product.entity,
-          product.warehouse,
-          ...(Array.isArray(product.scalev_product_names) ? product.scalev_product_names : []),
-        ]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase();
-        return haystack.includes(query);
-      })
-      .sort((left, right) => {
-        const getBoost = (product: any) => (
-          product.entity === preferredOwnerCode ? 2 : 0
-        ) + (product.warehouse === 'BTN' ? 0.1 : 0);
-        const leftBoost = getBoost(left);
-        const rightBoost = getBoost(right);
-        if (rightBoost !== leftBoost) return rightBoost - leftBoost;
-        return left.name.localeCompare(right.name);
-      })
-      .slice(0, 12);
-  }, [editingRow?.owner_business_code, productSearch, products]);
+    return filterWarehouseProductsForMapping(products, {
+      query: productSearch,
+      ownerBusinessCode: editingRow?.owner_business_code,
+      targets: editingRow?.allowed_warehouse_targets,
+      limit: 12,
+    });
+  }, [editingRow?.allowed_warehouse_targets, editingRow?.owner_business_code, productSearch, products]);
 
   const warehouseProductById = useMemo(() => {
     const nextMap = new Map<number, ReturnType<typeof toWarehouseProductLite>>();
@@ -608,7 +589,7 @@ export default function ScalevProductMappingSettingsTab() {
         <div style={{ flex: 1 }} />
         <input
           type="text"
-          placeholder="Cari nama Scalev, SKU, atau produk warehouse..."
+          placeholder="Filter entity Scalev atau mapping tersimpan..."
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           style={{ ...inputStyle, minWidth: 280, width: 'auto' }}
@@ -704,12 +685,18 @@ export default function ScalevProductMappingSettingsTab() {
                         <div>
                           <input
                             type="text"
-                            placeholder="Cari produk warehouse..."
+                            placeholder="Cari nama produk warehouse, SKU, atau alias..."
                             value={productSearch}
                             onChange={(event) => setProductSearch(event.target.value)}
                             style={inputStyle}
                             autoFocus
                           />
+                          <div style={{ marginTop: 5, color: 'var(--dim)', fontSize: 10, lineHeight: 1.5 }}>
+                            Routing diizinkan: {formatWarehouseTargets(
+                              row.owner_business_code,
+                              row.allowed_warehouse_targets,
+                            )}
+                          </div>
                           {productSearch ? (
                             <div
                               style={{
@@ -738,7 +725,9 @@ export default function ScalevProductMappingSettingsTab() {
                                 </div>
                               ))}
                               {filteredProducts.length === 0 ? (
-                                <div style={{ padding: '8px 10px', color: 'var(--dim)', fontSize: 10 }}>Tidak ada produk yang cocok.</div>
+                                <div style={{ padding: '8px 10px', color: 'var(--dim)', fontSize: 10, lineHeight: 1.5 }}>
+                                  Tidak ada produk aktif yang cocok pada routing warehouse ini.
+                                </div>
                               ) : null}
                             </div>
                           ) : null}

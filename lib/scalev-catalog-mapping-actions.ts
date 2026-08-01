@@ -15,6 +15,11 @@ import {
   type ScalevVisibilityKind,
   type VisibleDirectCatalogEntityRow,
 } from '@/lib/scalev-visible-entity-helpers';
+import {
+  formatWarehouseTargets,
+  isWarehouseProductAllowedForBusiness,
+  type WarehouseBusinessTarget,
+} from '@/lib/warehouse-mapping-targets';
 
 type WarehouseProductLite = {
   id: number;
@@ -25,13 +30,7 @@ type WarehouseProductLite = {
   scalev_product_names?: string[] | null;
 };
 
-type BusinessTarget = {
-  deduct_entity: string | null;
-  deduct_warehouse: string | null;
-  is_active: boolean;
-  is_primary?: boolean | null;
-  notes: string | null;
-};
+export type BusinessTarget = WarehouseBusinessTarget;
 
 type CatalogEntityRow = VisibleDirectCatalogEntityRow;
 
@@ -72,6 +71,7 @@ export type ScalevCatalogMappingRow = {
   processor_business_code: string;
   mapping_business_id: number | null;
   mapping_business_code: string | null;
+  allowed_warehouse_targets: BusinessTarget[];
   processor_business_target: BusinessTarget | null;
   processor_business_targets: BusinessTarget[];
   label: string;
@@ -158,6 +158,23 @@ function isMissingTableError(error: any): boolean {
 
 function getMissingMappingSchemaMessage() {
   return 'Tabel product mapping Scalev belum tersedia. Jalankan migration 107 terlebih dahulu.';
+}
+
+function normalizeBusinessTargetRow(row: any): BusinessTarget {
+  return {
+    deduct_entity: row?.deduct_entity || null,
+    deduct_warehouse: row?.deduct_warehouse || null,
+    is_active: Boolean(row?.is_active),
+    is_primary: Boolean(row?.is_primary),
+    notes: row?.notes || null,
+  };
+}
+
+function pickPrimaryBusinessTarget(targets: BusinessTarget[]): BusinessTarget | null {
+  return targets.find((target) => target.is_primary && target.is_active)
+    || targets.find((target) => target.is_active)
+    || targets[0]
+    || null;
 }
 
 function getOwnerBusinessBoost(
@@ -374,6 +391,11 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
   const svc = createServiceSupabase();
 
   const { businessCode, rows } = await getCatalogEntityRows(workspaceId, businessId);
+  const relevantBusinessCodes = Array.from(new Set([
+    businessCode,
+    ...rows.map((row) => row.owner_business_code),
+    ...rows.map((row) => row.processor_business_code),
+  ].map((code) => String(code || '').trim()).filter(Boolean)));
   const mappingRequestsByBusinessId = new Map<number, Set<string>>();
   for (const row of rows) {
     if (!mappingRequestsByBusinessId.has(row.owner_business_id)) {
@@ -382,7 +404,7 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
     mappingRequestsByBusinessId.get(row.owner_business_id)!.add(row.entity_key);
   }
 
-  const [{ data: identifiers, error: identifierError }, mappings, { data: legacyMappings, error: legacyError }, { data: warehouseProducts, error: productError }, { data: frequencies }] = await Promise.all([
+  const [{ data: identifiers, error: identifierError }, mappings, { data: legacyMappings, error: legacyError }, { data: warehouseProducts, error: productError }, { data: frequencies }, { data: businessTargetRows, error: businessTargetError }] = await Promise.all([
     svc
       .from('scalev_catalog_identifiers')
       .select('entity_key, identifier, identifier_normalized')
@@ -407,11 +429,30 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
       .order('category', { ascending: true })
       .order('name', { ascending: true }),
     svc.rpc('warehouse_scalev_mapping_frequencies', { p_workspace_id: workspaceId }),
+    relevantBusinessCodes.length > 0
+      ? svc
+          .from('warehouse_business_mapping')
+          .select('business_code, deduct_entity, deduct_warehouse, is_active, is_primary, notes')
+          .eq('workspace_id', workspaceId)
+          .in('business_code', relevantBusinessCodes)
+          .eq('is_active', true)
+          .order('is_primary', { ascending: false })
+          .order('id', { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
   ]);
 
   if (identifierError) throw identifierError;
   if (legacyError) throw legacyError;
   if (productError) throw productError;
+  if (businessTargetError) throw businessTargetError;
+
+  const businessTargetsByCode = new Map<string, BusinessTarget[]>();
+  for (const row of (businessTargetRows || []) as any[]) {
+    const code = String(row.business_code || '').trim();
+    if (!code) continue;
+    if (!businessTargetsByCode.has(code)) businessTargetsByCode.set(code, []);
+    businessTargetsByCode.get(code)!.push(normalizeBusinessTargetRow(row));
+  }
 
   const identifiersByEntityKey = new Map<string, string[]>();
   for (const row of (identifiers || []) as any[]) {
@@ -482,6 +523,8 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
     const existingMapping = mappingByCanonicalKey.get(
       buildCanonicalMappingLookupKey(entity.owner_business_id, entity.entity_key),
     ) || null;
+    const allowedWarehouseTargets = businessTargetsByCode.get(entity.owner_business_code) || [];
+    const processorBusinessTargets = businessTargetsByCode.get(entity.processor_business_code) || [];
     const recommendation = buildRecommendationForEntity({
       entity: {
         ...entity,
@@ -491,7 +534,11 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
       legacyByNormalized,
       aliasByNormalized: normalizedAliasMap,
       warehouseProducts: warehouseProductRows.filter((product) => (
-        !entity.owner_business_code || product.entity === entity.owner_business_code
+        isWarehouseProductAllowedForBusiness(
+          product,
+          entity.owner_business_code,
+          allowedWarehouseTargets,
+        )
       )),
       frequencyByNormalized,
     });
@@ -520,8 +567,9 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
       processor_business_code: entity.processor_business_code,
       mapping_business_id: existingMapping?.business_id ?? null,
       mapping_business_code: existingMapping?.business_code || entity.owner_business_code || null,
-      processor_business_target: null,
-      processor_business_targets: [],
+      allowed_warehouse_targets: allowedWarehouseTargets,
+      processor_business_target: pickPrimaryBusinessTarget(processorBusinessTargets),
+      processor_business_targets: processorBusinessTargets,
       label: entity.label,
       secondary_label: entity.secondary_label,
       sku: entity.sku,
@@ -545,8 +593,8 @@ export async function getScalevCatalogProductMappings(businessId: number): Promi
   return {
     business_id: businessId,
     business_code: businessCode,
-    business_target: null,
-    business_targets: [],
+    business_target: pickPrimaryBusinessTarget(businessTargetsByCode.get(businessCode) || []),
+    business_targets: businessTargetsByCode.get(businessCode) || [],
     rows: finalRows,
   };
 }
@@ -589,6 +637,50 @@ export async function saveScalevCatalogProductMapping(input: {
   const scalevEntityLabel = entityRow.label || entityRow.secondary_label || `${entityType === 'variant' ? 'Variant' : 'Product'} ${entityId}`;
   const canonicalBusinessId = Number(entityRow.owner_business_id);
   const canonicalBusinessCode = entityRow.owner_business_code || entityRow.viewer_business_code;
+
+  if (input.warehouseProductId != null) {
+    const warehouseProductId = Number(input.warehouseProductId);
+    if (!Number.isFinite(warehouseProductId) || warehouseProductId <= 0) {
+      throw new Error('Produk warehouse tidak valid.');
+    }
+
+    const [warehouseProductResult, businessTargetResult] = await Promise.all([
+      svc
+        .from('warehouse_products')
+        .select('id, name, entity, warehouse, is_active')
+        .eq('id', warehouseProductId)
+        .eq('owner_workspace_id', workspaceId)
+        .maybeSingle(),
+      svc
+        .from('warehouse_business_mapping')
+        .select('deduct_entity, deduct_warehouse, is_active, is_primary, notes')
+        .eq('workspace_id', workspaceId)
+        .eq('business_code', canonicalBusinessCode)
+        .eq('is_active', true)
+        .order('is_primary', { ascending: false })
+        .order('id', { ascending: true }),
+    ]);
+
+    if (warehouseProductResult.error) throw warehouseProductResult.error;
+    if (businessTargetResult.error) throw businessTargetResult.error;
+
+    const warehouseProduct = warehouseProductResult.data;
+    if (!warehouseProduct || !warehouseProduct.is_active) {
+      throw new Error('Produk warehouse aktif tidak ditemukan di workspace ini.');
+    }
+
+    const allowedWarehouseTargets = (businessTargetResult.data || []).map(normalizeBusinessTargetRow);
+    if (!isWarehouseProductAllowedForBusiness(
+      warehouseProduct,
+      canonicalBusinessCode,
+      allowedWarehouseTargets,
+    )) {
+      throw new Error(
+        `Produk ${warehouseProduct.name || warehouseProductId} berada di ${warehouseProduct.entity || '-'} • ${warehouseProduct.warehouse || '-'}, `
+        + `di luar routing ${canonicalBusinessCode} → ${formatWarehouseTargets(canonicalBusinessCode, allowedWarehouseTargets)}.`,
+      );
+    }
+  }
 
   const { data: beforeMapping, error: beforeMappingError } = await svc
     .from('warehouse_scalev_catalog_mapping')
