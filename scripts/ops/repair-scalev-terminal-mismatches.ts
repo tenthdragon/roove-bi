@@ -21,11 +21,25 @@ import {
 
 const DEFAULT_FROM = '2026-05-01';
 const DEFAULT_TO = '2026-05-25';
-const CONNECTED_BUSINESSES = new Set(['RTI', 'RLB', 'RLT', 'JHN', 'RLBPP']);
 const TERMINAL_STATUSES = new Set(['shipped', 'completed']);
+const SUPPORTED_STATUSES = new Set([
+  'draft',
+  'pending',
+  'ready',
+  'confirmed',
+  'paid',
+  'in_process',
+  'shipped',
+  'completed',
+  'canceled',
+  'rts',
+  'shipped_rts',
+  'deleted',
+]);
 
 type BusinessConfig = {
   id: number;
+  workspace_id: string;
   business_code: string;
   api_key: string;
   tax_rate_name: string | null;
@@ -72,13 +86,25 @@ function parseEnvFile(path: string) {
 function parseArgs() {
   const from = process.argv.find((arg) => arg.startsWith('--from='))?.split('=')[1] || DEFAULT_FROM;
   const to = process.argv.find((arg) => arg.startsWith('--to='))?.split('=')[1] || DEFAULT_TO;
+  const workspace = process.argv.find((arg) => arg.startsWith('--workspace='))?.split('=')[1] || null;
   const onlyBusiness = process.argv.find((arg) => arg.startsWith('--business='))?.split('=')[1] || null;
+  const statusArg = process.argv.find((arg) => arg.startsWith('--statuses='))?.split('=')[1] || null;
+  const statuses = statusArg
+    ? statusArg.split(',').map((status) => status.trim()).filter(Boolean)
+    : Array.from(TERMINAL_STATUSES);
 
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
     throw new Error('Use YYYY-MM-DD for --from and --to.');
   }
   if (from > to) {
     throw new Error(`Invalid range: ${from} is after ${to}.`);
+  }
+  if (!workspace) {
+    throw new Error('Use --workspace=SLUG_OR_UUID so the repair is explicitly tenant-scoped.');
+  }
+  const unsupportedStatuses = statuses.filter((status) => !SUPPORTED_STATUSES.has(status));
+  if (statuses.length === 0 || unsupportedStatuses.length > 0) {
+    throw new Error(`Invalid --statuses value${unsupportedStatuses.length ? `: ${unsupportedStatuses.join(', ')}` : ''}.`);
   }
 
   const repairMissing = !process.argv.includes('--no-repair-missing');
@@ -92,12 +118,19 @@ function parseArgs() {
     repairAmounts,
     from,
     to,
+    workspace,
     onlyBusiness,
+    statuses,
   };
 }
 
 function cleanText(value: unknown) {
   return String(value ?? '').trim();
+}
+
+function scalevDbId(value: unknown): string | null {
+  const text = cleanText(value);
+  return /^\d+$/.test(text) ? text : null;
 }
 
 function num(value: unknown) {
@@ -129,7 +162,15 @@ function jakartaDate(value: unknown): string | null {
 }
 
 function getOrderDate(order: any) {
-  return jakartaDate(order?.shipped_time || order?.completed_time || order?.paid_time || order?.confirmed_time);
+  return jakartaDate(
+    order?.shipped_time
+    || order?.completed_time
+    || order?.paid_time
+    || order?.confirmed_time
+    || order?.pending_time
+    || order?.draft_time
+    || order?.canceled_time,
+  );
 }
 
 function orderIdPrefixForDate(date: string) {
@@ -138,7 +179,14 @@ function orderIdPrefixForDate(date: string) {
 }
 
 function isOrderIdFromToday(orderId: string) {
-  return orderId.startsWith('260526');
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date());
+  const [year, month, day] = today.split('-');
+  return orderId.startsWith(`${year.slice(2)}${month}${day}`);
 }
 
 function getOrderLines(order: any) {
@@ -233,12 +281,13 @@ function deriveSourceClassFields(order: any, businessId: number, maps: ReturnTyp
   });
 }
 
-async function getTax(supabase: any, taxRateName: string | null) {
+async function getTax(supabase: any, workspaceId: string, taxRateName: string | null) {
   if (taxRateName === 'NONE') return { rate: 0, divisor: 1 };
 
   const { data, error } = await supabase
     .from('tax_rates')
     .select('name, rate, effective_from')
+    .eq('workspace_id', workspaceId)
     .eq('name', taxRateName || 'PPN')
     .order('effective_from', { ascending: false })
     .limit(1)
@@ -249,11 +298,17 @@ async function getTax(supabase: any, taxRateName: string | null) {
   return { rate, divisor: 1 + rate / 100 };
 }
 
-async function deriveBrandFromProduct(supabase: any, productName: string, cache: { rows?: Array<{ name: string; keywords: string[] }> }) {
+async function deriveBrandFromProduct(
+  supabase: any,
+  workspaceId: string,
+  productName: string,
+  cache: { rows?: Array<{ name: string; keywords: string[] }> },
+) {
   if (!cache.rows) {
     const { data, error } = await supabase
       .from('brands')
       .select('name, keywords')
+      .eq('workspace_id', workspaceId)
       .eq('is_active', true);
     if (error) throw error;
     cache.rows = (data || []).map((brand: any) => ({
@@ -275,6 +330,7 @@ async function buildOrderLines(args: {
   supabase: any;
   order: any;
   dbOrderId: number;
+  workspaceId: string;
   businessId: number;
   taxRateName: string | null;
   storeMaps: ReturnType<typeof createStoreMaps>;
@@ -283,7 +339,7 @@ async function buildOrderLines(args: {
 }) {
   const orderId = cleanText(args.order?.order_id);
   const salesChannel = deriveChannel(args.order, args.businessId, args.storeMaps);
-  const tax = await getTax(args.supabase, args.taxRateName);
+  const tax = await getTax(args.supabase, args.workspaceId, args.taxRateName);
   const lines = [];
 
   for (const line of getOrderLines(args.order)) {
@@ -297,10 +353,11 @@ async function buildOrderLines(args: {
     });
 
     lines.push({
+      workspace_id: args.workspaceId,
       scalev_order_id: args.dbOrderId,
       order_id: orderId,
       product_name: productName,
-      product_type: await deriveBrandFromProduct(args.supabase, productName, args.brandCache),
+      product_type: await deriveBrandFromProduct(args.supabase, args.workspaceId, productName, args.brandCache),
       variant_sku: cleanText(line?.variant_unique_id || line?.variant?.sku || line?.sku || '') || null,
       quantity: num(line?.quantity) || 1,
       item_name_raw: itemNameRaw || productName,
@@ -384,13 +441,19 @@ async function fetchV3OrderPage(args: {
   };
 }
 
-async function fetchScalevOrdersForBusiness(business: BusinessConfig, from: string, to: string) {
+async function fetchScalevOrdersForBusiness(
+  business: BusinessConfig,
+  from: string,
+  to: string,
+  statuses: string[],
+) {
   const candidates: any[] = [];
   const seenOrderIds = new Set<string>();
   const fromPrefix = orderIdPrefixForDate(from);
   const toPrefix = orderIdPrefixForDate(to);
 
-  for (const status of TERMINAL_STATUSES) {
+  const requestedStatuses = new Set(statuses);
+  for (const status of statuses) {
     let cursor: string | null = null;
     let pages = 0;
     let olderPageStreak = 0;
@@ -415,7 +478,7 @@ async function fetchScalevOrdersForBusiness(business: BusinessConfig, from: stri
         if (!orderDate || orderDate < from || orderDate > to) continue;
         if (!orderId) continue;
         if (prefix < fromPrefix || prefix > toPrefix) continue;
-        if (!TERMINAL_STATUSES.has(cleanText(row?.status))) continue;
+        if (!requestedStatuses.has(cleanText(row?.status))) continue;
         seenOrderIds.add(orderId);
         candidates.push(row);
       }
@@ -453,7 +516,12 @@ const EXISTING_COLUMNS = [
   'platform',
 ].join(',');
 
-async function fetchExistingOrdersByOrderId(supabase: any, businessCode: string, orderIds: string[]) {
+async function fetchExistingOrdersByOrderId(
+  supabase: any,
+  workspaceId: string,
+  businessCode: string,
+  orderIds: string[],
+) {
   const existing = new Map<string, ExistingOrder>();
   for (const chunk of chunkArray(Array.from(new Set(orderIds)).filter(Boolean), 500)) {
     const { data, error } = await withRetries(
@@ -461,6 +529,7 @@ async function fetchExistingOrdersByOrderId(supabase: any, businessCode: string,
       async () => await supabase
         .from('scalev_orders')
         .select(EXISTING_COLUMNS)
+        .eq('workspace_id', workspaceId)
         .eq('business_code', businessCode)
         .in('order_id', chunk),
     );
@@ -472,8 +541,35 @@ async function fetchExistingOrdersByOrderId(supabase: any, businessCode: string,
   return existing;
 }
 
+async function fetchTransferredOutOrderIds(
+  supabase: any,
+  workspaceId: string,
+  businessCode: string,
+  orderIds: string[],
+) {
+  const transferred = new Set<string>();
+  for (const chunk of chunkArray(Array.from(new Set(orderIds)).filter(Boolean), 500)) {
+    const { data, error } = await withRetries(
+      `transferred-order-id:${businessCode}:${chunk[0]}`,
+      async () => await supabase
+        .from('scalev_order_workspace_transfers')
+        .select('order_id')
+        .eq('source_workspace_id', workspaceId)
+        .eq('source_business_code', businessCode)
+        .eq('is_active', true)
+        .in('order_id', chunk),
+    );
+    if (error) throw error;
+    for (const row of data || []) {
+      transferred.add(cleanText(row.order_id));
+    }
+  }
+  return transferred;
+}
+
 async function findMarketplaceShadowOrder(args: {
   supabase: any;
+  workspaceId: string;
   businessCode: string;
   storeName: string | null;
   externalId: string | null;
@@ -483,6 +579,7 @@ async function findMarketplaceShadowOrder(args: {
     const { data, error } = await args.supabase
       .from('scalev_orders')
       .select(EXISTING_COLUMNS)
+      .eq('workspace_id', args.workspaceId)
       .eq('business_code', args.businessCode)
       .eq('external_id', args.externalId)
       .limit(2);
@@ -496,6 +593,7 @@ async function findMarketplaceShadowOrder(args: {
   let query = args.supabase
     .from('scalev_orders')
     .select(EXISTING_COLUMNS)
+    .eq('workspace_id', args.workspaceId)
     .eq('business_code', args.businessCode)
     .eq('marketplace_tracking_number', args.trackingNumber)
     .in('source', ['marketplace_api_upload', 'webhook', 'ops_upload'])
@@ -548,7 +646,11 @@ function buildOrderRow(args: {
   const trackingNumber = extractMarketplaceTrackingFromWebhookData(detail);
 
   return {
-    scalev_id: cleanText(detail?.id) || null,
+    workspace_id: args.business.workspace_id,
+    // scalev_orders.scalev_id is a legacy BIGINT column, while newer ScaleV
+    // accounts return UUID identifiers. Keep the UUID in raw_data and let
+    // order_id remain the stable lookup key for those accounts.
+    scalev_id: scalevDbId(detail?.id),
     order_id: cleanText(detail?.order_id),
     external_id: cleanText(detail?.external_id) || null,
     marketplace_tracking_number: trackingNumber,
@@ -600,6 +702,7 @@ async function replaceOrderLines(args: {
   supabase: any;
   detail: any;
   dbOrderId: number;
+  workspaceId: string;
   business: BusinessConfig;
   storeMaps: ReturnType<typeof createStoreMaps>;
   businessDirectoryRows: Awaited<ReturnType<typeof fetchWarehouseBusinessDirectoryRows>>;
@@ -609,6 +712,7 @@ async function replaceOrderLines(args: {
     supabase: args.supabase,
     order: args.detail,
     dbOrderId: args.dbOrderId,
+    workspaceId: args.workspaceId,
     businessId: args.business.id,
     taxRateName: args.business.tax_rate_name,
     storeMaps: args.storeMaps,
@@ -619,6 +723,7 @@ async function replaceOrderLines(args: {
   const { error: deleteError } = await args.supabase
     .from('scalev_order_lines')
     .delete()
+    .eq('workspace_id', args.workspaceId)
     .eq('scalev_order_id', args.dbOrderId);
   if (deleteError) throw deleteError;
 
@@ -646,10 +751,10 @@ function registerNextAliasResolution() {
   };
 }
 
-async function reconcileWarehouse(orderId: string, dbOrderId: number) {
+async function reconcileWarehouse(workspaceId: string, orderId: string, dbOrderId: number) {
   registerNextAliasResolution();
   const mod = await import('../../lib/warehouse-ledger-actions');
-  return mod.reconcileScalevOrderWarehouse(orderId, dbOrderId);
+  return mod.reconcileScalevOrderWarehouse(orderId, dbOrderId, workspaceId);
 }
 
 function preserveAuthoritativeSource(orderRow: Record<string, any>, existing: ExistingOrder | null) {
@@ -673,27 +778,42 @@ async function main() {
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
+  let workspaceQuery = supabase
+    .from('workspaces')
+    .select('id, slug, name');
+  workspaceQuery = /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(config.workspace)
+    ? workspaceQuery.eq('id', config.workspace)
+    : workspaceQuery.eq('slug', config.workspace);
+  const { data: workspace, error: workspaceError } = await workspaceQuery.maybeSingle();
+  if (workspaceError) throw workspaceError;
+  if (!workspace) throw new Error(`Workspace not found: ${config.workspace}`);
+  const workspaceId = String(workspace.id);
+
   const { data: businessRows, error: businessError } = await supabase
     .from('scalev_webhook_businesses')
-    .select('id, business_code, api_key, tax_rate_name')
+    .select('id, workspace_id, business_code, api_key, tax_rate_name')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true)
     .not('api_key', 'is', null);
   if (businessError) throw businessError;
 
   const businesses = ((businessRows || []) as BusinessConfig[])
-    .filter((business) => CONNECTED_BUSINESSES.has(business.business_code))
     .filter((business) => !config.onlyBusiness || business.business_code === config.onlyBusiness);
+  if (businesses.length === 0) {
+    throw new Error(`No active ScaleV business found in workspace ${workspace.slug}${config.onlyBusiness ? ` for ${config.onlyBusiness}` : ''}.`);
+  }
 
   const { data: storeRows, error: storeError } = await supabase
     .from('scalev_store_channels')
     .select('business_id, store_name, store_type, channel_override')
+    .eq('workspace_id', workspaceId)
     .eq('is_active', true);
   if (storeError) throw storeError;
 
   const storeMaps = createStoreMaps((storeRows || []) as StoreChannelRow[]);
   const [businessDirectoryRows, originRegistryRows] = await Promise.all([
-    fetchWarehouseBusinessDirectoryRows(supabase as any),
-    fetchWarehouseOriginRegistryRows(supabase as any),
+    fetchWarehouseBusinessDirectoryRows(supabase as any, workspaceId),
+    fetchWarehouseOriginRegistryRows(supabase as any, workspaceId),
   ]);
   const brandCache: { rows?: Array<{ name: string; keywords: string[] }> } = {};
 
@@ -701,10 +821,14 @@ async function main() {
     apply: config.apply,
     skipWarehouse: config.skipWarehouse,
     includeToday: config.includeToday,
+    workspace_id: workspaceId,
+    workspace_slug: workspace.slug,
+    statuses: config.statuses,
     from: config.from,
     to: config.to,
     scanned: 0,
     cleanExisting: 0,
+    transferredOut: 0,
     missing: 0,
     stale: 0,
     inserted: 0,
@@ -722,10 +846,22 @@ async function main() {
   };
 
   for (const business of businesses) {
-    const candidates = await fetchScalevOrdersForBusiness(business, config.from, config.to);
+    const candidates = await fetchScalevOrdersForBusiness(
+      business,
+      config.from,
+      config.to,
+      config.statuses,
+    );
     console.log(JSON.stringify({ business: business.business_code, candidates: candidates.length }));
     const existingByOrderId = await fetchExistingOrdersByOrderId(
       supabase,
+      workspaceId,
+      business.business_code,
+      candidates.map((candidate) => cleanText(candidate?.order_id)),
+    );
+    const transferredOutOrderIds = await fetchTransferredOutOrderIds(
+      supabase,
+      workspaceId,
       business.business_code,
       candidates.map((candidate) => cleanText(candidate?.order_id)),
     );
@@ -735,6 +871,10 @@ async function main() {
       const orderId = cleanText(candidate?.order_id);
       if (!orderId) continue;
       if (!config.includeToday && isOrderIdFromToday(orderId)) continue;
+      if (transferredOutOrderIds.has(orderId)) {
+        summary.transferredOut++;
+        continue;
+      }
 
       const exactExisting = existingByOrderId.get(orderId) || null;
       let action: 'clean' | 'missing' | 'stale' = 'clean';
@@ -752,7 +892,7 @@ async function main() {
       if (action === 'missing' && !config.repairMissing) continue;
       if (action === 'stale' && !config.repairAmounts) continue;
 
-      summary.issues.push({
+      if (summary.issues.length < 25) summary.issues.push({
         business_code: business.business_code,
         order_id: orderId,
         action,
@@ -800,6 +940,7 @@ async function main() {
         const { error: updateError } = await supabase
           .from('scalev_orders')
           .update(preserveAuthoritativeSource(orderRow, exactExisting))
+          .eq('workspace_id', workspaceId)
           .eq('id', exactExisting.id);
         if (updateError) throw updateError;
         dbOrderId = exactExisting.id;
@@ -808,6 +949,7 @@ async function main() {
       } else {
         const shadow = await findMarketplaceShadowOrder({
           supabase,
+          workspaceId,
           businessCode: business.business_code,
           storeName: getStoreName(detail) || null,
           externalId: cleanText(detail?.external_id) || null,
@@ -818,6 +960,7 @@ async function main() {
           const { error: updateError } = await supabase
             .from('scalev_orders')
             .update(preserveAuthoritativeSource(orderRow, shadow.match))
+            .eq('workspace_id', workspaceId)
             .eq('id', shadow.match.id);
           if (updateError) throw updateError;
           dbOrderId = shadow.match.id;
@@ -848,6 +991,7 @@ async function main() {
         supabase,
         detail,
         dbOrderId,
+        workspaceId,
         business,
         storeMaps,
         businessDirectoryRows,
@@ -857,7 +1001,7 @@ async function main() {
       let warehouseErrorMessage: string | null = null;
       if (!config.skipWarehouse) {
         try {
-          const warehouseResult = await reconcileWarehouse(orderId, dbOrderId);
+          const warehouseResult = await reconcileWarehouse(workspaceId, orderId, dbOrderId);
           const warehouseAction = cleanText(warehouseResult?.action) || 'unknown';
           summary.warehouse[warehouseAction] = (summary.warehouse[warehouseAction] || 0) + 1;
         } catch (error) {
@@ -879,6 +1023,7 @@ async function main() {
       }
 
       await supabase.from('scalev_sync_log').insert({
+        workspace_id: workspaceId,
         status: warehouseErrorMessage ? 'partial' : 'success',
         sync_type: `ops_repair_terminal_${finalAction}`,
         business_code: business.business_code,

@@ -30,6 +30,40 @@ function getServiceSupabase() {
   );
 }
 
+type TransferredOrderRoute = {
+  targetWorkspaceId: string;
+  targetBusinessCode: string;
+};
+
+async function resolveTransferredOrderRoute(args: {
+  sourceWorkspaceId: string;
+  sourceBusinessCode: string;
+  orderId: string | null | undefined;
+}): Promise<TransferredOrderRoute | null> {
+  const orderId = String(args.orderId || '').trim();
+  if (!orderId) return null;
+
+  const svc = getServiceSupabase();
+  const { data, error } = await svc
+    .from('scalev_order_workspace_transfers')
+    .select('target_workspace_id, target_business_code')
+    .eq('source_workspace_id', args.sourceWorkspaceId)
+    .eq('source_business_code', args.sourceBusinessCode)
+    .eq('order_id', orderId)
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Transferred-order route lookup failed: ${error.message}`);
+  }
+  if (!data) return null;
+
+  return {
+    targetWorkspaceId: String(data.target_workspace_id),
+    targetBusinessCode: String(data.target_business_code),
+  };
+}
+
 // ── Multi-business secret configuration ──
 // Primary: read from DB table `scalev_webhook_businesses`
 // Fallback: env vars SCALEV_WEBHOOK_SECRET_<CODE> or legacy SCALEV_WEBHOOK_SECRET
@@ -2476,57 +2510,71 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, business_code: businessCode, message: 'Test event received' });
     }
 
+    const transferredRoute = await resolveTransferredOrderRoute({
+      sourceWorkspaceId: workspaceId,
+      sourceBusinessCode: businessCode,
+      orderId: data?.order_id,
+    });
+    const routedBusinessCode = transferredRoute?.targetBusinessCode || businessCode;
+    const routedWorkspaceId = transferredRoute?.targetWorkspaceId || workspaceId;
+
+    if (transferredRoute) {
+      console.log(
+        `[scalev-webhook][${businessCode}] routing transferred order ${data?.order_id} to ${routedBusinessCode} in workspace ${routedWorkspaceId}`,
+      );
+    }
+
     // Route to appropriate handler — all handlers now receive businessCode + businessId
     switch (event) {
       case 'order.created':
         return handleOrderCreated(
           data,
-          businessCode,
+          routedBusinessCode,
           businessId,
-          workspaceId,
+          routedWorkspaceId,
           taxRateName,
         );
 
       case 'order.updated':
         return handleOrderUpdated(
           data,
-          businessCode,
+          routedBusinessCode,
           businessId,
-          workspaceId,
+          routedWorkspaceId,
           taxRateName,
         );
 
       case 'order.deleted':
         return handleOrderDeleted(
           data,
-          businessCode,
+          routedBusinessCode,
           businessId,
-          workspaceId,
+          routedWorkspaceId,
         );
 
       case 'order.status_changed':
         return handleStatusChanged(
           data,
-          businessCode,
+          routedBusinessCode,
           businessId,
-          workspaceId,
+          routedWorkspaceId,
           taxRateName,
         );
 
       case 'order.payment_status_changed':
         return handlePaymentStatusChanged(
           data,
-          businessCode,
+          routedBusinessCode,
           businessId,
-          workspaceId,
+          routedWorkspaceId,
         );
 
       case 'order.e_payment_created':
         return handleEPaymentCreated(
           data,
-          businessCode,
+          routedBusinessCode,
           businessId,
-          workspaceId,
+          routedWorkspaceId,
         );
 
       default:
