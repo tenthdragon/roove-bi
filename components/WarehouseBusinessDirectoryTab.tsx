@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, type CSSProperties, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import {
   deleteWarehouseBusinessDirectoryEntry,
   getWarehouseBusinessDirectoryEntries,
@@ -18,7 +18,17 @@ const inputStyle: CSSProperties = {
   width: '100%',
 };
 
-export default function WarehouseBusinessDirectoryTab() {
+type WarehouseBusinessDirectoryTabProps = {
+  businessId?: number;
+  businessCode?: string;
+  embedded?: boolean;
+};
+
+export default function WarehouseBusinessDirectoryTab({
+  businessId,
+  businessCode,
+  embedded = false,
+}: WarehouseBusinessDirectoryTabProps = {}) {
   const [entries, setEntries] = useState<any[]>([]);
   const [businesses, setBusinesses] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,13 +36,13 @@ export default function WarehouseBusinessDirectoryTab() {
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [draft, setDraft] = useState({
     external_name: '',
-    business_id: '',
-    business_code: '',
+    business_id: businessId ? String(businessId) : '',
+    business_code: businessCode || '',
     notes: '',
     is_active: true,
   });
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const payload = await getWarehouseBusinessDirectoryEntries();
@@ -45,11 +55,25 @@ export default function WarehouseBusinessDirectoryTab() {
       setMessage({ type: 'error', text: error?.message || 'Gagal memuat Business Directory.' });
     }
     setLoading(false);
-  }
+  }, []);
 
   useEffect(() => {
+    setDraft((current) => ({
+      ...current,
+      business_id: businessId ? String(businessId) : '',
+      business_code: businessCode || '',
+    }));
     loadData();
-  }, []);
+  }, [businessId, businessCode, loadData]);
+
+  const visibleEntries = useMemo(() => {
+    if (!businessId && !businessCode) return entries;
+    const normalizedCode = String(businessCode || '').trim().toUpperCase();
+    return entries.filter((entry) => (
+      (businessId && Number(entry.business_id) === businessId)
+      || (normalizedCode && String(entry.business_code || '').trim().toUpperCase() === normalizedCode)
+    ));
+  }, [businessCode, businessId, entries]);
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -57,12 +81,18 @@ export default function WarehouseBusinessDirectoryTab() {
     try {
       await saveWarehouseBusinessDirectoryEntry({
         external_name: draft.external_name,
-        business_id: draft.business_id ? Number(draft.business_id) : null,
-        business_code: draft.business_code,
+        business_id: businessId || (draft.business_id ? Number(draft.business_id) : null),
+        business_code: businessCode || draft.business_code,
         notes: draft.notes,
         is_active: draft.is_active,
       });
-      setDraft({ external_name: '', business_id: '', business_code: '', notes: '', is_active: true });
+      setDraft({
+        external_name: '',
+        business_id: businessId ? String(businessId) : '',
+        business_code: businessCode || '',
+        notes: '',
+        is_active: true,
+      });
       setMessage({ type: 'success', text: 'Alias business disimpan.' });
       await loadData();
     } catch (error: any) {
@@ -117,45 +147,51 @@ export default function WarehouseBusinessDirectoryTab() {
         </div>
       ) : null}
 
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>Business Directory</div>
+      <div style={{ background: embedded ? 'var(--bg)' : 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
+          {embedded ? `External Aliases · ${businessCode}` : 'Business Directory'}
+        </div>
         <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
-          Alias ini menjadi kamus normalisasi untuk `business_name`, `origin_business_name`, dan `item_owner`.
-          Source of truth deduction owner-aware akan membaca label external lewat tabel ini sebelum memutuskan seller, operator, dan owner stok.
+          Nama external dari ScaleV yang dikenali sebagai business ini. Alias dipakai untuk menormalkan business penjual,
+          operator origin, dan owner stok sebelum order diproses.
         </div>
       </div>
 
-      <form onSubmit={handleSave} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Tambah Alias</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr auto', gap: 10, alignItems: 'end' }}>
+      <form onSubmit={handleSave} style={{ background: embedded ? 'var(--bg)' : 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Tambah Alias untuk {businessCode || 'Business'}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: embedded ? '2fr 2fr auto' : '2fr 1fr 1fr 2fr auto', gap: 10, alignItems: 'end' }}>
           <div>
             <label style={{ fontSize: 10, color: 'var(--dim)' }}>Nama External</label>
             <input value={draft.external_name} onChange={(e) => setDraft((current) => ({ ...current, external_name: e.target.value }))} style={inputStyle} />
           </div>
-          <div>
-            <label style={{ fontSize: 10, color: 'var(--dim)' }}>Business</label>
-            <select
-              value={draft.business_id}
-              onChange={(e) => {
-                const business = businesses.find((row) => String(row.id) === e.target.value) || null;
-                setDraft((current) => ({
-                  ...current,
-                  business_id: e.target.value,
-                  business_code: business?.business_code || current.business_code,
-                }));
-              }}
-              style={inputStyle}
-            >
-              <option value="">Pilih</option>
-              {businesses.map((business) => (
-                <option key={business.id} value={business.id}>{business.business_code}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label style={{ fontSize: 10, color: 'var(--dim)' }}>Business Code</label>
-            <input value={draft.business_code} onChange={(e) => setDraft((current) => ({ ...current, business_code: e.target.value.toUpperCase() }))} style={inputStyle} />
-          </div>
+          {!embedded ? (
+            <>
+              <div>
+                <label style={{ fontSize: 10, color: 'var(--dim)' }}>Business</label>
+                <select
+                  value={draft.business_id}
+                  onChange={(e) => {
+                    const business = businesses.find((row) => String(row.id) === e.target.value) || null;
+                    setDraft((current) => ({
+                      ...current,
+                      business_id: e.target.value,
+                      business_code: business?.business_code || current.business_code,
+                    }));
+                  }}
+                  style={inputStyle}
+                >
+                  <option value="">Pilih</option>
+                  {businesses.map((business) => (
+                    <option key={business.id} value={business.id}>{business.business_code}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: 10, color: 'var(--dim)' }}>Business Code</label>
+                <input value={draft.business_code} onChange={(e) => setDraft((current) => ({ ...current, business_code: e.target.value.toUpperCase() }))} style={inputStyle} />
+              </div>
+            </>
+          ) : null}
           <div>
             <label style={{ fontSize: 10, color: 'var(--dim)' }}>Catatan</label>
             <input value={draft.notes} onChange={(e) => setDraft((current) => ({ ...current, notes: e.target.value }))} style={inputStyle} />
@@ -170,7 +206,7 @@ export default function WarehouseBusinessDirectoryTab() {
         </div>
       </form>
 
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+      <div style={{ background: embedded ? 'var(--bg)' : 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--dim)' }}>Memuat...</div>
         ) : (
@@ -183,7 +219,7 @@ export default function WarehouseBusinessDirectoryTab() {
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
+              {visibleEntries.map((entry) => (
                 <tr key={entry.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                   <td style={{ padding: '10px 12px', fontWeight: 600 }}>{entry.external_name}</td>
                   <td style={{ padding: '10px 12px', fontFamily: 'monospace' }}>{entry.business_code}</td>
@@ -217,10 +253,10 @@ export default function WarehouseBusinessDirectoryTab() {
                   </td>
                 </tr>
               ))}
-              {entries.length === 0 ? (
+              {visibleEntries.length === 0 ? (
                 <tr>
                   <td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--dim)' }}>
-                    Belum ada alias business.
+                    Belum ada alias untuk {businessCode || 'business ini'}.
                   </td>
                 </tr>
               ) : null}

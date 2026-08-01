@@ -3,6 +3,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import Link from 'next/link';
 import {
   getProductsFull,
   createProduct,
@@ -20,8 +21,6 @@ import ScalevCatalogSettingsTab from '@/components/ScalevCatalogSettingsTab';
 import ScalevBundleMappingSettingsTab from '@/components/ScalevBundleMappingSettingsTab';
 import ScalevProductMappingSettingsTab from '@/components/ScalevProductMappingSettingsTab';
 import WarehouseActivityLogTab from '@/components/WarehouseActivityLogTab';
-import WarehouseBusinessDirectoryTab from '@/components/WarehouseBusinessDirectoryTab';
-import WarehouseOriginRegistryTab from '@/components/WarehouseOriginRegistryTab';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 
@@ -29,8 +28,6 @@ const SUB_TABS = [
   { id: 'brands', label: 'Brand' },
   { id: 'vendors', label: 'Vendor' },
   { id: 'products', label: 'Master Produk' },
-  { id: 'warehouses', label: 'Warehouse Registry', permissionKey: 'whs:warehouses' },
-  { id: 'business-directory', label: 'Business Directory', permissionKey: 'whs:mapping' },
   { id: 'catalog', label: 'Katalog Scalev', permissionKey: 'whs:mapping' },
   { id: 'catalog-mapping', label: 'Item Mapping', permissionKey: 'whs:mapping' },
   { id: 'bundle-mapping', label: 'Bundle Decomposition', permissionKey: 'whs:mapping' },
@@ -58,16 +55,20 @@ const inputStyle = {
 };
 
 export default function WarehouseSettingsPage() {
-  const { can } = usePermissions();
+  const { can, role } = usePermissions();
   const visibleTabs = SUB_TABS.filter(t => can((t as any).permissionKey || `whs:${t.id}`));
   const [activeTab, setActiveTab] = useState('brands');
 
   useEffect(() => {
     const requestedTab = new URLSearchParams(window.location.search).get('tab');
+    if (role === 'owner' && (requestedTab === 'warehouses' || requestedTab === 'business-directory')) {
+      window.location.replace('/dashboard/business-settings');
+      return;
+    }
     if (requestedTab && SUB_TABS.some((tab) => tab.id === requestedTab)) {
       setActiveTab(requestedTab);
     }
-  }, []);
+  }, [role]);
 
   // Auto-switch if current tab is no longer visible
   const effectiveTab = visibleTabs.find(t => t.id === activeTab)?.id ?? visibleTabs[0]?.id ?? 'brands';
@@ -86,6 +87,17 @@ export default function WarehouseSettingsPage() {
   return (
     <div className="fade-in">
       <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Warehouse Settings</h2>
+
+      {role === 'owner' ? (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16, padding: '10px 12px', background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(96,165,250,0.22)', borderRadius: 10 }}>
+          <div style={{ color: 'var(--dim)', fontSize: 12, lineHeight: 1.6 }}>
+            Business Directory dan Warehouse Registry sekarang dikelola terpusat per business.
+          </div>
+          <Link href="/dashboard/business-settings" style={{ color: '#93c5fd', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+            Buka Business &amp; Fulfillment →
+          </Link>
+        </div>
+      ) : null}
 
       <div style={{ display: 'flex', gap: 2, marginBottom: 20, borderBottom: '1px solid var(--border)', overflowX: 'auto' }}>
         {visibleTabs.map(t => (
@@ -106,8 +118,6 @@ export default function WarehouseSettingsPage() {
       {effectiveTab === 'products' && <MasterProdukTab />}
       {effectiveTab === 'brands' && <BrandTab />}
       {effectiveTab === 'vendors' && <VendorTab />}
-      {effectiveTab === 'warehouses' && <WarehouseOriginRegistryTab />}
-      {effectiveTab === 'business-directory' && <WarehouseBusinessDirectoryTab />}
       {effectiveTab === 'catalog' && <ScalevCatalogSettingsTab />}
       {effectiveTab === 'catalog-mapping' && <ScalevProductMappingSettingsTab />}
       {effectiveTab === 'bundle-mapping' && <ScalevBundleMappingSettingsTab />}

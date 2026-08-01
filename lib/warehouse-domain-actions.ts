@@ -2,8 +2,8 @@
 
 import { createServiceSupabase } from './supabase-server';
 import {
+  requireAnyDashboardTabAccess,
   requireDashboardPermissionAccess,
-  requireDashboardTabAccess,
 } from './dashboard-access';
 import { recordWarehouseActivityLog } from './warehouse-activity-log-actions';
 import { getWarehouseActivityLogChangedFields } from './warehouse-activity-log-utils';
@@ -40,13 +40,13 @@ function getWarehouseDomainSchemaMissingMessage() {
 }
 
 async function requireMappingAccess(label: string) {
-  const access = await requireDashboardTabAccess('warehouse-settings', label);
+  const access = await requireAnyDashboardTabAccess(['business-settings', 'warehouse-settings'], label);
   await requireDashboardPermissionAccess('whs:mapping', label);
   return access;
 }
 
 async function requireWarehouseRegistryAccess(label: string) {
-  const access = await requireDashboardTabAccess('warehouse-settings', label);
+  const access = await requireAnyDashboardTabAccess(['business-settings', 'warehouse-settings'], label);
   await requireDashboardPermissionAccess('whs:warehouses', label);
   return access;
 }

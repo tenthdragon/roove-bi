@@ -310,7 +310,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers', group: 'Analysis' },
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign', group: 'Analysis' },
   // Ungrouped (bottom)
-  { id: 'business-settings', label: 'Business Settings', icon: 'Building2', ownerOnly: true },
+  { id: 'business-settings', label: 'Business & Fulfillment', icon: 'Building2', ownerOnly: true },
   { id: 'admin',          label: 'Admin',              icon: 'Settings', ownerOnly: true },
 ];
 

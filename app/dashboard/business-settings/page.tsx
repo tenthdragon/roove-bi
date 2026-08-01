@@ -24,6 +24,8 @@ import {
   removeWarehouseBusinessMapping,
 } from '@/lib/warehouse-ledger-actions';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import WarehouseBusinessDirectoryTab from '@/components/WarehouseBusinessDirectoryTab';
+import WarehouseOriginRegistryTab from '@/components/WarehouseOriginRegistryTab';
 
 // ── Types ──
 type Business = {
@@ -152,6 +154,7 @@ export default function BusinessSettingsPage() {
 
   // Expanded business detail
   const [expandedBiz, setExpandedBiz] = useState<number | null>(null);
+  const [detailSection, setDetailSection] = useState<'identity' | 'stores' | 'aliases' | 'fulfillment'>('identity');
   const [storeChannels, setStoreChannels] = useState<StoreChannel[]>([]);
   const [loadingStores, setLoadingStores] = useState(false);
   const [fetchingStores, setFetchingStores] = useState(false);
@@ -318,6 +321,7 @@ export default function BusinessSettingsPage() {
   async function toggleExpand(bizId: number) {
     if (expandedBiz === bizId) { setExpandedBiz(null); return; }
     setExpandedBiz(bizId);
+    setDetailSection('identity');
     setLoadingStores(true);
     setStoreError('');
     try {
@@ -416,8 +420,13 @@ export default function BusinessSettingsPage() {
 
   return (
     <div className="fade-in">
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Business Settings</h2>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div>
+          <h2 style={{ margin: '0 0 4px', fontSize: 18, fontWeight: 700 }}>Business &amp; Fulfillment</h2>
+          <div style={{ color: 'var(--dim)', fontSize: 12 }}>
+            Satu tempat untuk identitas business, stores, external aliases, routing fulfillment, dan origin warehouse.
+          </div>
+        </div>
         <button onClick={openAddForm} style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
           + Tambah Business
         </button>
@@ -527,8 +536,37 @@ export default function BusinessSettingsPage() {
                 {/* Expanded detail */}
                 {isExpanded && (
                   <div style={{ borderTop: '1px solid var(--border)', padding: '16px 18px' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))', gap: 16, marginBottom: 16 }}>
+                    <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--border)', overflowX: 'auto' }}>
+                      {[
+                        { id: 'identity', label: 'Identitas' },
+                        { id: 'stores', label: 'Stores & Penjualan' },
+                        { id: 'aliases', label: 'External Aliases' },
+                        { id: 'fulfillment', label: 'Warehouse & Fulfillment' },
+                      ].map((section) => (
+                        <button
+                          key={section.id}
+                          onClick={() => setDetailSection(section.id as typeof detailSection)}
+                          style={{
+                            padding: '8px 12px',
+                            border: 'none',
+                            borderBottom: detailSection === section.id ? '2px solid var(--accent)' : '2px solid transparent',
+                            background: detailSection === section.id ? 'var(--accent-subtle)' : 'transparent',
+                            color: detailSection === section.id ? 'var(--accent)' : 'var(--dim)',
+                            fontSize: 11,
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {section.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    {(detailSection === 'identity' || detailSection === 'fulfillment') && (
+                    <div style={{ display: 'grid', gridTemplateColumns: detailSection === 'identity' ? 'repeat(auto-fit, minmax(250px, 1fr))' : '1fr', gap: 16, marginBottom: 16 }}>
                       {/* Umum */}
+                      {detailSection === 'identity' && (
                       <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', marginBottom: 10, textTransform: 'uppercase' }}>Umum</div>
                         <div style={{ fontSize: 12, marginBottom: 6 }}>
@@ -559,8 +597,10 @@ export default function BusinessSettingsPage() {
                           )}
                         </div>
                       </div>
+                      )}
 
                       {/* Pajak */}
+                      {detailSection === 'identity' && (
                       <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', marginBottom: 10, textTransform: 'uppercase' }}>Pajak</div>
                         <div style={{ fontSize: 12, marginBottom: 6 }}>
@@ -572,15 +612,17 @@ export default function BusinessSettingsPage() {
                           <option value="NONE">Non-PKP</option>
                         </select>
                       </div>
+                      )}
 
                       {/* Gudang */}
+                      {detailSection === 'fulfillment' && (
                       <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14 }}>
-                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', marginBottom: 10, textTransform: 'uppercase' }}>Gudang</div>
-                        <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.22)', color: '#fde68a', fontSize: 11, lineHeight: 1.6 }}>
-                          Menu ini sedang dipensiunkan dari deduction live ScaleV. Source of truth baru untuk order owner-aware pindah ke Warehouse Settings &gt; Business Directory dan Warehouse Registry.
+                        <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', marginBottom: 10, textTransform: 'uppercase' }}>Allowed Warehouse &amp; Fallback</div>
+                        <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(96,165,250,0.24)', color: '#bfdbfe', fontSize: 11, lineHeight: 1.6 }}>
+                          Dipakai sebagai guardrail dan fallback ketika konteks owner atau origin belum lengkap. Mapping origin live dikelola pada bagian External Origin Labels di bawah.
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6, marginBottom: 10 }}>
-                          Gudang yang diizinkan untuk business ini. Resolver akan tetap strict dan hanya menerima produk yang jatuh ke salah satu target di bawah.
+                          Daftar entity dan warehouse yang tetap diizinkan untuk business ini. Resolver strict hanya menerima produk yang jatuh ke salah satu target berikut.
                         </div>
 
                         {mappings.length > 0 ? (
@@ -657,9 +699,28 @@ export default function BusinessSettingsPage() {
                           </button>
                         </div>
                       </div>
+                      )}
                     </div>
+                    )}
+
+                    {detailSection === 'aliases' && (
+                      <WarehouseBusinessDirectoryTab
+                        businessId={biz.id}
+                        businessCode={biz.business_code}
+                        embedded
+                      />
+                    )}
+
+                    {detailSection === 'fulfillment' && (
+                      <WarehouseOriginRegistryTab
+                        operatorBusinessId={biz.id}
+                        operatorBusinessCode={biz.business_code}
+                        embedded
+                      />
+                    )}
 
                     {/* Stores */}
+                    {detailSection === 'stores' && (
                     <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase' }}>
@@ -733,6 +794,7 @@ export default function BusinessSettingsPage() {
                         </div>
                       )}
                     </div>
+                    )}
                   </div>
                 )}
               </div>

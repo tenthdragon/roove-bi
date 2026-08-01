@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from 'react';
 import { getProducts } from '@/lib/warehouse-ledger-actions';
 import {
   deleteWarehouseOriginRegistryEntry,
@@ -19,7 +19,17 @@ const inputStyle: CSSProperties = {
   width: '100%',
 };
 
-export default function WarehouseOriginRegistryTab() {
+type WarehouseOriginRegistryTabProps = {
+  operatorBusinessId?: number;
+  operatorBusinessCode?: string;
+  embedded?: boolean;
+};
+
+export default function WarehouseOriginRegistryTab({
+  operatorBusinessId,
+  operatorBusinessCode,
+  embedded = false,
+}: WarehouseOriginRegistryTabProps = {}) {
   const [entries, setEntries] = useState<any[]>([]);
   const [businesses, setBusinesses] = useState<any[]>([]);
   const [warehouseCodes, setWarehouseCodes] = useState<string[]>([]);
@@ -29,14 +39,14 @@ export default function WarehouseOriginRegistryTab() {
   const [draft, setDraft] = useState({
     external_origin_business_name: '',
     external_origin_name: '',
-    operator_business_id: '',
-    operator_business_code: '',
+    operator_business_id: operatorBusinessId ? String(operatorBusinessId) : '',
+    operator_business_code: operatorBusinessCode || '',
     internal_warehouse_code: 'BTN',
     notes: '',
     is_active: true,
   });
 
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true);
     try {
       const [payload, products] = await Promise.all([
@@ -50,22 +60,38 @@ export default function WarehouseOriginRegistryTab() {
       }
       const nextWarehouseCodes = Array.from(new Set((products || []).map((product: any) => String(product.warehouse || '').trim()).filter(Boolean))).sort();
       setWarehouseCodes(nextWarehouseCodes);
-      if (nextWarehouseCodes.length > 0 && !nextWarehouseCodes.includes(draft.internal_warehouse_code)) {
-        setDraft((current) => ({ ...current, internal_warehouse_code: nextWarehouseCodes[0] }));
+      if (nextWarehouseCodes.length > 0) {
+        setDraft((current) => nextWarehouseCodes.includes(current.internal_warehouse_code)
+          ? current
+          : { ...current, internal_warehouse_code: nextWarehouseCodes[0] });
       }
     } catch (error: any) {
       setMessage({ type: 'error', text: error?.message || 'Gagal memuat Warehouse Registry.' });
     }
     setLoading(false);
-  }
-
-  useEffect(() => {
-    loadData();
   }, []);
 
+  useEffect(() => {
+    setDraft((current) => ({
+      ...current,
+      operator_business_id: operatorBusinessId ? String(operatorBusinessId) : '',
+      operator_business_code: operatorBusinessCode || '',
+    }));
+    loadData();
+  }, [loadData, operatorBusinessCode, operatorBusinessId]);
+
+  const visibleEntries = useMemo(() => {
+    if (!operatorBusinessId && !operatorBusinessCode) return entries;
+    const normalizedCode = String(operatorBusinessCode || '').trim().toUpperCase();
+    return entries.filter((entry) => (
+      (operatorBusinessId && Number(entry.operator_business_id) === operatorBusinessId)
+      || (normalizedCode && String(entry.operator_business_code || '').trim().toUpperCase() === normalizedCode)
+    ));
+  }, [entries, operatorBusinessCode, operatorBusinessId]);
+
   const activeCount = useMemo(
-    () => entries.filter((entry) => entry.is_active).length,
-    [entries],
+    () => visibleEntries.filter((entry) => entry.is_active).length,
+    [visibleEntries],
   );
 
   async function handleSave(event: FormEvent<HTMLFormElement>) {
@@ -75,8 +101,8 @@ export default function WarehouseOriginRegistryTab() {
       await saveWarehouseOriginRegistryEntry({
         external_origin_business_name: draft.external_origin_business_name,
         external_origin_name: draft.external_origin_name,
-        operator_business_id: draft.operator_business_id ? Number(draft.operator_business_id) : null,
-        operator_business_code: draft.operator_business_code,
+        operator_business_id: operatorBusinessId || (draft.operator_business_id ? Number(draft.operator_business_id) : null),
+        operator_business_code: operatorBusinessCode || draft.operator_business_code,
         internal_warehouse_code: draft.internal_warehouse_code,
         notes: draft.notes,
         is_active: draft.is_active,
@@ -84,8 +110,8 @@ export default function WarehouseOriginRegistryTab() {
       setDraft({
         external_origin_business_name: '',
         external_origin_name: '',
-        operator_business_id: '',
-        operator_business_code: '',
+        operator_business_id: operatorBusinessId ? String(operatorBusinessId) : '',
+        operator_business_code: operatorBusinessCode || '',
         internal_warehouse_code: warehouseCodes[0] || 'BTN',
         notes: '',
         is_active: true,
@@ -146,13 +172,15 @@ export default function WarehouseOriginRegistryTab() {
         </div>
       ) : null}
 
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+      <div style={{ background: embedded ? 'var(--bg)' : 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 260 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>Warehouse Registry</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 6 }}>
+              {embedded ? `External Origin Labels · ${operatorBusinessCode}` : 'Warehouse Registry'}
+            </div>
             <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
-              Registry ini memetakan pasangan `origin_business_name + origin` dari ScaleV ke warehouse fisik internal.
-              Resolver deduction owner-aware akan berhenti di sini sebelum memutuskan produk mana yang benar-benar dikurangi.
+              Pasangan origin business dan origin dari ScaleV yang dioperasikan business ini. Setiap label diarahkan
+              ke warehouse internal yang tepat sebelum deduction produk dijalankan.
             </div>
           </div>
           <div style={{ minWidth: 180, padding: '10px 12px', borderRadius: 10, background: 'var(--bg)', border: '1px solid var(--border)' }}>
@@ -162,9 +190,9 @@ export default function WarehouseOriginRegistryTab() {
         </div>
       </div>
 
-      <form onSubmit={handleSave} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Tambah Origin</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1.6fr 1fr 1fr 1fr auto', gap: 10, alignItems: 'end' }}>
+      <form onSubmit={handleSave} style={{ background: embedded ? 'var(--bg)' : 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Tambah Origin untuk {operatorBusinessCode || 'Business'}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: embedded ? '1.6fr 1.6fr 1fr 1fr auto' : '1.6fr 1.6fr 1fr 1fr 1fr auto', gap: 10, alignItems: 'end' }}>
           <div>
             <label style={{ fontSize: 10, color: 'var(--dim)' }}>Origin Business External</label>
             <input value={draft.external_origin_business_name} onChange={(e) => setDraft((current) => ({ ...current, external_origin_business_name: e.target.value }))} style={inputStyle} />
@@ -173,26 +201,28 @@ export default function WarehouseOriginRegistryTab() {
             <label style={{ fontSize: 10, color: 'var(--dim)' }}>Origin External</label>
             <input value={draft.external_origin_name} onChange={(e) => setDraft((current) => ({ ...current, external_origin_name: e.target.value }))} style={inputStyle} />
           </div>
-          <div>
-            <label style={{ fontSize: 10, color: 'var(--dim)' }}>Operator Business</label>
-            <select
-              value={draft.operator_business_id}
-              onChange={(e) => {
-                const business = businesses.find((row) => String(row.id) === e.target.value) || null;
-                setDraft((current) => ({
-                  ...current,
-                  operator_business_id: e.target.value,
-                  operator_business_code: business?.business_code || current.operator_business_code,
-                }));
-              }}
-              style={inputStyle}
-            >
-              <option value="">Pilih</option>
-              {businesses.map((business) => (
-                <option key={business.id} value={business.id}>{business.business_code}</option>
-              ))}
-            </select>
-          </div>
+          {!embedded ? (
+            <div>
+              <label style={{ fontSize: 10, color: 'var(--dim)' }}>Operator Business</label>
+              <select
+                value={draft.operator_business_id}
+                onChange={(e) => {
+                  const business = businesses.find((row) => String(row.id) === e.target.value) || null;
+                  setDraft((current) => ({
+                    ...current,
+                    operator_business_id: e.target.value,
+                    operator_business_code: business?.business_code || current.operator_business_code,
+                  }));
+                }}
+                style={inputStyle}
+              >
+                <option value="">Pilih</option>
+                {businesses.map((business) => (
+                  <option key={business.id} value={business.id}>{business.business_code}</option>
+                ))}
+              </select>
+            </div>
+          ) : null}
           <div>
             <label style={{ fontSize: 10, color: 'var(--dim)' }}>Warehouse Code</label>
             <select value={draft.internal_warehouse_code} onChange={(e) => setDraft((current) => ({ ...current, internal_warehouse_code: e.target.value }))} style={inputStyle}>
@@ -215,7 +245,7 @@ export default function WarehouseOriginRegistryTab() {
         </div>
       </form>
 
-      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+      <div style={{ background: embedded ? 'var(--bg)' : 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
         {loading ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--dim)' }}>Memuat...</div>
         ) : (
@@ -228,7 +258,7 @@ export default function WarehouseOriginRegistryTab() {
               </tr>
             </thead>
             <tbody>
-              {entries.map((entry) => (
+              {visibleEntries.map((entry) => (
                 <tr key={entry.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                   <td style={{ padding: '10px 12px', fontWeight: 600 }}>{entry.external_origin_business_name}</td>
                   <td style={{ padding: '10px 12px' }}>{entry.external_origin_name}</td>
@@ -263,10 +293,10 @@ export default function WarehouseOriginRegistryTab() {
                   </td>
                 </tr>
               ))}
-              {entries.length === 0 ? (
+              {visibleEntries.length === 0 ? (
                 <tr>
                   <td colSpan={6} style={{ padding: 24, textAlign: 'center', color: 'var(--dim)' }}>
-                    Belum ada origin registry.
+                    Belum ada origin yang dioperasikan {operatorBusinessCode || 'business ini'}.
                   </td>
                 </tr>
               ) : null}
