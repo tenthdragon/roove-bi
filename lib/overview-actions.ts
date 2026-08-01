@@ -319,6 +319,7 @@ export async function getOverviewPageData({
     prevAdsRes,
     prevChannelRes,
     prevShippingRes,
+    financialTargetsRes,
   ] = await Promise.all([
     svc.from('daily_product_summary')
       .select(OVERVIEW_DAILY_SUMMARY_COLUMNS)
@@ -373,6 +374,10 @@ export async function getOverviewPageData({
     getShippingFeeRange(workspaceId, prevFrom, prevTo)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: { message: error.message } })),
+    svc.from('workspace_financial_targets')
+      .select('id, target_month, effective_from, target_operating_profit, planned_cm3_margin, target_revenue_override, notes, updated_at')
+      .eq('workspace_id', workspaceId)
+      .or(`target_month.is.null,target_month.eq.${from.slice(0, 7)}-01`),
   ]);
 
   const ads = unwrapOptional(adsRes, 'Gagal memuat marketing fee Overview');
@@ -381,6 +386,16 @@ export async function getOverviewPageData({
   const prevAds = unwrapOptional(prevAdsRes, 'Gagal memuat marketing fee bulan sebelumnya');
   const prevChannel = unwrapOptional(prevChannelRes, 'Gagal memuat MP fee bulan sebelumnya');
   const prevShipping = unwrapOptional(prevShippingRes, 'Gagal memuat shipping fee bulan sebelumnya');
+  const financialTargets = unwrap(
+    financialTargetsRes,
+    'Gagal memuat target finansial workspace',
+  ) as any[];
+  const monthlyTarget = financialTargets.find(
+    target => target.target_month === `${from.slice(0, 7)}-01`,
+  );
+  const defaultTarget = financialTargets
+    .filter(target => target.target_month == null && target.effective_from <= `${from.slice(0, 7)}-01`)
+    .sort((a, b) => String(b.effective_from).localeCompare(String(a.effective_from)))[0];
   return {
     daily: unwrap(dailyRes, 'Gagal memuat data Overview'),
     shipment: unwrap(shipmentRes, 'Gagal memuat shipment Overview'),
@@ -397,6 +412,8 @@ export async function getOverviewPageData({
     prevFeeError: [prevAds.error, prevChannel.error].filter(Boolean).join(' | ') || null,
     shippingError: shipping.error,
     prevShippingError: prevShipping.error,
+    financialTarget: monthlyTarget || defaultTarget || null,
+    financialTargetSource: monthlyTarget ? 'monthly' : defaultTarget ? 'default' : 'unconfigured',
   };
 }
 

@@ -3,6 +3,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import FinancialTargetManager from './FinancialTargetManager';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -282,7 +283,7 @@ export default function FinancialSettingsPage() {
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', margin: 0 }}>⚙️ Financial Settings</h1>
           <p style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>
-            Daftar rekening bank yang digunakan per bisnis
+            Target profitabilitas workspace dan daftar rekening bank per bisnis
           </p>
         </div>
         <button
@@ -292,6 +293,8 @@ export default function FinancialSettingsPage() {
           + Tambah Rekening
         </button>
       </div>
+
+      <FinancialTargetManager />
 
       {/* ── Filter bar ── */}
       {accounts.length > 0 && (

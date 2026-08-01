@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:financial-targets": "tsx --test tests/financial-targets.test.ts",
     "test:source-class": "tsx --test tests/scalev-source-class.test.ts",
     "typecheck:app": "tsc --project tsconfig.json --noEmit",
     "check:app": "npm run typecheck:app && npm run lint && npm run build",

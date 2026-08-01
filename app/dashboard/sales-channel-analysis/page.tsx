@@ -20,6 +20,7 @@ import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
 import { getCommercialMomentAttribution, getOverviewPageData } from '@/lib/overview-actions';
 import { getCached, setCache } from '@/lib/dashboard-cache';
+import { calculateProfitabilityTarget } from '@/lib/financial-targets';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
 
 const MONTHS = [
@@ -292,29 +293,39 @@ export default function RevenueRunRatePage() {
     const actualDay = Math.max(1, Math.min(bounds.days, Number(actualTo.slice(8, 10))));
     const currentRevenue = total(revenue);
     const currentCm3 = total(grossProfit) - total(mp) - total(shipping) - total(ads);
-    const currentCm3Margin = currentRevenue > 0 ? currentCm3 / currentRevenue : 0;
     const projectedRevenue = currentRevenue / actualDay * bounds.days;
-    const projectedCm3 = projectedRevenue * currentCm3Margin;
     const currentMonthlyOh = (data.overhead || []).reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0);
-    const projectedProfit = projectedCm3 - currentMonthlyOh;
+    const profitability = calculateProfitabilityTarget({
+      currentRevenue,
+      currentCm3,
+      projectedRevenue,
+      monthlyOverhead: currentMonthlyOh,
+      actualDay,
+      daysInMonth: bounds.days,
+      target: data.financialTarget,
+    });
+    const {
+      currentCm3Margin,
+      projectedCm3,
+      projectedProfit,
+      targetConfigured,
+      targetOperatingProfit,
+      plannedCm3Margin,
+      targetRevenueOverride,
+      targetCm3,
+      minimumRevenue,
+      requiredCm3MarginAtProjection,
+      targetRevenueToDate,
+      targetCm3ToDate,
+      revenueTargetProgress,
+      cm3TargetProgress,
+      requiredDaily,
+    } = profitability;
 
     const prevRevenueFull = total(prevRevenue);
     const prevCm3Full = total(prevGrossProfit) - total(prevMp) - total(prevShipping) - total(prevAds);
     const prevMonthlyOh = (data.prevOverhead || []).reduce((sum: number, row: any) => sum + Number(row.amount || 0), 0);
     const prevProfitFull = prevCm3Full - prevMonthlyOh;
-    const internalCashTarget = 650_000_000;
-    const targetCm3 = currentMonthlyOh + internalCashTarget;
-    const minimumRevenue = currentCm3Margin > 0
-      ? targetCm3 / currentCm3Margin
-      : 0;
-    const requiredCm3MarginAtProjection = projectedRevenue > 0
-      ? targetCm3 / projectedRevenue
-      : 0;
-    const targetRevenueToDate = minimumRevenue * actualDay / bounds.days;
-    const targetCm3ToDate = targetCm3 * actualDay / bounds.days;
-    const revenueTargetProgress = minimumRevenue > 0 ? currentRevenue / minimumRevenue : 0;
-    const cm3TargetProgress = targetCm3 > 0 ? currentCm3 / targetCm3 : 0;
-    const requiredDaily = Math.max(0, minimumRevenue - currentRevenue) / Math.max(1, bounds.days - actualDay);
     const forecastGap = projectedRevenue - prevRevenueFull;
     const comparableDays = Math.min(actualDay, bounds.prevDays);
     const dailyComparisons = Array.from({ length: comparableDays }, (_, index) => {
@@ -541,6 +552,11 @@ export default function RevenueRunRatePage() {
       projectedCm3,
       currentMonthlyOh,
       projectedProfit,
+      targetConfigured,
+      targetOperatingProfit,
+      plannedCm3Margin,
+      targetRevenueOverride,
+      financialTargetSource: data.financialTargetSource || 'unconfigured',
       prevRevenueFull,
       prevCm3Full,
       prevProfitFull,
@@ -605,11 +621,37 @@ export default function RevenueRunRatePage() {
 
   const monthLabel = `${MONTHS[bounds.month - 1]} ${bounds.year}`;
   const prevLabel = `${MONTHS[bounds.prevMonth - 1]} ${bounds.prevYear}`;
-  const onTrack = analysis.projectedRevenue >= analysis.minimumRevenue;
+  const unitEconomicsHealthy = analysis.currentCm3Margin > 0;
+  const onTrack = unitEconomicsHealthy
+    && analysis.targetConfigured
+    && analysis.projectedProfit >= analysis.targetOperatingProfit;
+  const financialStatus = !unitEconomicsHealthy
+    ? { label: 'Unit economics negatif', tone: 'red' }
+    : !analysis.targetConfigured
+      ? { label: 'Target profitabilitas belum diatur', tone: 'neutral' }
+      : onTrack
+        ? { label: 'On track terhadap target laba', tone: 'green' }
+        : { label: 'Di bawah target laba', tone: 'red' };
   const projectedVsPrevious = analysis.prevRevenueFull > 0 ? analysis.forecastGap / analysis.prevRevenueFull * 100 : 0;
-  const revenuePaceDelta = analysis.currentRevenue - analysis.targetRevenueToDate;
-  const cm3PaceDelta = analysis.currentCm3 - analysis.targetCm3ToDate;
-  const forecastTargetDelta = analysis.projectedRevenue - analysis.minimumRevenue;
+  const revenuePaceDelta = analysis.targetConfigured
+    ? analysis.currentRevenue - analysis.targetRevenueToDate
+    : null;
+  const cm3PaceDelta = analysis.targetConfigured
+    ? analysis.currentCm3 - analysis.targetCm3ToDate
+    : null;
+  const forecastTargetDelta = analysis.targetConfigured
+    ? analysis.projectedRevenue - analysis.minimumRevenue
+    : null;
+  const statusColor = financialStatus.tone === 'green'
+    ? 'var(--green)'
+    : financialStatus.tone === 'red'
+      ? 'var(--red)'
+      : 'var(--dim)';
+  const statusBackground = financialStatus.tone === 'green'
+    ? 'var(--green-subtle)'
+    : financialStatus.tone === 'red'
+      ? 'var(--red-subtle)'
+      : 'var(--bg-deep)';
   return (
     <div className="fade-in">
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:16, marginBottom:18, flexWrap:'wrap' }}>
@@ -620,12 +662,12 @@ export default function RevenueRunRatePage() {
         </div>
         <div style={{
           display:'flex', alignItems:'center', gap:8, padding:'8px 11px', borderRadius:9,
-          background:onTrack ? 'var(--green-subtle)' : 'var(--red-subtle)',
-          color:onTrack ? 'var(--green)' : 'var(--red)', fontSize:11, fontWeight:700,
-          border:`1px solid ${onTrack ? 'rgba(16,185,129,.25)' : 'rgba(239,68,68,.25)'}`,
+          background:statusBackground,
+          color:statusColor, fontSize:11, fontWeight:700,
+          border:`1px solid ${financialStatus.tone === 'green' ? 'rgba(16,185,129,.25)' : financialStatus.tone === 'red' ? 'rgba(239,68,68,.25)' : 'var(--border)'}`,
         }}>
           <span style={{ width:7, height:7, borderRadius:'50%', background:'currentColor' }} />
-          {onTrack ? 'On track terhadap minimum revenue' : 'Di bawah minimum revenue'}
+          {financialStatus.label}
         </div>
       </div>
 
@@ -633,41 +675,51 @@ export default function RevenueRunRatePage() {
         <KpiCard
           label="Actual Revenue"
           value={`Rp ${fmtCompact(analysis.currentRevenue)}`}
-          sub={`${(analysis.revenueTargetProgress * 100).toFixed(1)}% dari target bulanan Rp ${fmtCompact(analysis.minimumRevenue)}`}
-          tone={revenuePaceDelta >= 0 ? 'var(--green)' : 'var(--red)'}
+          sub={analysis.targetConfigured
+            ? analysis.revenueTargetProgress == null
+              ? `Target bulanan Rp ${fmtCompact(analysis.minimumRevenue)}`
+              : `${(analysis.revenueTargetProgress * 100).toFixed(1)}% dari target bulanan Rp ${fmtCompact(analysis.minimumRevenue)}`
+            : 'Target profitabilitas bulan ini belum diatur'}
+          tone={revenuePaceDelta == null ? 'var(--dim)' : revenuePaceDelta >= 0 ? 'var(--green)' : 'var(--red)'}
           badge={`Hari ${analysis.actualDay}`}
-          delta={`Rp ${fmtCompact(Math.abs(revenuePaceDelta))}`}
-          deltaPositive={revenuePaceDelta >= 0}
+          delta={revenuePaceDelta == null ? null : `Rp ${fmtCompact(Math.abs(revenuePaceDelta))}`}
+          deltaPositive={revenuePaceDelta != null && revenuePaceDelta >= 0}
           deltaContext="vs pace target"
         />
         <KpiCard
           label="Estimated Revenue"
           value={`Rp ${fmtCompact(analysis.projectedRevenue)}`}
           sub={`${pct(projectedVsPrevious)} dibanding revenue penuh ${prevLabel}`}
-          tone={forecastTargetDelta >= 0 ? 'var(--green)' : 'var(--red)'}
+          tone={!unitEconomicsHealthy ? 'var(--red)' : forecastTargetDelta == null ? 'var(--dim)' : forecastTargetDelta >= 0 ? 'var(--green)' : 'var(--red)'}
           badge="Ekstrapolasi"
-          delta={`Rp ${fmtCompact(Math.abs(forecastTargetDelta))}`}
-          deltaPositive={forecastTargetDelta >= 0}
-          deltaContext="vs revenue floor"
+          delta={forecastTargetDelta == null ? null : `Rp ${fmtCompact(Math.abs(forecastTargetDelta))}`}
+          deltaPositive={forecastTargetDelta != null && forecastTargetDelta >= 0}
+          deltaContext="vs target revenue"
         />
         <KpiCard
           label="Target Revenue"
-          value={`Rp ${fmtCompact(analysis.minimumRevenue)}`}
-          sub="Target revenue minimum untuk menjaga profitabilitas perusahaan"
-          tone={onTrack ? 'var(--green)' : 'var(--yellow)'}
-          badge="Revenue floor"
-          delta={`Rp ${fmtCompact(Math.abs(forecastTargetDelta))}`}
-          deltaPositive={forecastTargetDelta >= 0}
+          value={analysis.targetConfigured ? `Rp ${fmtCompact(analysis.minimumRevenue)}` : '—'}
+          sub={analysis.targetConfigured
+            ? `Berdasarkan target laba Rp ${fmtCompact(analysis.targetOperatingProfit)} dan CM3 ${(analysis.plannedCm3Margin * 100).toFixed(1)}%`
+            : 'Atur target laba dan margin CM3 di Financial Settings'}
+          tone={!analysis.targetConfigured ? 'var(--dim)' : !unitEconomicsHealthy ? 'var(--red)' : onTrack ? 'var(--green)' : 'var(--yellow)'}
+          badge={!analysis.targetConfigured ? 'Belum diatur' : analysis.targetRevenueOverride != null ? 'Override' : analysis.financialTargetSource === 'monthly' ? 'Formula bulanan' : 'Formula default'}
+          delta={forecastTargetDelta == null ? null : `Rp ${fmtCompact(Math.abs(forecastTargetDelta))}`}
+          deltaPositive={forecastTargetDelta != null && forecastTargetDelta >= 0}
           deltaContext={forecastTargetDelta >= 0 ? 'forecast surplus' : 'forecast shortfall'}
         />
         <KpiCard
           label="CM3 vs Target"
           value={`Rp ${fmtCompact(analysis.currentCm3)}`}
-          sub={`${(analysis.cm3TargetProgress * 100).toFixed(1)}% dari target bulanan Rp ${fmtCompact(analysis.targetCm3)}`}
-          tone={cm3PaceDelta >= 0 ? 'var(--green)' : 'var(--red)'}
+          sub={analysis.targetConfigured
+            ? analysis.cm3TargetProgress == null
+              ? `Target CM3 Rp ${fmtCompact(analysis.targetCm3)}`
+              : `${(analysis.cm3TargetProgress * 100).toFixed(1)}% dari target CM3 Rp ${fmtCompact(analysis.targetCm3)}`
+            : 'Target CM3 belum tersedia karena target finansial belum diatur'}
+          tone={!unitEconomicsHealthy ? 'var(--red)' : cm3PaceDelta == null ? 'var(--dim)' : cm3PaceDelta >= 0 ? 'var(--green)' : 'var(--red)'}
           badge={`${(analysis.currentCm3Margin * 100).toFixed(1)}% margin`}
-          delta={`Rp ${fmtCompact(Math.abs(cm3PaceDelta))}`}
-          deltaPositive={cm3PaceDelta >= 0}
+          delta={cm3PaceDelta == null ? null : `Rp ${fmtCompact(Math.abs(cm3PaceDelta))}`}
+          deltaPositive={cm3PaceDelta != null && cm3PaceDelta >= 0}
           deltaContext="vs pace target"
         />
       </div>
@@ -754,7 +806,9 @@ export default function RevenueRunRatePage() {
               <Legend wrapperStyle={{ fontSize:10, paddingTop:8 }} />
               {chartMode === 'cumulative' && (
                 <>
-                  <ReferenceLine y={analysis.minimumRevenue} stroke="#f59e0b" strokeDasharray="4 4" label={{ value:'Minimum', fill:'#f59e0b', fontSize:9, position:'insideTopRight' }} />
+                  {analysis.targetConfigured && analysis.minimumRevenue > 0 && (
+                    <ReferenceLine y={analysis.minimumRevenue} stroke="#f59e0b" strokeDasharray="4 4" label={{ value:'Target', fill:'#f59e0b', fontSize:9, position:'insideTopRight' }} />
+                  )}
                   <Area type="monotone" dataKey="actual" name={monthLabel + ' aktual'} stroke="#3b82f6" strokeWidth={2.5} fill="url(#actualRevenueFill)" connectNulls={false} />
                   <Line type="monotone" dataKey="projection" name={monthLabel + ' prediksi'} stroke="#06b6d4" strokeWidth={2.2} strokeDasharray="7 5" dot={false} connectNulls={false} />
                   <Line type="monotone" dataKey="previous" name={prevLabel} stroke="#8b5cf6" strokeWidth={2} dot={false} />
@@ -905,13 +959,15 @@ export default function RevenueRunRatePage() {
           <div style={{ fontSize:13, fontWeight:700, marginBottom:12 }}>Kebutuhan Sisa Bulan</div>
           <div style={{ display:'grid', gap:10 }}>
             {[
-              ['Sisa revenue menuju minimum', Math.max(0, analysis.minimumRevenue - analysis.currentRevenue)],
+              ['Sisa revenue menuju target', analysis.targetConfigured ? Math.max(0, analysis.minimumRevenue - analysis.currentRevenue) : null],
               ['Kebutuhan rata-rata per hari tersisa', analysis.requiredDaily],
-              ['Gap prediksi vs minimum', analysis.projectedRevenue - analysis.minimumRevenue],
+              ['Gap prediksi vs target revenue', analysis.targetConfigured ? analysis.projectedRevenue - analysis.minimumRevenue : null],
             ].map(([label, value]: any) => (
               <div key={label} style={{ display:'flex', justifyContent:'space-between', gap:12, paddingBottom:9, borderBottom:'1px solid var(--border)' }}>
                 <span style={{ color:'var(--dim)', fontSize:10 }}>{label}</span>
-                <span style={{ fontFamily:'monospace', fontSize:11, fontWeight:700, color:value < 0 ? 'var(--red)' : 'var(--text)' }}>{value < 0 ? '−' : ''}Rp {fmtCompact(Math.abs(value))}</span>
+                <span style={{ fontFamily:'monospace', fontSize:11, fontWeight:700, color:value != null && value < 0 ? 'var(--red)' : 'var(--text)' }}>
+                  {value == null ? '—' : `${value < 0 ? '−' : ''}Rp ${fmtCompact(Math.abs(value))}`}
+                </span>
               </div>
             ))}
           </div>
@@ -920,11 +976,15 @@ export default function RevenueRunRatePage() {
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
           <div style={{ fontSize:13, fontWeight:700, marginBottom:12 }}>Efisiensi CM3</div>
           <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:8 }}>
-            <span style={{ fontFamily:'monospace', fontSize:24, fontWeight:750, color:'#8b5cf6' }}>{(analysis.currentCm3Margin * 100).toFixed(1)}%</span>
+            <span style={{ fontFamily:'monospace', fontSize:24, fontWeight:750, color:unitEconomicsHealthy ? '#8b5cf6' : 'var(--red)' }}>{(analysis.currentCm3Margin * 100).toFixed(1)}%</span>
             <span style={{ color:'var(--dim)', fontSize:10 }}>margin berjalan</span>
           </div>
           <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.6 }}>
-            Target dinamis CM3 bulan ini adalah <strong style={{ color:analysis.currentCm3Margin >= analysis.requiredCm3MarginAtProjection ? 'var(--green)' : 'var(--yellow)' }}>{(analysis.requiredCm3MarginAtProjection * 100).toFixed(1)}%</strong>.
+            {!unitEconomicsHealthy
+              ? 'Setiap tambahan revenue pada margin saat ini menambah kerugian CM3. Perbaiki unit economics sebelum mengejar volume.'
+              : analysis.targetConfigured
+                ? <>Target margin CM3 rencana <strong style={{ color:analysis.currentCm3Margin >= analysis.plannedCm3Margin ? 'var(--green)' : 'var(--yellow)' }}>{(analysis.plannedCm3Margin * 100).toFixed(1)}%</strong>. Forecast laba <strong style={{ color:onTrack ? 'var(--green)' : 'var(--red)' }}>Rp {fmtCompact(analysis.projectedProfit)}</strong> dari target Rp {fmtCompact(analysis.targetOperatingProfit)}.</>
+                : 'Target margin CM3 dan laba operasional belum dikonfigurasi di Financial Settings.'}
           </div>
         </div>
       </div>
