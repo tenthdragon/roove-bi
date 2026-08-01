@@ -174,7 +174,7 @@ export default function BrandManager() {
         ownerBusinessId: roleDraft.ownerBusinessId ? Number(roleDraft.ownerBusinessId) : null,
         sellerBusinessIds: roleDraft.sellerBusinessIds,
       });
-      setMessage({ type: 'success', text: 'Relasi owner dan seller brand disimpan.' });
+      setMessage({ type: 'success', text: 'Relasi pemilik produk/stok dan business penjual disimpan.' });
       await loadSnapshot();
     } catch (error: any) {
       setMessage({ type: 'error', text: error?.message || 'Gagal menyimpan relasi business.' });
@@ -260,10 +260,10 @@ export default function BrandManager() {
               <span style={{ padding: '2px 7px', borderRadius: 4, fontSize: 9, fontWeight: 700, background: brand.is_active ? 'var(--badge-green-bg)' : 'var(--border)', color: brand.is_active ? 'var(--green)' : 'var(--dim)' }}>
                 {brand.is_active ? 'Active' : 'Inactive'}
               </span>
-              {!owner && <span style={{ padding: '2px 7px', borderRadius: 4, fontSize: 9, fontWeight: 700, background: 'var(--badge-yellow-bg)', color: 'var(--yellow)' }}>Owner belum diatur</span>}
+              {!owner && <span style={{ padding: '2px 7px', borderRadius: 4, fontSize: 9, fontWeight: 700, background: 'var(--badge-yellow-bg)', color: 'var(--yellow)' }}>Pemilik produk/stok belum diatur</span>}
             </div>
             <div style={{ marginTop: 4, color: 'var(--dim)', fontSize: 11 }}>
-              Owner: {owner ? `${owner.business_code} · ${owner.business_name}` : '—'} · Seller: {sellers.length || 0}
+              Pemilik Produk/Stok: {owner ? `${owner.business_code} · ${owner.business_name}` : '—'} · Business Penjual: {sellers.length || 0}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -295,13 +295,13 @@ export default function BrandManager() {
               </section>
 
               <section style={{ padding: 13, borderRadius: 9, background: 'var(--bg)', border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Business Owner &amp; Seller</div>
-                <label style={labelStyle}>Pemilik utama</label>
+                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 10 }}>Kepemilikan Produk &amp; Penjualan</div>
+                <label style={labelStyle}>Pemilik Produk/Stok</label>
                 <select value={roleDraft.ownerBusinessId} onChange={event => setRoleDraft({ ...roleDraft, ownerBusinessId: event.target.value })} style={inputStyle}>
                   <option value="">— Belum ditetapkan —</option>
                   {(snapshot?.businesses || []).map(business => <option key={business.id} value={business.id}>{business.business_code} · {business.business_name}</option>)}
                 </select>
-                <div style={{ ...labelStyle, marginTop: 10 }}>Business yang boleh menjual</div>
+                <div style={{ ...labelStyle, marginTop: 10 }}>Business Penjual</div>
                 <div style={{ display: 'grid', gap: 5, maxHeight: 145, overflowY: 'auto' }}>
                   {(snapshot?.businesses || []).map(business => {
                     const checked = roleDraft.sellerBusinessIds.includes(business.id);
@@ -372,7 +372,7 @@ export default function BrandManager() {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 700 }}>Canonical Brand Registry</div>
-            <div style={{ marginTop: 4, color: 'var(--dim)', fontSize: 11, lineHeight: 1.6 }}>Satu sumber brand untuk product catalog, business ownership, Meta, WABA, dan atribusi biaya iklan.</div>
+            <div style={{ marginTop: 4, color: 'var(--dim)', fontSize: 11, lineHeight: 1.6 }}>Satu sumber brand untuk product catalog, kepemilikan produk/stok, business penjual, Meta, WABA, dan atribusi biaya iklan.</div>
           </div>
           <span style={{ padding: '3px 9px', borderRadius: 5, background: unresolved > 0 ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)', color: unresolved > 0 ? 'var(--yellow)' : 'var(--green)', fontSize: 10, fontWeight: 700 }}>
             {unresolved > 0 ? `${unresolved.toLocaleString('id-ID')} relasi belum terselesaikan` : 'Semua relasi canonical terselesaikan'}

@@ -722,8 +722,8 @@ export default function BusinessSettingsPage() {
                       <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 10, flexWrap: 'wrap' }}>
                           <div>
-                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase' }}>Brand Roles</div>
-                            <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 3 }}>Business dapat menjadi owner dan/atau seller untuk beberapa brand.</div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase' }}>Peran Produk &amp; Penjualan</div>
+                            <div style={{ color: 'var(--dim)', fontSize: 10, marginTop: 3 }}>Business dapat menjadi pemilik produk/stok dan/atau penjual untuk beberapa brand.</div>
                           </div>
                           <Link href="/dashboard/warehouse-settings?tab=brands" style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 700, textDecoration: 'none' }}>
                             Kelola di Master Data →
@@ -737,17 +737,17 @@ export default function BusinessSettingsPage() {
                           return (
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 8 }}>
                               <div style={{ padding: 11, borderRadius: 8, background: 'var(--card)', border: '1px solid var(--border)' }}>
-                                <div style={{ color: 'var(--dim)', fontSize: 10, marginBottom: 7 }}>DIMILIKI</div>
+                                <div style={{ color: 'var(--dim)', fontSize: 10, marginBottom: 7 }}>PRODUK/STOK YANG DIMILIKI</div>
                                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                                   {owned.map(role => <span key={role.id} style={{ padding: '3px 8px', borderRadius: 5, background: 'var(--accent-subtle)', color: 'var(--accent)', fontSize: 11, fontWeight: 700 }}>{brandName(role.brand_id)}</span>)}
-                                  {owned.length === 0 && <span style={{ color: 'var(--dim)', fontSize: 11 }}>Belum ada brand owner.</span>}
+                                  {owned.length === 0 && <span style={{ color: 'var(--dim)', fontSize: 11 }}>Belum menjadi pemilik produk/stok untuk brand mana pun.</span>}
                                 </div>
                               </div>
                               <div style={{ padding: 11, borderRadius: 8, background: 'var(--card)', border: '1px solid var(--border)' }}>
-                                <div style={{ color: 'var(--dim)', fontSize: 10, marginBottom: 7 }}>DIJUAL</div>
+                                <div style={{ color: 'var(--dim)', fontSize: 10, marginBottom: 7 }}>BRAND YANG DIJUAL</div>
                                 <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
                                   {sold.map(role => <span key={role.id} style={{ padding: '3px 8px', borderRadius: 5, background: 'var(--badge-green-bg)', color: 'var(--green)', fontSize: 11, fontWeight: 700 }}>{brandName(role.brand_id)}</span>)}
-                                  {sold.length === 0 && <span style={{ color: 'var(--dim)', fontSize: 11 }}>Belum ada brand seller.</span>}
+                                  {sold.length === 0 && <span style={{ color: 'var(--dim)', fontSize: 11 }}>Belum menjadi business penjual untuk brand mana pun.</span>}
                                 </div>
                               </div>
                             </div>
