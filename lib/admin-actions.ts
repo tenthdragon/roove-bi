@@ -6,6 +6,10 @@ import { MATRIX_ROLES, PERMISSION_GROUPS } from './utils';
 import { getShopeeSetupInfo } from './shopee-open-platform';
 import { resolveWorkspaceMarketplaceIntakeSourceConfig } from './marketplace-intake-workspace-sources';
 import {
+  resolveWorkspaceCredential,
+  resolveWorkspaceIntegrationValue,
+} from './workspace-integration-server';
+import {
   buildDefaultShopeeSpendStreams,
   isShopeeSpendStreamKey,
   listShopeeSpendStreamDefinitions,
@@ -370,6 +374,204 @@ export async function getMetaAdminSnapshot() {
     brandMappings: mappingsRes.data || [],
     wabaAccounts: wabaRes.data || [],
     wabaLogs: wabaLogsRes.data || [],
+  };
+}
+
+export type MetaCredentialStatus = {
+  configured: boolean;
+  available: boolean;
+  storage: 'vault' | 'runtime' | 'none';
+  businessId: string | null;
+  canManage: boolean;
+  displayName: string | null;
+  validatedActorName: string | null;
+  validatedAt: string | null;
+  updatedAt: string | null;
+};
+
+export async function getMetaCredentialStatus(): Promise<MetaCredentialStatus> {
+  const access = await requireAdminAccess('admin:meta', 'Admin Meta');
+  const svc = createServiceSupabase();
+  const { data, error } = await svc
+    .from('workspace_integrations')
+    .select('display_name, credential_reference, config, updated_at')
+    .eq('workspace_id', access.workspaceId)
+    .eq('provider', 'meta')
+    .eq('is_active', true)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  const reference = String(data?.credential_reference || '').trim();
+  let available = false;
+  if (reference) {
+    try {
+      await resolveWorkspaceCredential({
+        supabase: svc,
+        workspaceId: access.workspaceId,
+        provider: 'meta',
+        fallbackEnvKeys: ['META_ACCESS_TOKEN'],
+      });
+      available = true;
+    } catch {
+      available = false;
+    }
+  }
+
+  const businessId = await resolveWorkspaceIntegrationValue({
+    supabase: svc,
+    workspaceId: access.workspaceId,
+    provider: 'meta',
+    configKey: 'business_id',
+    referenceConfigKey: 'business_id_reference',
+    fallbackEnvKeys: ['META_BUSINESS_ID'],
+  });
+  const config = data?.config && typeof data.config === 'object'
+    ? data.config as Record<string, unknown>
+    : {};
+
+  return {
+    configured: Boolean(reference),
+    available,
+    storage: reference.startsWith('vault:')
+      ? 'vault'
+      : reference
+        ? 'runtime'
+        : 'none',
+    businessId,
+    canManage: access.profile.role === 'owner',
+    displayName: String(data?.display_name || '').trim() || null,
+    validatedActorName: String(config.validated_actor_name || '').trim() || null,
+    validatedAt: String(config.validated_at || '').trim() || null,
+    updatedAt: data?.updated_at || null,
+  };
+}
+
+async function fetchMetaCredentialIdentity(accessToken: string, businessId: string | null) {
+  const requestMetaObject = async (objectId: string, label: string) => {
+    const params = new URLSearchParams({ fields: 'id,name' });
+    const response = await fetch(
+      `https://graph.facebook.com/v21.0/${encodeURIComponent(objectId)}?${params.toString()}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: 'no-store',
+      },
+    );
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.error) {
+      throw new Error(
+        body?.error?.message
+          ? `${label}: ${body.error.message}`
+          : `${label} tidak dapat diverifikasi ke Meta.`,
+      );
+    }
+    return body as { id?: string; name?: string };
+  };
+
+  const actor = await requestMetaObject('me', 'Access token Meta tidak valid');
+  const business = businessId
+    ? await requestMetaObject(businessId, 'Business Manager ID tidak dapat diakses oleh token ini')
+    : null;
+
+  return {
+    actorId: String(actor.id || '').trim() || null,
+    actorName: String(actor.name || '').trim() || null,
+    businessName: String(business?.name || '').trim() || null,
+  };
+}
+
+export async function saveMetaCredential(payload: {
+  accessToken?: string;
+  businessId?: string;
+}) {
+  const { workspaceId } = await requireOwnerAccess('Meta API Credential');
+  const svc = createServiceSupabase();
+  const accessToken = String(payload?.accessToken || '').trim();
+  const businessId = String(payload?.businessId || '').trim() || null;
+
+  if (businessId && !/^\d{5,30}$/.test(businessId)) {
+    throw new Error('Business Manager ID harus berupa angka.');
+  }
+
+  const { data: existing, error: existingError } = await svc
+    .from('workspace_integrations')
+    .select('id, external_account_id, display_name, credential_reference, config')
+    .eq('workspace_id', workspaceId)
+    .eq('provider', 'meta')
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (existingError) throw existingError;
+
+  let tokenToValidate = accessToken;
+  if (!tokenToValidate && existing?.credential_reference) {
+    try {
+      tokenToValidate = await resolveWorkspaceCredential({
+        supabase: svc,
+        workspaceId,
+        provider: 'meta',
+        fallbackEnvKeys: ['META_ACCESS_TOKEN'],
+      });
+    } catch {
+      tokenToValidate = '';
+    }
+  }
+
+  if (!tokenToValidate) {
+    throw new Error('Masukkan Meta Access Token karena credential aktif belum tersedia.');
+  }
+  if (tokenToValidate.length < 20 || tokenToValidate.length > 10000) {
+    throw new Error('Format Meta Access Token tidak valid.');
+  }
+
+  const identity = await fetchMetaCredentialIdentity(tokenToValidate, businessId);
+  const validatedAt = new Date().toISOString();
+  const currentConfig = existing?.config && typeof existing.config === 'object'
+    ? existing.config as Record<string, unknown>
+    : {};
+  const config = {
+    ...currentConfig,
+    business_id: businessId,
+    business_id_reference: null,
+    validated_actor_id: identity.actorId,
+    validated_actor_name: identity.actorName,
+    validated_business_name: identity.businessName,
+    validated_at: validatedAt,
+  };
+
+  if (accessToken) {
+    const { error } = await svc.rpc('upsert_workspace_integration_vault_secret', {
+      p_workspace_id: workspaceId,
+      p_provider: 'meta',
+      p_secret: accessToken,
+      p_external_account_id: existing?.external_account_id || 'default',
+      p_display_name: existing?.display_name || 'Meta Marketing API',
+      p_config: config,
+    });
+    if (error) throw new Error(`Gagal menyimpan credential Meta: ${error.message}`);
+  } else {
+    if (!existing) {
+      throw new Error('Konfigurasi Meta belum tersedia. Masukkan Meta Access Token.');
+    }
+    const { error } = await svc
+      .from('workspace_integrations')
+      .update({
+        config,
+        updated_at: validatedAt,
+      })
+      .eq('id', existing.id)
+      .eq('workspace_id', workspaceId);
+    if (error) throw error;
+  }
+
+  return {
+    success: true,
+    actorName: identity.actorName,
+    businessName: identity.businessName,
+    validatedAt,
   };
 }
 

@@ -23,11 +23,10 @@ function readEnvironmentReference(reference: unknown, label: string) {
 }
 
 /**
- * Resolve an integration secret without storing the secret value in Postgres.
- *
- * workspace_integrations.credential_reference contains an environment variable
- * name (for example APURVA_WHATSAPP_ACCESS_TOKEN). There is no tenant fallback:
- * a workspace without its own integration record fails closed.
+ * Resolve a workspace integration secret from Supabase Vault or, for legacy
+ * records, from the referenced runtime environment variable. There is no
+ * cross-tenant fallback: a workspace without its own integration record fails
+ * closed.
  */
 export async function resolveWorkspaceCredential({
   supabase,
@@ -51,6 +50,26 @@ export async function resolveWorkspaceCredential({
   }
 
   const reference = String(data?.credential_reference || '').trim();
+  if (reference.startsWith('vault:')) {
+    const { data: vaultSecret, error: vaultError } = await supabase.rpc(
+      'get_workspace_integration_vault_secret',
+      {
+        p_workspace_id: workspaceId,
+        p_provider: provider,
+      },
+    );
+
+    if (vaultError) {
+      throw new Error(`Gagal membuka kredensial ${provider}: ${vaultError.message}`);
+    }
+
+    const value = String(vaultSecret || '').trim();
+    if (!value) {
+      throw new Error(`Kredensial ${provider} untuk workspace ini tidak ditemukan di Vault.`);
+    }
+    return value;
+  }
+
   if (reference) {
     const value = readEnvironmentReference(reference, provider);
     if (!value) {

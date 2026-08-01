@@ -3,7 +3,9 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
+  getMetaCredentialStatus,
   getMetaAdminSnapshot,
+  saveMetaCredential,
   saveMetaAccounts,
   saveWabaAccount,
   setMetaAccountActive,
@@ -60,6 +62,18 @@ interface AdsStoreBrandMapping {
   brand: string;
 }
 
+interface MetaCredentialStatus {
+  configured: boolean;
+  available: boolean;
+  storage: 'vault' | 'runtime' | 'none';
+  businessId: string | null;
+  canManage: boolean;
+  displayName: string | null;
+  validatedActorName: string | null;
+  validatedAt: string | null;
+  updatedAt: string | null;
+}
+
 // Brand mapping per selected account for bulk add
 interface SelectedAccountMapping {
   account_id: string;
@@ -87,6 +101,12 @@ export default function MetaManager() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [credentialStatus, setCredentialStatus] = useState<MetaCredentialStatus | null>(null);
+  const [showCredentialForm, setShowCredentialForm] = useState(false);
+  const [showAccessToken, setShowAccessToken] = useState(false);
+  const [credentialForm, setCredentialForm] = useState({ accessToken: '', businessId: '' });
+  const [credentialSaving, setCredentialSaving] = useState(false);
+  const [credentialMessage, setCredentialMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Date picker state for sync
   const getYesterday = () => {
@@ -162,12 +182,20 @@ export default function MetaManager() {
 
   const loadData = useCallback(async () => {
     try {
-      const snapshot = await getMetaAdminSnapshot();
+      const [snapshot, credential] = await Promise.all([
+        getMetaAdminSnapshot(),
+        getMetaCredentialStatus(),
+      ]);
       setAccounts(snapshot.accounts || []);
       setRecentLogs(snapshot.recentLogs || []);
       setBrandMappings(snapshot.brandMappings || []);
       setWabaAccounts(snapshot.wabaAccounts || []);
       setWabaLogs(snapshot.wabaLogs || []);
+      setCredentialStatus(credential);
+      setCredentialForm(current => ({
+        ...current,
+        businessId: credential.businessId || '',
+      }));
     } catch (err: any) {
       console.error('Failed to load Meta data:', err);
       setMessage({ type: 'error', text: err.message || 'Gagal memuat konfigurasi Meta' });
@@ -178,6 +206,34 @@ export default function MetaManager() {
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const handleSaveCredential = async () => {
+    if (!credentialForm.accessToken.trim() && !credentialStatus?.available) {
+      setCredentialMessage({ type: 'error', text: 'Meta Access Token wajib diisi karena credential aktif belum tersedia.' });
+      return;
+    }
+
+    setCredentialSaving(true);
+    setCredentialMessage(null);
+    try {
+      const result = await saveMetaCredential({
+        accessToken: credentialForm.accessToken.trim(),
+        businessId: credentialForm.businessId.trim(),
+      });
+      setCredentialMessage({
+        type: 'success',
+        text: `Credential berhasil divalidasi${result.actorName ? ` sebagai ${result.actorName}` : ''}${result.businessName ? ` · ${result.businessName}` : ''}.`,
+      });
+      setCredentialForm(current => ({ ...current, accessToken: '' }));
+      setShowAccessToken(false);
+      setShowCredentialForm(false);
+      await loadData();
+    } catch (err: any) {
+      setCredentialMessage({ type: 'error', text: err.message || 'Gagal menyimpan credential Meta.' });
+    } finally {
+      setCredentialSaving(false);
+    }
+  };
 
   // ── Fetch remote accounts from Meta API ──
   const handleLoadRemoteAccounts = async () => {
@@ -452,20 +508,159 @@ export default function MetaManager() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* ─── Meta API Credential ─── */}
+      <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 4 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 14, fontWeight: 700 }}>Meta API Credential</div>
+              <span style={{
+                padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
+                background: credentialStatus?.available ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+                color: credentialStatus?.available ? 'var(--green)' : 'var(--red)',
+              }}>
+                {credentialStatus?.available ? 'Tersambung' : 'Belum tersambung'}
+              </span>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--dim)', marginTop: 5, lineHeight: 1.6 }}>
+              Credential berlaku khusus untuk workspace aktif. Access token dienkripsi di Supabase Vault dan tidak pernah ditampilkan kembali.
+            </div>
+          </div>
+          {credentialStatus?.canManage && (
+            <button
+              onClick={() => {
+                setShowCredentialForm(current => !current);
+                setCredentialMessage(null);
+                setCredentialForm(current => ({
+                  accessToken: '',
+                  businessId: credentialStatus.businessId || current.businessId,
+                }));
+              }}
+              style={{
+                padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+                background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600,
+                flexShrink: 0,
+              }}
+            >
+              {showCredentialForm ? 'Tutup' : credentialStatus.available ? 'Ubah Credential' : '+ Tambah Credential'}
+            </button>
+          )}
+        </div>
+
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8,
+          marginTop: 14,
+        }}>
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
+            <div style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 3 }}>Penyimpanan Token</div>
+            <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>
+              {credentialStatus?.storage === 'vault'
+                ? 'Supabase Vault'
+                : credentialStatus?.storage === 'runtime'
+                  ? credentialStatus.available ? 'Runtime Environment' : 'Runtime Environment · Tidak tersedia'
+                  : 'Belum dikonfigurasi'}
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
+            <div style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 3 }}>Business Manager ID</div>
+            <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, fontFamily: credentialStatus?.businessId ? 'monospace' : undefined }}>
+              {credentialStatus?.businessId || 'Opsional · belum diisi'}
+            </div>
+          </div>
+          <div style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 10 }}>
+            <div style={{ fontSize: 10, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 3 }}>Identitas Terakhir</div>
+            <div style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>
+              {credentialStatus?.validatedActorName || 'Belum pernah divalidasi dari menu ini'}
+            </div>
+          </div>
+        </div>
+
+        {!credentialStatus?.canManage && !credentialStatus?.available && (
+          <div style={{ marginTop: 12, padding: 10, borderRadius: 8, background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 12 }}>
+            Minta Owner Workspace menambahkan Meta Access Token pada panel ini.
+          </div>
+        )}
+
+        {showCredentialForm && credentialStatus?.canManage && (
+          <div style={{ marginTop: 14, padding: 14, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 10 }}>
+              <div>
+                <label style={labelStyle}>Meta Access Token {credentialStatus.available ? '(kosongkan jika tidak ingin merotasi token)' : '(wajib)'}</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    type={showAccessToken ? 'text' : 'password'}
+                    autoComplete="new-password"
+                    value={credentialForm.accessToken}
+                    onChange={event => setCredentialForm(current => ({ ...current, accessToken: event.target.value }))}
+                    placeholder={credentialStatus.available ? 'Masukkan hanya jika ingin mengganti token' : 'Tempel system user access token Meta'}
+                    style={inputStyle}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAccessToken(current => !current)}
+                    style={{ padding: '7px 11px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--card)', color: 'var(--text-secondary)', fontSize: 11, cursor: 'pointer' }}
+                  >
+                    {showAccessToken ? 'Sembunyikan' : 'Lihat'}
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label style={labelStyle}>Meta Business Manager ID (opsional)</label>
+                <input
+                  inputMode="numeric"
+                  value={credentialForm.businessId}
+                  onChange={event => setCredentialForm(current => ({ ...current, businessId: event.target.value.replace(/\D/g, '') }))}
+                  placeholder="Contoh: 123456789012345"
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+              <div style={{ fontSize: 11, color: 'var(--dim)' }}>
+                Saat disimpan, token dan Business Manager ID akan dites langsung ke Meta terlebih dahulu.
+              </div>
+              <button
+                onClick={handleSaveCredential}
+                disabled={credentialSaving}
+                style={{
+                  padding: '7px 18px', borderRadius: 6, border: 'none',
+                  cursor: credentialSaving ? 'not-allowed' : 'pointer',
+                  background: credentialSaving ? 'var(--border)' : 'var(--green)',
+                  color: '#fff', fontSize: 12, fontWeight: 700, opacity: credentialSaving ? 0.6 : 1,
+                }}
+              >
+                {credentialSaving ? 'Memvalidasi...' : 'Validasi & Simpan'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {credentialMessage && (
+          <div style={{
+            marginTop: 12, padding: 11, borderRadius: 8, fontSize: 12,
+            background: credentialMessage.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+            color: credentialMessage.type === 'success' ? 'var(--green)' : 'var(--red)',
+          }}>
+            {credentialMessage.type === 'success' ? '✅' : '❌'} {credentialMessage.text}
+          </div>
+        )}
+      </div>
+
       {/* ─── Meta Ad Accounts ─── */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <div style={{ fontSize: 14, fontWeight: 700 }}>Meta Ad Accounts</div>
           <button
             onClick={handleLoadRemoteAccounts}
-            disabled={loadingRemote}
+            disabled={loadingRemote || !credentialStatus?.available}
+            title={!credentialStatus?.available ? 'Tambahkan Meta API Credential terlebih dahulu' : undefined}
             style={{
-              padding: '6px 14px', borderRadius: 6, border: 'none', cursor: loadingRemote ? 'not-allowed' : 'pointer',
-              background: loadingRemote ? 'var(--border)' : 'var(--accent)', color: '#fff',
-              fontSize: 12, fontWeight: 600, opacity: loadingRemote ? 0.6 : 1,
+              padding: '6px 14px', borderRadius: 6, border: 'none', cursor: loadingRemote || !credentialStatus?.available ? 'not-allowed' : 'pointer',
+              background: loadingRemote || !credentialStatus?.available ? 'var(--border)' : 'var(--accent)', color: '#fff',
+              fontSize: 12, fontWeight: 600, opacity: loadingRemote || !credentialStatus?.available ? 0.6 : 1,
             }}
           >
-            {loadingRemote ? 'Memuat...' : '+ Tambah Akun'}
+            {loadingRemote ? 'Memuat...' : credentialStatus?.available ? '+ Tambah Akun' : 'Credential diperlukan'}
           </button>
         </div>
         <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
