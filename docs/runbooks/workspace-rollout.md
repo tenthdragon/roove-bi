@@ -86,12 +86,16 @@ Apurva Workspace.
 
 ## Fixed cost
 
-Apurva memakai halaman **Fixed & Recurring Costs**. Setiap pengeluaran memiliki
-nominal per unit, jumlah unit, frekuensi, interval, tanggal berlaku, jatuh tempo,
-dan kategori. Dashboard mengubah rincian aktif menjadi ekuivalen biaya bulanan.
+Halaman **Fixed & Recurring Costs** menyediakan dua mode per workspace:
 
-Roove tetap memakai nilai `monthly_overhead` lama sampai setidaknya satu rincian
-fixed cost dibuat di Roove. Dengan demikian perilaku existing tidak berubah.
+- **Perinci semuanya**: setiap pengeluaran memiliki nominal per unit, jumlah
+  unit, frekuensi, interval, tanggal berlaku, jatuh tempo, dan kategori.
+  Dashboard mengubah rincian aktif menjadi ekuivalen biaya bulanan.
+- **Angka tunggal**: dashboard memakai satu nilai `monthly_overhead` untuk
+  setiap bulan, seperti alur overhead lama.
+
+Mengganti mode hanya mengubah sumber perhitungan aktif. Rincian biaya dan nilai
+bulanan tidak dihapus sehingga workspace dapat berpindah kembali kapan saja.
 
 ## Batas rollout awal
 

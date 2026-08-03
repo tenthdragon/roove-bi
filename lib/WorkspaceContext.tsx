@@ -11,11 +11,13 @@ import {
 import type {
   AccessibleWorkspace,
   WorkspaceBootstrap,
+  WorkspaceSettings,
 } from './workspaces';
 
 type WorkspaceContextValue = WorkspaceBootstrap & {
   switching: boolean;
   switchWorkspace: (workspaceId: string) => Promise<void>;
+  updateActiveWorkspaceSettings: (settings: Partial<WorkspaceSettings>) => void;
 };
 
 const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
@@ -31,6 +33,16 @@ export function WorkspaceProvider({
     initial.activeWorkspace,
   );
   const [switching, setSwitching] = useState(false);
+
+  const updateActiveWorkspaceSettings = useCallback(
+    (settings: Partial<WorkspaceSettings>) => {
+      setActiveWorkspace((current) => ({
+        ...current,
+        settings: { ...current.settings, ...settings },
+      }));
+    },
+    [],
+  );
 
   const switchWorkspace = useCallback(
     async (workspaceId: string) => {
@@ -62,6 +74,7 @@ export function WorkspaceProvider({
       isPlatformOwner: initial.isPlatformOwner,
       switching,
       switchWorkspace,
+      updateActiveWorkspaceSettings,
     }),
     [
       activeWorkspace,
@@ -69,6 +82,7 @@ export function WorkspaceProvider({
       initial.workspaces,
       switchWorkspace,
       switching,
+      updateActiveWorkspaceSettings,
     ],
   );
 

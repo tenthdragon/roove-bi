@@ -7,6 +7,7 @@ import {
 } from './dashboard-access';
 
 export type FixedCostRecurrence = 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+export type FixedCostMode = 'legacy_monthly_overhead' | 'detailed_fixed_costs';
 
 export type FixedCostInput = {
   id?: number | null;
@@ -50,10 +51,10 @@ function monthlyEquivalent(item: {
 }
 
 export async function getFixedCostBootstrap() {
-  const { workspaceId } = await requireDashboardTabAccess('fixed-costs', 'Fixed Costs');
+  const { workspaceId, workspace } = await requireDashboardTabAccess('fixed-costs', 'Fixed Costs');
   const svc = createServiceSupabase();
 
-  const [categoriesResult, itemsResult] = await Promise.all([
+  const [categoriesResult, itemsResult, monthlyOverheadResult] = await Promise.all([
     svc
       .from('fixed_cost_categories')
       .select('id, name, description, sort_order, is_active')
@@ -66,10 +67,16 @@ export async function getFixedCostBootstrap() {
       .eq('workspace_id', workspaceId)
       .order('is_active', { ascending: false })
       .order('name'),
+    svc
+      .from('monthly_overhead')
+      .select('id, year_month, amount, updated_at')
+      .eq('workspace_id', workspaceId)
+      .order('year_month', { ascending: false }),
   ]);
 
   if (categoriesResult.error) throw categoriesResult.error;
   if (itemsResult.error) throw itemsResult.error;
+  if (monthlyOverheadResult.error) throw monthlyOverheadResult.error;
 
   const items = (itemsResult.data || []).map((item: any) => ({
     ...item,
@@ -78,10 +85,23 @@ export async function getFixedCostBootstrap() {
     recurrence_interval: Number(item.recurrence_interval || 1),
     monthly_equivalent: monthlyEquivalent(item),
   }));
+  const monthlyOverhead = (monthlyOverheadResult.data || []).map((row: any) => ({
+    ...row,
+    amount: Number(row.amount || 0),
+  }));
+  const configuredMode = workspace.settings?.cost_model;
+  const costModel: FixedCostMode = configuredMode === 'legacy_monthly_overhead'
+    || configuredMode === 'detailed_fixed_costs'
+    ? configuredMode
+    : items.length > 0
+      ? 'detailed_fixed_costs'
+      : 'legacy_monthly_overhead';
 
   return {
     categories: categoriesResult.data || [],
     items,
+    monthlyOverhead,
+    costModel,
     summary: {
       activeMonthly: items
         .filter((item: any) => item.is_active)
@@ -94,6 +114,81 @@ export async function getFixedCostBootstrap() {
 
 async function requireManageFixedCosts() {
   return requireDashboardPermissionAccess('admin:financial', 'Kelola Fixed Costs');
+}
+
+export async function setFixedCostMode(mode: FixedCostMode) {
+  const { workspaceId } = await requireManageFixedCosts();
+  if (!['legacy_monthly_overhead', 'detailed_fixed_costs'].includes(mode)) {
+    throw new Error('Mode fixed cost tidak valid.');
+  }
+
+  const svc = createServiceSupabase();
+  const { data: workspace, error: workspaceError } = await svc
+    .from('workspaces')
+    .select('settings')
+    .eq('id', workspaceId)
+    .single();
+
+  if (workspaceError) throw workspaceError;
+
+  const settings = workspace.settings && typeof workspace.settings === 'object'
+    ? workspace.settings
+    : {};
+  const { error } = await svc
+    .from('workspaces')
+    .update({ settings: { ...settings, cost_model: mode } })
+    .eq('id', workspaceId);
+
+  if (error) throw error;
+  return { success: true, costModel: mode };
+}
+
+export async function saveSingleMonthlyOverhead(input: {
+  yearMonth: string;
+  amount: number;
+}) {
+  const { workspaceId } = await requireManageFixedCosts();
+  const yearMonth = String(input.yearMonth || '').trim();
+  const amount = Number(input.amount);
+
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(yearMonth)) {
+    throw new Error('Bulan overhead tidak valid.');
+  }
+  if (!Number.isFinite(amount) || amount < 0) {
+    throw new Error('Nominal overhead tidak valid.');
+  }
+
+  const svc = createServiceSupabase();
+  const { error } = await svc.from('monthly_overhead').upsert(
+    {
+      workspace_id: workspaceId,
+      year_month: yearMonth,
+      amount,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'workspace_id,year_month' },
+  );
+
+  if (error) throw error;
+  return { success: true };
+}
+
+export async function deleteSingleMonthlyOverhead(id: number) {
+  const { workspaceId } = await requireManageFixedCosts();
+  const overheadId = Number(id);
+  if (!Number.isInteger(overheadId) || overheadId <= 0) {
+    throw new Error('Data overhead tidak valid.');
+  }
+
+  const svc = createServiceSupabase();
+  const { error } = await svc
+    .from('monthly_overhead')
+    .delete()
+    .eq('id', overheadId)
+    .eq('workspace_id', workspaceId);
+
+  if (error) throw error;
+  return { success: true };
 }
 
 export async function createFixedCostCategory(name: string) {
