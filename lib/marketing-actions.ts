@@ -9,6 +9,28 @@ interface MarketingPageDataParams {
   to: string;
   prevRangeFrom: string;
   prevRangeTo: string;
+  historyFrom: string;
+  historyTo: string;
+}
+
+const HISTORY_PAGE_SIZE = 1000;
+
+async function fetchHistoricalRows(
+  buildQuery: (fromIndex: number, toIndex: number) => PromiseLike<any>,
+  label: string,
+) {
+  const rows: any[] = [];
+
+  for (let fromIndex = 0; ; fromIndex += HISTORY_PAGE_SIZE) {
+    const result = await buildQuery(fromIndex, fromIndex + HISTORY_PAGE_SIZE - 1);
+    if (result.error) throw new Error(`${label}: ${result.error.message}`);
+
+    const page = result.data || [];
+    rows.push(...page);
+    if (page.length < HISTORY_PAGE_SIZE) break;
+  }
+
+  return rows;
 }
 
 function unwrap<T>(result: { data: T | null; error: { message: string } | null }, label: string): T {
@@ -35,6 +57,8 @@ export async function getMarketingPageData({
   to,
   prevRangeFrom,
   prevRangeTo,
+  historyFrom,
+  historyTo,
 }: MarketingPageDataParams) {
   const { workspaceId } = await requireDashboardTabAccess(
     'marketing',
@@ -53,6 +77,8 @@ export async function getMarketingPageData({
     prevRangeAdsRes,
     prevRangeChRes,
     prevRangeShippingRes,
+    historyProd,
+    historyAds,
   ] = await Promise.all([
     svc.from('daily_product_summary')
       .select('date, product, net_sales, gross_profit, mkt_cost')
@@ -93,6 +119,30 @@ export async function getMarketingPageData({
     getShippingFeeRange(workspaceId, prevRangeFrom, prevRangeTo)
       .then((data) => ({ data, error: null }))
       .catch((error: Error) => ({ data: [], error: { message: error.message } })),
+    fetchHistoricalRows(
+      (fromIndex, toIndex) => svc.from('daily_product_summary')
+        .select('date, product, net_sales')
+        .eq('workspace_id', workspaceId)
+        .gte('date', historyFrom)
+        .lte('date', historyTo)
+        .order('date', { ascending: true })
+        .order('product', { ascending: true })
+        .range(fromIndex, toIndex),
+      'Gagal memuat histori revenue marketing',
+    ),
+    fetchHistoricalRows(
+      (fromIndex, toIndex) => svc.from('daily_ads_spend')
+        .select('date, source, spent, store, brand_id')
+        .eq('workspace_id', workspaceId)
+        .gte('date', historyFrom)
+        .lte('date', historyTo)
+        .order('date', { ascending: true })
+        .order('source', { ascending: true })
+        .order('store', { ascending: true })
+        .order('brand_id', { ascending: true })
+        .range(fromIndex, toIndex),
+      'Gagal memuat histori marketing fee',
+    ),
   ]);
 
   const shipping = unwrapOptional(shippingRes, 'Gagal memuat shipping fee Marketing');
@@ -110,5 +160,7 @@ export async function getMarketingPageData({
     prevRangeChannel: unwrap(prevRangeChRes, 'Gagal memuat perbandingan channel'),
     prevRangeShipping: prevShipping.data,
     prevRangeShippingError: prevShipping.error,
+    historyProd,
+    historyAds,
   };
 }

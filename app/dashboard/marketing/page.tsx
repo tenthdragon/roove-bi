@@ -9,6 +9,15 @@ import { getMarketingPageData } from '@/lib/marketing-actions';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { buildBrandColorMap } from '@/lib/utils';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 
 function formatIsoDate(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -26,6 +35,17 @@ function shiftIsoDateByMonthsClamped(value: string, deltaMonths: number): string
   const targetMonth = targetMonthIndex + 1;
   const targetDay = Math.min(day, getDaysInMonth(targetYear, targetMonth));
   return formatIsoDate(targetYear, targetMonth, targetDay);
+}
+
+function getHistoryRange(to: string, monthCount = 12) {
+  const [year, month] = to.split('-').map(Number);
+  const totalMonths = year * 12 + (month - 1) - (monthCount - 1);
+  const historyYear = Math.floor(totalMonths / 12);
+  const historyMonth = ((totalMonths % 12) + 12) % 12 + 1;
+  return {
+    historyFrom: formatIsoDate(historyYear, historyMonth, 1),
+    historyTo: to,
+  };
 }
 
 function calculateCm3(grossProfit: number, mpFee: number, shipping: number, marketingFee: number): number {
@@ -138,6 +158,8 @@ export default function MarketingPage() {
   const [shippingData, setShippingData] = useState<any[]>([]);
   const [prevRangeProdData, setPrevRangeProdData] = useState<any[]>([]);
   const [prevRangeShippingData, setPrevRangeShippingData] = useState<any[]>([]);
+  const [historyProdData, setHistoryProdData] = useState<any[]>([]);
+  const [historyAdsData, setHistoryAdsData] = useState<any[]>([]);
   const [shippingError, setShippingError] = useState('');
   const [prevRangeShippingError, setPrevRangeShippingError] = useState('');
   const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
@@ -215,6 +237,20 @@ export default function MarketingPage() {
     [resolvedPrevRangeAdsData]
   );
 
+  const resolvedHistoryAdsData = useMemo(() => {
+    return historyAdsData
+      .map((d) => {
+        const brand = getAdBrand(d.store, d.brand_id);
+        return { ...d, brand };
+      })
+      .filter((d) => !d.brand || isActiveBrand(d.brand));
+  }, [historyAdsData, brandIdMap, storeBrandMap, activeBrandMap, activeBrands, activeBrandsError, isActiveBrand]);
+
+  const filteredHistoryProdData = useMemo(
+    () => historyProdData.filter(d => isActiveBrand(d.product)),
+    [historyProdData, activeBrands, activeBrandsError, isActiveBrand]
+  );
+
   const filteredPrevRangeChannelData = useMemo(
     () => prevRangeChannelData.filter(d => isActiveBrand(d.product)),
     [prevRangeChannelData, activeBrands, activeBrandsError, isActiveBrand]
@@ -267,6 +303,7 @@ export default function MarketingPage() {
     if (!dateRange.from || !dateRange.to) return;
     const { from, to } = dateRange;
     const { prevRangeFrom, prevRangeTo } = getComparisonRanges(from, to);
+    const { historyFrom, historyTo } = getHistoryRange(to);
 
     const cachedProd = getCached<any[]>(workspaceCache('daily_product_summary_mkt_cm3_v1'), from, to);
     const cachedAds = getCached<any[]>(workspaceCache('daily_ads_spend'), from, to);
@@ -277,8 +314,10 @@ export default function MarketingPage() {
     const cachedPrevRangeAds = getCached<any[]>(workspaceCache('daily_ads_spend_prev_range'), prevRangeFrom, prevRangeTo);
     const cachedPrevRangeCh = getCached<any[]>(workspaceCache('daily_channel_data_prev_range_mkt_cm3_v1'), prevRangeFrom, prevRangeTo);
     const cachedPrevRangeShipping = getCached<any>(workspaceCache('daily_shipping_prev_range_mkt_cm3_v1'), prevRangeFrom, prevRangeTo);
+    const cachedHistoryProd = getCached<any[]>(workspaceCache('daily_product_summary_roas_history_v1'), historyFrom, historyTo);
+    const cachedHistoryAds = getCached<any[]>(workspaceCache('daily_ads_spend_roas_history_v1'), historyFrom, historyTo);
 
-    if (cachedProd && cachedAds && cachedCh && cachedBrandMapping && cachedShipping && cachedPrevRangeProd && cachedPrevRangeAds && cachedPrevRangeCh && cachedPrevRangeShipping) {
+    if (cachedProd && cachedAds && cachedCh && cachedBrandMapping && cachedShipping && cachedPrevRangeProd && cachedPrevRangeAds && cachedPrevRangeCh && cachedPrevRangeShipping && cachedHistoryProd && cachedHistoryAds) {
       setRawProdData(cachedProd);
       setAdsData(cachedAds);
       setChannelData(cachedCh);
@@ -290,6 +329,8 @@ export default function MarketingPage() {
       setPrevRangeChannelData(cachedPrevRangeCh);
       setPrevRangeShippingData(cachedPrevRangeShipping.rows || []);
       setPrevRangeShippingError(cachedPrevRangeShipping.error || '');
+      setHistoryProdData(cachedHistoryProd);
+      setHistoryAdsData(cachedHistoryAds);
       setError('');
       setLoading(false);
       return;
@@ -304,6 +345,8 @@ export default function MarketingPage() {
       to,
       prevRangeFrom,
       prevRangeTo,
+      historyFrom,
+      historyTo,
     })
       .then((data) => {
         if (cancelled) return;
@@ -317,6 +360,8 @@ export default function MarketingPage() {
         setCache(workspaceCache('daily_ads_spend_prev_range'), prevRangeFrom, prevRangeTo, data.prevRangeAds);
         setCache(workspaceCache('daily_channel_data_prev_range_mkt_cm3_v1'), prevRangeFrom, prevRangeTo, data.prevRangeChannel);
         setCache(workspaceCache('daily_shipping_prev_range_mkt_cm3_v1'), prevRangeFrom, prevRangeTo, { rows: data.prevRangeShipping, error: data.prevRangeShippingError });
+        setCache(workspaceCache('daily_product_summary_roas_history_v1'), historyFrom, historyTo, data.historyProd);
+        setCache(workspaceCache('daily_ads_spend_roas_history_v1'), historyFrom, historyTo, data.historyAds);
 
         setRawProdData(data.prod);
         setAdsData(data.ads);
@@ -329,6 +374,8 @@ export default function MarketingPage() {
         setPrevRangeChannelData(data.prevRangeChannel);
         setPrevRangeShippingData(data.prevRangeShipping || []);
         setPrevRangeShippingError(data.prevRangeShippingError || '');
+        setHistoryProdData(data.historyProd || []);
+        setHistoryAdsData(data.historyAds || []);
         setError('');
         setLoading(false);
       })
@@ -407,9 +454,56 @@ export default function MarketingPage() {
     return Array.from(set).sort();
   }, [attributedAdsData]);
 
-const BRAND_COLORS = useMemo(() => {
-  return buildBrandColorMap([...uniqueBrands, ...activeBrands]);
-}, [uniqueBrands, activeBrands]);
+  const BRAND_COLORS = useMemo(() => {
+    return buildBrandColorMap([...uniqueBrands, ...activeBrands]);
+  }, [uniqueBrands, activeBrands]);
+
+  // ── Combined ROAS history (Net Sales ÷ all marketing spend) ──
+  const monthlyRoasHistory = useMemo(() => {
+    if (!dateRange.to) return [];
+
+    const selectedProducts = filteredHistoryProdData.filter(
+      row => brandFilter === 'all' || row.product === brandFilter
+    );
+    const selectedAds = resolvedHistoryAdsData.filter(
+      row => brandFilter === 'all' || row.brand === brandFilter
+    );
+    const totalsByMonth: Record<string, { revenue: number; spend: number }> = {};
+
+    selectedProducts.forEach((row) => {
+      const month = String(row.date || '').slice(0, 7);
+      if (!month) return;
+      if (!totalsByMonth[month]) totalsByMonth[month] = { revenue: 0, spend: 0 };
+      totalsByMonth[month].revenue += Number(row.net_sales || 0);
+    });
+
+    selectedAds.forEach((row) => {
+      const month = String(row.date || '').slice(0, 7);
+      if (!month) return;
+      if (!totalsByMonth[month]) totalsByMonth[month] = { revenue: 0, spend: 0 };
+      totalsByMonth[month].spend += Math.abs(Number(row.spent || 0));
+    });
+
+    const [endYear, endMonth] = dateRange.to.split('-').map(Number);
+    return Array.from({ length: 12 }, (_, index) => {
+      const offset = index - 11;
+      const totalMonths = endYear * 12 + (endMonth - 1) + offset;
+      const year = Math.floor(totalMonths / 12);
+      const monthIndex = ((totalMonths % 12) + 12) % 12;
+      const key = `${year}-${String(monthIndex + 1).padStart(2, '0')}`;
+      const totals = totalsByMonth[key] || { revenue: 0, spend: 0 };
+      const date = new Date(year, monthIndex, 1);
+
+      return {
+        month: key,
+        label: date.toLocaleDateString('id-ID', { month: 'short' }),
+        fullLabel: date.toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }),
+        revenue: totals.revenue,
+        spend: totals.spend,
+        roas: totals.spend > 0 ? totals.revenue / totals.spend : null,
+      };
+    });
+  }, [dateRange.to, filteredHistoryProdData, resolvedHistoryAdsData, brandFilter]);
 
 
 
@@ -931,6 +1025,21 @@ const BRAND_COLORS = useMemo(() => {
     </div>
   );
 
+  const RoasHistoryTooltip = ({ active, payload }: any) => {
+    if (!active || !payload?.length) return null;
+    const point = payload[0].payload;
+    return (
+      <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', fontSize: 11 }}>
+        <div style={{ color: C.dim, marginBottom: 6 }}>{point.fullLabel}</div>
+        <div style={{ fontSize: 15, fontWeight: 800, color: brandFilter === 'all' ? 'var(--accent)' : BRAND_COLORS[brandFilter] || 'var(--accent)' }}>
+          {point.roas == null ? '—' : `${point.roas.toFixed(2)}x`}
+        </div>
+        <div style={{ color: C.dim, marginTop: 6 }}>Net Sales: {fmtRupiah(point.revenue)}</div>
+        <div style={{ color: C.dim, marginTop: 2 }}>Mkt Fee: {fmtRupiah(point.spend)}</div>
+      </div>
+    );
+  };
+
   const signalStyle = (tone: string) => {
     if (tone === 'bad') return { bg: 'var(--badge-red-bg)', color: 'var(--red)' };
     if (tone === 'warn') return { bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)' };
@@ -1101,6 +1210,61 @@ const BRAND_COLORS = useMemo(() => {
             ? { value: cm3Metrics.margin - cm3Metrics.prevMargin, suffix: 'pp', label: `CM3% vs ${prevMonthLabel}` }
             : undefined}
         />
+      </div>
+
+      {/* ── Combined ROAS monthly history ── */}
+      <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>Historis ROAS Gabungan</div>
+            <div style={{ fontSize: 11, color: C.dim, marginTop: 4 }}>
+              Net Sales ÷ seluruh marketing spend per bulan · 12 bulan hingga {new Date(`${dateRange.to}T00:00:00`).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+            </div>
+          </div>
+          <span style={{ padding: '4px 9px', borderRadius: 999, background: 'var(--border)', color: C.txt, fontSize: 11, fontWeight: 700 }}>
+            {brandFilter === 'all' ? 'Semua Brand' : brandFilter}
+          </span>
+        </div>
+
+        {monthlyRoasHistory.some(point => point.roas !== null) ? (
+          <div style={{ width: '100%', height: 280, marginTop: 18 }}>
+            <ResponsiveContainer>
+              <LineChart data={monthlyRoasHistory} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                <XAxis
+                  dataKey="label"
+                  tick={{ fill: 'var(--dim)', fontSize: 10 }}
+                  axisLine={{ stroke: 'var(--border)' }}
+                  tickLine={false}
+                  interval={0}
+                />
+                <YAxis
+                  tick={{ fill: 'var(--dim)', fontSize: 10 }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={38}
+                  domain={[0, (dataMax: number) => Math.max(1, Math.ceil(dataMax * 1.15))]}
+                  tickFormatter={(value: number) => `${value}x`}
+                />
+                <Tooltip content={<RoasHistoryTooltip />} cursor={{ stroke: 'var(--dim)', strokeDasharray: '3 3' }} />
+                <Line
+                  type="monotone"
+                  dataKey="roas"
+                  name="ROAS Gabungan"
+                  stroke={brandFilter === 'all' ? 'var(--accent)' : BRAND_COLORS[brandFilter] || 'var(--accent)'}
+                  strokeWidth={3}
+                  dot={{ r: 3, strokeWidth: 0 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.dim, fontSize: 12 }}>
+            Belum ada pasangan data net sales dan marketing spend untuk brand ini.
+          </div>
+        )}
       </div>
 
       {marketingChannelBreakdown.attention && (
