@@ -1243,98 +1243,96 @@ export default function MarketingPage() {
         </div>
 
         {monthlyRoasHistory.some(point => point.revenue > 0 || point.spend > 0) ? (
-          <div style={{ width: '100%', height: 300, marginTop: 18 }}>
-            <ResponsiveContainer>
-              <ComposedChart data={monthlyRoasHistory} barGap={2} margin={{ top: 30, right: 8, left: 0, bottom: 0 }}>
-                <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
-                <XAxis
-                  dataKey="label"
-                  tick={{ fill: 'var(--dim)', fontSize: 10 }}
-                  axisLine={{ stroke: 'var(--border)' }}
-                  tickLine={false}
-                  interval={0}
-                />
-                <YAxis
-                  yAxisId="roas"
-                  tick={{ fill: 'var(--dim)', fontSize: 10 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={38}
-                  domain={[0, (dataMax: number) => Math.max(1, Math.ceil(dataMax * 1.15))]}
-                  tickFormatter={(value: number) => `${value}x`}
-                />
-                <YAxis
-                  yAxisId="amount"
-                  orientation="right"
-                  tick={{ fill: 'var(--dim)', fontSize: 9 }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={58}
-                  domain={[0, (dataMax: number) => Math.max(1, dataMax * 1.15)]}
-                  tickFormatter={(value: number) => `Rp ${fmtCompact(value)}`}
-                />
-                <Tooltip content={<RoasHistoryTooltip />} cursor={{ stroke: 'var(--dim)', strokeDasharray: '3 3' }} />
-                <Bar
-                  yAxisId="amount"
-                  dataKey="revenue"
-                  name="Revenue"
-                  fill="#10b981"
-                  fillOpacity={0.28}
-                  maxBarSize={28}
-                  radius={[4, 4, 0, 0]}
-                >
-                  <LabelList
-                    dataKey="revenue"
-                    position="insideTop"
-                    offset={5}
-                    fill="var(--text)"
-                    fontSize={9}
-                    fontWeight={600}
-                    formatter={(value: number | null) => Number(value) > 0 ? `Rp ${fmtCompact(Number(value))}` : ''}
-                  />
-                </Bar>
-                <Bar
-                  yAxisId="amount"
-                  dataKey="spend"
-                  name="Marketing Spend"
-                  fill="#f59e0b"
-                  fillOpacity={0.32}
-                  maxBarSize={28}
-                  radius={[4, 4, 0, 0]}
-                >
-                  <LabelList
-                    dataKey="spend"
-                    position="insideTop"
-                    offset={5}
-                    fill="var(--text)"
-                    fontSize={9}
-                    fontWeight={600}
-                    formatter={(value: number | null) => Number(value) > 0 ? `Rp ${fmtCompact(Number(value))}` : ''}
-                  />
-                </Bar>
-                <Line
-                  yAxisId="roas"
-                  type="monotone"
-                  dataKey="roas"
-                  name="ROAS Gabungan"
-                  stroke={brandFilter === 'all' ? 'var(--accent)' : BRAND_COLORS[brandFilter] || 'var(--accent)'}
-                  strokeWidth={3}
-                  dot={{ r: 3, strokeWidth: 0 }}
-                  activeDot={{ r: 5 }}
-                  connectNulls={false}
-                >
-                  <LabelList
-                    dataKey="roas"
-                    position="top"
-                    offset={9}
-                    fill="var(--text)"
-                    fontSize={10}
-                    fontWeight={700}
-                    formatter={(value: number | null) => value == null ? '' : `${Number(value).toFixed(1)}x`}
-                  />
-                </Line>
-              </ComposedChart>
-            </ResponsiveContainer>
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', marginTop: 12, paddingBottom: 4 }}>
+            <div style={{ minWidth: 960 }}>
+              <div style={{ width: '100%', height: 280 }}>
+                <ResponsiveContainer>
+                  <ComposedChart data={monthlyRoasHistory} barGap={2} margin={{ top: 28, right: 8, left: 0, bottom: 0 }}>
+                    <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fill: 'var(--dim)', fontSize: 10 }}
+                      axisLine={{ stroke: 'var(--border)' }}
+                      tickLine={false}
+                      interval={0}
+                    />
+                    <YAxis
+                      yAxisId="roas"
+                      tick={{ fill: 'var(--dim)', fontSize: 10 }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={38}
+                      domain={[0, (dataMax: number) => Math.max(1, Math.ceil(dataMax * 1.15))]}
+                      tickFormatter={(value: number) => `${value}x`}
+                    />
+                    <YAxis
+                      yAxisId="amount"
+                      orientation="right"
+                      tick={{ fill: 'var(--dim)', fontSize: 9 }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={58}
+                      domain={[0, (dataMax: number) => Math.max(1, dataMax * 1.15)]}
+                      tickFormatter={(value: number) => `Rp ${fmtCompact(value)}`}
+                    />
+                    <Tooltip content={<RoasHistoryTooltip />} cursor={{ stroke: 'var(--dim)', strokeDasharray: '3 3' }} />
+                    <Bar
+                      yAxisId="amount"
+                      dataKey="revenue"
+                      name="Revenue"
+                      fill="#10b981"
+                      fillOpacity={0.28}
+                      maxBarSize={28}
+                      radius={[4, 4, 0, 0]}
+                    />
+                    <Bar
+                      yAxisId="amount"
+                      dataKey="spend"
+                      name="Marketing Spend"
+                      fill="#f59e0b"
+                      fillOpacity={0.32}
+                      maxBarSize={28}
+                      radius={[4, 4, 0, 0]}
+                    />
+                    <Line
+                      yAxisId="roas"
+                      type="monotone"
+                      dataKey="roas"
+                      name="ROAS Gabungan"
+                      stroke={brandFilter === 'all' ? 'var(--accent)' : BRAND_COLORS[brandFilter] || 'var(--accent)'}
+                      strokeWidth={3}
+                      dot={{ r: 3, strokeWidth: 0 }}
+                      activeDot={{ r: 5 }}
+                      connectNulls={false}
+                    >
+                      <LabelList
+                        dataKey="roas"
+                        position="top"
+                        offset={9}
+                        fill="var(--text)"
+                        stroke="var(--card)"
+                        strokeWidth={3}
+                        paintOrder="stroke"
+                        fontSize={10}
+                        fontWeight={700}
+                        formatter={(value: number | null) => value == null ? '' : `${Number(value).toFixed(1)}x`}
+                      />
+                    </Line>
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: `repeat(${monthlyRoasHistory.length}, minmax(0, 1fr))`, paddingLeft: 38, paddingRight: 58, marginTop: 8 }}>
+                {monthlyRoasHistory.map((point, index) => (
+                  <div key={point.month} style={{ minWidth: 0, padding: '8px 4px', textAlign: 'center', borderLeft: index === 0 ? 'none' : `1px solid ${C.bdr}` }}>
+                    <div style={{ color: C.dim, fontSize: 9, fontWeight: 700, textTransform: 'uppercase' }}>{point.label}</div>
+                    <div style={{ color: C.txt, fontSize: 11, fontWeight: 800, marginTop: 5 }}>{point.roas == null ? '—' : `${point.roas.toFixed(1)}x`}</div>
+                    <div style={{ color: '#10b981', fontSize: 9, fontWeight: 700, marginTop: 4, whiteSpace: 'nowrap' }}>Rev {point.revenue > 0 ? fmtCompact(point.revenue) : '—'}</div>
+                    <div style={{ color: '#f59e0b', fontSize: 9, fontWeight: 700, marginTop: 3, whiteSpace: 'nowrap' }}>Spend {point.spend > 0 ? fmtCompact(point.spend) : '—'}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         ) : (
           <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.dim, fontSize: 12 }}>
