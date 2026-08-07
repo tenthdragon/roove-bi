@@ -10,10 +10,11 @@ import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { buildBrandColorMap } from '@/lib/utils';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import {
+  Bar,
   CartesianGrid,
+  ComposedChart,
   LabelList,
   Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -1226,11 +1227,21 @@ export default function MarketingPage() {
             {brandFilter === 'all' ? 'Semua Brand' : brandFilter}
           </span>
         </div>
+        <div style={{ display: 'flex', gap: 16, alignItems: 'center', marginTop: 12, color: C.dim, fontSize: 10, fontWeight: 600 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 18, height: 3, borderRadius: 2, background: brandFilter === 'all' ? 'var(--accent)' : BRAND_COLORS[brandFilter] || 'var(--accent)' }} />
+            ROAS Gabungan
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b', opacity: 0.65 }} />
+            Marketing Spend
+          </span>
+        </div>
 
         {monthlyRoasHistory.some(point => point.roas !== null) ? (
           <div style={{ width: '100%', height: 280, marginTop: 18 }}>
             <ResponsiveContainer>
-              <LineChart data={monthlyRoasHistory} margin={{ top: 26, right: 18, left: 0, bottom: 0 }}>
+              <ComposedChart data={monthlyRoasHistory} margin={{ top: 30, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
                 <XAxis
                   dataKey="label"
@@ -1240,6 +1251,7 @@ export default function MarketingPage() {
                   interval={0}
                 />
                 <YAxis
+                  yAxisId="roas"
                   tick={{ fill: 'var(--dim)', fontSize: 10 }}
                   axisLine={false}
                   tickLine={false}
@@ -1247,8 +1259,38 @@ export default function MarketingPage() {
                   domain={[0, (dataMax: number) => Math.max(1, Math.ceil(dataMax * 1.15))]}
                   tickFormatter={(value: number) => `${value}x`}
                 />
+                <YAxis
+                  yAxisId="spend"
+                  orientation="right"
+                  tick={{ fill: 'var(--dim)', fontSize: 9 }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={58}
+                  domain={[0, (dataMax: number) => Math.max(1, dataMax * 1.15)]}
+                  tickFormatter={(value: number) => `Rp ${fmtCompact(value)}`}
+                />
                 <Tooltip content={<RoasHistoryTooltip />} cursor={{ stroke: 'var(--dim)', strokeDasharray: '3 3' }} />
+                <Bar
+                  yAxisId="spend"
+                  dataKey="spend"
+                  name="Marketing Spend"
+                  fill="#f59e0b"
+                  fillOpacity={0.32}
+                  maxBarSize={38}
+                  radius={[4, 4, 0, 0]}
+                >
+                  <LabelList
+                    dataKey="spend"
+                    position="insideTop"
+                    offset={5}
+                    fill="var(--text)"
+                    fontSize={9}
+                    fontWeight={600}
+                    formatter={(value: number | null) => Number(value) > 0 ? `Rp ${fmtCompact(Number(value))}` : ''}
+                  />
+                </Bar>
                 <Line
+                  yAxisId="roas"
                   type="monotone"
                   dataKey="roas"
                   name="ROAS Gabungan"
@@ -1268,7 +1310,7 @@ export default function MarketingPage() {
                     formatter={(value: number | null) => value == null ? '' : `${Number(value).toFixed(1)}x`}
                   />
                 </Line>
-              </LineChart>
+              </ComposedChart>
             </ResponsiveContainer>
           </div>
         ) : (
