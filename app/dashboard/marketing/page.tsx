@@ -1218,7 +1218,7 @@ export default function MarketingPage() {
       <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: 16, marginBottom: 20 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>Historis ROAS Gabungan</div>
+            <div style={{ fontSize: 15, fontWeight: 700 }}>Historis ROAS, Revenue & Marketing Spend</div>
             <div style={{ fontSize: 11, color: C.dim, marginTop: 4 }}>
               Net Sales ÷ seluruh marketing spend per bulan · 12 bulan hingga {new Date(`${dateRange.to}T00:00:00`).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
             </div>
@@ -1233,15 +1233,19 @@ export default function MarketingPage() {
             ROAS Gabungan
           </span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 10, height: 10, borderRadius: 2, background: '#10b981', opacity: 0.65 }} />
+            Revenue
+          </span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 10, height: 10, borderRadius: 2, background: '#f59e0b', opacity: 0.65 }} />
             Marketing Spend
           </span>
         </div>
 
-        {monthlyRoasHistory.some(point => point.roas !== null) ? (
-          <div style={{ width: '100%', height: 280, marginTop: 18 }}>
+        {monthlyRoasHistory.some(point => point.revenue > 0 || point.spend > 0) ? (
+          <div style={{ width: '100%', height: 300, marginTop: 18 }}>
             <ResponsiveContainer>
-              <ComposedChart data={monthlyRoasHistory} margin={{ top: 30, right: 8, left: 0, bottom: 0 }}>
+              <ComposedChart data={monthlyRoasHistory} barGap={2} margin={{ top: 30, right: 8, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
                 <XAxis
                   dataKey="label"
@@ -1260,7 +1264,7 @@ export default function MarketingPage() {
                   tickFormatter={(value: number) => `${value}x`}
                 />
                 <YAxis
-                  yAxisId="spend"
+                  yAxisId="amount"
                   orientation="right"
                   tick={{ fill: 'var(--dim)', fontSize: 9 }}
                   axisLine={false}
@@ -1271,12 +1275,31 @@ export default function MarketingPage() {
                 />
                 <Tooltip content={<RoasHistoryTooltip />} cursor={{ stroke: 'var(--dim)', strokeDasharray: '3 3' }} />
                 <Bar
-                  yAxisId="spend"
+                  yAxisId="amount"
+                  dataKey="revenue"
+                  name="Revenue"
+                  fill="#10b981"
+                  fillOpacity={0.28}
+                  maxBarSize={28}
+                  radius={[4, 4, 0, 0]}
+                >
+                  <LabelList
+                    dataKey="revenue"
+                    position="insideTop"
+                    offset={5}
+                    fill="var(--text)"
+                    fontSize={9}
+                    fontWeight={600}
+                    formatter={(value: number | null) => Number(value) > 0 ? `Rp ${fmtCompact(Number(value))}` : ''}
+                  />
+                </Bar>
+                <Bar
+                  yAxisId="amount"
                   dataKey="spend"
                   name="Marketing Spend"
                   fill="#f59e0b"
                   fillOpacity={0.32}
-                  maxBarSize={38}
+                  maxBarSize={28}
                   radius={[4, 4, 0, 0]}
                 >
                   <LabelList
