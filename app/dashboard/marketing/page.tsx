@@ -11,6 +11,7 @@ import { buildBrandColorMap } from '@/lib/utils';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import {
   CartesianGrid,
+  LabelList,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -1229,7 +1230,7 @@ export default function MarketingPage() {
         {monthlyRoasHistory.some(point => point.roas !== null) ? (
           <div style={{ width: '100%', height: 280, marginTop: 18 }}>
             <ResponsiveContainer>
-              <LineChart data={monthlyRoasHistory} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+              <LineChart data={monthlyRoasHistory} margin={{ top: 26, right: 18, left: 0, bottom: 0 }}>
                 <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
                 <XAxis
                   dataKey="label"
@@ -1256,7 +1257,17 @@ export default function MarketingPage() {
                   dot={{ r: 3, strokeWidth: 0 }}
                   activeDot={{ r: 5 }}
                   connectNulls={false}
-                />
+                >
+                  <LabelList
+                    dataKey="roas"
+                    position="top"
+                    offset={9}
+                    fill="var(--text)"
+                    fontSize={10}
+                    fontWeight={700}
+                    formatter={(value: number | null) => value == null ? '' : `${Number(value).toFixed(1)}x`}
+                  />
+                </Line>
               </LineChart>
             </ResponsiveContainer>
           </div>
