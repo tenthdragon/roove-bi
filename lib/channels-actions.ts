@@ -2,6 +2,7 @@
 
 import { requireDashboardTabAccess } from './dashboard-access';
 import { createServiceSupabase } from './supabase-server';
+import { getDailyShipmentCounts } from './shipment-count-data';
 import { getShippingFeeRange } from './shipping-fee-data';
 
 interface ChannelsPageDataParams {
@@ -69,11 +70,9 @@ export async function getChannelsPageData({
     svc.from('ads_store_brand_mapping')
       .select('store_pattern, brand, brand_id')
       .eq('workspace_id', workspaceId),
-    svc.rpc('get_workspace_daily_shipment_counts', {
-      p_workspace_id: workspaceId,
-      p_from: from,
-      p_to: to,
-    }),
+    getDailyShipmentCounts(workspaceId, from, to)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: { message: error.message } })),
     svc.from('daily_channel_data')
       .select('date, product, channel, net_sales, gross_profit, mp_admin_cost')
       .eq('workspace_id', workspaceId)
@@ -91,6 +90,7 @@ export async function getChannelsPageData({
 
   const shipping = unwrapOptional(shippingRes, 'Gagal memuat shipping fee Sales Channel');
   const prevShipping = unwrapOptional(prevShippingRes, 'Gagal memuat shipping fee bulan sebelumnya');
+  const shipment = unwrapOptional(shipmentRes, 'Gagal memuat data shipment Sales Channel');
 
   return {
     channel: unwrap(channelRes, 'Gagal memuat data Sales Channel'),
@@ -98,7 +98,8 @@ export async function getChannelsPageData({
     shipping: shipping.data,
     shippingError: shipping.error,
     brandMapping: unwrap(mappingRes, 'Gagal memuat mapping brand iklan'),
-    shipmentCounts: unwrap(shipmentRes, 'Gagal memuat data shipment Sales Channel'),
+    shipmentCounts: shipment.data,
+    shipmentError: shipment.error,
     prevChannel: unwrap(prevChannelRes, 'Gagal memuat channel bulan sebelumnya'),
     prevAds: unwrap(prevAdsRes, 'Gagal memuat ads bulan sebelumnya'),
     prevShipping: prevShipping.data,

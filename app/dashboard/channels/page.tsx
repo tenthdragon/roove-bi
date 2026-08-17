@@ -94,6 +94,7 @@ export default function ChannelsPage() {
   const [prevShippingData, setPrevShippingData] = useState<any[]>([]);
   const [shippingError, setShippingError] = useState('');
   const [prevShippingError, setPrevShippingError] = useState('');
+  const [shipmentError, setShipmentError] = useState('');
   const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
 
   useEffect(() => {
@@ -116,6 +117,7 @@ export default function ChannelsPage() {
       setPrevShippingData((cached.prevShipping || []).filter(row => isActiveBrand(row.product)));
       setShippingError(cached.shippingError || '');
       setPrevShippingError(cached.prevShippingError || '');
+      setShipmentError(cached.shipmentError || '');
       setError('');
       setLoading(false);
       return;
@@ -124,11 +126,14 @@ export default function ChannelsPage() {
     let cancelled = false;
     setLoading(true);
     setError('');
+    setShipmentError('');
 
     getChannelsPageData({ from, to, prevFrom: pf, prevTo: pt })
       .then((data) => {
         if (cancelled) return;
-        setCache('channels_page_data_v7_workspace', from, to, data, cacheExtra);
+        if (!data.shipmentError) {
+          setCache('channels_page_data_v7_workspace', from, to, data, cacheExtra);
+        }
         setChannelData(data.channel.filter(row => isActiveBrand(row.product)));
         setAdsData(data.ads);
         setShippingData(data.shipping.filter(row => isActiveBrand(row.product)));
@@ -139,6 +144,7 @@ export default function ChannelsPage() {
         setPrevShippingData(data.prevShipping.filter(row => isActiveBrand(row.product)));
         setShippingError(data.shippingError || '');
         setPrevShippingError(data.prevShippingError || '');
+        setShipmentError(data.shipmentError || '');
         setError('');
         setLoading(false);
       })
@@ -155,6 +161,7 @@ export default function ChannelsPage() {
         setPrevShippingData([]);
         setShippingError('');
         setPrevShippingError('');
+        setShipmentError('');
         setError(e?.message || 'Gagal memuat data Sales Channel.');
         setLoading(false);
       });
@@ -728,6 +735,11 @@ export default function ChannelsPage() {
 
   return (
     <div className="fade-in">
+      {shipmentError && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(146,64,14,0.45)', background: 'rgba(120,53,15,0.12)', color: '#fcd34d', fontSize: 12 }}>
+          Data shipment sementara tidak tersedia. Data sales channel lainnya tetap ditampilkan.
+        </div>
+      )}
       {/* Header + Product Filter */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
         <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Channel</h2>

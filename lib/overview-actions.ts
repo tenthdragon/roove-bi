@@ -3,6 +3,7 @@
 import { unstable_cache } from 'next/cache';
 import { createServiceSupabase } from './supabase-server';
 import { requireDashboardTabAccess } from './dashboard-access';
+import { getDailyShipmentCounts } from './shipment-count-data';
 import { getShippingFeeRange } from './shipping-fee-data';
 
 interface OverviewFeeDataParams {
@@ -207,11 +208,9 @@ export async function getOverviewCoreData({
       .gte('date', from)
       .lte('date', to)
       .order('date'),
-    svc.rpc('get_workspace_daily_shipment_counts', {
-      p_workspace_id: workspaceId,
-      p_from: from,
-      p_to: to,
-    }),
+    getDailyShipmentCounts(workspaceId, from, to)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: { message: error.message } })),
     svc.rpc('get_workspace_monthly_overhead', {
       p_workspace_id: workspaceId,
       p_date_from: from,
@@ -230,9 +229,12 @@ export async function getOverviewCoreData({
     }),
   ]);
 
+  const shipment = unwrapOptional(shipmentRes, 'Gagal memuat shipment Overview');
+
   return {
     daily: unwrap(dailyRes, 'Gagal memuat data Overview'),
-    shipment: unwrap(shipmentRes, 'Gagal memuat shipment Overview'),
+    shipment: shipment.data,
+    shipmentError: shipment.error,
     overhead: unwrap(overheadRes, 'Gagal memuat overhead Overview'),
     prevDaily: unwrap(prevDailyRes, 'Gagal memuat data Overview bulan sebelumnya'),
     prevOverhead: unwrap(prevOverheadRes, 'Gagal memuat overhead Overview bulan sebelumnya'),
@@ -327,11 +329,9 @@ export async function getOverviewPageData({
       .gte('date', from)
       .lte('date', to)
       .order('date'),
-    svc.rpc('get_workspace_daily_shipment_counts', {
-      p_workspace_id: workspaceId,
-      p_from: from,
-      p_to: to,
-    }),
+    getDailyShipmentCounts(workspaceId, from, to)
+      .then((data) => ({ data, error: null }))
+      .catch((error: Error) => ({ data: [], error: { message: error.message } })),
     svc.rpc('get_workspace_monthly_overhead', {
       p_workspace_id: workspaceId,
       p_date_from: from,
@@ -386,6 +386,7 @@ export async function getOverviewPageData({
   const prevAds = unwrapOptional(prevAdsRes, 'Gagal memuat marketing fee bulan sebelumnya');
   const prevChannel = unwrapOptional(prevChannelRes, 'Gagal memuat MP fee bulan sebelumnya');
   const prevShipping = unwrapOptional(prevShippingRes, 'Gagal memuat shipping fee bulan sebelumnya');
+  const shipment = unwrapOptional(shipmentRes, 'Gagal memuat shipment Overview');
   const financialTargets = unwrap(
     financialTargetsRes,
     'Gagal memuat target finansial workspace',
@@ -398,7 +399,8 @@ export async function getOverviewPageData({
     .sort((a, b) => String(b.effective_from).localeCompare(String(a.effective_from)))[0];
   return {
     daily: unwrap(dailyRes, 'Gagal memuat data Overview'),
-    shipment: unwrap(shipmentRes, 'Gagal memuat shipment Overview'),
+    shipment: shipment.data,
+    shipmentError: shipment.error,
     overhead: unwrap(overheadRes, 'Gagal memuat overhead Overview'),
     prevDaily: unwrap(prevDailyRes, 'Gagal memuat data Overview bulan sebelumnya'),
     prevOverhead: unwrap(prevOverheadRes, 'Gagal memuat overhead Overview bulan sebelumnya'),

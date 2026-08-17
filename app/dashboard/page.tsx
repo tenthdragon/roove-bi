@@ -111,6 +111,7 @@ export default function OverviewPage() {
   const [prevFeeError, setPrevFeeError] = useState('');
   const [shippingError, setShippingError] = useState('');
   const [prevShippingError, setPrevShippingError] = useState('');
+  const [shipmentError, setShipmentError] = useState('');
   const { activeBrands, loading: activeBrandsLoading, error: activeBrandsError, isActiveBrand } = useActiveBrands();
   const [showDetail, setShowDetail] = useState(false);
   const [showTren, setShowTren] = useState(true);
@@ -224,6 +225,7 @@ export default function OverviewPage() {
       setPrevFeeError(cached.prevFeeError || '');
       setShippingError(cached.shippingError || '');
       setPrevShippingError(cached.prevShippingError || '');
+      setShipmentError(cached.shipmentError || '');
       setLoadError('');
       setLoading(false);
       return;
@@ -236,6 +238,7 @@ export default function OverviewPage() {
     setPrevFeeError('');
     setShippingError('');
     setPrevShippingError('');
+    setShipmentError('');
     setCm3HistoryData(null);
 
     getOverviewPageData({
@@ -246,7 +249,9 @@ export default function OverviewPage() {
     })
       .then((data) => {
         if (cancelled) return;
-        setCache('overview_page_data_v8_workspace', dateRange.from, dateRange.to, data, cacheExtra);
+        if (!data.shipmentError) {
+          setCache('overview_page_data_v8_workspace', dateRange.from, dateRange.to, data, cacheExtra);
+        }
         setDailyData(data.daily || []);
         setShipmentData(data.shipment || []);
         setOverheadData(data.overhead || []);
@@ -262,6 +267,7 @@ export default function OverviewPage() {
         setPrevFeeError(data.prevFeeError || '');
         setShippingError(data.shippingError || '');
         setPrevShippingError(data.prevShippingError || '');
+        setShipmentError(data.shipmentError || '');
         setLoadError('');
         setLoading(false);
       })
@@ -285,6 +291,7 @@ export default function OverviewPage() {
         setPrevFeeError('');
         setShippingError('');
         setPrevShippingError('');
+        setShipmentError('');
         setLoading(false);
       });
 
@@ -685,6 +692,11 @@ export default function OverviewPage() {
           Data biaya marketing gagal dimuat penuh: {feeError}
         </div>
       )}
+      {shipmentError && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(146,64,14,0.45)', background: 'rgba(120,53,15,0.12)', color: '#fcd34d', fontSize: 12 }}>
+          Data shipment sementara tidak tersedia. KPI finansial lainnya tetap ditampilkan.
+        </div>
+      )}
 
       {/* ── KPI Cards ── */}
       {(() => {
@@ -736,7 +748,7 @@ export default function OverviewPage() {
         const afterOhUnavailable = cm3Unavailable || !kpi.hasOverhead;
         return (
           <div style={{ display:'grid', gridTemplateColumns:cols, gap:10, marginBottom:16 }}>
-            <Card label="Net Sales" value={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg Rp ${fmtCompact(kpi.avg)}/hari · ${kpi.tShipment.toLocaleString('id-ID')} shipment`} color="var(--accent)" deltaVal={dNs} />
+            <Card label="Net Sales" value={`Rp ${fmtCompact(kpi.ts)}`} sub={`Avg Rp ${fmtCompact(kpi.avg)}/hari · ${shipmentError ? 'Shipment tidak tersedia' : `${kpi.tShipment.toLocaleString('id-ID')} shipment`}`} color="var(--accent)" deltaVal={dNs} />
             <Card label={`CM1 · ${kpi.gpM.toFixed(1)}%`} value={`Rp ${fmtCompact(kpi.tg)}`} sub={`Gross profit · COGS ${cogsPct}%`} color="var(--green)" deltaVal={dCm1} marginDelta={dCm1Margin} marginLabel="CM1%" />
             <Card label={`CM2 · ${kpi.cm2M.toFixed(1)}%`} value={cm2Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm2)}`} sub={cm2Unavailable ? 'MP / shipping data belum lengkap' : `MP + shipping ${channelLogisticsPct}%`} color={cm2Color} deltaVal={cm2Unavailable ? null : dCm2} marginDelta={cm2Unavailable ? null : dCm2Margin} marginLabel="CM2%" />
             <Card label={`CM3 · ${kpi.cm3M.toFixed(1)}%`} value={cm3Unavailable ? '—' : `Rp ${fmtCompact(kpi.tCm3)}`} sub={cm3Unavailable ? 'Marketing/channel data belum lengkap' : 'Setelah biaya marketing'} color={cm3Color} deltaVal={cm3Unavailable ? null : dCm3} marginDelta={cm3Unavailable ? null : dCm3Margin} marginLabel="CM3%" />
