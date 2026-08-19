@@ -1,6 +1,6 @@
 export type FinancialTargetConfig = {
   target_operating_profit: number | string;
-  planned_cm3_margin: number | string;
+  planned_cm3_margin?: number | string | null;
   target_revenue_override?: number | string | null;
 };
 
@@ -26,33 +26,32 @@ export function calculateProfitabilityTarget(input: {
   const targetOperatingProfit = targetConfigured
     ? Number(input.target!.target_operating_profit || 0)
     : null;
-  const plannedCm3Margin = targetConfigured
-    ? Number(input.target!.planned_cm3_margin || 0)
-    : null;
-  const targetRevenueOverride = targetConfigured
-    && input.target!.target_revenue_override != null
-    ? Number(input.target!.target_revenue_override)
-    : null;
   const targetCm3 = targetConfigured
     ? monthlyOverhead + targetOperatingProfit!
     : null;
-  const minimumRevenue = targetConfigured && plannedCm3Margin! > 0
-    ? targetRevenueOverride ?? targetCm3! / plannedCm3Margin!
+  const configuredCm3Margin = targetConfigured
+    ? Number(input.target!.planned_cm3_margin || 0)
+    : 0;
+  const revenueCm3Margin = Number.isFinite(configuredCm3Margin) && configuredCm3Margin > 0
+    ? configuredCm3Margin
     : null;
-  const targetRevenueToDate = targetConfigured
-    ? minimumRevenue! * input.actualDay / Math.max(1, input.daysInMonth)
+  const minimumRevenue = targetConfigured && revenueCm3Margin != null
+    ? targetCm3! / revenueCm3Margin
+    : null;
+  const targetRevenueToDate = minimumRevenue != null
+    ? minimumRevenue * input.actualDay / Math.max(1, input.daysInMonth)
     : null;
   const targetCm3ToDate = targetConfigured
     ? targetCm3! * input.actualDay / Math.max(1, input.daysInMonth)
     : null;
-  const revenueTargetProgress = targetConfigured && minimumRevenue! > 0
-    ? currentRevenue / minimumRevenue!
+  const revenueTargetProgress = minimumRevenue != null && minimumRevenue > 0
+    ? currentRevenue / minimumRevenue
     : null;
   const cm3TargetProgress = targetConfigured && targetCm3! > 0
     ? currentCm3 / targetCm3!
     : null;
-  const requiredDaily = targetConfigured
-    ? Math.max(0, minimumRevenue! - currentRevenue)
+  const requiredDaily = minimumRevenue != null
+    ? Math.max(0, minimumRevenue - currentRevenue)
       / Math.max(1, input.daysInMonth - input.actualDay)
     : null;
   const requiredCm3MarginAtProjection = targetConfigured && projectedRevenue > 0
@@ -76,8 +75,7 @@ export function calculateProfitabilityTarget(input: {
     projectedProfit,
     targetConfigured,
     targetOperatingProfit,
-    plannedCm3Margin,
-    targetRevenueOverride,
+    revenueCm3Margin,
     targetCm3,
     minimumRevenue,
     targetRevenueToDate,

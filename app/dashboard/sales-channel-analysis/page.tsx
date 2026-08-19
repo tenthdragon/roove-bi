@@ -310,8 +310,7 @@ export default function RevenueRunRatePage() {
       projectedProfit,
       targetConfigured,
       targetOperatingProfit,
-      plannedCm3Margin,
-      targetRevenueOverride,
+      revenueCm3Margin,
       targetCm3,
       minimumRevenue,
       requiredCm3MarginAtProjection,
@@ -554,9 +553,7 @@ export default function RevenueRunRatePage() {
       projectedProfit,
       targetConfigured,
       targetOperatingProfit,
-      plannedCm3Margin,
-      targetRevenueOverride,
-      financialTargetSource: data.financialTargetSource || 'unconfigured',
+      revenueCm3Margin,
       prevRevenueFull,
       prevCm3Full,
       prevProfitFull,
@@ -633,13 +630,13 @@ export default function RevenueRunRatePage() {
         ? { label: 'On track terhadap target laba', tone: 'green' }
         : { label: 'Di bawah target laba', tone: 'red' };
   const projectedVsPrevious = analysis.prevRevenueFull > 0 ? analysis.forecastGap / analysis.prevRevenueFull * 100 : 0;
-  const revenuePaceDelta = analysis.targetConfigured
+  const revenuePaceDelta = analysis.targetRevenueToDate != null
     ? analysis.currentRevenue - analysis.targetRevenueToDate
     : null;
   const cm3PaceDelta = analysis.targetConfigured
     ? analysis.currentCm3 - analysis.targetCm3ToDate
     : null;
-  const forecastTargetDelta = analysis.targetConfigured
+  const forecastTargetDelta = analysis.minimumRevenue != null
     ? analysis.projectedRevenue - analysis.minimumRevenue
     : null;
   const statusColor = financialStatus.tone === 'green'
@@ -676,8 +673,10 @@ export default function RevenueRunRatePage() {
           label="Actual Revenue"
           value={`Rp ${fmtCompact(analysis.currentRevenue)}`}
           sub={analysis.targetConfigured
-            ? analysis.revenueTargetProgress == null
-              ? `Target bulanan Rp ${fmtCompact(analysis.minimumRevenue)}`
+            ? analysis.minimumRevenue == null
+              ? 'Target revenue menunggu weighted margin CM3 positif'
+              : analysis.revenueTargetProgress == null
+                ? `Target bulanan Rp ${fmtCompact(analysis.minimumRevenue)}`
               : `${(analysis.revenueTargetProgress * 100).toFixed(1)}% dari target bulanan Rp ${fmtCompact(analysis.minimumRevenue)}`
             : 'Target profitabilitas bulan ini belum diatur'}
           tone={revenuePaceDelta == null ? 'var(--dim)' : revenuePaceDelta >= 0 ? 'var(--green)' : 'var(--red)'}
@@ -698,15 +697,17 @@ export default function RevenueRunRatePage() {
         />
         <KpiCard
           label="Target Revenue"
-          value={analysis.targetConfigured ? `Rp ${fmtCompact(analysis.minimumRevenue)}` : '—'}
-          sub={analysis.targetConfigured
-            ? `Berdasarkan target laba Rp ${fmtCompact(analysis.targetOperatingProfit)} dan CM3 ${(analysis.plannedCm3Margin * 100).toFixed(1)}%`
-            : 'Atur target laba dan margin CM3 di Financial Settings'}
+          value={analysis.minimumRevenue != null ? `Rp ${fmtCompact(analysis.minimumRevenue)}` : '—'}
+          sub={!analysis.targetConfigured
+            ? 'Atur target laba di Financial Settings'
+            : analysis.revenueCm3Margin == null
+              ? 'Belum dapat dihitung karena weighted margin CM3 belum positif'
+              : `Otomatis dari target laba Rp ${fmtCompact(analysis.targetOperatingProfit)} dan weighted margin CM3 ${(analysis.revenueCm3Margin * 100).toFixed(1)}%`}
           tone={!analysis.targetConfigured ? 'var(--dim)' : !unitEconomicsHealthy ? 'var(--red)' : onTrack ? 'var(--green)' : 'var(--yellow)'}
-          badge={!analysis.targetConfigured ? 'Belum diatur' : analysis.targetRevenueOverride != null ? 'Override' : analysis.financialTargetSource === 'monthly' ? 'Formula bulanan' : 'Formula default'}
+          badge={!analysis.targetConfigured ? 'Belum diatur' : analysis.minimumRevenue == null ? 'Menunggu CM3' : 'Otomatis'}
           delta={forecastTargetDelta == null ? null : `Rp ${fmtCompact(Math.abs(forecastTargetDelta))}`}
           deltaPositive={forecastTargetDelta != null && forecastTargetDelta >= 0}
-          deltaContext={forecastTargetDelta >= 0 ? 'forecast surplus' : 'forecast shortfall'}
+          deltaContext={forecastTargetDelta != null && forecastTargetDelta >= 0 ? 'forecast surplus' : 'forecast shortfall'}
         />
         <KpiCard
           label="CM3 vs Target"
@@ -959,9 +960,9 @@ export default function RevenueRunRatePage() {
           <div style={{ fontSize:13, fontWeight:700, marginBottom:12 }}>Kebutuhan Sisa Bulan</div>
           <div style={{ display:'grid', gap:10 }}>
             {[
-              ['Sisa revenue menuju target', analysis.targetConfigured ? Math.max(0, analysis.minimumRevenue - analysis.currentRevenue) : null],
+              ['Sisa revenue menuju target', analysis.minimumRevenue != null ? Math.max(0, analysis.minimumRevenue - analysis.currentRevenue) : null],
               ['Kebutuhan rata-rata per hari tersisa', analysis.requiredDaily],
-              ['Gap prediksi vs target revenue', analysis.targetConfigured ? analysis.projectedRevenue - analysis.minimumRevenue : null],
+              ['Gap prediksi vs target revenue', analysis.minimumRevenue != null ? analysis.projectedRevenue - analysis.minimumRevenue : null],
             ].map(([label, value]: any) => (
               <div key={label} style={{ display:'flex', justifyContent:'space-between', gap:12, paddingBottom:9, borderBottom:'1px solid var(--border)' }}>
                 <span style={{ color:'var(--dim)', fontSize:10 }}>{label}</span>
@@ -983,8 +984,8 @@ export default function RevenueRunRatePage() {
             {!unitEconomicsHealthy
               ? 'Setiap tambahan revenue pada margin saat ini menambah kerugian CM3. Perbaiki unit economics sebelum mengejar volume.'
               : analysis.targetConfigured
-                ? <>Target margin CM3 rencana <strong style={{ color:analysis.currentCm3Margin >= analysis.plannedCm3Margin ? 'var(--green)' : 'var(--yellow)' }}>{(analysis.plannedCm3Margin * 100).toFixed(1)}%</strong>. Forecast laba <strong style={{ color:onTrack ? 'var(--green)' : 'var(--red)' }}>Rp {fmtCompact(analysis.projectedProfit)}</strong> dari target Rp {fmtCompact(analysis.targetOperatingProfit)}.</>
-                : 'Target margin CM3 dan laba operasional belum dikonfigurasi di Financial Settings.'}
+                ? <>Margin CM3 berjalan <strong style={{ color:'var(--green)' }}>{(analysis.currentCm3Margin * 100).toFixed(1)}%</strong>; target revenue memakai weighted margin 3 bulan <strong style={{ color:'var(--text)' }}>{analysis.revenueCm3Margin == null ? '—' : `${(analysis.revenueCm3Margin * 100).toFixed(1)}%`}</strong>. Forecast laba <strong style={{ color:onTrack ? 'var(--green)' : 'var(--red)' }}>Rp {fmtCompact(analysis.projectedProfit)}</strong> dari target Rp {fmtCompact(analysis.targetOperatingProfit)}.</>
+                : 'Target laba operasional belum dikonfigurasi di Financial Settings.'}
           </div>
         </div>
       </div>

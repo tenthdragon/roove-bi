@@ -12,16 +12,15 @@ test('negative CM3 is never on track, even with a configured target', () => {
     daysInMonth: 31,
     target: {
       target_operating_profit: 0,
-      planned_cm3_margin: 0.25,
     },
   });
 
   assert.equal(result.status, 'negative_unit_economics');
   assert.equal(result.onTrack, false);
-  assert.equal(result.minimumRevenue, 0);
+  assert.equal(result.minimumRevenue, null);
 });
 
-test('revenue target uses planned margin instead of negative actual margin', () => {
+test('weighted CM3 margin keeps the revenue target available when current CM3 is negative', () => {
   const result = calculateProfitabilityTarget({
     currentRevenue: 72_200_000,
     currentCm3: -5_400_000,
@@ -56,7 +55,7 @@ test('positive unit economics without configuration is neutral, not on track', (
   assert.equal(result.minimumRevenue, null);
 });
 
-test('forecast profit determines on-track status', () => {
+test('forecast profit uses current performance while revenue target uses the weighted CM3 margin', () => {
   const result = calculateProfitabilityTarget({
     currentRevenue: 100_000_000,
     currentCm3: 30_000_000,
@@ -66,30 +65,13 @@ test('forecast profit determines on-track status', () => {
     daysInMonth: 30,
     target: {
       target_operating_profit: 50_000_000,
-      planned_cm3_margin: 0.30,
+      planned_cm3_margin: 0.25,
     },
   });
 
   assert.equal(result.projectedProfit, 50_000_000);
   assert.equal(result.status, 'on_track');
   assert.equal(result.onTrack, true);
-  assert.equal(result.minimumRevenue, 300_000_000);
-});
-
-test('management revenue override wins over formula revenue', () => {
-  const result = calculateProfitabilityTarget({
-    currentRevenue: 100_000_000,
-    currentCm3: 30_000_000,
-    projectedRevenue: 200_000_000,
-    monthlyOverhead: 20_000_000,
-    actualDay: 15,
-    daysInMonth: 30,
-    target: {
-      target_operating_profit: 30_000_000,
-      planned_cm3_margin: 0.25,
-      target_revenue_override: 250_000_000,
-    },
-  });
-
-  assert.equal(result.minimumRevenue, 250_000_000);
+  assert.equal(result.minimumRevenue, 360_000_000);
+  assert.equal(result.revenueCm3Margin, 0.25);
 });

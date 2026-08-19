@@ -14,15 +14,11 @@ type TargetScope = 'default' | 'month';
 
 type TargetForm = {
   targetOperatingProfit: string;
-  plannedCm3MarginPercent: string;
-  targetRevenueOverride: string;
   notes: string;
 };
 
 const EMPTY_FORM: TargetForm = {
   targetOperatingProfit: '0',
-  plannedCm3MarginPercent: '',
-  targetRevenueOverride: '',
   notes: '',
 };
 
@@ -31,6 +27,18 @@ const rupiah = new Intl.NumberFormat('id-ID', {
   currency: 'IDR',
   maximumFractionDigits: 0,
 });
+
+const shortMonth = new Intl.DateTimeFormat('id-ID', {
+  month: 'short',
+  year: '2-digit',
+  timeZone: 'UTC',
+});
+
+function formatShortMonth(value?: string) {
+  return value
+    ? shortMonth.format(new Date(`${value}T00:00:00Z`))
+    : '—';
+}
 
 const inputStyle = {
   width: '100%',
@@ -60,10 +68,6 @@ function targetToForm(target: WorkspaceFinancialTarget | null): TargetForm {
   if (!target) return EMPTY_FORM;
   return {
     targetOperatingProfit: String(target.target_operating_profit),
-    plannedCm3MarginPercent: String(Number((target.planned_cm3_margin * 100).toFixed(4))),
-    targetRevenueOverride: target.target_revenue_override == null
-      ? ''
-      : String(target.target_revenue_override),
     notes: target.notes || '',
   };
 }
@@ -112,18 +116,14 @@ export default function FinancialTargetManager() {
 
   const preview = useMemo(() => {
     const profit = Number(form.targetOperatingProfit || 0);
-    const margin = Number(form.plannedCm3MarginPercent || 0) / 100;
-    const override = form.targetRevenueOverride.trim()
-      ? Number(form.targetRevenueOverride)
-      : null;
+    const margin = settings?.weightedCm3Margin ?? null;
     const requiredCm3 = Number(settings?.monthlyOverhead || 0) + (Number.isFinite(profit) ? profit : 0);
-    const derivedRevenue = margin > 0 ? requiredCm3 / margin : null;
+    const targetRevenue = margin != null && margin > 0 ? requiredCm3 / margin : null;
     return {
       requiredCm3,
-      targetRevenue: override != null && Number.isFinite(override) ? override : derivedRevenue,
-      overridden: override != null && Number.isFinite(override),
+      targetRevenue,
     };
-  }, [form, settings?.monthlyOverhead]);
+  }, [form.targetOperatingProfit, settings?.monthlyOverhead, settings?.weightedCm3Margin]);
 
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -134,10 +134,6 @@ export default function FinancialTargetManager() {
         scope,
         targetMonth: month,
         targetOperatingProfit: Number(form.targetOperatingProfit),
-        plannedCm3MarginPercent: Number(form.plannedCm3MarginPercent),
-        targetRevenueOverride: form.targetRevenueOverride.trim()
-          ? Number(form.targetRevenueOverride)
-          : null,
         notes: form.notes,
       });
       setMessage({
@@ -187,7 +183,7 @@ export default function FinancialTargetManager() {
         <div>
           <div style={{ fontSize: 16, fontWeight: 750 }}>Target Profitabilitas</div>
           <div style={{ color: 'var(--dim)', fontSize: 11, lineHeight: 1.6, marginTop: 4 }}>
-            Target tenant-specific untuk Sales Channel Analysis. Fixed OPEX dihitung otomatis dari Fixed &amp; Recurring Costs.
+            Cukup tentukan target laba. Target CM3 dan revenue dihitung otomatis memakai weighted margin CM3 dari 3 bulan penuh sebelumnya.
           </div>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -229,7 +225,7 @@ export default function FinancialTargetManager() {
             </div>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(190px, 420px)', gap: 12 }}>
             <label style={labelStyle}>
               Target Laba Operasional
               <input
@@ -243,36 +239,6 @@ export default function FinancialTargetManager() {
               />
               <span style={{ color: 'var(--dim)', fontSize: 9, fontWeight: 400 }}>Laba setelah fixed OPEX.</span>
             </label>
-
-            <label style={labelStyle}>
-              Target Margin CM3 (%)
-              <input
-                type="number"
-                min="0.01"
-                max="100"
-                step="0.01"
-                required
-                value={form.plannedCm3MarginPercent}
-                onChange={event => setForm(current => ({ ...current, plannedCm3MarginPercent: event.target.value }))}
-                placeholder="Contoh: 25"
-                style={inputStyle}
-              />
-              <span style={{ color: 'var(--dim)', fontSize: 9, fontWeight: 400 }}>Margin rencana, bukan margin aktual berjalan.</span>
-            </label>
-
-            <label style={labelStyle}>
-              Target Revenue Override (opsional)
-              <input
-                type="number"
-                min="0"
-                step="1000"
-                value={form.targetRevenueOverride}
-                onChange={event => setForm(current => ({ ...current, targetRevenueOverride: event.target.value }))}
-                placeholder="Kosongkan agar dihitung otomatis"
-                style={inputStyle}
-              />
-              <span style={{ color: 'var(--dim)', fontSize: 9, fontWeight: 400 }}>Gunakan hanya jika manajemen menetapkan revenue langsung.</span>
-            </label>
           </div>
 
           <label style={labelStyle}>
@@ -285,11 +251,15 @@ export default function FinancialTargetManager() {
             />
           </label>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 9 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(175px, 1fr))', gap: 9 }}>
             {[
               ['Fixed OPEX Bulan Ini', rupiah.format(settings?.monthlyOverhead || 0)],
               ['Target CM3', rupiah.format(preview.requiredCm3)],
-              [preview.overridden ? 'Target Revenue (Override)' : 'Target Revenue (Formula)', preview.targetRevenue == null ? '—' : rupiah.format(preview.targetRevenue)],
+              [
+                `Margin CM3 Weighted · ${formatShortMonth(settings?.weightedCm3From)}–${formatShortMonth(settings?.weightedCm3To)}`,
+                settings?.weightedCm3Margin == null ? '—' : `${(settings.weightedCm3Margin * 100).toFixed(1)}%`,
+              ],
+              ['Target Revenue (Otomatis)', preview.targetRevenue == null ? '—' : rupiah.format(preview.targetRevenue)],
             ].map(([label, value]) => (
               <div key={label} style={{ padding: 11, borderRadius: 9, border: '1px solid var(--border)', background: 'var(--bg-deep)' }}>
                 <div style={{ color: 'var(--dim)', fontSize: 9, marginBottom: 5 }}>{label}</div>
@@ -306,7 +276,9 @@ export default function FinancialTargetManager() {
 
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <div style={{ color: 'var(--dim)', fontSize: 9 }}>
-              Formula: (Fixed OPEX + Target Laba) ÷ Target Margin CM3.
+              {preview.targetRevenue == null
+                ? 'Target revenue tersedia setelah weighted margin CM3 memiliki nilai positif.'
+                : 'Formula: Target CM3 = Fixed OPEX + Target Laba; Target Revenue = Target CM3 ÷ Weighted Margin CM3 (3 bulan).'}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               {scope === 'month' && settings?.monthlyTarget && (

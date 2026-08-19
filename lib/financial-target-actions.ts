@@ -6,6 +6,7 @@ import {
   requireDashboardTabAccess,
 } from './dashboard-access';
 import { createServiceSupabase } from './service-supabase';
+import { getShippingFeeRange } from './shipping-fee-data';
 
 export type WorkspaceFinancialTarget = {
   id: number;
@@ -13,7 +14,7 @@ export type WorkspaceFinancialTarget = {
   target_month: string | null;
   effective_from: string;
   target_operating_profit: number;
-  planned_cm3_margin: number;
+  planned_cm3_margin: number | null;
   target_revenue_override: number | null;
   notes: string | null;
   created_at: string;
@@ -32,6 +33,9 @@ export type FinancialTargetAudit = {
 export type FinancialTargetSettings = {
   month: string;
   monthlyOverhead: number;
+  weightedCm3Margin: number | null;
+  weightedCm3From: string;
+  weightedCm3To: string;
   defaultTarget: WorkspaceFinancialTarget | null;
   monthlyTarget: WorkspaceFinancialTarget | null;
   effectiveTarget: WorkspaceFinancialTarget | null;
@@ -43,8 +47,6 @@ export type FinancialTargetInput = {
   scope: 'default' | 'month';
   targetMonth?: string | null;
   targetOperatingProfit: number;
-  plannedCm3MarginPercent: number;
-  targetRevenueOverride?: number | null;
   notes?: string | null;
 };
 
@@ -65,16 +67,124 @@ function monthBounds(month: string) {
   };
 }
 
+function weightedCm3Bounds(month: string) {
+  const [year, monthNumber] = month.split('-').map(Number);
+  const from = new Date(Date.UTC(year, monthNumber - 4, 1));
+  const to = new Date(Date.UTC(year, monthNumber - 1, 0));
+  return {
+    start: from.toISOString().slice(0, 10),
+    end: to.toISOString().slice(0, 10),
+  };
+}
+
 function mapTarget(row: any): WorkspaceFinancialTarget {
   return {
     ...row,
     id: Number(row.id),
     target_operating_profit: Number(row.target_operating_profit || 0),
-    planned_cm3_margin: Number(row.planned_cm3_margin || 0),
+    planned_cm3_margin: row.planned_cm3_margin == null
+      ? null
+      : Number(row.planned_cm3_margin),
     target_revenue_override: row.target_revenue_override == null
       ? null
       : Number(row.target_revenue_override),
   };
+}
+
+async function fetchAllRows(
+  svc: ReturnType<typeof createServiceSupabase>,
+  table: string,
+  columns: string,
+  workspaceId: string,
+  from: string,
+  to: string,
+) {
+  const rows: any[] = [];
+  const pageSize = 1000;
+
+  for (let offset = 0; ; offset += pageSize) {
+    const result = await svc
+      .from(table)
+      .select(columns)
+      .eq('workspace_id', workspaceId)
+      .gte('date', from)
+      .lte('date', to)
+      .order('date')
+      .range(offset, offset + pageSize - 1);
+
+    if (result.error) throw result.error;
+    const page = result.data || [];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return rows;
+}
+
+async function getWeightedCm3Benchmark(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  bounds: { start: string; end: string },
+) {
+  try {
+    const [daily, ads, channel, shipping] = await Promise.all([
+      fetchAllRows(
+        svc,
+        'daily_product_summary',
+        'date, net_sales, gross_profit',
+        workspaceId,
+        bounds.start,
+        bounds.end,
+      ),
+      fetchAllRows(
+        svc,
+        'daily_ads_spend',
+        'date, spent',
+        workspaceId,
+        bounds.start,
+        bounds.end,
+      ),
+      fetchAllRows(
+        svc,
+        'daily_channel_data',
+        'date, mp_admin_cost',
+        workspaceId,
+        bounds.start,
+        bounds.end,
+      ),
+      getShippingFeeRange(workspaceId, bounds.start, bounds.end),
+    ]);
+
+    const revenue = daily.reduce(
+      (sum, row) => sum + Number(row.net_sales || 0),
+      0,
+    );
+    const grossProfit = daily.reduce(
+      (sum, row) => sum + Number(row.gross_profit || 0),
+      0,
+    );
+    const marketplaceFees = channel.reduce(
+      (sum, row) => sum + Math.abs(Number(row.mp_admin_cost || 0)),
+      0,
+    );
+    const adsSpend = ads.reduce(
+      (sum, row) => sum + Math.abs(Number(row.spent || 0)),
+      0,
+    );
+    const shippingFees = shipping.reduce(
+      (sum, row) => sum + Math.abs(Number(row.shipping_charge || 0)),
+      0,
+    );
+    const cm3 = grossProfit - marketplaceFees - adsSpend - shippingFees;
+    const margin = revenue > 0 && cm3 > 0 && cm3 <= revenue
+      ? cm3 / revenue
+      : null;
+
+    return { revenue, cm3, margin };
+  } catch (error) {
+    console.error('[FinancialTarget] Gagal menghitung weighted margin CM3.', error);
+    return { revenue: 0, cm3: 0, margin: null };
+  }
 }
 
 export async function getFinancialTargetSettings(
@@ -86,9 +196,10 @@ export async function getFinancialTargetSettings(
   );
   const month = normalizeMonth(targetMonth);
   const bounds = monthBounds(month);
+  const benchmarkBounds = weightedCm3Bounds(month);
   const svc = createServiceSupabase();
 
-  const [targetsResult, overheadResult, auditResult] = await Promise.all([
+  const [targetsResult, overheadResult, auditResult, weightedCm3Benchmark] = await Promise.all([
     svc
       .from('workspace_financial_targets')
       .select('id, workspace_id, target_month, effective_from, target_operating_profit, planned_cm3_margin, target_revenue_override, notes, created_at, updated_at')
@@ -105,6 +216,7 @@ export async function getFinancialTargetSettings(
       .eq('workspace_id', workspaceId)
       .order('changed_at', { ascending: false })
       .limit(8),
+    getWeightedCm3Benchmark(svc, workspaceId, benchmarkBounds),
   ]);
 
   if (targetsResult.error) throw targetsResult.error;
@@ -123,6 +235,9 @@ export async function getFinancialTargetSettings(
       (sum: number, row: any) => sum + Number(row.amount || 0),
       0,
     ),
+    weightedCm3Margin: weightedCm3Benchmark.margin,
+    weightedCm3From: benchmarkBounds.start,
+    weightedCm3To: benchmarkBounds.end,
     defaultTarget,
     monthlyTarget,
     effectiveTarget: monthlyTarget || defaultTarget,
@@ -145,29 +260,18 @@ export async function saveFinancialTarget(input: FinancialTargetInput) {
   const effectiveMonthDate = `${effectiveMonth}-01`;
   const targetMonthDate = scope === 'month' ? effectiveMonthDate : null;
   const targetOperatingProfit = Number(input.targetOperatingProfit);
-  const plannedMarginPercent = Number(input.plannedCm3MarginPercent);
-  const targetRevenueOverride = input.targetRevenueOverride == null
-    ? null
-    : Number(input.targetRevenueOverride);
 
   if (!Number.isFinite(targetOperatingProfit) || targetOperatingProfit < 0) {
     throw new Error('Target laba operasional harus nol atau lebih besar.');
   }
-  if (
-    !Number.isFinite(plannedMarginPercent)
-    || plannedMarginPercent <= 0
-    || plannedMarginPercent > 100
-  ) {
-    throw new Error('Target margin CM3 harus lebih dari 0% dan maksimal 100%.');
-  }
-  if (
-    targetRevenueOverride !== null
-    && (!Number.isFinite(targetRevenueOverride) || targetRevenueOverride < 0)
-  ) {
-    throw new Error('Override target revenue tidak valid.');
-  }
 
   const svc = createServiceSupabase();
+  const benchmarkBounds = weightedCm3Bounds(effectiveMonth);
+  const weightedCm3Benchmark = await getWeightedCm3Benchmark(
+    svc,
+    workspaceId,
+    benchmarkBounds,
+  );
   let existingQuery = svc
     .from('workspace_financial_targets')
     .select('id')
@@ -185,8 +289,8 @@ export async function saveFinancialTarget(input: FinancialTargetInput) {
     target_month: targetMonthDate,
     effective_from: effectiveMonthDate,
     target_operating_profit: targetOperatingProfit,
-    planned_cm3_margin: plannedMarginPercent / 100,
-    target_revenue_override: targetRevenueOverride,
+    planned_cm3_margin: weightedCm3Benchmark.margin,
+    target_revenue_override: null,
     notes: String(input.notes || '').trim() || null,
     updated_by: profile.id,
   };
