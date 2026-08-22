@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   DEFAULT_FULL_SYNC_BATCH_LIMIT,
+  getScalevSyncConcurrency,
   normalizeFullSyncBatchLimit,
   trimFullSyncBatch,
 } from '../lib/scalev-sync-runner';
@@ -34,6 +35,12 @@ test('trimFullSyncBatch does not request a follow-up when the page is complete',
   assert.equal(result.rows.length, 3);
   assert.equal(result.hasMore, false);
   assert.equal(result.nextAfterId, 13);
+});
+
+test('repair mode serializes line writes while regular sync retains bounded concurrency', () => {
+  assert.equal(getScalevSyncConcurrency('repair'), 1);
+  assert.equal(getScalevSyncConcurrency('full'), 5);
+  assert.equal(getScalevSyncConcurrency('date'), 5);
 });
 
 test('buildNextScalevSyncJobPayload chains only full sync jobs that still have more rows', () => {

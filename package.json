@@ -16,6 +16,7 @@
     "backfill:scalev-header-financials": "tsx scripts/backfill-scalev-header-financials.ts",
     "backfill:marketplace-intake-shipping": "tsx scripts/backfill-marketplace-intake-shipping.ts",
     "backfill:marketplace-tracking": "tsx scripts/ops/backfill-marketplace-tracking.ts",
+    "backfill:scalev-missing-lines": "tsx scripts/ops/backfill-scalev-missing-order-lines.ts",
     "check:mcp": "npm --prefix mcp-server run build",
     "mcp:build": "npm --prefix mcp-server run build",
     "mcp:start": "npm --prefix mcp-server run start",

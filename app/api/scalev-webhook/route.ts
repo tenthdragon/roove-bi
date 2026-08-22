@@ -19,6 +19,11 @@ import {
 } from '@/lib/warehouse-domain-helpers';
 import { limitByIp } from '@/lib/request-hardening';
 import { requireExplicitWorkspaceId } from '@/lib/workspace-scope';
+import {
+  persistScalevOrderLines,
+  withScalevLineRetry,
+} from '@/lib/scalev-line-persistence';
+import { extractScalevNumericId } from '@/lib/scalev-id';
 
 export const maxDuration = 60;
 
@@ -342,6 +347,9 @@ type ExistingScalevWebhookOrder = {
   store_name?: string | null;
   platform?: string | null;
   financial_entity?: string | null;
+  is_purchase_fb?: boolean | null;
+  is_purchase_tiktok?: boolean | null;
+  is_purchase_kwai?: boolean | null;
   raw_data?: any;
 };
 
@@ -368,12 +376,7 @@ function isMarketplaceAuthoritativeSource(source: string | null | undefined) {
 }
 
 function extractWebhookScalevId(data: any): string | null {
-  return ts(
-    data?.id
-    ?? data?.scalev_id
-    ?? data?.raw_data?.id
-    ?? null,
-  );
+  return extractScalevNumericId(data);
 }
 
 async function recordMarketplaceWebhookQuarantine(args: {
@@ -1131,6 +1134,167 @@ async function buildEnrichedLines(
   return lines;
 }
 
+function mergeWebhookOrderLinePayload(
+  data: any,
+  existing?: ExistingScalevWebhookOrder | null,
+) {
+  const rawData = existing?.raw_data && typeof existing.raw_data === 'object'
+    ? existing.raw_data
+    : {};
+  const incoming = data && typeof data === 'object' ? data : {};
+
+  return {
+    ...rawData,
+    ...incoming,
+    order_id: incoming.order_id || rawData.order_id || existing?.order_id || null,
+    external_id: incoming.external_id || rawData.external_id || existing?.external_id || null,
+    store: incoming.store || rawData.store || (existing?.store_name
+      ? { name: existing.store_name }
+      : null),
+    financial_entity: incoming.financial_entity || rawData.financial_entity || existing?.financial_entity || null,
+    orderlines: Array.isArray(incoming.orderlines) && incoming.orderlines.length > 0
+      ? incoming.orderlines
+      : Array.isArray(rawData.orderlines)
+        ? rawData.orderlines
+        : [],
+    is_purchase_fb: incoming.is_purchase_fb ?? rawData.is_purchase_fb ?? existing?.is_purchase_fb ?? false,
+    is_purchase_tiktok: incoming.is_purchase_tiktok ?? rawData.is_purchase_tiktok ?? existing?.is_purchase_tiktok ?? false,
+    is_purchase_kwai: incoming.is_purchase_kwai ?? rawData.is_purchase_kwai ?? existing?.is_purchase_kwai ?? false,
+  };
+}
+
+async function recordWebhookLineFailure(args: {
+  svc: ReturnType<typeof getServiceSupabase>;
+  workspaceId: string;
+  businessCode: string;
+  syncType: string;
+  orderId: string;
+  error: unknown;
+}) {
+  const message = args.error instanceof Error ? args.error.message : String(args.error);
+  const { error: logError } = await args.svc.from('scalev_sync_log').insert({
+    workspace_id: args.workspaceId,
+    status: 'failed',
+    sync_type: args.syncType,
+    business_code: args.businessCode,
+    orders_fetched: 1,
+    orders_updated: 0,
+    orders_inserted: 0,
+    error_message: `${args.orderId}: ${message}`,
+    completed_at: new Date().toISOString(),
+  });
+
+  if (logError) {
+    console.error(
+      `[scalev-webhook][${args.businessCode}] failed to persist line failure log for ${args.orderId}:`,
+      logError.message,
+    );
+  }
+}
+
+async function persistWebhookOrderLines(args: {
+  svc: ReturnType<typeof getServiceSupabase>;
+  workspaceId: string;
+  businessCode: string;
+  syncType: string;
+  orderId: string;
+  dbOrderId: number;
+  lines: any[];
+  replaceExisting?: boolean;
+}) {
+  if (args.lines.length === 0) return 0;
+
+  try {
+    await persistScalevOrderLines(args.svc, {
+      workspaceId: args.workspaceId,
+      dbOrderId: args.dbOrderId,
+      lines: args.lines,
+      replaceExisting: args.replaceExisting,
+      retry: {
+        onRetry: ({ attempt, delayMs, error }) => {
+          const message = error instanceof Error ? error.message : String((error as any)?.message || error);
+          console.warn(
+            `[scalev-webhook][${args.businessCode}] ${args.syncType}: retrying lines for ${args.orderId}`
+            + ` after attempt ${attempt} in ${delayMs}ms: ${message}`,
+          );
+        },
+      },
+    });
+
+    return args.lines.length;
+  } catch (error) {
+    console.error(
+      `[scalev-webhook][${args.businessCode}] ${args.syncType}: line persistence failed for ${args.orderId}:`,
+      error,
+    );
+    await recordWebhookLineFailure({
+      svc: args.svc,
+      workspaceId: args.workspaceId,
+      businessCode: args.businessCode,
+      syncType: args.syncType,
+      orderId: args.orderId,
+      error,
+    });
+    throw error;
+  }
+}
+
+async function selfHealMissingWebhookOrderLines(args: {
+  svc: ReturnType<typeof getServiceSupabase>;
+  workspaceId: string;
+  businessCode: string;
+  businessId: number;
+  taxRateName: string;
+  orderId: string;
+  existing: ExistingScalevWebhookOrder;
+  data: any;
+  syncType: string;
+}) {
+  if (!['shipped', 'completed'].includes(String(args.data?.status || args.existing.status || ''))) {
+    return 0;
+  }
+
+  const payload = mergeWebhookOrderLinePayload(args.data, args.existing);
+  if (!Array.isArray(payload.orderlines) || payload.orderlines.length === 0) return 0;
+
+  const lineCount = await withScalevLineRetry(async () => {
+    const { count, error } = await args.svc
+      .from('scalev_order_lines')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', args.workspaceId)
+      .eq('scalev_order_id', args.existing.id);
+    if (error) throw error;
+    return count || 0;
+  });
+  if (lineCount > 0) return 0;
+
+  const warehouseOrderContext = await resolveWarehouseOrderContext(
+    args.svc,
+    payload,
+    args.businessCode,
+    args.workspaceId,
+  );
+  const lines = await buildEnrichedLines(
+    args.orderId,
+    args.existing.id,
+    payload,
+    args.businessId,
+    args.workspaceId,
+    args.taxRateName,
+    warehouseOrderContext.businessDirectoryRows,
+  );
+
+  return persistWebhookOrderLines({
+    svc: args.svc,
+    workspaceId: args.workspaceId,
+    businessCode: args.businessCode,
+    syncType: args.syncType,
+    orderId: args.orderId,
+    dbOrderId: args.existing.id,
+    lines,
+  });
+}
+
 // ── Handle order.created: insert new order into scalev_orders ──
 async function handleOrderCreated(
   data: any,
@@ -1214,7 +1378,7 @@ async function handleOrderCreated(
   const derivedPlatform = derivePlatformFromStore(storeName || '', data.external_id, data);
   const orderRow: Record<string, any> = {
     workspace_id: workspaceId,
-    scalev_id: null,
+    scalev_id: extractWebhookScalevId(data),
     order_id: orderId,
     external_id: data.external_id || null,
     marketplace_tracking_number: trackingNumber,
@@ -1294,10 +1458,15 @@ async function handleOrderCreated(
       warehouseOrderContext.businessDirectoryRows,
     );
     if (lines.length > 0) {
-      const { error: lineErr } = await svc.from('scalev_order_lines').upsert(lines, { onConflict: 'scalev_order_id,product_name' });
-      if (lineErr) {
-        console.warn(`[scalev-webhook][${businessCode}] order.created lines insert error for ${orderId}:`, lineErr.message);
-      }
+      await persistWebhookOrderLines({
+        svc,
+        workspaceId,
+        businessCode,
+        syncType: 'webhook_created_lines',
+        orderId,
+        dbOrderId: inserted.id,
+        lines,
+      });
     }
   }
 
@@ -1365,7 +1534,7 @@ async function handleStatusChanged(
     externalId: data.external_id,
     trackingNumber,
     storeName: data.store?.name || data.store_name || null,
-    columns: 'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
+    columns: 'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, is_purchase_fb, is_purchase_tiktok, is_purchase_kwai, raw_data',
     sourceClassFields: preliminarySourceClassFields,
   });
 
@@ -1475,6 +1644,27 @@ async function handleStatusChanged(
 
   // Skip if status hasn't actually changed
   if (existing.status === newStatus) {
+    const webhookScalevId = extractWebhookScalevId(data);
+    if (webhookScalevId && webhookScalevId !== txt(existing.scalev_id)) {
+      const { error: scalevIdError } = await svc
+        .from('scalev_orders')
+        .update({ scalev_id: webhookScalevId, synced_at: new Date().toISOString() })
+        .eq('id', existing.id)
+        .eq('workspace_id', workspaceId);
+      if (scalevIdError) throw scalevIdError;
+    }
+
+    const repairedLines = await selfHealMissingWebhookOrderLines({
+      svc,
+      workspaceId,
+      businessCode,
+      businessId,
+      taxRateName,
+      orderId,
+      existing,
+      data,
+      syncType: 'webhook_status_unchanged_lines',
+    });
     const warehouseResult = await reconcileScalevOrderWarehouseBestEffort(
       orderId,
       existing.id,
@@ -1483,7 +1673,8 @@ async function handleStatusChanged(
     return NextResponse.json({
       ok: true,
       skipped: true,
-      reason: 'status_unchanged',
+      reason: repairedLines > 0 ? 'status_unchanged_lines_repaired' : 'status_unchanged',
+      ...(repairedLines > 0 ? { lines_repaired: repairedLines } : {}),
       ...(warehouseResult ? { warehouse_action: warehouseResult.action } : {}),
     });
   }
@@ -1508,6 +1699,8 @@ async function handleStatusChanged(
     synced_at: new Date().toISOString(),
   };
   if (trackingNumber) updateData.marketplace_tracking_number = trackingNumber;
+  const webhookScalevId = extractWebhookScalevId(data);
+  if (webhookScalevId) updateData.scalev_id = webhookScalevId;
 
   if (existing.order_id !== orderId) {
     updateData.order_id = orderId;
@@ -1629,12 +1822,6 @@ async function handleStatusChanged(
           .or('product_price_bt.is.null,product_price_bt.eq.0');
 
         if (emptyLines && emptyLines.length > 0 && orderData.raw_data?.orderlines?.length > 0) {
-          // Delete old lines and re-insert enriched ones
-          await svc
-            .from('scalev_order_lines')
-            .delete()
-            .eq('workspace_id', workspaceId)
-            .eq('scalev_order_id', existing.id);
           const enrichedLines = await buildEnrichedLines(orderId, existing.id, {
             ...orderData.raw_data,
             external_id: orderData.external_id,
@@ -1644,12 +1831,17 @@ async function handleStatusChanged(
             is_purchase_kwai: orderData.is_purchase_kwai,
           }, businessId, workspaceId, taxRateName, warehouseOrderContext.businessDirectoryRows);
           if (enrichedLines.length > 0) {
-            const { error: reInsertErr } = await svc.from('scalev_order_lines').upsert(enrichedLines, { onConflict: 'scalev_order_id,product_name' });
-            if (reInsertErr) {
-              console.warn(`[scalev-webhook][${businessCode}] status_changed: re-enrich lines error for ${orderId}:`, reInsertErr.message);
-            } else {
-              console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} re-enriched ${enrichedLines.length} lines with financial data`);
-            }
+            await persistWebhookOrderLines({
+              svc,
+              workspaceId,
+              businessCode,
+              syncType: 'webhook_status_reenrich_lines',
+              orderId,
+              dbOrderId: existing.id,
+              lines: enrichedLines,
+              replaceExisting: true,
+            });
+            console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} re-enriched ${enrichedLines.length} lines with financial data`);
           }
         }
 
@@ -1670,18 +1862,22 @@ async function handleStatusChanged(
             is_purchase_kwai: orderData.is_purchase_kwai,
           }, businessId, workspaceId, taxRateName, warehouseOrderContext.businessDirectoryRows);
           if (newLines.length > 0) {
-            const { error: insertErr } = await svc.from('scalev_order_lines').upsert(newLines, { onConflict: 'scalev_order_id,product_name' });
-            if (insertErr) {
-              console.warn(`[scalev-webhook][${businessCode}] status_changed: insert missing lines error for ${orderId}:`, insertErr.message);
-            } else {
-              console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} inserted ${newLines.length} missing lines from raw_data`);
-            }
+            await persistWebhookOrderLines({
+              svc,
+              workspaceId,
+              businessCode,
+              syncType: 'webhook_status_missing_lines',
+              orderId,
+              dbOrderId: existing.id,
+              lines: newLines,
+            });
+            console.log(`[scalev-webhook][${businessCode}] status_changed: ${orderId} inserted ${newLines.length} missing lines from raw_data`);
           }
         }
       }
     } catch (enrichErr: any) {
-      // Non-fatal: log but don't fail the status change
-      console.warn(`[scalev-webhook][${businessCode}] status_changed: re-enrich failed for ${orderId}:`, enrichErr.message);
+      console.error(`[scalev-webhook][${businessCode}] status_changed: re-enrich failed for ${orderId}:`, enrichErr.message);
+      throw enrichErr;
     }
 
   }
@@ -1747,7 +1943,7 @@ async function handleOrderUpdated(
     externalId: data.external_id,
     trackingNumber,
     storeName: data.store?.name || data.store_name || null,
-    columns: 'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, raw_data',
+    columns: 'id, order_id, status, source, scalev_id, store_name, platform, external_id, financial_entity, is_purchase_fb, is_purchase_tiktok, is_purchase_kwai, raw_data',
     sourceClassFields: preliminarySourceClassFields,
   });
 
@@ -1907,6 +2103,8 @@ async function handleOrderUpdated(
     raw_data: data,
   };
   if (trackingNumber) updateData.marketplace_tracking_number = trackingNumber;
+  const webhookScalevId = extractWebhookScalevId(data);
+  if (webhookScalevId) updateData.scalev_id = webhookScalevId;
 
   if (existing.order_id !== orderId) updateData.order_id = orderId;
   if (data.status) updateData.status = data.status;
@@ -1958,13 +2156,6 @@ async function handleOrderUpdated(
 
   // Replace order lines with enriched data (including financial fields)
   if (data.orderlines && Array.isArray(data.orderlines) && data.orderlines.length > 0) {
-    // Delete old lines
-    await svc
-      .from('scalev_order_lines')
-      .delete()
-      .eq('workspace_id', workspaceId)
-      .eq('scalev_order_id', existing.id);
-
     const lines = await buildEnrichedLines(
       orderId,
       existing.id,
@@ -1975,10 +2166,16 @@ async function handleOrderUpdated(
       warehouseOrderContext.businessDirectoryRows,
     );
     if (lines.length > 0) {
-      const { error: lineErr } = await svc.from('scalev_order_lines').upsert(lines, { onConflict: 'scalev_order_id,product_name' });
-      if (lineErr) {
-        console.warn(`[scalev-webhook][${businessCode}] order.updated lines replace error for ${orderId}:`, lineErr.message);
-      }
+      await persistWebhookOrderLines({
+        svc,
+        workspaceId,
+        businessCode,
+        syncType: 'webhook_updated_lines',
+        orderId,
+        dbOrderId: existing.id,
+        lines,
+        replaceExisting: true,
+      });
     }
   } else if (data.is_purchase_fb != null || data.is_purchase_tiktok != null) {
     // Orderlines weren't replaced but purchase flags may have changed.

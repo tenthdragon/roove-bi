@@ -13,6 +13,13 @@ import { resolveWarehouseOrderContext } from './warehouse-order-context';
 import { extractMarketplaceTrackingFromWebhookData } from './marketplace-tracking';
 import { createServiceSupabase } from './service-supabase';
 import { requireExplicitWorkspaceId } from './workspace-scope';
+import { persistScalevOrderLines, withScalevLineRetry } from './scalev-line-persistence';
+import {
+  extractScalevLineItemNameRaw,
+  extractScalevLineItemOwnerRaw,
+  resolveWarehouseBusinessCode,
+} from './warehouse-domain-helpers';
+import { extractScalevNumericId, normalizeScalevNumericId } from './scalev-id';
 
 export type ScalevSyncMode = 'full' | 'date' | 'order_id' | 'repair';
 
@@ -23,6 +30,7 @@ export type ScalevSyncOptions = {
   targetOrderIds?: string[] | null;
   startAfterId?: number | null;
   maxPendingOrders?: number | null;
+  skipWarehouseReconcile?: boolean;
 };
 
 export type ScalevSyncResult = {
@@ -65,6 +73,60 @@ export function trimFullSyncBatch<T extends { id?: number | null }>(
   };
 }
 
+export function getScalevSyncConcurrency(syncMode: ScalevSyncMode): number {
+  // Repair writes terminal lines and fires several summary triggers. Keeping it
+  // serial avoids spending the database statement timeout waiting on our own
+  // per-workspace advisory lock.
+  return syncMode === 'repair' ? 1 : 5;
+}
+
+export function buildScalevRepairPayload(dbOrder: any): any | null {
+  const rawData = dbOrder?.raw_data;
+  if (!rawData || typeof rawData !== 'object') return null;
+  if (!Array.isArray(rawData.orderlines) || rawData.orderlines.length === 0) return null;
+
+  return {
+    ...rawData,
+    id: extractScalevNumericId(rawData) || normalizeScalevNumericId(dbOrder.scalev_id),
+    order_id: rawData.order_id || dbOrder.order_id || null,
+    status: dbOrder.status || rawData.status || null,
+    store: rawData.store || (dbOrder.store_name ? { name: dbOrder.store_name } : null),
+    external_id: rawData.external_id || dbOrder.external_id || null,
+    platform: rawData.platform || dbOrder.platform || null,
+    financial_entity: rawData.financial_entity || dbOrder.financial_entity || null,
+    shipped_time: dbOrder.shipped_time || rawData.shipped_time || null,
+    completed_time: dbOrder.completed_time || rawData.completed_time || null,
+    pending_time: dbOrder.pending_time || rawData.pending_time || null,
+    is_purchase_fb: rawData.is_purchase_fb ?? dbOrder.is_purchase_fb ?? false,
+    is_purchase_tiktok: rawData.is_purchase_tiktok ?? dbOrder.is_purchase_tiktok ?? false,
+    is_purchase_kwai: rawData.is_purchase_kwai ?? dbOrder.is_purchase_kwai ?? false,
+  };
+}
+
+async function filterOrdersMissingLines(
+  svc: any,
+  workspaceId: string,
+  orders: any[],
+): Promise<any[]> {
+  if (orders.length === 0) return [];
+
+  const idsWithLines = new Set<number>();
+  const chunkSize = 200;
+  for (let i = 0; i < orders.length; i += chunkSize) {
+    const chunk = orders.slice(i, i + chunkSize).map((order) => order.id);
+    const { data, error } = await svc
+      .from('scalev_order_lines')
+      .select('scalev_order_id')
+      .eq('workspace_id', workspaceId)
+      .in('scalev_order_id', chunk)
+      .limit(10000);
+    if (error) throw error;
+    (data || []).forEach((row: { scalev_order_id: number }) => idsWithLines.add(row.scalev_order_id));
+  }
+
+  return orders.filter((order) => !idsWithLines.has(order.id));
+}
+
 function getSyncLogType(syncMode: ScalevSyncMode) {
   return syncMode === 'full'
     ? 'pending_reconcile'
@@ -105,6 +167,7 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
   const targetOrderIds = options.targetOrderIds || null;
   const startAfterId = Math.floor(Number(options.startAfterId || 0)) || null;
   const maxPendingOrders = normalizeFullSyncBatchLimit(options.maxPendingOrders);
+  const skipWarehouseReconcile = options.skipWarehouseReconcile === true;
   const svc = createServiceSupabase();
   const workspaceId = requireExplicitWorkspaceId(options.workspaceId, 'ScaleV sync');
 
@@ -158,7 +221,7 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
     }
 
     let pendingOrders: any[] = [];
-    const lightCols = 'id, order_id, scalev_id, status, store_name, business_code, source, platform, external_id, financial_entity, raw_data';
+    const lightCols = 'id, order_id, scalev_id, status, store_name, business_code, source, platform, external_id, financial_entity, shipped_time, completed_time, pending_time, is_purchase_fb, is_purchase_tiktok, is_purchase_kwai, raw_data';
 
     if (syncMode === 'order_id' && targetOrderIds && targetOrderIds.length > 0) {
       const { data, error } = await svc
@@ -180,6 +243,15 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
         .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid', 'in_process']);
       if (error) throw error;
       pendingOrders = data || [];
+    } else if (syncMode === 'repair' && targetOrderIds && targetOrderIds.length > 0) {
+      const { data, error } = await svc
+        .from('scalev_orders')
+        .select(lightCols)
+        .eq('workspace_id', workspaceId)
+        .in('order_id', targetOrderIds)
+        .in('status', ['shipped', 'completed']);
+      if (error) throw error;
+      pendingOrders = await filterOrdersMissingLines(svc, workspaceId, data || []);
     } else if (syncMode === 'repair' && targetDate) {
       const dayStart = `${targetDate}T00:00:00+07:00`;
       const dayEnd = `${targetDate}T23:59:59+07:00`;
@@ -187,32 +259,11 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
         .from('scalev_orders')
         .select(lightCols)
         .eq('workspace_id', workspaceId)
-        .gte('pending_time', dayStart)
-        .lte('pending_time', dayEnd)
+        .gte('shipped_time', dayStart)
+        .lte('shipped_time', dayEnd)
         .in('status', ['shipped', 'completed']);
       if (error) throw error;
-      if (shippedForDate && shippedForDate.length > 0) {
-        const shippedIds = shippedForDate.map((order: { id: number }) => order.id);
-        const idsWithLines = new Set<number>();
-        const chunkSize = 200;
-        for (let i = 0; i < shippedIds.length; i += chunkSize) {
-          const chunk = shippedIds.slice(i, i + chunkSize);
-          const { data: withLines, error: withLinesError } = await svc
-            .from('scalev_order_lines')
-            .select('scalev_order_id')
-            .eq('workspace_id', workspaceId)
-            .in('scalev_order_id', chunk)
-            .limit(10000);
-          if (withLinesError) throw withLinesError;
-          (withLines || []).forEach((row: { scalev_order_id: number }) => idsWithLines.add(row.scalev_order_id));
-        }
-
-        for (const order of shippedForDate) {
-          if (!idsWithLines.has(order.id)) {
-            pendingOrders.push(order);
-          }
-        }
-      }
+      pendingOrders = await filterOrdersMissingLines(svc, workspaceId, shippedForDate || []);
     } else {
       let query = svc
         .from('scalev_orders')
@@ -280,23 +331,28 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
 
     async function syncOneOrder(dbOrder: any) {
       try {
-        let scalevId = dbOrder.scalev_id;
-        if (!scalevId) {
-          const { data: rawRow, error: rawRowError } = await svc
+        const repairPayload = syncMode === 'repair'
+          ? buildScalevRepairPayload(dbOrder)
+          : null;
+        let scalevId = normalizeScalevNumericId(dbOrder.scalev_id)
+          || extractScalevNumericId(dbOrder.raw_data)
+          || null;
+
+        if (scalevId && !dbOrder.scalev_id) {
+          const { error: scalevIdError } = await svc
             .from('scalev_orders')
-            .select('raw_data')
+            .update({ scalev_id: String(scalevId) })
             .eq('id', dbOrder.id)
-            .eq('workspace_id', workspaceId)
-            .single();
-          if (rawRowError) throw rawRowError;
-          scalevId = rawRow?.raw_data?.id;
+            .eq('workspace_id', workspaceId);
+          if (scalevIdError) throw scalevIdError;
+          dbOrder.scalev_id = String(scalevId);
         }
 
         if (!scalevId && dbOrder.order_id && dbOrder.order_id.length < 20 && /[A-Z]/.test(dbOrder.order_id)) {
           scalevId = dbOrder.order_id;
         }
 
-        if (!scalevId) {
+        if (!scalevId && !repairPayload) {
           details.push({
             order_id: dbOrder.order_id,
             store_name: dbOrder.store_name,
@@ -316,6 +372,17 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
         }
 
         if (!bizCode || !bizApiKeys.has(bizCode)) {
+          if (repairPayload) {
+            details.push({
+              order_id: dbOrder.order_id,
+              store_name: dbOrder.store_name,
+              business_code: dbOrder.business_code,
+              error: 'No configured business available for raw-data repair',
+            });
+            erroredCount++;
+            return;
+          }
+
           let found = false;
           for (const [code, config] of bizApiKeys) {
             try {
@@ -340,6 +407,7 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
                   syncMode === 'full' || syncMode === 'date',
                   channelOverrideMap,
                   workspaceId,
+                  skipWarehouseReconcile,
                 );
                 found = true;
                 updatedCount++;
@@ -365,9 +433,11 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
           throw new Error(`Missing Scalev config for business ${bizCode}`);
         }
 
-        let apiOrder: any;
+        let apiOrder: any = repairPayload;
         try {
-          apiOrder = await fetchOrderDetail(config.api_key, config.base_url, String(scalevId));
+          if (!apiOrder) {
+            apiOrder = await fetchOrderDetail(config.api_key, config.base_url, String(scalevId));
+          }
         } catch (apiErr: any) {
           if (apiErr.message.includes('404')) {
             details.push({
@@ -421,6 +491,7 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
           lightweight,
           channelOverrideMap,
           workspaceId,
+          skipWarehouseReconcile,
         );
         if (result === 'updated') updatedCount++;
         if (result === 'still_pending') stillPendingCount++;
@@ -436,7 +507,7 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
       }
     }
 
-    const batchSize = 5;
+    const batchSize = getScalevSyncConcurrency(syncMode);
     for (let i = 0; i < pendingOrders.length; i += batchSize) {
       const batch = pendingOrders.slice(i, i + batchSize);
       await Promise.all(batch.map(syncOneOrder));
@@ -512,6 +583,7 @@ async function processOrder(
   lightweight = false,
   channelOverrideMap: Map<string, string> = new Map(),
   workspaceId = '',
+  skipWarehouseReconcile = false,
 ): Promise<'updated' | 'still_pending'> {
   workspaceId = requireExplicitWorkspaceId(workspaceId, 'ScaleV order processing');
   const newStatus = apiOrder.status;
@@ -539,8 +611,9 @@ async function processOrder(
   if (['pending', 'draft', 'ready', 'confirmed', 'paid', 'in_process'].includes(newStatus)) {
     if (!forceUpdate) return 'still_pending';
 
-    await svc.from('scalev_orders').update({
+    const { error: pendingUpdateError } = await svc.from('scalev_orders').update({
       status: newStatus,
+      ...(apiOrder.id ? { scalev_id: String(apiOrder.id) } : {}),
       business_name_raw: warehouseOrderContext.businessNameRaw,
       origin_business_name_raw: warehouseOrderContext.originBusinessNameRaw,
       origin_raw: warehouseOrderContext.originRaw,
@@ -555,6 +628,7 @@ async function processOrder(
       synced_at: new Date().toISOString(),
     }).eq('id', dbOrder.id)
       .eq('workspace_id', workspaceId);
+    if (pendingUpdateError) throw pendingUpdateError;
 
     if (!lightweight) {
       const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
@@ -569,14 +643,17 @@ async function processOrder(
         taxRatesMap,
         channelOverrideMap,
         workspaceId,
+        warehouseOrderContext.businessDirectoryRows,
       );
     }
 
-    warehouseResult = await reconcileScalevOrderWarehouse(
-      dbOrder.order_id,
-      dbOrder.id,
-      workspaceId,
-    );
+    if (!skipWarehouseReconcile) {
+      warehouseResult = await reconcileScalevOrderWarehouse(
+        dbOrder.order_id,
+        dbOrder.id,
+        workspaceId,
+      );
+    }
 
     details.push({
       order_id: dbOrder.order_id,
@@ -595,6 +672,7 @@ async function processOrder(
   const now = new Date().toISOString();
   const updateData: Record<string, any> = {
     status: newStatus,
+    ...(apiOrder.id ? { scalev_id: String(apiOrder.id) } : {}),
     business_name_raw: warehouseOrderContext.businessNameRaw,
     origin_business_name_raw: warehouseOrderContext.originBusinessNameRaw,
     origin_raw: warehouseOrderContext.originRaw,
@@ -620,11 +698,12 @@ async function processOrder(
   if (parsedHeaderFinancials.shippingDiscountPresent) updateData.shipping_discount = parsedHeaderFinancials.shippingDiscount;
   if (parsedHeaderFinancials.discountCodeDiscountPresent) updateData.discount_code_discount = parsedHeaderFinancials.discountCodeDiscount;
 
-  await svc
+  const { error: orderUpdateError } = await svc
     .from('scalev_orders')
     .update(updateData)
     .eq('id', dbOrder.id)
     .eq('workspace_id', workspaceId);
+  if (orderUpdateError) throw orderUpdateError;
 
   if (!lightweight && (newStatus === 'shipped' || newStatus === 'completed')) {
     const taxRateName = bizCodeToTaxRateName.get(dbOrder.business_code) || 'PPN';
@@ -639,14 +718,17 @@ async function processOrder(
       taxRatesMap,
       channelOverrideMap,
       workspaceId,
+      warehouseOrderContext.businessDirectoryRows,
     );
   }
 
-  warehouseResult = await reconcileScalevOrderWarehouse(
-    dbOrder.order_id,
-    dbOrder.id,
-    workspaceId,
-  );
+  if (!skipWarehouseReconcile) {
+    warehouseResult = await reconcileScalevOrderWarehouse(
+      dbOrder.order_id,
+      dbOrder.id,
+      workspaceId,
+    );
+  }
 
   details.push({
     order_id: dbOrder.order_id,
@@ -673,6 +755,7 @@ async function enrichLineItems(
   taxRatesMap: Map<string, { rate: number; divisor: number }>,
   channelOverrideMap: Map<string, string>,
   workspaceId: string,
+  businessDirectoryRows: Awaited<ReturnType<typeof resolveWarehouseOrderContext>>['businessDirectoryRows'] = [],
 ) {
   const storeName = String(apiOrder.store?.name || '').toLowerCase();
   const overrideKey = `${businessId}:${storeName}`;
@@ -707,16 +790,27 @@ async function enrichLineItems(
       const productPrice = Number(line.product_price) || 0;
       const discount = Number(line.discount) || 0;
       const cogs = Number(line.cogs || line.variant_cogs) || 0;
-      const brand = await lookupProductType(line.product_name || '', workspaceId);
+      const itemNameRaw = extractScalevLineItemNameRaw(line);
+      const itemOwnerRaw = extractScalevLineItemOwnerRaw(line);
+      const productName = line.product_name || itemNameRaw || null;
+      const brand = await lookupProductType(productName || '', workspaceId);
+      const ownerResolution = resolveWarehouseBusinessCode({
+        rawValue: itemOwnerRaw,
+        fallbackBusinessCode: null,
+        directoryRows: businessDirectoryRows,
+      });
 
       newLines.push({
         workspace_id: workspaceId,
         scalev_order_id: dbOrderId,
         order_id: orderId,
-        product_name: line.product_name || null,
+        product_name: productName,
         product_type: brand,
         variant_sku: line.variant_unique_id || null,
         quantity: qty,
+        item_name_raw: itemNameRaw || productName,
+        item_owner_raw: itemOwnerRaw,
+        stock_owner_business_code: ownerResolution.business_code || null,
         product_price_bt: calcBT(productPrice, tax),
         discount_bt: calcBT(discount, tax),
         cogs_bt: calcBT(cogs, tax),
@@ -729,30 +823,30 @@ async function enrichLineItems(
       });
     }
 
-    await svc
-      .from('scalev_order_lines')
-      .delete()
-      .eq('workspace_id', workspaceId)
-      .eq('scalev_order_id', dbOrderId);
-
     if (newLines.length > 0) {
-      await svc
-        .from('scalev_order_lines')
-        .upsert(newLines, { onConflict: 'scalev_order_id,product_name' });
+      await persistScalevOrderLines(svc, {
+        workspaceId,
+        dbOrderId,
+        lines: newLines,
+        replaceExisting: true,
+      });
     }
     return;
   }
 
-  await svc
-    .from('scalev_order_lines')
-    .update({
-      sales_channel: newChannel,
-      is_purchase_fb: apiOrder.is_purchase_fb || false,
-      is_purchase_tiktok: apiOrder.is_purchase_tiktok || false,
-      is_purchase_kwai: apiOrder.is_purchase_kwai || false,
-    })
-    .eq('workspace_id', workspaceId)
-    .eq('scalev_order_id', dbOrderId);
+  await withScalevLineRetry(async () => {
+    const { error } = await svc
+      .from('scalev_order_lines')
+      .update({
+        sales_channel: newChannel,
+        is_purchase_fb: apiOrder.is_purchase_fb || false,
+        is_purchase_tiktok: apiOrder.is_purchase_tiktok || false,
+        is_purchase_kwai: apiOrder.is_purchase_kwai || false,
+      })
+      .eq('workspace_id', workspaceId)
+      .eq('scalev_order_id', dbOrderId);
+    if (error) throw error;
+  });
 
   const { data: lines, error: linesError } = await svc
     .from('scalev_order_lines')
@@ -763,10 +857,13 @@ async function enrichLineItems(
 
   for (const line of lines || []) {
     const brand = await lookupProductType(line.product_name || '', workspaceId);
-    await svc
-      .from('scalev_order_lines')
-      .update({ product_type: brand })
-      .eq('id', line.id)
-      .eq('workspace_id', workspaceId);
+    await withScalevLineRetry(async () => {
+      const { error } = await svc
+        .from('scalev_order_lines')
+        .update({ product_type: brand })
+        .eq('id', line.id)
+        .eq('workspace_id', workspaceId);
+      if (error) throw error;
+    });
   }
 }

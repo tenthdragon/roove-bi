@@ -30,8 +30,14 @@ function normalizeScalevPayload(body: ScalevRequestPayload) {
     return { syncMode: 'date' as const, targetDate: body.date, targetOrderIds: null };
   }
 
-  if (body.mode === 'repair' && body.date) {
-    return { syncMode: 'repair' as const, targetDate: body.date, targetOrderIds: null };
+  if (body.mode === 'repair' && (body.date || (Array.isArray(body.order_ids) && body.order_ids.length > 0))) {
+    return {
+      syncMode: 'repair' as const,
+      targetDate: body.date || null,
+      targetOrderIds: Array.isArray(body.order_ids)
+        ? body.order_ids.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        : null,
+    };
   }
 
   if (body.mode === 'order_id' && Array.isArray(body.order_ids) && body.order_ids.length > 0) {
