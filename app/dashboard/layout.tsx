@@ -906,11 +906,13 @@ export default function DashboardLayout({ children }) {
         {/* ═══ DESKTOP SIDEBAR ═══ */}
         <aside className="desktop-sidebar" style={{
           width: sidebarW,
-          minHeight:'100vh',
+          height:'100dvh',
+          maxHeight:'100dvh',
           background:'var(--sidebar-bg)',
           borderRight:'1px solid var(--border)',
           display:'flex',
           flexDirection:'column',
+          overflow:'hidden',
           position:'fixed',
           top:0,
           left:0,
