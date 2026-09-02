@@ -11,6 +11,7 @@ import {
   fetchBrandAnalysisRefreshTime,
   refreshBrandAnalysis,
   fetchOwnedBrandBuyerHealth,
+  fetchBrandMarketplaceOrderContext,
 } from '@/lib/scalev-actions';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { buildBrandColorMap } from '@/lib/utils';
@@ -25,7 +26,7 @@ import {
   Bar,
   Line,
 } from 'recharts';
-import { ChevronDown, Info } from 'lucide-react';
+import { ChevronDown, Info, ShoppingBag } from 'lucide-react';
 
 export default function BrandAnalysisPage() {
   const [activeView, setActiveView] = useState('brand-health'); // 'brand-health' | 'cross-brand'
@@ -537,15 +538,60 @@ export default function BrandAnalysisPage() {
 
 function BrandHealthView({ data, loading, error, selectedBrand, setSelectedBrand, weeksToShow, setWeeksToShow }) {
   const [statusGuideOpen, setStatusGuideOpen] = useState(false);
+  const [marketplaceContextOpen, setMarketplaceContextOpen] = useState(false);
+  const [marketplaceContext, setMarketplaceContext] = useState(null);
+  const [marketplaceContextLoading, setMarketplaceContextLoading] = useState(false);
+  const [marketplaceContextError, setMarketplaceContextError] = useState('');
   const summaries = data?.summaries || [];
   const brandColors = useMemo(() => buildBrandColorMap(summaries.map((summary) => summary.brand)), [summaries]);
   const selectedSummary = summaries.find((summary) => summary.brand === selectedBrand) || summaries[0] || null;
-  const chartPoints = (selectedSummary?.points || []).slice(-weeksToShow).map((point) => ({
+  const visiblePoints = (selectedSummary?.points || []).slice(-weeksToShow);
+  const visibleWeeks = visiblePoints.map((point) => ({ weekStart: point.weekStart, weekEnd: point.weekEnd }));
+  const marketplaceLookup = useMemo(() => {
+    const lookup = {};
+    for (const point of marketplaceContext?.points || []) {
+      lookup[`${point.brand}||${point.weekEnd}`] = Number(point.marketplaceOrders || 0);
+    }
+    return lookup;
+  }, [marketplaceContext]);
+  const chartPoints = visiblePoints.map((point) => ({
     ...point,
+    marketplaceOrders: marketplaceLookup[`${point.brand}||${point.weekEnd}`] || 0,
+    showMarketplaceOrders: marketplaceContextOpen && !marketplaceContextLoading && !marketplaceContextError,
     weekLabel: formatWeekLabel(point.weekEnd),
   }));
+  const marketplaceOrdersInView = chartPoints.reduce((sum, point) => sum + Number(point.marketplaceOrders || 0), 0);
   const statusMeta = selectedSummary ? BRAND_HEALTH_STATUS_META[selectedSummary.status] : null;
   const latestPoint = selectedSummary?.points?.[selectedSummary.points.length - 1] || null;
+
+  async function loadMarketplaceContext() {
+    if (!selectedSummary || visibleWeeks.length === 0) return;
+    setMarketplaceContextLoading(true);
+    setMarketplaceContextError('');
+    try {
+      const context = await fetchBrandMarketplaceOrderContext({
+        brand: selectedSummary.brand,
+        weeks: visibleWeeks,
+      });
+      setMarketplaceContext(context);
+    } catch (err: any) {
+      console.error('Failed to load marketplace context:', err);
+      setMarketplaceContextError(err?.message || 'Gagal memuat Marketplace Context.');
+    } finally {
+      setMarketplaceContextLoading(false);
+    }
+  }
+
+  async function handleMarketplaceContextToggle() {
+    const nextOpen = !marketplaceContextOpen;
+    setMarketplaceContextOpen(nextOpen);
+    if (nextOpen) await loadMarketplaceContext();
+  }
+
+  useEffect(() => {
+    if (!marketplaceContextOpen) return;
+    loadMarketplaceContext();
+  }, [selectedSummary?.brand, weeksToShow]);
 
   if (loading) {
     return (
@@ -636,6 +682,29 @@ function BrandHealthView({ data, loading, error, selectedBrand, setSelectedBrand
                 style={{ transform: statusGuideOpen ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 160ms ease' }}
               />
             </button>
+            <button
+              type="button"
+              onClick={handleMarketplaceContextToggle}
+              aria-pressed={marketplaceContextOpen}
+              title="Tampilkan order marketplace mingguan"
+              style={{
+                height: 30,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '0 10px',
+                borderRadius: 8,
+                border: marketplaceContextOpen ? '1px solid #38bdf8' : '1px solid var(--border)',
+                background: marketplaceContextOpen ? 'rgba(56,189,248,0.12)' : 'var(--bg)',
+                color: marketplaceContextOpen ? '#38bdf8' : 'var(--dim)',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              <ShoppingBag size={14} />
+              {marketplaceContextLoading ? 'Loading...' : 'Marketplace context'}
+            </button>
             <div style={{ display: 'flex', gap: 3, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: 3 }}>
               {[13, 26, 52].map((weeks) => (
                 <button
@@ -687,6 +756,7 @@ function BrandHealthView({ data, loading, error, selectedBrand, setSelectedBrand
               <XAxis dataKey="weekLabel" tick={{ fill: 'var(--dim)', fontSize: 10 }} axisLine={{ stroke: 'var(--border)' }} tickLine={false} minTickGap={18} />
               <YAxis yAxisId="base" tick={{ fill: 'var(--dim)', fontSize: 10 }} axisLine={false} tickLine={false} width={42} />
               <YAxis yAxisId="new" orientation="right" tick={{ fill: 'var(--dim)', fontSize: 10 }} axisLine={false} tickLine={false} width={36} />
+              <YAxis yAxisId="marketplace" hide />
               <Tooltip content={<BrandHealthTooltip />} />
               <Legend wrapperStyle={{ fontSize: 11, color: 'var(--dim)' }} />
               <Bar yAxisId="new" dataKey="newBuyers" name="New Buyer" fill="var(--green)" radius={[3, 3, 0, 0]} opacity={0.76} />
@@ -700,6 +770,19 @@ function BrandHealthView({ data, loading, error, selectedBrand, setSelectedBrand
                 dot={false}
                 activeDot={{ r: 4 }}
               />
+              {marketplaceContextOpen && !marketplaceContextLoading && !marketplaceContextError && (
+                <Line
+                  yAxisId="marketplace"
+                  type="monotone"
+                  dataKey="marketplaceOrders"
+                  name="Marketplace Orders"
+                  stroke="#38bdf8"
+                  strokeWidth={2.2}
+                  strokeDasharray="5 4"
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+              )}
             </ComposedChart>
           </ResponsiveContainer>
         </div>
@@ -708,6 +791,11 @@ function BrandHealthView({ data, loading, error, selectedBrand, setSelectedBrand
           <span>Latest week: {latestPoint ? formatDateId(latestPoint.weekStart) : '—'} - {latestPoint ? formatDateId(latestPoint.weekEnd) : '—'}</span>
           <span>Rows read: {Number(data?.coverage?.rowsRead || 0).toLocaleString('id-ID')}</span>
           <span>Identity: phone-backed owned channel</span>
+          {marketplaceContextOpen && marketplaceContextLoading && <span>Marketplace orders: loading...</span>}
+          {marketplaceContextOpen && marketplaceContextError && <span style={{ color: 'var(--red)' }}>Marketplace orders gagal dimuat</span>}
+          {marketplaceContextOpen && !marketplaceContextLoading && !marketplaceContextError && (
+            <span>Marketplace orders: {marketplaceOrdersInView.toLocaleString('id-ID')} / {weeksToShow}W</span>
+          )}
         </div>
       </div>
 
@@ -771,6 +859,9 @@ function BrandHealthTooltip({ active, payload, label }) {
       <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>Week end: {formatDateId(row.weekEnd)}</div>
       <div style={{ fontSize: 12, color: 'var(--text)' }}>Active Base 90D: <strong>{Number(row.trailingActiveBuyers || 0).toLocaleString('id-ID')}</strong></div>
       <div style={{ fontSize: 12, color: 'var(--green)' }}>New Buyer: <strong>{Number(row.newBuyers || 0).toLocaleString('id-ID')}</strong></div>
+      {row.showMarketplaceOrders && (
+        <div style={{ fontSize: 12, color: '#38bdf8' }}>Marketplace Orders: <strong>{Number(row.marketplaceOrders || 0).toLocaleString('id-ID')}</strong></div>
+      )}
     </div>
   );
 }

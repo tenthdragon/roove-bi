@@ -675,6 +675,7 @@ export type BrandBuyerHealthPoint = {
   weekEnd: string;
   trailingActiveBuyers: number;
   newBuyers: number;
+  marketplaceOrders?: number;
   activeDelta: number | null;
   newDelta: number | null;
 };
@@ -717,6 +718,22 @@ export type BrandBuyerHealthData = {
   };
 };
 
+export type BrandMarketplaceOrderContextPoint = {
+  brand: string;
+  weekStart: string;
+  weekEnd: string;
+  marketplaceOrders: number;
+};
+
+export type BrandMarketplaceOrderContextData = {
+  points: BrandMarketplaceOrderContextPoint[];
+  coverage: {
+    source: 'marketplace_channel_summary';
+    rowsRead: number;
+    generatedAt: string;
+  };
+};
+
 type OwnedBuyerHealthRpcRow = {
   brand: string | null;
   week_start: string | null;
@@ -729,8 +746,27 @@ type OwnedBuyerHealthRpcRow = {
   unique_buyers: number | string | null;
 };
 
+type DailyShipmentCountRow = {
+  date: string | null;
+  product: string | null;
+  channel: string | null;
+  order_count: number | string | null;
+};
+
 const BUYER_HEALTH_DEFAULT_WEEKS = 26;
 const BUYER_HEALTH_TREND_WINDOW_WEEKS = 13;
+const BRAND_HEALTH_MARKETPLACE_CHANNELS = [
+  'Marketplace',
+  'Shopee',
+  'TikTok',
+  'TikTok Shop',
+  'Tiktok Shop',
+  'Tokopedia',
+  'Lazada',
+  'BliBli',
+  'Blibli',
+  'Bli Bli',
+];
 
 function classifyTrend(delta: number, baseline: number, minAbs: number, minPct: number): 'up' | 'flat' | 'down' {
   const threshold = Math.max(minAbs, Math.abs(baseline) * minPct);
@@ -765,6 +801,70 @@ function average(values: number[]): number {
 function percentDelta(delta: number | null, baseline: number): number | null {
   if (delta == null || baseline <= 0) return null;
   return (delta / baseline) * 100;
+}
+
+function isMarketplaceSalesChannel(channel: unknown): boolean {
+  const value = String(channel || '').trim().toLowerCase();
+  if (!value) return false;
+  if (value.includes('scalev ads') || value.includes('tiktok ads')) return false;
+  return (
+    value === 'marketplace'
+    || value === 'tiktok'
+    || value.includes('marketplace')
+    || value.includes('shopee')
+    || value.includes('tiktok shop')
+    || value.includes('tiktokshop')
+    || value.includes('tokopedia')
+    || value.includes('lazada')
+    || value.includes('blibli')
+    || value.includes('bli bli')
+  );
+}
+
+function resolveWeekEndForDate(dateKey: string, weeks: Array<{ weekStart: string; weekEnd: string }>): string | null {
+  for (const week of weeks) {
+    if (dateKey >= week.weekStart && dateKey <= week.weekEnd) return week.weekEnd;
+  }
+  return null;
+}
+
+async function fetchMarketplaceOrderCountsByBrandWeek(
+  svc: ReturnType<typeof createServiceSupabase>,
+  weeks: Array<{ weekStart: string; weekEnd: string }>,
+  brandFilter?: string | null,
+): Promise<{ counts: Map<string, number>; rowsRead: number }> {
+  const firstWeek = weeks[0];
+  const lastWeek = weeks[weeks.length - 1];
+  if (!firstWeek || !lastWeek) return { counts: new Map(), rowsRead: 0 };
+
+  const counts = new Map<string, number>();
+  let rowsRead = 0;
+
+  const { data, error } = await svc.rpc('get_daily_shipment_counts', {
+    p_from: firstWeek.weekStart,
+    p_to: lastWeek.weekEnd,
+  });
+
+  if (error) {
+    console.error('[Brand Health] Failed to load marketplace order context:', error.message);
+    throw new Error(`Gagal memuat Marketplace Context: ${error.message}`);
+  }
+
+  const rows = (data || []) as DailyShipmentCountRow[];
+  for (const row of rows) {
+    if (!isMarketplaceSalesChannel(row.channel)) continue;
+    const brand = String(row.product || '').trim();
+    const dateKey = row.date ? String(row.date).slice(0, 10) : '';
+    if (!brand || !dateKey || brand === 'Unknown' || brand === 'Other') continue;
+    if (brandFilter && brand !== brandFilter) continue;
+    const weekEnd = resolveWeekEndForDate(dateKey, weeks);
+    if (!weekEnd) continue;
+    const key = `${brand}||${weekEnd}`;
+    counts.set(key, (counts.get(key) || 0) + Number(row.order_count || 0));
+    rowsRead += 1;
+  }
+
+  return { counts, rowsRead };
 }
 
 function summarizeBuyerHealthPoints(pointsByBrand: Map<string, BrandBuyerHealthPoint[]>): {
@@ -870,6 +970,7 @@ export async function fetchOwnedBrandBuyerHealth(options?: { weeks?: number }): 
         weekEnd,
         trailingActiveBuyers: Number(row.trailing_active_buyers || 0),
         newBuyers: Number(row.new_buyers || 0),
+        marketplaceOrders: 0,
         activeDelta: null,
         newDelta: null,
       });
@@ -880,8 +981,8 @@ export async function fetchOwnedBrandBuyerHealth(options?: { weeks?: number }): 
       uniqueBuyers = Math.max(uniqueBuyers, Number(row.unique_buyers || 0));
     }
 
-    const summarized = summarizeBuyerHealthPoints(pointsByBrand);
     const weeks = Array.from(weeksByEnd.values()).sort((left, right) => left.weekEnd.localeCompare(right.weekEnd));
+    const summarized = summarizeBuyerHealthPoints(pointsByBrand);
     return {
       brands: summarized.summaries.map((summary) => summary.brand),
       summaries: summarized.summaries,
@@ -905,6 +1006,50 @@ export async function fetchOwnedBrandBuyerHealth(options?: { weeks?: number }): 
     throw new Error('Database function get_owned_brand_buyer_health belum tersedia. Jalankan migration 157_owned_brand_buyer_health_rpc.sql sebelum membuka Brand Health.');
   }
   throw rpcError;
+}
+
+// ── Marketplace context for Brand Health: weekly marketplace order counts only ──
+export async function fetchBrandMarketplaceOrderContext(options: {
+  brand?: string | null;
+  weeks: Array<{ weekStart: string; weekEnd: string }>;
+}): Promise<BrandMarketplaceOrderContextData> {
+  await requireBrandAnalysisAccess('Brand Analysis');
+  const svc = createServiceSupabase();
+  const brand = String(options?.brand || '').trim();
+  const weeks = (options?.weeks || [])
+    .map((week) => ({
+      weekStart: String(week?.weekStart || '').slice(0, 10),
+      weekEnd: String(week?.weekEnd || '').slice(0, 10),
+    }))
+    .filter((week) => week.weekStart && week.weekEnd)
+    .sort((left, right) => left.weekEnd.localeCompare(right.weekEnd))
+    .slice(-52);
+
+  const marketplaceContext = await fetchMarketplaceOrderCountsByBrandWeek(svc, weeks, brand || null);
+  const weekByEnd = new Map(weeks.map((week) => [week.weekEnd, week]));
+  const points: BrandMarketplaceOrderContextPoint[] = [];
+
+  for (const [key, marketplaceOrders] of marketplaceContext.counts.entries()) {
+    const [brand, weekEnd] = key.split('||');
+    const week = weekByEnd.get(weekEnd);
+    if (!brand || !week) continue;
+    points.push({
+      brand,
+      weekStart: week.weekStart,
+      weekEnd: week.weekEnd,
+      marketplaceOrders,
+    });
+  }
+
+  points.sort((left, right) => left.brand.localeCompare(right.brand) || left.weekEnd.localeCompare(right.weekEnd));
+  return {
+    points,
+    coverage: {
+      source: 'marketplace_channel_summary',
+      rowsRead: marketplaceContext.rowsRead,
+      generatedAt: new Date().toISOString(),
+    },
+  };
 }
 
 // ── Last refresh time ──
