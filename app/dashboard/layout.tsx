@@ -38,6 +38,8 @@ function hasAdminAreaAccess(role, permissions) {
 function canAccessLayoutTab(role, tab, permissions) {
   // Sales Channel Analysis inherits its parent Sales Channel permission.
   if (tab.id === 'sales-channel-analysis') return canAccessTab(role, 'channels', permissions);
+  // Shopee Details is a focused view inside Marketing Channel.
+  if (tab.id === 'shopee-details') return canAccessTab(role, 'marketing', permissions);
   if (tab.id === 'admin') return hasAdminAreaAccess(role, permissions);
   if (tab.ownerOnly && role !== 'owner') return false;
   return canAccessTab(role, tab.id, permissions);
@@ -1091,6 +1093,7 @@ function TabIcon({ id, size = 18 }) {
     case 'products': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>;
     case 'channels': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>;
     case 'marketing': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>;
+    case 'shopee-details': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 8h12l1 13H5L6 8z"/><path d="M9 8V6a3 3 0 016 0v2"/><path d="M9 13h6"/></svg>;
     case 'customers': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>;
     case 'brand-analysis': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="20" rx="2"/><path d="M2 12h20"/><path d="M12 2v20"/><path d="M7 7h0"/><path d="M17 7h0"/><path d="M7 17h0"/><path d="M17 17h0"/></svg>;
     case 'finance': return <svg {...s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>;

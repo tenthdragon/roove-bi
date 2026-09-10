@@ -1,8 +1,13 @@
 import { createServiceSupabase } from './service-supabase';
 import {
   fetchShopeeAdsPerformanceRange,
+  fetchShopeeProductCampaignPerformanceRange,
+  getShopeeProductCampaignRefs,
+  getShopeeProductCampaignSettings,
   refreshShopeeAccessToken,
   type ShopeeAdsPerformancePoint,
+  type ShopeeProductCampaignPerformancePoint,
+  type ShopeeProductCampaignSetting,
 } from './shopee-open-platform';
 import {
   getShopeeApiDataSourceForStream,
@@ -208,6 +213,148 @@ function buildSpendRows(shop: ShopeeShopRow, stream: ShopeeSpendStreamRow, point
     }));
 }
 
+function toIsoTimestamp(value: number | null | undefined) {
+  const seconds = Number(value || 0);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return new Date(seconds * 1000).toISOString();
+}
+
+function buildProductCampaignRows(
+  shop: ShopeeShopRow,
+  settings: ShopeeProductCampaignSetting[],
+  workspaceId: string,
+) {
+  const now = new Date().toISOString();
+
+  return settings.map((setting) => {
+    const common = setting.common_info || {};
+    const target = Number(setting.auto_bidding_info?.roas_target || 0);
+
+    return {
+      workspace_id: workspaceId,
+      shop_config_id: shop.id,
+      shop_id: shop.shop_id,
+      shop_name: shop.shop_name,
+      campaign_id: setting.campaign_id,
+      campaign_type: 'product',
+      ad_type: common.ad_type || null,
+      ad_name: common.ad_name || '',
+      campaign_status: common.campaign_status || null,
+      bidding_method: common.bidding_method || null,
+      campaign_placement: common.campaign_placement || null,
+      campaign_budget: Number(common.campaign_budget || 0),
+      roas_target: target > 0 ? target : null,
+      start_at: toIsoTimestamp(common.campaign_duration?.start_time),
+      end_at: toIsoTimestamp(common.campaign_duration?.end_time),
+      item_ids: common.item_id_list || [],
+      products: setting.auto_product_ads_info || [],
+      selected_keywords: setting.manual_bidding_info?.selected_keywords || [],
+      raw_setting: setting,
+      last_seen_at: now,
+      updated_at: now,
+    };
+  });
+}
+
+function buildProductCampaignMetricRows(
+  shop: ShopeeShopRow,
+  points: ShopeeProductCampaignPerformancePoint[],
+  workspaceId: string,
+) {
+  const now = new Date().toISOString();
+
+  return points.map((point) => ({
+    workspace_id: workspaceId,
+    shop_config_id: shop.id,
+    shop_id: shop.shop_id,
+    campaign_id: point.campaign_id,
+    campaign_type: 'product',
+    metric_date: point.date,
+    ad_type: point.ad_type || null,
+    ad_name: point.ad_name || '',
+    campaign_placement: point.campaign_placement || null,
+    impressions: point.impression,
+    clicks: point.clicks,
+    ctr: point.ctr,
+    expense: point.expense,
+    broad_gmv: point.broad_gmv,
+    broad_order: point.broad_order,
+    broad_order_amount: point.broad_order_amount,
+    broad_roas: point.broad_roi,
+    broad_acos: point.broad_cir,
+    conversion_rate: point.cr,
+    cost_per_conversion: point.cpc,
+    direct_gmv: point.direct_gmv,
+    direct_order: point.direct_order,
+    direct_order_amount: point.direct_order_amount,
+    direct_roas: point.direct_roi,
+    direct_acos: point.direct_cir,
+    direct_conversion_rate: point.direct_cr,
+    cost_per_direct_conversion: point.cpdc,
+    raw_payload: point,
+    updated_at: now,
+  }));
+}
+
+async function syncProductCampaignDetails(input: {
+  accessToken: string;
+  shop: ShopeeShopRow;
+  workspaceId: string;
+  dateStart: string;
+  dateEnd: string;
+}) {
+  const svc = createServiceSupabase();
+  const campaignRefs = await getShopeeProductCampaignRefs({
+    accessToken: input.accessToken,
+    shopId: input.shop.shop_id,
+  });
+  const campaignIds = campaignRefs.map((campaign) => campaign.campaign_id);
+
+  const [settings, performance] = await Promise.all([
+    getShopeeProductCampaignSettings({
+      accessToken: input.accessToken,
+      shopId: input.shop.shop_id,
+      campaignIds,
+    }),
+    fetchShopeeProductCampaignPerformanceRange({
+      accessToken: input.accessToken,
+      shopId: input.shop.shop_id,
+      campaignIds,
+      dateStart: input.dateStart,
+      dateEnd: input.dateEnd,
+    }),
+  ]);
+
+  const campaignRows = buildProductCampaignRows(input.shop, settings, input.workspaceId);
+  const metricRows = buildProductCampaignMetricRows(input.shop, performance, input.workspaceId);
+
+  if (campaignRows.length > 0) {
+    const { error: upsertError } = await svc
+      .from('shopee_ad_campaigns')
+      .upsert(campaignRows, {
+        onConflict: 'workspace_id,shop_config_id,campaign_type,campaign_id',
+      });
+    if (upsertError) {
+      throw new Error(`Upsert shopee_ad_campaigns: ${upsertError.message}`);
+    }
+  }
+
+  const { error: deleteMetricsError } = await svc
+    .from('shopee_ad_campaign_daily_metrics')
+    .delete()
+    .eq('workspace_id', input.workspaceId)
+    .eq('shop_config_id', input.shop.id)
+    .eq('campaign_type', 'product')
+    .gte('metric_date', input.dateStart)
+    .lte('metric_date', input.dateEnd);
+  if (deleteMetricsError) {
+    throw new Error(`Delete shopee_ad_campaign_daily_metrics: ${deleteMetricsError.message}`);
+  }
+
+  await insertInBatches('shopee_ad_campaign_daily_metrics', metricRows);
+  return campaignRows.length + metricRows.length;
+}
+
 async function insertInBatches(
   table: string,
   rows: Record<string, unknown>[],
@@ -379,6 +526,20 @@ export async function runShopeeSync(options: RunShopeeSyncOptions): Promise<Shop
           directGmvTotal += metricsRows.reduce((sum, row) => sum + Number(row.direct_gmv || 0), 0);
           broadGmvTotal += metricsRows.reduce((sum, row) => sum + Number(row.broad_gmv || 0), 0);
           shopHadSuccess = true;
+        }
+
+        if (shopHadSuccess) {
+          try {
+            rowsInserted += await syncProductCampaignDetails({
+              accessToken: usableToken.accessToken,
+              shop,
+              workspaceId,
+              dateStart,
+              dateEnd,
+            });
+          } catch (campaignError: any) {
+            errors.push(`${shop.shop_name}: detail campaign Shopee tidak tersinkron (${campaignError.message || 'request gagal'}).`);
+          }
         }
 
         if (shopHadSuccess) {

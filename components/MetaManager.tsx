@@ -101,6 +101,10 @@ const ACCOUNT_STATUS_LABELS: Record<number, string> = {
   201: 'Any Closed',
 };
 
+function isCpasSource(source: string | null | undefined) {
+  return String(source || '').toLowerCase().includes('cpas');
+}
+
 export default function MetaManager() {
   const [accounts, setAccounts] = useState<MetaAccount[]>([]);
   const [recentLogs, setRecentLogs] = useState<SyncLog[]>([]);
@@ -667,7 +671,7 @@ export default function MetaManager() {
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 12, color: 'var(--dim)' }}>
-            Daftar akun Meta Ads yang datanya ditarik otomatis via Marketing API. Setiap akun memakai brand canonical dari Master Data.
+            Daftar akun Meta Ads yang datanya ditarik otomatis via Marketing API. Pilih source <strong>Facebook CPAS</strong> untuk akun yang harus masuk ke ringkasan Shopee &amp; CPAS.
           </div>
           <Link href="/dashboard/warehouse-settings?tab=brands" style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 700, textDecoration: 'none' }}>
             Kelola Brand →
@@ -827,7 +831,7 @@ export default function MetaManager() {
                           </select>
                         </div>
                         <div>
-                          <label style={labelStyle}>Source</label>
+                          <label style={labelStyle}>Source / Peran</label>
                           <select
                             value={mapping.default_source}
                             onChange={e => updateMapping(acc.account_id, 'default_source', e.target.value)}
@@ -966,7 +970,14 @@ export default function MetaManager() {
                         </td>
                         <td style={{ padding: '10px 12px', color: 'var(--text)', fontWeight: 600 }}>{acc.account_name}</td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{getBrandDisplay(acc.default_brand_id, acc.brand_name || acc.store)}</td>
-                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_source}</td>
+                        <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>
+                          {acc.default_source}
+                          {isCpasSource(acc.default_source) && (
+                            <span style={{ marginLeft: 6, padding: '2px 6px', borderRadius: 4, background: 'rgba(24, 119, 242, 0.12)', color: '#60a5fa', fontSize: 9, fontWeight: 800 }}>
+                              CPAS
+                            </span>
+                          )}
+                        </td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-secondary)' }}>{acc.default_advertiser}</td>
                         <td style={{ padding: '10px 12px' }}>
                           <div style={{ display: 'flex', gap: 6 }}>

@@ -60,6 +60,76 @@ export type ShopeeAdsPerformancePoint = {
   broad_roas: number;
 };
 
+export type ShopeeProductCampaignRef = {
+  campaign_id: number;
+  ad_type: string;
+};
+
+export type ShopeeProductCampaignKeyword = {
+  keyword: string;
+  status: string;
+  match_type: string;
+  bid_price_per_click: number;
+};
+
+export type ShopeeProductCampaignProduct = {
+  item_id: number;
+  product_name: string;
+  status: string;
+};
+
+export type ShopeeProductCampaignSetting = {
+  campaign_id: number;
+  common_info: {
+    ad_type?: string;
+    ad_name?: string;
+    campaign_status?: string;
+    bidding_method?: string;
+    campaign_placement?: string;
+    campaign_budget?: number;
+    campaign_duration?: {
+      start_time?: number;
+      end_time?: number;
+    };
+    item_id_list?: number[];
+  };
+  manual_bidding_info?: {
+    enhanced_cpc?: boolean;
+    selected_keywords?: ShopeeProductCampaignKeyword[];
+    discovery_ads_locations?: unknown[];
+  };
+  auto_bidding_info?: {
+    roas_target?: number;
+  };
+  auto_product_ads_info?: ShopeeProductCampaignProduct[];
+};
+
+export type ShopeeProductCampaignPerformancePoint = {
+  campaign_id: number;
+  ad_type: string;
+  campaign_placement: string;
+  ad_name: string;
+  date: string;
+  impression: number;
+  clicks: number;
+  ctr: number;
+  expense: number;
+  broad_gmv: number;
+  broad_order: number;
+  broad_order_amount: number;
+  broad_roi: number;
+  broad_cir: number;
+  cr: number;
+  cpc: number;
+  direct_gmv: number;
+  direct_order: number;
+  direct_order_amount: number;
+  direct_roi: number;
+  direct_cir: number;
+  direct_cr: number;
+  cpdc: number;
+};
+
 type ShopeeAdsHourlyPoint = ShopeeAdsPerformancePoint & {
   hour?: number;
 };
@@ -532,6 +602,313 @@ export async function fetchShopeeAdsPerformanceRange(input: {
   }
 
   return output.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+function normalizeShopeeApiDate(value: string) {
+  const input = String(value || '').trim();
+  if (!input) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
+  return parseShopeeDate(input);
+}
+
+function chunkValues<T>(values: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < values.length; index += size) {
+    chunks.push(values.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function extractProductCampaigns(response: unknown) {
+  const containers = Array.isArray(response) ? response : [response];
+  return containers.flatMap((container: any) => (
+    Array.isArray(container?.campaign_list) ? container.campaign_list : []
+  ));
+}
+
+export function normalizeShopeeProductCampaignSetting(raw: any): ShopeeProductCampaignSetting {
+  const common = raw?.common_info || {};
+  const manual = raw?.manual_bidding_info || {};
+  const auto = raw?.auto_bidding_info || {};
+
+  return {
+    campaign_id: num(raw?.campaign_id),
+    common_info: {
+      ad_type: String(common.ad_type || ''),
+      ad_name: String(common.ad_name || ''),
+      campaign_status: String(common.campaign_status || ''),
+      bidding_method: String(common.bidding_method || ''),
+      campaign_placement: String(common.campaign_placement || ''),
+      campaign_budget: num(common.campaign_budget),
+      campaign_duration: {
+        start_time: num(common.campaign_duration?.start_time),
+        end_time: num(common.campaign_duration?.end_time),
+      },
+      item_id_list: Array.isArray(common.item_id_list)
+        ? common.item_id_list.map((itemId: unknown) => num(itemId)).filter(Boolean)
+        : [],
+    },
+    manual_bidding_info: {
+      enhanced_cpc: Boolean(manual.enhanced_cpc),
+      selected_keywords: Array.isArray(manual.selected_keywords)
+        ? manual.selected_keywords.map((keyword: any) => ({
+          keyword: String(keyword?.keyword || ''),
+          status: String(keyword?.status || ''),
+          match_type: String(keyword?.match_type || ''),
+          bid_price_per_click: num(keyword?.bid_price_per_click),
+        }))
+        : [],
+      discovery_ads_locations: Array.isArray(manual.discovery_ads_locations)
+        ? manual.discovery_ads_locations
+        : [],
+    },
+    auto_bidding_info: {
+      roas_target: num(auto.roas_target),
+    },
+    auto_product_ads_info: Array.isArray(raw?.auto_product_ads_info)
+      ? raw.auto_product_ads_info.map((product: any) => ({
+        item_id: num(product?.item_id),
+        product_name: String(product?.product_name || ''),
+        status: String(product?.status || ''),
+      }))
+      : [],
+  };
+}
+
+export function normalizeShopeeProductCampaignPerformance(response: unknown) {
+  return extractProductCampaigns(response).flatMap((campaign: any) => {
+    const metrics = Array.isArray(campaign?.metrics_list) ? campaign.metrics_list : [];
+    return metrics.map((metric: any): ShopeeProductCampaignPerformancePoint => ({
+      campaign_id: num(campaign?.campaign_id),
+      ad_type: String(campaign?.ad_type || ''),
+      campaign_placement: String(campaign?.campaign_placement || ''),
+      ad_name: String(campaign?.ad_name || ''),
+      date: normalizeShopeeApiDate(metric?.date),
+      impression: num(metric?.impression),
+      clicks: num(metric?.clicks),
+      ctr: num(metric?.ctr),
+      expense: num(metric?.expense),
+      broad_gmv: num(metric?.broad_gmv),
+      broad_order: num(metric?.broad_order),
+      broad_order_amount: num(metric?.broad_order_amount),
+      broad_roi: num(metric?.broad_roi),
+      broad_cir: num(metric?.broad_cir),
+      cr: num(metric?.cr),
+      cpc: num(metric?.cpc),
+      direct_gmv: num(metric?.direct_gmv),
+      direct_order: num(metric?.direct_order),
+      direct_order_amount: num(metric?.direct_order_amount),
+      direct_roi: num(metric?.direct_roi),
+      direct_cir: num(metric?.direct_cir),
+      direct_cr: num(metric?.direct_cr),
+      cpdc: num(metric?.cpdc),
+    }));
+  }).filter((point) => point.campaign_id > 0 && Boolean(point.date));
+}
+
+function aggregateProductCampaignHourlyPoints(points: ShopeeProductCampaignPerformancePoint[]) {
+  const byCampaignDate = new Map<string, ShopeeProductCampaignPerformancePoint>();
+
+  for (const point of points) {
+    const key = `${point.campaign_id}:${point.date}`;
+    const current = byCampaignDate.get(key) || {
+      ...point,
+      impression: 0,
+      clicks: 0,
+      ctr: 0,
+      expense: 0,
+      broad_gmv: 0,
+      broad_order: 0,
+      broad_order_amount: 0,
+      broad_roi: 0,
+      broad_cir: 0,
+      cr: 0,
+      cpc: 0,
+      direct_gmv: 0,
+      direct_order: 0,
+      direct_order_amount: 0,
+      direct_roi: 0,
+      direct_cir: 0,
+      direct_cr: 0,
+      cpdc: 0,
+    };
+
+    current.impression += point.impression;
+    current.clicks += point.clicks;
+    current.expense += point.expense;
+    current.broad_gmv += point.broad_gmv;
+    current.broad_order += point.broad_order;
+    current.broad_order_amount += point.broad_order_amount;
+    current.direct_gmv += point.direct_gmv;
+    current.direct_order += point.direct_order;
+    current.direct_order_amount += point.direct_order_amount;
+    byCampaignDate.set(key, current);
+  }
+
+  return Array.from(byCampaignDate.values()).map((point) => ({
+    ...point,
+    ctr: point.impression > 0 ? (point.clicks / point.impression) * 100 : 0,
+    broad_roi: point.expense > 0 ? point.broad_gmv / point.expense : 0,
+    broad_cir: point.broad_gmv > 0 ? (point.expense / point.broad_gmv) * 100 : 0,
+    cr: point.clicks > 0 ? (point.broad_order / point.clicks) * 100 : 0,
+    cpc: point.broad_order > 0 ? point.expense / point.broad_order : 0,
+    direct_roi: point.expense > 0 ? point.direct_gmv / point.expense : 0,
+    direct_cir: point.direct_gmv > 0 ? (point.expense / point.direct_gmv) * 100 : 0,
+    direct_cr: point.clicks > 0 ? (point.direct_order / point.clicks) * 100 : 0,
+    cpdc: point.direct_order > 0 ? point.expense / point.direct_order : 0,
+  }));
+}
+
+export async function getShopeeProductCampaignRefs(input: {
+  accessToken: string;
+  shopId: number | string;
+}) {
+  const path = '/api/v2/ads/get_product_level_campaign_id_list';
+  const limit = 100;
+  let offset = 0;
+  const campaigns: ShopeeProductCampaignRef[] = [];
+
+  for (let page = 0; page < 100; page += 1) {
+    const url = buildSignedUrl(path, {
+      ad_type: 'all',
+      offset,
+      limit,
+    }, {
+      accessToken: input.accessToken,
+      shopId: input.shopId,
+    });
+    const json = await getJson<any>(url, 'Shopee product campaign list');
+    const response = json.response || {};
+    const pageRows = Array.isArray(response.campaign_list) ? response.campaign_list : [];
+
+    campaigns.push(...pageRows.map((campaign: any) => ({
+      campaign_id: num(campaign?.campaign_id),
+      ad_type: String(campaign?.ad_type || ''),
+    })).filter((campaign: ShopeeProductCampaignRef) => campaign.campaign_id > 0));
+
+    if (!response.has_next_page || pageRows.length === 0) break;
+    offset += pageRows.length;
+  }
+
+  return Array.from(new Map(
+    campaigns.map((campaign) => [campaign.campaign_id, campaign]),
+  ).values());
+}
+
+export async function getShopeeProductCampaignSettings(input: {
+  accessToken: string;
+  shopId: number | string;
+  campaignIds: number[];
+}) {
+  if (input.campaignIds.length === 0) return [];
+
+  const path = '/api/v2/ads/get_product_level_campaign_setting_info';
+  const settings: ShopeeProductCampaignSetting[] = [];
+
+  for (const campaignIds of chunkValues(input.campaignIds, 100)) {
+    const url = buildSignedUrl(path, {
+      info_type_list: '1,2,3,4',
+      campaign_id_list: campaignIds.join(','),
+    }, {
+      accessToken: input.accessToken,
+      shopId: input.shopId,
+    });
+    const json = await getJson<any>(url, 'Shopee product campaign settings');
+    settings.push(...extractProductCampaigns(json.response)
+      .map(normalizeShopeeProductCampaignSetting)
+      .filter((campaign) => campaign.campaign_id > 0));
+  }
+
+  return settings;
+}
+
+async function getShopeeProductCampaignDailyPerformance(input: {
+  accessToken: string;
+  shopId: number | string;
+  campaignIds: number[];
+  startDate: string;
+  endDate: string;
+}) {
+  const path = '/api/v2/ads/get_product_campaign_daily_performance';
+  const url = buildSignedUrl(path, {
+    campaign_id_list: input.campaignIds.join(','),
+    start_date: formatShopeeDate(input.startDate),
+    end_date: formatShopeeDate(input.endDate),
+  }, {
+    accessToken: input.accessToken,
+    shopId: input.shopId,
+  });
+  const json = await getJson<any>(url, 'Shopee product campaign daily performance');
+  return normalizeShopeeProductCampaignPerformance(json.response);
+}
+
+async function getShopeeProductCampaignHourlyPerformance(input: {
+  accessToken: string;
+  shopId: number | string;
+  campaignIds: number[];
+  performanceDate: string;
+}) {
+  const path = '/api/v2/ads/get_product_campaign_hourly_performance';
+  const url = buildSignedUrl(path, {
+    campaign_id_list: input.campaignIds.join(','),
+    performance_date: formatShopeeDate(input.performanceDate),
+  }, {
+    accessToken: input.accessToken,
+    shopId: input.shopId,
+  });
+  const json = await getJson<any>(url, 'Shopee product campaign hourly performance');
+  return aggregateProductCampaignHourlyPoints(
+    normalizeShopeeProductCampaignPerformance(json.response),
+  );
+}
+
+export async function fetchShopeeProductCampaignPerformanceRange(input: {
+  accessToken: string;
+  shopId: number | string;
+  campaignIds: number[];
+  dateStart: string;
+  dateEnd: string;
+}) {
+  if (input.campaignIds.length === 0) return [];
+
+  const start = parseIsoDate(input.dateStart);
+  const end = parseIsoDate(input.dateEnd);
+  if (start.getTime() > end.getTime()) {
+    throw new Error('Tanggal mulai campaign Shopee tidak boleh lebih besar dari tanggal akhir.');
+  }
+
+  const output: ShopeeProductCampaignPerformancePoint[] = [];
+  for (const campaignIds of chunkValues(input.campaignIds, 100)) {
+    let cursor = start;
+    while (cursor.getTime() <= end.getTime()) {
+      const chunkEnd = new Date(Math.min(addUtcDays(cursor, 29).getTime(), end.getTime()));
+      const cursorDate = formatIsoDate(cursor);
+      const chunkEndDate = formatIsoDate(chunkEnd);
+
+      if (cursorDate === chunkEndDate) {
+        output.push(...await getShopeeProductCampaignHourlyPerformance({
+          accessToken: input.accessToken,
+          shopId: input.shopId,
+          campaignIds,
+          performanceDate: cursorDate,
+        }));
+      } else {
+        output.push(...await getShopeeProductCampaignDailyPerformance({
+          accessToken: input.accessToken,
+          shopId: input.shopId,
+          campaignIds,
+          startDate: cursorDate,
+          endDate: chunkEndDate,
+        }));
+      }
+
+      cursor = addUtcDays(chunkEnd, 1);
+    }
+  }
+
+  return output.sort((a, b) => (
+    a.date.localeCompare(b.date) || a.campaign_id - b.campaign_id
+  ));
 }
 
 export function toShopeeTimestamp(date: string | Date | null | undefined) {
