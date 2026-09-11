@@ -130,6 +130,82 @@ async function fetchShopeeCampaignDetails(
   };
 }
 
+function isMissingShopeeGmsSchema(error: { code?: string; message?: string } | null | undefined) {
+  const detail = `${error?.code || ''} ${error?.message || ''}`;
+  return /PGRST205|42P01/i.test(detail)
+    || /(relation|table).*(shopee_gms_campaign_period_metrics|shopee_gms_item_period_metrics).*(does not exist|schema cache|not found)/i.test(detail);
+}
+
+async function fetchShopeeGmsDetails(
+  svc: any,
+  workspaceId: string,
+  from: string,
+  to: string,
+) {
+  const fields = 'shop_config_id, shop_id, campaign_id, period_start, period_end, impressions, clicks, expense, broad_gmv, broad_order, broad_order_amount, broad_roas, broad_acos, conversion_rate, cost_per_conversion, direct_order, direct_order_amount, direct_roas, direct_acos, direct_conversion_rate, cost_per_direct_conversion, sync_batch_id';
+  const fetchRows = async (buildQuery: (fromIndex: number, toIndex: number) => PromiseLike<any>) => {
+    const rows: any[] = [];
+    for (let fromIndex = 0; ; fromIndex += HISTORY_PAGE_SIZE) {
+      const result = await buildQuery(fromIndex, fromIndex + HISTORY_PAGE_SIZE - 1);
+      if (result.error) return { data: null, error: result.error };
+      const page = result.data || [];
+      rows.push(...page);
+      if (page.length < HISTORY_PAGE_SIZE) return { data: rows, error: null };
+    }
+  };
+  const [campaignsRes, itemsRes] = await Promise.all([
+    fetchRows((fromIndex, toIndex) => svc.from('shopee_gms_campaign_period_metrics')
+      .select(fields)
+      .eq('workspace_id', workspaceId)
+      .eq('period_start', from)
+      .eq('period_end', to)
+      .order('shop_config_id', { ascending: true })
+      .order('campaign_id', { ascending: true })
+      .range(fromIndex, toIndex)),
+    fetchRows((fromIndex, toIndex) => svc.from('shopee_gms_item_period_metrics')
+      .select(`item_id, ${fields}`)
+      .eq('workspace_id', workspaceId)
+      .eq('period_start', from)
+      .eq('period_end', to)
+      .order('shop_config_id', { ascending: true })
+      .order('campaign_id', { ascending: true })
+      .order('item_id', { ascending: true })
+      .range(fromIndex, toIndex)),
+  ]);
+
+  if (isMissingShopeeGmsSchema(campaignsRes.error) || isMissingShopeeGmsSchema(itemsRes.error)) {
+    return {
+      gmsCampaignMetrics: [],
+      gmsItemMetrics: [],
+      gmsSchemaReady: false,
+    };
+  }
+  if (campaignsRes.error) {
+    throw new Error(`Gagal memuat performa campaign Shop GMV Max: ${campaignsRes.error.message}`);
+  }
+  if (itemsRes.error) {
+    throw new Error(`Gagal memuat performa item Shop GMV Max: ${itemsRes.error.message}`);
+  }
+
+  const campaignRows = campaignsRes.data || [];
+  const publishedBatches = new Map(
+    campaignRows.map((row: any) => [
+      `${row.shop_config_id}:${row.campaign_id}`,
+      String(row.sync_batch_id || ''),
+    ]),
+  );
+  const itemRows = (itemsRes.data || []).filter((row: any) => (
+    publishedBatches.get(`${row.shop_config_id}:${row.campaign_id}`)
+      === String(row.sync_batch_id || '')
+  ));
+
+  return {
+    gmsCampaignMetrics: campaignRows,
+    gmsItemMetrics: itemRows,
+    gmsSchemaReady: true,
+  };
+}
+
 async function fetchGlobalCm3AdsSpend(
   svc: ReturnType<typeof createServiceSupabase>,
   workspaceId: string,
@@ -160,7 +236,7 @@ export async function getShopeeDetailsData({
   );
 
   const svc = createServiceSupabase();
-  const [adsRes, channelRes, shopeeAdsRes, campaignDetails, shopeeFeeRatesRes, globalCm3AdsSpend] = await Promise.all([
+  const [adsRes, channelRes, shopeeAdsRes, campaignDetails, gmsDetails, shopeeFeeRatesRes, globalCm3AdsSpend] = await Promise.all([
     fetchAdsRowsWithPlatformAttribution(svc, workspaceId, from, to),
     svc.from('daily_channel_data')
       .select('date, channel, net_sales')
@@ -175,6 +251,7 @@ export async function getShopeeDetailsData({
       .gte('metric_date', from)
       .lte('metric_date', to),
     fetchShopeeCampaignDetails(svc, workspaceId, from, to),
+    fetchShopeeGmsDetails(svc, workspaceId, from, to),
     svc.from('marketplace_fee_estimate_rates')
       .select('rate, effective_from')
       .eq('workspace_id', workspaceId)
@@ -191,6 +268,7 @@ export async function getShopeeDetailsData({
     shopeeFeeRates: unwrap(shopeeFeeRatesRes, 'Gagal memuat asumsi biaya admin Shopee'),
     globalCm3AdsSpend,
     ...campaignDetails,
+    ...gmsDetails,
   };
 }
 

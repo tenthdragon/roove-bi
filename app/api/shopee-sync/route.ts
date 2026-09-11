@@ -110,12 +110,14 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
         routeErrors.push(`${scheduledWorkspaceId}: ${error?.message || 'Shopee sync gagal'}`);
       }
     }
+    const hasSuccessfulResult = results.some((item) => item.success);
+    const hasFailedResult = results.some((item) => item.status === 'failed');
+    const hasPartialResult = results.some((item) => item.status === 'partial');
+    const hasFailure = routeErrors.length > 0 || hasFailedResult;
     const result = {
-      status: routeErrors.length === 0
-        ? 'success' as const
-        : results.length > 0
-          ? 'partial' as const
-          : 'failed' as const,
+      status: hasFailure
+        ? hasSuccessfulResult ? 'partial' as const : 'failed' as const
+        : hasPartialResult ? 'partial' as const : 'success' as const,
       shops_synced: results.reduce((sum, item) => sum + item.shops_synced, 0),
       shops_total: results.reduce((sum, item) => sum + item.shops_total, 0),
       rows_inserted: results.reduce((sum, item) => sum + item.rows_inserted, 0),
@@ -124,6 +126,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
       broad_gmv_total: results.reduce((sum, item) => sum + item.broad_gmv_total, 0),
       duration_ms: Date.now() - startTime,
       errors: [...results.flatMap((item) => item.errors || []), ...routeErrors],
+      notices: results.flatMap((item) => item.notices || []),
       message: workspaceIds.length === 0 ? 'Tidak ada workspace dengan toko Shopee aktif.' : undefined,
     };
 
@@ -161,6 +164,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
       broad_gmv_total: result.broad_gmv_total,
       duration_ms: result.duration_ms,
       errors: result.errors,
+      notices: result.notices,
       message: result.message || (
         result.status === 'success'
           ? 'Sync Shopee selesai.'

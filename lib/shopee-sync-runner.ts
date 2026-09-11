@@ -1,11 +1,15 @@
+import { randomUUID } from 'crypto';
 import { createServiceSupabase } from './service-supabase';
 import {
   fetchShopeeAdsPerformanceRange,
+  fetchShopeeGmsPerformanceRange,
   fetchShopeeProductCampaignPerformanceRange,
   getShopeeProductCampaignRefs,
   getShopeeProductCampaignSettings,
   refreshShopeeAccessToken,
   type ShopeeAdsPerformancePoint,
+  type ShopeeGmsPeriodPerformance,
+  type ShopeeGmsReport,
   type ShopeeProductCampaignPerformancePoint,
   type ShopeeProductCampaignSetting,
 } from './shopee-open-platform';
@@ -61,6 +65,7 @@ export type ShopeeSyncResult = {
   date_range: { start: string; end: string };
   duration_ms: number;
   errors?: string[];
+  notices?: string[];
   message?: string;
 };
 
@@ -296,6 +301,193 @@ function buildProductCampaignMetricRows(
   }));
 }
 
+function mapGmsReport(report: ShopeeGmsReport) {
+  return {
+    impressions: report.impression,
+    clicks: report.clicks,
+    expense: report.expense,
+    broad_gmv: report.broad_gmv,
+    broad_order: report.broad_order,
+    broad_order_amount: report.broad_order_amount,
+    broad_roas: report.broad_roi,
+    broad_acos: report.broad_cir,
+    conversion_rate: report.cr,
+    cost_per_conversion: report.cpc,
+    direct_order: report.direct_order,
+    direct_order_amount: report.direct_order_amount,
+    direct_roas: report.direct_roi,
+    direct_acos: report.direct_cir,
+    direct_conversion_rate: report.direct_cr,
+    cost_per_direct_conversion: report.cpdc,
+  };
+}
+
+const MAX_GMS_SNAPSHOT_RPC_BYTES = 5_500_000;
+
+export function buildGmsSnapshotRpcPayload(
+  campaignRows: Array<Record<string, any>>,
+  itemRows: Array<Record<string, any>>,
+) {
+  const compactRow = (row: Record<string, any>) => ({
+    campaign_id: row.campaign_id,
+    ...('item_id' in row ? { item_id: row.item_id } : {}),
+    impressions: row.impressions,
+    clicks: row.clicks,
+    expense: row.expense,
+    broad_gmv: row.broad_gmv,
+    broad_order: row.broad_order,
+    broad_order_amount: row.broad_order_amount,
+    broad_roas: row.broad_roas,
+    broad_acos: row.broad_acos,
+    conversion_rate: row.conversion_rate,
+    cost_per_conversion: row.cost_per_conversion,
+    direct_order: row.direct_order,
+    direct_order_amount: row.direct_order_amount,
+    direct_roas: row.direct_roas,
+    direct_acos: row.direct_acos,
+    direct_conversion_rate: row.direct_conversion_rate,
+    cost_per_direct_conversion: row.cost_per_direct_conversion,
+    raw_payload: {
+      source_api: row.raw_payload?.source_api,
+      chunk_count: row.raw_payload?.chunk_count,
+    },
+  });
+  const payload = {
+    campaignRows: campaignRows.map(compactRow),
+    itemRows: itemRows.map(compactRow),
+  };
+  const bytes = Buffer.byteLength(JSON.stringify(payload), 'utf8');
+  if (bytes > MAX_GMS_SNAPSHOT_RPC_BYTES) {
+    throw new Error(
+      `Snapshot Shop GMV Max terlalu besar untuk dipublikasikan dengan aman (${bytes} bytes).`,
+    );
+  }
+  return payload;
+}
+
+export function buildGmsCampaignPeriodRows(input: {
+  shop: Pick<ShopeeShopRow, 'id' | 'shop_id'>;
+  workspaceId: string;
+  snapshots: ShopeeGmsPeriodPerformance[];
+  syncBatchId: string;
+}) {
+  const now = new Date().toISOString();
+  return input.snapshots.map((snapshot) => ({
+    workspace_id: input.workspaceId,
+    shop_config_id: input.shop.id,
+    shop_id: input.shop.shop_id,
+    campaign_id: snapshot.campaign_id,
+    period_start: snapshot.period_start,
+    period_end: snapshot.period_end,
+    ...mapGmsReport(snapshot.report),
+    raw_payload: {
+      source_api: 'v2.ads.get_gms_campaign_performance',
+      report: snapshot.report,
+      chunk_count: snapshot.report_chunks.length,
+    },
+    sync_batch_id: input.syncBatchId,
+    updated_at: now,
+  }));
+}
+
+export function buildGmsItemPeriodRows(input: {
+  shop: Pick<ShopeeShopRow, 'id' | 'shop_id'>;
+  workspaceId: string;
+  snapshots: ShopeeGmsPeriodPerformance[];
+  syncBatchId: string;
+}) {
+  const now = new Date().toISOString();
+  return input.snapshots.flatMap((snapshot) => snapshot.items.map((item) => ({
+    workspace_id: input.workspaceId,
+    shop_config_id: input.shop.id,
+    shop_id: input.shop.shop_id,
+    campaign_id: snapshot.campaign_id,
+    item_id: item.item_id,
+    period_start: snapshot.period_start,
+    period_end: snapshot.period_end,
+    ...mapGmsReport(item.report),
+    raw_payload: {
+      source_api: 'v2.ads.get_gms_item_performance',
+      report: item.report,
+      chunk_count: item.report_chunks.length,
+    },
+    sync_batch_id: input.syncBatchId,
+    updated_at: now,
+  })));
+}
+
+async function syncGmsPeriodDetails(input: {
+  accessToken: string;
+  shop: ShopeeShopRow;
+  workspaceId: string;
+  dateStart: string;
+  dateEnd: string;
+}) {
+  const result = await fetchShopeeGmsPerformanceRange({
+    accessToken: input.accessToken,
+    shopId: input.shop.shop_id,
+    dateStart: input.dateStart,
+    dateEnd: input.dateEnd,
+  });
+  if (result.status === 'range_unavailable' || result.status === 'not_whitelisted') {
+    return { rowsInserted: 0, status: result.status };
+  }
+
+  if (result.status === 'no_campaign') {
+    const svc = createServiceSupabase();
+    const { error } = await svc.rpc('clear_shopee_gms_period_snapshot', {
+      p_workspace_id: input.workspaceId,
+      p_shop_config_id: input.shop.id,
+      p_shop_id: input.shop.shop_id,
+      p_period_start: input.dateStart,
+      p_period_end: input.dateEnd,
+    });
+    if (error) {
+      throw new Error(`Clear Shop GMV Max snapshot: ${error.message}`);
+    }
+    return { rowsInserted: 0, status: result.status };
+  }
+
+  const snapshots = result.snapshots;
+  const syncBatchId = randomUUID();
+  const campaignRows = buildGmsCampaignPeriodRows({
+    shop: input.shop,
+    workspaceId: input.workspaceId,
+    snapshots,
+    syncBatchId,
+  });
+  const itemRows = buildGmsItemPeriodRows({
+    shop: input.shop,
+    workspaceId: input.workspaceId,
+    snapshots,
+    syncBatchId,
+  });
+  const rpcPayload = buildGmsSnapshotRpcPayload(campaignRows, itemRows);
+
+  // Replace the exact-period campaign and item snapshot in one database
+  // transaction. A failed request leaves the previously published snapshot
+  // intact instead of exposing a partial set of item rows.
+  const svc = createServiceSupabase();
+  const { data: replacedRows, error } = await svc.rpc(
+    'replace_shopee_gms_period_snapshot',
+    {
+      p_workspace_id: input.workspaceId,
+      p_shop_config_id: input.shop.id,
+      p_shop_id: input.shop.shop_id,
+      p_period_start: input.dateStart,
+      p_period_end: input.dateEnd,
+      p_sync_batch_id: syncBatchId,
+      p_campaign_rows: rpcPayload.campaignRows,
+      p_item_rows: rpcPayload.itemRows,
+    },
+  );
+  if (error) {
+    throw new Error(`Replace Shop GMV Max snapshot: ${error.message}`);
+  }
+
+  return { rowsInserted: Number(replacedRows || 0), status: result.status };
+}
+
 async function syncProductCampaignDetails(input: {
   accessToken: string;
   shop: ShopeeShopRow;
@@ -451,6 +643,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions): Promise<Shop
     let spendTotal = 0;
     let directGmvTotal = 0;
     let broadGmvTotal = 0;
+    const notices: string[] = [];
 
     for (const shop of shops) {
       const missingConfig = getMissingShopeeConfigLabels(shop);
@@ -543,6 +736,28 @@ export async function runShopeeSync(options: RunShopeeSyncOptions): Promise<Shop
         }
 
         if (shopHadSuccess) {
+          try {
+            const gmsResult = await syncGmsPeriodDetails({
+              accessToken: usableToken.accessToken,
+              shop,
+              workspaceId,
+              dateStart,
+              dateEnd,
+            });
+            rowsInserted += gmsResult.rowsInserted;
+            if (gmsResult.status === 'range_unavailable') {
+              notices.push(`${shop.shop_name}: Shop GMV Max memerlukan rentang minimal dua hari.`);
+            } else if (gmsResult.status === 'not_whitelisted') {
+              notices.push(`${shop.shop_name}: Shop GMV Max belum tersedia untuk shop ini di Shopee API.`);
+            } else if (gmsResult.status === 'no_campaign') {
+              notices.push(`${shop.shop_name}: tidak ada campaign Shop GMV Max pada rentang ini.`);
+            }
+          } catch (gmsError: any) {
+            errors.push(`${shop.shop_name}: Shop GMV Max tidak tersinkron (${gmsError.message || 'request gagal'}).`);
+          }
+        }
+
+        if (shopHadSuccess) {
           shopsSynced += 1;
         }
       } catch (error: any) {
@@ -586,6 +801,7 @@ export async function runShopeeSync(options: RunShopeeSyncOptions): Promise<Shop
       date_range: { start: dateStart, end: dateEnd },
       duration_ms: duration,
       errors: errors.length > 0 ? errors : undefined,
+      notices: notices.length > 0 ? notices : undefined,
     };
   } catch (error: any) {
     const duration = Date.now() - startTime;
