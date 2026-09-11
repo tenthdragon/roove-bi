@@ -9,9 +9,9 @@ import { buildDefaultShopeeSpendStreams } from '@/lib/shopee-streams';
 
 export const dynamic = 'force-dynamic';
 
-function buildAdminRedirect(req: NextRequest, status: 'connected' | 'error', message: string, shopId?: string) {
-  const url = new URL('/dashboard/admin', req.url);
-  url.searchParams.set('tab', 'meta');
+function buildShopeeDetailsRedirect(req: NextRequest, status: 'connected' | 'error', message: string, shopId?: string) {
+  const url = new URL('/dashboard/shopee-details', req.url);
+  url.searchParams.set('tab', 'product');
   url.searchParams.set('shopee_status', status);
   url.searchParams.set('shopee_message', message);
   if (shopId) url.searchParams.set('shopee_shop_id', shopId);
@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
     workspaceId = access.workspaceId;
   } catch (error: any) {
     return NextResponse.redirect(
-      buildAdminRedirect(req, 'error', error.message || 'Login admin diperlukan untuk menyelesaikan koneksi Shopee.'),
+      buildShopeeDetailsRedirect(req, 'error', error.message || 'Login admin diperlukan untuk menyelesaikan koneksi Shopee.'),
     );
   }
 
@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
 
   if (mainAccountId && !shopId) {
     return NextResponse.redirect(
-      buildAdminRedirect(
+      buildShopeeDetailsRedirect(
         req,
         'error',
         'Callback Shopee mengembalikan main_account_id. Flow ini saat ini hanya mendukung shop authorization.',
@@ -51,7 +51,7 @@ export async function GET(req: NextRequest) {
 
   if (!code || !shopId) {
     return NextResponse.redirect(
-      buildAdminRedirect(req, 'error', 'Callback Shopee tidak lengkap. code/shop_id tidak ditemukan.'),
+      buildShopeeDetailsRedirect(req, 'error', 'Callback Shopee tidak lengkap. code/shop_id tidak ditemukan.'),
     );
   }
 
@@ -157,12 +157,12 @@ export async function GET(req: NextRequest) {
     if (tokenError) throw tokenError;
 
     return NextResponse.redirect(
-      buildAdminRedirect(req, 'connected', `Shop ${basePayload.shop_name} berhasil terhubung.`, shopId),
+      buildShopeeDetailsRedirect(req, 'connected', `Shop ${basePayload.shop_name} berhasil terhubung.`, shopId),
     );
   } catch (error: any) {
     console.error('[shopee-callback] Error:', error);
     return NextResponse.redirect(
-      buildAdminRedirect(req, 'error', error.message || 'Gagal menyelesaikan koneksi Shopee.', shopId),
+      buildShopeeDetailsRedirect(req, 'error', error.message || 'Gagal menyelesaikan koneksi Shopee.', shopId),
     );
   }
 }

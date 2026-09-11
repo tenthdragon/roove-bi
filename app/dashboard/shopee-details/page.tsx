@@ -403,6 +403,10 @@ export default function ShopeeDetailsPage() {
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [connectionNotice, setConnectionNotice] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
   const [activeTab, setActiveTab] = useState<ShopeeDetailsTab>('cpas');
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -422,11 +426,24 @@ export default function ShopeeDetailsPage() {
       setActiveTab(nextTab);
       setCurrentPage(Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1);
 
+      const shopeeStatus = params.get('shopee_status');
+      const shopeeMessage = params.get('shopee_message');
+      if (shopeeStatus && shopeeMessage) {
+        setConnectionNotice({
+          type: shopeeStatus === 'error' ? 'error' : 'success',
+          message: shopeeMessage,
+        });
+        params.delete('shopee_status');
+        params.delete('shopee_message');
+        params.delete('shopee_shop_id');
+      }
+
       if (rawTab !== nextTab) {
         params.set('tab', nextTab);
-        const query = params.toString();
-        window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
       }
+
+      const query = params.toString();
+      window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
     };
 
     syncNavigationState();
@@ -999,11 +1016,56 @@ export default function ShopeeDetailsPage() {
           <h2 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>Shopee Details</h2>
         </div>
         <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => { window.location.href = '/api/shopee/connect'; }}
+            style={{
+              border: '1px solid #ee4d2d',
+              borderRadius: 7,
+              padding: '7px 11px',
+              background: '#ee4d2d',
+              color: '#fff',
+              fontSize: 10,
+              fontWeight: 800,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Hubungkan Shopee
+          </button>
           <span style={{ border: `1px solid ${C.bdr}`, borderRadius: 999, padding: '5px 9px', color: C.dim, fontSize: 10 }}>
             {formatDate(dateRange.from)} — {formatDate(dateRange.to)}
           </span>
         </div>
       </div>
+
+      {connectionNotice && (
+        <div
+          role={connectionNotice.type === 'error' ? 'alert' : 'status'}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            marginBottom: 12,
+            padding: '9px 11px',
+            border: `1px solid ${connectionNotice.type === 'error' ? 'var(--red)' : 'var(--green)'}`,
+            borderRadius: 8,
+            color: connectionNotice.type === 'error' ? 'var(--red)' : 'var(--green)',
+            fontSize: 10,
+          }}
+        >
+          <span>{connectionNotice.message}</span>
+          <button
+            type="button"
+            aria-label="Tutup"
+            onClick={() => setConnectionNotice(null)}
+            style={{ border: 0, background: 'transparent', color: 'inherit', cursor: 'pointer', padding: 0, fontSize: 14 }}
+          >
+            ×
+          </button>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(205px, 1fr))', gap: 10, marginBottom: 16 }}>
         <MetricCard
