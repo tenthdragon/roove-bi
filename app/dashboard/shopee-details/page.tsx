@@ -19,6 +19,10 @@ const C = {
   dim: 'var(--dim)',
 };
 
+// Keep simulated rows available for local UI development only. Staging and
+// production must show the actual API state, including honest empty states.
+const SHOW_PREVIEW_DATA = process.env.NODE_ENV === 'development';
+
 function formatDate(value: string) {
   return new Date(`${value}T00:00:00`).toLocaleDateString('id-ID', {
     day: 'numeric',
@@ -740,29 +744,33 @@ export default function ShopeeDetailsPage() {
   }, [data.ads]);
 
   const previewFeeRate = resolveShopeeAdminFeeRate(data.shopeeFeeRates, dateRange.to);
-  const previewCpasRows = useMemo(() => buildPreviewCpasRows(), []);
+  const previewCpasRows = useMemo(
+    () => SHOW_PREVIEW_DATA ? buildPreviewCpasRows() : [],
+    [],
+  );
   const previewProductRows = useMemo(
-    () => buildPreviewProductRows(previewFeeRate),
+    () => SHOW_PREVIEW_DATA ? buildPreviewProductRows(previewFeeRate) : [],
     [previewFeeRate],
   );
   const gmsItemRows = useMemo(
-    () => buildPreviewGmsItems(previewFeeRate),
+    () => SHOW_PREVIEW_DATA ? buildPreviewGmsItems(previewFeeRate) : [],
     [previewFeeRate],
   );
   const previewCpcDailyRows = useMemo(
-    () => buildPreviewCpcDailyRows(dateRange.from, dateRange.to),
+    () => SHOW_PREVIEW_DATA ? buildPreviewCpcDailyRows(dateRange.from, dateRange.to) : [],
     [dateRange.from, dateRange.to],
   );
 
   const cpasRows = cpasResume.rows.length > 0 ? cpasResume.rows : previewCpasRows;
-  const cpasIsPreview = cpasResume.rows.length === 0;
+  const cpasIsPreview = cpasResume.rows.length === 0 && previewCpasRows.length > 0;
   const syncedProductRows = campaignResume.rows.filter((row: any) => (
     String(row.ad_type || '').toLowerCase() !== 'auto'
   ));
   const productRows = syncedProductRows.length > 0 ? syncedProductRows : previewProductRows;
-  const productIsPreview = syncedProductRows.length === 0 || productRows.every((row: any) => (
+  const productIsPreview = productRows.length > 0 && productRows.every((row: any) => (
     row.isPreview || String(row.ad_name || '').toLowerCase().includes('preview')
   ));
+  const gmsIsPreview = gmsItemRows.some((row: any) => row.isPreview);
   const productSummary = {
     active: productRows.filter((row: any) => row.isRunning).length,
     achieved: productRows.filter((row: any) => row.signal === 'Tercapai').length,
@@ -808,7 +816,7 @@ export default function ShopeeDetailsPage() {
         isPreview: false,
       }))
     : previewCpcDailyRows;
-  const cpcIsPreview = data.shopeeAdsMetrics.length === 0;
+  const cpcIsPreview = data.shopeeAdsMetrics.length === 0 && previewCpcDailyRows.length > 0;
   const cpcSummary = cpcDailyRows.reduce((summary: any, row: any) => ({
     impressions: summary.impressions + Number(row.impressions || 0),
     clicks: summary.clicks + Number(row.clicks || 0),
@@ -841,10 +849,12 @@ export default function ShopeeDetailsPage() {
   const previewCpasRoas = previewCpasSummary.expense > 0
     ? previewCpasSummary.revenue / previewCpasSummary.expense
     : 0;
-  const cpasRevenueIsPreview = !cpasSummary.complete;
-  const cpasRevenue = cpasRevenueIsPreview
-    ? cpasSummary.expense * previewCpasRoas
-    : cpasSummary.revenue;
+  const cpasRevenueIsPreview = !cpasSummary.complete && SHOW_PREVIEW_DATA;
+  const cpasRevenue = cpasSummary.complete
+    ? cpasSummary.revenue
+    : cpasRevenueIsPreview
+      ? cpasSummary.expense * previewCpasRoas
+      : null;
   const productChannelSummary = productRows.reduce((summary, row: any) => ({
     expense: summary.expense + Number(row.expense || 0),
     impressions: summary.impressions + Number(row.impressions || 0),
@@ -888,7 +898,7 @@ export default function ShopeeDetailsPage() {
       secondaryRevenue: null,
       expense: gmsSummary.expense,
       impressions: gmsSummary.impressions,
-      isPreview: true,
+      isPreview: gmsIsPreview,
       isUnavailable: false,
     },
     {
@@ -1080,7 +1090,7 @@ export default function ShopeeDetailsPage() {
           sub={`Direct ${fmtRupiah(connectedShopeeDirectGmv)}`}
           color="#ee4d2d"
           title="GMV atribusi dari Iklan Produk dan Iklan Produk Otomatis yang sudah memiliki kontrak API."
-          preview
+          preview={productIsPreview || gmsIsPreview}
         />
         <MetricCard
           label="Biaya iklan terhubung"
@@ -1409,12 +1419,18 @@ export default function ShopeeDetailsPage() {
                 <div style={{ color: C.dim, fontSize: 9, marginTop: 4 }}>Shop GMV Max · satu campaign tingkat toko</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 9, fontWeight: 800 }}>Preview API</span>
-                <span style={{ color: 'var(--green)', fontSize: 9, fontWeight: 800 }}>● {campaignStatusLabel(gmsCampaign.status)}</span>
+                {gmsIsPreview && (
+                  <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 9, fontWeight: 800 }}>Preview API</span>
+                )}
+                {gmsItemRows.length > 0 && (
+                  <span style={{ color: 'var(--green)', fontSize: 9, fontWeight: 800 }}>● {campaignStatusLabel(gmsCampaign.status)}</span>
+                )}
               </div>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', borderBottom: `1px solid ${C.bdr}` }}>
+            {gmsItemRows.length > 0 ? (
+              <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', borderBottom: `1px solid ${C.bdr}` }}>
               {[
                 ['Iklan dilihat', formatCount(gmsSummary.impressions)],
                 ['Biaya', fmtRupiah(gmsSummary.expense)],
@@ -1485,7 +1501,11 @@ export default function ShopeeDetailsPage() {
                 </tbody>
               </table>
             </div>
-            <Pagination page={gmsPage.page} totalPages={gmsPage.totalPages} onChange={(page) => navigateDetail('automatic', page)} />
+              <Pagination page={gmsPage.page} totalPages={gmsPage.totalPages} onChange={(page) => navigateDetail('automatic', page)} />
+              </>
+            ) : (
+              <DetailEmptyState>Belum ada data Iklan Produk Otomatis dari Shopee.</DetailEmptyState>
+            )}
           </>
         )}
 
