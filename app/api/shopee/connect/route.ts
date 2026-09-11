@@ -1,9 +1,11 @@
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import {
   buildShopeeShopAuthUrl,
   getShopeeRuntimeDiagnostics,
   getShopeeSetupInfo,
+  SHOPEE_OAUTH_STATE_COOKIE,
 } from '@/lib/shopee-open-platform';
 
 export const dynamic = 'force-dynamic';
@@ -39,7 +41,16 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    return NextResponse.redirect(buildShopeeShopAuthUrl());
+    const state = crypto.randomBytes(32).toString('hex');
+    const response = NextResponse.redirect(buildShopeeShopAuthUrl({ state }));
+    response.cookies.set(SHOPEE_OAUTH_STATE_COOKIE, state, {
+      httpOnly: true,
+      maxAge: 10 * 60,
+      path: '/api/shopee',
+      sameSite: 'lax',
+      secure: req.nextUrl.protocol === 'https:',
+    });
+    return response;
   } catch (error: any) {
     return NextResponse.redirect(
       buildShopeeDetailsRedirect(req, 'error', error.message || 'Gagal memulai koneksi Shopee.'),

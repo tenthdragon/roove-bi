@@ -1,9 +1,10 @@
 import crypto from 'crypto';
 import { buildPublicSiteUrl } from './site-config';
 
-const DEFAULT_SHOPEE_AUTH_BASE_URL = 'https://partner.shopeemobile.com';
+const DEFAULT_SHOPEE_AUTH_BASE_URL = 'https://open.shopee.com';
 const DEFAULT_SHOPEE_API_BASE_URL = 'https://partner.shopeemobile.com';
 const SHOPEE_CALLBACK_PATH = '/api/shopee/callback';
+export const SHOPEE_OAUTH_STATE_COOKIE = 'shopee_oauth_state';
 
 type ShopeeAuthContext =
   | { accessToken: string; shopId: number | string; merchantId?: never }
@@ -197,14 +198,6 @@ function getApiBaseUrl() {
   return cleanUrl(readEnvText('SHOPEE_API_BASE_URL').value || DEFAULT_SHOPEE_API_BASE_URL);
 }
 
-function isSandboxBaseUrl(value: string) {
-  return /sandbox|test-stable/i.test(value);
-}
-
-function getSignedRequestBaseUrl(input: Pick<ShopeeConfig, 'authBaseUrl' | 'apiBaseUrl'>) {
-  return isSandboxBaseUrl(input.authBaseUrl) ? input.authBaseUrl : input.apiBaseUrl;
-}
-
 export function getShopeeSetupInfo(): ShopeeSetupInfo {
   const partnerId = readEnvText('SHOPEE_PARTNER_ID');
   const partnerKey = readEnvText('SHOPEE_PARTNER_KEY');
@@ -344,7 +337,7 @@ function buildSignedUrl(
 
   params.set('sign', buildSignature(config, path, timestamp, auth));
 
-  return `${cleanUrl(baseUrlOverride || getSignedRequestBaseUrl(config))}${path}?${params.toString()}`;
+  return `${cleanUrl(baseUrlOverride || config.apiBaseUrl)}${path}?${params.toString()}`;
 }
 
 async function parseShopeeResponse<TResponse, TExtra extends object = Record<string, never>>(
@@ -450,16 +443,16 @@ async function postJson<TResponse, TExtra extends object = Record<string, never>
   return parseShopeeResponse<TResponse, TExtra>(response, label);
 }
 
-export function buildShopeeShopAuthUrl() {
+export function buildShopeeShopAuthUrl(input?: { state?: string }) {
   const config = requireShopeeConfig();
-  const path = '/api/v2/shop/auth_partner';
-  const timestamp = nowUnix();
+  const path = '/auth';
   const params = new URLSearchParams({
     partner_id: config.partnerId,
-    timestamp: String(timestamp),
-    redirect: config.redirectUrl,
-    sign: buildSignature(config, path, timestamp),
+    auth_type: 'seller',
+    redirect_uri: config.redirectUrl,
+    response_type: 'code',
   });
+  if (input?.state) params.set('state', input.state);
 
   return `${config.authBaseUrl}${path}?${params.toString()}`;
 }
@@ -467,7 +460,7 @@ export function buildShopeeShopAuthUrl() {
 export async function exchangeShopeeAuthCode(input: { code: string; shopId: number | string }) {
   const config = requireShopeeConfig();
   const path = '/api/v2/auth/token/get';
-  const url = buildSignedUrl(path, {}, undefined, config.authBaseUrl);
+  const url = buildSignedUrl(path, {}, undefined, config.apiBaseUrl);
 
   const json = await postJson<never, ShopeeTokenPayload>(url, {
     code: input.code,
@@ -490,7 +483,7 @@ export async function exchangeShopeeAuthCode(input: { code: string; shopId: numb
 export async function refreshShopeeAccessToken(input: { refreshToken: string; shopId: number | string }) {
   const config = requireShopeeConfig();
   const path = '/api/v2/auth/access_token/get';
-  const url = buildSignedUrl(path, {}, undefined, config.authBaseUrl);
+  const url = buildSignedUrl(path, {}, undefined, config.apiBaseUrl);
 
   const json = await postJson<never, ShopeeTokenPayload>(url, {
     refresh_token: input.refreshToken,

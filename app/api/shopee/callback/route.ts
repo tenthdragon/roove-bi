@@ -1,9 +1,11 @@
+import crypto from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { createServiceSupabase } from '@/lib/service-supabase';
 import {
   exchangeShopeeAuthCode,
   getShopeeShopInfo,
+  SHOPEE_OAUTH_STATE_COOKIE,
 } from '@/lib/shopee-open-platform';
 import { buildDefaultShopeeSpendStreams } from '@/lib/shopee-streams';
 
@@ -18,6 +20,27 @@ function buildShopeeDetailsRedirect(req: NextRequest, status: 'connected' | 'err
   return url;
 }
 
+function buildCallbackResponse(
+  req: NextRequest,
+  status: 'connected' | 'error',
+  message: string,
+  shopId?: string,
+) {
+  const response = NextResponse.redirect(buildShopeeDetailsRedirect(req, status, message, shopId));
+  response.cookies.set(SHOPEE_OAUTH_STATE_COOKIE, '', {
+    expires: new Date(0),
+    maxAge: 0,
+    path: '/api/shopee',
+  });
+  return response;
+}
+
+function stateMatches(actual: string, expected: string) {
+  const actualBuffer = Buffer.from(actual);
+  const expectedBuffer = Buffer.from(expected);
+  return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
+}
+
 function unixToIso(value: number | null | undefined) {
   if (!value) return null;
   return new Date(Number(value) * 1000).toISOString();
@@ -29,8 +52,10 @@ export async function GET(req: NextRequest) {
     const access = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
     workspaceId = access.workspaceId;
   } catch (error: any) {
-    return NextResponse.redirect(
-      buildShopeeDetailsRedirect(req, 'error', error.message || 'Login admin diperlukan untuk menyelesaikan koneksi Shopee.'),
+    return buildCallbackResponse(
+      req,
+      'error',
+      error.message || 'Login admin diperlukan untuk menyelesaikan koneksi Shopee.',
     );
   }
 
@@ -38,20 +63,26 @@ export async function GET(req: NextRequest) {
   const code = searchParams.get('code');
   const shopId = searchParams.get('shop_id');
   const mainAccountId = searchParams.get('main_account_id');
+  const state = searchParams.get('state');
+  const expectedState = req.cookies.get(SHOPEE_OAUTH_STATE_COOKIE)?.value;
+
+  if (!state || !expectedState || !stateMatches(state, expectedState)) {
+    return buildCallbackResponse(req, 'error', 'State otorisasi Shopee tidak valid atau sudah kedaluwarsa.');
+  }
 
   if (mainAccountId && !shopId) {
-    return NextResponse.redirect(
-      buildShopeeDetailsRedirect(
-        req,
-        'error',
-        'Callback Shopee mengembalikan main_account_id. Flow ini saat ini hanya mendukung shop authorization.',
-      ),
+    return buildCallbackResponse(
+      req,
+      'error',
+      'Callback Shopee mengembalikan main_account_id. Flow ini saat ini hanya mendukung shop authorization.',
     );
   }
 
   if (!code || !shopId) {
-    return NextResponse.redirect(
-      buildShopeeDetailsRedirect(req, 'error', 'Callback Shopee tidak lengkap. code/shop_id tidak ditemukan.'),
+    return buildCallbackResponse(
+      req,
+      'error',
+      'Callback Shopee tidak lengkap. code/shop_id tidak ditemukan.',
     );
   }
 
@@ -156,13 +187,19 @@ export async function GET(req: NextRequest) {
 
     if (tokenError) throw tokenError;
 
-    return NextResponse.redirect(
-      buildShopeeDetailsRedirect(req, 'connected', `Shop ${basePayload.shop_name} berhasil terhubung.`, shopId),
+    return buildCallbackResponse(
+      req,
+      'connected',
+      `Shop ${basePayload.shop_name} berhasil terhubung.`,
+      shopId,
     );
   } catch (error: any) {
     console.error('[shopee-callback] Error:', error);
-    return NextResponse.redirect(
-      buildShopeeDetailsRedirect(req, 'error', error.message || 'Gagal menyelesaikan koneksi Shopee.', shopId),
+    return buildCallbackResponse(
+      req,
+      'error',
+      error.message || 'Gagal menyelesaikan koneksi Shopee.',
+      shopId,
     );
   }
 }
