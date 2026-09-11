@@ -26,6 +26,20 @@ export type ShopeeSetupInfo = {
   missingEnv: string[];
 };
 
+export type ShopeeRuntimeDiagnostics = {
+  serverUnixTime: number;
+  partnerId: string;
+  partnerIdIsNumeric: boolean;
+  partnerKeyLength: number;
+  partnerKeyStartsWithShpk: boolean;
+  partnerKeyContainsWhitespace: boolean;
+  partnerIdWasWrappedInQuotes: boolean;
+  partnerKeyWasWrappedInQuotes: boolean;
+  redirectUrl: string;
+  authBaseUrl: string;
+  apiBaseUrl: string;
+};
+
 export type ShopeeTokenPayload = {
   access_token: string;
   refresh_token: string;
@@ -201,6 +215,25 @@ export function getShopeeSetupInfo(): ShopeeSetupInfo {
   return {
     configured: missingEnv.length === 0,
     missingEnv,
+  };
+}
+
+export function getShopeeRuntimeDiagnostics(): ShopeeRuntimeDiagnostics {
+  const partnerId = readEnvText('SHOPEE_PARTNER_ID');
+  const partnerKey = readEnvText('SHOPEE_PARTNER_KEY');
+
+  return {
+    serverUnixTime: nowUnix(),
+    partnerId: partnerId.value,
+    partnerIdIsNumeric: /^\d+$/.test(partnerId.value),
+    partnerKeyLength: partnerKey.value.length,
+    partnerKeyStartsWithShpk: partnerKey.value.startsWith('shpk'),
+    partnerKeyContainsWhitespace: /\s/.test(partnerKey.value),
+    partnerIdWasWrappedInQuotes: partnerId.wrapped,
+    partnerKeyWasWrappedInQuotes: partnerKey.wrapped,
+    redirectUrl: getRedirectUrl(),
+    authBaseUrl: getAuthBaseUrl(),
+    apiBaseUrl: getApiBaseUrl(),
   };
 }
 
