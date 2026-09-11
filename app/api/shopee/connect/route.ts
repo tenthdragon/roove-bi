@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import {
   buildShopeeShopAuthUrl,
-  getShopeeRuntimeDiagnostics,
   getShopeeSetupInfo,
   SHOPEE_OAUTH_STATE_COOKIE,
 } from '@/lib/shopee-open-platform';
@@ -19,8 +18,6 @@ function buildShopeeDetailsRedirect(req: NextRequest, status: 'connected' | 'err
 }
 
 export async function GET(req: NextRequest) {
-  console.info('[shopee-connect] Runtime configuration', getShopeeRuntimeDiagnostics());
-
   try {
     await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
   } catch (error: any) {
