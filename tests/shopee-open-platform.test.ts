@@ -61,7 +61,7 @@ async function withMockShopeeFetch<T>(
 
   process.env.SHOPEE_PARTNER_ID = '1232910';
   process.env.SHOPEE_PARTNER_KEY = 'test-partner-key';
-  process.env.SHOPEE_API_BASE_URL = 'https://partner.test-stable.shopeemobile.com';
+  process.env.SHOPEE_API_BASE_URL = 'https://openplatform.sandbox.test-stable.shopee.sg';
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(input), init });
     if (responseIndex >= responses.length) {

@@ -297,7 +297,9 @@ function getApiBaseUrl() {
 
 function usesShopeeSandboxApi() {
   try {
-    return new URL(getApiBaseUrl()).hostname === 'partner.test-stable.shopeemobile.com';
+    const hostname = new URL(getApiBaseUrl()).hostname;
+    return hostname === 'partner.test-stable.shopeemobile.com'
+      || hostname === 'openplatform.sandbox.test-stable.shopee.sg';
   } catch {
     return false;
   }
