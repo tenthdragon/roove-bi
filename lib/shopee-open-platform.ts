@@ -211,7 +211,7 @@ export type ShopeeGmsPeriodPerformance = {
 };
 
 export type ShopeeGmsFetchResult = {
-  status: 'ok' | 'range_unavailable' | 'not_whitelisted' | 'no_campaign';
+  status: 'ok' | 'range_unavailable' | 'not_whitelisted' | 'no_campaign' | 'sandbox_unavailable';
   snapshots: ShopeeGmsPeriodPerformance[];
 };
 
@@ -293,6 +293,14 @@ function getAuthBaseUrl() {
 
 function getApiBaseUrl() {
   return cleanUrl(readEnvText('SHOPEE_API_BASE_URL').value || DEFAULT_SHOPEE_API_BASE_URL);
+}
+
+function usesShopeeSandboxApi() {
+  try {
+    return new URL(getApiBaseUrl()).hostname === 'partner.test-stable.shopeemobile.com';
+  } catch {
+    return false;
+  }
 }
 
 export function getShopeeSetupInfo(): ShopeeSetupInfo {
@@ -1352,6 +1360,12 @@ export async function fetchShopeeGmsPerformanceRange(input: {
         return { status: 'not_whitelisted', snapshots: [] };
       }
       if (code === GMS_CAMPAIGN_NOT_FOUND_ERROR) continue;
+      // The official sandbox URL currently returns the undocumented generic
+      // `error_not_found` when no GMS fixture is available. Keep this fallback
+      // sandbox-only so the same response from the live API remains visible.
+      if (code === 'error_not_found' && usesShopeeSandboxApi()) {
+        return { status: 'sandbox_unavailable', snapshots: [] };
+      }
       throw error;
     }
 

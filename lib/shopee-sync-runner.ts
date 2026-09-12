@@ -429,7 +429,11 @@ async function syncGmsPeriodDetails(input: {
     dateStart: input.dateStart,
     dateEnd: input.dateEnd,
   });
-  if (result.status === 'range_unavailable' || result.status === 'not_whitelisted') {
+  if (
+    result.status === 'range_unavailable'
+    || result.status === 'not_whitelisted'
+    || result.status === 'sandbox_unavailable'
+  ) {
     return { rowsInserted: 0, status: result.status };
   }
 
@@ -751,6 +755,8 @@ export async function runShopeeSync(options: RunShopeeSyncOptions): Promise<Shop
               notices.push(`${shop.shop_name}: Shop GMV Max belum tersedia untuk shop ini di Shopee API.`);
             } else if (gmsResult.status === 'no_campaign') {
               notices.push(`${shop.shop_name}: tidak ada campaign Shop GMV Max pada rentang ini.`);
+            } else if (gmsResult.status === 'sandbox_unavailable') {
+              notices.push(`${shop.shop_name}: data Shop GMV Max tidak tersedia pada akun sandbox Shopee.`);
             }
           } catch (gmsError: any) {
             errors.push(`${shop.shop_name}: Shop GMV Max tidak tersinkron (${gmsError.message || 'request gagal'}).`);

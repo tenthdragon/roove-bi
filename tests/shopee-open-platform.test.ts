@@ -61,7 +61,7 @@ async function withMockShopeeFetch<T>(
 
   process.env.SHOPEE_PARTNER_ID = '1232910';
   process.env.SHOPEE_PARTNER_KEY = 'test-partner-key';
-  process.env.SHOPEE_API_BASE_URL = 'https://partner.test';
+  process.env.SHOPEE_API_BASE_URL = 'https://partner.test-stable.shopeemobile.com';
   globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(input), init });
     if (responseIndex >= responses.length) {
@@ -710,6 +710,31 @@ test('returns explicit GMS availability statuses without fabricating rows', { co
       dateStart: '2026-09-01',
       dateEnd: '2026-09-02',
     }), { status: 'no_campaign', snapshots: [] });
+  });
+
+  await withMockShopeeFetch([{
+    error: 'error_not_found',
+    message: 'Not found.',
+  }], async () => {
+    assert.deepEqual(await fetchShopeeGmsPerformanceRange({
+      accessToken: 'token',
+      shopId: 227509446,
+      dateStart: '2026-09-01',
+      dateEnd: '2026-09-02',
+    }), { status: 'sandbox_unavailable', snapshots: [] });
+  });
+
+  await withMockShopeeFetch([{
+    error: 'error_not_found',
+    message: 'Not found.',
+  }], async () => {
+    process.env.SHOPEE_API_BASE_URL = 'https://partner.shopeemobile.com';
+    await assert.rejects(() => fetchShopeeGmsPerformanceRange({
+      accessToken: 'token',
+      shopId: 227509446,
+      dateStart: '2026-09-01',
+      dateEnd: '2026-09-02',
+    }), /Shopee GMS campaign performance: Not found\./);
   });
 });
 
