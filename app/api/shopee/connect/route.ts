@@ -19,7 +19,7 @@ function buildShopeeDetailsRedirect(req: NextRequest, status: 'connected' | 'err
 
 export async function GET(req: NextRequest) {
   try {
-    await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+    await requireDashboardPermissionAccess('admin:shopee', 'Admin Shopee');
   } catch (error: any) {
     return NextResponse.redirect(
       buildShopeeDetailsRedirect(req, 'error', error.message || 'Tidak punya akses untuk menghubungkan Shopee.'),

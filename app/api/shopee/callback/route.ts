@@ -49,7 +49,7 @@ function unixToIso(value: number | null | undefined) {
 export async function GET(req: NextRequest) {
   let workspaceId: string;
   try {
-    const access = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+    const access = await requireDashboardPermissionAccess('admin:shopee', 'Admin Shopee');
     workspaceId = access.workspaceId;
   } catch (error: any) {
     return buildCallbackResponse(

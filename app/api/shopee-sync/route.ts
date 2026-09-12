@@ -4,6 +4,7 @@ import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from 
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 import { runShopeeSync } from '@/lib/shopee-sync-runner';
 import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
+import { matchesCronBearer } from '@/lib/cron-auth';
 
 export const maxDuration = 60;
 
@@ -40,7 +41,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
   const startTime = Date.now();
   const requestId = getRequestId(req);
   const authHeader = req.headers.get('authorization');
-  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const isCron = matchesCronBearer(authHeader, process.env.CRON_SECRET);
   const mode = isCron ? `cron_${method.toLowerCase()}` : `dashboard_${method.toLowerCase()}`;
   let requestedBy: string | null = null;
   let workspaceId: string | null = null;
@@ -71,7 +72,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
       if (rateLimitError) return rateLimitError;
 
       try {
-        const access = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        const access = await requireDashboardPermissionAccess('admin:shopee', 'Admin Shopee');
         const { profile } = access;
         requestedBy = profile.id;
         workspaceId = access.workspaceId;

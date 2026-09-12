@@ -29,11 +29,16 @@ import MetaManager from '@/components/MetaManager';
 import ShopeeManager from '@/components/ShopeeManager';
 import WarehouseSheetManager from '@/components/WarehouseSheetManager';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import {
+  fixedPermissionsForRole,
+  SHOPEE_REVIEWER_ROLE,
+} from '@/lib/role-access';
 
 const TABS = [
   { id: 'workspaces', label: 'Workspaces' },
   { id: 'daily', label: 'Daily Data' },
-  { id: 'meta', label: 'Marketing APIs' },
+  { id: 'meta', label: 'Meta & WABA' },
+  { id: 'shopee', label: 'Shopee' },
   { id: 'financial', label: 'Financial' },
   { id: 'warehouse', label: 'Warehouse' },
   // Connection + PKP moved to Business Settings
@@ -440,7 +445,8 @@ export default function AdminPage() {
       case 'owner':              return { text: 'Owner',             bg: 'var(--accent-subtle)',    color: '#818cf8' };
       case 'workspace_owner':    return { text: 'Owner Workspace',   bg: 'var(--accent-subtle)',    color: '#818cf8' };
       case 'admin':              return { text: 'Admin',             bg: 'var(--badge-green-bg)',   color: 'var(--green)' };
-      case 'marketing_api_reviewer': return { text: 'Marketing API Reviewer', bg: 'var(--accent-subtle)', color: '#f97316' };
+      case 'shopee_reviewer':  return { text: 'Shopee Reviewer',   bg: 'var(--accent-subtle)', color: '#f97316' };
+      case 'marketing_api_reviewer': return { text: 'Marketing API Reviewer (lama)', bg: 'var(--accent-subtle)', color: '#f97316' };
       case 'direktur_ops':       return { text: 'Direktur Ops',      bg: 'var(--badge-green-bg)',   color: '#34d399' };
       case 'staf_ops':           return { text: 'Staf Ops',          bg: 'var(--accent-subtle)',    color: '#38bdf8' };
       case 'direktur_finance':   return { text: 'Direktur Finance',  bg: 'var(--accent-subtle)',    color: '#60a5fa' };
@@ -658,10 +664,12 @@ export default function AdminPage() {
 
       {/* ═══ TAB: META ADS ═══ */}
       {currentTabId === 'meta' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <MetaManager />
-          <ShopeeManager />
-        </div>
+        <MetaManager />
+      )}
+
+      {/* ═══ TAB: SHOPEE ═══ */}
+      {currentTabId === 'shopee' && (
+        <ShopeeManager />
       )}
 
       {/* ═══ TAB: FINANCIAL ═══ */}
@@ -1386,7 +1394,7 @@ export default function AdminPage() {
             {[
               { r: 'owner',             desc: 'akses penuh' },
               { r: 'admin',             desc: 'lihat semua, atur via matrix' },
-              { r: 'marketing_api_reviewer', desc: 'khusus Admin > Marketing APIs' },
+              { r: 'shopee_reviewer', desc: 'hanya Shopee Details & Admin > Shopee' },
               { r: 'direktur_ops',      desc: 'operasional + notif gudang' },
               { r: 'staf_ops',          desc: 'akses via matrix' },
               { r: 'direktur_finance',  desc: 'finance + laporan' },
@@ -1512,6 +1520,11 @@ function PermissionsMatrix() {
           nextMatrix[row.role].add(row.permission_key);
         });
 
+        MATRIX_ROLES.forEach((role) => {
+          const fixedPermissions = fixedPermissionsForRole(role.id);
+          if (fixedPermissions) nextMatrix[role.id] = new Set(fixedPermissions);
+        });
+
         setMatrix(nextMatrix);
       } catch (err: any) {
         if (mounted) setError(err.message || 'Gagal memuat permission matrix');
@@ -1527,6 +1540,7 @@ function PermissionsMatrix() {
   }, []);
 
   const toggle = (role: string, key: string) => {
+    if (fixedPermissionsForRole(role)) return;
     setMatrix(prev => {
       const next = { ...prev, [role]: new Set(prev[role]) };
       if (next[role].has(key)) next[role].delete(key);
@@ -1613,16 +1627,26 @@ function PermissionsMatrix() {
                   {group.keys.map(({ key, label }) => (
                     <tr key={key} style={{ background: 'var(--card)' }}>
                       <td style={labelStyle}>{label}</td>
-                      {MATRIX_ROLES.map(r => (
-                        <td key={r.id} style={tdStyle}>
-                          <input
-                            type="checkbox"
-                            checked={matrix[r.id]?.has(key) ?? false}
-                            onChange={() => toggle(r.id, key)}
-                            style={{ cursor: 'pointer', width: 15, height: 15 }}
-                          />
-                        </td>
-                      ))}
+                      {MATRIX_ROLES.map(r => {
+                        const isFixedReviewer = r.id === SHOPEE_REVIEWER_ROLE;
+                        return (
+                          <td key={r.id} style={tdStyle}>
+                            <input
+                              type="checkbox"
+                              checked={matrix[r.id]?.has(key) ?? false}
+                              onChange={() => toggle(r.id, key)}
+                              disabled={isFixedReviewer}
+                              title={isFixedReviewer ? 'Akses Shopee Reviewer dikunci.' : undefined}
+                              style={{
+                                cursor: isFixedReviewer ? 'not-allowed' : 'pointer',
+                                opacity: isFixedReviewer ? 0.65 : 1,
+                                width: 15,
+                                height: 15,
+                              }}
+                            />
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </>

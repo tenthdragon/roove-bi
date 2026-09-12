@@ -341,7 +341,7 @@ export default function ShopeeDetailsPage() {
   const { activeWorkspace } = useWorkspace();
   const { can } = usePermissions();
   const { dateRange, loading: dateLoading } = useDateRange();
-  const canManageShopee = can('admin:meta');
+  const canManageShopee = can('admin:shopee');
   const [data, setData] = useState({
     ads: [],
     channel: [],
@@ -353,7 +353,8 @@ export default function ShopeeDetailsPage() {
     gmsCampaignMetrics: [],
     gmsItemMetrics: [],
     gmsSchemaReady: true,
-    globalCm3AdsSpend: 0,
+    globalCm3AdsSpend: null,
+    canViewWorkspaceCm3: false,
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -471,7 +472,10 @@ export default function ShopeeDetailsPage() {
           gmsCampaignMetrics: result.gmsCampaignMetrics || [],
           gmsItemMetrics: result.gmsItemMetrics || [],
           gmsSchemaReady: result.gmsSchemaReady !== false,
-          globalCm3AdsSpend: Number(result.globalCm3AdsSpend || 0),
+          globalCm3AdsSpend: result.globalCm3AdsSpend == null
+            ? null
+            : Number(result.globalCm3AdsSpend),
+          canViewWorkspaceCm3: result.canViewWorkspaceCm3 === true,
         });
         setLoading(false);
       })
@@ -1131,12 +1135,16 @@ export default function ShopeeDetailsPage() {
         <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
           <div style={{ fontSize: 13, fontWeight: 800 }}>Ads Distribution</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-            <div style={{ color: C.dim, fontSize: 9 }}>
-              CM3 workspace <span style={{ marginLeft: 4, color: C.txt, fontFamily: 'monospace', fontWeight: 800 }}>{globalCm3AdsSpend > 0 ? fmtRupiah(globalCm3AdsSpend) : '—'}</span>
-            </div>
-            <div style={{ color: C.dim, fontSize: 9 }}>
-              Porsi CPAS + CPC <span style={{ marginLeft: 4, color: '#ee4d2d', fontFamily: 'monospace', fontWeight: 800 }}>{shopeeShareOfGlobal == null ? '—' : `${shopeeShareOfGlobal.toFixed(1)}%`}</span>
-            </div>
+            {data.canViewWorkspaceCm3 && (
+              <>
+                <div style={{ color: C.dim, fontSize: 9 }}>
+                  CM3 workspace <span style={{ marginLeft: 4, color: C.txt, fontFamily: 'monospace', fontWeight: 800 }}>{globalCm3AdsSpend > 0 ? fmtRupiah(globalCm3AdsSpend) : '—'}</span>
+                </div>
+                <div style={{ color: C.dim, fontSize: 9 }}>
+                  Porsi CPAS + CPC <span style={{ marginLeft: 4, color: '#ee4d2d', fontFamily: 'monospace', fontWeight: 800 }}>{shopeeShareOfGlobal == null ? '—' : `${shopeeShareOfGlobal.toFixed(1)}%`}</span>
+                </div>
+              </>
+            )}
             {hasPreviewDistribution && (
               <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 9, fontWeight: 800 }}>
                 Preview API

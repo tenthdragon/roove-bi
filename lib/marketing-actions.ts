@@ -2,7 +2,14 @@
 
 import { createServiceSupabase } from './supabase-server';
 import { getShippingFeeRange } from './shipping-fee-data';
-import { requireDashboardTabAccess } from './dashboard-access';
+import {
+  requireAnyDashboardTabAccess,
+  requireDashboardTabAccess,
+} from './dashboard-access';
+import {
+  LEGACY_MARKETING_API_REVIEWER_ROLE,
+  SHOPEE_REVIEWER_ROLE,
+} from './role-access';
 
 interface MarketingPageDataParams {
   from: string;
@@ -81,6 +88,44 @@ async function fetchAdsRowsWithPlatformAttribution(
     .eq('workspace_id', workspaceId)
     .gte('date', from)
     .lte('date', to);
+}
+
+async function fetchShopeeCpasRows(
+  svc: any,
+  workspaceId: string,
+  from: string,
+  to: string,
+) {
+  const fetchPages = async (fields: string) => {
+    const rows: any[] = [];
+
+    for (let fromIndex = 0; ; fromIndex += HISTORY_PAGE_SIZE) {
+      const result = await svc.from('daily_ads_spend')
+        .select(fields)
+        .eq('workspace_id', workspaceId)
+        .eq('data_source', 'meta_api')
+        .ilike('source', '%cpas%')
+        .gte('date', from)
+        .lte('date', to)
+        .order('id', { ascending: true })
+        .range(fromIndex, fromIndex + HISTORY_PAGE_SIZE - 1);
+
+      if (result.error) return { data: null, error: result.error };
+      const page = result.data || [];
+      rows.push(...page);
+      if (page.length < HISTORY_PAGE_SIZE) return { data: rows, error: null };
+    }
+  };
+
+  const enrichedFields = 'id, date, source, spent, impressions, store, brand_id, ad_account, data_source, platform_attributed_revenue, platform_reported_roas';
+  const enriched = await fetchPages(enrichedFields);
+  if (!enriched.error) return enriched;
+
+  const migrationPending = /platform_attributed_revenue|platform_reported_roas/i
+    .test(String(enriched.error.message || ''));
+  if (!migrationPending) return enriched;
+
+  return fetchPages('id, date, source, spent, impressions, store, brand_id, ad_account, data_source');
 }
 
 function isMissingShopeeCampaignSchema(error: { code?: string; message?: string } | null | undefined) {
@@ -230,14 +275,19 @@ export async function getShopeeDetailsData({
   from,
   to,
 }: ShopeeDetailsDataParams) {
-  const { workspaceId } = await requireDashboardTabAccess(
-    'marketing',
-    'Marketing Channel',
+  const access = await requireAnyDashboardTabAccess(
+    ['shopee-details', 'marketing'],
+    'Shopee Details',
   );
+  const { workspaceId } = access;
+  const canViewWorkspaceCm3 = ![
+    SHOPEE_REVIEWER_ROLE,
+    LEGACY_MARKETING_API_REVIEWER_ROLE,
+  ].includes(access.profile.role);
 
   const svc = createServiceSupabase();
   const [adsRes, channelRes, shopeeAdsRes, campaignDetails, gmsDetails, shopeeFeeRatesRes, globalCm3AdsSpend] = await Promise.all([
-    fetchAdsRowsWithPlatformAttribution(svc, workspaceId, from, to),
+    fetchShopeeCpasRows(svc, workspaceId, from, to),
     svc.from('daily_channel_data')
       .select('date, channel, net_sales')
       .eq('workspace_id', workspaceId)
@@ -258,7 +308,9 @@ export async function getShopeeDetailsData({
       .eq('setting_key', 'shopee_fallback')
       .lte('effective_from', to)
       .order('effective_from', { ascending: true }),
-    fetchGlobalCm3AdsSpend(svc, workspaceId, from, to),
+    canViewWorkspaceCm3
+      ? fetchGlobalCm3AdsSpend(svc, workspaceId, from, to)
+      : Promise.resolve(null),
   ]);
 
   return {
@@ -267,6 +319,7 @@ export async function getShopeeDetailsData({
     shopeeAdsMetrics: unwrap(shopeeAdsRes, 'Gagal memuat atribusi Shopee Ads'),
     shopeeFeeRates: unwrap(shopeeFeeRatesRes, 'Gagal memuat asumsi biaya admin Shopee'),
     globalCm3AdsSpend,
+    canViewWorkspaceCm3,
     ...campaignDetails,
     ...gmsDetails,
   };

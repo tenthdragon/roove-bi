@@ -3,6 +3,10 @@ import { createClient } from '@supabase/supabase-js';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { buildPublicSiteUrl } from '@/lib/site-config';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
+import {
+  normalizeAssignableWorkspaceRole,
+  workspaceRoleLabel,
+} from '@/lib/role-access';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -49,20 +53,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email tidak valid' }, { status: 400 });
     }
 
-    const allowedRoles = [
-      'workspace_owner',
-      'admin',
-      'marketing_api_reviewer',
-      'direktur_ops', 'staf_ops',
-      'direktur_finance', 'staf_finance',
-      'brand_manager', 'sales_manager',
-      'warehouse_manager', 'ppic_manager',
-      // legacy
-      'finance', 'staff',
-    ];
-    if (!allowedRoles.includes(normalizedRole)) {
+    const membershipRole = normalizeAssignableWorkspaceRole(normalizedRole);
+    if (!membershipRole) {
       return NextResponse.json({ error: 'Role tidak valid' }, { status: 400 });
     }
+    const roleLabel = workspaceRoleLabel(membershipRole);
 
     const svc = getServiceSupabase();
     const warnings: string[] = [];
@@ -83,39 +78,44 @@ export async function POST(req: NextRequest) {
     if (workspaceError || !targetWorkspace) {
       return NextResponse.json({ error: 'Workspace tujuan tidak ditemukan.' }, { status: 404 });
     }
-
-    const addMembership = async (userId: string, isDefault: boolean) => {
-      const { error } = await svc.from('workspace_memberships').upsert(
-        {
-          workspace_id: targetWorkspaceId,
-          user_id: userId,
-          role: normalizedRole,
-          status: 'active',
-          is_default: isDefault,
-        },
-        { onConflict: 'workspace_id,user_id' },
+    if (targetWorkspace.status !== 'active') {
+      return NextResponse.json(
+        { error: 'Workspace tujuan belum aktif.' },
+        { status: 409 },
       );
+    }
+
+    const activateMembership = async (userId: string) => {
+      const { error } = await svc.rpc('set_workspace_member_role', {
+        p_workspace_id: targetWorkspaceId,
+        p_user_id: userId,
+        p_role: membershipRole,
+        p_actor_user_id: access.profile.id,
+      });
       if (error) throw error;
     };
 
     // An existing login can join another workspace without creating a second
     // authentication identity.
-    const { data: existing } = await svc
+    const { data: existing, error: existingError } = await svc
       .from('profiles')
-      .select('id, email')
+      .select('id, email, role, active_workspace_id')
       .eq('email', normalizedEmail)
       .maybeSingle();
+    if (existingError) {
+      console.error('[Invite] Existing profile lookup error:', existingError);
+      return NextResponse.json(
+        { error: 'Gagal memeriksa user yang sudah ada. Silakan coba lagi.' },
+        { status: 500 },
+      );
+    }
     if (existing) {
-      const { count } = await svc
-        .from('workspace_memberships')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', existing.id)
-        .eq('status', 'active');
-      await addMembership(existing.id, (count || 0) === 0);
+      await activateMembership(existing.id);
+
       return NextResponse.json({
         success: true,
         partial: false,
-        message: `${normalizedEmail} berhasil ditambahkan ke ${targetWorkspace.name} sebagai ${normalizedRole}.`,
+        message: `${normalizedEmail} berhasil ditambahkan ke ${targetWorkspace.name} sebagai ${roleLabel}.`,
         userId: existing.id,
         recoveryLink: null,
         warnings: [],
@@ -147,13 +147,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Gagal membuat user' }, { status: 500 });
     }
 
-    // `profiles.role` stays as the legacy/global compatibility role. Workspace
-    // ownership is held only by workspace_memberships, never promoted globally.
-    const compatibilityRole =
-      normalizedRole === 'workspace_owner' ? 'admin' : normalizedRole;
+    const rollbackNewUser = async () => {
+      const { error: rollbackError } = await svc.auth.admin.deleteUser(newUser.user.id);
+      if (rollbackError) {
+        console.error('[Invite] New user rollback error:', rollbackError);
+      }
+    };
 
-    // Update the compatibility profile role (trigger should have created it as
-    // 'pending').
     // Poll for profile existence (trigger may take a moment)
     let profileReady = false;
     for (let attempt = 0; attempt < 5; attempt++) {
@@ -162,19 +162,7 @@ export async function POST(req: NextRequest) {
       if (check) { profileReady = true; break; }
     }
 
-    if (profileReady) {
-      const { error: updateError } = await svc
-        .from('profiles')
-        .update({
-          role: compatibilityRole,
-          active_workspace_id: targetWorkspaceId,
-        })
-        .eq('id', newUser.user.id);
-      if (updateError) {
-        console.error('[Invite] Update role error:', updateError);
-        warnings.push('Role user belum berhasil di-set otomatis. Cek profil user di admin.');
-      }
-    } else {
+    if (!profileReady) {
       // Trigger didn't fire — insert profile directly
       console.warn('[Invite] Profile trigger did not fire, inserting directly');
       const { error: insertError } = await svc
@@ -182,21 +170,27 @@ export async function POST(req: NextRequest) {
         .upsert({
           id: newUser.user.id,
           email: normalizedEmail,
-          role: compatibilityRole,
-          active_workspace_id: targetWorkspaceId,
+          role: 'pending',
+          active_workspace_id: null,
         });
       if (insertError) {
         console.error('[Invite] Insert profile error:', insertError);
-        warnings.push('Profil user belum berhasil dibuat otomatis. Cek data user di Supabase.');
+        await rollbackNewUser();
+        return NextResponse.json(
+          { error: 'Profil user gagal dibuat. Silakan coba invite kembali.' },
+          { status: 500 },
+        );
       }
     }
 
     try {
-      await addMembership(newUser.user.id, true);
+      await activateMembership(newUser.user.id);
     } catch (membershipError: any) {
-      console.error('[Invite] Membership error:', membershipError);
-      warnings.push(
-        'User berhasil dibuat, tetapi membership workspace belum tersimpan. Cek Admin Users.',
+      console.error('[Invite] Membership activation error:', membershipError);
+      await rollbackNewUser();
+      return NextResponse.json(
+        { error: 'Akses workspace gagal dibuat. Silakan coba invite kembali.' },
+        { status: 500 },
       );
     }
 
@@ -225,7 +219,7 @@ export async function POST(req: NextRequest) {
       partial,
       message: partial
         ? `User ${normalizedEmail} berhasil dibuat di ${targetWorkspace.name}, tetapi masih ada langkah manual yang perlu dicek.`
-        : `User ${normalizedEmail} berhasil dibuat di ${targetWorkspace.name} sebagai ${normalizedRole}. Bagikan link set password ke user.`,
+        : `User ${normalizedEmail} berhasil dibuat di ${targetWorkspace.name} sebagai ${roleLabel}. Bagikan link set password ke user.`,
       userId: newUser.user.id,
       recoveryLink,
       warnings,

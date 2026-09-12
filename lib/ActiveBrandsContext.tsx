@@ -4,6 +4,11 @@
 import { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { useSupabase } from '@/lib/supabase-browser';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import { usePermissions } from '@/lib/PermissionsContext';
+import {
+  LEGACY_MARKETING_API_REVIEWER_ROLE,
+  SHOPEE_REVIEWER_ROLE,
+} from '@/lib/role-access';
 
 interface ActiveBrandsContextType {
   activeBrands: string[];      // list of active brand names
@@ -22,12 +27,23 @@ const ActiveBrandsContext = createContext<ActiveBrandsContextType>({
 export function ActiveBrandsProvider({ children }: { children: React.ReactNode }) {
   const supabase = useSupabase();
   const { activeWorkspace } = useWorkspace();
+  const { role } = usePermissions();
   const [activeBrands, setActiveBrands] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+
+    if (
+      role === SHOPEE_REVIEWER_ROLE
+      || role === LEGACY_MARKETING_API_REVIEWER_ROLE
+    ) {
+      setActiveBrands([]);
+      setError(null);
+      setLoading(false);
+      return () => { cancelled = true; };
+    }
 
     supabase
       .from('brands')
@@ -59,7 +75,7 @@ export function ActiveBrandsProvider({ children }: { children: React.ReactNode }
     return () => {
       cancelled = true;
     };
-  }, [activeWorkspace.id, supabase]);
+  }, [activeWorkspace.id, role, supabase]);
 
   const activeSet = useMemo(() => new Set(activeBrands.map(b => b.toLowerCase())), [activeBrands]);
 
