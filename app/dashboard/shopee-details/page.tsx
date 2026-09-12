@@ -1026,43 +1026,24 @@ export default function ShopeeDetailsPage() {
         </div>
         <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap' }}>
           {canManageShopee && (
-            <>
-              <button
-                type="button"
-                disabled={syncing}
-                onClick={syncSelectedRange}
-                style={{
-                  border: `1px solid ${C.bdr}`,
-                  borderRadius: 7,
-                  padding: '7px 11px',
-                  background: C.card,
-                  color: syncing ? C.dim : C.txt,
-                  fontSize: 10,
-                  fontWeight: 800,
-                  cursor: syncing ? 'wait' : 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                {syncing ? 'Menyinkronkan…' : 'Sync rentang'}
-              </button>
-              <button
-                type="button"
-                onClick={() => { window.location.href = '/api/shopee/connect'; }}
-                style={{
-                  border: '1px solid #ee4d2d',
-                  borderRadius: 7,
-                  padding: '7px 11px',
-                  background: '#ee4d2d',
-                  color: '#fff',
-                  fontSize: 10,
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Hubungkan Shopee
-              </button>
-            </>
+            <button
+              type="button"
+              disabled={syncing}
+              onClick={syncSelectedRange}
+              style={{
+                border: `1px solid ${C.bdr}`,
+                borderRadius: 7,
+                padding: '7px 11px',
+                background: C.card,
+                color: syncing ? C.dim : C.txt,
+                fontSize: 10,
+                fontWeight: 800,
+                cursor: syncing ? 'wait' : 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {syncing ? 'Menyinkronkan…' : 'Sync rentang'}
+            </button>
           )}
           <span style={{ border: `1px solid ${C.bdr}`, borderRadius: 999, padding: '5px 9px', color: C.dim, fontSize: 10 }}>
             {formatDate(dateRange.from)} — {formatDate(dateRange.to)}
