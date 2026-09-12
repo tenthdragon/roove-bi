@@ -61,7 +61,13 @@ export async function POST(req: NextRequest) {
 
     const svc = getServiceSupabase();
     const warnings: string[] = [];
-    const resetRedirectTo = buildPublicSiteUrl('/reset-password');
+    // Keep password setup on the same trusted app origin that created the
+    // invite. This matters for staging, whose preview domain intentionally
+    // differs from the production NEXT_PUBLIC_SITE_URL.
+    const requestSiteUrl = req.headers.get('origin') || req.headers.get('referer');
+    const resetRedirectTo = requestSiteUrl
+      ? new URL('/reset-password', requestSiteUrl).toString()
+      : buildPublicSiteUrl('/reset-password');
 
     if (targetWorkspaceId !== access.workspaceId && !access.isPlatformOwner) {
       return NextResponse.json(

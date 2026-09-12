@@ -95,6 +95,17 @@ test('workspace role assignments are normalized and legacy inputs are rejected',
   assert.equal(normalizeAssignableWorkspaceRole('made_up_role'), null);
 });
 
+test('reviewer invite keeps password setup on the trusted request origin', () => {
+  const inviteRoute = readFileSync(
+    new URL('../app/api/invite/route.ts', import.meta.url),
+    'utf8',
+  );
+
+  assert.match(inviteRoute, /req\.headers\.get\('origin'\)/);
+  assert.match(inviteRoute, /req\.headers\.get\('referer'\)/);
+  assert.match(inviteRoute, /new URL\('\/reset-password', requestSiteUrl\)/);
+});
+
 test('profile compatibility roles never write unsupported enum values', () => {
   assert.equal(profileCompatibilityRoleForWorkspaceRole('workspace_owner'), 'admin');
   assert.equal(profileCompatibilityRoleForWorkspaceRole('shopee_reviewer'), 'shopee_reviewer');
