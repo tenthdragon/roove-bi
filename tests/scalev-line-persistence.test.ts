@@ -6,8 +6,9 @@ import {
   ScalevLinePersistenceError,
   withScalevLineRetry,
 } from '../lib/scalev-line-persistence';
-import { buildScalevRepairPayload } from '../lib/scalev-sync-runner';
+import { buildScalevIdUpdate, buildScalevRepairPayload } from '../lib/scalev-sync-runner';
 import { extractScalevNumericId } from '../lib/scalev-id';
+import { getStartOfTodayWibIso } from '../lib/scalev-sync-date';
 
 test('ScaleV line retry recognizes database contention errors', () => {
   assert.equal(isTransientScalevLineError({ code: '40P01', message: 'deadlock detected' }), true);
@@ -90,6 +91,22 @@ test('ScaleV database ID extraction rejects webhook UUID event IDs', () => {
   assert.equal(extractScalevNumericId({ id: '019fbc6f-e2c8-7cfc-bfda-0262fd643d0d' }), null);
   assert.equal(extractScalevNumericId({ scalev_id: 987654 }), '987654');
   assert.equal(extractScalevNumericId({ id: 'event-id', raw_data: { scalev_id: '12345' } }), '12345');
+});
+
+test('ScaleV sync never writes UUID event IDs into the numeric scalev_id column', () => {
+  assert.deepEqual(buildScalevIdUpdate({ id: '01a097ed-a8d0-7745-b951-631531da6ab5' }), {});
+  assert.deepEqual(buildScalevIdUpdate({ id: 987654 }), { scalev_id: '987654' });
+  assert.deepEqual(
+    buildScalevIdUpdate({ id: 'event-id', scalev_id: '12345' }),
+    { scalev_id: '12345' },
+  );
+});
+
+test('pending-order cutoff uses Jakarta midnight regardless of server timezone', () => {
+  assert.equal(
+    getStartOfTodayWibIso(new Date('2026-09-12T23:22:10.000Z')),
+    '2026-09-13T00:00:00+07:00',
+  );
 });
 
 test('repair payload is rejected when raw order lines are unavailable', () => {

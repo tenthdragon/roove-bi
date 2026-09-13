@@ -6,6 +6,7 @@ import {
   requireDashboardPermissionAccess,
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
+import { getStartOfTodayWibIso } from '@/lib/scalev-sync-date';
 
 async function requireCustomerAnalyticsAccess(label: string) {
   return requireDashboardTabAccess('customers', label);
@@ -46,9 +47,7 @@ export async function getScalevStatus() {
       .not('shipped_time', 'is', null);
 
     const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready', 'in_process'];
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayISO = today.toISOString();
+    const todayISO = getStartOfTodayWibIso();
 
     const { count: pendingOrders } = await svc
       .from('scalev_orders')
@@ -115,9 +114,7 @@ export async function getPendingOrders(): Promise<PendingOrder[]> {
   const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready', 'in_process'];
 
   // Only show orders from before today (today's orders may still be processing normally)
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayISO = today.toISOString();
+  const todayISO = getStartOfTodayWibIso();
 
   const { data: orders, error } = await svc
     .from('scalev_orders')

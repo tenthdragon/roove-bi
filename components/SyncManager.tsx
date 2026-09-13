@@ -12,6 +12,7 @@ type RowState = {
 };
 
 const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready', 'in_process'];
+const SYNC_ALL_BATCH_SIZE = 50;
 
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
   pending: { bg: 'var(--badge-yellow-bg)', color: '#fbbf24' },
@@ -81,13 +82,20 @@ export default function SyncManager() {
     }
   }
 
-  async function syncOne(orderId: string) {
-    setRowStates(prev => ({ ...prev, [orderId]: { syncing: true, result: null } }));
+  async function syncOrders(orderIds: string[]): Promise<boolean> {
+    setRowStates(prev => {
+      const next = { ...prev };
+      for (const orderId of orderIds) {
+        next[orderId] = { syncing: true, result: null };
+      }
+      return next;
+    });
+
     try {
       const res = await fetch('/api/scalev-sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'order_id', order_ids: [orderId] }),
+        body: JSON.stringify({ mode: 'order_id', order_ids: orderIds }),
       });
       const ct = res.headers.get('content-type') || '';
       if (!ct.includes('application/json')) {
@@ -96,26 +104,70 @@ export default function SyncManager() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Sync gagal');
 
-      const detail = data.details?.[0];
-      if (detail?.error) {
-        setRowStates(prev => ({ ...prev, [orderId]: { syncing: false, result: { success: false, error: detail.error } } }));
-      } else {
-        const newStatus = detail?.new_status || '';
-        const isTerminal = !PRE_TERMINAL.includes(newStatus) && newStatus !== '';
-        setRowStates(prev => ({
-          ...prev,
-          [orderId]: {
+      const detailsByOrderId = new Map<string, any>(
+        (Array.isArray(data.details) ? data.details : [])
+          .map((detail: any) => [String(detail?.order_id || ''), detail]),
+      );
+      const terminalOrderIds = new Set<string>();
+
+      setRowStates(prev => {
+        const next = { ...prev };
+        for (const orderId of orderIds) {
+          const detail = detailsByOrderId.get(orderId);
+          if (!detail) {
+            next[orderId] = {
+              syncing: false,
+              result: { success: false, error: 'Order tidak ditemukan dalam hasil sync' },
+            };
+            continue;
+          }
+          if (detail.error) {
+            next[orderId] = {
+              syncing: false,
+              result: { success: false, error: detail.error },
+            };
+            continue;
+          }
+
+          const newStatus = detail.new_status || '';
+          const isTerminal = newStatus !== '' && !PRE_TERMINAL.includes(newStatus);
+          if (isTerminal) terminalOrderIds.add(orderId);
+          next[orderId] = {
             syncing: false,
-            result: { success: true, newStatus, action: detail?.action || (isTerminal ? `→ ${newStatus}` : 'no_change') },
-          },
-        }));
-        if (isTerminal) {
-          setTimeout(() => setOrders(prev => prev.filter(o => o.order_id !== orderId)), 2000);
+            result: {
+              success: true,
+              newStatus,
+              action: detail.action || (isTerminal ? `→ ${newStatus}` : 'no_change'),
+            },
+          };
         }
+        return next;
+      });
+
+      if (terminalOrderIds.size > 0) {
+        setTimeout(() => {
+          setOrders(prev => prev.filter(order => !terminalOrderIds.has(order.order_id)));
+        }, 2000);
       }
+      return true;
     } catch (err: any) {
-      setRowStates(prev => ({ ...prev, [orderId]: { syncing: false, result: { success: false, error: err.message } } }));
+      setRowStates(prev => {
+        const next = { ...prev };
+        for (const orderId of orderIds) {
+          next[orderId] = {
+            syncing: false,
+            result: { success: false, error: err.message },
+          };
+        }
+        return next;
+      });
+      setMessage({ type: 'error', text: err.message });
+      return false;
     }
+  }
+
+  async function syncOne(orderId: string) {
+    await syncOrders([orderId]);
   }
 
   async function syncAll() {
@@ -128,11 +180,13 @@ export default function SyncManager() {
     });
     setSyncAllProgress({ current: 0, total: pending.length });
 
-    for (let i = 0; i < pending.length; i++) {
+    setMessage(null);
+    for (let i = 0; i < pending.length; i += SYNC_ALL_BATCH_SIZE) {
       if (abortRef.current) break;
-      setSyncAllProgress({ current: i + 1, total: pending.length });
-      await syncOne(pending[i].order_id);
-      if (i < pending.length - 1) await new Promise(r => setTimeout(r, 500));
+      const batch = pending.slice(i, i + SYNC_ALL_BATCH_SIZE);
+      const succeeded = await syncOrders(batch.map(order => order.order_id));
+      setSyncAllProgress({ current: Math.min(i + batch.length, pending.length), total: pending.length });
+      if (!succeeded) break;
     }
 
     setSyncingAll(false);
