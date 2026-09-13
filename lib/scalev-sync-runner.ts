@@ -80,6 +80,11 @@ export function getScalevSyncConcurrency(syncMode: ScalevSyncMode): number {
   return syncMode === 'repair' ? 1 : 5;
 }
 
+export function buildScalevIdUpdate(apiOrder: any): { scalev_id: string } | Record<string, never> {
+  const scalevId = extractScalevNumericId(apiOrder);
+  return scalevId ? { scalev_id: scalevId } : {};
+}
+
 export function buildScalevRepairPayload(dbOrder: any): any | null {
   const rawData = dbOrder?.raw_data;
   if (!rawData || typeof rawData !== 'object') return null;
@@ -613,7 +618,7 @@ async function processOrder(
 
     const { error: pendingUpdateError } = await svc.from('scalev_orders').update({
       status: newStatus,
-      ...(apiOrder.id ? { scalev_id: String(apiOrder.id) } : {}),
+      ...buildScalevIdUpdate(apiOrder),
       business_name_raw: warehouseOrderContext.businessNameRaw,
       origin_business_name_raw: warehouseOrderContext.originBusinessNameRaw,
       origin_raw: warehouseOrderContext.originRaw,
@@ -672,7 +677,7 @@ async function processOrder(
   const now = new Date().toISOString();
   const updateData: Record<string, any> = {
     status: newStatus,
-    ...(apiOrder.id ? { scalev_id: String(apiOrder.id) } : {}),
+    ...buildScalevIdUpdate(apiOrder),
     business_name_raw: warehouseOrderContext.businessNameRaw,
     origin_business_name_raw: warehouseOrderContext.originBusinessNameRaw,
     origin_raw: warehouseOrderContext.originRaw,
