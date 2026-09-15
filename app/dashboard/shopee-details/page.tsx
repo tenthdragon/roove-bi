@@ -56,6 +56,23 @@ function campaignStatusLabel(value: string) {
   return labels[String(value || '').toLowerCase()] || value || 'Status tidak diketahui';
 }
 
+function productCampaignSubtype(campaign: any) {
+  const adType = String(campaign.ad_type || '').toLowerCase();
+  const biddingMethod = String(campaign.bidding_method || '').toLowerCase();
+  if (adType === 'auto' || biddingMethod === 'auto') return 'automatic';
+
+  const productCount = Math.max(
+    asArray(campaign.products).length,
+    asArray(campaign.itemIds).length,
+    asArray(campaign.item_ids).length,
+  );
+  if (adType === 'manual' || biddingMethod === 'manual') {
+    if (productCount > 1) return 'group';
+    if (productCount === 1) return 'individual';
+  }
+  return 'unclassified';
+}
+
 const DETAIL_PAGE_SIZE = 10;
 
 function paginateRows<T>(rows: T[], requestedPage: number) {
@@ -819,25 +836,68 @@ export default function ShopeeDetailsPage() {
     return {
       expense: summary.expense + Number(row.spend || 0),
       impressions: summary.impressions + Number(row.impressions || 0),
+      attributedRevenue: summary.attributedRevenue + Number(row.attributedRevenue || 0),
     };
-  }, { expense: 0, impressions: 0 });
+  }, { expense: 0, impressions: 0, attributedRevenue: 0 });
   const cpasHasData = cpasRows.length > 0;
-  const hasAvailableSpend = cpasHasData || cpcHasData;
-  const connectedTotalExpense = hasAvailableSpend
-    ? (cpasHasData ? cpasSummary.expense : 0) + (cpcHasData ? cpcSummary.expense : 0)
-    : null;
-  const connectedShopeeGmv = cpcHasData ? cpcSummary.broadGmv : null;
-  const connectedShopeeDirectGmv = cpcHasData ? cpcSummary.directGmv : null;
-  const hasPreviewSpend = cpasIsPreview || cpcIsPreview;
-  const hasBothSpendSources = cpasHasData && cpcHasData;
   const cpasAttributionIncomplete = cpasRows.some((row: any) => (
     !row.isPreview && row.attributionComplete !== true
   ));
-  const spendCoverageLabel = [cpasHasData ? 'CPAS' : null, cpcHasData ? 'CPC Shopee' : null]
+  const cpasAttributedRevenue = cpasHasData && !cpasAttributionIncomplete
+    ? cpasSummary.attributedRevenue
+    : null;
+  const cpasPlatformRoas = cpasAttributedRevenue != null && cpasSummary.expense > 0
+    ? cpasAttributedRevenue / cpasSummary.expense
+    : null;
+
+  const productMetricRows = productRows.filter((row: any) => (
+    Number(row.metricRowCount || 0) > 0 || Boolean(row.isPreview)
+  ));
+  const productSummary = [...productMetricRows, ...gmsCampaignRows]
+    .reduce((summary: any, row: any) => ({
+      impressions: summary.impressions + Number(row.impressions || 0),
+      clicks: summary.clicks + Number(row.clicks || 0),
+      expense: summary.expense + Math.abs(Number(row.expense || 0)),
+      broadGmv: summary.broadGmv + Number(row.broadGmv || 0),
+    }), { impressions: 0, clicks: 0, expense: 0, broadGmv: 0 });
+  const productHasData = productMetricRows.length > 0 || gmsCampaignRows.length > 0;
+  const productPlatformRoas = productHasData && productSummary.expense > 0
+    ? productSummary.broadGmv / productSummary.expense
+    : null;
+  const productSubtypeCounts = productRows.reduce((counts: Record<string, number>, campaign: any) => {
+    const subtype = productCampaignSubtype(campaign);
+    counts[subtype] = (counts[subtype] || 0) + 1;
+    return counts;
+  }, { individual: 0, group: 0, automatic: 0, unclassified: 0 });
+  const productSubtypeLabel = [
+    productSubtypeCounts.individual > 0 ? `Individual ${productSubtypeCounts.individual}` : null,
+    productSubtypeCounts.group > 0 ? `Grup ${productSubtypeCounts.group}` : null,
+    productSubtypeCounts.automatic > 0 ? `Otomatis ${productSubtypeCounts.automatic}` : null,
+    gmsCampaignRows.length > 0 ? `Shop GMV Max ${gmsCampaignRows.length}` : null,
+    productSubtypeCounts.unclassified > 0 ? `Belum terklasifikasi ${productSubtypeCounts.unclassified}` : null,
+  ].filter(Boolean).join(' · ') || 'Belum ada campaign';
+  const productIsPreview = productMetricRows.some((row: any) => row.isPreview)
+    || gmsCampaignRows.some((row: any) => row.isPreview);
+
+  const hasAvailableSpend = cpasHasData || productHasData || cpcHasData;
+  const connectedTotalExpense = hasAvailableSpend
+    ? (cpasHasData ? cpasSummary.expense : 0)
+      + (productHasData ? productSummary.expense : 0)
+      + (cpcHasData ? cpcSummary.expense : 0)
+    : null;
+  const connectedShopeeGmv = cpcHasData ? cpcSummary.broadGmv : null;
+  const connectedShopeeDirectGmv = cpcHasData ? cpcSummary.directGmv : null;
+  const hasPreviewSpend = cpasIsPreview || productIsPreview || cpcIsPreview;
+  const hasAllSpendSources = cpasHasData && productHasData && cpcHasData;
+  const spendCoverageLabel = [
+    cpasHasData ? 'CPAS' : null,
+    productHasData ? 'Iklan Produk' : null,
+    cpcHasData ? 'Agregat CPC' : null,
+  ]
     .filter(Boolean)
     .join(' + ') || 'Belum tersinkron';
   const blendedRoas = overview.hasActualShopeeSales
-    && hasBothSpendSources
+    && hasAllSpendSources
     && connectedTotalExpense != null
     && connectedTotalExpense > 0
     ? overview.actualShopeeSales / connectedTotalExpense
@@ -846,6 +906,58 @@ export default function ShopeeDetailsPage() {
   const shopeeShareOfGlobal = connectedTotalExpense != null && globalCm3AdsSpend > 0
     ? connectedTotalExpense / globalCm3AdsSpend * 100
     : null;
+  const summarySourceCount = Number(cpasHasData) + Number(productHasData) + Number(cpcHasData);
+  const totalSummaryImpressions = hasAvailableSpend
+    ? (cpasHasData ? cpasSummary.impressions : 0)
+      + (productHasData ? productSummary.impressions : 0)
+      + (cpcHasData ? cpcSummary.impressions : 0)
+    : null;
+  const totalSummaryGmv = hasAllSpendSources && cpasAttributedRevenue != null
+    ? cpasAttributedRevenue + productSummary.broadGmv + cpcSummary.broadGmv
+    : null;
+  const totalSummaryRoas = totalSummaryGmv != null
+    && connectedTotalExpense != null
+    && connectedTotalExpense > 0
+    ? totalSummaryGmv / connectedTotalExpense
+    : null;
+  const sourceSummaryRows = [
+    {
+      key: 'cpas',
+      name: 'CPAS',
+      sub: 'Meta Ads',
+      color: '#1877f2',
+      hasData: cpasHasData,
+      impressions: cpasHasData ? cpasSummary.impressions : null,
+      expense: cpasHasData ? cpasSummary.expense : null,
+      gmv: cpasAttributedRevenue,
+      roas: cpasPlatformRoas,
+      preview: cpasIsPreview,
+    },
+    {
+      key: 'product',
+      name: 'Iklan Produk',
+      sub: productSubtypeLabel,
+      color: '#ee4d2d',
+      hasData: productHasData,
+      impressions: productHasData ? productSummary.impressions : null,
+      expense: productHasData ? productSummary.expense : null,
+      gmv: productHasData ? productSummary.broadGmv : null,
+      roas: productPlatformRoas,
+      preview: productIsPreview,
+    },
+    {
+      key: 'cpc',
+      name: 'Agregat CPC Shopee',
+      sub: 'Shop-level Open API',
+      color: 'var(--green)',
+      hasData: cpcHasData,
+      impressions: cpcHasData ? cpcSummary.impressions : null,
+      expense: cpcHasData ? cpcSummary.expense : null,
+      gmv: cpcHasData ? cpcSummary.broadGmv : null,
+      roas: cpcBroadRoas,
+      preview: cpcIsPreview,
+    },
+  ];
 
   const gmsItemCountByCampaign = gmsItemRows.reduce((counts: Map<string, number>, row: any) => {
     const owner = row.shopConfigId || `shop:${row.shopId || 'preview'}`;
@@ -1065,24 +1177,97 @@ export default function ShopeeDetailsPage() {
           preview={cpcIsPreview}
         />
         <MetricCard
-          label="Biaya sumber terhubung"
+          label="Biaya 3 sumber"
           value={connectedTotalExpense == null ? '—' : fmtRupiah(connectedTotalExpense)}
           sub={data.canViewWorkspaceCm3 && shopeeShareOfGlobal != null
             ? `${spendCoverageLabel} · ${shopeeShareOfGlobal.toFixed(1)}% biaya marketing workspace`
             : spendCoverageLabel}
           color="var(--yellow)"
-          title="CPAS dari Meta ditambah agregat CPC Shopee. Detail campaign tidak dijumlahkan ulang."
+          title="CPAS + Iklan Produk + agregat CPC Shopee. Total sementara hingga audit overlap menggunakan data live."
           preview={hasPreviewSpend}
         />
         <MetricCard
-          label="Blended MER terhubung"
+          label="Blended MER sementara"
           value={blendedRoas == null ? '—' : `${blendedRoas.toFixed(2)}x`}
           sub="Penjualan aktual ÷ biaya tersimpan"
           color={blendedRoas == null ? C.dim : blendedRoas >= 3 ? 'var(--green)' : blendedRoas >= 1.5 ? 'var(--yellow)' : 'var(--red)'}
-          title="Seluruh penjualan Shopee, termasuk organik, dibagi baris biaya CPAS dan CPC yang tersimpan pada rentang terpilih."
+          title="Seluruh penjualan Shopee dibagi CPAS + Iklan Produk + agregat CPC. Sementara hingga audit overlap data live."
           preview={hasPreviewSpend}
         />
       </div>
+
+      <section style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+        <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, fontSize: 13, fontWeight: 800 }}>
+          Ringkasan iklan
+        </div>
+        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+          <table style={{ width: '100%', minWidth: 680, borderCollapse: 'collapse', fontSize: 11 }}>
+            <thead>
+              <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                {['Sumber', 'Impressions', 'Biaya', 'GMV atribusi', 'ROAS'].map((heading, index) => (
+                  <th
+                    key={heading}
+                    title={heading === 'Impressions'
+                      ? 'Impressions platform; bukan reach unik.'
+                      : heading === 'GMV atribusi'
+                        ? 'GMV yang dilaporkan masing-masing platform.'
+                        : undefined}
+                    style={{ padding: '9px 12px', textAlign: index === 0 ? 'left' : 'right', color: C.dim, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}
+                  >
+                    {heading}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sourceSummaryRows.map((row) => (
+                <tr key={row.key} style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                  <td style={{ padding: '11px 12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 999, background: row.color, flex: '0 0 auto' }} />
+                      <span style={{ fontWeight: 800 }}>{row.name}</span>
+                      {row.preview && (
+                        <span style={{ borderRadius: 999, padding: '2px 6px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 7, fontWeight: 800 }}>Preview</span>
+                      )}
+                    </div>
+                    <div style={{ color: C.dim, fontSize: 9, marginTop: 3, paddingLeft: 14 }}>{row.sub}</div>
+                  </td>
+                  <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                    {row.impressions == null ? '—' : formatCount(row.impressions)}
+                  </td>
+                  <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                    {row.expense == null ? '—' : fmtRupiah(row.expense)}
+                  </td>
+                  <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                    {row.gmv == null ? '—' : fmtRupiah(row.gmv)}
+                  </td>
+                  <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
+                    {row.roas == null ? '—' : `${row.roas.toFixed(2)}x`}
+                  </td>
+                </tr>
+              ))}
+              <tr title="Penjumlahan mentah tiga sumber; belum diaudit terhadap kemungkinan overlap." style={{ background: 'rgba(255, 255, 255, 0.018)' }}>
+                <td style={{ padding: '11px 12px' }}>
+                  <div style={{ fontWeight: 800 }}>Total ketiganya</div>
+                  <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{summarySourceCount}/3 sumber tersedia · belum deduplikasi</div>
+                </td>
+                <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
+                  {totalSummaryImpressions == null ? '—' : formatCount(totalSummaryImpressions)}
+                </td>
+                <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
+                  {connectedTotalExpense == null ? '—' : fmtRupiah(connectedTotalExpense)}
+                </td>
+                <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
+                  {totalSummaryGmv == null ? '—' : fmtRupiah(totalSummaryGmv)}
+                </td>
+                <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
+                  {totalSummaryRoas == null ? '—' : `${totalSummaryRoas.toFixed(2)}x`}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
         <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
@@ -1189,50 +1374,6 @@ export default function ShopeeDetailsPage() {
         <Pagination page={campaignPage.page} totalPages={campaignPage.totalPages} onChange={navigateCampaignPage} />
       </section>
 
-      <section style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
-        <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 800 }}>Kontrol agregat CPC Shopee</div>
-            <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>Gabungan shop dalam workspace · tidak dijumlahkan dengan tabel detail</div>
-          </div>
-          {cpcIsPreview && (
-            <span style={{ borderRadius: 999, padding: '3px 7px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 8, fontWeight: 800 }}>Preview API</span>
-          )}
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(125px, 1fr))' }}>
-          {[
-            ['Impressions', cpcHasData ? formatCount(cpcSummary.impressions) : '—', null],
-            ['Klik', cpcHasData ? formatCount(cpcSummary.clicks) : '—', null],
-            ['Biaya', cpcHasData ? fmtRupiah(cpcSummary.expense) : '—', null],
-            ['Broad GMV', cpcHasData ? fmtRupiah(cpcSummary.broadGmv) : '—', cpcHasData ? `${formatCount(cpcSummary.broadOrders)} order` : null],
-            ['Direct GMV', cpcHasData ? fmtRupiah(cpcSummary.directGmv) : '—', cpcHasData ? `${formatCount(cpcSummary.directOrders)} order` : null],
-            ['ROAS platform', cpcHasData && cpcBroadRoas != null ? `${cpcBroadRoas.toFixed(2)}x` : '—', cpcHasData && cpcSummary.expense > 0 ? `Direct ${(cpcSummary.directGmv / cpcSummary.expense).toFixed(2)}x` : null],
-          ].map(([label, value, secondary], index) => (
-            <div key={label} style={{ padding: '12px 14px', borderRight: index < 5 ? `1px solid ${C.bdr}` : 0 }}>
-              <div style={{ color: C.dim, fontSize: 8, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-              <div style={{ marginTop: 5, fontFamily: 'monospace', fontSize: 13, fontWeight: 800 }}>{value}</div>
-              {secondary && <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{secondary}</div>}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden' }}>
-        <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, fontSize: 13, fontWeight: 800 }}>Cakupan API</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }}>
-          {[
-            { badge: 'Meta API', color: '#1877f2', background: 'rgba(24, 119, 242, 0.10)', value: 'CPAS', sub: 'Level ad account' },
-            { badge: 'Shopee Open API', color: 'var(--green)', background: 'var(--badge-green-bg)', value: 'Iklan Produk + Shop GMV Max', sub: 'Endpoint terpisah · level campaign' },
-            { badge: 'Belum didukung', color: 'var(--yellow)', background: 'var(--badge-yellow-bg)', value: 'Toko+ · Banner · Iklan Live', sub: 'Tidak dicakup kontrak API app · tanpa dummy' },
-          ].map((item, index) => (
-            <div key={item.badge} style={{ padding: '12px 14px', borderRight: index < 2 ? `1px solid ${C.bdr}` : 0 }}>
-              <span style={{ borderRadius: 999, padding: '2px 6px', background: item.background, color: item.color, fontSize: 8, fontWeight: 800 }}>{item.badge}</span>
-              <div style={{ marginTop: 7, fontSize: 11, fontWeight: 800 }}>{item.value}</div>
-              <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{item.sub}</div>
-            </div>
-          ))}
-        </div>
-      </section>
     </div>
   );
 }
