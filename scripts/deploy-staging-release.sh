@@ -33,9 +33,13 @@ fi
 
 previous_release="$(readlink -f "${current_link}" 2>/dev/null || true)"
 next_link="${release_root}/.current-${release_id}"
+deployment_complete=false
 
 cleanup() {
   rm -f "${archive_path}" "${next_link}"
+  if [[ "${deployment_complete}" != "true" && -d "${release_dir}" ]]; then
+    rm -rf "${release_dir}"
+  fi
 }
 trap cleanup EXIT
 
@@ -45,7 +49,7 @@ ln -s "${shared_env}" "${release_dir}/.env.local"
 
 cd "${release_dir}"
 npm ci --no-audit --no-fund
-NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=1536 npm run build
+NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=2560 npm run build
 
 chgrp -R roove "${release_dir}"
 chmod -R g+rX "${release_dir}"
@@ -74,4 +78,5 @@ if [[ "${healthy}" != "true" ]]; then
   exit 1
 fi
 
+deployment_complete=true
 echo "Staging deployed: ${release_id}"
