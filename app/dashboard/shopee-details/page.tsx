@@ -56,20 +56,6 @@ function campaignStatusLabel(value: string) {
   return labels[String(value || '').toLowerCase()] || value || 'Status tidak diketahui';
 }
 
-type ShopeeDetailsTab = 'cpas' | 'product' | 'automatic';
-
-type ShopeeDetailsTabDefinition = {
-  id: ShopeeDetailsTab;
-  label: string;
-  group: 'Eksternal' | 'Internal Shopee';
-};
-
-const SHOPEE_DETAIL_TABS: ShopeeDetailsTabDefinition[] = [
-  { id: 'cpas', label: 'CPAS', group: 'Eksternal' },
-  { id: 'product', label: 'Iklan Produk', group: 'Internal Shopee' },
-  { id: 'automatic', label: 'Shop GMV Max', group: 'Internal Shopee' },
-];
-
 const DETAIL_PAGE_SIZE = 10;
 
 function paginateRows<T>(rows: T[], requestedPage: number) {
@@ -160,12 +146,15 @@ function buildPreviewCpasRows() {
     const reportedRoas = 2.1 + ((index * 37) % 31) / 10;
     const impressions = Math.round(spend / (31_000 + index * 3_500) * 1000);
     return {
+      key: `preview-cpas:${index + 1}`,
       account: name,
+      store: 'Roove Official Store',
       sourceLabel: 'Ad account · Meta CPAS',
       spend,
       impressions,
       attributedRevenue: Math.round(spend * reportedRoas),
-      reportedRoas,
+      attributionRoas: reportedRoas,
+      attributionComplete: true,
       isPreview: true,
     };
   });
@@ -199,6 +188,8 @@ function buildPreviewProductRows(feeRate: number | null) {
     return {
       key: `preview-product-${index + 1}`,
       campaign_id: 910_000_000_000 + index,
+      shop_id: 227_509_446,
+      shop_name: 'Roove Official Store',
       ad_name: `${name} Campaign`,
       campaign_status: isRunning ? 'ongoing' : 'paused',
       bidding_method: index % 3 === 2 ? 'manual' : 'auto',
@@ -215,6 +206,8 @@ function buildPreviewProductRows(feeRate: number | null) {
       directGmv: Math.round(broadGmv * 0.74),
       actualRoas: platformRoas,
       adjustedRoas: adjustedPreviewRoas(expense, broadGmv, feeRate),
+      metricRowCount: 1,
+      last_seen_at: new Date().toISOString(),
       isRunning,
       signal: apiTargetRoas == null
         ? 'Tanpa target'
@@ -364,21 +357,12 @@ export default function ShopeeDetailsPage() {
   } | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [activeTab, setActiveTab] = useState<ShopeeDetailsTab>('cpas');
   const [currentPage, setCurrentPage] = useState(1);
 
   useEffect(() => {
     const syncNavigationState = () => {
       const params = new URLSearchParams(window.location.search);
-      const rawTab = params.get('tab');
-      const requestedTab = rawTab === 'gms' || rawTab === 'automatic'
-        ? 'automatic'
-        : rawTab as ShopeeDetailsTab | null;
-      const nextTab = SHOPEE_DETAIL_TABS.some((tab) => tab.id === requestedTab)
-        ? requestedTab as ShopeeDetailsTab
-        : 'cpas';
       const requestedPage = Number(params.get('page') || 1);
-      setActiveTab(nextTab);
       setCurrentPage(Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1);
 
       const shopeeStatus = params.get('shopee_status');
@@ -393,9 +377,9 @@ export default function ShopeeDetailsPage() {
         params.delete('shopee_shop_id');
       }
 
-      if (rawTab !== nextTab) {
-        params.set('tab', nextTab);
-      }
+      // The old tabbed UI has been replaced by one verified inventory table.
+      // Remove legacy tab aliases so saved URLs keep working without a blank panel.
+      params.delete('tab');
 
       const query = params.toString();
       window.history.replaceState({}, '', `${window.location.pathname}${query ? `?${query}` : ''}`);
@@ -406,11 +390,10 @@ export default function ShopeeDetailsPage() {
     return () => window.removeEventListener('popstate', syncNavigationState);
   }, []);
 
-  const navigateDetail = (tab: ShopeeDetailsTab, page = 1) => {
-    setActiveTab(tab);
+  const navigateCampaignPage = (page = 1) => {
     setCurrentPage(page);
     const params = new URLSearchParams(window.location.search);
-    params.set('tab', tab);
+    params.delete('tab');
     if (page > 1) params.set('page', String(page));
     else params.delete('page');
     const query = params.toString();
@@ -493,41 +476,9 @@ export default function ShopeeDetailsPage() {
     const actualShopeeSales = data.channel
       .reduce((sum, row: any) => sum + Number(row.net_sales || 0), 0);
 
-    const shopeeSpend = data.shopeeAdsMetrics
-      .reduce((sum, row: any) => sum + Math.abs(Number(row.expense || 0)), 0);
-    const shopeeBroadGmv = data.shopeeAdsMetrics
-      .reduce((sum, row: any) => sum + Number(row.broad_gmv || 0), 0);
-    const shopeeDirectGmv = data.shopeeAdsMetrics
-      .reduce((sum, row: any) => sum + Number(row.direct_gmv || 0), 0);
-    const cpasRows = data.ads.filter((row: any) => (
-      row.data_source === 'meta_api' && isCpasSource(row.source)
-    ));
-    const cpasSpend = cpasRows
-      .reduce((sum: number, row: any) => sum + Math.abs(Number(row.spent || 0)), 0);
-    const cpasRevenueRows = cpasRows.filter((row: any) => (
-      row.platform_attributed_revenue !== null
-      && row.platform_attributed_revenue !== undefined
-      && Number.isFinite(Number(row.platform_attributed_revenue))
-    ));
-    const hasShopeeMetrics = data.shopeeAdsMetrics.length > 0;
-    const hasCpasRows = cpasRows.length > 0;
-    const hasCompletePaidSpend = hasShopeeMetrics && hasCpasRows;
-    const totalPaidSpend = shopeeSpend + cpasSpend;
-
     return {
       actualShopeeSales,
-      actualBlendedRoas: hasCompletePaidSpend && totalPaidSpend > 0
-        ? actualShopeeSales / totalPaidSpend
-        : null,
-      totalPaidSpend,
-      shopeeSpend,
-      shopeeBroadGmv,
-      shopeeDirectGmv,
-      hasShopeeMetrics,
-      cpasSpend,
-      hasCpasRows,
-      hasCompletePaidSpend,
-      hasMetaRevenue: cpasRevenueRows.length > 0,
+      hasActualShopeeSales: data.channel.length > 0,
     };
   }, [data]);
 
@@ -691,42 +642,46 @@ export default function ShopeeDetailsPage() {
       .filter((row: any) => row.data_source === 'meta_api' && isCpasSource(row.source))
       .forEach((row: any) => {
         const account = String(row.ad_account || '').trim() || 'Akun CPAS';
-        const current = byAccount.get(account) || {
+        const store = String(row.store || '').trim() || 'Toko belum dipetakan';
+        const key = `${store}:${account}`;
+        const current = byAccount.get(key) || {
+          key,
           account,
+          store,
           sources: new Set<string>(),
           spend: 0,
           impressions: 0,
           attributedRevenue: 0,
+          rowCount: 0,
           revenueRows: 0,
-          reportedRoasValue: 0,
-          reportedRoasSpend: 0,
         };
         const spend = Math.abs(Number(row.spent || 0));
         const source = String(row.source || '').trim();
         const attributedRevenue = Number(row.platform_attributed_revenue);
-        const reportedRoas = Number(row.platform_reported_roas);
 
         if (source) current.sources.add(source);
         current.spend += spend;
         current.impressions += Number(row.impressions || 0);
+        current.rowCount += 1;
         if (row.platform_attributed_revenue != null && Number.isFinite(attributedRevenue)) {
           current.attributedRevenue += attributedRevenue;
           current.revenueRows += 1;
         }
-        if (row.platform_reported_roas != null && Number.isFinite(reportedRoas) && spend > 0) {
-          current.reportedRoasValue += spend * reportedRoas;
-          current.reportedRoasSpend += spend;
-        }
-        byAccount.set(account, current);
+        byAccount.set(key, current);
       });
 
     const rows = Array.from(byAccount.values())
       .map((row) => ({
         ...row,
         sourceLabel: Array.from(row.sources as Set<string>).join(', ') || 'Meta CPAS',
-        attributedRevenue: row.revenueRows > 0 ? row.attributedRevenue : null,
-        reportedRoas: row.reportedRoasSpend > 0
-          ? row.reportedRoasValue / row.reportedRoasSpend
+        attributionComplete: row.rowCount > 0 && row.revenueRows === row.rowCount,
+        attributedRevenue: row.rowCount > 0 && row.revenueRows === row.rowCount
+          ? row.attributedRevenue
+          : null,
+        attributionRoas: row.rowCount > 0
+          && row.revenueRows === row.rowCount
+          && row.spend > 0
+          ? row.attributedRevenue / row.spend
           : null,
       }))
       .sort((a, b) => b.spend - a.spend || a.account.localeCompare(b.account));
@@ -734,25 +689,33 @@ export default function ShopeeDetailsPage() {
     return { rows };
   }, [data.ads]);
 
-  const previewFeeRate = resolveShopeeAdminFeeRate(data.shopeeFeeRates, dateRange.to);
   const gmsStartFeeRate = resolveShopeeAdminFeeRate(data.shopeeFeeRates, dateRange.from);
-  const gmsEndFeeRate = resolveShopeeAdminFeeRate(data.shopeeFeeRates, dateRange.to);
-  const gmsFeeRate = gmsStartFeeRate != null
-    && gmsEndFeeRate != null
-    && Math.abs(gmsStartFeeRate - gmsEndFeeRate) < 0.0000001
-    ? gmsEndFeeRate
-    : null;
+  const gmsFeeRates = gmsStartFeeRate == null
+    ? []
+    : Array.from(new Set([
+        gmsStartFeeRate,
+        ...data.shopeeFeeRates
+          .filter((row: any) => {
+            const effectiveFrom = String(row.effective_from || '').slice(0, 10);
+            return effectiveFrom > dateRange.from && effectiveFrom <= dateRange.to;
+          })
+          .map((row: any) => Number(row.rate))
+          .filter((rate: number) => Number.isFinite(rate)),
+      ]));
+  const gmsFeeRate = gmsFeeRates.length === 1 ? gmsFeeRates[0] : null;
   const gmsFeeRateLabel = gmsFeeRate == null ? null : `${(gmsFeeRate * 100).toFixed(2)}%`;
   const previewCpasRows = useMemo(
     () => SHOW_PREVIEW_DATA ? buildPreviewCpasRows() : [],
     [],
   );
   const previewProductRows = useMemo(
-    () => SHOW_PREVIEW_DATA ? buildPreviewProductRows(previewFeeRate) : [],
-    [previewFeeRate],
+    () => SHOW_PREVIEW_DATA ? buildPreviewProductRows(gmsFeeRate) : [],
+    [gmsFeeRate],
   );
   const previewGmsData = useMemo(
-    () => SHOW_PREVIEW_DATA ? buildPreviewGmsData(dateRange.from, dateRange.to) : { campaigns: [], items: [] },
+    () => SHOW_PREVIEW_DATA && dateRange.from !== dateRange.to
+      ? buildPreviewGmsData(dateRange.from, dateRange.to)
+      : { campaigns: [], items: [] },
     [dateRange.from, dateRange.to],
   );
   const previewCpcDailyRows = useMemo(
@@ -762,9 +725,9 @@ export default function ShopeeDetailsPage() {
 
   const cpasRows = cpasResume.rows.length > 0 ? cpasResume.rows : previewCpasRows;
   const cpasIsPreview = cpasResume.rows.length === 0 && previewCpasRows.length > 0;
-  const productRows = campaignResume.rows.length > 0 ? campaignResume.rows : previewProductRows;
-  const productIsPreview = productRows.length > 0 && productRows.every((row: any) => (
-    row.isPreview || String(row.ad_name || '').toLowerCase().includes('preview')
+  const productSourceRows = campaignResume.rows.length > 0 ? campaignResume.rows : previewProductRows;
+  const productRows = productSourceRows.filter((row: any) => (
+    row.isRunning || Number(row.metricRowCount || 0) > 0
   ));
   const rawGmsCampaignRows = data.gmsCampaignMetrics.length > 0
     ? data.gmsCampaignMetrics
@@ -774,6 +737,8 @@ export default function ShopeeDetailsPage() {
     : previewGmsData.items;
   const gmsCampaignRows = rawGmsCampaignRows.map((row: any) => ({
     key: `${row.shop_config_id || 'preview'}:${row.campaign_id}`,
+    shopConfigId: row.shop_config_id || null,
+    shopId: Number(row.shop_id || 0) || null,
     campaignId: Number(row.campaign_id || 0),
     periodStart: String(row.period_start || dateRange.from),
     periodEnd: String(row.period_end || dateRange.to),
@@ -787,6 +752,11 @@ export default function ShopeeDetailsPage() {
     directOrders: Number(row.direct_order || 0),
     directOrderAmount: Number(row.direct_order_amount || 0),
     directRoas: Number(row.direct_roas || 0),
+    adjustedRoas: adjustedPreviewRoas(
+      Math.abs(Number(row.expense || 0)),
+      Number(row.broad_gmv || 0),
+      gmsFeeRate,
+    ),
     isPreview: Boolean(row.isPreview),
   }));
   const gmsItemRows = rawGmsItemRows.map((row: any) => {
@@ -794,6 +764,8 @@ export default function ShopeeDetailsPage() {
     const broadGmv = Number(row.broad_gmv || 0);
     return {
       key: `${row.shop_config_id || 'preview'}:${row.campaign_id}:${row.item_id}`,
+      shopConfigId: row.shop_config_id || null,
+      shopId: Number(row.shop_id || 0) || null,
       campaignId: Number(row.campaign_id || 0),
       itemId: Number(row.item_id || 0),
       impressions: Number(row.impressions || 0),
@@ -810,30 +782,6 @@ export default function ShopeeDetailsPage() {
       isPreview: Boolean(row.isPreview),
     };
   });
-  const gmsIsPreview = gmsCampaignRows.some((row: any) => row.isPreview);
-  const productSummary = {
-    active: productRows.filter((row: any) => row.isRunning).length,
-    achieved: productRows.filter((row: any) => row.signal === 'Tercapai').length,
-    attention: productRows.filter((row: any) => row.signalTone === 'bad').length,
-  };
-  const gmsSummary = gmsCampaignRows.reduce((summary, row) => ({
-    impressions: summary.impressions + row.impressions,
-    clicks: summary.clicks + row.clicks,
-    expense: summary.expense + row.expense,
-    broadGmv: summary.broadGmv + row.broadGmv,
-    broadOrders: summary.broadOrders + row.broadOrders,
-    broadOrderAmount: summary.broadOrderAmount + row.broadOrderAmount,
-    directOrders: summary.directOrders + row.directOrders,
-    directOrderAmount: summary.directOrderAmount + row.directOrderAmount,
-  }), { impressions: 0, clicks: 0, expense: 0, broadGmv: 0, broadOrders: 0, broadOrderAmount: 0, directOrders: 0, directOrderAmount: 0 });
-  const gmsPlatformRoas = gmsSummary.expense > 0
-    ? gmsSummary.broadGmv / gmsSummary.expense
-    : null;
-  const gmsAdjustedRoas = adjustedPreviewRoas(
-    gmsSummary.expense,
-    gmsSummary.broadGmv,
-    gmsFeeRate,
-  );
   const cpcDailyRows = data.shopeeAdsMetrics.length > 0
     ? data.shopeeAdsMetrics.map((row: any) => ({
         metric_date: row.metric_date,
@@ -868,138 +816,159 @@ export default function ShopeeDetailsPage() {
   }), { impressions: 0, clicks: 0, expense: 0, broadGmv: 0, directGmv: 0, broadOrders: 0, directOrders: 0, broadItems: 0, directItems: 0 });
   const cpcBroadRoas = cpcSummary.expense > 0 ? cpcSummary.broadGmv / cpcSummary.expense : null;
   const cpasSummary = cpasRows.reduce((summary, row: any) => {
-    const derivedRevenue = row.attributedRevenue != null
-      ? Number(row.attributedRevenue)
-      : row.reportedRoas != null
-        ? Number(row.spend || 0) * Number(row.reportedRoas)
-        : null;
     return {
       expense: summary.expense + Number(row.spend || 0),
       impressions: summary.impressions + Number(row.impressions || 0),
-      revenue: summary.revenue + Number(derivedRevenue || 0),
-      complete: summary.complete && derivedRevenue != null,
     };
-  }, { expense: 0, impressions: 0, revenue: 0, complete: true });
-  const previewCpasSummary = previewCpasRows.reduce((summary, row) => ({
-    expense: summary.expense + row.spend,
-    revenue: summary.revenue + row.attributedRevenue,
-  }), { expense: 0, revenue: 0 });
-  const previewCpasRoas = previewCpasSummary.expense > 0
-    ? previewCpasSummary.revenue / previewCpasSummary.expense
-    : 0;
-  const cpasRevenueIsPreview = !cpasSummary.complete && SHOW_PREVIEW_DATA;
+  }, { expense: 0, impressions: 0 });
   const cpasHasData = cpasRows.length > 0;
-  const cpasRevenue = !cpasHasData
-    ? null
-    : cpasSummary.complete
-    ? cpasSummary.revenue
-    : cpasRevenueIsPreview
-      ? cpasSummary.expense * previewCpasRoas
-      : null;
-  const productChannelSummary = productRows.reduce((summary, row: any) => ({
-    expense: summary.expense + Number(row.expense || 0),
-    impressions: summary.impressions + Number(row.impressions || 0),
-    broadGmv: summary.broadGmv + Number(row.broadGmv || 0),
-    directGmv: summary.directGmv + Number(row.directGmv || 0),
-  }), { expense: 0, impressions: 0, broadGmv: 0, directGmv: 0 });
-  const productHasData = data.campaignMetrics.length > 0 || productIsPreview;
-  const gmsHasData = gmsCampaignRows.length > 0;
-  const channelRevenueRows = [
-    {
-      label: 'CPAS',
-      sub: 'Meta',
-      color: '#1877f2',
-      revenueLabel: 'Meta',
-      revenue: cpasRevenue,
-      secondaryRevenueLabel: null,
-      secondaryRevenue: null,
-      expense: cpasHasData ? cpasSummary.expense : null,
-      impressions: cpasHasData ? cpasSummary.impressions : null,
-      isPreview: cpasIsPreview || cpasRevenueIsPreview,
-      hasData: cpasHasData,
-    },
-    {
-      label: 'Iklan Produk',
-      sub: 'Pemilihan otomatis & manual',
-      color: '#ee4d2d',
-      revenueLabel: 'Broad',
-      revenue: productHasData ? productChannelSummary.broadGmv : null,
-      secondaryRevenueLabel: 'Direct',
-      secondaryRevenue: productHasData ? productChannelSummary.directGmv : null,
-      expense: productHasData ? productChannelSummary.expense : null,
-      impressions: productHasData ? productChannelSummary.impressions : null,
-      isPreview: productIsPreview,
-      hasData: productHasData,
-    },
-    {
-      label: 'Shop GMV Max',
-      sub: 'GMS Performance API',
-      color: '#8b5cf6',
-      revenueLabel: 'Broad',
-      revenue: gmsHasData ? gmsSummary.broadGmv : null,
-      secondaryRevenueLabel: null,
-      secondaryRevenue: null,
-      expense: gmsHasData ? gmsSummary.expense : null,
-      impressions: gmsHasData ? gmsSummary.impressions : null,
-      isPreview: gmsIsPreview,
-      hasData: gmsHasData,
-    },
-  ].map((row) => ({
-    ...row,
-    roas: row.revenue != null && row.expense != null && row.expense > 0
-      ? row.revenue / row.expense
-      : null,
-    secondaryRoas: row.secondaryRevenue != null && row.expense != null && row.expense > 0
-      ? row.secondaryRevenue / row.expense
-      : null,
-  }));
-  const connectedChannelRows = channelRevenueRows.filter((row) => row.hasData);
   const hasAvailableSpend = cpasHasData || cpcHasData;
   const connectedTotalExpense = hasAvailableSpend
     ? (cpasHasData ? cpasSummary.expense : 0) + (cpcHasData ? cpcSummary.expense : 0)
     : null;
-  const connectedTotalImpressions = hasAvailableSpend
-    ? (cpasHasData ? cpasSummary.impressions : 0) + (cpcHasData ? cpcSummary.impressions : 0)
-    : null;
   const connectedShopeeGmv = cpcHasData ? cpcSummary.broadGmv : null;
   const connectedShopeeDirectGmv = cpcHasData ? cpcSummary.directGmv : null;
-  const hasPreviewDistribution = connectedChannelRows.some((row) => row.isPreview) || cpcIsPreview;
   const hasPreviewSpend = cpasIsPreview || cpcIsPreview;
-  const hasCompleteSpend = cpasHasData && cpcHasData;
+  const hasBothSpendSources = cpasHasData && cpcHasData;
+  const cpasAttributionIncomplete = cpasRows.some((row: any) => (
+    !row.isPreview && row.attributionComplete !== true
+  ));
   const spendCoverageLabel = [cpasHasData ? 'CPAS' : null, cpcHasData ? 'CPC Shopee' : null]
     .filter(Boolean)
     .join(' + ') || 'Belum tersinkron';
-  const blendedRoas = hasCompleteSpend && connectedTotalExpense != null && connectedTotalExpense > 0
+  const blendedRoas = overview.hasActualShopeeSales
+    && hasBothSpendSources
+    && connectedTotalExpense != null
+    && connectedTotalExpense > 0
     ? overview.actualShopeeSales / connectedTotalExpense
     : null;
-  const adsDistributionTableRows = [
-    ...channelRevenueRows,
-    {
-      label: 'CPAS + agregat CPC',
-      sub: 'Total sumber utama · detail campaign tidak dijumlahkan ulang',
-      revenueLabel: null,
-      revenue: null,
-      secondaryRevenueLabel: null,
-      secondaryRevenue: null,
-      expense: connectedTotalExpense,
-      impressions: connectedTotalImpressions,
-      roas: blendedRoas,
-      secondaryRoas: null,
-      isPreview: hasPreviewSpend,
-      hasData: hasAvailableSpend,
-      isTotal: true,
-      hideRevenue: true,
-      title: 'Blended ROAS hanya tersedia ketika CPAS dan agregat CPC Shopee sama-sama tersinkron.',
-    },
-  ];
   const globalCm3AdsSpend = Number(data.globalCm3AdsSpend || 0);
   const shopeeShareOfGlobal = connectedTotalExpense != null && globalCm3AdsSpend > 0
     ? connectedTotalExpense / globalCm3AdsSpend * 100
     : null;
 
-  const cpasPage = paginateRows(cpasRows, currentPage);
-  const productPage = paginateRows(productRows, currentPage);
-  const gmsPage = paginateRows(gmsItemRows, currentPage);
+  const gmsItemCountByCampaign = gmsItemRows.reduce((counts: Map<string, number>, row: any) => {
+    const owner = row.shopConfigId || `shop:${row.shopId || 'preview'}`;
+    const key = `${owner}:${row.campaignId}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+    return counts;
+  }, new Map<string, number>());
+
+  const identifiedCampaignRows = [
+    ...cpasRows.map((row: any) => {
+      const hasDelivery = Number(row.spend || 0) > 0 || Number(row.impressions || 0) > 0;
+      return {
+        key: `cpas:${row.key || `${row.store}:${row.account}`}`,
+        type: 'CPAS',
+        typeColor: '#1877f2',
+        name: row.account,
+        idLabel: 'Ad account Meta',
+        targetPrimary: row.store,
+        targetSecondary: 'Target —',
+        status: hasDelivery ? 'Ada delivery' : 'Tanpa delivery',
+        statusColor: hasDelivery ? 'var(--green)' : C.dim,
+        statusTitle: 'Aktivitas pada rentang terpilih; bukan status campaign.',
+        impressions: Number(row.impressions || 0),
+        clicks: null,
+        expense: Number(row.spend || 0),
+        gmv: row.attributedRevenue == null ? null : Number(row.attributedRevenue),
+        gmvLabel: row.attributionComplete ? 'Meta' : 'Meta —',
+        secondaryGmv: null,
+        primaryRoas: row.attributionRoas == null ? null : Number(row.attributionRoas),
+        platformRoas: null,
+        roasLabel: row.attributionComplete ? 'Meta' : 'Meta —',
+        performanceLabel: row.attributionComplete ? null : 'Atribusi Meta —',
+        isPreview: Boolean(row.isPreview),
+        priority: hasDelivery ? 2 : 0,
+      };
+    }),
+    ...productRows.map((campaign: any) => {
+      const productNames = campaign.products
+        .map((product: any) => String(product?.product_name || '').trim())
+        .filter(Boolean);
+      const itemCount = Math.max(productNames.length, campaign.itemIds.length);
+      const isRunning = String(campaign.campaign_status || '').toLowerCase() === 'ongoing';
+      const hasPerformance = Number(campaign.metricRowCount || 0) > 0 || Boolean(campaign.isPreview);
+      const hasDelivery = hasPerformance
+        && (Number(campaign.expense || 0) > 0 || Number(campaign.impressions || 0) > 0);
+      const lastSeen = String(campaign.last_seen_at || '').slice(0, 10);
+      return {
+        key: `product:${campaign.key}`,
+        type: 'Iklan Produk',
+        typeColor: '#ee4d2d',
+        name: campaign.ad_name || `Campaign ${campaign.campaign_id}`,
+        idLabel: [
+          campaign.shop_name || (campaign.shop_id ? `Shop ${campaign.shop_id}` : null),
+          `Campaign ${campaign.campaign_id}`,
+          lastSeen ? `Sync ${formatDate(lastSeen)}` : null,
+        ].filter(Boolean).join(' · '),
+        targetPrimary: productNames[0] || (itemCount > 0 ? `${itemCount} produk` : 'Produk —'),
+        targetSecondary: [
+          itemCount > 1 ? `+${itemCount - 1} produk` : null,
+          campaign.targetRoas != null ? `Target ${campaign.targetRoas.toFixed(2)}x` : 'Target —',
+        ].filter(Boolean).join(' · '),
+        status: campaignStatusLabel(campaign.campaign_status),
+        statusColor: isRunning ? 'var(--green)' : C.dim,
+        statusTitle: 'Status campaign pada sinkronisasi terakhir.',
+        impressions: hasPerformance ? Number(campaign.impressions || 0) : null,
+        clicks: hasPerformance ? Number(campaign.clicks || 0) : null,
+        expense: hasPerformance ? Number(campaign.expense || 0) : null,
+        gmv: hasPerformance ? Number(campaign.broadGmv || 0) : null,
+        gmvLabel: 'Broad',
+        secondaryGmv: hasPerformance ? Number(campaign.directGmv || 0) : null,
+        primaryRoas: hasPerformance ? campaign.adjustedRoas : null,
+        platformRoas: hasPerformance ? campaign.actualRoas : null,
+        roasLabel: null,
+        performanceLabel: hasPerformance ? null : 'Data rentang —',
+        isPreview: Boolean(campaign.isPreview),
+        priority: hasDelivery ? 2 : isRunning ? 1 : 0,
+      };
+    }),
+    ...gmsCampaignRows.map((campaign: any) => {
+      const owner = campaign.shopConfigId || `shop:${campaign.shopId || 'preview'}`;
+      const itemCount = gmsItemCountByCampaign.get(`${owner}:${campaign.campaignId}`) || 0;
+      const hasDelivery = Number(campaign.expense || 0) > 0 || Number(campaign.impressions || 0) > 0;
+      return {
+        key: `gms:${campaign.key}`,
+        type: 'Iklan Produk · GMV Max',
+        typeColor: '#8b5cf6',
+        name: `Shop GMV Max · Campaign ${campaign.campaignId}`,
+        idLabel: campaign.shopId ? `Shop ${campaign.shopId}` : `Campaign ${campaign.campaignId}`,
+        targetPrimary: itemCount > 0 ? `${itemCount} item dilaporkan` : 'Item —',
+        targetSecondary: 'Target —',
+        status: hasDelivery ? 'Ada delivery' : 'Tanpa delivery',
+        statusColor: hasDelivery ? 'var(--green)' : C.dim,
+        statusTitle: 'Aktivitas pada rentang terpilih; API tidak menyediakan status campaign.',
+        impressions: Number(campaign.impressions || 0),
+        clicks: Number(campaign.clicks || 0),
+        expense: Number(campaign.expense || 0),
+        gmv: Number(campaign.broadGmv || 0),
+        gmvLabel: 'Broad',
+        secondaryGmv: null,
+        primaryRoas: campaign.adjustedRoas,
+        platformRoas: campaign.expense > 0 ? Number(campaign.platformRoas) : null,
+        roasLabel: null,
+        performanceLabel: null,
+        isPreview: Boolean(campaign.isPreview),
+        priority: hasDelivery ? 2 : 0,
+      };
+    }),
+  ].sort((a, b) => (
+    b.priority - a.priority
+    || b.expense - a.expense
+    || a.name.localeCompare(b.name)
+  ));
+  const campaignPage = paginateRows(identifiedCampaignRows, currentPage);
+  const hasPreviewCampaignRows = identifiedCampaignRows.some((row) => row.isPreview);
+  const roasColumnTitle = [
+    campaignResume.feeRateLabel
+      ? `Iklan Produk: setelah biaya admin ${campaignResume.feeRateLabel}.`
+      : 'Iklan Produk: asumsi biaya admin belum tersedia.',
+    gmsFeeRateLabel
+      ? `Shop GMV Max: setelah biaya admin ${gmsFeeRateLabel}.`
+      : 'Shop GMV Max: asumsi biaya admin tidak tersedia atau berubah dalam rentang.',
+    'CPAS: ROAS Meta.',
+  ].join(' ');
 
   if (loading || dateLoading) {
     return (
@@ -1042,7 +1011,7 @@ export default function ShopeeDetailsPage() {
                 whiteSpace: 'nowrap',
               }}
             >
-              {syncing ? 'Menyinkronkan…' : 'Sync rentang'}
+              {syncing ? 'Sync Shopee…' : 'Sync Shopee'}
             </button>
           )}
           <span style={{ border: `1px solid ${C.bdr}`, borderRadius: 999, padding: '5px 9px', color: C.dim, fontSize: 10 }}>
@@ -1079,12 +1048,13 @@ export default function ShopeeDetailsPage() {
         </div>
       )}
 
+      <div style={{ marginBottom: 8, fontSize: 13, fontWeight: 800 }}>Ringkasan Shopee workspace</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(205px, 1fr))', gap: 10, marginBottom: 16 }}>
         <MetricCard
           label="Penjualan aktual Shopee"
-          value={fmtRupiah(overview.actualShopeeSales)}
+          value={overview.hasActualShopeeSales ? fmtRupiah(overview.actualShopeeSales) : '—'}
           sub="Pesanan dikirim + selesai"
-          title="Net sales dari order Shopee berstatus shipped/completed, berdasarkan tanggal pengiriman."
+          title="Net sales Shopee pada workspace aktif."
         />
         <MetricCard
           label="GMV atribusi CPC Shopee"
@@ -1095,53 +1065,57 @@ export default function ShopeeDetailsPage() {
           preview={cpcIsPreview}
         />
         <MetricCard
-          label="Biaya CPAS + CPC Shopee"
+          label="Biaya sumber terhubung"
           value={connectedTotalExpense == null ? '—' : fmtRupiah(connectedTotalExpense)}
-          sub={spendCoverageLabel}
+          sub={data.canViewWorkspaceCm3 && shopeeShareOfGlobal != null
+            ? `${spendCoverageLabel} · ${shopeeShareOfGlobal.toFixed(1)}% biaya marketing workspace`
+            : spendCoverageLabel}
           color="var(--yellow)"
-          title="CPAS berasal dari Meta. CPC Shopee berasal dari endpoint agregat tingkat toko; detail campaign tidak dijumlahkan ulang."
+          title="CPAS dari Meta ditambah agregat CPC Shopee. Detail campaign tidak dijumlahkan ulang."
           preview={hasPreviewSpend}
         />
         <MetricCard
-          label="Blended ROAS CPAS + CPC"
+          label="Blended MER terhubung"
           value={blendedRoas == null ? '—' : `${blendedRoas.toFixed(2)}x`}
-          sub="Penjualan aktual ÷ biaya terhubung"
+          sub="Penjualan aktual ÷ biaya tersimpan"
           color={blendedRoas == null ? C.dim : blendedRoas >= 3 ? 'var(--green)' : blendedRoas >= 1.5 ? 'var(--yellow)' : 'var(--red)'}
-          title="Ditampilkan hanya ketika data CPAS dan agregat CPC Shopee sama-sama tersedia."
+          title="Seluruh penjualan Shopee, termasuk organik, dibagi baris biaya CPAS dan CPC yang tersimpan pada rentang terpilih."
           preview={hasPreviewSpend}
         />
       </div>
 
-      <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
-        <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
-          <div style={{ fontSize: 13, fontWeight: 800 }}>Ads Distribution</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-            {data.canViewWorkspaceCm3 && (
-              <>
-                <div style={{ color: C.dim, fontSize: 9 }}>
-                  CM3 workspace <span style={{ marginLeft: 4, color: C.txt, fontFamily: 'monospace', fontWeight: 800 }}>{globalCm3AdsSpend > 0 ? fmtRupiah(globalCm3AdsSpend) : '—'}</span>
-                </div>
-                <div style={{ color: C.dim, fontSize: 9 }}>
-                  Porsi CPAS + CPC <span style={{ marginLeft: 4, color: '#ee4d2d', fontFamily: 'monospace', fontWeight: 800 }}>{shopeeShareOfGlobal == null ? '—' : `${shopeeShareOfGlobal.toFixed(1)}%`}</span>
-                </div>
-              </>
+      <section style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+        <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>Campaign & sumber iklan</div>
+            <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>CPAS per ad account · Shopee per campaign</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            {hasPreviewCampaignRows && (
+              <span style={{ borderRadius: 999, padding: '3px 7px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 8, fontWeight: 800 }}>Preview API</span>
             )}
-            {hasPreviewDistribution && (
-              <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 9, fontWeight: 800 }}>
-                Preview API
-              </span>
-            )}
+            <span style={{ color: C.dim, fontSize: 9 }}>{cpasRows.length} sumber CPAS</span>
+            <span style={{ color: C.dim, fontSize: 9 }}>·</span>
+            <span style={{ color: C.dim, fontSize: 9 }}>{productRows.length} Iklan Produk</span>
+            <span style={{ color: C.dim, fontSize: 9 }}>·</span>
+            <span style={{ color: C.dim, fontSize: 9 }}>{gmsCampaignRows.length} GMV Max</span>
           </div>
         </div>
-        <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-            <table style={{ width: '100%', minWidth: 610, borderCollapse: 'collapse', fontSize: 11 }}>
+
+        {campaignPage.rows.length > 0 ? (
+          <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+            <table style={{ width: '100%', minWidth: 920, borderCollapse: 'collapse', fontSize: 11 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                  {['Channel', 'Impressions', 'GMV / revenue', 'Biaya', 'ROAS'].map((heading, index) => (
+                  {['Campaign / sumber', 'Produk / target', 'Impressions / klik', 'Biaya', 'GMV atribusi', 'ROAS'].map((heading, index) => (
                     <th
                       key={heading}
-                      title={heading === 'Impressions' ? 'Jumlah tayangan yang dilaporkan platform; bukan reach unik.' : undefined}
-                      style={{ padding: '9px 12px', textAlign: index === 0 ? 'left' : 'right', color: C.dim, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}
+                      title={heading === 'ROAS'
+                        ? roasColumnTitle
+                        : heading === 'Impressions / klik'
+                          ? 'Impressions dilaporkan platform dan bukan reach unik.'
+                          : undefined}
+                      style={{ padding: '9px 12px', textAlign: index < 2 ? 'left' : 'right', color: C.dim, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}
                     >
                       {heading}
                     </th>
@@ -1149,403 +1123,116 @@ export default function ShopeeDetailsPage() {
                 </tr>
               </thead>
               <tbody>
-                {adsDistributionTableRows.map((row: any, index) => {
-                  const startsTotal = index === channelRevenueRows.length;
-                  return (
-                    <tr
-                      key={row.label}
-                      title={row.title}
-                      style={{
-                        borderTop: startsTotal ? `2px solid ${C.bdr}` : undefined,
-                        borderBottom: `1px solid ${C.bdr}`,
-                        background: row.isTotal ? 'rgba(238, 77, 45, 0.025)' : 'transparent',
-                      }}
-                    >
-                      <td style={{ padding: '11px 12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-                          <span style={{ fontWeight: row.isTotal ? 800 : 700 }}>{row.label}</span>
-                          {row.isPreview && (
-                            <span style={{ borderRadius: 999, padding: '2px 6px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 8, fontWeight: 800 }}>Preview API</span>
-                          )}
-                        </div>
-                        <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{row.sub}</div>
-                      </td>
-                      <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', color: row.impressions == null ? C.dim : C.txt, fontWeight: row.isTotal ? 800 : 700 }}>
-                        {row.impressions == null ? '—' : formatCount(row.impressions)}
-                      </td>
-                      <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: row.isTotal ? 800 : 700 }}>
-                        {!row.hideRevenue && (
-                          <>
-                            <div>{row.revenue == null ? '—' : `${row.revenueLabel} ${fmtRupiah(row.revenue)}`}</div>
-                            {row.secondaryRevenueLabel && (
-                              <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>
-                                {row.secondaryRevenueLabel} {fmtRupiah(row.secondaryRevenue)}
-                              </div>
-                            )}
-                          </>
+                {campaignPage.rows.map((row: any) => (
+                  <tr key={row.key} style={{ borderBottom: `1px solid ${C.bdr}` }}>
+                    <td style={{ padding: '11px 12px', maxWidth: 300 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
+                        <span style={{ borderRadius: 999, padding: '2px 6px', background: `${row.typeColor}18`, color: row.typeColor, fontSize: 8, fontWeight: 800 }}>{row.type}</span>
+                        <span title={row.statusTitle} style={{ color: row.statusColor, fontSize: 8, fontWeight: 700 }}>● {row.status}</span>
+                        {row.isPreview && (
+                          <span style={{ color: 'var(--yellow)', fontSize: 8, fontWeight: 800 }}>Preview</span>
                         )}
-                      </td>
-                      <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', color: C.dim, fontWeight: row.isTotal ? 800 : 500 }}>
-                        {row.expense == null ? '—' : fmtRupiah(row.expense)}
-                      </td>
-                      <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, color: row.roas == null ? C.dim : row.roas >= 3 ? 'var(--green)' : row.roas >= 1.5 ? 'var(--yellow)' : 'var(--red)' }}>
-                        <div>{row.roas == null ? '—' : `${row.roas.toFixed(2)}x`}</div>
-                        {row.secondaryRoas != null && (
-                          <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>
-                            {row.secondaryRevenueLabel} {row.secondaryRoas.toFixed(2)}x
-                          </div>
+                        {row.performanceLabel && (
+                          <span style={{ color: C.dim, fontSize: 8, fontWeight: 700 }}>{row.performanceLabel}</span>
                         )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                      </div>
+                      <div style={{ fontWeight: 800, lineHeight: 1.35 }}>{row.name}</div>
+                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{row.idLabel}</div>
+                    </td>
+                    <td style={{ padding: '11px 12px', maxWidth: 250 }}>
+                      <div style={{ lineHeight: 1.35 }}>{row.targetPrimary}</div>
+                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{row.targetSecondary}</div>
+                    </td>
+                    <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                      <div>{row.impressions == null ? '—' : formatCount(row.impressions)}</div>
+                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>{row.clicks == null ? 'Klik —' : `${formatCount(row.clicks)} klik`}</div>
+                    </td>
+                    <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{row.expense == null ? '—' : fmtRupiah(row.expense)}</td>
+                    <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
+                      <div>{row.gmv == null ? '—' : fmtRupiah(row.gmv)}</div>
+                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>
+                        {row.secondaryGmv == null ? row.gmvLabel : `Direct ${fmtRupiah(row.secondaryGmv)}`}
+                      </div>
+                    </td>
+                    <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
+                      <div>{row.primaryRoas == null ? '—' : `${Number(row.primaryRoas).toFixed(2)}x`}</div>
+                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>
+                        {row.platformRoas == null ? (row.roasLabel || 'Platform —') : `Platform ${Number(row.platformRoas).toFixed(2)}x`}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
-      </div>
-
-      <div role="tablist" aria-label="Sumber iklan terkait Shopee" style={{ display: 'flex', alignItems: 'stretch', overflowX: 'auto', borderBottom: `1px solid ${C.bdr}`, marginBottom: 12, scrollbarWidth: 'none' }}>
-        {SHOPEE_DETAIL_TABS.map((tab, index) => {
-          const count = tab.id === 'cpas'
-            ? cpasRows.length
-            : tab.id === 'product'
-              ? productRows.length
-              : tab.id === 'automatic'
-                ? gmsCampaignRows.length
-                : 0;
-          const selected = activeTab === tab.id;
-          const startsGroup = index === 0 || SHOPEE_DETAIL_TABS[index - 1].group !== tab.group;
-          return (
-            <div key={tab.id} style={{ display: 'flex', alignItems: 'stretch' }}>
-              {startsGroup && (
-                <span style={{ display: 'flex', alignItems: 'center', padding: index === 0 ? '0 9px 0 2px' : '0 9px 0 16px', borderLeft: index === 0 ? 0 : `1px solid ${C.bdr}`, color: C.dim, fontSize: 8, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
-                  {tab.group}
-                </span>
-              )}
-              <button
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                onClick={() => navigateDetail(tab.id)}
-                style={{ border: 0, borderBottom: `2px solid ${selected ? '#ee4d2d' : 'transparent'}`, background: 'transparent', color: selected ? C.txt : C.dim, padding: '10px 12px', fontSize: 11, fontWeight: selected ? 800 : 600, whiteSpace: 'nowrap', cursor: 'pointer', marginBottom: -1 }}
-              >
-                {tab.label}
-                {count > 0 && (
-                  <span style={{ marginLeft: 6, color: selected ? '#ee4d2d' : C.dim, fontSize: 9 }}>{count}</span>
-                )}
-              </button>
-            </div>
-          );
-        })}
-      </div>
-
-      <div role="tabpanel" style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden' }}>
-        {activeTab === 'cpas' && (
-          <>
-            <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.bdr}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              <div style={{ fontSize: 14, fontWeight: 800 }}>CPAS</div>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                {cpasIsPreview && (
-                  <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 9, fontWeight: 800 }}>Preview API</span>
-                )}
-                <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-green-bg)', color: 'var(--green)', fontSize: 9, fontWeight: 800 }}>
-                  {cpasRows.length} ad account
-                </span>
-              </div>
-            </div>
-
-            {cpasPage.rows.length > 0 ? (
-              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                <table style={{ width: '100%', minWidth: 650, borderCollapse: 'collapse', fontSize: 11 }}>
-                  <thead>
-                    <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                      {['Ad account', 'Biaya', 'Revenue atribusi Meta', 'ROAS Meta'].map((heading, index) => (
-                        <th key={heading} style={{ padding: '9px 12px', textAlign: index === 0 ? 'left' : 'right', color: C.dim, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>
-                          {heading}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cpasPage.rows.map((row: any) => (
-                      <tr key={row.account} style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                        <td style={{ padding: '13px 12px' }}>
-                          <div style={{ fontWeight: 800 }}>{row.account}</div>
-                          <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{row.sourceLabel}</div>
-                        </td>
-                        <td style={{ padding: '13px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{fmtRupiah(row.spend)}</td>
-                        <td style={{ padding: '13px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
-                          {row.attributedRevenue == null ? '—' : fmtRupiah(row.attributedRevenue)}
-                        </td>
-                        <td style={{ padding: '13px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, color: '#1877f2' }}>
-                          {row.reportedRoas == null ? '—' : `${row.reportedRoas.toFixed(2)}x`}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <DetailEmptyState>Belum ada data CPAS.</DetailEmptyState>
-            )}
-
-            {overview.hasCpasRows && !overview.hasMetaRevenue && (
-              <div style={{ padding: '10px 12px', borderTop: `1px solid ${C.bdr}`, background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 10 }}>
-                Purchase value Meta belum tersimpan. Sync ulang Meta.
-              </div>
-            )}
-            <Pagination page={cpasPage.page} totalPages={cpasPage.totalPages} onChange={(page) => navigateDetail('cpas', page)} />
-          </>
+        ) : (
+          <DetailEmptyState>Belum ada campaign atau sumber iklan pada rentang ini.</DetailEmptyState>
         )}
 
-        {activeTab === 'product' && (
-          <>
-            <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.bdr}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 800 }}>Iklan Produk</div>
-                <div style={{ color: C.dim, fontSize: 9, marginTop: 4 }}>Campaign produk · pemilihan otomatis & manual</div>
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {productIsPreview && (
-                  <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 9, fontWeight: 800 }}>
-                    Preview API
-                  </span>
-                )}
-                <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-green-bg)', color: 'var(--green)', fontSize: 9, fontWeight: 800 }}>
-                  {productSummary.active} berjalan
-                </span>
-                <span style={{ borderRadius: 999, padding: '4px 8px', background: 'rgba(238, 77, 45, 0.10)', color: '#ee4d2d', fontSize: 9, fontWeight: 800 }}>
-                  {productSummary.achieved} tercapai
-                </span>
-                <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 9, fontWeight: 800 }}>
-                  {productSummary.attention} perlu perhatian
-                </span>
-              </div>
-            </div>
-
-            {productPage.rows.length > 0 ? (
-              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                <table style={{ width: '100%', minWidth: 870, borderCollapse: 'collapse', fontSize: 11 }}>
-                  <thead>
-                    <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                      {['Campaign', 'Produk', 'Budget / target Shopee', 'Biaya', 'Broad / direct GMV', 'ROAS setelah admin'].map((heading, index) => (
-                        <th
-                          key={heading}
-                          title={heading === 'ROAS setelah admin'
-                            ? campaignResume.feeRateLabel
-                              ? `Asumsi biaya admin: ${campaignResume.feeRateLabel} (Data Reference)`
-                              : 'Asumsi biaya admin belum diatur di Data Reference.'
-                            : undefined}
-                          style={{ padding: '9px 12px', textAlign: index < 3 ? 'left' : 'right', color: C.dim, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}
-                        >
-                          {heading}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {productPage.rows.map((campaign: any) => {
-                      const productNames = campaign.products
-                        .map((product: any) => String(product?.product_name || '').trim())
-                        .filter(Boolean);
-                      const itemCount = Math.max(productNames.length, campaign.itemIds.length);
-                      const strategyLabel = campaign.targetRoas != null
-                        ? 'Auto bidding · target ROAS'
-                        : String(campaign.bidding_method || '').toLowerCase() === 'auto'
-                          ? 'Auto bidding'
-                          : 'Manual bidding';
-
-                      return (
-                        <tr key={campaign.key} style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                          <td style={{ padding: '12px', maxWidth: 285 }}>
-                            <div title={`${campaign.ad_name || 'Campaign'} · ID ${campaign.campaign_id}`} style={{ fontWeight: 800, lineHeight: 1.35 }}>{campaign.ad_name || `Campaign ${campaign.campaign_id}`}</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
-                              <span style={{ color: campaign.isRunning ? 'var(--green)' : C.dim, fontSize: 9, fontWeight: 700 }}>
-                                ● {campaignStatusLabel(campaign.campaign_status)}
-                              </span>
-                              <span style={{ color: C.dim, fontSize: 9 }}>{strategyLabel}</span>
-                            </div>
-                          </td>
-                          <td style={{ padding: '12px', maxWidth: 260 }}>
-                            <div style={{ lineHeight: 1.4 }}>
-                              {productNames[0] || (itemCount > 0 ? `${itemCount} produk` : 'Produk dari campaign')}
-                            </div>
-                            {itemCount > 1 && (
-                              <div style={{ color: C.dim, fontSize: 9, marginTop: 3, lineHeight: 1.4 }}>
-                                {productNames.length > 0 ? `+${itemCount - 1} produk` : `${itemCount} produk`}
-                              </div>
-                            )}
-                          </td>
-                          <td style={{ padding: '12px', lineHeight: 1.45 }}>
-                            <div>{Number(campaign.campaign_budget || 0) > 0 ? fmtRupiah(Number(campaign.campaign_budget)) : 'Tak terbatas'}</div>
-                            <div style={{ color: campaign.targetRoas != null ? '#ee4d2d' : C.dim, fontSize: 9, marginTop: 3 }}>
-                              {campaign.targetRoas != null ? `Target ${campaign.targetRoas.toFixed(2)}x` : 'Target —'}
-                            </div>
-                          </td>
-                          <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
-                            <div>{fmtRupiah(campaign.expense)}</div>
-                            <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{formatCount(campaign.clicks)} klik</div>
-                          </td>
-                          <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
-                            <div>{fmtRupiah(campaign.broadGmv)}</div>
-                            <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{formatCount(campaign.broadOrder)} order · direct {fmtRupiah(campaign.directGmv)}</div>
-                          </td>
-                          <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, color: C.txt }}>
-                            {campaign.adjustedRoas == null ? '—' : `${campaign.adjustedRoas.toFixed(2)}x`}
-                            <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>
-                              {campaign.actualRoas == null ? 'Platform —' : `Platform ${campaign.actualRoas.toFixed(2)}x`}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <DetailEmptyState>
-                {data.campaignSchemaReady ? 'Belum ada data Iklan Produk.' : 'Migrasi campaign belum diterapkan.'}
-              </DetailEmptyState>
-            )}
-            <Pagination page={productPage.page} totalPages={productPage.totalPages} onChange={(page) => navigateDetail('product', page)} />
-          </>
-        )}
-
-        {activeTab === 'automatic' && (
-          <>
-            <div style={{ padding: '14px 16px', borderBottom: `1px solid ${C.bdr}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 800 }}>Iklan Produk · Shop GMV Max (GMS)</div>
-                <div style={{ color: C.dim, fontSize: 9, marginTop: 4 }}>{formatDate(dateRange.from)} — {formatDate(dateRange.to)}</div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {gmsIsPreview && (
-                  <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 9, fontWeight: 800 }}>Preview API</span>
-                )}
-                {gmsCampaignRows.length > 0 && (
-                  <span style={{ borderRadius: 999, padding: '4px 8px', background: 'var(--badge-green-bg)', color: 'var(--green)', fontSize: 9, fontWeight: 800 }}>
-                    {gmsCampaignRows.length} campaign
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {gmsCampaignRows.length > 0 ? (
-              <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))', borderBottom: `1px solid ${C.bdr}` }}>
-              {[
-                ['Impressions', formatCount(gmsSummary.impressions)],
-                ['Klik', formatCount(gmsSummary.clicks)],
-                ['Biaya', fmtRupiah(gmsSummary.expense)],
-                ['Broad GMV', fmtRupiah(gmsSummary.broadGmv)],
-                ['Order', `${formatCount(gmsSummary.broadOrders)} broad · ${formatCount(gmsSummary.directOrders)} direct`],
-                ['ROAS setelah admin', gmsAdjustedRoas == null ? '—' : `${gmsAdjustedRoas.toFixed(2)}x`],
-                ['Item dengan performa', formatCount(gmsItemRows.length)],
-              ].map(([label, value], index) => (
-                <div key={label} title={label === 'ROAS setelah admin'
-                  ? gmsFeeRateLabel
-                    ? `Asumsi biaya admin: ${gmsFeeRateLabel} (Data Reference)`
-                    : 'ROAS setelah admin tidak tersedia karena asumsi belum diatur atau berubah di dalam rentang.'
-                  : undefined} style={{ padding: '13px 15px', borderRight: index < 6 ? `1px solid ${C.bdr}` : 0 }}>
-                  <div style={{ color: C.dim, fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.05em', fontWeight: 800 }}>{label}</div>
-                  <div style={{ marginTop: 6, fontFamily: 'monospace', fontSize: 15, fontWeight: 800 }}>{value}</div>
-                  {label === 'ROAS setelah admin' && (
-                    <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>Platform {gmsPlatformRoas == null ? '—' : `${gmsPlatformRoas.toFixed(2)}x`}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-              {gmsPage.rows.length > 0 ? (
-                <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                  <table style={{ width: '100%', minWidth: 860, borderCollapse: 'collapse', fontSize: 11 }}>
-                    <thead>
-                      <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                        {['Item', 'Impressions / klik', 'Biaya', 'Broad GMV', 'Order / unit', 'ROAS setelah admin'].map((heading, index) => (
-                          <th
-                            key={heading}
-                            title={heading === 'ROAS setelah admin'
-                              ? gmsFeeRateLabel
-                                ? `Asumsi biaya admin: ${gmsFeeRateLabel} (Data Reference)`
-                                : 'ROAS setelah admin tidak tersedia karena asumsi belum diatur atau berubah di dalam rentang.'
-                              : undefined}
-                            style={{ padding: '9px 12px', textAlign: index === 0 ? 'left' : 'right', color: C.dim, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}
-                          >
-                            {heading}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {gmsPage.rows.map((row) => (
-                        <tr key={row.key} style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                          <td style={{ padding: '12px', maxWidth: 300 }}>
-                            <div style={{ fontWeight: 800, lineHeight: 1.35 }}>Item ID {row.itemId}</div>
-                            <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>Campaign {row.campaignId}</div>
-                          </td>
-                          <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
-                            <div>{formatCount(row.impressions)}</div>
-                            <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{formatCount(row.clicks)} klik · {row.impressions > 0 ? `${((row.clicks / row.impressions) * 100).toFixed(2)}%` : '—'}</div>
-                          </td>
-                          <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{fmtRupiah(row.expense)}</td>
-                          <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{fmtRupiah(row.broadGmv)}</td>
-                          <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
-                            <div>Broad {formatCount(row.broadOrders)} / {formatCount(row.broadOrderAmount)}</div>
-                            <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>Direct {formatCount(row.directOrders)} / {formatCount(row.directOrderAmount)}</div>
-                          </td>
-                          <td style={{ padding: '12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
-                            {row.adjustedRoas == null ? '—' : `${row.adjustedRoas.toFixed(2)}x`}
-                            <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>
-                              Platform {row.expense > 0 ? `${row.platformRoas.toFixed(2)}x` : '—'} · Direct {row.expense > 0 ? `${row.directRoas.toFixed(2)}x` : '—'}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <DetailEmptyState>Belum ada item dengan performa pada rentang ini.</DetailEmptyState>
-              )}
-              <Pagination page={gmsPage.page} totalPages={gmsPage.totalPages} onChange={(page) => navigateDetail('automatic', page)} />
-              </>
-            ) : (
-              <DetailEmptyState>
-                {!data.gmsSchemaReady
-                  ? 'Migrasi Shop GMV Max belum diterapkan.'
-                  : dateRange.from === dateRange.to
-                    ? 'Shop GMV Max API memerlukan rentang minimal 2 hari.'
-                    : 'Belum ada snapshot Shop GMV Max untuk rentang ini.'}
-              </DetailEmptyState>
-            )}
-          </>
-        )}
-      </div>
-
-      <div style={{ marginTop: 12, background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 190 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 11, fontWeight: 800 }}>Agregat CPC Shopee</span>
-            {cpcIsPreview && (
-              <span style={{ borderRadius: 999, padding: '2px 6px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 8, fontWeight: 800 }}>Preview API</span>
-            )}
+        {cpasAttributionIncomplete && (
+          <div style={{ padding: '9px 12px', borderTop: `1px solid ${C.bdr}`, background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 9 }}>
+            GMV dan ROAS CPAS disembunyikan saat atribusi Meta tidak tersedia pada sebagian baris.
           </div>
-          <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>Rekonsiliasi tingkat toko · bukan tipe iklan</div>
+        )}
+        {(!data.campaignSchemaReady || !data.gmsSchemaReady) && (
+          <div style={{ padding: '9px 12px', borderTop: `1px solid ${C.bdr}`, color: C.dim, fontSize: 9 }}>
+            {!data.campaignSchemaReady ? 'Data Iklan Produk belum siap.' : ''}
+            {!data.campaignSchemaReady && !data.gmsSchemaReady ? ' ' : ''}
+            {!data.gmsSchemaReady ? 'Data Shop GMV Max belum siap.' : ''}
+          </div>
+        )}
+        {data.gmsSchemaReady && dateRange.from === dateRange.to && gmsCampaignRows.length === 0 && (
+          <div style={{ padding: '9px 12px', borderTop: `1px solid ${C.bdr}`, color: C.dim, fontSize: 9 }}>
+            Shop GMV Max memerlukan rentang minimal 2 hari.
+          </div>
+        )}
+        <Pagination page={campaignPage.page} totalPages={campaignPage.totalPages} onChange={navigateCampaignPage} />
+      </section>
+
+      <section style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
+        <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>Kontrol agregat CPC Shopee</div>
+            <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>Gabungan shop dalam workspace · tidak dijumlahkan dengan tabel detail</div>
+          </div>
+          {cpcIsPreview && (
+            <span style={{ borderRadius: 999, padding: '3px 7px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 8, fontWeight: 800 }}>Preview API</span>
+          )}
         </div>
-        <div style={{ display: 'flex', gap: 18, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(125px, 1fr))' }}>
           {[
-            ['Biaya', cpcHasData ? fmtRupiah(cpcSummary.expense) : '—'],
-            ['Broad GMV', cpcHasData ? fmtRupiah(cpcSummary.broadGmv) : '—'],
-            ['Direct GMV', cpcHasData ? fmtRupiah(cpcSummary.directGmv) : '—'],
-            ['ROAS', cpcHasData && cpcBroadRoas != null ? `${cpcBroadRoas.toFixed(2)}x` : '—'],
-          ].map(([label, value]) => (
-            <div key={label} style={{ textAlign: 'right' }}>
+            ['Impressions', cpcHasData ? formatCount(cpcSummary.impressions) : '—', null],
+            ['Klik', cpcHasData ? formatCount(cpcSummary.clicks) : '—', null],
+            ['Biaya', cpcHasData ? fmtRupiah(cpcSummary.expense) : '—', null],
+            ['Broad GMV', cpcHasData ? fmtRupiah(cpcSummary.broadGmv) : '—', cpcHasData ? `${formatCount(cpcSummary.broadOrders)} order` : null],
+            ['Direct GMV', cpcHasData ? fmtRupiah(cpcSummary.directGmv) : '—', cpcHasData ? `${formatCount(cpcSummary.directOrders)} order` : null],
+            ['ROAS platform', cpcHasData && cpcBroadRoas != null ? `${cpcBroadRoas.toFixed(2)}x` : '—', cpcHasData && cpcSummary.expense > 0 ? `Direct ${(cpcSummary.directGmv / cpcSummary.expense).toFixed(2)}x` : null],
+          ].map(([label, value, secondary], index) => (
+            <div key={label} style={{ padding: '12px 14px', borderRight: index < 5 ? `1px solid ${C.bdr}` : 0 }}>
               <div style={{ color: C.dim, fontSize: 8, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
-              <div style={{ marginTop: 3, fontFamily: 'monospace', fontSize: 11, fontWeight: 800 }}>{value}</div>
+              <div style={{ marginTop: 5, fontFamily: 'monospace', fontSize: 13, fontWeight: 800 }}>{value}</div>
+              {secondary && <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{secondary}</div>}
             </div>
           ))}
         </div>
-      </div>
+      </section>
+
+      <section style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden' }}>
+        <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, fontSize: 13, fontWeight: 800 }}>Cakupan API</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }}>
+          {[
+            { badge: 'Meta API', color: '#1877f2', background: 'rgba(24, 119, 242, 0.10)', value: 'CPAS', sub: 'Level ad account' },
+            { badge: 'Shopee Open API', color: 'var(--green)', background: 'var(--badge-green-bg)', value: 'Iklan Produk + Shop GMV Max', sub: 'Endpoint terpisah · level campaign' },
+            { badge: 'Belum didukung', color: 'var(--yellow)', background: 'var(--badge-yellow-bg)', value: 'Toko+ · Banner · Iklan Live', sub: 'Tidak dicakup kontrak API app · tanpa dummy' },
+          ].map((item, index) => (
+            <div key={item.badge} style={{ padding: '12px 14px', borderRight: index < 2 ? `1px solid ${C.bdr}` : 0 }}>
+              <span style={{ borderRadius: 999, padding: '2px 6px', background: item.background, color: item.color, fontSize: 8, fontWeight: 800 }}>{item.badge}</span>
+              <div style={{ marginTop: 7, fontSize: 11, fontWeight: 800 }}>{item.value}</div>
+              <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{item.sub}</div>
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }
