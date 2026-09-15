@@ -270,8 +270,23 @@ function stripWrappingQuotes(value: string) {
   return value;
 }
 
-function readEnvText(name: string) {
-  const raw = String(process.env[name] || '').trim();
+type ShopeeEnvName =
+  | 'SHOPEE_PARTNER_ID'
+  | 'SHOPEE_PARTNER_KEY'
+  | 'SHOPEE_REDIRECT_URL'
+  | 'SHOPEE_AUTH_BASE_URL'
+  | 'SHOPEE_API_BASE_URL';
+
+const shopeeEnvReaders: Record<ShopeeEnvName, () => string | undefined> = {
+  SHOPEE_PARTNER_ID: () => process.env.SHOPEE_PARTNER_ID,
+  SHOPEE_PARTNER_KEY: () => process.env.SHOPEE_PARTNER_KEY,
+  SHOPEE_REDIRECT_URL: () => process.env.SHOPEE_REDIRECT_URL,
+  SHOPEE_AUTH_BASE_URL: () => process.env.SHOPEE_AUTH_BASE_URL,
+  SHOPEE_API_BASE_URL: () => process.env.SHOPEE_API_BASE_URL,
+};
+
+function readEnvText(name: ShopeeEnvName) {
+  const raw = String(shopeeEnvReaders[name]() || '').trim();
   const wrapped =
     raw.length >= 2 &&
     ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")));
