@@ -328,7 +328,7 @@ function buildPreviewCpcDailyRows(dateFrom: string, dateTo: string) {
 function MetricCard({ label, value, sub, color = C.txt, title, preview = false }: {
   label: string;
   value: string;
-  sub: string;
+  sub?: string;
   color?: string;
   title?: string;
   preview?: boolean;
@@ -338,11 +338,13 @@ function MetricCard({ label, value, sub, color = C.txt, title, preview = false }
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <div style={{ fontSize: 10, color: C.dim, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{label}</div>
         {preview && (
-          <span style={{ borderRadius: 999, padding: '2px 6px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 7, fontWeight: 800, whiteSpace: 'nowrap' }}>Preview API</span>
+          <span style={{ borderRadius: 999, padding: '2px 6px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 7, fontWeight: 800, whiteSpace: 'nowrap' }}>Preview</span>
         )}
       </div>
       <div style={{ marginTop: 7, color, fontFamily: 'monospace', fontSize: 20, fontWeight: 800, overflowWrap: 'anywhere' }}>{value}</div>
-      <div style={{ marginTop: 5, color: C.dim, fontSize: 10, lineHeight: 1.5 }}>{sub}</div>
+      {sub && (
+        <div style={{ marginTop: 5, color: C.dim, fontSize: 10, lineHeight: 1.5 }}>{sub}</div>
+      )}
     </div>
   );
 }
@@ -875,7 +877,7 @@ export default function ShopeeDetailsPage() {
     productSubtypeCounts.automatic > 0 ? `Otomatis ${productSubtypeCounts.automatic}` : null,
     gmsCampaignRows.length > 0 ? `Shop GMV Max ${gmsCampaignRows.length}` : null,
     productSubtypeCounts.unclassified > 0 ? `Belum terklasifikasi ${productSubtypeCounts.unclassified}` : null,
-  ].filter(Boolean).join(' · ') || 'Belum ada campaign';
+  ].filter(Boolean).join(' · ');
   const productIsPreview = productMetricRows.some((row: any) => row.isPreview)
     || gmsCampaignRows.some((row: any) => row.isPreview);
 
@@ -889,13 +891,7 @@ export default function ShopeeDetailsPage() {
   const connectedShopeeDirectGmv = cpcHasData ? cpcSummary.directGmv : null;
   const hasPreviewSpend = cpasIsPreview || productIsPreview || cpcIsPreview;
   const hasAllSpendSources = cpasHasData && productHasData && cpcHasData;
-  const spendCoverageLabel = [
-    cpasHasData ? 'CPAS' : null,
-    productHasData ? 'Iklan Produk' : null,
-    cpcHasData ? 'Agregat CPC' : null,
-  ]
-    .filter(Boolean)
-    .join(' + ') || 'Belum tersinkron';
+  const summarySourceCount = Number(cpasHasData) + Number(productHasData) + Number(cpcHasData);
   const blendedRoas = overview.hasActualShopeeSales
     && hasAllSpendSources
     && connectedTotalExpense != null
@@ -906,7 +902,6 @@ export default function ShopeeDetailsPage() {
   const shopeeShareOfGlobal = connectedTotalExpense != null && globalCm3AdsSpend > 0
     ? connectedTotalExpense / globalCm3AdsSpend * 100
     : null;
-  const summarySourceCount = Number(cpasHasData) + Number(productHasData) + Number(cpcHasData);
   const totalSummaryImpressions = hasAvailableSpend
     ? (cpasHasData ? cpasSummary.impressions : 0)
       + (productHasData ? productSummary.impressions : 0)
@@ -948,7 +943,7 @@ export default function ShopeeDetailsPage() {
     {
       key: 'cpc',
       name: 'Agregat CPC Shopee',
-      sub: 'Shop-level Open API',
+      sub: '',
       color: 'var(--green)',
       hasData: cpcHasData,
       impressions: cpcHasData ? cpcSummary.impressions : null,
@@ -974,22 +969,21 @@ export default function ShopeeDetailsPage() {
         type: 'CPAS',
         typeColor: '#1877f2',
         name: row.account,
-        idLabel: 'Ad account Meta',
+        idLabel: '',
         targetPrimary: row.store,
-        targetSecondary: 'Target —',
-        status: hasDelivery ? 'Ada delivery' : 'Tanpa delivery',
+        targetSecondary: '',
+        status: hasDelivery ? 'Tayang' : 'Tidak tayang',
         statusColor: hasDelivery ? 'var(--green)' : C.dim,
         statusTitle: 'Aktivitas pada rentang terpilih; bukan status campaign.',
         impressions: Number(row.impressions || 0),
         clicks: null,
         expense: Number(row.spend || 0),
         gmv: row.attributedRevenue == null ? null : Number(row.attributedRevenue),
-        gmvLabel: row.attributionComplete ? 'Meta' : 'Meta —',
+        gmvLabel: null,
         secondaryGmv: null,
         primaryRoas: row.attributionRoas == null ? null : Number(row.attributionRoas),
         platformRoas: null,
-        roasLabel: row.attributionComplete ? 'Meta' : 'Meta —',
-        performanceLabel: row.attributionComplete ? null : 'Atribusi Meta —',
+        roasLabel: null,
         isPreview: Boolean(row.isPreview),
         priority: hasDelivery ? 2 : 0,
       };
@@ -1003,7 +997,6 @@ export default function ShopeeDetailsPage() {
       const hasPerformance = Number(campaign.metricRowCount || 0) > 0 || Boolean(campaign.isPreview);
       const hasDelivery = hasPerformance
         && (Number(campaign.expense || 0) > 0 || Number(campaign.impressions || 0) > 0);
-      const lastSeen = String(campaign.last_seen_at || '').slice(0, 10);
       return {
         key: `product:${campaign.key}`,
         type: 'Iklan Produk',
@@ -1011,13 +1004,12 @@ export default function ShopeeDetailsPage() {
         name: campaign.ad_name || `Campaign ${campaign.campaign_id}`,
         idLabel: [
           campaign.shop_name || (campaign.shop_id ? `Shop ${campaign.shop_id}` : null),
-          `Campaign ${campaign.campaign_id}`,
-          lastSeen ? `Sync ${formatDate(lastSeen)}` : null,
+          `ID ${campaign.campaign_id}`,
         ].filter(Boolean).join(' · '),
-        targetPrimary: productNames[0] || (itemCount > 0 ? `${itemCount} produk` : 'Produk —'),
+        targetPrimary: productNames[0] || (itemCount > 0 ? `${itemCount} produk` : '—'),
         targetSecondary: [
           itemCount > 1 ? `+${itemCount - 1} produk` : null,
-          campaign.targetRoas != null ? `Target ${campaign.targetRoas.toFixed(2)}x` : 'Target —',
+          campaign.targetRoas != null ? `Target ${campaign.targetRoas.toFixed(2)}x` : null,
         ].filter(Boolean).join(' · '),
         status: campaignStatusLabel(campaign.campaign_status),
         statusColor: isRunning ? 'var(--green)' : C.dim,
@@ -1031,7 +1023,6 @@ export default function ShopeeDetailsPage() {
         primaryRoas: hasPerformance ? campaign.adjustedRoas : null,
         platformRoas: hasPerformance ? campaign.actualRoas : null,
         roasLabel: null,
-        performanceLabel: hasPerformance ? null : 'Data rentang —',
         isPreview: Boolean(campaign.isPreview),
         priority: hasDelivery ? 2 : isRunning ? 1 : 0,
       };
@@ -1042,13 +1033,13 @@ export default function ShopeeDetailsPage() {
       const hasDelivery = Number(campaign.expense || 0) > 0 || Number(campaign.impressions || 0) > 0;
       return {
         key: `gms:${campaign.key}`,
-        type: 'Iklan Produk · GMV Max',
+        type: 'GMV Max',
         typeColor: '#8b5cf6',
-        name: `Shop GMV Max · Campaign ${campaign.campaignId}`,
-        idLabel: campaign.shopId ? `Shop ${campaign.shopId}` : `Campaign ${campaign.campaignId}`,
-        targetPrimary: itemCount > 0 ? `${itemCount} item dilaporkan` : 'Item —',
-        targetSecondary: 'Target —',
-        status: hasDelivery ? 'Ada delivery' : 'Tanpa delivery',
+        name: `Campaign ${campaign.campaignId}`,
+        idLabel: campaign.shopId ? `Shop ${campaign.shopId}` : '',
+        targetPrimary: itemCount > 0 ? `${itemCount} produk` : '—',
+        targetSecondary: '',
+        status: hasDelivery ? 'Tayang' : 'Tidak tayang',
         statusColor: hasDelivery ? 'var(--green)' : C.dim,
         statusTitle: 'Aktivitas pada rentang terpilih; API tidak menyediakan status campaign.',
         impressions: Number(campaign.impressions || 0),
@@ -1060,7 +1051,6 @@ export default function ShopeeDetailsPage() {
         primaryRoas: campaign.adjustedRoas,
         platformRoas: campaign.expense > 0 ? Number(campaign.platformRoas) : null,
         roasLabel: null,
-        performanceLabel: null,
         isPreview: Boolean(campaign.isPreview),
         priority: hasDelivery ? 2 : 0,
       };
@@ -1085,7 +1075,7 @@ export default function ShopeeDetailsPage() {
   if (loading || dateLoading) {
     return (
       <div className="fade-in" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 320 }}>
-        <div style={{ color: C.dim, fontSize: 13 }}>Memuat Shopee Details...</div>
+        <div style={{ color: C.dim, fontSize: 13 }}>Memuat…</div>
       </div>
     );
   }
@@ -1093,7 +1083,7 @@ export default function ShopeeDetailsPage() {
   if (error) {
     return (
       <div className="fade-in" style={{ background: C.card, border: '1px solid var(--red)', borderRadius: 12, padding: 20 }}>
-        <div style={{ fontSize: 15, fontWeight: 800 }}>Shopee Details gagal dimuat</div>
+        <div style={{ fontSize: 15, fontWeight: 800 }}>Gagal memuat data</div>
         <div style={{ color: C.dim, marginTop: 6, fontSize: 12 }}>{error}</div>
       </div>
     );
@@ -1123,7 +1113,7 @@ export default function ShopeeDetailsPage() {
                 whiteSpace: 'nowrap',
               }}
             >
-              {syncing ? 'Sync Shopee…' : 'Sync Shopee'}
+              {syncing ? 'Menyinkronkan…' : 'Sync'}
             </button>
           )}
           <span style={{ border: `1px solid ${C.bdr}`, borderRadius: 999, padding: '5px 9px', color: C.dim, fontSize: 10 }}>
@@ -1160,56 +1150,53 @@ export default function ShopeeDetailsPage() {
         </div>
       )}
 
-      <div style={{ marginBottom: 8, fontSize: 13, fontWeight: 800 }}>Ringkasan Shopee workspace</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(205px, 1fr))', gap: 10, marginBottom: 16 }}>
         <MetricCard
-          label="Penjualan aktual Shopee"
+          label="Penjualan aktual"
           value={overview.hasActualShopeeSales ? fmtRupiah(overview.actualShopeeSales) : '—'}
-          sub="Pesanan dikirim + selesai"
-          title="Net sales Shopee pada workspace aktif."
+          title="Pesanan dikirim dan selesai."
         />
         <MetricCard
-          label="GMV atribusi CPC Shopee"
+          label="GMV CPC"
           value={connectedShopeeGmv == null ? '—' : fmtRupiah(connectedShopeeGmv)}
-          sub={connectedShopeeDirectGmv == null ? 'Direct —' : `Direct ${fmtRupiah(connectedShopeeDirectGmv)}`}
+          sub={connectedShopeeDirectGmv == null ? undefined : `Direct ${fmtRupiah(connectedShopeeDirectGmv)}`}
           color="#ee4d2d"
-          title="Broad dan direct GMV dari endpoint agregat CPC tingkat toko."
+          title="GMV agregat CPC."
           preview={cpcIsPreview}
         />
         <MetricCard
-          label="Biaya 3 sumber"
+          label="Total biaya"
           value={connectedTotalExpense == null ? '—' : fmtRupiah(connectedTotalExpense)}
           sub={data.canViewWorkspaceCm3 && shopeeShareOfGlobal != null
-            ? `${spendCoverageLabel} · ${shopeeShareOfGlobal.toFixed(1)}% biaya marketing workspace`
-            : spendCoverageLabel}
+            ? `${shopeeShareOfGlobal.toFixed(1)}% dari biaya marketing`
+            : summarySourceCount < 3 ? `${summarySourceCount}/3 sumber` : undefined}
           color="var(--yellow)"
-          title="CPAS + Iklan Produk + agregat CPC Shopee. Total sementara hingga audit overlap menggunakan data live."
+          title="CPAS, Iklan Produk, dan Agregat CPC."
           preview={hasPreviewSpend}
         />
         <MetricCard
-          label="Blended MER sementara"
+          label="MER"
           value={blendedRoas == null ? '—' : `${blendedRoas.toFixed(2)}x`}
-          sub="Penjualan aktual ÷ biaya tersimpan"
           color={blendedRoas == null ? C.dim : blendedRoas >= 3 ? 'var(--green)' : blendedRoas >= 1.5 ? 'var(--yellow)' : 'var(--red)'}
-          title="Seluruh penjualan Shopee dibagi CPAS + Iklan Produk + agregat CPC. Sementara hingga audit overlap data live."
+          title="Penjualan aktual dibagi total biaya."
           preview={hasPreviewSpend}
         />
       </div>
 
       <section style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
         <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, fontSize: 13, fontWeight: 800 }}>
-          Ringkasan iklan
+          Ringkasan
         </div>
         <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
           <table style={{ width: '100%', minWidth: 680, borderCollapse: 'collapse', fontSize: 11 }}>
             <thead>
               <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                {['Sumber', 'Impressions', 'Biaya', 'GMV atribusi', 'ROAS'].map((heading, index) => (
+                {['Sumber', 'Impressions', 'Biaya', 'GMV', 'ROAS'].map((heading, index) => (
                   <th
                     key={heading}
                     title={heading === 'Impressions'
                       ? 'Impressions platform; bukan reach unik.'
-                      : heading === 'GMV atribusi'
+                      : heading === 'GMV'
                         ? 'GMV yang dilaporkan masing-masing platform.'
                         : undefined}
                     style={{ padding: '9px 12px', textAlign: index === 0 ? 'left' : 'right', color: C.dim, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}
@@ -1230,7 +1217,9 @@ export default function ShopeeDetailsPage() {
                         <span style={{ borderRadius: 999, padding: '2px 6px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 7, fontWeight: 800 }}>Preview</span>
                       )}
                     </div>
-                    <div style={{ color: C.dim, fontSize: 9, marginTop: 3, paddingLeft: 14 }}>{row.sub}</div>
+                    {row.sub && (
+                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3, paddingLeft: 14 }}>{row.sub}</div>
+                    )}
                   </td>
                   <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
                     {row.impressions == null ? '—' : formatCount(row.impressions)}
@@ -1246,10 +1235,9 @@ export default function ShopeeDetailsPage() {
                   </td>
                 </tr>
               ))}
-              <tr title="Penjumlahan mentah tiga sumber; belum diaudit terhadap kemungkinan overlap." style={{ background: 'rgba(255, 255, 255, 0.018)' }}>
+              <tr title="Sumber dapat tumpang tindih." style={{ background: 'rgba(255, 255, 255, 0.018)' }}>
                 <td style={{ padding: '11px 12px' }}>
-                  <div style={{ fontWeight: 800 }}>Total ketiganya</div>
-                  <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{summarySourceCount}/3 sumber tersedia · belum deduplikasi</div>
+                  <div style={{ fontWeight: 800 }}>Total</div>
                 </td>
                 <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
                   {totalSummaryImpressions == null ? '—' : formatCount(totalSummaryImpressions)}
@@ -1272,18 +1260,12 @@ export default function ShopeeDetailsPage() {
       <section style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, overflow: 'hidden', marginBottom: 16 }}>
         <div style={{ padding: '12px 15px', borderBottom: `1px solid ${C.bdr}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 800 }}>Campaign & sumber iklan</div>
-            <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>CPAS per ad account · Shopee per campaign</div>
+            <div style={{ fontSize: 13, fontWeight: 800 }}>Detail iklan</div>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
             {hasPreviewCampaignRows && (
-              <span style={{ borderRadius: 999, padding: '3px 7px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 8, fontWeight: 800 }}>Preview API</span>
+              <span style={{ borderRadius: 999, padding: '3px 7px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 8, fontWeight: 800 }}>Preview</span>
             )}
-            <span style={{ color: C.dim, fontSize: 9 }}>{cpasRows.length} sumber CPAS</span>
-            <span style={{ color: C.dim, fontSize: 9 }}>·</span>
-            <span style={{ color: C.dim, fontSize: 9 }}>{productRows.length} Iklan Produk</span>
-            <span style={{ color: C.dim, fontSize: 9 }}>·</span>
-            <span style={{ color: C.dim, fontSize: 9 }}>{gmsCampaignRows.length} GMV Max</span>
           </div>
         </div>
 
@@ -1292,12 +1274,12 @@ export default function ShopeeDetailsPage() {
             <table style={{ width: '100%', minWidth: 920, borderCollapse: 'collapse', fontSize: 11 }}>
               <thead>
                 <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
-                  {['Campaign / sumber', 'Produk / target', 'Impressions / klik', 'Biaya', 'GMV atribusi', 'ROAS'].map((heading, index) => (
+                  {['Iklan', 'Target', 'Impressions', 'Biaya', 'GMV', 'ROAS'].map((heading, index) => (
                     <th
                       key={heading}
                       title={heading === 'ROAS'
                         ? roasColumnTitle
-                        : heading === 'Impressions / klik'
+                        : heading === 'Impressions'
                           ? 'Impressions dilaporkan platform dan bukan reach unik.'
                           : undefined}
                       style={{ padding: '9px 12px', textAlign: index < 2 ? 'left' : 'right', color: C.dim, fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}
@@ -1317,33 +1299,40 @@ export default function ShopeeDetailsPage() {
                         {row.isPreview && (
                           <span style={{ color: 'var(--yellow)', fontSize: 8, fontWeight: 800 }}>Preview</span>
                         )}
-                        {row.performanceLabel && (
-                          <span style={{ color: C.dim, fontSize: 8, fontWeight: 700 }}>{row.performanceLabel}</span>
-                        )}
                       </div>
                       <div style={{ fontWeight: 800, lineHeight: 1.35 }}>{row.name}</div>
-                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{row.idLabel}</div>
+                      {row.idLabel && (
+                        <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{row.idLabel}</div>
+                      )}
                     </td>
                     <td style={{ padding: '11px 12px', maxWidth: 250 }}>
                       <div style={{ lineHeight: 1.35 }}>{row.targetPrimary}</div>
-                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{row.targetSecondary}</div>
+                      {row.targetSecondary && (
+                        <div style={{ color: C.dim, fontSize: 9, marginTop: 3 }}>{row.targetSecondary}</div>
+                      )}
                     </td>
                     <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
                       <div>{row.impressions == null ? '—' : formatCount(row.impressions)}</div>
-                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>{row.clicks == null ? 'Klik —' : `${formatCount(row.clicks)} klik`}</div>
+                      {row.clicks != null && (
+                        <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>{formatCount(row.clicks)} klik</div>
+                      )}
                     </td>
                     <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{row.expense == null ? '—' : fmtRupiah(row.expense)}</td>
                     <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>
                       <div>{row.gmv == null ? '—' : fmtRupiah(row.gmv)}</div>
-                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>
-                        {row.secondaryGmv == null ? row.gmvLabel : `Direct ${fmtRupiah(row.secondaryGmv)}`}
-                      </div>
+                      {(row.secondaryGmv != null || row.gmvLabel) && (
+                        <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>
+                          {row.secondaryGmv == null ? row.gmvLabel : `Direct ${fmtRupiah(row.secondaryGmv)}`}
+                        </div>
+                      )}
                     </td>
                     <td style={{ padding: '11px 12px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800 }}>
                       <div>{row.primaryRoas == null ? '—' : `${Number(row.primaryRoas).toFixed(2)}x`}</div>
-                      <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>
-                        {row.platformRoas == null ? (row.roasLabel || 'Platform —') : `Platform ${Number(row.platformRoas).toFixed(2)}x`}
-                      </div>
+                      {(row.platformRoas != null || row.roasLabel) && (
+                        <div style={{ color: C.dim, fontSize: 9, marginTop: 3, fontWeight: 500 }}>
+                          {row.platformRoas == null ? row.roasLabel : `Platform ${Number(row.platformRoas).toFixed(2)}x`}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1351,12 +1340,12 @@ export default function ShopeeDetailsPage() {
             </table>
           </div>
         ) : (
-          <DetailEmptyState>Belum ada campaign atau sumber iklan pada rentang ini.</DetailEmptyState>
+          <DetailEmptyState>Tidak ada data.</DetailEmptyState>
         )}
 
         {cpasAttributionIncomplete && (
           <div style={{ padding: '9px 12px', borderTop: `1px solid ${C.bdr}`, background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 9 }}>
-            GMV dan ROAS CPAS disembunyikan saat atribusi Meta tidak tersedia pada sebagian baris.
+            Atribusi Meta belum lengkap.
           </div>
         )}
         {(!data.campaignSchemaReady || !data.gmsSchemaReady) && (
@@ -1368,7 +1357,7 @@ export default function ShopeeDetailsPage() {
         )}
         {data.gmsSchemaReady && dateRange.from === dateRange.to && gmsCampaignRows.length === 0 && (
           <div style={{ padding: '9px 12px', borderTop: `1px solid ${C.bdr}`, color: C.dim, fontSize: 9 }}>
-            Shop GMV Max memerlukan rentang minimal 2 hari.
+            Pilih rentang minimal 2 hari untuk GMV Max.
           </div>
         )}
         <Pagination page={campaignPage.page} totalPages={campaignPage.totalPages} onChange={navigateCampaignPage} />
