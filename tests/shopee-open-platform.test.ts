@@ -7,6 +7,7 @@ import {
   fetchShopeeGmsPerformanceRange,
   getShopeeGmsItemPerformance,
   getShopeeApiErrorCode,
+  getShopeeSetupInfo,
   isShopeeGmsUnavailableError,
   normalizeShopeeGmsCampaignPerformance,
   normalizeShopeeGmsItemPerformance,
@@ -84,6 +85,26 @@ async function withMockShopeeFetch<T>(
     else process.env.SHOPEE_API_BASE_URL = originalApiBaseUrl;
   }
 }
+
+test('treats null-like Shopee credentials as missing configuration', () => {
+  const originalPartnerId = process.env.SHOPEE_PARTNER_ID;
+  const originalPartnerKey = process.env.SHOPEE_PARTNER_KEY;
+
+  process.env.SHOPEE_PARTNER_ID = 'null';
+  process.env.SHOPEE_PARTNER_KEY = '"undefined"';
+
+  try {
+    assert.deepEqual(getShopeeSetupInfo(), {
+      configured: false,
+      missingEnv: ['SHOPEE_PARTNER_ID', 'SHOPEE_PARTNER_KEY'],
+    });
+  } finally {
+    if (originalPartnerId == null) delete process.env.SHOPEE_PARTNER_ID;
+    else process.env.SHOPEE_PARTNER_ID = originalPartnerId;
+    if (originalPartnerKey == null) delete process.env.SHOPEE_PARTNER_KEY;
+    else process.env.SHOPEE_PARTNER_KEY = originalPartnerKey;
+  }
+});
 
 test('normalizes Shopee product campaign target, products, and manual keywords', () => {
   const setting = normalizeShopeeProductCampaignSetting({

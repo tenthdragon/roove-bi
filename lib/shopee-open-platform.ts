@@ -290,11 +290,13 @@ function readEnvText(name: ShopeeEnvName) {
   const wrapped =
     raw.length >= 2 &&
     ((raw.startsWith('"') && raw.endsWith('"')) || (raw.startsWith("'") && raw.endsWith("'")));
+  const unwrapped = stripWrappingQuotes(raw);
+  const value = /^(null|undefined)$/i.test(unwrapped) ? '' : unwrapped;
 
   return {
     raw,
     wrapped,
-    value: stripWrappingQuotes(raw),
+    value,
   };
 }
 
