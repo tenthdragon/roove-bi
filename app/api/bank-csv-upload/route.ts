@@ -3,7 +3,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
-import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
+import {
+  buildRateLimitResponse,
+  consumeRateLimit,
+  rejectMissingDashboardSession,
+  rejectUntrustedOrigin,
+} from '@/lib/request-hardening';
 import { classifyTransaction } from '@/lib/transaction-tagger';
 
 type Bank = 'BCA' | 'BRI' | 'MANDIRI';
@@ -465,15 +470,6 @@ export async function POST(req: NextRequest) {
     const sessionError = rejectMissingDashboardSession(req);
     if (sessionError) return sessionError;
 
-    const rateLimitError = limitByIp(
-      req,
-      'bank-csv-upload',
-      20,
-      10 * 60 * 1000,
-      'Terlalu banyak upload bank statement. Coba lagi beberapa menit lagi.',
-    );
-    if (rateLimitError) return rateLimitError;
-
     let uploadedById: string | null = null;
     let workspaceId: string;
     try {
@@ -484,6 +480,18 @@ export async function POST(req: NextRequest) {
     } catch (error: any) {
       const status = /sesi|login/i.test(error.message || '') ? 401 : 403;
       return NextResponse.json({ error: error.message }, { status });
+    }
+
+    const rateLimit = consumeRateLimit({
+      key: `bank-csv-upload:${workspaceId}:${uploadedById}`,
+      max: 100,
+      windowMs: 10 * 60 * 1000,
+    });
+    if (!rateLimit.ok) {
+      return buildRateLimitResponse(
+        'Terlalu banyak upload bank statement. Coba lagi beberapa menit lagi.',
+        rateLimit.retryAfterSeconds,
+      );
     }
 
     const formData = await req.formData();
