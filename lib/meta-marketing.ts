@@ -110,7 +110,7 @@ export async function fetchAccountInsights(
   });
 
   const url = `${META_API_BASE}/${accountId}/insights?${params.toString()}`;
-  const response = await fetch(url);
+  const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
 
   if (!response.ok) {
     const errorBody = await response.json().catch(() => ({}));
@@ -126,8 +126,8 @@ export async function fetchAccountInsights(
   while (data?.data) {
     insights.push(...data.data);
     if (data.paging?.next) {
-      const nextResponse = await fetch(data.paging.next);
-      if (!nextResponse.ok) break;
+      const nextResponse = await fetch(data.paging.next, { signal: AbortSignal.timeout(30000) });
+      if (!nextResponse.ok) throw new Error(`Meta pagination failed for ${accountId}: ${nextResponse.status}`);
       data = await nextResponse.json();
     } else {
       break;
@@ -227,7 +227,7 @@ export async function debugToken(
       access_token: `${appId}|${appSecret}`,
     });
     const url = `${META_API_BASE}/debug_token?${params.toString()}`;
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
     if (!response.ok) return null;
 
     const json = await response.json();
@@ -254,7 +254,7 @@ export async function refreshLongLivedToken(
       fb_exchange_token: currentToken,
     });
     const url = `${META_API_BASE}/oauth/access_token?${params.toString()}`;
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: AbortSignal.timeout(30000) });
     if (!response.ok) return null;
 
     return await response.json();

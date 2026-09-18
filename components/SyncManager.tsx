@@ -289,7 +289,7 @@ export default function SyncManager() {
           </span>
           <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{orders.length} order pending</span>
         </div>
-        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Cron: 02:00 WIB (status check)</span>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Cron: 02:00, 17:00, 18:00 WIB (cek ulang status via antrean)</span>
       </div>
 
       {/* Message */}

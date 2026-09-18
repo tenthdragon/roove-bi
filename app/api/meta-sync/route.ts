@@ -1,25 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
+import { getTodayWIB } from '@/lib/sync-schedule';
+import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
 import { runMetaSync } from '@/lib/meta-sync-runner';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
 
 export const maxDuration = 60;
 
-function getCronDateRange() {
-  const now = new Date();
-  const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
-  const end = new Date(wib);
-  end.setDate(end.getDate() - 1);
-  const start = new Date(wib);
-  start.setDate(start.getDate() - 3);
-
-  return {
-    date_start: start.toISOString().split('T')[0],
-    date_end: end.toISOString().split('T')[0],
-  };
-}
 
 function resolveDateRange(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -33,11 +22,11 @@ function resolveDateRange(req: NextRequest) {
     };
   }
 
-  const defaultRange = getCronDateRange();
+  const today = getTodayWIB();
 
   return {
-    date_start: defaultRange.date_start,
-    date_end: defaultRange.date_end,
+    date_start: today,
+    date_end: today,
   };
 }
 
@@ -45,7 +34,7 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
   const startTime = Date.now();
   const requestId = getRequestId(req);
   const authHeader = req.headers.get('authorization');
-  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const isCron = Boolean(process.env.CRON_SECRET) && authHeader === `Bearer ${process.env.CRON_SECRET}`;
   const mode = isCron ? `cron_${method.toLowerCase()}` : `dashboard_${method.toLowerCase()}`;
   let requestedBy: string | null = null;
   let workspaceId: string | null = null;
@@ -102,6 +91,31 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
           'meta',
         )
       : [workspaceId!];
+    if (isCron) {
+      // Ignore date overrides for scheduled runs: intraday refresh is today only.
+      const today = getTodayWIB();
+      const cronPayload = { date_start: today, date_end: today };
+      const jobs = [];
+      for (const scheduledWorkspaceId of workspaceIds) {
+        jobs.push(await enqueueSyncJob({
+          workspaceId: scheduledWorkspaceId,
+          jobName: 'meta_sync',
+          route: '/api/meta-sync',
+          mode: 'cron',
+          payload: cronPayload,
+          dedupeKey: createSyncJobDedupeKey('meta_sync', 'cron', cronPayload),
+          requestId,
+          priority: 30,
+          maxAttempts: 3,
+        }));
+      }
+      return NextResponse.json({
+        queued: true,
+        job_ids: jobs.map(({ job }) => job.id),
+        date_range: { start: today, end: today },
+      }, { status: 202 });
+    }
+
     const results = [];
     const routeErrors: string[] = [];
     for (const scheduledWorkspaceId of workspaceIds) {

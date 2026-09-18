@@ -1,8 +1,11 @@
+import { buildNextScalevSyncJobPayload } from '../lib/scalev-sync-job-payload';
 import { hostname } from 'os';
 import { loadEnvConfig } from '@next/env';
 import { executeSyncJob } from '../lib/sync-job-runners';
 import {
   claimNextSyncJob,
+  createSyncJobDedupeKey,
+  enqueueSyncJob,
   failSyncJob,
   finalizeSyncJob,
   requeueStaleSyncJobs,
@@ -81,6 +84,21 @@ async function processNextJob(workerId: string) {
 
   try {
     const result = await executeSyncJob(job);
+    const nextPayload = buildNextScalevSyncJobPayload(job, result.resultSummary);
+    if (nextPayload) {
+      await enqueueSyncJob({
+        workspaceId: job.workspace_id,
+        jobName: 'scalev_sync',
+        route: job.route,
+        mode: job.mode,
+        payload: nextPayload as Record<string, any>,
+        dedupeKey: createSyncJobDedupeKey('scalev_sync', job.mode, nextPayload as Record<string, any>),
+        requestedBy: job.requested_by,
+        requestId: job.request_id || job.id,
+        maxAttempts: job.max_attempts,
+        priority: job.priority,
+      });
+    }
     await finalizeSyncJob({
       jobId: job.id,
       status: result.status as SyncJobTerminalStatus,

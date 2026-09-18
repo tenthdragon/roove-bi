@@ -111,34 +111,19 @@ export async function runMetaSync(options: RunMetaSyncOptions): Promise<MetaSync
         continue;
       }
 
-      const { error: delError } = await svc
-        .from('daily_ads_spend')
-        .delete()
-        .eq('workspace_id', workspaceId)
-        .gte('date', dateStart)
-        .lte('date', dateEnd)
-        .eq('data_source', 'meta_api')
-        .eq('ad_account', result.account_name);
-
-      if (delError) {
-        console.error(`[meta-sync] Delete error for ${result.account_name}:`, delError);
-        errors.push(`Delete ${result.account_name}: ${delError.message}`);
-        continue;
-      }
-
-      let accountInsertFailed = false;
-      for (let i = 0; i < result.rows.length; i += 500) {
-        const batch = result.rows
-          .slice(i, i + 500)
-          .map((row) => ({ ...row, workspace_id: workspaceId }));
-        const { error } = await svc.from('daily_ads_spend').insert(batch);
-        if (error) {
-          console.error(`[meta-sync] Insert batch error for ${result.account_name}:`, error);
-          errors.push(`Insert ${result.account_name} batch ${Math.floor(i / 500) + 1}: ${error.message}`);
-          accountInsertFailed = true;
-          break;
-        }
-        rowsInserted += batch.length;
+      // One transaction: readers never observe an empty/partial replacement.
+      const { error: replaceError } = await svc.rpc('replace_meta_ads_spend', {
+        p_workspace_id: workspaceId,
+        p_account_name: result.account_name,
+        p_date_start: dateStart,
+        p_date_end: dateEnd,
+        p_rows: result.rows,
+      });
+      const accountInsertFailed = Boolean(replaceError);
+      if (replaceError) {
+        errors.push(`Replace ${result.account_name}: ${replaceError.message}`);
+      } else {
+        rowsInserted += result.rows.length;
       }
 
       if (!accountInsertFailed) {

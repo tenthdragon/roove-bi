@@ -245,7 +245,7 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
         .eq('workspace_id', workspaceId)
         .gte('pending_time', dayStart)
         .lte('pending_time', dayEnd)
-        .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid', 'in_process']);
+        .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid', 'processing', 'in_process']);
       if (error) throw error;
       pendingOrders = data || [];
     } else if (syncMode === 'repair' && targetOrderIds && targetOrderIds.length > 0) {
@@ -274,7 +274,7 @@ export async function runScalevSync(options: ScalevSyncOptions): Promise<ScalevS
         .from('scalev_orders')
         .select(lightCols)
         .eq('workspace_id', workspaceId)
-        .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid', 'in_process']);
+        .in('status', ['pending', 'ready', 'draft', 'confirmed', 'paid', 'processing', 'in_process']);
 
       if (startAfterId) {
         query = query.gt('id', startAfterId);

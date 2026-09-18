@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/meta-sync",
-      "schedule": "0 1 * * *"
+      "schedule": "*/10 * * * *"
     },
     {
       "path": "/api/whatsapp-sync",
@@ -18,11 +18,11 @@
     },
     {
       "path": "/api/scalev-sync",
-      "schedule": "0 19 * * *"
+      "schedule": "0 10,11,19 * * *"
     },
     {
       "path": "/api/sync-jobs-worker",
-      "schedule": "15 19 * * *"
+      "schedule": "*/2 * * * *"
     },
     {
       "path": "/api/telegram-report",

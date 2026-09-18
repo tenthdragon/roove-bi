@@ -1,3 +1,4 @@
+import { getTodayWIB } from './sync-schedule';
 import { runDailyAdsSync } from './daily-ads-sync-runner';
 import { triggerFinancialSync } from './financial-actions';
 import { runMetaSync } from './meta-sync-runner';
@@ -38,9 +39,12 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
       const payload = job.payload || {};
       const result = await runMetaSync({
         workspaceId: job.workspace_id,
-        dateStart: typeof payload.date_start === 'string' ? payload.date_start : null,
-        dateEnd: typeof payload.date_end === 'string' ? payload.date_end : null,
+        dateStart: job.mode === 'cron' ? getTodayWIB() : typeof payload.date_start === 'string' ? payload.date_start : null,
+        dateEnd: job.mode === 'cron' ? getTodayWIB() : typeof payload.date_end === 'string' ? payload.date_end : null,
       });
+      if (result.status !== 'success') {
+        throw new Error((result.errors || ['Meta sync incomplete']).join('; '));
+      }
       return {
         status: result.status,
         rowsProcessed: result.rows_inserted,
