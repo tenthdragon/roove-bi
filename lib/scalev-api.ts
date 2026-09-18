@@ -167,6 +167,7 @@ export async function fetchOrderDetail(
 ): Promise<any> {
   const res = await fetch(`${baseUrl}/order/${orderId}`, {
     headers: { 'Authorization': `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(15000),
   });
 
   if (!res.ok) {
