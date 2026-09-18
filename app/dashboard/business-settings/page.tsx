@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { getScalevWebhookUrl } from '@/lib/site-config';
+import ScalevWebhookUrl from '@/components/ScalevWebhookUrl';
 import { useSupabase } from '@/lib/supabase-browser';
 import {
   getWebhookBusinesses,
@@ -90,7 +90,6 @@ const CHANNEL_OVERRIDE_OPTIONS = [
   { value: 'BliBli', label: 'BliBli' },
   { value: 'Lazada', label: 'Lazada' },
 ];
-const scalevWebhookUrl = getScalevWebhookUrl();
 
 // ── Helpers ──
 function formatTime(iso: string | null): string {
@@ -440,7 +439,7 @@ export default function BusinessSettingsPage() {
 
       {/* Webhook URL info */}
       <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16, padding: '8px 12px', background: 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)' }}>
-        Webhook URL: <code style={{ color: 'var(--accent)' }}>{scalevWebhookUrl}</code>
+        Webhook URL: <code style={{ color: 'var(--accent)' }}><ScalevWebhookUrl /></code>
       </div>
 
       {/* Message */}
