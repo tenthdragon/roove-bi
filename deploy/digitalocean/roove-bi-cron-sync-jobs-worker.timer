@@ -1,0 +1,11 @@
+[Unit]
+Description=Drain Roove BI sync queue every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00 Asia/Jakarta
+AccuracySec=1s
+Persistent=true
+Unit=roove-bi-cron@sync-jobs-worker.service
+
+[Install]
+WantedBy=timers.target

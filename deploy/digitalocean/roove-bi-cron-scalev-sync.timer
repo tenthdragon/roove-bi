@@ -1,0 +1,11 @@
+[Unit]
+Description=Reconcile Roove BI orders at 02:00, 17:00 and 18:00 WIB
+
+[Timer]
+OnCalendar=*-*-* 02,17,18:00:00 Asia/Jakarta
+AccuracySec=1s
+Persistent=true
+Unit=roove-bi-cron@scalev-sync.service
+
+[Install]
+WantedBy=timers.target

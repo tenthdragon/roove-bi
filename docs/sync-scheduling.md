@@ -72,3 +72,18 @@ per account, baseline Insights traffic is roughly 144*A requests/day, plus
 pagination/token checks/retries. Actual capacity depends on account counts,
 provider throttling and database timings. Monitor duration, queue age and
 errors after enabling; no production load guarantee is implied.
+
+## Existing production Droplet
+
+Production at `app.rti-hq.com` runs as user `roove` under `roove-bi.service`.
+The active release is `/var/www/releases/roove-bi/current`; keep `previous`
+pointing to the prior release when switching. Preserve its `.env.local`.
+
+This server already uses systemd timers rather than crontab. Install the three
+versioned timer files from `deploy/digitalocean/` into `/etc/systemd/system/`,
+and its worker override into the corresponding service drop-in directory.
+The existing shared `roove-bi-cron@.service` and HTTP cron runner remain in use
+for Meta and orders. Only the worker switches to the CLI to drain up to five
+jobs per run. systemd does not start a second instance while that unit runs.
+Reload systemd and restart/enable the three timers after the app is healthy.
+Do not also install the example crontab above. Journald handles these job logs.

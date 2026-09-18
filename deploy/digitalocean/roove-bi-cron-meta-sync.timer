@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh Roove BI Meta spend every ten minutes
+
+[Timer]
+OnCalendar=*-*-* *:0/10:00 Asia/Jakarta
+AccuracySec=1s
+Persistent=true
+Unit=roove-bi-cron@meta-sync.service
+
+[Install]
+WantedBy=timers.target
