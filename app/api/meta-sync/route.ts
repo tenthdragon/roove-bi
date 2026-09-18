@@ -105,7 +105,8 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
           payload: cronPayload,
           dedupeKey: createSyncJobDedupeKey('meta_sync', 'cron', cronPayload),
           requestId,
-          priority: 30,
+          // Intraday spend must not wait behind the long ScaleV sweep (20).
+          priority: 10,
           maxAttempts: 3,
         }));
       }
