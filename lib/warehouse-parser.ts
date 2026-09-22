@@ -3,26 +3,13 @@
 // Handles Summary, Daily, and Mingguan (Stock Opname) sheets
 
 import { google } from 'googleapis';
+import { parseGoogleServiceAccountKey } from './google-service-account';
 
 // ── Auth (same pattern as financial-parser.ts) ──
 
 function getAuth() {
-  const envKey = process.env.GOOGLE_SERVICE_ACCOUNT_KEY;
-  if (!envKey || envKey.trim() === '') {
-    throw new Error('GOOGLE_SERVICE_ACCOUNT_KEY is not set or empty');
-  }
-  let raw = envKey.trim();
-  if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
-    raw = raw.slice(1, -1);
-  }
-  let creds;
-  try {
-    creds = JSON.parse(raw);
-  } catch (e: any) {
-    throw new Error(`Failed to parse GOOGLE_SERVICE_ACCOUNT_KEY: ${e.message}`);
-  }
   return new google.auth.GoogleAuth({
-    credentials: creds,
+    credentials: parseGoogleServiceAccountKey(),
     scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
   });
 }
