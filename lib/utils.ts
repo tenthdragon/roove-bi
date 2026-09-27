@@ -333,8 +333,8 @@ export function canAccessProduct(profile: Profile, product: string): boolean {
 }
 
 // Preset date ranges
-export function getPresetRanges() {
-  const today = new Date();
+export function getPresetRanges(referenceDate: Date = new Date()) {
+  const today = referenceDate;
   const { year, month, iso: todayStr } = getDatePartsInTimeZone('Asia/Jakarta', today);
 
   const d7 = new Date(today); d7.setDate(d7.getDate() - 7);
@@ -347,6 +347,11 @@ export function getPresetRanges() {
 
   const monthStart = `${year}-${month}-01`;
 
+  const previousMonthNumber = Number(month) === 1 ? 12 : Number(month) - 1;
+  const previousMonthYear = Number(month) === 1 ? Number(year) - 1 : Number(year);
+  const cutoffStart = `${previousMonthYear}-${String(previousMonthNumber).padStart(2, '0')}-26`;
+  const cutoffEnd = `${year}-${month}-25`;
+
   const prevMonthEnd = new Date(Number(year), Number(month) - 1, 0);
   const prevMonthStart = new Date(prevMonthEnd.getFullYear(), prevMonthEnd.getMonth(), 1);
 
@@ -354,6 +359,7 @@ export function getPresetRanges() {
     { label: 'Hari Ini',   from: todayStr, to: todayStr },
     { label: '7 Hari',     from: fmtD(d7), to: todayStr },
     { label: 'Bulan Ini',  from: monthStart, to: todayStr },
+    { label: 'Cut Off',    from: cutoffStart, to: cutoffEnd },
     { label: 'Bulan Lalu', from: fmtD(prevMonthStart), to: fmtD(prevMonthEnd) },
     { label: '30 Hari',    from: fmtD(d30), to: todayStr },
     { label: '90 Hari',    from: fmtD(d90), to: todayStr },
