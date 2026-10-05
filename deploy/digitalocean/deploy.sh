@@ -18,7 +18,7 @@ cp -p "$old/.env.local" "$release/.env.local"
 chown -R roove:roove "$release"
 cd "$release"
 runuser -u roove -- npm ci --include=dev --no-audit --no-fund
-runuser -u roove -- node --import tsx --test tests/sync-schedule.test.ts tests/meta-pagination.test.ts tests/scalev-sync-runner.test.ts tests/scalev-request-timeout.test.ts
+runuser -u roove -- node --import tsx --test tests/sync-schedule.test.ts tests/scheduled-ads-sync.test.ts tests/daily-ads-sync-runner.test.ts tests/meta-pagination.test.ts tests/scalev-sync-runner.test.ts tests/scalev-request-timeout.test.ts
 runuser -u roove -- env NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=2048 npm run build
 
 mkdir -m 700 "$backup"

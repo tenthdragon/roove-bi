@@ -2,10 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireDashboardPermissionAccess } from '@/lib/dashboard-access';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { getTodayWIB } from '@/lib/sync-schedule';
-import { createSyncJobDedupeKey, enqueueSyncJob } from '@/lib/sync-jobs';
+import { enqueueScheduledAdsSync } from '@/lib/scheduled-ads-sync';
 import { runMetaSync } from '@/lib/meta-sync-runner';
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
-import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
 
 export const maxDuration = 60;
 
@@ -84,39 +83,15 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
       }
     }
 
-    const payload = resolveDateRange(req);
-    const workspaceIds = isCron
-      ? await resolveScheduledWorkspaceIds(
-          new URL(req.url).searchParams.get('workspace_id'),
-          'meta',
-        )
-      : [workspaceId!];
     if (isCron) {
-      // Ignore date overrides for scheduled runs: intraday refresh is today only.
-      const today = getTodayWIB();
-      const cronPayload = { date_start: today, date_end: today };
-      const jobs = [];
-      for (const scheduledWorkspaceId of workspaceIds) {
-        jobs.push(await enqueueSyncJob({
-          workspaceId: scheduledWorkspaceId,
-          jobName: 'meta_sync',
-          route: '/api/meta-sync',
-          mode: 'cron',
-          payload: cronPayload,
-          dedupeKey: createSyncJobDedupeKey('meta_sync', 'cron', cronPayload),
-          requestId,
-          // Intraday spend must not wait behind the long ScaleV sweep (20).
-          priority: 10,
-          maxAttempts: 3,
-        }));
-      }
-      return NextResponse.json({
-        queued: true,
-        job_ids: jobs.map(({ job }) => job.id),
-        date_range: { start: today, end: today },
-      }, { status: 202 });
+      return NextResponse.json(await enqueueScheduledAdsSync(
+        new URL(req.url).searchParams.get('workspace_id'),
+        requestId,
+      ), { status: 202 });
     }
 
+    const payload = resolveDateRange(req);
+    const workspaceIds = [workspaceId!];
     const results = [];
     const routeErrors: string[] = [];
     for (const scheduledWorkspaceId of workspaceIds) {

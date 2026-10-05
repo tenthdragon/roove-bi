@@ -7,7 +7,13 @@
 - Meta ad spend is queued **every ten minutes**, using **today in WIB only**.
   The old D-3 through D-1 automatic refresh is removed. Historical corrections
   are now picked up only if a user explicitly syncs those dates manually.
-- Google Sheets imports retain their existing manual behavior.
+- Google Sheets ads imports are queued alongside Meta every ten minutes by
+  `/api/meta-sync` (including the CLI `scheduled-sync.ts ads` entry point).
+  Each feed uses its own active workspace connections, including workspaces
+  with Sheets but no Meta account. Sheets refreshes the full available Ads tab
+  so late entries are imported; Meta still refreshes today only. Active Sheets
+  jobs are deduplicated per workspace, with priority 15 after Meta (10) and
+  before ScaleV (20). The manual Sheets sync button remains available.
 - Active workspace connections determine the workspaces to enqueue. An active
   queued/running Meta job for the same date/workspace is deduplicated.
 - Meta snapshot replacement is atomic per account/date range. Fetch/pagination
