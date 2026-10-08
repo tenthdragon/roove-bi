@@ -36,6 +36,7 @@ import {
   type GrowthTab,
 } from "@/lib/growth-domain";
 import styles from "./GrowthExecution.module.css";
+import DashboardMetricCard from "./DashboardMetricCard";
 
 type Bootstrap = Awaited<ReturnType<typeof getGrowthBootstrap>>;
 type Overview = Awaited<ReturnType<typeof getGrowthOverview>>;
@@ -468,7 +469,7 @@ export default function GrowthExecution() {
   }
   return (
     <div className={`${styles.root} fade-in`}>
-      <div className={styles.bar}>
+      <div className={styles.pageHeader}>
         <div style={{ flex: 1 }}>
           <h1>Growth Execution</h1>
           <div className={styles.muted}>
@@ -824,23 +825,37 @@ function OverviewPanel({
   const metrics = data.metrics;
   return (
     <>
-      <div className={styles.grid}>
-        {Object.entries(data.counts).map(([kind, total]) => (
-          <div key={kind} className={styles.card}>
-            <div className={styles.muted}>
-              {GROWTH_LABELS[kind as GrowthKind]}
-            </div>
-            <div className={styles.metric}>{total}</div>
-          </div>
-        ))}
-      </div>
-      <p className={styles.muted}>
-        Jumlah record mengikuti hak akses; jumlah task selesai tidak menyatakan
-        pencapaian finansial.
-      </p>
       {metrics ? (
         <>
-          <div className={styles.notice}>
+          <div className={styles.kpiRow}>
+            <DashboardMetricCard
+              label="Actual Net Sales"
+              value={money(metrics.actual?.revenue)}
+              color="var(--accent)"
+              sub="Actual BI pada periode terpilih"
+            />
+            <DashboardMetricCard
+              label="Actual CM3"
+              value={money(metrics.actual?.cm3)}
+              color={
+                metrics.actual?.cm3 != null && metrics.actual.cm3 < 0
+                  ? "var(--red)"
+                  : "#06b6d4"
+              }
+              sub="Setelah COGS, MP, shipping & marketing"
+            />
+            <DashboardMetricCard
+              label="Combined ROAS"
+              value={
+                metrics.actual?.roas == null
+                  ? "N/A"
+                  : metrics.actual.roas.toFixed(2) + "×"
+              }
+              color="var(--green)"
+              sub="Net Sales ÷ seluruh marketing spend"
+            />
+          </div>
+          <div className={styles.sourceContext}>
             {metrics.scope === "company" ? "Scope perusahaan" : "Scope brand"} ·{" "}
             {metrics.source_period.from} — {metrics.source_period.to}
             <br />
@@ -854,26 +869,6 @@ function OverviewPanel({
               : "Belum terverifikasi"}
           </div>
           {metrics.reason && <p role="status">{metrics.reason}</p>}
-          <div className={styles.grid}>
-            <div className={styles.card}>
-              Actual Net Sales
-              <div className={styles.metric}>
-                {money(metrics.actual?.revenue)}
-              </div>
-            </div>
-            <div className={styles.card}>
-              Actual CM3
-              <div className={styles.metric}>{money(metrics.actual?.cm3)}</div>
-            </div>
-            <div className={styles.card}>
-              Combined ROAS
-              <div className={styles.metric}>
-                {metrics.actual?.roas == null
-                  ? "N/A"
-                  : metrics.actual.roas.toFixed(2) + "×"}
-              </div>
-            </div>
-          </div>
           {metrics.target ? (
             <div className={styles.card}>
               <h2>Target finansial perusahaan · {metrics.target.month}</h2>
@@ -895,6 +890,21 @@ function OverviewPanel({
           Angka BI memerlukan izin metrics-read dan akses tim sesuai scope.
         </div>
       )}
+      <h2 className={styles.sectionTitle}>Ringkasan eksekusi</h2>
+      <div className={styles.kpiRow}>
+        {Object.entries(data.counts).map(([kind, total]) => (
+          <DashboardMetricCard
+            key={kind}
+            label={GROWTH_LABELS[kind as GrowthKind]}
+            value={total}
+            color="var(--border)"
+          />
+        ))}
+      </div>
+      <p className={styles.muted}>
+        Jumlah record mengikuti hak akses; jumlah task selesai tidak menyatakan
+        pencapaian finansial.
+      </p>
       <div className={styles.grid}>
         {(
           [

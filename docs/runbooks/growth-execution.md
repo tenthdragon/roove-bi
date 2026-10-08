@@ -132,6 +132,7 @@ Final snapshots cannot be rewritten. A correction creates a new review with
 
 ```sh
 npm run test:growth
+npm run test:dashboard-components
 npm run test:financial-targets
 npm run typecheck:app
 npm run lint
@@ -160,10 +161,19 @@ keyboard/mobile, navigation, search/filter/board, detail and form QA.
 
 Growth uses the existing application's `--card`, `--text`, `--input-bg` and
 `--accent` theme tokens, Warehouse-style tabs and Marketing-style KPI cards.
-The local fixture imports the actual global stylesheet, ThemeProvider,
-ThemeToggle and ALL_TABS. Its dashboard shell mirrors the production layout;
-it does not load authentication or other modules. Production Growth remains
-inside the existing dashboard layout, without an additional sidebar or padding.
+Both the application layout and local fixture now import the same DashboardFrame,
+DashboardNavigation and WorkspaceSwitcher components extracted from the existing
+layout. Marketing and Growth both render DashboardMetricCard. The fixture also
+compiles the actual global stylesheet through the same Tailwind/PostCSS reset,
+and imports ThemeProvider, ThemeToggle and ALL_TABS. No independent dashboard
+shell remains. Production Growth stays inside the authenticated dashboard layout.
+
+Only the fixture's workspace context is replaced by an esbuild alias to
+tests/fixtures/growth-workspace.tsx. Its selector switches between two explicitly
+labelled sample workspaces in browser memory; the second has Growth disabled.
+It never POSTs to the real workspace API. Other modules and logout remain
+unavailable in the isolated fixture. This is visual/component verification,
+not a staging deployment with real login or workspace memberships.
 
 Before pilot activation, repeat PRD AC01–AC38 against the full migrated staging
 schema and real user JWTs. Use independent connections for competing priority

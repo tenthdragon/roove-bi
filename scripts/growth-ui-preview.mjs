@@ -2,8 +2,16 @@ import { build } from "esbuild";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import postcss from "postcss";
+import tailwindcss from "tailwindcss";
+import autoprefixer from "autoprefixer";
 const root = process.cwd(),
   output = "/private/tmp/roove-growth-ui-preview";
+// Compile the same global CSS pipeline as Next, including its reset.
+const theme = await postcss([tailwindcss(), autoprefixer()]).process(
+  await readFile(path.join(root, "app/globals.css"), "utf8"),
+  { from: path.join(root, "app/globals.css") },
+);
 await build({
   entryPoints: [path.join(root, "tests/fixtures/growth-preview.tsx")],
   bundle: true,
@@ -14,6 +22,10 @@ await build({
   jsx: "automatic",
   define: { "process.env.NODE_ENV": '"development"' },
   alias: {
+    "@/lib/WorkspaceContext": path.join(
+      root,
+      "tests/fixtures/growth-workspace.tsx",
+    ),
     "@/lib/growth-actions": path.join(root, "tests/fixtures/growth-actions.ts"),
     "next/navigation": path.join(root, "tests/fixtures/growth-navigation.tsx"),
     "next/link": path.join(root, "tests/fixtures/growth-navigation.tsx"),
@@ -24,7 +36,7 @@ const server = createServer(async (req, res) => {
   try {
     if (req.url === "/theme.css") {
       res.setHeader("Content-Type", "text/css");
-      res.end(await readFile(path.join(root, "app/globals.css")));
+      res.end(theme.css);
     } else if (req.url?.startsWith("/preview.")) {
       const name = req.url.split("?")[0];
       res.setHeader(
