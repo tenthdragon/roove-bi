@@ -158,6 +158,13 @@ fixture actions and serves `127.0.0.1:3127`. Its examples stay in browser memory
 the fixture is not imported by the application route. Use it for layout,
 keyboard/mobile, navigation, search/filter/board, detail and form QA.
 
+Growth uses the existing application's `--card`, `--text`, `--input-bg` and
+`--accent` theme tokens, Warehouse-style tabs and Marketing-style KPI cards.
+The local fixture imports the actual global stylesheet, ThemeProvider,
+ThemeToggle and ALL_TABS. Its dashboard shell mirrors the production layout;
+it does not load authentication or other modules. Production Growth remains
+inside the existing dashboard layout, without an additional sidebar or padding.
+
 Before pilot activation, repeat PRD AC01–AC38 against the full migrated staging
 schema and real user JWTs. Use independent connections for competing priority
 activations and duplicate decision responses; validate actual Supabase grants,

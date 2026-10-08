@@ -467,7 +467,7 @@ export default function GrowthExecution() {
     return `${pathname}?${params}`;
   }
   return (
-    <div className={styles.root}>
+    <div className={`${styles.root} fade-in`}>
       <div className={styles.bar}>
         <div style={{ flex: 1 }}>
           <h1>Growth Execution</h1>

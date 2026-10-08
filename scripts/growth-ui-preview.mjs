@@ -22,7 +22,10 @@ await build({
 });
 const server = createServer(async (req, res) => {
   try {
-    if (req.url?.startsWith("/preview.")) {
+    if (req.url === "/theme.css") {
+      res.setHeader("Content-Type", "text/css");
+      res.end(await readFile(path.join(root, "app/globals.css")));
+    } else if (req.url?.startsWith("/preview.")) {
       const name = req.url.split("?")[0];
       res.setHeader(
         "Content-Type",
@@ -32,7 +35,7 @@ const server = createServer(async (req, res) => {
     } else {
       res.setHeader("Content-Type", "text/html");
       res.end(
-        '<!DOCTYPE html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Growth Execution · Preview</title><link rel="stylesheet" href="/preview.css"><style>body{margin:0;background:#f8fafc;font-family:system-ui,sans-serif}*{box-sizing:border-box}</style><div id="root"></div><script src="/preview.js"></script></html>',
+        '<!DOCTYPE html><html lang="id"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Growth Execution · Preview</title><link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/preview.css"><div id="root"></div><script src="/preview.js"></script></html>',
       );
     }
   } catch {
