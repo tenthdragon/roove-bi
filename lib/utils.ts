@@ -29,7 +29,7 @@ export const MATRIX_ROLES: { id: string; label: string }[] = [
   { id: 'staf_ops',          label: 'Staf Ops' },
   { id: 'direktur_finance',  label: 'Direktur Finance' },
   { id: 'staf_finance',      label: 'Staf Finance' },
-  { id: 'brand_manager',     label: 'Brand Manager' },
+  { id: 'brand_manager',     label: 'Growth Lead' },
   { id: 'sales_manager',     label: 'Sales Manager' },
   { id: 'warehouse_manager', label: 'WH Manager' },
   { id: 'ppic_manager',      label: 'PPIC Manager' },
@@ -54,6 +54,21 @@ export const PERMISSION_GROUPS = [
       { key: 'tab:cashflow',           label: '↳ Cash Flow (Bank)' },
       { key: 'tab:financial-settings', label: '↳ Financial Settings' },
       { key: 'tab:fixed-costs',         label: '↳ Fixed & Recurring Costs' },
+      { key: 'tab:growth-work',         label: 'Growth Execution' },
+    ],
+  },
+  {
+    label: 'Growth Execution — Aksi',
+    keys: [
+      { key: 'growth:team-read', label: 'Lihat tim dalam scope' },
+      { key: 'growth:manage', label: 'Kelola prioritas dan pekerjaan' },
+      { key: 'growth:update-own', label: 'Perbarui pekerjaan sendiri' },
+      { key: 'growth:review', label: 'Review hasil pekerjaan' },
+      { key: 'growth:decide', label: 'Jawab keputusan sesuai mandat' },
+      { key: 'growth:weekly-finalize', label: 'Finalisasi weekly review' },
+      { key: 'growth:configure', label: 'Konfigurasi portfolio dan mandat' },
+      { key: 'growth:metrics-read', label: 'Baca metrik BI sesuai scope' },
+      { key: 'growth:financial-target-read', label: 'Baca target finansial' },
     ],
   },
   {
@@ -308,6 +323,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'customers',      label: 'Customer Analysis',  icon: 'Users', group: 'Analysis' },
   { id: 'brand-analysis', label: 'Brand Analysis',     icon: 'Layers', group: 'Analysis' },
   { id: 'finance',        label: 'Finance Analysis',   icon: 'DollarSign', group: 'Analysis' },
+  { id: 'growth-work', label: 'Growth Execution', icon: 'ClipboardList', group: 'Work Management' },
   // Settings
   { id: 'business-settings', label: 'Business & Fulfillment', icon: 'Building2', ownerOnly: true, group: 'Settings' },
   { id: 'warehouse-settings', label: 'Catalog & Master Data', icon: 'Wrench', group: 'Settings' },

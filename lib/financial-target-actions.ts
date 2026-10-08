@@ -6,6 +6,8 @@ import {
   requireDashboardTabAccess,
 } from './dashboard-access';
 import { createServiceSupabase } from './service-supabase';
+import { createServerSupabase } from './supabase-server';
+import { assertUuid } from './growth-domain';
 import { getShippingFeeRange } from './shipping-fee-data';
 
 export type WorkspaceFinancialTarget = {
@@ -194,6 +196,23 @@ export async function getFinancialTargetSettings(
     'financial-settings',
     'Financial Settings',
   );
+  return readFinancialTargetSettings(workspaceId, targetMonth);
+}
+
+export async function getGrowthFinancialTargetSettings(portfolioId: string, targetMonth: string) {
+  assertUuid(portfolioId);
+  const { workspaceId } = await requireDashboardTabAccess('growth-work', 'Growth Execution');
+  const supabase = createServerSupabase();
+  const checks = await Promise.all([
+    supabase.rpc('growth_team', { w: workspaceId, p: portfolioId, b: null }),
+    supabase.rpc('growth_has_permission', { w: workspaceId, permission: 'growth:financial-target-read' }),
+  ]);
+  if (checks.some(check => check.error || check.data !== true)) throw new Error('Target perusahaan memerlukan akses tim dan scope perusahaan.');
+  return readFinancialTargetSettings(workspaceId, targetMonth);
+}
+
+// Private resolver shared by independently authorized server actions.
+async function readFinancialTargetSettings(workspaceId: string, targetMonth: string): Promise<FinancialTargetSettings> {
   const month = normalizeMonth(targetMonth);
   const bounds = monthBounds(month);
   const benchmarkBounds = weightedCm3Bounds(month);

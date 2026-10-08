@@ -8,6 +8,7 @@ export type WorkspaceSettings = {
   tenant_model?: 'isolated';
   tenant_schema_version?: number;
   disabled_modules?: string[];
+  growth_execution_enabled?: boolean;
   warehouse_mode?: 'independent';
   warehouse_code?: string;
   inventory_entity?: string;
@@ -41,6 +42,8 @@ export function isWorkspaceModuleEnabled(
   workspace: Pick<AccessibleWorkspace, 'settings'>,
   moduleId: string,
 ) {
+  // New workspaces require an explicit pilot opt-in, including before migration.
+  if (moduleId === 'growth-work' && workspace.settings?.growth_execution_enabled !== true) return false;
   const disabledModules = Array.isArray(workspace.settings?.disabled_modules)
     ? workspace.settings.disabled_modules
     : [];

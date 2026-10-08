@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:growth": "tsx --test tests/growth-domain.test.ts",
     "test:financial-targets": "tsx --test tests/financial-targets.test.ts",
     "test:warehouse-mapping-targets": "tsx --test tests/warehouse-mapping-targets.test.ts",
     "test:source-class": "tsx --test tests/scalev-source-class.test.ts",

@@ -6,6 +6,7 @@ import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
 import { getMarketingPageData } from '@/lib/marketing-actions';
+import { calculateCm3, resolveMarketingAdBrand } from '@/lib/marketing-metrics';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { buildBrandColorMap } from '@/lib/utils';
 import { useWorkspace } from '@/lib/WorkspaceContext';
@@ -49,15 +50,6 @@ function getHistoryRange(to: string, monthCount = 12) {
     historyTo: to,
   };
 }
-
-function calculateCm3(grossProfit: number, mpFee: number, shipping: number, marketingFee: number): number {
-  return grossProfit - mpFee - shipping - marketingFee;
-}
-
-const LEGACY_STORE_BRAND_FALLBACKS: Record<string, string> = {
-  'purvu store': 'Purvu',
-  plume: 'Pluve',
-};
 
 // Ads source -> marketing platform.
 function normPlatform(source: string): string {
@@ -195,10 +187,7 @@ export default function MarketingPage() {
   }, [activeBrands]);
 
   const getAdBrand = (store: string, brandId?: number | null) => {
-    if (brandId && brandIdMap[Number(brandId)]) return brandIdMap[Number(brandId)];
-    if (!store) return null;
-    const key = store.trim().toLowerCase();
-    return storeBrandMap[key] || activeBrandMap[key] || LEGACY_STORE_BRAND_FALLBACKS[key] || null;
+    return resolveMarketingAdBrand(store, brandId, brandIdMap, storeBrandMap, activeBrandMap);
   };
 
   const prodData = useMemo(
