@@ -10,7 +10,11 @@ export function validateDocument(value: unknown, caseId: string): RichNode {
   let count = 0;
   function visit(input: unknown, depth: number): RichNode {
     if (!input || typeof input !== 'object' || Array.isArray(input) || depth > 20 || ++count > 5000) throw new Error('Format editor tidak valid.');
-    const node = input as RichNode;
+    const source = input as RichNode;
+    const node = { ...source, ...(source.attrs ? { attrs: { ...source.attrs } } : {}) };
+    // Recent Tiptap tables emit a default null alignment. P0.1 does not expose
+    // cell alignment; omit that empty default from the persisted schema.
+    if (['tableCell','tableHeader'].includes(node.type) && node.attrs?.align === null) delete node.attrs.align;
     if (!types.has(node.type) || Object.keys(node).some(k => !['type','text','attrs','marks','content'].includes(k))) throw new Error('Format editor tidak didukung.');
     if (node.text !== undefined && (node.type !== 'text' || typeof node.text !== 'string')) throw new Error('Teks tidak valid.');
     if (node.type === 'text' && typeof node.text !== 'string') throw new Error('Teks tidak valid.');
@@ -27,7 +31,7 @@ export function validateDocument(value: unknown, caseId: string): RichNode {
     if (node.type === 'image' && !new RegExp(`^/api/growth-cases/${caseId}/images/[0-9a-f-]{36}\\.(png|jpg|webp|gif)$`, 'i').test(String(node.attrs?.src))) throw new Error('Gambar harus diunggah ke kasus ini.');
     if (node.content !== undefined) {
       if (!Array.isArray(node.content)) throw new Error('Isi editor tidak valid.');
-      node.content.forEach(c => visit(c, depth + 1));
+      node.content=node.content.map(c => visit(c, depth + 1));
     }
     return node;
   }

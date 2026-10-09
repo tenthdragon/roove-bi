@@ -12,7 +12,7 @@ async function request(route,options={}) {
  const r=await fetch(origin+route,{...options,redirect:'manual',headers:{Origin:origin,Cookie:[...jar].map(([k,v])=>`${k}=${encodeURIComponent(v)}`).join('; '),...options.headers},signal:AbortSignal.timeout(60000)});
  for(const cookie of r.headers.getSetCookie()){const m=cookie.match(/^([^=]+)=([^;]*)/);if(m)jar.set(m[1],decodeURIComponent(m[2]));}return r;
 }
-let profile,changed=false,session,bucket;
+let profile,changed=false,session,bucket,exportedCookies=false;
 try {
  profile=ok(await admin.from('profiles').select('id,active_workspace_id').eq('role','owner').limit(1).single(),'Owner lookup');
  const account=ok(await admin.auth.admin.getUserById(profile.id),'Auth owner lookup').user;
@@ -28,17 +28,18 @@ try {
   const brands=await user.from('brands').select('id',{head:true,count:'exact'}).eq('workspace_id',w.id);ok(brands,'Brands RLS');
   const daily=await user.from('daily_product_summary').select('date,net_sales').eq('workspace_id',w.id).order('date',{ascending:false}).limit(3);ok(daily,'BI read');
   const pages=['/dashboard','/dashboard/marketing','/dashboard/customers','/dashboard/brand-analysis'];if(w.settings?.growth_execution_enabled)pages.push('/dashboard/growth-work');
-  for(const p of pages){const r=await request(p),html=await r.text();if(r.status!==200||html.includes('Internal Server Error'))throw new Error(`Page failed ${p}`);if(p.includes('growth')&&!html.includes('P0.1'))throw new Error('P0.1 plan missing');}
+  // Client-rendered pages need the browser acceptance check after this HTTP smoke.
+  for(const p of pages){const r=await request(p),html=await r.text();if(r.status!==200||html.includes('Internal Server Error'))throw new Error(`Page failed ${p}`);}
   results.push({workspace:w.slug,brands:brands.count,biSampleRows:daily.data.length,pages:pages.length,workspaceWriteVerified:true});
  }
  bucket='staging-smoke-'+Date.now();ok(await admin.storage.createBucket(bucket,{public:false}),'Storage bucket');
  const bytes=Buffer.from('staging smoke test');ok(await admin.storage.from(bucket).upload('probe.txt',bytes,{contentType:'text/plain'}),'Storage upload');
  const file=ok(await admin.storage.from(bucket).download('probe.txt'),'Storage download');if(await file.text()!=='staging smoke test')throw new Error('Storage content mismatch');
  ok(await admin.storage.from(bucket).remove(['probe.txt']),'Storage remove');ok(await admin.storage.deleteBucket(bucket),'Storage bucket remove');bucket=null;
- if(process.env.STAGING_BROWSER_COOKIES)await writeFile(process.env.STAGING_BROWSER_COOKIES,JSON.stringify([...jar].map(([name,value])=>({name,value:encodeURIComponent(value),domain:'staging-app.rti-hq.com',path:'/',secure:true,httpOnly:false,sameSite:'Lax'}))),{mode:0o600});
+ if(process.env.STAGING_BROWSER_COOKIES){await writeFile(process.env.STAGING_BROWSER_COOKIES,JSON.stringify([...jar].map(([name,value])=>({name,value:encodeURIComponent(value),domain:'staging-app.rti-hq.com',path:'/',secure:true,httpOnly:false,sameSite:'Lax'}))),{mode:0o600});exportedCookies=true;}
  console.log(JSON.stringify({healthy:true,existingOwnerAuth:true,sessionRefresh:true,storageRoundTrip:true,workspaces:results,productionWrites:0},null,2));
 } finally {
  if(bucket){await admin.storage.from(bucket).remove(['probe.txt']);await admin.storage.deleteBucket(bucket);}
  if(changed&&profile)ok(await admin.from('profiles').update({active_workspace_id:profile.active_workspace_id}).eq('id',profile.id),'Restore workspace preference');
- if(session&&!process.env.STAGING_BROWSER_COOKIES)await user.auth.signOut({scope:'local'});
+ if(session&&!exportedCookies)await user.auth.signOut({scope:'local'});
 }

@@ -12,6 +12,13 @@ test('rich text rejects executable URLs, cross-case images and arbitrary HTML at
  assert.throws(()=>validateDocument({type:'doc',content:[{type:'paragraph',attrs:{onclick:'alert(1)'}}]},id));
  assert.throws(()=>validateDocument({type:'doc',content:[{type:'text',text:'link',marks:[{type:'link',attrs:{href:'javascript:alert(1)'}}]}]},id));
 });
+test('default table alignment normalizes to the persisted schema without mutating the input',()=>{
+ const doc={type:'doc',content:[{type:'table',content:[{type:'tableRow',content:[{type:'tableHeader',attrs:{colspan:1,rowspan:1,colwidth:null,align:null},content:[{type:'paragraph'}]}]}]}]};
+ const result=validateDocument(doc,id);
+ assert.equal(result.content?.[0].content?.[0].content?.[0].attrs?.align,undefined);
+ assert.equal(doc.content[0].content[0].content[0].attrs.align,null);
+ assert.throws(()=>validateDocument({...doc,content:[{type:'tableCell',attrs:{align:'unsafe'}}]},id));
+});
 test('case validation preserves earlier attempts, allows blank results, rejects duplicate attempts',()=>{
  const data={title:'  Kasus conversion  ',status:'open',version:1,problem:emptyDocument(),attempts:[attempt,{...attempt,id:'22222222-2222-4222-8222-222222222222'}]};
  const result=validateCaseInput(data,id);assert.equal(result.title,'Kasus conversion');assert.equal(result.attempts.length,2);assert.deepEqual(result.attempts[0],attempt);
