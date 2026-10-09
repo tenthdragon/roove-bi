@@ -1,5 +1,53 @@
 # Growth Execution P0
 
+## Current product direction: P0.1
+
+The dashboard route now mounts the P0.1 case log. The previous P0 client is
+hidden; its implementation, migration and existing data are preserved.
+
+The signed-in Growth Lead sees their own cases in the active workspace, with
+a title, problem summary, Open/Solved status and last update time. A case
+contains a problem description and an initial attempt with hypothesis, planned
+action and result (initially optional). Further attempts append without
+replacing earlier attempts. All description fields use rich-text editors with
+images between text and editable tables. Solved/reopen are manual decisions.
+
+Priorities, Work Board, Experiments, Decisions, Weekly Review, BI cards and
+portfolio/mandate configuration are hidden from the current route. The P0
+architecture notes below describe the preserved implementation.
+
+### P0.1 operation and verification
+
+Apply migration `196_growth_case_logs.sql` only to the intended environment.
+P0.1 uses `growth_cases`, independent of portfolios, memberships and mandates.
+The workspace module opt-in and `tab:growth-work` permission still apply.
+Cases and private images are accessible only to their owner, including for
+platform administrators. Search/filter/pagination are scoped to that owner
+in the active workspace.
+
+Creating a case immediately persists an empty container so image uploads can
+be authorized to it. The user explicitly saves editor changes with **Simpan
+log**. Empty results are allowed. Marking Solved or reopening also saves current
+editor changes. New attempts append to the same log; attempt identities cannot
+be removed or reordered by the mutation. Saves check an expected version under
+a row lock; stale tabs receive a conflict and keep their unsaved input.
+Earlier descriptions/results remain editable by the case owner.
+
+Rich text is structured JSON with server/database whitelists. External image
+URLs, arbitrary HTML attributes and executable links are rejected. Images use
+the private `growth-case-images` bucket, up to 5 MB each in PNG/JPEG/WebP/GIF.
+Paste/drop and toolbar upload are supported. An authenticated route serves
+images so stored URLs do not expire and remain case-scoped. Removed editor
+images remain in private storage; there is no automatic garbage collection or
+case-delete UI in this version.
+
+Run `npm run test:growth`, `npm run typecheck:app`, `npm run lint`, and a build
+with the target environment. `tests/growth-case-access.sql` verifies history,
+conflicts, state changes, owner/workspace isolation and image RLS inside a
+rolled-back transaction; it refuses databases without a nonproduction marker.
+Validate browser creation/save/reload, table and image round trips,
+retry/solve/reopen and search/filter in staging before promotion.
+
 Implementation branch: `codex/growth-execution-p0`. Module ID: `growth-work`.
 
 The domain references are the PRD Growth Execution P0 and both Growth Lead v1.2

@@ -1,0 +1,48 @@
+.root{max-width:1120px;margin:0 auto;padding:24px;color:var(--text);font-size:14px}
+.header{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;margin-bottom:24px}
+.header h1{font-size:24px;margin:0 0 6px;font-weight:700}
+.muted{color:var(--dim);line-height:1.6;margin:0}
+.root button{font:inherit;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--text);border-radius:7px;padding:9px 14px}
+.root button:disabled{opacity:.5;cursor:wait}
+.root button:focus-visible,.root input:focus-visible,.root select:focus-visible{outline:2px solid #818cf8;outline-offset:2px}
+.root .primary{background:#4f46e5;color:white;border-color:#4f46e5}
+.root .success{background:#059669;color:white;border-color:#059669}
+.filters{display:flex;gap:12px;margin-bottom:18px}
+.root input,.root select{font:inherit;color:var(--text);background:var(--card);border:1px solid var(--border);border-radius:7px;padding:10px 12px}
+.filters input{flex:1;min-width:100px}
+.list{display:grid;gap:12px}
+.root .caseCard{display:flex;gap:16px;justify-content:space-between;align-items:flex-start;text-align:left;padding:20px;width:100%;border-radius:10px}
+.caseCard:hover{border-color:#818cf8}
+.caseCard h2{font-size:16px;font-weight:600;margin:0 0 7px}
+.summary{color:var(--dim);margin:0 0 10px;line-height:1.6;max-width:740px;overflow-wrap:anywhere}
+.date{font-size:12px;color:var(--dim)}
+.badge{white-space:nowrap;display:inline-block;background:#eef2ff;color:#4338ca;padding:5px 10px;border-radius:20px;font-size:12px}
+.solved{background:#d1fae5;color:#065f46}
+.empty{border:1px dashed var(--border);border-radius:10px;padding:48px 24px;text-align:center;color:var(--dim)}
+.empty h2{color:var(--text);font-size:18px;margin-bottom:10px}
+.detail{background:var(--card);border:1px solid var(--border);padding:24px;border-radius:12px}
+.titleField{display:flex;flex-direction:column;gap:8px;font-weight:600;margin-top:18px}
+.titleField input{font-size:20px;font-weight:600;width:100%}
+.detailTop{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.editorField h3{font-size:14px;font-weight:600;margin:22px 0 10px}
+.editorShell{border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.toolbar{display:flex;flex-wrap:wrap;gap:4px;padding:7px;background:var(--bg);border-bottom:1px solid var(--border)}
+.root .toolbar button{font-size:12px;padding:5px 9px;border-color:transparent;background:transparent}
+.root .toolbar .activeTool{background:#e0e7ff;color:#4338ca}
+.editorContent :global(.tiptap){min-height:105px;padding:14px;outline:none;line-height:1.7;overflow-wrap:anywhere;overflow-x:auto}
+.editorContent :global(.tiptap p){margin:0 0 8px}
+.editorContent :global(.tiptap h3){font-size:18px;margin:14px 0 8px}
+.editorContent :global(.tiptap ul),.editorContent :global(.tiptap ol){padding-left:24px;list-style:revert}
+.editorContent :global(.tiptap img){max-width:100%;max-height:600px;object-fit:contain;border-radius:5px;margin:12px 0}
+.editorContent :global(.tiptap table){border-collapse:collapse;table-layout:fixed;width:100%;margin:12px 0}
+.editorContent :global(.tiptap td),.editorContent :global(.tiptap th){border:1px solid var(--border);padding:8px;min-width:80px;vertical-align:top;position:relative}
+.editorContent :global(.tiptap th){background:var(--bg);font-weight:600}
+.editorContent :global(.tiptap .selectedCell){background:#e0e7ff;color:#1e1b4b}
+.attempt{margin-top:24px;border-top:1px solid var(--border);padding-top:20px}
+.root .attemptToggle{display:flex;justify-content:space-between;width:100%;text-align:left;background:var(--bg);font-weight:600}
+.attemptLabel{color:var(--dim);font-weight:400;font-size:12px}
+.actions{position:sticky;bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:14px;background:var(--card);border:1px solid var(--border);border-radius:10px;margin-top:24px;box-shadow:0 4px 18px #0001;z-index:5}
+.error{color:#dc2626;margin:12px 0;line-height:1.5}
+.notice{background:#ecfdf5;color:#065f46;border-radius:8px;padding:12px 16px;margin-bottom:16px}
+.loadMore{margin-top:16px}
+@media(max-width:640px){.root{padding:16px 12px}.header{flex-direction:column}.detail{padding:16px}.actions{bottom:0}.attemptLabel{display:none}.filters{flex-wrap:wrap}.caseCard{gap:8px}.root .caseCard{padding:16px}}

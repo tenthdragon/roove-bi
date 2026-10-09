@@ -45,6 +45,19 @@ scripts/*
 !scripts/sync-jobs-worker.ts
 !scripts/scheduled-sync.ts
 !scripts/growth-ui-preview.mjs
+!scripts/local-supabase.mjs
+!scripts/local-supabase-lib.mjs
+!scripts/local-docker-proxy.mjs
+!scripts/local-production-access.mjs
+!scripts/local-clone-catalog.mjs
+!scripts/local-clone-export.mjs
+!scripts/local-clone-restore.mjs
+!scripts/local-clone-chunks.mjs
+!scripts/local-clone-activate.mjs
+!scripts/local-clone-http.mjs
+!scripts/local-clone-checkpoint.mjs
+!scripts/local-clone-smoke.mjs
+!scripts/local-network-guard.mjs
 !scripts/backfill-marketplace-tracking.ts
 !scripts/ops/
 !scripts/ops/backfill-marketplace-tracking.ts
@@ -57,10 +70,17 @@ docs/runbooks/*
 !docs/runbooks/marketplace-tracking-backfill.md
 !docs/runbooks/workspace-rollout.md
 !docs/runbooks/growth-execution.md
+!docs/runbooks/local-development.md
 
 # supabase temp
 supabase/.temp/
+supabase/.branches/
+
+# Isolated local Supabase config, generated migration copies and local credentials
+/.local/
 
 # local generated artifacts
 /output/
 /tmp/
+
+!docs/runbooks/development-staging-production.md

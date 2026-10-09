@@ -21,6 +21,12 @@ jobs:
       - name: Install app dependencies
         run: npm ci
 
+      - name: Check staging isolation
+        run: node --test tests/staging-isolation.test.mjs
+
+      - name: Check Growth case log validation
+        run: npm run test:growth
+
       - name: Typecheck app
         run: npm run typecheck:app
 

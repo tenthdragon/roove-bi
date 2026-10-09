@@ -1,0 +1,113 @@
+name: roove-staging
+services:
+  db:
+    image: public.ecr.aws/supabase/postgres:17.6.1.075
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?required}
+      POSTGRES_HOST: /var/run/postgresql
+      JWT_SECRET: ${JWT_SECRET:?required}
+      JWT_EXP: 3600
+    command: [postgres, -c, shared_buffers=128MB, -c, max_connections=60, -c, listen_addresses=*]
+    volumes:
+      - db:/var/lib/postgresql/data
+    networks:
+      isolated:
+        ipv4_address: 172.30.88.2
+    mem_limit: 768m
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U postgres']
+      interval: 5s
+      retries: 30
+  auth:
+    image: public.ecr.aws/supabase/gotrue:v2.186.0
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      API_EXTERNAL_URL: https://staging-app.rti-hq.com/supabase
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${DB_PASSWORD}@db:5432/roove_staging
+      GOTRUE_SITE_URL: https://staging-app.rti-hq.com
+      GOTRUE_URI_ALLOW_LIST: https://staging-app.rti-hq.com/**
+      GOTRUE_DISABLE_SIGNUP: 'true'
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: 3600
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: 'true'
+      GOTRUE_EXTERNAL_PHONE_ENABLED: 'false'
+      GOTRUE_MAILER_AUTOCONFIRM: 'false'
+      GOTRUE_MAILER_URLPATHS_INVITE: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_RECOVERY: /auth/v1/verify
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: /auth/v1/verify
+      GOTRUE_SMTP_HOST: mail
+      GOTRUE_SMTP_PORT: 1025
+      GOTRUE_SMTP_ADMIN_EMAIL: staging@rti-hq.com
+      GOTRUE_SMTP_SENDER_NAME: Roove Staging
+    networks:
+      isolated:
+        ipv4_address: 172.30.88.3
+    mem_limit: 128m
+  rest:
+    image: public.ecr.aws/supabase/postgrest:v14.3
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${DB_PASSWORD}@db:5432/roove_staging
+      PGRST_DB_SCHEMAS: public
+      PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_DB_MAX_ROWS: 1000
+      PGRST_DB_POOL: 10
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+    networks:
+      isolated:
+        ipv4_address: 172.30.88.4
+    mem_limit: 128m
+  storage:
+    image: supabase/storage-api:v1.74.0
+    restart: unless-stopped
+    depends_on:
+      db: {condition: service_healthy}
+      rest: {condition: service_started}
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${DB_PASSWORD}@db:5432/roove_staging
+      POSTGREST_URL: http://rest:3000
+      FILE_SIZE_LIMIT: 52428800
+      STORAGE_PUBLIC_URL: https://staging-app.rti-hq.com/supabase
+      STORAGE_BACKEND: file
+      FILE_STORAGE_BACKEND_PATH: /mnt
+      TENANT_ID: staging
+      REGION: local
+      GLOBAL_S3_BUCKET: staging
+      ENABLE_IMAGE_TRANSFORMATION: 'false'
+    volumes: ['storage:/mnt']
+    networks:
+      isolated:
+        ipv4_address: 172.30.88.5
+    mem_limit: 256m
+  mail:
+    image: public.ecr.aws/supabase/mailpit:v1.22.3
+    restart: unless-stopped
+    networks:
+      isolated:
+        ipv4_address: 172.30.88.6
+    mem_limit: 64m
+networks:
+  isolated:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.88.0/24
+volumes:
+  db:
+  storage:

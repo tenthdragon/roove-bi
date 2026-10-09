@@ -1,0 +1,26 @@
+[Unit]
+Description=Roove BI Staging — isolated database
+Wants=network-online.target
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+User=roove
+Group=roove
+WorkingDirectory=/var/www/releases/roove-bi-staging/current
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+Environment=ROOVE_ENVIRONMENT=staging
+Environment=NODE_OPTIONS=--max-old-space-size=768 --import=/etc/roove-staging/network-guard.mjs
+EnvironmentFile=/etc/roove-staging/app.env
+ExecStart=/usr/bin/node /var/www/releases/roove-bi-staging/current/node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3001
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+MemoryMax=1G
+CPUQuota=100%
+
+[Install]
+WantedBy=multi-user.target

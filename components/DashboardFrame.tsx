@@ -1,5 +1,7 @@
 "use client";
 
+import EnvironmentNotice from "./EnvironmentNotice";
+
 import {
   useRef,
   type ReactNode,
@@ -355,6 +357,7 @@ export default function DashboardFrame({
             margin: "0 auto",
           }}
         >
+          <EnvironmentNotice />
           {children}
         </main>
       </div>

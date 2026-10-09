@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import EnvironmentNotice from '@/components/EnvironmentNotice';
 import { useSupabase } from '@/lib/supabase-browser';
 import { useRouter } from 'next/navigation';
 
@@ -68,6 +69,7 @@ export default function LoginPage() {
         width: '100%',
         maxWidth: 400,
       }}>
+        <EnvironmentNotice />
         {/* Logo */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{
