@@ -17,6 +17,7 @@ import DashboardNavigation from '@/components/DashboardNavigation';
 import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
 import { WorkspaceProvider } from '@/lib/WorkspaceContext';
 import { isWorkspaceModuleEnabled } from '@/lib/workspaces';
+import { canRoleAccessPermission } from '@/lib/role-access';
 
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
@@ -29,10 +30,13 @@ function getTabPath(tabId) {
 
 function hasAdminAreaAccess(role, permissions) {
   if (role === 'owner') return true;
-  if (permissions.has('tab:admin')) return true;
+  if (canRoleAccessPermission(role, permissions, 'tab:admin')) return true;
 
   for (const permission of permissions) {
-    if (permission.startsWith('admin:')) return true;
+    if (
+      permission.startsWith('admin:')
+      && canRoleAccessPermission(role, permissions, permission)
+    ) return true;
   }
 
   return false;
@@ -41,6 +45,12 @@ function hasAdminAreaAccess(role, permissions) {
 function canAccessLayoutTab(role, tab, permissions) {
   // Sales Channel Analysis inherits its parent Sales Channel permission.
   if (tab.id === 'sales-channel-analysis') return canAccessTab(role, 'channels', permissions);
+  // Shopee Details normally inherits Marketing Channel, while the dedicated
+  // Shopee reviewer can receive access to this child page without the parent.
+  if (tab.id === 'shopee-details') {
+    return canAccessTab(role, 'marketing', permissions)
+      || canAccessTab(role, 'shopee-details', permissions);
+  }
   if (tab.id === 'admin') return hasAdminAreaAccess(role, permissions);
   if (tab.ownerOnly && role !== 'owner') return false;
   return canAccessTab(role, tab.id, permissions);
@@ -578,16 +588,27 @@ export default function DashboardLayout({ children }) {
   if (workspaceBootstrap?.activeWorkspace) {
     const workspace = workspaceBootstrap.activeWorkspace;
     visibleTabs = visibleTabs
-      .filter((tab) => isWorkspaceModuleEnabled(workspace, tab.id))
-      .map((tab) => ({
-        ...tab,
-        children: tab.children?.filter((child) => isWorkspaceModuleEnabled(workspace, child.id)),
-      }));
+      .map((tab) => {
+        const workspaceParentEnabled = isWorkspaceModuleEnabled(workspace, tab.id);
+        const children = tab.children?.filter((child) =>
+          isWorkspaceModuleEnabled(workspace, child.id),
+        );
+
+        if (tab.children) {
+          if (!workspaceParentEnabled && (children?.length || 0) === 0) return null;
+          return { ...tab, children, workspaceParentEnabled };
+        }
+
+        return workspaceParentEnabled
+          ? { ...tab, workspaceParentEnabled }
+          : null;
+      })
+      .filter(Boolean);
   }
 
   const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake', 'growth-work'].includes(currentTab);
-  const canSyncSheets = accessRole === 'owner' || permissions.has('admin:daily');
-  const canSyncMeta = accessRole === 'owner' || permissions.has('admin:meta');
+  const canSyncSheets = canRoleAccessPermission(accessRole, permissions, 'admin:daily');
+  const canSyncMeta = canRoleAccessPermission(accessRole, permissions, 'admin:meta');
   const showRefreshButton = canSyncSheets || canSyncMeta;
 
   if (loading) {
@@ -632,6 +653,21 @@ export default function DashboardLayout({ children }) {
     );
   }
 
+  // Do not mount an unauthorized page while the client-side redirect is in
+  // flight. Server actions remain permission-gated, and this also prevents a
+  // restricted reviewer from briefly rendering another dashboard screen.
+  if (
+    accessRole !== 'owner'
+    && accessibleTabIds.length > 0
+    && !accessibleTabIds.includes(currentTab)
+  ) {
+    return (
+      <div style={{ minHeight:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)' }}>
+        <div className="spinner" style={{ width:32, height:32, border:'3px solid var(--border)', borderTop:'3px solid var(--accent)', borderRadius:'50%' }} />
+      </div>
+    );
+  }
+
 
 
   if (!workspaceBootstrap) {
@@ -661,7 +697,7 @@ export default function DashboardLayout({ children }) {
             isMobile={isMobile}
             sidebarCollapsed={sidebarCollapsed}
             expandedMenus={expandedMenus}
-            canAccess={(tab) => canAccessLayoutTab(accessRole, tab, permissions)}
+            canAccess={(tab) => tab.workspaceParentEnabled !== false && canAccessLayoutTab(accessRole, tab, permissions)}
             navigateTo={navigateTo}
             setSidebarCollapsed={setSidebarCollapsed}
             setExpandedMenus={setExpandedMenus}

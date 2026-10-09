@@ -115,3 +115,19 @@ Subsequent P0.1 releases are built from a Git commit archive with staging-only
 configuration; the release name identifies that commit. Commit and push each
 reviewed release before promoting it. Credentials, dumps and browser test
 sessions stay in ignored/private directories.
+
+## Preserve existing staging features
+
+The integration branch `codex/growth-execution-p0` includes both Growth P0.1
+and the previous `codex/shopee-staging` features. Deploying a standalone feature
+branch that predates the current staging features removes those features from
+the application, even when their database rows and permissions still exist.
+Merge the current staging feature set before preparing a release and validate
+both a workspace owner and the existing Shopee reviewer accounts. Shopee
+reviewers must retain only Shopee Details and Admin Shopee; Growth and other
+workspace facts remain inaccessible to them.
+
+Shopee schema migrations 189–195 are included as historical source from the
+Shopee branch. They are already present in the verified snapshot and must not
+be replayed on the local clone or staging. The imported legacy auto-deployment
+job/script is excluded from this integration; use the isolated workflow above.

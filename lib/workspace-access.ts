@@ -77,14 +77,12 @@ async function getAuthenticatedWorkspaceProfile() {
 }
 
 export async function getWorkspaceBootstrap(): Promise<WorkspaceBootstrap> {
-  const { supabase, user, profile, isPlatformOwner } =
+  const { user, profile } =
     await getAuthenticatedWorkspaceProfile();
 
-  return getWorkspaceBootstrapForProfile({
-    supabase,
+  return getWorkspaceBootstrapForVerifiedProfile({
     userId: user.id,
     profile,
-    isPlatformOwner,
   });
 }
 
@@ -196,7 +194,11 @@ export async function requireWorkspaceAccess() {
 }
 
 export async function setActiveWorkspace(workspaceId: string) {
-  const bootstrap = await getWorkspaceBootstrap();
+  const { user, profile } = await getAuthenticatedWorkspaceProfile();
+  const bootstrap = await getWorkspaceBootstrapForVerifiedProfile({
+    userId: user.id,
+    profile,
+  });
   const workspace = bootstrap.workspaces.find((item) => item.id === workspaceId);
 
   if (!workspace) {
@@ -206,6 +208,17 @@ export async function setActiveWorkspace(workspaceId: string) {
     throw new Error(`${workspace.name} masih dalam proses provisioning.`);
   }
 
+  // Membership was verified above. Persist the database selector first so
+  // database role checks and the browser cookie can never point at different
+  // workspaces if the write fails.
+  const { error: profileUpdateError } = await createServiceSupabase()
+    .from('profiles')
+    .update({ active_workspace_id: workspace.id })
+    .eq('id', user.id);
+  if (profileUpdateError) {
+    throw new Error(`Gagal mengganti workspace aktif: ${profileUpdateError.message}`);
+  }
+
   cookies().set(ACTIVE_WORKSPACE_COOKIE, workspace.id, {
     httpOnly: true,
     sameSite: 'lax',
@@ -213,17 +226,6 @@ export async function setActiveWorkspace(workspaceId: string) {
     path: '/',
     maxAge: 60 * 60 * 24 * 365,
   });
-
-  const supabase = createServerSupabase();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (user) {
-    await supabase
-      .from('profiles')
-      .update({ active_workspace_id: workspace.id })
-      .eq('id', user.id);
-  }
 
   return {
     activeWorkspace: workspace,

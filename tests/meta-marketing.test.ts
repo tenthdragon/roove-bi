@@ -1,9 +1,10 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
 import {
   getMetaAdAccountDiscoveryTargets,
   getMetaTokenHealthWarning,
+  selectPurchaseMetric,
 } from '../lib/meta-marketing';
 
 test('getMetaAdAccountDiscoveryTargets prefers Business Manager edges when META_BUSINESS_ID is configured', () => {
@@ -48,4 +49,26 @@ test('getMetaTokenHealthWarning warns when a valid token is near expiry', () => 
     warning: 'Token expires in 5 day(s). Please refresh it.',
     expires_at: new Date(Date.UTC(2026, 6, 10, 0, 0, 0)),
   });
+});
+
+test('selectPurchaseMetric prefers omni purchase without double counting overlapping actions', () => {
+  assert.deepEqual(
+    selectPurchaseMetric([
+      { action_type: 'offsite_conversion.fb_pixel_purchase', value: '125000' },
+      { action_type: 'omni_purchase', value: '150000' },
+    ]),
+    { actionType: 'omni_purchase', value: 150000 },
+  );
+});
+
+test('selectPurchaseMetric falls back to a purchase-like action', () => {
+  assert.deepEqual(
+    selectPurchaseMetric([{ action_type: 'custom_marketplace_purchase', value: '87500.5' }]),
+    { actionType: 'custom_marketplace_purchase', value: 87500.5 },
+  );
+});
+
+test('selectPurchaseMetric ignores missing and invalid metrics', () => {
+  assert.equal(selectPurchaseMetric(undefined), null);
+  assert.equal(selectPurchaseMetric([{ action_type: 'omni_purchase', value: 'not-a-number' }]), null);
 });

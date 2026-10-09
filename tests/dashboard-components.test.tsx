@@ -8,7 +8,7 @@ import DashboardNavigation from "../components/DashboardNavigation";
 import DashboardMetricCard from "../components/DashboardMetricCard";
 import WorkspaceSwitcher from "../components/WorkspaceSwitcher";
 import { WorkspaceProvider } from "../lib/WorkspaceContext";
-import type { TabDef } from "../lib/utils";
+import { ALL_TABS, canAccessTab, type TabDef } from "../lib/utils";
 
 // tsx's non-Next runner uses classic JSX for the existing context modules.
 Object.assign(globalThis, { React });
@@ -22,6 +22,22 @@ const workspace = {
   isDefault: true,
 };
 const noop = () => {};
+
+test("combined staging catalog keeps Shopee reviewer navigation alongside owner Growth access", () => {
+  const marketing=ALL_TABS.find(tab=>tab.id==='marketing')!;
+  const shopee=marketing.children?.find(tab=>tab.id==='shopee-details');
+  const growth=ALL_TABS.find(tab=>tab.id==='growth-work');
+  assert.ok(shopee, 'Existing Shopee Details must survive Growth staging releases');
+  assert.ok(growth, 'Growth must survive Shopee staging releases');
+  const permissionKeys=new Set(['tab:shopee-details','admin:shopee','tab:growth-work']);
+  const props={currentTab:'shopee-details',sidebarCollapsed:false,expandedMenus:{marketing:true},navigateTo:noop,setSidebarCollapsed:noop,setExpandedMenus:noop};
+  const reviewer=renderToStaticMarkup(<DashboardNavigation {...props} isMobile tabs={[{...marketing,children:[shopee]}]} canAccess={tab=>canAccessTab('shopee_reviewer',tab.id,permissionKeys)}/>);
+  assert.match(reviewer,/Shopee Details/);
+  assert.doesNotMatch(reviewer,/>Marketing Channel</);
+  assert.equal(canAccessTab('shopee_reviewer','growth-work',permissionKeys),false);
+  const owner=renderToStaticMarkup(<DashboardNavigation {...props} tabs={[marketing,growth]} canAccess={tab=>canAccessTab('owner',tab.id,new Set())}/>);
+  assert.match(owner,/Shopee Details/);assert.match(owner,/Growth Execution/);
+});
 
 test("shared dashboard frame retains workspace selector, content and responsive shell", () => {
   const html = renderToStaticMarkup(

@@ -4,6 +4,7 @@ import { createServerSupabase, createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardRoles, requireDashboardTabAccess } from './dashboard-access';
 import { parseRooveExcel } from './excel-parser';
 import type { Profile, DailyProductSummary, MonthlyProductSummary } from './utils';
+import { normalizeAssignableWorkspaceRole } from './role-access';
 
 // ── Auth & Profile ──
 
@@ -298,13 +299,14 @@ export async function fetchAllUsers() {
   const svc = createServiceSupabase();
   const { data: memberships, error: membershipsError } = await svc
     .from('workspace_memberships')
-    .select('user_id, role, created_at')
+    .select('user_id, role, status, created_at')
     .eq('workspace_id', workspaceId)
-    .eq('status', 'active')
     .order('created_at', { ascending: true });
   if (membershipsError) throw membershipsError;
 
-  const memberIds = (memberships || []).map((membership) => membership.user_id);
+  const memberIds = Array.from(
+    new Set((memberships || []).map((membership) => membership.user_id)),
+  );
   if (memberIds.length === 0) return [];
 
   const { data, error } = await svc
@@ -316,7 +318,11 @@ export async function fetchAllUsers() {
   const roleByUser = new Map(
     (memberships || []).map((membership) => [
       membership.user_id,
-      membership.role === 'workspace_owner' ? 'owner' : membership.role,
+      membership.status !== 'active'
+        ? 'pending'
+        : membership.role === 'workspace_owner'
+          ? 'owner'
+          : membership.role,
     ]),
   );
   return (data || [])
@@ -331,22 +337,29 @@ export async function fetchAllUsers() {
 }
 
 export async function updateUserRole(userId: string, role: string, allowedTabs: string[], allowedProducts: string[]) {
-  const { workspaceId } = await requireDashboardRoles(
+  const { profile, workspaceId } = await requireDashboardRoles(
     ['owner'],
     'Hanya owner workspace yang bisa mengubah role user.',
   );
-  const membershipRole = role === 'owner' ? 'workspace_owner' : role;
+  if (userId === profile.id) {
+    throw new Error('Role akun yang sedang digunakan tidak bisa diubah sendiri.');
+  }
+
+  const normalizedRole = String(role || '').trim().toLowerCase();
+  const membershipRole = normalizedRole === 'pending'
+    ? 'pending'
+    : normalizeAssignableWorkspaceRole(normalizedRole);
+  if (!membershipRole) {
+    throw new Error('Role tidak valid.');
+  }
 
   const svc = createServiceSupabase();
-  const { error } = await svc
-    .from('workspace_memberships')
-    .update({
-      role: membershipRole,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('workspace_id', workspaceId)
-    .eq('user_id', userId)
-    .eq('status', 'active');
+  const { error } = await svc.rpc('set_workspace_member_role', {
+    p_workspace_id: workspaceId,
+    p_user_id: userId,
+    p_role: membershipRole,
+    p_actor_user_id: profile.id,
+  });
 
   if (error) throw error;
   void allowedTabs;

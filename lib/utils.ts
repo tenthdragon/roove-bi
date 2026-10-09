@@ -2,9 +2,12 @@
 // Types
 // ============================================================
 
+import { canRoleAccessPermission } from './role-access';
+
 export type UserRole =
   | 'owner'
   | 'admin'
+  | 'shopee_reviewer'
   | 'marketing_api_reviewer'
   | 'direktur_ops'
   | 'staf_ops'
@@ -24,7 +27,7 @@ export type UserRole =
 // Roles that appear in the permission matrix (excludes owner + pending)
 export const MATRIX_ROLES: { id: string; label: string }[] = [
   { id: 'admin',             label: 'Admin' },
-  { id: 'marketing_api_reviewer', label: 'Marketing API Reviewer' },
+  { id: 'shopee_reviewer',   label: 'Shopee Reviewer' },
   { id: 'direktur_ops',      label: 'Direktur Ops' },
   { id: 'staf_ops',          label: 'Staf Ops' },
   { id: 'direktur_finance',  label: 'Direktur Finance' },
@@ -42,6 +45,7 @@ export const PERMISSION_GROUPS = [
     keys: [
       { key: 'tab:overview',           label: 'Dashboard' },
       { key: 'tab:marketing',          label: 'Marketing Channel' },
+      { key: 'tab:shopee-details',     label: '↳ Shopee Details' },
       { key: 'tab:channels',           label: 'Sales Channel' },
       { key: 'tab:waba-management',    label: '↳ WABA Management' },
       { key: 'tab:ppic',               label: 'PPIC' },
@@ -98,7 +102,8 @@ export const PERMISSION_GROUPS = [
     label: 'Admin - Sub-tab',
     keys: [
       { key: 'admin:daily',      label: 'Daily Data' },
-      { key: 'admin:meta',       label: 'Marketing APIs' },
+      { key: 'admin:meta',       label: 'Meta & WABA' },
+      { key: 'admin:shopee',     label: 'Shopee' },
       { key: 'admin:financial',  label: 'Financial' },
       { key: 'admin:warehouse',  label: 'Warehouse (upload)' },
       { key: 'admin:sync',       label: 'Sync' },
@@ -305,7 +310,9 @@ export const ALL_TABS: TabDef[] = [
   // Main Menu
   { id: 'overview',       label: 'Dashboard',           icon: 'LayoutDashboard', group: 'Main Menu' },
   // { id: 'products',    label: 'Products',           icon: 'Package' },  // Hidden — merged into Overview
-  { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone', group: 'Main Menu' },
+  { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone', group: 'Main Menu', children: [
+    { id: 'shopee-details', label: 'Shopee Details', icon: 'ShoppingBag' },
+  ]},
   { id: 'channels',       label: 'Sales Channel',      icon: 'Share2', group: 'Main Menu', children: [
     { id: 'waba-management', label: 'WABA Management',   icon: 'MessageCircle' },
   ]},
@@ -337,8 +344,7 @@ export type TabId = string;
 // Owner always returns true.
 export function canAccessTab(role: string, tabId: string, permissions: Set<string>): boolean {
   if (role === 'pending') return false;
-  if (role === 'owner') return true;
-  return permissions.has(`tab:${tabId}`);
+  return canRoleAccessPermission(role, permissions, `tab:${tabId}`);
 }
 
 // Check if user can access a product

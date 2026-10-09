@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useContext, ReactNode } from 'react';
+import { canRoleAccessPermission } from './role-access';
 
 interface PermissionsContextValue {
   role: string | null;
@@ -29,7 +30,7 @@ export function PermissionsProvider({
   permissions: Set<string>;
   children: ReactNode;
 }) {
-  const can = (key: string) => role === 'owner' || permissions.has(key);
+  const can = (key: string) => canRoleAccessPermission(role, permissions, key);
 
   return (
     <PermissionsContext.Provider value={{ role: role || null, permissions, can }}>

@@ -2,7 +2,14 @@
 
 import { createServiceSupabase } from './supabase-server';
 import { getShippingFeeRange } from './shipping-fee-data';
-import { requireDashboardTabAccess } from './dashboard-access';
+import {
+  requireAnyDashboardTabAccess,
+  requireDashboardTabAccess,
+} from './dashboard-access';
+import {
+  LEGACY_MARKETING_API_REVIEWER_ROLE,
+  SHOPEE_REVIEWER_ROLE,
+} from './role-access';
 
 interface MarketingPageDataParams {
   from: string;
@@ -11,6 +18,11 @@ interface MarketingPageDataParams {
   prevRangeTo: string;
   historyFrom: string;
   historyTo: string;
+}
+
+interface ShopeeDetailsDataParams {
+  from: string;
+  to: string;
 }
 
 const HISTORY_PAGE_SIZE = 1000;
@@ -52,6 +64,267 @@ function unwrapOptional<T>(result: { data: T | null; error: { message: string } 
   };
 }
 
+async function fetchAdsRowsWithPlatformAttribution(
+  svc: any,
+  workspaceId: string,
+  from: string,
+  to: string,
+) {
+  const enriched = await svc.from('daily_ads_spend')
+    .select('date, source, spent, impressions, store, brand_id, ad_account, data_source, platform_attributed_revenue, platform_reported_roas')
+    .eq('workspace_id', workspaceId)
+    .gte('date', from)
+    .lte('date', to);
+
+  if (!enriched.error) return enriched;
+
+  const migrationPending = /platform_attributed_revenue|platform_reported_roas/i
+    .test(String(enriched.error.message || ''));
+  if (!migrationPending) return enriched;
+
+  // Keep the dashboard readable during a rolling deploy before migration 189 lands.
+  return svc.from('daily_ads_spend')
+    .select('date, source, spent, impressions, store, brand_id, ad_account, data_source')
+    .eq('workspace_id', workspaceId)
+    .gte('date', from)
+    .lte('date', to);
+}
+
+async function fetchShopeeCpasRows(
+  svc: any,
+  workspaceId: string,
+  from: string,
+  to: string,
+) {
+  const fetchPages = async (fields: string) => {
+    const rows: any[] = [];
+
+    for (let fromIndex = 0; ; fromIndex += HISTORY_PAGE_SIZE) {
+      const result = await svc.from('daily_ads_spend')
+        .select(fields)
+        .eq('workspace_id', workspaceId)
+        .eq('data_source', 'meta_api')
+        .ilike('source', '%cpas%')
+        .gte('date', from)
+        .lte('date', to)
+        .order('id', { ascending: true })
+        .range(fromIndex, fromIndex + HISTORY_PAGE_SIZE - 1);
+
+      if (result.error) return { data: null, error: result.error };
+      const page = result.data || [];
+      rows.push(...page);
+      if (page.length < HISTORY_PAGE_SIZE) return { data: rows, error: null };
+    }
+  };
+
+  const enrichedFields = 'id, date, source, spent, impressions, store, brand_id, ad_account, data_source, platform_attributed_revenue, platform_reported_roas';
+  const enriched = await fetchPages(enrichedFields);
+  if (!enriched.error) return enriched;
+
+  const migrationPending = /platform_attributed_revenue|platform_reported_roas/i
+    .test(String(enriched.error.message || ''));
+  if (!migrationPending) return enriched;
+
+  return fetchPages('id, date, source, spent, impressions, store, brand_id, ad_account, data_source');
+}
+
+function isMissingShopeeCampaignSchema(error: { code?: string; message?: string } | null | undefined) {
+  const detail = `${error?.code || ''} ${error?.message || ''}`;
+  return /PGRST205|42P01/i.test(detail)
+    || /(relation|table).*(shopee_ad_campaigns|shopee_ad_campaign_daily_metrics).*(does not exist|schema cache|not found)/i.test(detail);
+}
+
+async function fetchShopeeCampaignDetails(
+  svc: any,
+  workspaceId: string,
+  from: string,
+  to: string,
+) {
+  const [campaignsRes, metricsRes] = await Promise.all([
+    svc.from('shopee_ad_campaigns')
+      .select('shop_config_id, shop_id, shop_name, campaign_id, campaign_type, ad_type, ad_name, campaign_status, bidding_method, campaign_placement, campaign_budget, roas_target, start_at, end_at, item_ids, products, selected_keywords, last_seen_at')
+      .eq('workspace_id', workspaceId)
+      .eq('campaign_type', 'product')
+      .order('last_seen_at', { ascending: false }),
+    svc.from('shopee_ad_campaign_daily_metrics')
+      .select('shop_config_id, shop_id, campaign_id, campaign_type, metric_date, ad_type, ad_name, campaign_placement, impressions, clicks, ctr, expense, broad_gmv, broad_order, broad_order_amount, broad_roas, direct_gmv, direct_order, direct_order_amount, direct_roas')
+      .eq('workspace_id', workspaceId)
+      .eq('campaign_type', 'product')
+      .gte('metric_date', from)
+      .lte('metric_date', to),
+  ]);
+
+  if (isMissingShopeeCampaignSchema(campaignsRes.error) || isMissingShopeeCampaignSchema(metricsRes.error)) {
+    return {
+      campaigns: [],
+      campaignMetrics: [],
+      campaignSchemaReady: false,
+    };
+  }
+  if (campaignsRes.error) {
+    throw new Error(`Gagal memuat setting campaign Shopee: ${campaignsRes.error.message}`);
+  }
+  if (metricsRes.error) {
+    throw new Error(`Gagal memuat performa campaign Shopee: ${metricsRes.error.message}`);
+  }
+
+  return {
+    campaigns: campaignsRes.data || [],
+    campaignMetrics: metricsRes.data || [],
+    campaignSchemaReady: true,
+  };
+}
+
+function isMissingShopeeGmsSchema(error: { code?: string; message?: string } | null | undefined) {
+  const detail = `${error?.code || ''} ${error?.message || ''}`;
+  return /PGRST205|42P01/i.test(detail)
+    || /(relation|table).*(shopee_gms_campaign_period_metrics|shopee_gms_item_period_metrics).*(does not exist|schema cache|not found)/i.test(detail);
+}
+
+async function fetchShopeeGmsDetails(
+  svc: any,
+  workspaceId: string,
+  from: string,
+  to: string,
+) {
+  const fields = 'shop_config_id, shop_id, campaign_id, period_start, period_end, impressions, clicks, expense, broad_gmv, broad_order, broad_order_amount, broad_roas, broad_acos, conversion_rate, cost_per_conversion, direct_order, direct_order_amount, direct_roas, direct_acos, direct_conversion_rate, cost_per_direct_conversion, sync_batch_id';
+  const fetchRows = async (buildQuery: (fromIndex: number, toIndex: number) => PromiseLike<any>) => {
+    const rows: any[] = [];
+    for (let fromIndex = 0; ; fromIndex += HISTORY_PAGE_SIZE) {
+      const result = await buildQuery(fromIndex, fromIndex + HISTORY_PAGE_SIZE - 1);
+      if (result.error) return { data: null, error: result.error };
+      const page = result.data || [];
+      rows.push(...page);
+      if (page.length < HISTORY_PAGE_SIZE) return { data: rows, error: null };
+    }
+  };
+  const [campaignsRes, itemsRes] = await Promise.all([
+    fetchRows((fromIndex, toIndex) => svc.from('shopee_gms_campaign_period_metrics')
+      .select(fields)
+      .eq('workspace_id', workspaceId)
+      .eq('period_start', from)
+      .eq('period_end', to)
+      .order('shop_config_id', { ascending: true })
+      .order('campaign_id', { ascending: true })
+      .range(fromIndex, toIndex)),
+    fetchRows((fromIndex, toIndex) => svc.from('shopee_gms_item_period_metrics')
+      .select(`item_id, ${fields}`)
+      .eq('workspace_id', workspaceId)
+      .eq('period_start', from)
+      .eq('period_end', to)
+      .order('shop_config_id', { ascending: true })
+      .order('campaign_id', { ascending: true })
+      .order('item_id', { ascending: true })
+      .range(fromIndex, toIndex)),
+  ]);
+
+  if (isMissingShopeeGmsSchema(campaignsRes.error) || isMissingShopeeGmsSchema(itemsRes.error)) {
+    return {
+      gmsCampaignMetrics: [],
+      gmsItemMetrics: [],
+      gmsSchemaReady: false,
+    };
+  }
+  if (campaignsRes.error) {
+    throw new Error(`Gagal memuat performa campaign Shop GMV Max: ${campaignsRes.error.message}`);
+  }
+  if (itemsRes.error) {
+    throw new Error(`Gagal memuat performa item Shop GMV Max: ${itemsRes.error.message}`);
+  }
+
+  const campaignRows = campaignsRes.data || [];
+  const publishedBatches = new Map(
+    campaignRows.map((row: any) => [
+      `${row.shop_config_id}:${row.campaign_id}`,
+      String(row.sync_batch_id || ''),
+    ]),
+  );
+  const itemRows = (itemsRes.data || []).filter((row: any) => (
+    publishedBatches.get(`${row.shop_config_id}:${row.campaign_id}`)
+      === String(row.sync_batch_id || '')
+  ));
+
+  return {
+    gmsCampaignMetrics: campaignRows,
+    gmsItemMetrics: itemRows,
+    gmsSchemaReady: true,
+  };
+}
+
+async function fetchGlobalCm3AdsSpend(
+  svc: ReturnType<typeof createServiceSupabase>,
+  workspaceId: string,
+  from: string,
+  to: string,
+) {
+  const rows = await fetchHistoricalRows(
+    (fromIndex, toIndex) => svc.from('daily_ads_spend')
+      .select('date, spent')
+      .eq('workspace_id', workspaceId)
+      .gte('date', from)
+      .lte('date', to)
+      .order('date', { ascending: true })
+      .range(fromIndex, toIndex),
+    'Gagal memuat total biaya iklan CM3 workspace aktif',
+  );
+
+  return rows.reduce((sum, row) => sum + Math.abs(Number(row.spent || 0)), 0);
+}
+
+export async function getShopeeDetailsData({
+  from,
+  to,
+}: ShopeeDetailsDataParams) {
+  const access = await requireAnyDashboardTabAccess(
+    ['shopee-details', 'marketing'],
+    'Shopee Details',
+  );
+  const { workspaceId } = access;
+  const canViewWorkspaceCm3 = ![
+    SHOPEE_REVIEWER_ROLE,
+    LEGACY_MARKETING_API_REVIEWER_ROLE,
+  ].includes(access.profile.role);
+
+  const svc = createServiceSupabase();
+  const [adsRes, channelRes, shopeeAdsRes, campaignDetails, gmsDetails, shopeeFeeRatesRes, globalCm3AdsSpend] = await Promise.all([
+    fetchShopeeCpasRows(svc, workspaceId, from, to),
+    svc.from('daily_channel_data')
+      .select('date, channel, net_sales')
+      .eq('workspace_id', workspaceId)
+      .ilike('channel', 'shopee')
+      .gte('date', from)
+      .lte('date', to),
+    svc.from('shopee_ads_daily_metrics')
+      .select('metric_date, shop_id, shop_name, impressions, clicks, ctr, direct_order, broad_order, direct_item_sold, broad_item_sold, direct_gmv, broad_gmv, expense, cost_per_conversion, direct_roas, broad_roas')
+      .eq('workspace_id', workspaceId)
+      .eq('spend_stream_key', 'shopee_ads')
+      .gte('metric_date', from)
+      .lte('metric_date', to),
+    fetchShopeeCampaignDetails(svc, workspaceId, from, to),
+    fetchShopeeGmsDetails(svc, workspaceId, from, to),
+    svc.from('marketplace_fee_estimate_rates')
+      .select('rate, effective_from')
+      .eq('workspace_id', workspaceId)
+      .eq('setting_key', 'shopee_fallback')
+      .lte('effective_from', to)
+      .order('effective_from', { ascending: true }),
+    canViewWorkspaceCm3
+      ? fetchGlobalCm3AdsSpend(svc, workspaceId, from, to)
+      : Promise.resolve(null),
+  ]);
+
+  return {
+    ads: unwrap(adsRes, 'Gagal memuat spend Meta CPAS'),
+    channel: unwrap(channelRes, 'Gagal memuat penjualan aktual Shopee'),
+    shopeeAdsMetrics: unwrap(shopeeAdsRes, 'Gagal memuat atribusi Shopee Ads'),
+    shopeeFeeRates: unwrap(shopeeFeeRatesRes, 'Gagal memuat asumsi biaya admin Shopee'),
+    globalCm3AdsSpend,
+    canViewWorkspaceCm3,
+    ...campaignDetails,
+    ...gmsDetails,
+  };
+}
+
 export async function getMarketingPageData({
   from,
   to,
@@ -85,11 +358,7 @@ export async function getMarketingPageData({
       .eq('workspace_id', workspaceId)
       .gte('date', from)
       .lte('date', to),
-    svc.from('daily_ads_spend')
-      .select('date, source, spent, store, brand_id')
-      .eq('workspace_id', workspaceId)
-      .gte('date', from)
-      .lte('date', to),
+    fetchAdsRowsWithPlatformAttribution(svc, workspaceId, from, to),
     svc.from('daily_channel_data')
       .select('date, channel, product, net_sales, gross_profit, mp_admin_cost')
       .eq('workspace_id', workspaceId)

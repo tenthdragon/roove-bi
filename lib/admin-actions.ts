@@ -3,8 +3,12 @@
 import { createServerSupabase, createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardRoles } from './dashboard-access';
 import { MATRIX_ROLES, PERMISSION_GROUPS } from './utils';
+import { fixedPermissionsForRole } from './role-access';
 import { getShopeeSetupInfo } from './shopee-open-platform';
-import { resolveWorkspaceMarketplaceIntakeSourceConfig } from './marketplace-intake-workspace-sources';
+import {
+  listWorkspaceMarketplaceIntakeSourceConfigs,
+  resolveWorkspaceMarketplaceIntakeSourceConfig,
+} from './marketplace-intake-workspace-sources';
 import {
   resolveWorkspaceCredential,
   resolveWorkspaceIntegrationValue,
@@ -41,6 +45,14 @@ function sanitizePermissionMatrix(matrix: Record<string, string[]>) {
 
   for (const [role, permissions] of Object.entries(matrix || {})) {
     if (!MATRIX_ROLE_IDS.has(role) || !Array.isArray(permissions)) continue;
+
+    const fixedPermissions = fixedPermissionsForRole(role);
+    if (fixedPermissions) {
+      fixedPermissions.forEach((permission_key) => {
+        rows.push({ role, permission_key });
+      });
+      continue;
+    }
 
     const uniqueKeys = Array.from(
       new Set(
@@ -91,12 +103,13 @@ export async function getAdminBootstrap() {
     .from('workspace_memberships')
     .select('user_id, role, status, created_at')
     .eq('workspace_id', access.workspaceId)
-    .eq('status', 'active')
     .order('created_at', { ascending: true });
 
   if (membershipsError) throw membershipsError;
 
-  const memberIds = (memberships || []).map((membership) => membership.user_id);
+  const memberIds = Array.from(
+    new Set((memberships || []).map((membership) => membership.user_id)),
+  );
   if (memberIds.length === 0) {
     return { profile: { ...profile, role: 'owner' }, users: [] };
   }
@@ -111,7 +124,11 @@ export async function getAdminBootstrap() {
   const roleByUser = new Map(
     (memberships || []).map((membership) => [
       membership.user_id,
-      membership.role === 'workspace_owner' ? 'owner' : membership.role,
+      membership.status !== 'active'
+        ? 'pending'
+        : membership.role === 'workspace_owner'
+          ? 'owner'
+          : membership.role,
     ]),
   );
   const users = (profiles || [])
@@ -332,22 +349,17 @@ export async function saveRolePermissionsMatrix(matrix: Record<string, string[]>
   const rows = sanitizePermissionMatrix(matrix);
   const svc = createServiceSupabase();
 
-  const { error: deleteError } = await svc
-    .from('workspace_role_permissions')
-    .delete()
-    .eq('workspace_id', workspaceId);
+  const { data: savedCount, error } = await svc.rpc(
+    'replace_workspace_role_permissions',
+    {
+      p_workspace_id: workspaceId,
+      p_rows: rows,
+    },
+  );
 
-  if (deleteError) throw deleteError;
+  if (error) throw error;
 
-  if (rows.length > 0) {
-    const { error: insertError } = await svc
-      .from('workspace_role_permissions')
-      .insert(rows.map((row) => ({ ...row, workspace_id: workspaceId })));
-
-    if (insertError) throw insertError;
-  }
-
-  return { success: true, count: rows.length };
+  return { success: true, count: Number(savedCount || 0) };
 }
 
 export async function getMetaAdminSnapshot() {
@@ -799,14 +811,15 @@ export async function setWabaAccountActive(id: number, isActive: boolean) {
 }
 
 export async function getShopeeAdminSnapshot() {
-  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:shopee', 'Admin Shopee');
 
   const svc = createServiceSupabase();
-  const [shopsRes, tokensRes, logsRes, streamsRes] = await Promise.all([
+  const [shopsRes, tokensRes, logsRes, streamsRes, marketplaceSources] = await Promise.all([
     svc.from('shopee_shops').select('*').eq('workspace_id', workspaceId).order('shop_name'),
     svc.from('shopee_shop_tokens').select('shop_config_id, token_expires_at').eq('workspace_id', workspaceId),
     svc.from('shopee_sync_log').select('*').eq('workspace_id', workspaceId).order('created_at', { ascending: false }).limit(5),
     svc.from('shopee_shop_spend_streams').select('*').eq('workspace_id', workspaceId).order('shop_config_id').order('stream_key'),
+    listWorkspaceMarketplaceIntakeSourceConfigs(workspaceId),
   ]);
 
   if (shopsRes.error) throw shopsRes.error;
@@ -868,6 +881,9 @@ export async function getShopeeAdminSnapshot() {
 
   return {
     setup: getShopeeSetupInfo(),
+    marketplaceSources: marketplaceSources.filter((source) => (
+      source.platform === 'shopee' && source.uploadEnabled
+    )),
     shops: (shopsRes.data || []).map((shop: any) => ({
       ...shop,
       has_tokens: tokenMap.has(shop.id),
@@ -902,7 +918,7 @@ export async function updateShopeeShop(
     }>;
   }
 ) {
-  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:shopee', 'Admin Shopee');
 
   const sourceKey = normalizeOptionalText(payload.marketplace_source_key)?.toLowerCase() || null;
   const sourceConfig = sourceKey
@@ -977,7 +993,7 @@ export async function updateShopeeShop(
 }
 
 export async function setShopeeShopActive(id: number, isActive: boolean) {
-  const { workspaceId } = await requireAdminAccess('admin:meta', 'Admin Meta');
+  const { workspaceId } = await requireAdminAccess('admin:shopee', 'Admin Shopee');
 
   const svc = createServiceSupabase();
   const { error } = await svc

@@ -1,9 +1,10 @@
-import { createServerSupabase } from './supabase-server';
+import { createServerSupabase, createServiceSupabase } from './supabase-server';
 import { getWorkspaceBootstrapForVerifiedProfile } from './workspace-access';
 import {
   isWorkspaceModuleEnabled,
   type AccessibleWorkspace,
 } from './workspaces';
+import { isPermissionAllowedForRole } from './role-access';
 
 type DashboardProfile = {
   id: string;
@@ -81,13 +82,21 @@ async function verifyPermissionKeys(
   verifyErrorMessage: string,
   denyMessage: string
 ) {
-  const supabase = createServerSupabase();
+  const allowedPermissionKeys = permissionKeys.filter((permissionKey) =>
+    isPermissionAllowedForRole(role, permissionKey),
+  );
+  if (allowedPermissionKeys.length === 0) throw new Error(denyMessage);
+
+  // The workspace and role were already derived from the verified JWT through
+  // the service-side bootstrap. Keep permission reads server-only so the
+  // restricted Shopee reviewer does not need direct table access in PostgREST.
+  const supabase = createServiceSupabase();
   const { data: permissions, error } = await supabase
     .from('workspace_role_permissions')
     .select('permission_key')
     .eq('workspace_id', workspaceId)
     .eq('role', role)
-    .in('permission_key', permissionKeys)
+    .in('permission_key', allowedPermissionKeys)
     .limit(1);
 
   if (error) throw new Error(verifyErrorMessage);

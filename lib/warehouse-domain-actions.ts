@@ -5,7 +5,7 @@ import {
   requireAnyDashboardTabAccess,
   requireDashboardPermissionAccess,
 } from './dashboard-access';
-import { recordWarehouseActivityLog } from './warehouse-activity-log-actions';
+import { recordWarehouseActivityLog } from './warehouse-activity-log-runner';
 import { getWarehouseActivityLogChangedFields } from './warehouse-activity-log-utils';
 import { cleanWarehouseDomainText, normalizeWarehouseDomainText } from './warehouse-domain-helpers';
 

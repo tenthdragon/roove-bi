@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { useMarketplaceIntakeSources } from '@/lib/use-marketplace-intake-sources';
 import {
   getShopeeSpendStreamDefinition,
   listShopeeSpendStreamDefinitions,
@@ -153,13 +152,13 @@ function buildEditForm(shop: ShopeeShop): EditFormState {
 }
 
 export default function ShopeeManager() {
-  const { sources: marketplaceSources, error: marketplaceSourcesError } = useMarketplaceIntakeSources();
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [setup, setSetup] = useState<ShopeeSetupInfo | null>(null);
   const [shops, setShops] = useState<ShopeeShop[]>([]);
   const [logs, setLogs] = useState<SyncLog[]>([]);
+  const [marketplaceSources, setMarketplaceSources] = useState<any[]>([]);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [syncDateStart, setSyncDateStart] = useState(getYesterday);
   const [syncDateEnd, setSyncDateEnd] = useState(getYesterday);
@@ -233,6 +232,7 @@ export default function ShopeeManager() {
       setSetup(snapshot.setup || null);
       setShops(snapshot.shops || []);
       setLogs(snapshot.recentLogs || []);
+      setMarketplaceSources(snapshot.marketplaceSources || []);
     } catch (error: any) {
       console.error('Failed to load Shopee admin snapshot:', error);
       setMessage({ type: 'error', text: error.message || 'Gagal memuat konfigurasi Shopee.' });
@@ -428,16 +428,16 @@ export default function ShopeeManager() {
           </div>
         )}
 
-        {(marketplaceSourcesError || message) && (
+        {message && (
           <div style={{
             marginBottom: 12,
             padding: 12,
             borderRadius: 8,
             fontSize: 13,
-            background: message?.type === 'success' && !marketplaceSourcesError ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
-            color: message?.type === 'success' && !marketplaceSourcesError ? 'var(--green)' : 'var(--red)',
+            background: message.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
+            color: message.type === 'success' ? 'var(--green)' : 'var(--red)',
           }}>
-            {marketplaceSourcesError || message?.text}
+            {message.text}
           </div>
         )}
 

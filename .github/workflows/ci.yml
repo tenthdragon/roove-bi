@@ -6,6 +6,9 @@ on:
       - "**"
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   app:
     runs-on: ubuntu-latest
@@ -26,6 +29,12 @@ jobs:
 
       - name: Check Growth case log validation
         run: npm run test:growth
+
+      - name: Check shared navigation
+        run: npm run test:dashboard-components
+
+      - name: Check Shopee reviewer and integrations
+        run: node --import tsx --test tests/shopee-reviewer-access.test.ts tests/shopee-open-platform.test.ts tests/shopee-sync-runner.test.ts tests/shopee-campaign-metrics.test.ts
 
       - name: Typecheck app
         run: npm run typecheck:app
