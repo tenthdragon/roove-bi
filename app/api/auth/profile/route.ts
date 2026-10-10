@@ -4,6 +4,7 @@ import {
   createServerSupabase,
   createServiceSupabase,
 } from '@/lib/supabase-server';
+import { isThemePreference } from '@/lib/theme-preference';
 import { getWorkspaceBootstrapForVerifiedProfile } from '@/lib/workspace-access';
 
 export const dynamic = 'force-dynamic';
@@ -92,4 +93,57 @@ export async function GET() {
       { status: 403 },
     );
   }
+}
+
+// Saves the signed-in user's own dashboard theme. Like GET, the service client
+// is used only after the JWT is verified and the update is pinned to that user.
+export async function PATCH(request: Request) {
+  const auth = createServerSupabase();
+  const {
+    data: { user },
+    error: userError,
+  } = await auth.auth.getUser();
+
+  if (userError || !user) {
+    return NextResponse.json(
+      { error: 'Sesi login tidak ditemukan.' },
+      { status: 401 },
+    );
+  }
+
+  const body = await request.json().catch(() => null);
+  const themePreference = body?.theme_preference;
+  if (!body || !('theme_preference' in body) || !isThemePreference(themePreference)) {
+    return NextResponse.json(
+      { error: 'Pilihan tema tidak valid.' },
+      { status: 400 },
+    );
+  }
+
+  const { data, error } = await createServiceSupabase()
+    .from('profiles')
+    .update({ theme_preference: themePreference })
+    .eq('id', user.id)
+    .select('theme_preference')
+    .maybeSingle();
+
+  if (error) {
+    // 42703 / PGRST204: the column is not deployed to this database yet.
+    const notDeployed = error.code === '42703' || error.code === 'PGRST204';
+    return NextResponse.json(
+      { error: notDeployed ? 'Preferensi tema belum tersedia di database ini.' : 'Preferensi tema gagal disimpan.' },
+      { status: notDeployed ? 409 : 500 },
+    );
+  }
+  if (!data) {
+    return NextResponse.json(
+      { error: 'Profil dashboard tidak ditemukan.' },
+      { status: 404 },
+    );
+  }
+
+  return NextResponse.json(
+    { theme_preference: data.theme_preference ?? null },
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
 }

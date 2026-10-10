@@ -11,6 +11,7 @@ import {
   type ScalevBundleMappingPayload,
   type ScalevBundleMappingRow,
 } from '@/lib/scalev-catalog-bundle-actions';
+import { toneText } from '@/lib/theme-tones';
 
 const BUNDLE_SYNC_BATCH_SIZE = 80;
 
@@ -30,25 +31,25 @@ function renderStatusBadge(status: ScalevBundleMappingRow['status']) {
     resolved: {
       bg: 'rgba(16,185,129,0.12)',
       border: 'rgba(52,211,153,0.22)',
-      color: '#6ee7b7',
+      color: 'var(--tone-emerald)',
       label: 'Resolved',
     },
     partial: {
       bg: 'rgba(245,158,11,0.12)',
       border: 'rgba(251,191,36,0.2)',
-      color: '#fcd34d',
+      color: 'var(--tone-amber)',
       label: 'Partial',
     },
     unresolved: {
       bg: 'rgba(239,68,68,0.12)',
       border: 'rgba(248,113,113,0.2)',
-      color: '#fca5a5',
+      color: 'var(--tone-red)',
       label: 'Unresolved',
     },
     'missing-lines': {
       bg: 'rgba(59,130,246,0.12)',
       border: 'rgba(96,165,250,0.22)',
-      color: '#93c5fd',
+      color: 'var(--tone-blue)',
       label: 'Belum Sync Isi',
     },
   } as const;
@@ -64,7 +65,7 @@ function renderStatusBadge(status: ScalevBundleMappingRow['status']) {
         borderRadius: 999,
         border: `1px solid ${style.border}`,
         background: style.bg,
-        color: style.color,
+        color: toneText(style.color),
         fontSize: 10,
         fontWeight: 700,
         whiteSpace: 'nowrap',
@@ -298,7 +299,7 @@ export default function ScalevBundleMappingSettingsTab() {
               borderRadius: 10,
               border: '1px solid rgba(59,130,246,0.25)',
               background: 'rgba(37,99,235,0.12)',
-              color: '#60a5fa',
+              color: 'var(--tone-blue)',
               cursor: !selectedBusinessId || syncing || !selectedBusiness?.has_api_key || Boolean(payload?.schema_message) ? 'not-allowed' : 'pointer',
               fontSize: 12,
               fontWeight: 700,
@@ -317,7 +318,7 @@ export default function ScalevBundleMappingSettingsTab() {
               borderRadius: 10,
               border: `1px solid ${message.type === 'success' ? 'rgba(34,197,94,0.18)' : 'rgba(239,68,68,0.18)'}`,
               background: message.type === 'success' ? 'rgba(34,197,94,0.08)' : 'rgba(239,68,68,0.08)',
-              color: message.type === 'success' ? '#86efac' : '#fca5a5',
+              color: message.type === 'success' ? 'var(--tone-green)' : 'var(--tone-red)',
               fontSize: 12,
               lineHeight: 1.5,
             }}
@@ -350,7 +351,7 @@ export default function ScalevBundleMappingSettingsTab() {
                 cursor: 'pointer',
               }}
             >
-              <div style={{ fontSize: 12, fontWeight: 800, color: '#3b82f6' }}>{business.business_code}</div>
+              <div style={{ fontSize: 12, fontWeight: 800, color: 'var(--tone-blue)' }}>{business.business_code}</div>
               <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginTop: 4 }}>{business.business_name}</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 12, fontSize: 11, color: 'var(--dim)' }}>
                 <div>Bundle: <span style={{ color: 'var(--text)', fontWeight: 700 }}>{business.bundles_count}</span></div>
@@ -409,7 +410,7 @@ export default function ScalevBundleMappingSettingsTab() {
                   borderRadius: 8,
                   border: `1px solid ${filter === value ? 'rgba(96,165,250,0.5)' : 'var(--border)'}`,
                   background: filter === value ? 'rgba(37,99,235,0.12)' : 'transparent',
-                  color: filter === value ? '#93c5fd' : 'var(--dim)',
+                  color: filter === value ? 'var(--tone-blue)' : 'var(--dim)',
                   cursor: 'pointer',
                   fontSize: 11,
                   fontWeight: 700,
@@ -477,9 +478,9 @@ export default function ScalevBundleMappingSettingsTab() {
                             <div style={{ marginTop: 4, fontSize: 11, color: 'var(--dim)' }}>{row.secondary_label}</div>
                           ) : null}
                           {row.custom_id ? (
-                            <div style={{ marginTop: 6, fontSize: 10, color: '#93c5fd', fontFamily: 'monospace' }}>{row.custom_id}</div>
+                            <div style={{ marginTop: 6, fontSize: 10, color: 'var(--tone-blue)', fontFamily: 'monospace' }}>{row.custom_id}</div>
                           ) : null}
-                          <div style={{ marginTop: 6, fontSize: 10, color: row.visibility_kind === 'shared' ? '#93c5fd' : 'var(--dim)' }}>
+                          <div style={{ marginTop: 6, fontSize: 10, color: row.visibility_kind === 'shared' ? 'var(--tone-blue)' : 'var(--dim)' }}>
                             {row.visibility_kind.toUpperCase()} • stock owner: {row.owner_business_code} • processor: {row.processor_business_code}
                           </div>
                         </td>
@@ -538,7 +539,7 @@ export default function ScalevBundleMappingSettingsTab() {
                               borderRadius: 8,
                               border: '1px solid var(--border)',
                               background: 'transparent',
-                              color: '#60a5fa',
+                              color: 'var(--tone-blue)',
                               cursor: 'pointer',
                               fontSize: 11,
                               fontWeight: 700,
@@ -598,7 +599,7 @@ export default function ScalevBundleMappingSettingsTab() {
                                             </div>
                                           </>
                                         ) : (
-                                          <div style={{ color: '#fca5a5', fontSize: 10, fontWeight: 700 }}>
+                                          <div style={{ color: 'var(--tone-red)', fontSize: 10, fontWeight: 700 }}>
                                             {component.processor_business_code && component.processor_business_code !== payload?.business_code
                                               ? `Belum ada Owner Item Mapping di owner ${component.owner_business_code || component.processor_business_code}`
                                               : 'Belum terhubung ke Owner Item Mapping'}
@@ -606,14 +607,14 @@ export default function ScalevBundleMappingSettingsTab() {
                                         )}
                                       </td>
                                       <td style={{ padding: '8px 6px', fontSize: 10 }}>
-                                        <div style={{ color: component.resolution_source ? '#93c5fd' : 'var(--dim)', fontWeight: 700 }}>
+                                        <div style={{ color: component.resolution_source ? 'var(--tone-blue)' : 'var(--dim)', fontWeight: 700 }}>
                                           {component.resolution_source === 'variant'
                                             ? 'variant'
                                             : component.resolution_source === 'product'
                                               ? 'product'
                                               : '-'}
                                         </div>
-                                        <div style={{ color: component.visibility_kind === 'shared' ? '#93c5fd' : 'var(--dim)', marginTop: 3 }}>
+                                        <div style={{ color: component.visibility_kind === 'shared' ? 'var(--tone-blue)' : 'var(--dim)', marginTop: 3 }}>
                                           {component.visibility_kind.toUpperCase()}
                                         </div>
                                         {component.owner_business_code ? (

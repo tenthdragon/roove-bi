@@ -109,9 +109,9 @@
   outline-offset: 2px;
 }
 .root .primary {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
+  background: var(--accent-solid);
+  color: var(--on-solid);
+  border-color: var(--accent-solid);
 }
 .grid {
   display: grid;

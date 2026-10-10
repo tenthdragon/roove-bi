@@ -52,6 +52,7 @@ import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { getCurrentProfile } from '@/lib/actions';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, CartesianGrid } from 'recharts';
+import { toneFill, toneText } from '@/lib/theme-tones';
 
 // ── Types ──
 
@@ -321,7 +322,7 @@ function PreCutoffNotice({
       borderRadius: 16,
       border: '1px dashed rgba(245,158,11,0.35)',
       background: 'rgba(120, 53, 15, 0.14)',
-      color: '#fcd34d',
+      color: 'var(--tone-amber)',
       textAlign: 'center',
     }}>
       <div style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>{title}</div>
@@ -594,7 +595,7 @@ function WarehousePageContent() {
               padding: '8px 16px', borderRadius: '8px 8px 0 0', border: 'none',
               cursor: 'pointer', fontSize: 13, fontWeight: 600,
               background: activeTab === t.id ? 'var(--border)' : 'transparent',
-              color: activeTab === t.id ? '#60a5fa' : 'var(--dim)',
+              color: activeTab === t.id ? 'var(--tone-blue)' : 'var(--dim)',
               borderBottom: activeTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
               whiteSpace: 'nowrap',
             }}
@@ -611,7 +612,7 @@ function WarehousePageContent() {
       )}
 
       {!!tabError && (
-        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid #ef444440', background: 'var(--card)', color: '#fca5a5', fontSize: 12 }}>
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid #ef444440', background: 'var(--card)', color: 'var(--tone-red)', fontSize: 12 }}>
           {tabError}
         </div>
       )}
@@ -1247,27 +1248,28 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
 
   const scopeLabel = (scope: string) => scope === 'pre_go_live' ? 'RTS Pra Go-Live' : 'RTS Pasca Go-Live';
   const statusTone = (status: string) => {
-    if (status === 'completed') return { bg: 'var(--badge-green-bg)', color: '#6ee7b7', label: 'Selesai' };
-    if (status === 'cancelled') return { bg: 'rgba(148,163,184,0.16)', color: '#cbd5e1', label: 'Batal' };
-    return { bg: 'var(--badge-yellow-bg)', color: '#fcd34d', label: 'Pending' };
+    if (status === 'completed') return { bg: 'var(--badge-green-bg)', color: 'var(--tone-emerald)', label: 'Selesai' };
+    if (status === 'cancelled') return { bg: 'rgba(148,163,184,0.16)', color: 'var(--text-secondary)', label: 'Batal' };
+    return { bg: 'var(--badge-yellow-bg)', color: 'var(--tone-amber)', label: 'Pending' };
   };
-  const reviewSurface = '#14171f';
-  const reviewSurface2 = '#1c2030';
-  const reviewSurface3 = '#232840';
-  const reviewBorder = '#2a3050';
-  const reviewBorderSoft = '#1e2438';
-  const reviewTextPrimary = '#e8ecf4';
-  const reviewTextSecondary = '#8b95b0';
-  const reviewTextMuted = '#4a5270';
-  const reviewAccent = '#6c7fff';
-  const reviewAccentDim = 'rgba(108,127,255,0.12)';
-  const reviewAccentGlow = 'rgba(108,127,255,0.25)';
-  const reviewGreen = '#3ecf8e';
-  const reviewGreenDim = 'rgba(62,207,142,0.12)';
-  const reviewAmber = '#f5a623';
-  const reviewAmberDim = 'rgba(245,166,35,0.12)';
-  const reviewRed = '#ff5a5a';
-  const reviewRedDim = 'rgba(255,90,90,0.12)';
+  const reviewSurface = 'var(--card)';
+  const reviewSurface2 = 'var(--bg-deep)';
+  const reviewSurface3 = 'var(--input-bg)';
+  const reviewBorder = 'var(--border)';
+  const reviewBorderSoft = 'var(--border)';
+  const reviewTextPrimary = 'var(--text)';
+  const reviewTextSecondary = 'var(--text-secondary)';
+  const reviewTextMuted = 'var(--text-muted)';
+  const reviewAccent = 'var(--accent)';
+  const reviewAccentFill = 'var(--accent-solid)';
+  const reviewAccentDim = 'var(--accent-subtle)';
+  const reviewAccentGlow = 'color-mix(in srgb, var(--accent) 25%, transparent)';
+  const reviewGreen = 'var(--green)';
+  const reviewGreenDim = 'var(--green-subtle)';
+  const reviewAmber = 'var(--yellow)';
+  const reviewAmberDim = 'var(--yellow-subtle)';
+  const reviewRed = 'var(--red)';
+  const reviewRedDim = 'var(--red-subtle)';
   const reviewSans = '"DM Sans", system-ui, sans-serif';
   const reviewMono = '"DM Mono", monospace';
   const reviewInputStyle = {
@@ -1324,7 +1326,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
               padding: '5px 13px',
               borderRadius: 20,
               border: `1px solid ${statusFilter === option.key ? reviewAccent : reviewBorder}`,
-              background: statusFilter === option.key ? reviewAccent : reviewSurface2,
+              background: statusFilter === option.key ? reviewAccentFill : reviewSurface2,
               color: statusFilter === option.key ? '#fff' : reviewTextSecondary,
               fontSize: 12,
               fontWeight: 500,
@@ -1369,11 +1371,11 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                     {row.order_id}
                   </span>
                   {row.business_code && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 12, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', background: 'rgba(108,127,255,0.15)', color: '#a0aaff' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 12, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', background: 'rgba(108,127,255,0.15)', color: 'var(--tone-indigo)' }}>
                       {row.business_code}
                     </span>
                   )}
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 12, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', background: tone.bg, color: tone.color }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 12, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', background: tone.bg, color: toneText(tone.color) }}>
                     {tone.label}
                   </span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, padding: '2px 7px', borderRadius: 12, fontSize: 10, fontWeight: 600, letterSpacing: '0.04em', textTransform: 'uppercase', background: reviewGreenDim, color: reviewGreen }}>
@@ -1505,7 +1507,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                           padding: '7px 10px',
                                           borderRadius: 4,
                                           border: 'none',
-                                          background: mode === option.key ? reviewAccent : 'transparent',
+                                          background: mode === option.key ? reviewAccentFill : 'transparent',
                                           boxShadow: mode === option.key ? `0 2px 12px ${reviewAccentGlow}` : 'none',
                                           color: mode === option.key ? '#fff' : reviewTextMuted,
                                           fontSize: 12,
@@ -1741,7 +1743,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                                     </div>
                                     <div>
                                       <div style={{ fontSize: 11, color: reviewTextMuted }}>Qty Loss / Tidak Direstock</div>
-                                      <div style={{ fontSize: 13, fontWeight: 700, color: '#fca5a5', fontFamily: reviewMono }}>
+                                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--tone-red)', fontFamily: reviewMono }}>
                                         {Number(item.damaged_qty || 0).toLocaleString('id-ID')}
                                       </div>
                                     </div>
@@ -1806,7 +1808,7 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                               style={{ ...reviewInputStyle, minHeight: 54, resize: 'vertical', fontSize: 12, lineHeight: 1.5 }}
                             />
                             {!!errorByVerification[verificationId] && (
-                              <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: reviewRedDim, color: '#fca5a5', fontSize: 12 }}>
+                              <div style={{ marginTop: 8, padding: '8px 10px', borderRadius: 8, background: reviewRedDim, color: 'var(--tone-red)', fontSize: 12 }}>
                                 {errorByVerification[verificationId]}
                               </div>
                             )}
@@ -1820,9 +1822,9 @@ function RTSVerificationTab({ data, onRefresh }: { data: any[]; onRefresh: () =>
                             <button
                               onClick={() => handleComplete(row)}
                               disabled={submittingId === verificationId || loadingContextByVerification[verificationId]}
-                              style={{ padding: '9px 20px', background: reviewGreen, border: 'none', borderRadius: 5, color: '#071a0e', fontSize: 13, fontWeight: 700, cursor: submittingId === verificationId || loadingContextByVerification[verificationId] ? 'wait' : 'pointer', opacity: submittingId === verificationId || loadingContextByVerification[verificationId] ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', justifySelf: 'end' }}
+                              style={{ padding: '9px 20px', background: 'var(--green-solid)', border: 'none', borderRadius: 5, color: '#fff', fontSize: 13, fontWeight: 700, cursor: submittingId === verificationId || loadingContextByVerification[verificationId] ? 'wait' : 'pointer', opacity: submittingId === verificationId || loadingContextByVerification[verificationId] ? 0.7 : 1, display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap', justifySelf: 'end' }}
                             >
-                              <RtsCheckIcon color="#071a0e" size={14} />
+                              <RtsCheckIcon color="#fff" size={14} />
                               {loadingContextByVerification[verificationId] ? 'Memuat Batch...' : (submittingId === verificationId ? 'Menyimpan...' : 'Selesaikan Verifikasi RTS')}
                             </button>
                           )}
@@ -1902,19 +1904,19 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
       {/* Action buttons + Filters */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
         {can('wh:stock_masuk') && <button onClick={() => { setModalMode('in'); setShowModal(true); }}
-          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--green)', color: '#fff' }}>
+          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--green-solid)', color: '#fff' }}>
           + Stock Masuk
         </button>}
         {can('wh:transfer') && <button onClick={() => { setModalMode('transfer'); setShowModal(true); }}
-          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#06b6d4', color: '#fff' }}>
+          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#0e7490', color: '#fff' }}>
           Transfer
         </button>}
         {can('wh:stock_keluar') && <button onClick={() => { setModalMode('out'); setShowModal(true); }}
-          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#f97316', color: '#fff' }}>
+          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#c2410c', color: '#fff' }}>
           Stock Keluar
         </button>}
         {can('wh:dispose') && <button onClick={() => { setModalMode('dispose'); setShowModal(true); }}
-          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--red)', color: '#fff' }}>
+          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--red-solid)', color: '#fff' }}>
           Dispose
         </button>}
         <div style={{ flex: 1 }} />
@@ -1962,7 +1964,7 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
                 <td style={{ padding: '6px 10px', textAlign: 'right', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{i + 1}</td>
                 <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
                 <td style={{ padding: '6px 10px' }}>
-                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `${CATEGORY_COLORS[r.category]}20` : 'var(--bg-deep)', color: CATEGORY_COLORS[r.category] || 'var(--text-secondary)' }}>{r.category}</span>
+                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `color-mix(in srgb, ${CATEGORY_COLORS[r.category]} 12%, transparent)` : 'var(--bg-deep)', color: toneText(CATEGORY_COLORS[r.category] || 'var(--text-secondary)') }}>{r.category}</span>
                 </td>
                 <td style={{ padding: '6px 10px', fontSize: 11 }}>
                   <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text)' }}>{r.warehouse} - {r.entity}</span>
@@ -1975,9 +1977,9 @@ function StockBalanceTab({ data, searchQuery, setSearchQuery, categoryFilter, se
                 <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{r.stock_value > 0 ? fmtRupiah(r.stock_value) : '-'}</td>
                 <td style={{ padding: '6px 10px' }}>
                   {r.needs_reorder ? (
-                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-red-bg)', color: '#fca5a5' }}>Reorder</span>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-red-bg)', color: 'var(--tone-red)' }}>Reorder</span>
                   ) : (
-                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-green-bg)', color: '#6ee7b7' }}>OK</span>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-green-bg)', color: 'var(--tone-emerald)' }}>OK</span>
                   )}
                 </td>
               </tr>
@@ -2105,7 +2107,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         {can('wh:konversi') && (
           <button onClick={() => setShowConvert(true)}
-            style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#8b5cf6', color: '#fff' }}>
+            style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#7c3aed', color: '#fff' }}>
             + Konversi ke FG
           </button>
         )}
@@ -2138,7 +2140,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
                 <td style={{ padding: '6px 10px', textAlign: 'right', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{i + 1}</td>
                 <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
                 <td style={{ padding: '6px 10px' }}>
-                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `${CATEGORY_COLORS[r.category]}20` : 'var(--bg-deep)', color: CATEGORY_COLORS[r.category] || 'var(--text-secondary)' }}>{r.category}</span>
+                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `color-mix(in srgb, ${CATEGORY_COLORS[r.category]} 12%, transparent)` : 'var(--bg-deep)', color: toneText(CATEGORY_COLORS[r.category] || 'var(--text-secondary)') }}>{r.category}</span>
                 </td>
                 <td style={{ padding: '6px 10px', fontSize: 11 }}>
                   <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text)' }}>{r.warehouse} - {r.entity}</span>
@@ -2189,7 +2191,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
       )}
 
       {!!eventError && (
-        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid #ef444440', background: 'var(--card)', color: '#fca5a5', fontSize: 12 }}>
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid #ef444440', background: 'var(--card)', color: 'var(--tone-red)', fontSize: 12 }}>
           {eventError}
         </div>
       )}
@@ -2228,7 +2230,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
                     </td>
                     <td style={{ padding: '8px 10px', minWidth: 120 }}>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                        <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${moveCfg.color}20`, color: moveCfg.color }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `color-mix(in srgb, ${moveCfg.color} 12%, transparent)`, color: toneText(moveCfg.color) }}>
                           {moveCfg.label}
                         </span>
                         {isConversion && (
@@ -2239,7 +2241,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
                               borderRadius: 999,
                               border: '1px solid var(--border)',
                               background: isExpanded ? 'rgba(139,92,246,0.14)' : 'transparent',
-                              color: isExpanded ? '#c4b5fd' : 'var(--dim)',
+                              color: isExpanded ? 'var(--tone-violet)' : 'var(--dim)',
                               fontSize: 10,
                               fontWeight: 700,
                               cursor: 'pointer',
@@ -2264,7 +2266,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
                     <td style={{ padding: '8px 10px', fontSize: 11 }}>
                       <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text)' }}>{row.warehouse_label || '-'}</span>
                     </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: qty > 0 ? 'var(--green)' : qty < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: qty > 0 ? 'var(--green)' : qty < 0 ? 'var(--tone-orange)' : 'var(--text-muted)' }}>
                       {row.quantity == null ? '-' : `${qty > 0 ? '+' : ''}${qty.toLocaleString('id-ID')}`}
                     </td>
                     <td style={{ padding: '8px 10px', minWidth: 140, color: row.actor_name ? 'var(--text)' : 'var(--dim)' }}>
@@ -2279,7 +2281,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
                       <td colSpan={9} style={{ padding: '0 10px 12px 10px' }}>
                         <div style={{ border: '1px solid rgba(139,92,246,0.25)', background: 'rgba(139,92,246,0.06)', borderRadius: 12, padding: 14, display: 'grid', gap: 14 }}>
                           <div>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: '#c4b5fd', marginBottom: 8 }}>Bahan Dipakai</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tone-violet)', marginBottom: 8 }}>Bahan Dipakai</div>
                             <div style={{ display: 'grid', gap: 8 }}>
                               {(row.source_lines || []).map((detail: any) => (
                                 <div key={`src-${detail.id}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: '8px 10px', borderRadius: 10, background: 'rgba(15,23,42,0.35)', border: '1px solid rgba(255,255,255,0.04)' }}>
@@ -2289,7 +2291,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
                                       {[detail.batch_code ? `Batch ${detail.batch_code}` : '', detail.note || ''].filter(Boolean).join(' • ') || '-'}
                                     </div>
                                   </div>
-                                  <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: '#fdba74' }}>
+                                  <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: 'var(--tone-orange)' }}>
                                     -{Number(detail.quantity || 0).toLocaleString('id-ID')}
                                   </div>
                                 </div>
@@ -2301,7 +2303,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
                           </div>
 
                           <div>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: '#c4b5fd', marginBottom: 8 }}>Hasil Konversi</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tone-violet)', marginBottom: 8 }}>Hasil Konversi</div>
                             <div style={{ display: 'grid', gap: 8 }}>
                               {(row.target_lines || []).map((detail: any) => (
                                 <div key={`tgt-${detail.id}`} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', padding: '8px 10px', borderRadius: 10, background: 'rgba(15,23,42,0.35)', border: '1px solid rgba(255,255,255,0.04)' }}>
@@ -2311,7 +2313,7 @@ function WipTab({ data, onRefresh, userRole }: { data: any[]; onRefresh: () => v
                                       {[detail.batch_code ? `Batch ${detail.batch_code}` : '', detail.note || ''].filter(Boolean).join(' • ') || '-'}
                                     </div>
                                   </div>
-                                  <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: '#6ee7b7' }}>
+                                  <div style={{ fontSize: 12, fontFamily: 'monospace', fontWeight: 700, color: 'var(--tone-emerald)' }}>
                                     +{Number(detail.quantity || 0).toLocaleString('id-ID')}
                                   </div>
                                 </div>
@@ -2358,9 +2360,9 @@ function StockReclassTab({ data, onRefresh }: { data: any[]; onRefresh: () => vo
   const rejectedCount = data.filter(r => r.status === 'rejected').length;
 
   const statusColor = (status: string) => {
-    if (status === 'requested') return { bg: 'rgba(245,158,11,0.15)', fg: '#fbbf24', label: 'Menunggu Approval' };
-    if (status === 'applied') return { bg: 'rgba(16,185,129,0.15)', fg: '#6ee7b7', label: 'Applied' };
-    return { bg: 'rgba(239,68,68,0.15)', fg: '#fca5a5', label: 'Rejected' };
+    if (status === 'requested') return { bg: 'rgba(245,158,11,0.15)', fg: 'var(--tone-amber)', label: 'Menunggu Approval' };
+    if (status === 'applied') return { bg: 'rgba(16,185,129,0.15)', fg: 'var(--tone-emerald)', label: 'Applied' };
+    return { bg: 'rgba(239,68,68,0.15)', fg: 'var(--tone-red)', label: 'Rejected' };
   };
 
   const readinessSummary = (profile: any) => {
@@ -2409,7 +2411,7 @@ function StockReclassTab({ data, onRefresh }: { data: any[]; onRefresh: () => vo
         {can('wh:reclass_request') && (
           <button
             onClick={() => setShowModal(true)}
-            style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#8b5cf6', color: '#fff' }}
+            style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: '#7c3aed', color: '#fff' }}
           >
             + Request Reklasifikasi
           </button>
@@ -2461,7 +2463,7 @@ function StockReclassTab({ data, onRefresh }: { data: any[]; onRefresh: () => vo
                 <tr key={row.id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                   <td style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text-muted)', fontFamily: 'monospace' }}>{i + 1}</td>
                   <td style={{ padding: '8px 10px' }}>
-                    <span style={{ padding: '3px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: badge.bg, color: badge.fg }}>{badge.label}</span>
+                    <span style={{ padding: '3px 8px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: badge.bg, color: toneText(badge.fg) }}>{badge.label}</span>
                   </td>
                   <td style={{ padding: '8px 10px', minWidth: 220 }}>
                     <div style={{ fontWeight: 600, color: 'var(--text)' }}>{row.source_product_name_snapshot}</div>
@@ -2471,7 +2473,7 @@ function StockReclassTab({ data, onRefresh }: { data: any[]; onRefresh: () => vo
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 2 }}>
                       <div style={{ fontWeight: 600, color: 'var(--text)' }}>{row.target_product_name_snapshot}</div>
                       {row.target_product_auto_created && (
-                        <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: 'rgba(139,92,246,0.18)', color: '#c4b5fd' }}>
+                        <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: 'rgba(139,92,246,0.18)', color: 'var(--tone-violet)' }}>
                           Auto-created
                         </span>
                       )}
@@ -2482,18 +2484,18 @@ function StockReclassTab({ data, onRefresh }: { data: any[]; onRefresh: () => vo
                   <td style={{ padding: '8px 10px', color: 'var(--text-secondary)' }}>{row.source_batch_code_snapshot || '-'}</td>
                   <td style={{ padding: '8px 10px', minWidth: 170 }}>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
-                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: sourceReady.brandReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: sourceReady.brandReady ? '#6ee7b7' : '#fca5a5' }}>
+                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: sourceReady.brandReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: sourceReady.brandReady ? 'var(--tone-emerald)' : 'var(--tone-red)' }}>
                         Src Brand {sourceReady.brandReady ? 'OK' : 'Missing'}
                       </span>
-                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: sourceReady.mappingReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: sourceReady.mappingReady ? '#6ee7b7' : '#fca5a5' }}>
+                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: sourceReady.mappingReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: sourceReady.mappingReady ? 'var(--tone-emerald)' : 'var(--tone-red)' }}>
                         Src Map {sourceReady.mappingReady ? 'OK' : 'Missing'}
                       </span>
                     </div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: targetReady.brandReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: targetReady.brandReady ? '#6ee7b7' : '#fca5a5' }}>
+                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: targetReady.brandReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: targetReady.brandReady ? 'var(--tone-emerald)' : 'var(--tone-red)' }}>
                         Tgt Brand {targetReady.brandReady ? 'OK' : 'Missing'}
                       </span>
-                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: targetReady.mappingReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: targetReady.mappingReady ? '#6ee7b7' : '#fca5a5' }}>
+                      <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: targetReady.mappingReady ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: targetReady.mappingReady ? 'var(--tone-emerald)' : 'var(--tone-red)' }}>
                         Tgt Map {targetReady.mappingReady ? 'OK' : 'Missing'}
                       </span>
                     </div>
@@ -2510,8 +2512,8 @@ function StockReclassTab({ data, onRefresh }: { data: any[]; onRefresh: () => vo
                   <td style={{ padding: '8px 10px', minWidth: 220 }}>
                     <div style={{ color: 'var(--text)' }}>{row.reason}</div>
                     {row.notes && <div style={{ fontSize: 11, color: 'var(--dim)' }}>{row.notes}</div>}
-                    {row.target_product_auto_created && <div style={{ fontSize: 11, color: '#c4b5fd' }}>Identity target dibuat otomatis saat request.</div>}
-                    {row.rejection_reason && <div style={{ fontSize: 11, color: '#fca5a5' }}>Reject note: {row.rejection_reason}</div>}
+                    {row.target_product_auto_created && <div style={{ fontSize: 11, color: 'var(--tone-violet)' }}>Identity target dibuat otomatis saat request.</div>}
+                    {row.rejection_reason && <div style={{ fontSize: 11, color: 'var(--tone-red)' }}>Reject note: {row.rejection_reason}</div>}
                   </td>
                   <td style={{ padding: '8px 10px', minWidth: 160 }}>
                     {row.status === 'requested' && can('wh:reclass_approve') ? (
@@ -2519,14 +2521,14 @@ function StockReclassTab({ data, onRefresh }: { data: any[]; onRefresh: () => vo
                         <button
                           onClick={() => handleApprove(row.id)}
                           disabled={actioningId === row.id}
-                          style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: 'var(--green)', color: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 700, opacity: actioningId === row.id ? 0.7 : 1 }}
+                          style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: 'var(--green-solid)', color: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 700, opacity: actioningId === row.id ? 0.7 : 1 }}
                         >
                           Approve
                         </button>
                         <button
                           onClick={() => handleReject(row.id)}
                           disabled={actioningId === row.id}
-                          style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: 'var(--red)', color: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 700, opacity: actioningId === row.id ? 0.7 : 1 }}
+                          style={{ padding: '6px 10px', borderRadius: 6, border: 'none', background: 'var(--red-solid)', color: '#fff', cursor: 'pointer', fontSize: 11, fontWeight: 700, opacity: actioningId === row.id ? 0.7 : 1 }}
                         >
                           Reject
                         </button>
@@ -2678,10 +2680,10 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
       <div style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--bg-deep)', marginBottom: 12 }}>
         <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>{label}</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
-          <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: hasBrand ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: hasBrand ? '#6ee7b7' : '#fca5a5' }}>
+          <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: hasBrand ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: hasBrand ? 'var(--tone-emerald)' : 'var(--tone-red)' }}>
             Brand {hasBrand ? profile.brand_name || 'OK' : 'Missing'}
           </span>
-          <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: mappingCount > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: mappingCount > 0 ? '#6ee7b7' : '#fca5a5' }}>
+          <span style={{ padding: '2px 6px', borderRadius: 999, fontSize: 10, fontWeight: 700, background: mappingCount > 0 ? 'rgba(16,185,129,0.15)' : 'rgba(239,68,68,0.15)', color: mappingCount > 0 ? 'var(--tone-emerald)' : 'var(--tone-red)' }}>
             Scalev Mapping {mappingCount > 0 ? `${mappingCount}x` : 'Missing'}
           </span>
         </div>
@@ -2740,7 +2742,7 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#8b5cf6' }}>Request Reklasifikasi Stock</h3>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--tone-violet)' }}>Request Reklasifikasi Stock</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--dim)', fontSize: 18, cursor: 'pointer', padding: 4 }}>&#10005;</button>
         </div>
         <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Pindahkan stok antar kategori identity produk pada gudang dan entity yang sama. Produk sumber bisa dicari dari kategori apa pun, lalu dipindahkan ke kategori tujuan lain.</div>
@@ -2809,7 +2811,7 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
                     : 'Identity target belum ada. Sistem akan membuat counterpart baru dengan nama yang sama, gudang/entity yang sama, kategori tujuan, dan mapping Scalev kosong saat request dibuat.'}
                 </div>
                 {willAutoCreateTarget && (
-                  <div style={{ fontSize: 11, color: '#c4b5fd', marginTop: 6 }}>
+                  <div style={{ fontSize: 11, color: 'var(--tone-violet)', marginTop: 6 }}>
                     Field utama seperti brand, vendor, unit, HPP, dan harga dasar akan diwariskan dari produk sumber agar jejak operasional tetap konsisten.
                   </div>
                 )}
@@ -2840,12 +2842,12 @@ function StockReclassRequestModal({ onClose, onSuccess }: { onClose: () => void;
           <input type="text" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Opsional" style={inputStyle} />
         </div>
 
-        {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: '#fca5a5', fontSize: 12, marginBottom: 12 }}>{error}</div>}
+        {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: 'var(--tone-red)', fontSize: 12, marginBottom: 12 }}>{error}</div>}
 
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: '#8b5cf6', color: '#fff', opacity: submitting ? 0.7 : 1 }}
+          style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: '#7c3aed', color: '#fff', opacity: submitting ? 0.7 : 1 }}
         >
           {submitting ? 'Mengirim Request...' : 'Kirim Request'}
         </button>
@@ -3012,7 +3014,7 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: cfg.color }}>{cfg.title}</h3>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: toneText(cfg.color) }}>{cfg.title}</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--dim)', fontSize: 18, cursor: 'pointer', padding: 4 }}>&#10005;</button>
         </div>
 
@@ -3120,11 +3122,11 @@ function SimpleMovementModal({ mode, onClose, onSuccess }: {
               <input type="text" placeholder="Opsional" value={notes} onChange={(e) => setNotes(e.target.value)} style={inputStyle} />
             </div>
 
-            {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: '#fca5a5', fontSize: 12, marginBottom: 12 }}>{error}</div>}
-            {success && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.1)', color: '#6ee7b7', fontSize: 12, marginBottom: 12 }}>{success}</div>}
+            {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: 'var(--tone-red)', fontSize: 12, marginBottom: 12 }}>{error}</div>}
+            {success && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.1)', color: 'var(--tone-emerald)', fontSize: 12, marginBottom: 12 }}>{success}</div>}
 
             <button onClick={handleSubmit} disabled={submitting}
-              style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: cfg.color, color: '#fff', opacity: submitting ? 0.7 : 1 }}>
+              style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting ? 'wait' : 'pointer', fontSize: 13, fontWeight: 700, background: toneFill(cfg.color), color: '#fff', opacity: submitting ? 0.7 : 1 }}>
               {submitting ? 'Menyimpan...' : `Simpan ${cfg.label}`}
             </button>
           </>
@@ -3309,7 +3311,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 16, padding: 24, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#8b5cf6' }}>Konversi Produk</h3>
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--tone-violet)' }}>Konversi Produk</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'var(--dim)', fontSize: 18, cursor: 'pointer', padding: 4 }}>&#10005;</button>
         </div>
         <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 16 }}>Gabungkan bahan menjadi 1 produk di dalam gudang yang sama</div>
@@ -3369,8 +3371,8 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
                               style={{ padding: '7px 12px', display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
                                 borderBottom: '1px solid var(--bg-deep)',
                                 background: checked ? 'rgba(139,92,246,0.08)' : 'transparent' }}>
-                              <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? '#8b5cf6' : 'var(--border)'}`,
-                                background: checked ? '#8b5cf6' : 'transparent', flexShrink: 0,
+                              <div style={{ width: 16, height: 16, borderRadius: 4, border: `2px solid ${checked ? '#7c3aed' : 'var(--border)'}`,
+                                background: checked ? '#7c3aed' : 'transparent', flexShrink: 0,
                                 display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                                 {checked && <span style={{ color: '#fff', fontSize: 10, lineHeight: 1 }}>✓</span>}
                               </div>
@@ -3386,7 +3388,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
                   {/* Footer: close */}
                   <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
                     <button onClick={(e) => { e.stopPropagation(); setDropdownOpen(false); setSearch(''); }}
-                      style={{ background: '#8b5cf6', border: 'none', color: '#fff', borderRadius: 6, padding: '5px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                      style={{ background: '#7c3aed', border: 'none', color: '#fff', borderRadius: 6, padding: '5px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
                       Selesai ({sources.length})
                     </button>
                   </div>
@@ -3423,7 +3425,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
                           ))}
                         </select>
                         {!sourceBatchLoading[s.productId] && (sourceBatchMap[s.productId] || []).length === 0 && (
-                          <div style={{ fontSize: 10, color: '#fca5a5', marginTop: 4 }}>
+                          <div style={{ fontSize: 10, color: 'var(--tone-red)', marginTop: 4 }}>
                             Tidak ada batch aktif dengan stok untuk bahan ini.
                           </div>
                         )}
@@ -3490,7 +3492,7 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
 
             {needsMaterialGuard && (
               <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(245,158,11,0.35)', background: 'rgba(245,158,11,0.08)' }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#fbbf24', marginBottom: 6 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--tone-amber)', marginBottom: 6 }}>
                   Material pendukung belum dipilih
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--dim)', lineHeight: 1.6, marginBottom: 8 }}>
@@ -3513,9 +3515,9 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
         {/* ── Summary ── */}
         {summaryReady && (
           <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--bg-deep)', border: '1px solid var(--border)', marginBottom: 14, fontSize: 12 }}>
-            <div style={{ fontWeight: 700, color: '#8b5cf6', marginBottom: 6 }}>Ringkasan Konversi</div>
+            <div style={{ fontWeight: 700, color: 'var(--tone-violet)', marginBottom: 6 }}>Ringkasan Konversi</div>
             {sources.map(s => (
-              <div key={s.productId} style={{ color: '#f97316', marginBottom: 2 }}>
+              <div key={s.productId} style={{ color: 'var(--tone-orange)', marginBottom: 2 }}>
                 - {s.productName}
                 {(() => {
                   const selectedBatch = (sourceBatchMap[s.productId] || []).find((batch: any) => String(batch.id) === String(s.batchId));
@@ -3533,11 +3535,11 @@ function ConvertModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
           </div>
         )}
 
-        {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: '#fca5a5', fontSize: 12, marginBottom: 12 }}>{error}</div>}
-        {success && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.1)', color: '#6ee7b7', fontSize: 12, marginBottom: 12 }}>{success}</div>}
+        {error && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(239,68,68,0.1)', color: 'var(--tone-red)', fontSize: 12, marginBottom: 12 }}>{error}</div>}
+        {success && <div style={{ padding: '8px 12px', borderRadius: 8, background: 'rgba(16,185,129,0.1)', color: 'var(--tone-emerald)', fontSize: 12, marginBottom: 12 }}>{success}</div>}
 
         <button onClick={handleSubmit} disabled={submitting || !selectedEntity}
-          style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting || !selectedEntity ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700, background: '#8b5cf6', color: '#fff', opacity: submitting || !selectedEntity ? 0.5 : 1 }}>
+          style={{ width: '100%', padding: '10px 16px', borderRadius: 8, border: 'none', cursor: submitting || !selectedEntity ? 'not-allowed' : 'pointer', fontSize: 13, fontWeight: 700, background: '#7c3aed', color: '#fff', opacity: submitting || !selectedEntity ? 0.5 : 1 }}>
           {submitting ? 'Menyimpan...' : 'Simpan Konversi'}
         </button>
       </div>
@@ -3709,18 +3711,18 @@ function DailySummaryTab({
           style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13 }} />
         <div style={{ flex: 1 }} />
         {!showOperationalMovementSummary ? (
-          <span style={{ padding: '4px 10px', borderRadius: 999, border: '1px solid rgba(245,158,11,0.28)', background: 'rgba(245,158,11,0.08)', color: '#fcd34d', fontSize: 11, fontWeight: 700 }}>
+          <span style={{ padding: '4px 10px', borderRadius: 999, border: '1px solid rgba(245,158,11,0.28)', background: 'rgba(245,158,11,0.08)', color: 'var(--tone-amber)', fontSize: 11, fontWeight: 700 }}>
             {isGoLiveDate ? 'Hari go-live warehouse' : 'Mode pra-go-live'}
           </span>
         ) : (
           <>
             <button onClick={() => setEntityFilter('all')}
-              style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === 'all' ? 'var(--accent)' : 'transparent', color: entityFilter === 'all' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+              style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === 'all' ? 'var(--accent-solid)' : 'transparent', color: entityFilter === 'all' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
               Semua ({data.length})
             </button>
             {entities.map(e => (
               <button key={e} onClick={() => setEntityFilter(entityFilter === e ? 'all' : e)}
-                style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === e ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === e ? 'var(--accent)' : 'transparent', color: entityFilter === e ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+                style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${entityFilter === e ? 'var(--accent)' : 'var(--border)'}`, background: entityFilter === e ? 'var(--accent-solid)' : 'transparent', color: entityFilter === e ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
                 {e} ({data.filter(r => r.entity === e).length})
               </button>
             ))}
@@ -3737,7 +3739,7 @@ function DailySummaryTab({
         />
       ) : isPartialGoLiveSummary ? (
         <>
-          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(96,165,250,0.08)', color: '#bfdbfe', fontSize: 11, lineHeight: 1.55 }}>
+          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(96,165,250,0.08)', color: 'var(--tone-blue)', fontSize: 11, lineHeight: 1.55 }}>
             Summary movement untuk {fullDateID(date)} hanya menghitung ledger setelah go-live warehouse aktif pada {warehouseGoLive.notBeforeLabel}. Pergerakan sebelum cutoff tetap disembunyikan agar tidak mencampur baseline stock opname.
           </div>
           {filtered.length === 0 ? (
@@ -3760,20 +3762,20 @@ function DailySummaryTab({
                       <td style={{ padding: '6px 10px', fontWeight: 500 }}>{r.product_name}</td>
                       <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{r.entity}</td>
                       <td style={{ padding: '6px 10px' }}>
-                        <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${CATEGORY_COLORS[r.category] || '#94a3b8'}20`, color: CATEGORY_COLORS[r.category] || '#94a3b8' }}>
+                        <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `color-mix(in srgb, ${CATEGORY_COLORS[r.category] || '#94a3b8'} 12%, transparent)`, color: toneText(CATEGORY_COLORS[r.category] || 'var(--dim)') }}>
                           {r.category}
                         </span>
                       </td>
                       <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_in > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
                         {r.total_in > 0 ? `+${r.total_in.toLocaleString('id-ID')}` : '-'}
                       </td>
-                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_out < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_out < 0 ? 'var(--tone-orange)' : 'var(--text-muted)' }}>
                         {r.total_out < 0 ? r.total_out.toLocaleString('id-ID') : '-'}
                       </td>
-                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_adjust !== 0 ? '#8b5cf6' : 'var(--text-muted)' }}>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_adjust !== 0 ? 'var(--tone-violet)' : 'var(--text-muted)' }}>
                         {r.total_adjust !== 0 ? (r.total_adjust > 0 ? '+' : '') + r.total_adjust.toLocaleString('id-ID') : '-'}
                       </td>
-                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: r.net_change > 0 ? 'var(--green)' : r.net_change < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                      <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: r.net_change > 0 ? 'var(--green)' : r.net_change < 0 ? 'var(--tone-orange)' : 'var(--text-muted)' }}>
                         {r.net_change > 0 ? '+' : ''}{r.net_change.toLocaleString('id-ID')}
                       </td>
                     </tr>
@@ -3783,13 +3785,13 @@ function DailySummaryTab({
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--green)' }}>
                       {totals.total_in > 0 ? `+${totals.total_in.toLocaleString('id-ID')}` : '-'}
                     </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f97316' }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--tone-orange)' }}>
                       {totals.total_out < 0 ? totals.total_out.toLocaleString('id-ID') : '-'}
                     </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#8b5cf6' }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--tone-violet)' }}>
                       {totals.total_adjust !== 0 ? (totals.total_adjust > 0 ? '+' : '') + totals.total_adjust.toLocaleString('id-ID') : '-'}
                     </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totals.net_change > 0 ? 'var(--green)' : totals.net_change < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totals.net_change > 0 ? 'var(--green)' : totals.net_change < 0 ? 'var(--tone-orange)' : 'var(--text-muted)' }}>
                       {totals.net_change > 0 ? '+' : ''}{totals.net_change.toLocaleString('id-ID')}
                     </td>
                   </tr>
@@ -3818,20 +3820,20 @@ function DailySummaryTab({
                   <td style={{ padding: '6px 10px', fontWeight: 500 }}>{r.product_name}</td>
                   <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontSize: 11 }}>{r.entity}</td>
                   <td style={{ padding: '6px 10px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${CATEGORY_COLORS[r.category] || '#94a3b8'}20`, color: CATEGORY_COLORS[r.category] || '#94a3b8' }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `color-mix(in srgb, ${CATEGORY_COLORS[r.category] || '#94a3b8'} 12%, transparent)`, color: toneText(CATEGORY_COLORS[r.category] || 'var(--dim)') }}>
                       {r.category}
                     </span>
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_in > 0 ? 'var(--green)' : 'var(--text-muted)' }}>
                     {r.total_in > 0 ? `+${r.total_in.toLocaleString('id-ID')}` : '-'}
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_out < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_out < 0 ? 'var(--tone-orange)' : 'var(--text-muted)' }}>
                     {r.total_out < 0 ? r.total_out.toLocaleString('id-ID') : '-'}
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_adjust !== 0 ? '#8b5cf6' : 'var(--text-muted)' }}>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: r.total_adjust !== 0 ? 'var(--tone-violet)' : 'var(--text-muted)' }}>
                     {r.total_adjust !== 0 ? (r.total_adjust > 0 ? '+' : '') + r.total_adjust.toLocaleString('id-ID') : '-'}
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: r.net_change > 0 ? 'var(--green)' : r.net_change < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: r.net_change > 0 ? 'var(--green)' : r.net_change < 0 ? 'var(--tone-orange)' : 'var(--text-muted)' }}>
                     {r.net_change > 0 ? '+' : ''}{r.net_change.toLocaleString('id-ID')}
                   </td>
                 </tr>
@@ -3841,13 +3843,13 @@ function DailySummaryTab({
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--green)' }}>
                   {totals.total_in > 0 ? `+${totals.total_in.toLocaleString('id-ID')}` : '-'}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#f97316' }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--tone-orange)' }}>
                   {totals.total_out < 0 ? totals.total_out.toLocaleString('id-ID') : '-'}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: '#8b5cf6' }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: 'var(--tone-violet)' }}>
                   {totals.total_adjust !== 0 ? (totals.total_adjust > 0 ? '+' : '') + totals.total_adjust.toLocaleString('id-ID') : '-'}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totals.net_change > 0 ? 'var(--green)' : totals.net_change < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: totals.net_change > 0 ? 'var(--green)' : totals.net_change < 0 ? 'var(--tone-orange)' : 'var(--text-muted)' }}>
                   {totals.net_change > 0 ? '+' : ''}{totals.net_change.toLocaleString('id-ID')}
                 </td>
               </tr>
@@ -3862,7 +3864,7 @@ function DailySummaryTab({
       <div style={{ marginTop: 20, background: 'var(--card)', border: `1px solid ${totalAlertsCount > 0 ? 'rgba(245,158,11,0.28)' : 'var(--border)'}`, borderRadius: 12, padding: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: totalAlertsCount > 0 ? '#f59e0b' : 'var(--green)' }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: totalAlertsCount > 0 ? 'var(--tone-amber)' : 'var(--green)' }}>
               Guardrail Deduction Harian
             </div>
             <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2, maxWidth: 720 }}>
@@ -3880,7 +3882,7 @@ function DailySummaryTab({
               <button
                 onClick={handleBulkRepair}
                 disabled={bulkRepairRunning}
-                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(245,158,11,0.32)', background: bulkRepairRunning ? 'transparent' : 'rgba(245,158,11,0.12)', color: bulkRepairRunning ? 'var(--dim)' : '#f59e0b', fontSize: 11, cursor: bulkRepairRunning ? 'wait' : 'pointer', fontWeight: 700 }}>
+                style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid rgba(245,158,11,0.32)', background: bulkRepairRunning ? 'transparent' : 'rgba(245,158,11,0.12)', color: bulkRepairRunning ? 'var(--dim)' : 'var(--tone-amber)', fontSize: 11, cursor: bulkRepairRunning ? 'wait' : 'pointer', fontWeight: 700 }}>
                 {bulkRepairRunning ? 'Repair Berjalan...' : 'Repair Semua Order Tanggal Ini'}
               </button>
             )}
@@ -3915,7 +3917,7 @@ function DailySummaryTab({
         </div>
 
         {alertsLoaded && (
-          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: `1px solid ${totalAlertsCount > 0 ? 'rgba(245,158,11,0.24)' : 'rgba(16,185,129,0.24)'}`, background: totalAlertsCount > 0 ? 'rgba(245,158,11,0.08)' : 'rgba(16,185,129,0.08)', color: totalAlertsCount > 0 ? '#fcd34d' : '#86efac', fontSize: 11, lineHeight: 1.5 }}>
+          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: `1px solid ${totalAlertsCount > 0 ? 'rgba(245,158,11,0.24)' : 'rgba(16,185,129,0.24)'}`, background: totalAlertsCount > 0 ? 'rgba(245,158,11,0.08)' : 'rgba(16,185,129,0.08)', color: totalAlertsCount > 0 ? 'var(--tone-amber)' : 'var(--tone-green)', fontSize: 11, lineHeight: 1.5 }}>
             {totalAlertsCount > 0
               ? `Masih ada ${totalAlertsCount.toLocaleString('id-ID')} order yang deduction ledger-nya belum sama dengan target final. Breakdown kartu di atas mengikuti halaman queue aktif${alertsHasMore ? ' karena backlog lebih besar dari satu halaman' : ''}.`
               : 'Tidak ada mismatch deduction yang terdeteksi untuk tanggal ini. Jalur deduction dan ledger saat ini konsisten.'}
@@ -3923,13 +3925,13 @@ function DailySummaryTab({
         )}
 
         {!!bulkRepairError && (
-          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.08)', color: '#fca5a5', fontSize: 11 }}>
+          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.25)', background: 'rgba(239,68,68,0.08)', color: 'var(--tone-red)', fontSize: 11 }}>
             {bulkRepairError}
           </div>
         )}
 
         {bulkRepairResult && (
-          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(96,165,250,0.08)', color: '#bfdbfe', fontSize: 11, lineHeight: 1.5 }}>
+          <div style={{ marginTop: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(96,165,250,0.08)', color: 'var(--tone-blue)', fontSize: 11, lineHeight: 1.5 }}>
             {`Repair ${fullDateID(bulkRepairResult.date)} selesai. Dicek ${bulkRepairResult.checked.toLocaleString('id-ID')} order, menulis ${bulkRepairResult.deducted.toLocaleString('id-ID')} deduction baru, membuat ${bulkRepairResult.reversed.toLocaleString('id-ID')} reversal, dan melewati ${bulkRepairResult.skipped.toLocaleString('id-ID')} item yang masih butuh mapping/data order.`}
           </div>
         )}
@@ -3939,7 +3941,7 @@ function DailySummaryTab({
       <div style={{ marginTop: 20, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: alertsLoaded ? 10 : 0 }}>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 700, color: '#f59e0b' }}>Order Belum Deduct</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--tone-amber)' }}>Order Belum Deduct</div>
             <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 2 }}>
               Queue ini dimuat per halaman agar tetap stabil saat shipment harian ribuan.
             </div>
@@ -3978,7 +3980,7 @@ function DailySummaryTab({
         </div>
 
         {!!alertsError && (
-          <div style={{ marginTop: 10, fontSize: 11, color: '#fca5a5' }}>{alertsError}</div>
+          <div style={{ marginTop: 10, fontSize: 11, color: 'var(--tone-red)' }}>{alertsError}</div>
         )}
 
         {alertsLoaded && !alertsLoading && alerts.length === 0 && !alertsError && (
@@ -4002,8 +4004,8 @@ function DailySummaryTab({
                   const problemColors = {
                     no_business_mapping: { bg: 'var(--badge-red-bg)', color: 'var(--red)', label: 'No Mapping' },
                     no_product_mapping: { bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)', label: 'Produk?' },
-                    no_order_lines: { bg: 'rgba(148,163,184,0.18)', color: '#94a3b8', label: 'No Lines' },
-                    unknown: { bg: 'var(--accent-subtle)', color: '#818cf8', label: 'Belum Sync' },
+                    no_order_lines: { bg: 'rgba(148,163,184,0.18)', color: 'var(--dim)', label: 'No Lines' },
+                    unknown: { bg: 'var(--accent-subtle)', color: 'var(--tone-indigo)', label: 'Belum Sync' },
                   };
                   const pc = problemColors[a.problem] || problemColors.unknown;
                   const canSyncThisOrder = a.problem === 'unknown' && can('wh:mapping_sync');
@@ -4015,7 +4017,7 @@ function DailySummaryTab({
                         {a.product_lines.map(p => `${p.product_name} x${p.quantity}`).join(', ')}
                       </td>
                       <td style={{ padding: '6px 10px' }}>
-                        <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: pc.bg, color: pc.color }}>{pc.label}</span>
+                        <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: pc.bg, color: toneText(pc.color) }}>{pc.label}</span>
                         <div style={{ fontSize: 10, color: 'var(--dim)', marginTop: 2 }}>{a.problem_detail}</div>
                       </td>
                       <td style={{ padding: '6px 10px' }}>
@@ -4074,7 +4076,7 @@ function DailySummaryTab({
       {/* ── Deduction Summary (grouped by entity blocks) ── */}
       <div style={{ marginTop: 20 }}>
         {!showOperationalMovementSummary && (
-          <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(96,165,250,0.08)', color: '#bfdbfe', fontSize: 11, lineHeight: 1.55 }}>
+          <div style={{ marginBottom: 10, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(96,165,250,0.22)', background: 'rgba(96,165,250,0.08)', color: 'var(--tone-blue)', fontSize: 11, lineHeight: 1.55 }}>
             Untuk {isGoLiveDate ? 'hari go-live ini' : 'periode pra-go-live'}, yang ditampilkan di bawah hanya deduction shipment `OUT` per tanggal kirim. Koreksi sistem bertipe `Masuk` tidak dimasukkan ke ringkasan ini.
           </div>
         )}
@@ -4095,7 +4097,7 @@ function DailySummaryTab({
           <div style={{ marginTop: 10, fontSize: 12, color: 'var(--dim)' }}>Memuat deduction summary...</div>
         )}
         {showDeductLog && !!deductLogError && (
-          <div style={{ marginTop: 10, fontSize: 12, color: '#fca5a5' }}>{deductLogError}</div>
+          <div style={{ marginTop: 10, fontSize: 12, color: 'var(--tone-red)' }}>{deductLogError}</div>
         )}
         {showDeductLog && deductLogLoaded && deductLog.length > 0 && (() => {
           // Group by entity
@@ -4131,7 +4133,7 @@ function DailySummaryTab({
                                 padding: '5px 10px',
                                 fontSize: 11,
                                 fontWeight: 600,
-                                color: deductionLabelsLookConsistent(d.scalev_product, d.warehouse_product) ? 'var(--text)' : '#f59e0b'
+                                color: deductionLabelsLookConsistent(d.scalev_product, d.warehouse_product) ? 'var(--text)' : 'var(--tone-amber)'
                               }}>{d.warehouse_product}</td>
                               <td style={{ padding: '5px 10px', fontFamily: 'monospace', fontSize: 10 }}>{d.business_codes}</td>
                               <td style={{ padding: '5px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>{d.total_qty.toLocaleString('id-ID')}</td>
@@ -4506,7 +4508,7 @@ function ProductAuditTab({ warehouseGoLive }: { warehouseGoLive: typeof DEFAULT_
             padding: '4px 12px',
             borderRadius: 6,
             border: `1px solid ${movementFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`,
-            background: movementFilter === 'all' ? 'var(--accent)' : 'transparent',
+            background: movementFilter === 'all' ? 'var(--accent-solid)' : 'transparent',
             color: movementFilter === 'all' ? '#fff' : 'var(--dim)',
             fontSize: 11,
             cursor: 'pointer',
@@ -4523,8 +4525,8 @@ function ProductAuditTab({ warehouseGoLive }: { warehouseGoLive: typeof DEFAULT_
               padding: '4px 12px',
               borderRadius: 6,
               border: `1px solid ${movementFilter === key ? cfg.color : 'var(--border)'}`,
-              background: movementFilter === key ? `${cfg.color}20` : 'transparent',
-              color: movementFilter === key ? cfg.color : 'var(--dim)',
+              background: movementFilter === key ? `color-mix(in srgb, ${cfg.color} 12%, transparent)` : 'transparent',
+              color: toneText(movementFilter === key ? cfg.color : 'var(--dim)'),
               fontSize: 11,
               cursor: 'pointer',
               fontWeight: 600,
@@ -4581,7 +4583,7 @@ function ProductAuditTab({ warehouseGoLive }: { warehouseGoLive: typeof DEFAULT_
           <div style={{ flex: 1, minWidth: 260 }}>
             <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{selectedProduct.name}</div>
             <div style={{ marginTop: 4, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${CATEGORY_COLORS[selectedProduct.category] || '#94a3b8'}20`, color: CATEGORY_COLORS[selectedProduct.category] || '#94a3b8' }}>
+              <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `color-mix(in srgb, ${CATEGORY_COLORS[selectedProduct.category] || '#94a3b8'} 12%, transparent)`, color: toneText(CATEGORY_COLORS[selectedProduct.category] || 'var(--dim)') }}>
                 {selectedProduct.category}
               </span>
               <span style={{ fontSize: 11, color: 'var(--dim)' }}>{locationLabel}</span>
@@ -4606,7 +4608,7 @@ function ProductAuditTab({ warehouseGoLive }: { warehouseGoLive: typeof DEFAULT_
           borderRadius: 12,
           border: '1px solid #ef444440',
           background: 'rgba(127, 29, 29, 0.16)',
-          color: '#fecaca',
+          color: 'var(--tone-red)',
           fontSize: 12,
           lineHeight: 1.55,
         }}>
@@ -4624,7 +4626,7 @@ function ProductAuditTab({ warehouseGoLive }: { warehouseGoLive: typeof DEFAULT_
           borderRadius: 12,
           border: '1px solid rgba(245, 158, 11, 0.25)',
           background: 'rgba(120, 53, 15, 0.18)',
-          color: '#fcd34d',
+          color: 'var(--tone-amber)',
           fontSize: 12,
           lineHeight: 1.55,
         }}>
@@ -4648,7 +4650,7 @@ function ProductAuditTab({ warehouseGoLive }: { warehouseGoLive: typeof DEFAULT_
       )}
 
       {!!historyError && (
-        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid #ef444440', background: 'var(--card)', color: '#fca5a5', fontSize: 12 }}>
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid #ef444440', background: 'var(--card)', color: 'var(--tone-red)', fontSize: 12 }}>
           {historyError}
         </div>
       )}
@@ -4703,11 +4705,11 @@ function ProductAuditTab({ warehouseGoLive }: { warehouseGoLive: typeof DEFAULT_
                     {fmtDateTimeDetailed(row.created_at)}
                   </td>
                   <td style={{ padding: '6px 10px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${moveCfg.color}20`, color: moveCfg.color }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `color-mix(in srgb, ${moveCfg.color} 12%, transparent)`, color: toneText(moveCfg.color) }}>
                       {moveCfg.label}
                     </span>
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: qty > 0 ? 'var(--green)' : qty < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: qty > 0 ? 'var(--green)' : qty < 0 ? 'var(--tone-orange)' : 'var(--text-muted)' }}>
                     {qty > 0 ? '+' : ''}{qty.toLocaleString('id-ID')}
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, color: balance < 0 ? 'var(--red)' : 'var(--text)' }}>
@@ -4831,7 +4833,7 @@ function LedgerTab({
           onClick={() => setTypeFilter('all')}
           style={{
             padding: '4px 12px', borderRadius: 6, border: `1px solid ${typeFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`,
-            background: typeFilter === 'all' ? 'var(--accent)' : 'transparent',
+            background: typeFilter === 'all' ? 'var(--accent-solid)' : 'transparent',
             color: typeFilter === 'all' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600,
           }}
         >
@@ -4843,8 +4845,8 @@ function LedgerTab({
             onClick={() => setTypeFilter(typeFilter === key ? 'all' : key)}
             style={{
               padding: '4px 12px', borderRadius: 6, border: `1px solid ${typeFilter === key ? cfg.color : 'var(--border)'}`,
-              background: typeFilter === key ? `${cfg.color}20` : 'transparent',
-              color: typeFilter === key ? cfg.color : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600,
+              background: typeFilter === key ? `color-mix(in srgb, ${cfg.color} 12%, transparent)` : 'transparent',
+              color: toneText(typeFilter === key ? cfg.color : 'var(--dim)'), fontSize: 11, cursor: 'pointer', fontWeight: 600,
             }}
           >
             {cfg.label} ({typeCounts[key] || 0})
@@ -4890,11 +4892,11 @@ function LedgerTab({
                     {r.warehouse_products?.name || '-'}
                   </td>
                   <td style={{ padding: '6px 10px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${moveCfg.color}20`, color: moveCfg.color }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `color-mix(in srgb, ${moveCfg.color} 12%, transparent)`, color: toneText(moveCfg.color) }}>
                       {moveCfg.label}
                     </span>
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: qty > 0 ? 'var(--green)' : qty < 0 ? '#f97316' : 'var(--text-muted)' }}>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: qty > 0 ? 'var(--green)' : qty < 0 ? 'var(--tone-orange)' : 'var(--text-muted)' }}>
                     {qty > 0 ? '+' : ''}{qty.toLocaleString('id-ID')}
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>
@@ -4963,10 +4965,10 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
   }, [data, searchQuery, sortCol, sortAsc]);
 
   const statusConfig: Record<string, { bg: string; color: string; label: string }> = {
-    expired: { bg: 'var(--badge-red-bg)', color: '#fca5a5', label: 'Expired' },
-    critical: { bg: 'var(--badge-yellow-bg)', color: '#fcd34d', label: 'Critical' },
-    warning: { bg: '#713f12', color: '#fde68a', label: 'Warning' },
-    safe: { bg: 'var(--badge-green-bg)', color: '#6ee7b7', label: 'Aman' },
+    expired: { bg: 'var(--badge-red-bg)', color: 'var(--tone-red)', label: 'Expired' },
+    critical: { bg: 'var(--badge-yellow-bg)', color: 'var(--tone-amber)', label: 'Critical' },
+    warning: { bg: '#713f12', color: 'var(--tone-amber)', label: 'Warning' },
+    safe: { bg: 'var(--badge-green-bg)', color: 'var(--tone-emerald)', label: 'Aman' },
     no_expiry: { bg: 'var(--bg-deep)', color: 'var(--text-secondary)', label: 'No Expiry' },
   };
 
@@ -5023,7 +5025,7 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
                 <tr key={r.batch_id} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                   <td style={{ padding: '6px 10px', color: 'var(--text)', fontWeight: 500, whiteSpace: 'nowrap' }}>{r.product_name}</td>
                   <td style={{ padding: '6px 10px' }}>
-                    <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `${CATEGORY_COLORS[r.category]}20` : 'var(--bg-deep)', color: CATEGORY_COLORS[r.category] || 'var(--text-secondary)' }}>{r.category}</span>
+                    <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: CATEGORY_COLORS[r.category] ? `color-mix(in srgb, ${CATEGORY_COLORS[r.category]} 12%, transparent)` : 'var(--bg-deep)', color: toneText(CATEGORY_COLORS[r.category] || 'var(--text-secondary)') }}>{r.category}</span>
                   </td>
                   <td style={{ padding: '6px 10px', color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: 11 }}>{r.batch_code}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: 'var(--text)' }}>
@@ -5035,11 +5037,11 @@ function BatchTab({ data, searchQuery, setSearchQuery }: {
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>
                     {r.expired_date ? fullDateID(r.expired_date) : '-'}
                   </td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: cfg.color }}>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: toneText(cfg.color) }}>
                     {r.days_remaining != null ? r.days_remaining : '-'}
                   </td>
                   <td style={{ padding: '6px 10px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: cfg.bg, color: cfg.color }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: cfg.bg, color: toneText(cfg.color) }}>
                       {cfg.label}
                     </span>
                   </td>
@@ -5269,7 +5271,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
             {can('wh:opname_manage') && <button onClick={handleSaveCounts} disabled={saving} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>
               {saving ? 'Menyimpan...' : 'Simpan Draft'}
             </button>}
-            {can('wh:opname_manage') && <button onClick={handleSubmitReview} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+            {can('wh:opname_manage') && <button onClick={handleSubmitReview} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: 'none', background: 'var(--accent-solid)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
               Selesai Hitung →
             </button>}
           </div>
@@ -5314,7 +5316,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
               <tr key={item.id} style={{ borderBottom: '1px solid var(--border)', opacity: isSkipped ? 0.7 : 1, background: isSkipped ? 'rgba(148,163,184,0.08)' : 'transparent' }}>
                 <td style={{ padding: '6px 8px', fontWeight: 500 }}>{item.product_name}</td>
                 <td style={{ padding: '6px 8px' }}>
-                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: CATEGORY_COLORS[item.category] || 'var(--text-secondary)' }}>{item.category}</span>
+                  <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: toneText(CATEGORY_COLORS[item.category] || 'var(--text-secondary)') }}>{item.category}</span>
                 </td>
                 <td style={{ padding: '4px 8px', textAlign: 'center' }}>
                   <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--dim)', cursor: 'pointer' }}>
@@ -5359,7 +5361,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
             {can('wh:opname_manage') && <button onClick={handleRevertCounting} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer' }}>
               ← Kembali ke Hitung
             </button>}
-            {can('wh:opname_approve') && <button onClick={handleApprove} disabled={approving} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: 'none', background: 'var(--green)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
+            {can('wh:opname_approve') && <button onClick={handleApprove} disabled={approving} style={{ padding: '6px 14px', fontSize: 12, borderRadius: 6, border: 'none', background: 'var(--green-solid)', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>
               {approving ? 'Memproses...' : 'Approve & Adjust'}
             </button>}
           </div>
@@ -5379,7 +5381,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
                   <tr key={item.id} style={{ borderBottom: '1px solid var(--border)', background: 'rgba(148,163,184,0.08)' }}>
                     <td style={{ padding: '6px 8px', fontWeight: 500 }}>{item.product_name}</td>
                     <td style={{ padding: '6px 8px' }}>
-                      <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: CATEGORY_COLORS[item.category] || 'var(--text-secondary)' }}>{item.category}</span>
+                      <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: toneText(CATEGORY_COLORS[item.category] || 'var(--text-secondary)') }}>{item.category}</span>
                     </td>
                     <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--dim)' }}>{Number(item.sebelum_so).toLocaleString('id-ID')}</td>
                     <td style={{ padding: '6px 8px', textAlign: 'right', color: 'var(--dim)', fontWeight: 600 }}>Dilewati</td>
@@ -5392,7 +5394,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
                 <tr key={item.id} style={{ borderBottom: '1px solid var(--border)', background: sel !== 0 ? (sel > 0 ? 'rgba(34,197,94,0.05)' : 'rgba(239,68,68,0.05)') : 'transparent' }}>
                   <td style={{ padding: '6px 8px', fontWeight: 500 }}>{item.product_name}</td>
                   <td style={{ padding: '6px 8px' }}>
-                    <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: CATEGORY_COLORS[item.category] || 'var(--text-secondary)' }}>{item.category}</span>
+                    <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: toneText(CATEGORY_COLORS[item.category] || 'var(--text-secondary)') }}>{item.category}</span>
                   </td>
                   <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{Number(item.sebelum_so).toLocaleString('id-ID')}</td>
                   <td style={{ padding: '6px 8px', textAlign: 'right', fontFamily: 'monospace' }}>{item.sesudah_so != null ? Number(item.sesudah_so).toLocaleString('id-ID') : '—'}</td>
@@ -5440,7 +5442,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
               <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4 }}>Label</div>
               <input value={newLabel} onChange={e => setNewLabel(e.target.value)} placeholder="cth: SO April Minggu 1" style={{ width: '100%', padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }} />
             </div>
-            <button onClick={handleCreate} disabled={creating || !newLabel.trim()} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: 'var(--accent)', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: 12, opacity: creating || !newLabel.trim() ? 0.5 : 1 }}>
+            <button onClick={handleCreate} disabled={creating || !newLabel.trim()} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: 'var(--accent-solid)', color: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: 12, opacity: creating || !newLabel.trim() ? 0.5 : 1 }}>
               {creating ? 'Membuat...' : 'Mulai SO'}
             </button>
             <button onClick={() => setShowCreateForm(false)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', cursor: 'pointer', fontSize: 12 }}>Batal</button>
@@ -5470,7 +5472,7 @@ function StockOpnameTab({ soData, soSummary, expandedSO, setExpandedSO, session,
                   <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                     <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{so.item_count} item</span>
                     {hasSelisih && (
-                      <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-red-bg)', color: '#fca5a5' }}>{so.items_with_selisih} selisih</span>
+                      <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: 'var(--badge-red-bg)', color: 'var(--tone-red)' }}>{so.items_with_selisih} selisih</span>
                     )}
                     <span style={{ color: 'var(--dim)', fontSize: 14, transition: 'transform 0.2s', transform: isExpanded ? 'rotate(180deg)' : 'rotate(0)' }}>&#9660;</span>
                   </div>
@@ -5533,10 +5535,10 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
   }, [allData]);
 
   const statusConfig: Record<string, { bg: string; color: string; label: string; border: string }> = {
-    expired: { bg: 'var(--badge-red-bg)', color: '#fca5a5', label: 'Expired', border: '#991b1b' },
-    critical: { bg: 'var(--badge-yellow-bg)', color: '#fcd34d', label: 'Critical (<30 hari)', border: '#92400e' },
-    warning: { bg: '#713f12', color: '#fde68a', label: 'Warning (<90 hari)', border: '#854d0e' },
-    safe: { bg: 'var(--badge-green-bg)', color: '#6ee7b7', label: 'Aman', border: '#065f46' },
+    expired: { bg: 'var(--badge-red-bg)', color: 'var(--tone-red)', label: 'Expired', border: '#991b1b' },
+    critical: { bg: 'var(--badge-yellow-bg)', color: 'var(--tone-amber)', label: 'Critical (<30 hari)', border: '#92400e' },
+    warning: { bg: '#713f12', color: 'var(--tone-amber)', label: 'Warning (<90 hari)', border: '#854d0e' },
+    safe: { bg: 'var(--badge-green-bg)', color: 'var(--tone-emerald)', label: 'Aman', border: '#065f46' },
   };
 
   return (
@@ -5551,7 +5553,7 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
               opacity: expiryFilter !== 'all' && expiryFilter !== key ? 0.5 : 1, transition: 'opacity 0.2s',
             }}>
             <div style={{ fontSize: 11, color: 'var(--dim)', marginBottom: 4, fontWeight: 600, textTransform: 'uppercase', textAlign: 'left' }}>{cfg.label}</div>
-            <div style={{ fontSize: 24, fontWeight: 700, color: cfg.color, fontFamily: 'monospace', textAlign: 'left' }}>{statusCounts[key as keyof typeof statusCounts]}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: toneText(cfg.color), fontFamily: 'monospace', textAlign: 'left' }}>{statusCounts[key as keyof typeof statusCounts]}</div>
           </button>
         ))}
       </div>
@@ -5582,11 +5584,11 @@ function ExpiredTab({ data, expiryFilter, setExpiryFilter, allData }: {
                     <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--bg-deep)', color: 'var(--text-secondary)' }}>{r.category}</span>
                   </td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{fullDateID(r.expired_date)}</td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: cfg.color }}>{r.days_remaining}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: toneText(cfg.color) }}>{r.days_remaining}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{r.last_day_stock.toLocaleString('id-ID')}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--text)' }}>{fmtRupiah(r.sub_total_value)}</td>
                   <td style={{ padding: '6px 10px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: cfg.bg, color: cfg.color }}>{cfg.label}</span>
+                    <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: cfg.bg, color: toneText(cfg.color) }}>{cfg.label}</span>
                   </td>
                 </tr>
               );

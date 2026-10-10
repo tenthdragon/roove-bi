@@ -11,6 +11,7 @@ import {
   calculateAttributedRevenueAfterAdminFee,
   resolveShopeeAdminFeeRate,
 } from '@/lib/shopee-campaign-metrics';
+import { toneText } from '@/lib/theme-tones';
 
 const C = {
   bg: 'var(--bg)',
@@ -118,7 +119,7 @@ function Pagination({ page, totalPages, onChange }: {
             <button
               type="button"
               onClick={() => onChange(pageNumber)}
-              style={{ border: `1px solid ${pageNumber === page ? '#ee4d2d' : C.bdr}`, background: pageNumber === page ? 'rgba(238, 77, 45, 0.10)' : 'transparent', color: pageNumber === page ? '#ee4d2d' : C.txt, borderRadius: 6, minWidth: 28, padding: '5px 7px', fontSize: 10, fontWeight: pageNumber === page ? 800 : 500, cursor: 'pointer' }}
+              style={{ border: `1px solid ${pageNumber === page ? '#ee4d2d' : C.bdr}`, background: pageNumber === page ? 'rgba(238, 77, 45, 0.10)' : 'transparent', color: toneText(pageNumber === page ? 'var(--tone-shopee)' : C.txt), borderRadius: 6, minWidth: 28, padding: '5px 7px', fontSize: 10, fontWeight: pageNumber === page ? 800 : 500, cursor: 'pointer' }}
             >
               {pageNumber}
             </button>
@@ -341,7 +342,7 @@ function MetricCard({ label, value, sub, color = C.txt, title, preview = false }
           <span style={{ borderRadius: 999, padding: '2px 6px', background: 'var(--badge-yellow-bg)', color: 'var(--yellow)', fontSize: 7, fontWeight: 800, whiteSpace: 'nowrap' }}>Preview</span>
         )}
       </div>
-      <div style={{ marginTop: 7, color, fontFamily: 'monospace', fontSize: 20, fontWeight: 800, overflowWrap: 'anywhere' }}>{value}</div>
+      <div style={{ marginTop: 7, color: toneText(color), fontFamily: 'monospace', fontSize: 20, fontWeight: 800, overflowWrap: 'anywhere' }}>{value}</div>
       {sub && (
         <div style={{ marginTop: 5, color: C.dim, fontSize: 10, lineHeight: 1.5 }}>{sub}</div>
       )}
@@ -1294,8 +1295,8 @@ export default function ShopeeDetailsPage() {
                   <tr key={row.key} style={{ borderBottom: `1px solid ${C.bdr}` }}>
                     <td style={{ padding: '11px 12px', maxWidth: 300 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 5 }}>
-                        <span style={{ borderRadius: 999, padding: '2px 6px', background: `${row.typeColor}18`, color: row.typeColor, fontSize: 8, fontWeight: 800 }}>{row.type}</span>
-                        <span title={row.statusTitle} style={{ color: row.statusColor, fontSize: 8, fontWeight: 700 }}>● {row.status}</span>
+                        <span style={{ borderRadius: 999, padding: '2px 6px', background: `color-mix(in srgb, ${row.typeColor} 10%, transparent)`, color: toneText(row.typeColor), fontSize: 8, fontWeight: 800 }}>{row.type}</span>
+                        <span title={row.statusTitle} style={{ color: toneText(row.statusColor), fontSize: 8, fontWeight: 700 }}>● {row.status}</span>
                         {row.isPreview && (
                           <span style={{ color: 'var(--yellow)', fontSize: 8, fontWeight: 800 }}>Preview</span>
                         )}

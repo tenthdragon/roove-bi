@@ -410,10 +410,10 @@ export default function BusinessSettingsPage() {
   if (loadError) {
     return (
       <div className="fade-in">
-        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: 'var(--tone-red)' }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Business Settings Gagal Dimuat</div>
           <div style={{ fontSize: 13, marginBottom: 12 }}>{loadError}</div>
-          <button onClick={loadAll} style={{ background: 'transparent', color: '#fecaca', border: '1px solid #991b1b', borderRadius: 8, padding: '8px 14px', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
+          <button onClick={loadAll} style={{ background: 'transparent', color: 'var(--tone-red)', border: '1px solid #991b1b', borderRadius: 8, padding: '8px 14px', fontWeight: 600, fontSize: 12, cursor: 'pointer' }}>
             Coba Lagi
           </button>
         </div>
@@ -432,7 +432,7 @@ export default function BusinessSettingsPage() {
             Satu tempat untuk identitas business, stores, external aliases, routing fulfillment, dan origin warehouse.
           </div>
         </div>
-        <button onClick={openAddForm} style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+        <button onClick={openAddForm} style={{ background: 'var(--accent-solid)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
           + Tambah Business
         </button>
       </div>
@@ -482,7 +482,7 @@ export default function BusinessSettingsPage() {
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={handleSave} disabled={saving}
-              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontWeight: 600, fontSize: 13, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.6 : 1 }}>
+              style={{ background: 'var(--accent-solid)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontWeight: 600, fontSize: 13, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.6 : 1 }}>
               {saving ? 'Menyimpan...' : form.id ? 'Update' : 'Simpan'}
             </button>
             <button onClick={() => { setShowForm(false); setForm(EMPTY_FORM); }}
@@ -522,7 +522,7 @@ export default function BusinessSettingsPage() {
                       {biz.is_active ? 'Active' : 'Inactive'}
                     </span>
                     {/* PKP */}
-                    <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--accent-subtle)', color: '#818cf8' }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'var(--accent-subtle)', color: 'var(--tone-indigo)' }}>
                       {biz.tax_rate_name === 'NONE' ? 'Non-PKP' : 'PKP'}
                     </span>
                     {/* API */}
@@ -592,7 +592,7 @@ export default function BusinessSettingsPage() {
                           </button>
                           {confirmDelete === biz.id ? (
                             <>
-                              <button onClick={() => handleDelete(biz.id)} style={{ padding: '4px 10px', borderRadius: 6, border: 'none', background: 'var(--red)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>Yakin Hapus</button>
+                              <button onClick={() => handleDelete(biz.id)} style={{ padding: '4px 10px', borderRadius: 6, border: 'none', background: 'var(--red-solid)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>Yakin Hapus</button>
                               <button onClick={() => setConfirmDelete(null)} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 11, cursor: 'pointer' }}>Batal</button>
                             </>
                           ) : (
@@ -624,7 +624,7 @@ export default function BusinessSettingsPage() {
                       {detailSection === 'fulfillment' && (
                       <div style={{ background: 'var(--bg)', borderRadius: 8, padding: 14 }}>
                         <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--dim)', marginBottom: 10, textTransform: 'uppercase' }}>Allowed Warehouse &amp; Fallback</div>
-                        <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(96,165,250,0.24)', color: '#bfdbfe', fontSize: 11, lineHeight: 1.6 }}>
+                        <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: 'rgba(59,130,246,0.08)', border: '1px solid rgba(96,165,250,0.24)', color: 'var(--tone-blue)', fontSize: 11, lineHeight: 1.6 }}>
                           Dipakai sebagai guardrail dan fallback ketika konteks owner atau origin belum lengkap. Mapping origin live dikelola pada bagian External Origin Labels di bawah.
                         </div>
                         <div style={{ fontSize: 12, color: 'var(--dim)', lineHeight: 1.6, marginBottom: 10 }}>
@@ -669,7 +669,7 @@ export default function BusinessSettingsPage() {
                                       fontWeight: 700,
                                       cursor: mapping.is_primary ? 'default' : 'pointer',
                                       background: mapping.is_primary ? 'rgba(37,99,235,0.18)' : 'var(--bg)',
-                                      color: mapping.is_primary ? '#93c5fd' : 'var(--dim)',
+                                      color: mapping.is_primary ? 'var(--tone-blue)' : 'var(--dim)',
                                       border: `1px solid ${mapping.is_primary ? 'rgba(96,165,250,0.45)' : 'var(--border)'}`,
                                     }}
                                   >
@@ -700,7 +700,7 @@ export default function BusinessSettingsPage() {
                             Utama sekarang: <span style={{ color: 'var(--text)', fontWeight: 600 }}>{primaryMapping ? `${primaryMapping.deduct_entity} • ${primaryMapping.deduct_warehouse}` : 'Belum ada'}</span>
                           </div>
                           <button onClick={() => handleCreateMapping(biz.business_code)}
-                            style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--accent)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+                            style={{ padding: '5px 12px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--accent-solid)', color: '#fff', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
                             + Tambah Gudang
                           </button>
                         </div>

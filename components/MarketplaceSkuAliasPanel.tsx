@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMarketplaceIntakeSources } from '@/lib/use-marketplace-intake-sources';
+import { toneText } from '@/lib/theme-tones';
 
 const panelStyle = {
   background: 'var(--card)',
@@ -50,7 +51,7 @@ function SummaryCard({ label, value, helper, tone = 'default' }) {
       <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
         {label}
       </div>
-      <div style={{ marginTop: 6, fontSize: 22, fontWeight: 800, color }}>
+      <div style={{ marginTop: 6, fontSize: 22, fontWeight: 800, color: toneText(color) }}>
         {fmtNumber(value)}
       </div>
       {helper ? <div style={{ marginTop: 4, fontSize: 12, color: 'var(--dim)' }}>{helper}</div> : null}
@@ -62,9 +63,9 @@ function ActionButton({ children, onClick, tone = 'default', disabled = false, t
   const palette = tone === 'primary'
     ? { bg: '#2563eb', color: '#fff', border: '#2563eb' }
     : tone === 'warn'
-      ? { bg: 'rgba(245,158,11,0.12)', color: '#fcd34d', border: 'rgba(245,158,11,0.24)' }
+      ? { bg: 'rgba(245,158,11,0.12)', color: 'var(--tone-amber)', border: 'rgba(245,158,11,0.24)' }
       : tone === 'danger'
-        ? { bg: 'rgba(239,68,68,0.12)', color: '#fca5a5', border: 'rgba(239,68,68,0.24)' }
+        ? { bg: 'rgba(239,68,68,0.12)', color: 'var(--tone-red)', border: 'rgba(239,68,68,0.24)' }
         : { bg: 'var(--bg)', color: 'var(--text-secondary)', border: 'var(--border)' };
 
   return (
@@ -77,7 +78,7 @@ function ActionButton({ children, onClick, tone = 'default', disabled = false, t
         borderRadius: 8,
         border: `1px solid ${palette.border}`,
         background: disabled ? 'var(--bg)' : palette.bg,
-        color: disabled ? 'var(--dim)' : palette.color,
+        color: toneText(disabled ? 'var(--dim)' : palette.color),
         fontSize: 12,
         fontWeight: 700,
         cursor: disabled ? 'not-allowed' : 'pointer',
@@ -100,7 +101,7 @@ function StatusPill({ active }) {
         fontSize: 11,
         fontWeight: 700,
         background: active ? 'rgba(34,197,94,0.12)' : 'rgba(148,163,184,0.12)',
-        color: active ? '#22c55e' : 'var(--dim)',
+        color: active ? 'var(--tone-green)' : 'var(--dim)',
         border: `1px solid ${active ? 'rgba(34,197,94,0.24)' : 'var(--border)'}`,
       }}
     >
@@ -555,7 +556,7 @@ export default function MarketplaceSkuAliasPanel() {
                   borderRadius: 999,
                   border: `1px solid ${resolverView === 'sku' ? 'rgba(37,99,235,0.32)' : 'var(--border)'}`,
                   background: resolverView === 'sku' ? 'rgba(37,99,235,0.12)' : 'var(--bg)',
-                  color: resolverView === 'sku' ? '#bfdbfe' : 'var(--text-secondary)',
+                  color: resolverView === 'sku' ? 'var(--tone-blue)' : 'var(--text-secondary)',
                   fontSize: 12,
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -571,7 +572,7 @@ export default function MarketplaceSkuAliasPanel() {
                   borderRadius: 999,
                   border: `1px solid ${resolverView === 'entity_store' ? 'rgba(34,197,94,0.32)' : 'var(--border)'}`,
                   background: resolverView === 'entity_store' ? 'rgba(34,197,94,0.12)' : 'var(--bg)',
-                  color: resolverView === 'entity_store' ? '#86efac' : 'var(--text-secondary)',
+                  color: resolverView === 'entity_store' ? 'var(--tone-green)' : 'var(--text-secondary)',
                   fontSize: 12,
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -652,12 +653,12 @@ export default function MarketplaceSkuAliasPanel() {
         </div>
 
         {sourcesError || error ? (
-          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#fca5a5', fontSize: 13 }}>
+          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: 'var(--tone-red)', fontSize: 13 }}>
             {sourcesError || error}
           </div>
         ) : null}
         {message ? (
-          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.08)', color: '#86efac', fontSize: 13 }}>
+          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.08)', color: 'var(--tone-green)', fontSize: 13 }}>
             {message}
           </div>
         ) : null}

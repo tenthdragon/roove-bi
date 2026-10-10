@@ -10,6 +10,7 @@ import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import ChannelSlaSection from '@/components/ChannelSlaSection';
 import ShipmentStatusSection from '@/components/ShipmentStatusSection';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import { toneText } from '@/lib/theme-tones';
 
 function formatIsoDate(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -657,7 +658,7 @@ export default function ChannelsPage() {
   }, [prevRevenue]);
 
   const DeltaLine = ({ value, suffix, higherIsBetter, label: lbl, compact = false }: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string; compact?: boolean }) => (
-    <div style={{ fontSize: compact ? 9 : 10, marginTop: compact ? 2 : 4, color: value === 0 ? 'var(--dim)' : ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
+    <div style={{ fontSize: compact ? 9 : 10, marginTop: compact ? 2 : 4, color: value === 0 ? 'var(--dim)' : ((value > 0) === (higherIsBetter !== false)) ? 'var(--delta-up)' : 'var(--delta-down)' }}>
       {value > 0 ? '▲' : value < 0 ? '▼' : '•'} {value > 0 ? '+' : ''}{value.toFixed(1)}{suffix || '%'}{lbl ? ` ${lbl}` : ` vs ${prevMonthLabel}`}
     </div>
   );
@@ -700,7 +701,7 @@ export default function ChannelsPage() {
     return (
       <div className="fade-in">
         <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Channel</h2>
-        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: 'var(--tone-red)' }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Data Sales Channel Gagal Dimuat</div>
           <div style={{ fontSize: 13 }}>{error}</div>
         </div>
@@ -712,7 +713,7 @@ export default function ChannelsPage() {
     return (
       <div className="fade-in">
         <h2 style={{ margin: '0 0 16px', fontSize: 18, fontWeight: 700 }}>Channel</h2>
-        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: 'var(--tone-red)' }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Filter Brand Gagal Dimuat</div>
           <div style={{ fontSize: 13 }}>{activeBrandsError}</div>
         </div>
@@ -736,7 +737,7 @@ export default function ChannelsPage() {
   return (
     <div className="fade-in">
       {shipmentError && (
-        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(146,64,14,0.45)', background: 'rgba(120,53,15,0.12)', color: '#fcd34d', fontSize: 12 }}>
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(146,64,14,0.45)', background: 'rgba(120,53,15,0.12)', color: 'var(--tone-amber)', fontSize: 12 }}>
           Data shipment sementara tidak tersedia. Data sales channel lainnya tetap ditampilkan.
         </div>
       )}
@@ -779,7 +780,7 @@ export default function ChannelsPage() {
 
       {/* Pre-Feb disclaimer */}
       {dateRange.from < '2026-02-01' && (
-        <div style={{ background: '#1e1b4b', border: '1px solid #3730a3', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 11, color: '#a5b4fc', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div style={{ background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.35)', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 11, color: 'var(--tone-indigo)', display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 16 }}>ℹ️</span>
           <span>Data sebelum Feb 2026 tidak termasuk biaya admin marketplace (MP Fee).</span>
         </div>
@@ -840,8 +841,8 @@ export default function ChannelsPage() {
                 }} style={{
                   padding: '4px 10px', fontSize: 11, fontWeight: 600, borderRadius: 6,
                   border: `1px solid ${isHidden ? 'var(--border)' : (CHANNEL_COLORS[ch] || 'var(--dim)')}`,
-                  background: isHidden ? 'transparent' : `${CHANNEL_COLORS[ch] || 'var(--dim)'}15`,
-                  color: isHidden ? 'var(--dim)' : (CHANNEL_COLORS[ch] || 'var(--text)'),
+                  background: isHidden ? 'transparent' : `color-mix(in srgb, ${CHANNEL_COLORS[ch] || 'var(--dim)'} 8%, transparent)`,
+                  color: toneText(isHidden ? 'var(--dim)' : (CHANNEL_COLORS[ch] || 'var(--text)')),
                   cursor: 'pointer', opacity: isHidden ? 0.5 : 1, textDecoration: isHidden ? 'line-through' : 'none',
                 }}>
                   {ch}
@@ -863,7 +864,7 @@ export default function ChannelsPage() {
               <tr style={{ borderBottom: '2px solid var(--border)' }}>
                 <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--dim)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', position: 'sticky', left: 0, background: 'var(--card)', zIndex: 1 }}>Date</th>
                 {visibleChannels.map(ch => (
-                  <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: CHANNEL_COLORS[ch] || 'var(--dim)' }}>{ch}</th>
+                  <th key={ch} style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600, fontSize: 10, textTransform: 'uppercase', color: toneText(CHANNEL_COLORS[ch] || 'var(--dim)') }}>{ch}</th>
                 ))}
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text)', fontWeight: 700, fontSize: 10, textTransform: 'uppercase' }}>Total</th>
               </tr>
@@ -905,13 +906,13 @@ export default function ChannelsPage() {
                   const prevChRev = prevRevenue?.byChannel[ch];
                   const chDelta = prevChRev && prevChRev > 0 ? ((chRevenue - prevChRev) / prevChRev) * 100 : null;
                   return (
-                    <td key={ch} style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: CHANNEL_COLORS[ch] || 'var(--text)' }}>
+                    <td key={ch} style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: toneText(CHANNEL_COLORS[ch] || 'var(--text)') }}>
                       {chRevenue > 0 ? (
                         <>
                           <div>{fmtRupiah(chRevenue)}</div>
                           {chOrders > 0 && <div style={{ fontSize: 10, fontStyle: 'italic', opacity: 0.7 }}>{chOrders.toLocaleString('id-ID')}</div>}
                           {chDelta !== null && (
-                            <div style={{ fontSize: 10, marginTop: 2, color: chDelta >= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                            <div style={{ fontSize: 10, marginTop: 2, color: chDelta >= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                               {chDelta >= 0 ? '▲' : '▼'} {chDelta >= 0 ? '+' : ''}{chDelta.toFixed(1)}%
                             </div>
                           )}
@@ -929,7 +930,7 @@ export default function ChannelsPage() {
                       <div>{fmtRupiah(grandRevenue)}</div>
                       <div style={{ fontSize: 10, color: 'var(--dim)', fontStyle: 'italic' }}>{grandOrders.toLocaleString('id-ID')}</div>
                       {revDelta !== null && (
-                        <div style={{ fontSize: 10, marginTop: 2, color: revDelta >= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                        <div style={{ fontSize: 10, marginTop: 2, color: revDelta >= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                           {revDelta >= 0 ? '▲' : '▼'} {revDelta >= 0 ? '+' : ''}{revDelta.toFixed(1)}% vs prev
                         </div>
                       )}
@@ -1000,27 +1001,27 @@ export default function ChannelsPage() {
                     {deltas.revenue && <DeltaLine {...deltas.revenue} compact={compact} />}
                   </td>
                   <td style={{ padding: cellPadding, textAlign: 'right', color: 'var(--dim)' }}>{c.pct.toFixed(1)}%</td>
-                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? '#059669' : 'var(--green)' }}>
+                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? 'var(--tone-emerald)' : 'var(--green)' }}>
                     <div>{fmtRupiah(c.cm1)}</div>
                     {deltas.cm1 && <DeltaLine {...deltas.cm1} compact={compact} />}
                   </td>
-                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? '#7c3aed' : '#8b5cf6' }}>
+                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? 'var(--tone-violet)' : 'var(--tone-violet)' }}>
                     {c.mpAdmin > 0 ? fmtRupiah(c.mpAdmin) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     {deltas.mpAdmin && <DeltaLine {...deltas.mpAdmin} compact={compact} />}
                   </td>
-                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: '#0ea5e9' }}>
+                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: 'var(--tone-sky)' }}>
                     {c.shippingCharge > 0 ? fmtRupiah(c.shippingCharge) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     {deltas.shippingCharge && <DeltaLine {...deltas.shippingCharge} compact={compact} />}
                   </td>
-                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? '#0891b2' : '#06b6d4' }}>
+                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? 'var(--tone-cyan)' : 'var(--tone-cyan)' }}>
                     <div>{fmtRupiah(c.cm2)}</div>
                     {deltas.cm2 && <DeltaLine {...deltas.cm2} compact={compact} />}
                   </td>
-                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? '#d97706' : 'var(--yellow)' }}>
+                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: compact ? 'var(--tone-amber)' : 'var(--yellow)' }}>
                     {c.adsCost > 0 ? fmtRupiah(c.adsCost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     {deltas.adsCost && <DeltaLine {...deltas.adsCost} compact={compact} />}
                   </td>
-                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: c.cm3 >= 0 ? (compact ? '#059669' : 'var(--green)') : (compact ? '#dc2626' : 'var(--red)') }}>
+                  <td style={{ padding: cellPadding, textAlign: 'right', fontFamily: 'monospace', fontSize: cellFontSize, color: c.cm3 >= 0 ? (compact ? 'var(--tone-emerald)' : 'var(--green)') : (compact ? 'var(--tone-red)' : 'var(--red)') }}>
                     <div>{fmtRupiah(c.cm3)}</div>
                     {deltas.cm3 && <DeltaLine {...deltas.cm3} compact={compact} />}
                   </td>
@@ -1077,15 +1078,15 @@ export default function ChannelsPage() {
                           <div>{fmtRupiah(svCM1)}</div>
                           {svDeltas.cm1 && <DeltaLine {...svDeltas.cm1} compact />}
                         </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#8b5cf6' }}>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--tone-violet)' }}>
                           {sv.mpAdmin > 0 ? fmtRupiah(sv.mpAdmin) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           {svDeltas.mpAdmin && <DeltaLine {...svDeltas.mpAdmin} compact />}
                         </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#0ea5e9' }}>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--tone-sky)' }}>
                           {sv.shippingCharge > 0 ? fmtRupiah(sv.shippingCharge) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                           {svDeltas.shippingCharge && <DeltaLine {...svDeltas.shippingCharge} compact />}
                         </td>
-                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#06b6d4' }}>
+                        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--tone-cyan)' }}>
                           <div>{fmtRupiah(svCM2)}</div>
                           {svDeltas.cm2 && <DeltaLine {...svDeltas.cm2} compact />}
                         </td>
@@ -1145,15 +1146,15 @@ export default function ChannelsPage() {
                 <div>{fmtRupiah(totalCM1)}</div>
                 {totalDeltas.cm1 && <DeltaLine {...totalDeltas.cm1} compact />}
               </td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--tone-violet)' }}>
                 <div>{fmtRupiah(totalMpAdmin)}</div>
                 {totalDeltas.mpAdmin && <DeltaLine {...totalDeltas.mpAdmin} compact />}
               </td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#0ea5e9' }}>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--tone-sky)' }}>
                 <div>{fmtRupiah(totalShippingCharges)}</div>
                 {totalDeltas.shippingCharge && <DeltaLine {...totalDeltas.shippingCharge} compact />}
               </td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#06b6d4' }}>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--tone-cyan)' }}>
                 <div>{fmtRupiah(totalCM2)}</div>
                 {totalDeltas.cm2 && <DeltaLine {...totalDeltas.cm2} compact />}
               </td>
@@ -1202,13 +1203,13 @@ export default function ChannelsPage() {
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--green)' }}>
                   {fmtRupiah(p.cm1)}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#8b5cf6' }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--tone-violet)' }}>
                   {p.mpAdmin > 0 ? fmtRupiah(p.mpAdmin) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#0ea5e9' }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--tone-sky)' }}>
                   {p.shippingCharge > 0 ? fmtRupiah(p.shippingCharge) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                 </td>
-                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#06b6d4' }}>
+                <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--tone-cyan)' }}>
                   {fmtRupiah(p.cm2)}
                 </td>
                 <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--yellow)' }}>
@@ -1232,9 +1233,9 @@ export default function ChannelsPage() {
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(totalRevenue)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 700 }}>100%</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--green)' }}>{fmtRupiah(totalCM1)}</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#8b5cf6' }}>{fmtRupiah(totalMpAdmin)}</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#0ea5e9' }}>{fmtRupiah(totalShippingCharges)}</td>
-              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#06b6d4' }}>{fmtRupiah(totalCM2)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--tone-violet)' }}>{fmtRupiah(totalMpAdmin)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--tone-sky)' }}>{fmtRupiah(totalShippingCharges)}</td>
+              <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--tone-cyan)' }}>{fmtRupiah(totalCM2)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--yellow)' }}>{fmtRupiah(totalAdsCost)}</td>
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: totalCM3 >= 0 ? 'var(--green)' : 'var(--red)' }}>
                 {fmtRupiah(totalCM3)}

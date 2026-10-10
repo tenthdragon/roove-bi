@@ -13,6 +13,7 @@ import {
   type ScalevVisibleCatalogCutoverBusinessProgress,
   type ScalevVisibleCatalogCutoverProgress,
 } from '@/lib/scalev-catalog-actions';
+import { toneText } from '@/lib/theme-tones';
 
 const inputStyle: CSSProperties = {
   background: 'var(--bg)',
@@ -45,7 +46,7 @@ function renderVisibilitySummary(row: {
     <div style={{ display: 'grid', gap: 3 }}>
       <span
         style={{
-          color: visibilityKind === 'shared' ? '#93c5fd' : 'var(--dim)',
+          color: visibilityKind === 'shared' ? 'var(--tone-blue)' : 'var(--dim)',
           fontSize: 10,
           fontWeight: 700,
           textTransform: 'uppercase',
@@ -76,9 +77,9 @@ function formatCount(value: number | null | undefined) {
 function renderStatusBadge(status: ScalevCatalogBusinessSummary['sync_status']) {
   const colors: Record<ScalevCatalogBusinessSummary['sync_status'], { bg: string; text: string; border: string; dot: string; label: string }> = {
     idle: { bg: 'rgba(148,163,184,0.08)', text: 'var(--dim)', border: 'rgba(148,163,184,0.16)', dot: '#64748b', label: 'Idle' },
-    running: { bg: 'rgba(59,130,246,0.12)', text: '#93c5fd', border: 'rgba(96,165,250,0.28)', dot: '#60a5fa', label: 'Syncing' },
-    success: { bg: 'rgba(16,185,129,0.14)', text: '#6ee7b7', border: 'rgba(52,211,153,0.24)', dot: '#34d399', label: 'Ready' },
-    failed: { bg: 'rgba(239,68,68,0.12)', text: '#fca5a5', border: 'rgba(248,113,113,0.22)', dot: '#f87171', label: 'Failed' },
+    running: { bg: 'rgba(59,130,246,0.12)', text: 'var(--tone-blue)', border: 'rgba(96,165,250,0.28)', dot: '#60a5fa', label: 'Syncing' },
+    success: { bg: 'rgba(16,185,129,0.14)', text: 'var(--tone-emerald)', border: 'rgba(52,211,153,0.24)', dot: '#34d399', label: 'Ready' },
+    failed: { bg: 'rgba(239,68,68,0.12)', text: 'var(--tone-red)', border: 'rgba(248,113,113,0.22)', dot: '#f87171', label: 'Failed' },
   };
   const style = colors[status];
   return (
@@ -94,7 +95,7 @@ function renderStatusBadge(status: ScalevCatalogBusinessSummary['sync_status']) 
         fontSize: 11,
         fontWeight: 700,
         background: style.bg,
-        color: style.text,
+        color: toneText(style.text),
         lineHeight: 1,
         whiteSpace: 'nowrap',
       }}
@@ -116,11 +117,11 @@ function renderStatusBadge(status: ScalevCatalogBusinessSummary['sync_status']) 
 function renderCutoverBadge(status: ScalevVisibleCatalogCutoverBusinessProgress['catalog_status']) {
   const colors: Record<ScalevVisibleCatalogCutoverBusinessProgress['catalog_status'], { bg: string; text: string; border: string; label: string }> = {
     pending: { bg: 'rgba(148,163,184,0.08)', text: 'var(--dim)', border: 'rgba(148,163,184,0.16)', label: 'Pending' },
-    running: { bg: 'rgba(59,130,246,0.12)', text: '#93c5fd', border: 'rgba(96,165,250,0.28)', label: 'Running' },
-    success: { bg: 'rgba(16,185,129,0.14)', text: '#6ee7b7', border: 'rgba(52,211,153,0.24)', label: 'Done' },
-    warning: { bg: 'rgba(251,191,36,0.12)', text: '#fde68a', border: 'rgba(251,191,36,0.28)', label: 'Warning' },
-    failed: { bg: 'rgba(239,68,68,0.12)', text: '#fca5a5', border: 'rgba(248,113,113,0.22)', label: 'Failed' },
-    skipped: { bg: 'rgba(107,114,128,0.14)', text: '#d1d5db', border: 'rgba(107,114,128,0.24)', label: 'Skipped' },
+    running: { bg: 'rgba(59,130,246,0.12)', text: 'var(--tone-blue)', border: 'rgba(96,165,250,0.28)', label: 'Running' },
+    success: { bg: 'rgba(16,185,129,0.14)', text: 'var(--tone-emerald)', border: 'rgba(52,211,153,0.24)', label: 'Done' },
+    warning: { bg: 'rgba(251,191,36,0.12)', text: 'var(--tone-amber)', border: 'rgba(251,191,36,0.28)', label: 'Warning' },
+    failed: { bg: 'rgba(239,68,68,0.12)', text: 'var(--tone-red)', border: 'rgba(248,113,113,0.22)', label: 'Failed' },
+    skipped: { bg: 'rgba(107,114,128,0.14)', text: 'var(--text-secondary)', border: 'rgba(107,114,128,0.24)', label: 'Skipped' },
   };
   const style = colors[status];
   return (
@@ -132,7 +133,7 @@ function renderCutoverBadge(status: ScalevVisibleCatalogCutoverBusinessProgress[
         borderRadius: 999,
         border: `1px solid ${style.border}`,
         background: style.bg,
-        color: style.text,
+        color: toneText(style.text),
         fontSize: 10,
         fontWeight: 700,
         lineHeight: 1,
@@ -223,7 +224,7 @@ function DataTable({ view, rows, loading }: { view: ScalevCatalogView; rows: Sca
                 <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{row.item_type || '-'}</td>
                 <td style={{ padding: '6px 8px', fontFamily: 'monospace', color: 'var(--text-secondary)' }}>{row.variants_count}</td>
                 <td style={{ padding: '6px 8px' }}>{renderVisibilitySummary(row)}</td>
-                <td style={{ padding: '6px 8px', color: row.is_listed_at_marketplace ? '#6ee7b7' : 'var(--dim)' }}>
+                <td style={{ padding: '6px 8px', color: row.is_listed_at_marketplace ? 'var(--tone-emerald)' : 'var(--dim)' }}>
                   {row.is_listed_at_marketplace ? 'Ya' : 'Tidak'}
                 </td>
                 <td style={{ padding: '6px 8px', color: 'var(--text-secondary)' }}>{formatDateTime(row.scalev_last_updated_at || row.last_synced_at)}</td>
@@ -491,7 +492,7 @@ export default function ScalevCatalogSettingsTab() {
             marginBottom: 12,
             fontSize: 12,
             background: message.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)',
-            color: message.type === 'success' ? '#6ee7b7' : '#fca5a5',
+            color: message.type === 'success' ? 'var(--tone-emerald)' : 'var(--tone-red)',
           }}
         >
           {message.text}
@@ -546,7 +547,7 @@ export default function ScalevCatalogSettingsTab() {
               borderRadius: 10,
               border: '1px solid rgba(251,191,36,0.35)',
               background: 'rgba(251,191,36,0.08)',
-              color: '#fde68a',
+              color: 'var(--tone-amber)',
               fontSize: 12,
               lineHeight: 1.6,
             }}
@@ -614,9 +615,9 @@ export default function ScalevCatalogSettingsTab() {
             </div>
 
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 11, color: 'var(--text-secondary)', marginBottom: 12 }}>
-              <span>Katalog gagal: <b style={{ color: '#fca5a5' }}>{formatCount(cutoverProgress.catalog_failed_count)}</b></span>
-              <span>Bundle warning: <b style={{ color: '#fde68a' }}>{formatCount(cutoverProgress.bundle_warning_count)}</b></span>
-              <span>Bundle gagal: <b style={{ color: '#fca5a5' }}>{formatCount(cutoverProgress.bundle_failed_count)}</b></span>
+              <span>Katalog gagal: <b style={{ color: 'var(--tone-red)' }}>{formatCount(cutoverProgress.catalog_failed_count)}</b></span>
+              <span>Bundle warning: <b style={{ color: 'var(--tone-amber)' }}>{formatCount(cutoverProgress.bundle_warning_count)}</b></span>
+              <span>Bundle gagal: <b style={{ color: 'var(--tone-red)' }}>{formatCount(cutoverProgress.bundle_failed_count)}</b></span>
               <span>
                 Current:
                 {' '}
@@ -653,7 +654,7 @@ export default function ScalevCatalogSettingsTab() {
                   <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 6 }}>
                     Bundle: <b style={{ color: 'var(--text)' }}>{formatCount(business.bundles_processed)}</b> / {formatCount(business.bundles_total)}
                     {business.bundle_failed_count > 0 ? (
-                      <span style={{ color: '#fca5a5' }}> • gagal {formatCount(business.bundle_failed_count)}</span>
+                      <span style={{ color: 'var(--tone-red)' }}> • gagal {formatCount(business.bundle_failed_count)}</span>
                     ) : null}
                   </div>
                   <ProgressBar
@@ -662,7 +663,7 @@ export default function ScalevCatalogSettingsTab() {
                     color={business.bundle_status === 'warning' ? '#f59e0b' : business.bundle_status === 'failed' ? '#f87171' : '#34d399'}
                   />
                   {business.latest_error ? (
-                    <div style={{ marginTop: 8, fontSize: 10, color: '#fca5a5', lineHeight: 1.5 }}>
+                    <div style={{ marginTop: 8, fontSize: 10, color: 'var(--tone-red)', lineHeight: 1.5 }}>
                       {business.latest_error}
                     </div>
                   ) : null}
@@ -728,7 +729,7 @@ export default function ScalevCatalogSettingsTab() {
                     {business.last_error ? (
                       <>
                         <br />
-                        <span style={{ color: '#fca5a5' }}>{business.last_error}</span>
+                        <span style={{ color: 'var(--tone-red)' }}>{business.last_error}</span>
                       </>
                     ) : null}
                   </div>
@@ -803,7 +804,7 @@ export default function ScalevCatalogSettingsTab() {
                 border: '1px solid rgba(251,191,36,0.25)',
                 borderRadius: 12,
                 padding: 20,
-                color: '#fde68a',
+                color: 'var(--tone-amber)',
                 fontSize: 13,
                 lineHeight: 1.7,
               }}

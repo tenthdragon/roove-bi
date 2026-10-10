@@ -120,6 +120,8 @@ export interface Profile {
   role: UserRole;
   allowed_tabs: string[];
   allowed_products: string[];
+  /** Dashboard theme chosen by the user; null follows the app default. */
+  theme_preference?: 'light' | 'dark' | null;
 }
 
 export interface DailyProductSummary {

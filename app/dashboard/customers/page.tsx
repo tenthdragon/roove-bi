@@ -16,6 +16,7 @@ import {
   fetchAvailableBrands,
   fetchMonthlyCac,
 } from '@/lib/scalev-actions';
+import { toneText } from '@/lib/theme-tones';
 
 // ── Channel grouping ──
 const CHANNEL_GROUP_MAP = {
@@ -305,7 +306,7 @@ export default function CustomersPage() {
         {SUB_TABS.map(t => (
           <button key={t.id} onClick={() => setSubTab(t.id)} style={{
             padding: '7px 16px', borderRadius: 7, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-            background: subTab === t.id ? 'var(--accent)' : 'transparent',
+            background: subTab === t.id ? 'var(--accent-solid)' : 'transparent',
             color: subTab === t.id ? '#fff' : 'var(--dim)',
           }}>{t.label}</button>
         ))}
@@ -397,8 +398,8 @@ function OverviewTab({ kpis: k, channelPerformance, channelFilter, setChannelFil
           <button key={ch} onClick={() => setChannelFilter(ch)} style={{
             padding: '5px 14px', borderRadius: 20, border: '1px solid',
             borderColor: channelFilter === ch ? (CHANNEL_TAB_COLORS[ch] || '#3b82f6') : 'var(--border)',
-            background: channelFilter === ch ? `${CHANNEL_TAB_COLORS[ch] || '#3b82f6'}18` : 'transparent',
-            color: channelFilter === ch ? (CHANNEL_TAB_COLORS[ch] || '#3b82f6') : 'var(--text-secondary)',
+            background: channelFilter === ch ? `color-mix(in srgb, ${CHANNEL_TAB_COLORS[ch] || '#3b82f6'} 10%, transparent)` : 'transparent',
+            color: toneText(channelFilter === ch ? (CHANNEL_TAB_COLORS[ch] || 'var(--tone-blue)') : 'var(--text-secondary)'),
             fontSize: 11, fontWeight: 600, cursor: 'pointer',
           }}>{ch}</button>
         ))}
@@ -461,7 +462,7 @@ function OverviewTab({ kpis: k, channelPerformance, channelFilter, setChannelFil
 
 function SectionError({ title, message }) {
   return (
-    <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+    <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: 'var(--tone-red)' }}>
       <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>{title}</div>
       <div style={{ fontSize: 13 }}>{message}</div>
     </div>
@@ -474,9 +475,9 @@ function RevenueCard({ label, value, pct, color, bgColor, orders, tooltip }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
         <div>
           <div style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</div>
-          <div style={{ fontSize: 22, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace" }}>{fmtCompact(value)}</div>
+          <div style={{ fontSize: 22, fontWeight: 800, color: toneText(color), fontFamily: "'JetBrains Mono', monospace" }}>{fmtCompact(value)}</div>
         </div>
-        <div style={{ fontSize: 13, fontWeight: 700, color, fontFamily: "'JetBrains Mono', monospace", background: bgColor, padding: '3px 10px', borderRadius: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: toneText(color), fontFamily: "'JetBrains Mono', monospace", background: bgColor, padding: '3px 10px', borderRadius: 8 }}>
           {fmtPct(pct, 1)}
         </div>
       </div>
@@ -498,7 +499,7 @@ function KpiCard({ label, value, color, sub }) {
   return (
     <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
       <div style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
+      <div style={{ fontSize: 20, fontWeight: 800, color: toneText(color), fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
       <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>{sub}</div>
     </div>
   );
@@ -543,7 +544,7 @@ function TopCustomersSection({ customers, channelFilter }) {
                     {maskedPhone && <div style={{ fontSize: 9, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{maskedPhone}</div>}
                   </td>
                   <td style={{ padding: '7px 10px' }}>
-                    <span style={{ padding: '2px 7px', borderRadius: 10, fontSize: 9, fontWeight: 600, background: `${CHANNEL_TAB_COLORS[cg] || 'var(--dim)'}20`, color: CHANNEL_TAB_COLORS[cg] || 'var(--text-secondary)' }}>{cg}</span>
+                    <span style={{ padding: '2px 7px', borderRadius: 10, fontSize: 9, fontWeight: 600, background: `color-mix(in srgb, ${CHANNEL_TAB_COLORS[cg] || 'var(--dim)'} 12%, transparent)`, color: toneText(CHANNEL_TAB_COLORS[cg] || 'var(--text-secondary)') }}>{cg}</span>
                   </td>
                   <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600 }}>{c.total_orders}</td>
                   <td style={{ padding: '7px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: 'var(--green)' }}>{fmtRupiah(c.total_revenue)}</td>
@@ -580,7 +581,7 @@ function ChannelRow({ row }) {
 function RepeatRateBadge({ value, bold = false }) {
   const color = value >= 50 ? 'var(--green)' : value >= 30 ? 'var(--yellow)' : 'var(--red)';
   const bg = value >= 50 ? 'var(--badge-green-bg)' : value >= 30 ? 'var(--badge-yellow-bg)' : 'var(--badge-red-bg)';
-  return <span style={{ padding: '3px 8px', borderRadius: 10, fontSize: 10, fontWeight: bold ? 800 : 700, fontFamily: 'monospace', background: bg, color }}>{fmtPct(value, 1)}</span>;
+  return <span style={{ padding: '3px 8px', borderRadius: 10, fontSize: 10, fontWeight: bold ? 800 : 700, fontFamily: 'monospace', background: bg, color: toneText(color) }}>{fmtPct(value, 1)}</span>;
 }
 
 // ═══════════════════════════════════════════════════
@@ -682,7 +683,7 @@ function CohortTable({ data, title, subtitle, csvFilename }) {
                     return <td key={i} style={{
                       padding: '8px 10px', borderBottom: '1px solid var(--bg-deep)', textAlign: 'center',
                       background: i === 0 ? 'var(--accent-subtle)' : `rgba(16,185,129,${Math.min(ret / 100, 1) * 0.3})`,
-                      color: i === 0 ? '#60a5fa' : ret > 10 ? 'var(--green)' : 'var(--text-muted)',
+                      color: i === 0 ? 'var(--tone-blue)' : ret > 10 ? 'var(--green)' : 'var(--text-muted)',
                       fontWeight: ret > 20 ? 700 : 400, fontFamily: 'monospace', fontSize: 11
                     }}>{fmtPct(ret, 0)}</td>;
                   })}
@@ -891,7 +892,7 @@ function LtvTab() {
           ].map((card, i) => (
             <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 6 }}>{card.label}</div>
-              <div style={{ fontSize: 20, fontWeight: 800, color: card.color || 'var(--text)', fontFamily: 'monospace' }}>{card.value}</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color: toneText(card.color || 'var(--text)'), fontFamily: 'monospace' }}>{card.value}</div>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{card.sub}</div>
             </div>
           ))}
@@ -967,8 +968,8 @@ function LtvTab() {
                 <button key={ch} onClick={() => setTrendChannel(ch)} style={{
                   padding: '4px 12px', borderRadius: 16, border: '1px solid',
                   borderColor: trendChannel === ch ? (TREND_COLORS[ch] || '#3b82f6') : 'var(--border)',
-                  background: trendChannel === ch ? `${TREND_COLORS[ch] || '#3b82f6'}18` : 'transparent',
-                  color: trendChannel === ch ? (TREND_COLORS[ch] || '#3b82f6') : 'var(--text-secondary)',
+                  background: trendChannel === ch ? `color-mix(in srgb, ${TREND_COLORS[ch] || '#3b82f6'} 10%, transparent)` : 'transparent',
+                  color: toneText(trendChannel === ch ? (TREND_COLORS[ch] || 'var(--tone-blue)') : 'var(--text-secondary)'),
                   fontSize: 11, fontWeight: 600, cursor: 'pointer',
                 }}>{ch}</button>
               ))}
@@ -1217,14 +1218,14 @@ function CacTab() {
         ].map((card, i) => (
           <div key={i} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 6 }}>{card.label}</div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: card.color || 'var(--text)', fontFamily: 'monospace' }}>{card.value}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: toneText(card.color || 'var(--text)'), fontFamily: 'monospace' }}>{card.value}</div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{card.sub}</div>
           </div>
         ))}
         {channelSummary.map(ch => (
           <div key={ch.channel} style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
             <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--dim)', textTransform: 'uppercase', marginBottom: 6 }}>CAC {ch.channel}</div>
-            <div style={{ fontSize: 20, fontWeight: 800, color: CAC_COLORS[ch.channel] || 'var(--text)', fontFamily: 'monospace' }}>{fmtRp(ch.cac)}</div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: toneText(CAC_COLORS[ch.channel] || 'var(--text)'), fontFamily: 'monospace' }}>{fmtRp(ch.cac)}</div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{ch.newCustomers.toLocaleString()} customers</div>
           </div>
         ))}
@@ -1249,8 +1250,8 @@ function CacTab() {
               <button key={ch} onClick={() => setSelectedChannel(ch)} style={{
                 padding: '4px 12px', borderRadius: 16, border: '1px solid',
                 borderColor: selectedChannel === ch ? (CAC_COLORS[ch] || 'var(--accent)') : 'var(--border)',
-                background: selectedChannel === ch ? `${CAC_COLORS[ch] || 'var(--accent)'}18` : 'transparent',
-                color: selectedChannel === ch ? (CAC_COLORS[ch] || 'var(--accent)') : 'var(--text-secondary)',
+                background: selectedChannel === ch ? `color-mix(in srgb, ${CAC_COLORS[ch] || 'var(--accent)'} 10%, transparent)` : 'transparent',
+                color: toneText(selectedChannel === ch ? (CAC_COLORS[ch] || 'var(--accent)') : 'var(--text-secondary)'),
                 fontSize: 11, fontWeight: 600, cursor: 'pointer',
               }}>{ch}</button>
             ))}
@@ -1319,7 +1320,7 @@ function CacTab() {
                   <tr key={m} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
                     <td style={{ ...tdStyle, fontWeight: 600, fontFamily: 'inherit' }}>{m}</td>
                     <td style={{ ...tdStyle, fontFamily: 'inherit' }}>
-                      <span style={{ color: CAC_COLORS[row.channel_group] || 'var(--text)' }}>{row.channel_group}</span>
+                      <span style={{ color: toneText(CAC_COLORS[row.channel_group] || 'var(--text)') }}>{row.channel_group}</span>
                     </td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>{fmtRp(row.ad_spend)}</td>
                     <td style={{ ...tdStyle, textAlign: 'right' }}>{Number(row.new_customers).toLocaleString()}</td>

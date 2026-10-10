@@ -69,7 +69,7 @@ export default function MarketplaceIntakePage() {
           style={{
             ...subMenuStyle,
             background: subMenu === 'quarantine' ? 'rgba(245,158,11,0.14)' : 'var(--bg)',
-            color: subMenu === 'quarantine' ? '#fcd34d' : 'var(--text-secondary)',
+            color: subMenu === 'quarantine' ? 'var(--tone-amber)' : 'var(--text-secondary)',
             borderColor: subMenu === 'quarantine' ? 'rgba(245,158,11,0.28)' : 'var(--border)',
           }}
         >
@@ -80,7 +80,7 @@ export default function MarketplaceIntakePage() {
           style={{
             ...subMenuStyle,
             background: subMenu === 'store_scope' ? 'rgba(14,165,233,0.14)' : 'var(--bg)',
-            color: subMenu === 'store_scope' ? '#7dd3fc' : 'var(--text-secondary)',
+            color: subMenu === 'store_scope' ? 'var(--tone-sky)' : 'var(--text-secondary)',
             borderColor: subMenu === 'store_scope' ? 'rgba(14,165,233,0.28)' : 'var(--border)',
           }}
         >
@@ -91,7 +91,7 @@ export default function MarketplaceIntakePage() {
           style={{
             ...subMenuStyle,
             background: subMenu === 'sku_alias' ? 'rgba(34,197,94,0.14)' : 'var(--bg)',
-            color: subMenu === 'sku_alias' ? '#86efac' : 'var(--text-secondary)',
+            color: subMenu === 'sku_alias' ? 'var(--tone-green)' : 'var(--text-secondary)',
             borderColor: subMenu === 'sku_alias' ? 'rgba(34,197,94,0.28)' : 'var(--border)',
           }}
         >

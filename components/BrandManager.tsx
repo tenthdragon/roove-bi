@@ -283,7 +283,7 @@ export default function BrandManager() {
                 {editingKeywords?.id === brand.id ? (
                   <div style={{ display: 'flex', gap: 6 }}>
                     <input value={editingKeywords.keywords} onChange={event => setEditingKeywords({ id: brand.id, keywords: event.target.value })} style={inputStyle} placeholder={brand.name.toLowerCase()} />
-                    <button onClick={saveKeywords} disabled={savingDetail} style={{ border: 'none', borderRadius: 6, padding: '6px 11px', background: 'var(--green)', color: '#fff', fontSize: 11, cursor: 'pointer' }}>Simpan</button>
+                    <button onClick={saveKeywords} disabled={savingDetail} style={{ border: 'none', borderRadius: 6, padding: '6px 11px', background: 'var(--green-solid)', color: '#fff', fontSize: 11, cursor: 'pointer' }}>Simpan</button>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
@@ -322,7 +322,7 @@ export default function BrandManager() {
                     );
                   })}
                 </div>
-                <button onClick={saveRoles} disabled={savingDetail} style={{ marginTop: 10, border: 'none', borderRadius: 6, padding: '6px 12px', background: 'var(--accent)', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Simpan Relasi</button>
+                <button onClick={saveRoles} disabled={savingDetail} style={{ marginTop: 10, border: 'none', borderRadius: 6, padding: '6px 12px', background: 'var(--accent-solid)', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>Simpan Relasi</button>
               </section>
             </div>
 
@@ -339,7 +339,7 @@ export default function BrandManager() {
                 <div><label style={labelStyle}>Jenis</label><select value={aliasDraft.aliasType} onChange={event => setAliasDraft({ ...aliasDraft, aliasType: event.target.value as BrandAlias['alias_type'] })} style={inputStyle}>{ALIAS_TYPES.map(type => <option key={type.value} value={type.value}>{type.label}</option>)}</select></div>
                 <div><label style={labelStyle}>Alias</label><input value={aliasDraft.alias} onChange={event => setAliasDraft({ ...aliasDraft, alias: event.target.value })} style={inputStyle} placeholder="Contoh: Plume" /></div>
                 <div><label style={labelStyle}>Catatan</label><input value={aliasDraft.notes} onChange={event => setAliasDraft({ ...aliasDraft, notes: event.target.value })} style={inputStyle} placeholder="Opsional" /></div>
-                <button onClick={saveAlias} disabled={savingDetail} style={{ border: 'none', borderRadius: 6, padding: '7px 12px', background: 'var(--green)', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>+ Alias</button>
+                <button onClick={saveAlias} disabled={savingDetail} style={{ border: 'none', borderRadius: 6, padding: '7px 12px', background: 'var(--green-solid)', color: '#fff', fontSize: 11, fontWeight: 700, cursor: 'pointer' }}>+ Alias</button>
               </div>
 
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 10 }}>
@@ -396,7 +396,7 @@ export default function BrandManager() {
         <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(180px, 1fr) auto', gap: 8, alignItems: 'end' }}>
           <div><label style={labelStyle}>Nama Brand *</label><input value={newName} onChange={event => setNewName(event.target.value)} style={inputStyle} placeholder="Contoh: NovaSkin" /></div>
           <div><label style={labelStyle}>Sheet Name</label><input value={newSheet} onChange={event => setNewSheet(event.target.value)} style={inputStyle} placeholder={newName || 'Default sama dengan brand'} /></div>
-          <button onClick={handleAdd} disabled={adding} style={{ border: 'none', borderRadius: 7, padding: '8px 16px', background: adding ? 'var(--border)' : 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: adding ? 'wait' : 'pointer' }}>{adding ? 'Menambahkan...' : '+ Tambah Brand'}</button>
+          <button onClick={handleAdd} disabled={adding} style={{ border: 'none', borderRadius: 7, padding: '8px 16px', background: adding ? 'var(--muted-solid)' : 'var(--accent-solid)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: adding ? 'wait' : 'pointer' }}>{adding ? 'Menambahkan...' : '+ Tambah Brand'}</button>
         </div>
         {message && <div onClick={() => setMessage(null)} style={{ marginTop: 10, padding: '8px 10px', borderRadius: 7, background: message.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: message.type === 'success' ? 'var(--green)' : 'var(--red)', fontSize: 11, cursor: 'pointer' }}>{message.text}</div>}
       </div>

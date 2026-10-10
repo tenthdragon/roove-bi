@@ -18,6 +18,7 @@ import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
 import { WorkspaceProvider } from '@/lib/WorkspaceContext';
 import { isWorkspaceModuleEnabled } from '@/lib/workspaces';
 import { canRoleAccessPermission } from '@/lib/role-access';
+import { profileThemePreference } from '@/lib/theme-preference';
 
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
@@ -236,9 +237,9 @@ function RefreshViewsButton({
   };
   const stepColor = (state: string) => {
     switch (state) {
-      case 'running': return '#60a5fa';
-      case 'success': return '#22c55e';
-      case 'error': return '#ef4444';
+      case 'running': return 'var(--accent)';
+      case 'success': return 'var(--green)';
+      case 'error': return 'var(--red)';
       case 'skipped': return 'var(--dim)';
       default: return 'var(--text-muted)';
     }
@@ -259,12 +260,12 @@ function RefreshViewsButton({
       </svg>
     ),
     success: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#22c55e" strokeWidth="2.5">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--green)' }}>
         <polyline points="20 6 9 17 4 12" />
       </svg>
     ),
     error: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2.5">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ color: 'var(--red)' }}>
         <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
       </svg>
     ),
@@ -708,7 +709,10 @@ export default function DashboardLayout({ children }) {
           <WorkspaceSwitcher />
           {showRefreshButton && <RefreshViewsButton canSyncSheets={canSyncSheets} canSyncMeta={canSyncMeta} />}
           {showDatePicker && <HeaderDatePicker />}
-          <ThemeToggle />
+          <ThemeToggle
+            preference={profileThemePreference(profile)}
+            onPreferenceSaved={(themePreference) => setProfile((current: any) => (current ? { ...current, theme_preference: themePreference } : current))}
+          />
           <div className="desktop-sidebar" style={{ fontSize:11, color:'var(--text-muted)', fontWeight:500 }}>
             {profile?.full_name || profile?.email}
           </div>

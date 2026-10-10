@@ -18,6 +18,7 @@
     "lint": "next lint",
     "test:growth": "node --import tsx --test tests/growth-domain.test.ts tests/growth-case-domain.test.ts",
     "test:dashboard-components": "node --import tsx --test tests/dashboard-components.test.tsx",
+    "test:theme": "node --import tsx --test tests/theme-contrast.test.ts tests/theme-preference.test.ts",
     "test:financial-targets": "tsx --test tests/financial-targets.test.ts",
     "test:warehouse-mapping-targets": "tsx --test tests/warehouse-mapping-targets.test.ts",
     "test:source-class": "tsx --test tests/scalev-source-class.test.ts",

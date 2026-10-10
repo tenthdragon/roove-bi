@@ -15,6 +15,7 @@ import {
 } from '@/lib/fixed-cost-actions';
 import { invalidateAll } from '@/lib/dashboard-cache';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import { toneText } from '@/lib/theme-tones';
 
 type Category = { id: number; name: string; description: string | null };
 type FixedCost = {
@@ -102,7 +103,7 @@ const secondaryButtonStyle = {
   color: 'var(--text-secondary)', background: 'transparent', cursor: 'pointer', fontWeight: 650,
 } as const;
 const primaryButtonStyle = {
-  border: 0, borderRadius: 8, padding: '10px 16px', background: 'var(--accent)',
+  border: 0, borderRadius: 8, padding: '10px 16px', background: 'var(--accent-solid)',
   color: '#fff', fontWeight: 700, cursor: 'pointer',
 } as const;
 
@@ -182,7 +183,7 @@ function SummaryCard({ label, value, context, color }: {
   return (
     <div className="fc-summary-card">
       <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 8 }}>{label}</div>
-      <div style={{ fontSize: 21, fontWeight: 750, color: color || 'var(--text)' }}>{value}</div>
+      <div style={{ fontSize: 21, fontWeight: 750, color: toneText(color || 'var(--text)') }}>{value}</div>
       {context ? <div style={{ color: 'var(--dim)', fontSize: 11, marginTop: 5 }}>{context}</div> : null}
     </div>
   );
@@ -486,7 +487,7 @@ export default function FixedCostsPage() {
                 const selected = costModel === mode;
                 return <button key={mode} type="button" role="radio" aria-checked={selected}
                   disabled={loading || modeSaving} onClick={() => { if (!selected) setPendingMode(mode); }}
-                  className="fc-mode-button" style={{ background: selected ? 'var(--accent)' : 'transparent',
+                  className="fc-mode-button" style={{ background: selected ? 'var(--accent-solid)' : 'transparent',
                     color: selected ? '#fff' : 'var(--text-secondary)', opacity: loading || modeSaving ? 0.7 : 1 }}>
                   {label}
                 </button>;

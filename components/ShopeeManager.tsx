@@ -14,6 +14,7 @@ import {
   updateShopeeShop,
 } from '@/lib/admin-actions';
 import { invalidateAll } from '@/lib/dashboard-cache';
+import { toneText } from '@/lib/theme-tones';
 
 type ShopeeSetupInfo = {
   configured: boolean;
@@ -344,7 +345,7 @@ export default function ShopeeManager() {
       case 'failed':
         return { bg: 'var(--badge-red-bg)', color: 'var(--red)', label: 'Gagal' };
       case 'running':
-        return { bg: '#1e3a5f', color: '#60a5fa', label: 'Running' };
+        return { bg: 'var(--accent-subtle)', color: 'var(--tone-blue)', label: 'Running' };
       default:
         return { bg: 'var(--border)', color: 'var(--dim)', label: status };
     }
@@ -403,7 +404,7 @@ export default function ShopeeManager() {
                 borderRadius: 6,
                 border: 'none',
                 cursor: setup?.configured ? 'pointer' : 'not-allowed',
-                background: setup?.configured ? '#ee4d2d' : 'var(--border)',
+                background: setup?.configured ? '#c2381a' : 'var(--muted-solid)',
                 color: '#fff',
                 fontSize: 12,
                 fontWeight: 600,
@@ -475,7 +476,7 @@ export default function ShopeeManager() {
                 borderRadius: 6,
                 border: 'none',
                 cursor: syncing || readyShops.length === 0 ? 'not-allowed' : 'pointer',
-                background: syncing || readyShops.length === 0 ? 'var(--border)' : '#ee4d2d',
+                background: syncing || readyShops.length === 0 ? 'var(--muted-solid)' : '#c2381a',
                 color: '#fff',
                 fontSize: 12,
                 fontWeight: 600,
@@ -661,7 +662,7 @@ export default function ShopeeManager() {
                                   padding: '6px 12px',
                                   borderRadius: 6,
                                   border: 'none',
-                                  background: 'var(--accent)',
+                                  background: 'var(--accent-solid)',
                                   color: '#fff',
                                   fontSize: 12,
                                   cursor: 'pointer',
@@ -799,7 +800,7 @@ export default function ShopeeManager() {
                                   borderRadius: 4,
                                   border: '1px solid var(--border)',
                                   background: 'transparent',
-                                  color: '#60a5fa',
+                                  color: 'var(--tone-blue)',
                                   fontSize: 11,
                                   cursor: 'pointer',
                                 }}
@@ -882,7 +883,7 @@ export default function ShopeeManager() {
                           fontSize: 10,
                           fontWeight: 600,
                           background: status.bg,
-                          color: status.color,
+                          color: toneText(status.color),
                         }}>
                           {status.label}
                         </span>

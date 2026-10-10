@@ -3,6 +3,7 @@
 'use client';
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { toneFill, toneText } from '@/lib/theme-tones';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,7 +61,7 @@ const TAG_COLORS: Record<string, { bg: string; text: string }> = {
   marketplace:  { bg: '#cffafe', text: '#155e75' },
   refund:       { bg: '#ffe4e6', text: '#9f1239' },
   auto_debit:   { bg: '#fce7f3', text: '#9d174d' },
-  'n/a':        { bg: '#f1f5f9', text: '#64748b' },
+  'n/a':        { bg: '#f1f5f9', text: 'var(--dim)' },
 };
 
 interface BankAccount {
@@ -200,12 +201,12 @@ function UploadZone({ onUploaded }: { onUploaded: () => void }) {
               border: `1px solid ${item.status === 'error' ? 'var(--red)' : item.status === 'success' ? 'var(--green)' : 'var(--border)'}`,
               opacity: item.status === 'waiting' ? 0.6 : 1,
             }}>
-              <span style={{ color: statusColor(item.status), fontSize: 13, fontWeight: 700, flexShrink: 0, animation: item.status === 'uploading' ? 'spin 1s linear infinite' : 'none', display: 'inline-block' }}>
+              <span style={{ color: toneText(statusColor(item.status)), fontSize: 13, fontWeight: 700, flexShrink: 0, animation: item.status === 'uploading' ? 'spin 1s linear infinite' : 'none', display: 'inline-block' }}>
                 {statusIcon(item.status)}
               </span>
               <span style={{ fontSize: 12, color: 'var(--text)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.file.name}</span>
               {item.message && (
-                <span style={{ fontSize: 11, color: statusColor(item.status), flexShrink: 0 }}>{item.message}</span>
+                <span style={{ fontSize: 11, color: toneText(statusColor(item.status)), flexShrink: 0 }}>{item.message}</span>
               )}
             </div>
           ))}
@@ -253,7 +254,7 @@ function BizTable({ sessions, bizName, onDelete }: { sessions: Session[]; bizNam
 
       {/* Title */}
       <div style={{ padding: '12px 14px 6px', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700, background: BIZ_COLORS[bizName] || '#64748b', color: '#fff' }}>{bizName}</span>
+        <span style={{ padding: '2px 10px', borderRadius: 999, fontSize: 12, fontWeight: 700, background: toneFill(BIZ_COLORS[bizName] || '#475569'), color: '#fff' }}>{bizName}</span>
         <span style={{ fontSize: 11, color: 'var(--dim)' }}>{totals.trx.toLocaleString('id-ID')} transaksi</span>
       </div>
 
@@ -278,7 +279,7 @@ function BizTable({ sessions, bizName, onDelete }: { sessions: Session[]; bizNam
               return (
                 <tr key={s.id} style={{ borderBottom: '1px solid rgba(55,65,81,0.2)' }}>
                   <td style={{ ...tdStyle, textAlign: 'left', fontFamily: 'inherit' }}>
-                    <span style={{ display: 'inline-block', padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: badge.bg, color: badge.text }}>{s.bank}</span>
+                    <span style={{ display: 'inline-block', padding: '1px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: badge.bg, color: toneText(badge.text) }}>{s.bank}</span>
                   </td>
                   <td style={{ ...tdStyle, textAlign: 'left', fontSize: 11, color: 'var(--text-secondary)' }}>
                     {s.account_no && s.account_no !== 'UNKNOWN' ? s.account_no : '—'}
@@ -389,7 +390,7 @@ function TagPill({ tag, tagAuto, onChangeTag }: { tag: string; tagAuto: string; 
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 3,
           padding: '1px 7px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-          background: colors.bg, color: colors.text, border: 'none', cursor: 'pointer',
+          background: colors.bg, color: toneText(colors.text), border: 'none', cursor: 'pointer',
           outline: open ? `2px solid ${colors.text}` : 'none',
         }}
       >
@@ -472,7 +473,7 @@ function TransactionTable({ periodLabel, business, acctMap }: { periodLabel: str
       onClick={onClick}
       style={{
         padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 10, cursor: 'pointer',
-        background: active ? (color || 'var(--accent)') : 'var(--bg-deep)',
+        background: active ? toneFill(color || 'var(--accent-solid)') : 'var(--bg-deep)',
         color: active ? '#fff' : 'var(--text-secondary)',
         fontWeight: active ? 700 : 400,
       }}
@@ -533,13 +534,13 @@ function TransactionTable({ periodLabel, business, acctMap }: { periodLabel: str
                   <td style={{ padding: '5px 8px', whiteSpace: 'nowrap', color: 'var(--dim)', fontSize: 11 }}>{fmtTime(r.transaction_date, r.transaction_time)}</td>
                   <td style={{ padding: '5px 8px' }}>
                     {biz ? (
-                      <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: BIZ_COLORS[biz] || 'var(--accent)', color: '#fff' }}>{biz}</span>
+                      <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: toneFill(BIZ_COLORS[biz] || 'var(--accent-solid)'), color: '#fff' }}>{biz}</span>
                     ) : (
                       <span style={{ fontSize: 10, color: 'var(--dim)' }}>—</span>
                     )}
                   </td>
                   <td style={{ padding: '5px 8px' }}>
-                    <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: badge.bg, color: badge.text }}>{r.bank}</span>
+                    <span style={{ display: 'inline-block', padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 700, background: badge.bg, color: toneText(badge.text) }}>{r.bank}</span>
                   </td>
                   <td style={{ padding: '5px 8px', color: 'var(--text-secondary)', maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={r.description}>
                     {r.description || '—'}
@@ -667,7 +668,7 @@ export default function BankCashFlowDashboard() {
       style={{
         padding: '5px 14px', borderRadius: 999, border: active ? 'none' : '1px solid var(--border)',
         fontSize: 12, cursor: 'pointer', fontWeight: active ? 700 : 500, transition: 'all 0.15s',
-        background: active ? (color || 'var(--accent)') : 'transparent',
+        background: active ? toneFill(color || 'var(--accent-solid)') : 'transparent',
         color: active ? '#fff' : 'var(--text-secondary)',
       }}
     >{label}</button>
@@ -699,7 +700,7 @@ export default function BankCashFlowDashboard() {
             style={{
               display: 'flex', alignItems: 'center', gap: 6,
               padding: '7px 14px', borderRadius: 8, border: '1px solid var(--border)',
-              background: uploadOpen ? 'var(--accent)' : 'var(--card)',
+              background: uploadOpen ? 'var(--accent-solid)' : 'var(--card)',
               color: uploadOpen ? '#fff' : 'var(--text-secondary)', fontSize: 12, cursor: 'pointer', fontWeight: 600,
             }}
           >
@@ -738,7 +739,7 @@ export default function BankCashFlowDashboard() {
         <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 12 }}>Memuat data…</div>
       )}
       {!loading && error && (
-        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 8, padding: 16, color: '#fca5a5', fontSize: 13 }}>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 8, padding: 16, color: 'var(--tone-red)', fontSize: 13 }}>
           {error}
         </div>
       )}
@@ -753,7 +754,7 @@ export default function BankCashFlowDashboard() {
           </div>
           <button
             onClick={() => setUploadOpen(true)}
-            style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
+            style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: 'var(--accent-solid)', color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
           >↑ Upload Sekarang</button>
         </div>
       )}

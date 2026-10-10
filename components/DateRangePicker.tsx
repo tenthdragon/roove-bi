@@ -67,7 +67,7 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest }
                 <button key={p.label} onClick={() => { onChange(p.from, p.to); setOpen(false); }}
                   style={{
                     padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)',
-                    background: from === p.from && to === p.to ? 'var(--accent)' : 'transparent',
+                    background: from === p.from && to === p.to ? 'var(--accent-solid)' : 'transparent',
                     color: from === p.from && to === p.to ? '#fff' : 'var(--text-secondary)',
                     fontSize: 12, cursor: 'pointer', fontWeight: 500,
                   }}>

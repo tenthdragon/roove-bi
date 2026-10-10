@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { toneText } from '@/lib/theme-tones';
 
 const panelStyle = {
   background: 'var(--card)',
@@ -62,7 +63,7 @@ function SummaryCard({ label, value, tone = 'default', helper }) {
       <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
         {label}
       </div>
-      <div style={{ marginTop: 6, fontSize: 22, fontWeight: 800, color }}>
+      <div style={{ marginTop: 6, fontSize: 22, fontWeight: 800, color: toneText(color) }}>
         {fmtNumber(value)}
       </div>
       {helper ? (
@@ -76,7 +77,7 @@ function ActionButton({ children, onClick, tone = 'default', disabled = false })
   const palette = tone === 'primary'
     ? { bg: '#2563eb', color: '#fff', border: '#2563eb' }
     : tone === 'warn'
-      ? { bg: 'rgba(245,158,11,0.12)', color: '#fcd34d', border: 'rgba(245,158,11,0.24)' }
+      ? { bg: 'rgba(245,158,11,0.12)', color: 'var(--tone-amber)', border: 'rgba(245,158,11,0.24)' }
       : { bg: 'var(--bg)', color: 'var(--text-secondary)', border: 'var(--border)' };
 
   return (
@@ -88,7 +89,7 @@ function ActionButton({ children, onClick, tone = 'default', disabled = false })
         borderRadius: 8,
         border: `1px solid ${palette.border}`,
         background: disabled ? 'var(--bg)' : palette.bg,
-        color: disabled ? 'var(--dim)' : palette.color,
+        color: toneText(disabled ? 'var(--dim)' : palette.color),
         fontSize: 12,
         fontWeight: 700,
         cursor: disabled ? 'not-allowed' : 'pointer',
@@ -104,14 +105,14 @@ function ReasonPill({ reason }) {
   const meta = normalized === 'marketplace_webhook_unmatched'
     ? {
         label: 'Unmatched',
-        color: '#fca5a5',
+        color: 'var(--tone-red)',
         bg: 'rgba(239,68,68,0.12)',
         border: 'rgba(239,68,68,0.24)',
       }
     : normalized === 'marketplace_webhook_non_authoritative_match'
       ? {
           label: 'Non-Authoritative Match',
-          color: '#fcd34d',
+          color: 'var(--tone-amber)',
           bg: 'rgba(245,158,11,0.12)',
           border: 'rgba(245,158,11,0.24)',
         }
@@ -133,7 +134,7 @@ function ReasonPill({ reason }) {
         fontSize: 11,
         fontWeight: 700,
         background: meta.bg,
-        color: meta.color,
+        color: toneText(meta.color),
         border: `1px solid ${meta.border}`,
         whiteSpace: 'nowrap',
       }}
@@ -270,7 +271,7 @@ export default function MarketplaceWebhookQuarantinePanel() {
               borderRadius: 10,
               fontSize: 13,
               background: 'rgba(239,68,68,0.12)',
-              color: '#fca5a5',
+              color: 'var(--tone-red)',
               border: '1px solid rgba(239,68,68,0.24)',
             }}
           >

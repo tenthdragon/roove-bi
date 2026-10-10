@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useMarketplaceIntakeSources } from '@/lib/use-marketplace-intake-sources';
+import { toneText } from '@/lib/theme-tones';
 
 const panelStyle = {
   background: 'var(--card)',
@@ -31,7 +32,7 @@ function ActionButton({ children, onClick, tone = 'default', disabled = false, t
         borderRadius: 8,
         border: `1px solid ${palette.border}`,
         background: disabled ? 'var(--bg)' : palette.bg,
-        color: disabled ? 'var(--dim)' : palette.color,
+        color: toneText(disabled ? 'var(--dim)' : palette.color),
         fontSize: 12,
         fontWeight: 700,
         cursor: disabled ? 'not-allowed' : 'pointer',
@@ -240,12 +241,12 @@ export default function MarketplaceStoreScopePanel() {
         </div>
 
         {sourcesError || error ? (
-          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: '#fca5a5', fontSize: 13 }}>
+          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.08)', color: 'var(--tone-red)', fontSize: 13 }}>
             {sourcesError || error}
           </div>
         ) : null}
         {message ? (
-          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.08)', color: '#86efac', fontSize: 13 }}>
+          <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.08)', color: 'var(--tone-green)', fontSize: 13 }}>
             {message}
           </div>
         ) : null}
@@ -295,7 +296,7 @@ export default function MarketplaceStoreScopePanel() {
                         <td style={{ padding: '10px 12px', fontSize: 12, color: 'var(--dim)', borderBottom: '1px solid var(--border)' }}>
                           {store.storeType || 'Belum diisi'}
                         </td>
-                        <td style={{ padding: '10px 12px', fontSize: 12, color: store.isActive ? '#86efac' : '#fca5a5', borderBottom: '1px solid var(--border)' }}>
+                        <td style={{ padding: '10px 12px', fontSize: 12, color: store.isActive ? 'var(--tone-green)' : 'var(--tone-red)', borderBottom: '1px solid var(--border)' }}>
                           {store.isActive ? 'Aktif di Business Settings' : 'Tidak aktif di Business Settings'}
                         </td>
                         <td style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)' }}>

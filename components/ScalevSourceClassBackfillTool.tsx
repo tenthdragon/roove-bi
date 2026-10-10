@@ -101,7 +101,7 @@ export default function ScalevSourceClassBackfillTool() {
           marginBottom: 12,
           fontSize: 12,
           background: message.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
-          color: message.type === 'success' ? '#6ee7b7' : '#fca5a5',
+          color: message.type === 'success' ? 'var(--tone-emerald)' : 'var(--tone-red)',
         }}>
           {message.text}
         </div>
@@ -221,9 +221,9 @@ export default function ScalevSourceClassBackfillTool() {
                     <td style={{ padding: '6px 8px', color: 'var(--text)', fontWeight: 600 }}>{day}</td>
                     <td style={{ padding: '6px 8px', color: 'var(--text)' }}>{bucket.rowsSeen.toLocaleString('id-ID')}</td>
                     <td style={{ padding: '6px 8px', color: 'var(--text)' }}>{bucket.inScope.toLocaleString('id-ID')}</td>
-                    <td style={{ padding: '6px 8px', color: '#93c5fd' }}>{bucket.changed.toLocaleString('id-ID')}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--tone-blue)' }}>{bucket.changed.toLocaleString('id-ID')}</td>
                     <td style={{ padding: '6px 8px', color: 'var(--text)' }}>{bucket.unchanged.toLocaleString('id-ID')}</td>
-                    <td style={{ padding: '6px 8px', color: '#6ee7b7' }}>{bucket.updated.toLocaleString('id-ID')}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--tone-emerald)' }}>{bucket.updated.toLocaleString('id-ID')}</td>
                   </tr>
                 ))}
               </tbody>

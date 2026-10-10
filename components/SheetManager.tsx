@@ -150,7 +150,7 @@ export default function SheetManager() {
           style={{
             padding:'7px 16px', borderRadius:8, border:'none',
             cursor: syncing ? 'not-allowed' : 'pointer',
-            background: syncing ? 'var(--border)' : 'var(--green)',
+            background: syncing ? 'var(--border)' : 'var(--green-solid)',
             color: syncing ? 'var(--dim)' : '#fff',
             fontSize:12, fontWeight:600,
             opacity: connections.filter(c => c.is_active).length === 0 ? 0.5 : 1,
@@ -184,7 +184,7 @@ export default function SheetManager() {
         </div>
       )}
       {activeConnectionCount > 1 && (
-        <div style={{ marginBottom:12, padding:12, background:'rgba(245, 158, 11, 0.12)', borderRadius:8, color:'#f59e0b', fontSize:13 }}>
+        <div style={{ marginBottom:12, padding:12, background:'rgba(245, 158, 11, 0.12)', borderRadius:8, color:'var(--tone-amber)', fontSize:13 }}>
           Ada lebih dari satu koneksi aktif dari konfigurasi lama. Menyimpan atau mengaktifkan satu spreadsheet dari halaman ini akan otomatis menonaktifkan sisanya.
         </div>
       )}
@@ -226,7 +226,7 @@ export default function SheetManager() {
           style={{
             padding:'8px 16px', borderRadius:8, border:'none',
             cursor: adding ? 'not-allowed' : 'pointer',
-            background:'var(--accent)', color:'#fff', fontSize:12, fontWeight:600,
+            background:'var(--accent-solid)', color:'#fff', fontSize:12, fontWeight:600,
             opacity: (!newSpreadsheetId.trim() || !newLabel.trim()) ? 0.5 : 1,
           }}
         >
@@ -332,7 +332,7 @@ export default function SheetManager() {
                         fontSize:10,
                         fontWeight:600,
                         background: conn.is_active ? 'rgba(245, 158, 11, 0.12)' : 'var(--border)',
-                        color: conn.is_active ? '#f59e0b' : 'var(--dim)',
+                        color: conn.is_active ? 'var(--tone-amber)' : 'var(--dim)',
                       }}>
                         {conn.is_active ? 'Aktif tambahan' : 'Nonaktif'}
                       </span>

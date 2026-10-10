@@ -127,7 +127,7 @@ export default function FinancialSheetManager() {
           disabled={loading || !newId.trim() || !newLabel.trim()}
           style={{
             padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-            background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600,
+            background: 'var(--accent-solid)', color: '#fff', fontSize: 13, fontWeight: 600,
             opacity: loading || !newId.trim() || !newLabel.trim() ? 0.5 : 1,
           }}
         >
@@ -141,7 +141,7 @@ export default function FinancialSheetManager() {
         disabled={syncing || connections.filter(c => c.is_active).length === 0}
         style={{
           padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-          background: 'var(--green)', color: '#fff', fontSize: 13, fontWeight: 600,
+          background: 'var(--green-solid)', color: '#fff', fontSize: 13, fontWeight: 600,
           marginBottom: 12,
           opacity: syncing || connections.filter(c => c.is_active).length === 0 ? 0.5 : 1,
           display: 'inline-flex', alignItems: 'center', gap: 6,

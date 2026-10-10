@@ -8,6 +8,7 @@ import { usePermissions } from '@/lib/PermissionsContext';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import { toneText } from '@/lib/theme-tones';
 
 // Lazy-load emoji picker to avoid SSR issues
 const EmojiPicker = dynamic(() => import('emoji-picker-react'), { ssr: false });
@@ -47,9 +48,9 @@ const STATUS_STYLE: Record<string, { bg: string; color: string }> = {
 };
 
 const CATEGORY_STYLE: Record<string, { bg: string; color: string }> = {
-  MARKETING:      { bg: '#1e3a5f', color: '#60a5fa' },
-  UTILITY:        { bg: '#1a3636', color: '#2dd4bf' },
-  AUTHENTICATION: { bg: '#3b1f4a', color: '#c084fc' },
+  MARKETING:      { bg: 'var(--accent-subtle)', color: 'var(--tone-blue)' },
+  UTILITY:        { bg: 'rgba(20,184,166,0.14)', color: 'var(--tone-teal)' },
+  AUTHENTICATION: { bg: 'rgba(168,85,247,0.14)', color: 'var(--tone-purple)' },
 };
 
 // ── Template Preview Component (WhatsApp chat bubble) ──
@@ -74,28 +75,28 @@ function TemplatePreview({ template, renderWaFormatted, analytics }: { template:
               </div>
             )}
             {header?.format === 'IMAGE' && (
-              <div style={{ background: '#f0f0f0', borderRadius: 6, height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6, color: '#999', fontSize: 11 }}>
+              <div style={{ background: '#f0f0f0', borderRadius: 6, height: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 6, color: '#667781', fontSize: 11 }}>
                 📷 Image Header
               </div>
             )}
             {/* Body */}
             <div style={{ fontSize: 13, color: '#303030', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-              {body?.text ? renderWaFormatted(body.text) : <span style={{ color: '#999' }}>No body text</span>}
+              {body?.text ? renderWaFormatted(body.text) : <span style={{ color: '#667781' }}>No body text</span>}
             </div>
             {/* Footer */}
             {footer?.text && (
-              <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 6 }}>{footer.text}</div>
+              <div style={{ fontSize: 11, color: '#667781', marginTop: 6 }}>{footer.text}</div>
             )}
             {/* Timestamp */}
             <div style={{ textAlign: 'right', marginTop: 2 }}>
-              <span style={{ fontSize: 10, color: '#8c8c8c' }}>12:00</span>
+              <span style={{ fontSize: 10, color: '#667781' }}>12:00</span>
             </div>
           </div>
           {/* Buttons */}
           {buttons?.buttons?.length > 0 && (
             <div style={{ position: 'relative', marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
               {buttons.buttons.map((btn: any, i: number) => (
-                <div key={i} style={{ background: '#fff', borderRadius: 6, padding: '7px 10px', textAlign: 'center', fontSize: 13, color: '#00a5f4', fontWeight: 500, boxShadow: '0 1px 2px rgba(0,0,0,0.08)' }}>
+                <div key={i} style={{ background: '#fff', borderRadius: 6, padding: '7px 10px', textAlign: 'center', fontSize: 13, color: 'var(--tone-sky)', fontWeight: 500, boxShadow: '0 1px 2px rgba(0,0,0,0.08)' }}>
                   {btn.type === 'URL' ? '🔗 ' : btn.type === 'PHONE_NUMBER' ? '📞 ' : ''}{btn.text}
                 </div>
               ))}
@@ -148,7 +149,7 @@ function TemplatePreview({ template, renderWaFormatted, analytics }: { template:
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 8 }}>
               <div style={{ background: 'var(--bg)', borderRadius: 6, padding: '8px 10px', textAlign: 'center' }}>
                 <div style={{ fontSize: 9, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Click Rate</div>
-                <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: '#60a5fa' }}>
+                <div style={{ fontSize: 14, fontWeight: 700, fontFamily: 'monospace', color: 'var(--tone-blue)' }}>
                   {analytics.read > 0 ? (analytics.clicked / analytics.read * 100).toFixed(1) + '%' : '—'}
                 </div>
               </div>
@@ -883,10 +884,10 @@ export default function WabaManagementPage() {
                 ? 'rgba(161,98,7,0.15)'
                 : 'rgba(6,95,70,0.15)',
             color: syncNotice.tone === 'error'
-              ? '#fca5a5'
+              ? 'var(--tone-red)'
               : syncNotice.tone === 'warning'
-                ? '#fde68a'
-                : '#86efac',
+                ? 'var(--tone-amber)'
+                : 'var(--tone-green)',
             fontSize: 12,
             lineHeight: 1.6,
           }}>
@@ -1036,7 +1037,7 @@ export default function WabaManagementPage() {
                     </button>
                     <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
                     <button type="button" onClick={addVariable} title="Add variable"
-                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, height: 28, padding: '0 10px', cursor: 'pointer', color: '#60a5fa', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      style={{ background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, height: 28, padding: '0 10px', cursor: 'pointer', color: 'var(--tone-blue)', fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
                       + Add variable
                     </button>
                   </div>
@@ -1092,7 +1093,7 @@ export default function WabaManagementPage() {
 
                 {/* Authentication category info */}
                 {formCategory === 'AUTHENTICATION' && (
-                  <div style={{ background: '#1e1533', border: '1px solid #6b21a8', borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 11, color: '#c084fc' }}>
+                  <div style={{ background: '#1e1533', border: '1px solid #6b21a8', borderRadius: 6, padding: 10, marginBottom: 12, fontSize: 11, color: 'var(--tone-purple)' }}>
                     Authentication templates have a fixed body format set by Meta: <strong>{'"{{1}} is your verification code."'}</strong> Your body text will be replaced.
                   </div>
                 )}
@@ -1136,17 +1137,17 @@ export default function WabaManagementPage() {
                     )}
                     {/* Body */}
                     <div style={{ fontSize: 13, color: '#303030', lineHeight: 1.45, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                      {previewBody ? renderWaFormatted(previewBody) : <span style={{ color: '#999' }}>Message body will appear here...</span>}
+                      {previewBody ? renderWaFormatted(previewBody) : <span style={{ color: '#667781' }}>Message body will appear here...</span>}
                     </div>
                     {/* Footer */}
                     {formFooter.trim() && (
-                      <div style={{ fontSize: 11, color: '#8c8c8c', marginTop: 6 }}>
+                      <div style={{ fontSize: 11, color: '#667781', marginTop: 6 }}>
                         {formFooter}
                       </div>
                     )}
                     {/* Timestamp */}
                     <div style={{ textAlign: 'right', marginTop: 2 }}>
-                      <span style={{ fontSize: 10, color: '#8c8c8c' }}>
+                      <span style={{ fontSize: 10, color: '#667781' }}>
                         {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
                       </span>
                     </div>
@@ -1157,7 +1158,7 @@ export default function WabaManagementPage() {
                       {formButtons.filter(b => b.trim()).map((btn, i) => (
                         <div key={i} style={{
                           background: '#fff', borderRadius: 8, padding: '8px 12px', textAlign: 'center',
-                          fontSize: 13, color: '#00a5f4', fontWeight: 500, boxShadow: '0 1px 2px rgba(0,0,0,0.13)',
+                          fontSize: 13, color: 'var(--tone-sky)', fontWeight: 500, boxShadow: '0 1px 2px rgba(0,0,0,0.13)',
                           cursor: 'default',
                         }}>
                           {btn}
@@ -1207,14 +1208,14 @@ export default function WabaManagementPage() {
                 background: showAutoGenerated ? '#1e3a5f' : 'transparent',
                 border: `1px solid ${showAutoGenerated ? 'var(--accent)' : 'var(--border)'}`,
                 borderRadius: 6, padding: '5px 12px', cursor: 'pointer',
-                color: showAutoGenerated ? '#60a5fa' : 'var(--dim)',
+                color: showAutoGenerated ? 'var(--tone-blue)' : 'var(--dim)',
                 fontSize: 11, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6,
               }}
             >
               <span style={{
                 display: 'inline-block', width: 14, height: 14, borderRadius: 3,
                 border: `1.5px solid ${showAutoGenerated ? 'var(--accent)' : 'var(--text-muted)'}`,
-                background: showAutoGenerated ? 'var(--accent)' : 'transparent',
+                background: showAutoGenerated ? 'var(--accent-solid)' : 'transparent',
                 lineHeight: '12px', textAlign: 'center', fontSize: 10, color: '#fff',
               }}>{showAutoGenerated ? '✓' : ''}</span>
               Show auto-generated CTWA templates ({autoGeneratedCount})
@@ -1233,7 +1234,7 @@ export default function WabaManagementPage() {
             <span style={{
               display: 'inline-block', width: 14, height: 14, borderRadius: 3,
               border: `1.5px solid ${showOnlySent ? 'var(--green)' : 'var(--text-muted)'}`,
-              background: showOnlySent ? 'var(--green)' : 'transparent',
+              background: showOnlySent ? 'var(--green-solid)' : 'transparent',
               lineHeight: '12px', textAlign: 'center', fontSize: 10, color: '#fff',
             }}>{showOnlySent ? '✓' : ''}</span>
             Sent &gt; 0 only
@@ -1250,7 +1251,7 @@ export default function WabaManagementPage() {
             {allTags.map(tag => (
               <button key={tag} onClick={() => setFilterTag(filterTag === tag ? null : tag)}
                 style={{
-                  background: filterTag === tag ? 'var(--accent)' : 'var(--bg-deep)',
+                  background: filterTag === tag ? 'var(--accent-solid)' : 'var(--bg-deep)',
                   color: filterTag === tag ? '#fff' : 'var(--text-secondary)',
                   border: `1px solid ${filterTag === tag ? 'var(--accent)' : 'var(--border)'}`,
                   borderRadius: 12, padding: '2px 10px', fontSize: 10, fontWeight: 600,
@@ -1333,7 +1334,7 @@ export default function WabaManagementPage() {
                               {(t.tags || []).map(tag => (
                                 <span key={tag} style={{
                                   display: 'inline-flex', alignItems: 'center', gap: 2,
-                                  background: '#1e3a5f', color: '#60a5fa', borderRadius: 8,
+                                  background: '#1e3a5f', color: 'var(--tone-blue)', borderRadius: 8,
                                   padding: '1px 6px', fontSize: 9, fontWeight: 600, fontFamily: 'sans-serif',
                                 }}>
                                   {tag}
@@ -1342,7 +1343,7 @@ export default function WabaManagementPage() {
                                       e.stopPropagation();
                                       handleUpdateTags(t.id, (t.tags || []).filter(x => x !== tag));
                                     }} style={{
-                                      background: 'transparent', border: 'none', color: '#60a5fa',
+                                      background: 'transparent', border: 'none', color: 'var(--tone-blue)',
                                       cursor: 'pointer', padding: 0, fontSize: 10, lineHeight: 1, opacity: 0.7,
                                     }}>×</button>
                                   )}
@@ -1395,12 +1396,12 @@ export default function WabaManagementPage() {
                             </td>
                           )}
                           <td style={tdStyle}>
-                            <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: cs.bg, color: cs.color }}>
+                            <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: cs.bg, color: toneText(cs.color) }}>
                               {t.category}
                             </span>
                           </td>
                           <td style={{ ...tdStyle, textAlign: 'center' }}>
-                            <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: ss.bg, color: ss.color }}>
+                            <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: ss.bg, color: toneText(ss.color) }}>
                               {t.status}
                             </span>
                           </td>
@@ -1411,7 +1412,7 @@ export default function WabaManagementPage() {
                           </td>
                           <td style={{ ...tdStyle, textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
                             {metrics?.read && metrics.read > 0 ? (
-                              <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1e3a5f', color: '#60a5fa' }}>
+                              <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: '#1e3a5f', color: 'var(--tone-blue)' }}>
                                 {(metrics.clicked / metrics.read * 100).toFixed(1)}%
                               </span>
                             ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
@@ -1494,7 +1495,7 @@ export default function WabaManagementPage() {
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600 }}>
                       {r.orders > 0 ? r.orders.toLocaleString() : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: '#25D366' }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: 'var(--tone-green)' }}>
                       {r.cost > 0 ? fmtRupiah(r.cost) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11 }}>
@@ -1519,7 +1520,7 @@ export default function WabaManagementPage() {
                     ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                   </td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.orders.toLocaleString()}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#25D366' }}>{fmtRupiah(wabaAnalysis.totals.cost)}</td>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: 'var(--tone-green)' }}>{fmtRupiah(wabaAnalysis.totals.cost)}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{fmtRupiah(wabaAnalysis.totals.revenue)}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{wabaAnalysis.totals.orders > 0 ? fmtRupiah(wabaAnalysis.totals.costPerOrder) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                 </tr>
