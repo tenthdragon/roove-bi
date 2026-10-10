@@ -48,7 +48,7 @@ rolled-back transaction; it refuses databases without a nonproduction marker.
 Validate browser creation/save/reload, table and image round trips,
 retry/solve/reopen and search/filter in staging before promotion.
 
-Implementation branch: `codex/growth-execution-p0`. Module ID: `growth-work`.
+Staging integration branch: `staging`. Module ID: `growth-work`.
 
 The domain references are the PRD Growth Execution P0 and both Growth Lead v1.2
 documents in `Workstation Doc`. Illustrative business amounts in those documents

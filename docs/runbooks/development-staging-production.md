@@ -32,10 +32,17 @@ Production credentials are absent from the new staging app environment.
 
 ## Feature workflow
 
-1. Work on a feature branch such as `codex/growth-execution-p0`. Run the app
+`main` contains code approved for production. `staging` is the permanent
+integration branch and the only source for staging deployment. Create short-lived
+feature branches from `staging`, merge reviewed changes back into `staging`,
+and delete feature branches once their changes are retained there. Product
+approval and an explicit release to `main` are required before production deployment.
+
+1. Work on a feature branch such as `codex/growth-case-improvement`. Run the app
    against local Supabase and record new schema changes as reviewed SQL migrations.
 2. Commit the intended feature changes, then run relevant tests, typecheck, lint
-   and build. Build staging with its own
+   and build. Merge into `staging` and push it to GitHub. Build the exact pushed
+   `staging` commit from a Git archive with its own
    public Supabase URL and anon key; these values are embedded in browser assets.
    Changing runtime environment variables alone does not change that build.
 3. Apply new migrations only to the staging database. Back it up first.
@@ -44,20 +51,25 @@ Production credentials are absent from the new staging app environment.
    backs up the fixed staging database and records a transactional checksum.
    It refuses migration versions through 195, which are already in the snapshot.
 4. Prepare a distinct staging release, with its staging-only `.env.local`,
-   dependencies and `.next` build. On the host, run
+   dependencies and `.next` build. Set `ROOVE_SOURCE_BRANCH=staging` and
+   `ROOVE_RELEASE=<first-12-commit-characters>-staging` in the release environment.
+   Include `.release-source.json` containing `{"branch":"staging","commit":"<full-40-character-commit>"}`.
+   The deployment helper verifies this commit against the current GitHub
+   `staging` head before switching the release. On the host, run
    `bash deploy/staging/deploy.sh /var/www/releases/roove-bi-staging/<release>`.
    The script checks the endpoint and browser bundle, switches only the staging
    release, and rolls back that release if its environment health check fails.
 5. Validate real login, permissions, workspace switching, numbers, persistence,
    image uploads and feature workflows at the staging domain. Record the tested
    commit/build and migration set. The app environment endpoint identifies the
-   deployed release and snapshot date: `/api/environment`.
+   deployed branch, release and snapshot date: `/api/environment`.
 6. After explicit product approval, release that exact code and migration set
    through the established production deployment process. Preserve production
    data. Never restore a staging dump or test records into production.
 
 A code push is not production approval. The repository currently has a CI
-workflow that checks branches; production promotion remains deliberate.
+workflow that checks branches; staging deployment is manual and a push alone
+does not update the app. Production promotion remains deliberate.
 Staging deployment helpers do not start production timers or modify production
 service files, environment files or release links.
 
@@ -118,8 +130,9 @@ sessions stay in ignored/private directories.
 
 ## Preserve existing staging features
 
-The integration branch `codex/growth-execution-p0` includes both Growth P0.1
-and the previous `codex/shopee-staging` features. Deploying a standalone feature
+The integration branch `staging` includes both Growth P0.1 and the previous
+`codex/shopee-staging` features. It was created from the combined Growth and
+Shopee release, preserving its full commit history. Deploying a standalone feature
 branch that predates the current staging features removes those features from
 the application, even when their database rows and permissions still exist.
 Merge the current staging feature set before preparing a release and validate
@@ -130,4 +143,6 @@ workspace facts remain inaccessible to them.
 Shopee schema migrations 189–195 are included as historical source from the
 Shopee branch. They are already present in the verified snapshot and must not
 be replayed on the local clone or staging. The imported legacy auto-deployment
-job/script is excluded from this integration; use the isolated workflow above.
+job/script is excluded from this integration. The server's legacy
+`/usr/local/sbin/deploy-roove-bi-staging` entrypoint is disabled so the old
+Shopee branch cannot replace the combined release. Use the isolated workflow above.

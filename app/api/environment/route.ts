@@ -4,6 +4,7 @@ export async function GET() {
   const environment = process.env.ROOVE_ENVIRONMENT || (process.env.ROOVE_LOCAL_DEV === '1' ? 'development' : 'production');
   return NextResponse.json({
     environment,
+    branch: process.env.ROOVE_SOURCE_BRANCH || null,
     release: process.env.ROOVE_RELEASE || null,
     snapshotAt: environment === 'production' ? null : process.env.ROOVE_SNAPSHOT_AT || null,
     integrationsEnabled: environment === 'production',
