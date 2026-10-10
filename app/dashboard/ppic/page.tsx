@@ -24,6 +24,7 @@ import {
 } from '@/lib/ppic-actions';
 import { getProducts } from '@/lib/warehouse-ledger-actions';
 import { getCurrentProfile } from '@/lib/actions';
+import { toneFill, toneText } from '@/lib/theme-tones';
 
 // ── Helpers ──
 
@@ -90,7 +91,7 @@ function StatusBadge({ status }: { status: string }) {
   return (
     <span style={{
       padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
-      background: STATUS_COLORS[status] || '#94a3b8',
+      background: toneFill(STATUS_COLORS[status] || '#475569'),
       color: '#fff',
     }}>
       {STATUS_LABELS[status] || status}
@@ -236,7 +237,7 @@ function POTab() {
         </select>
         <div style={{ flex: 1 }} />
         <button onClick={() => setShowCreateModal(true)}
-          style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+          style={{ background: 'var(--accent-solid)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
           + Buat PO
         </button>
       </div>
@@ -271,11 +272,11 @@ function POTab() {
                       style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer', color: 'var(--text)' }}>Detail</button>
                     {po.status === 'draft' && (
                       <button onClick={async () => { await submitPurchaseOrder(po.id); refresh(); }}
-                        style={{ background: '#3b82f6', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer', color: '#fff' }}>Submit</button>
+                        style={{ background: '#2563eb', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer', color: '#fff' }}>Submit</button>
                     )}
                     {['submitted', 'partial'].includes(po.status) && (
                       <button onClick={() => setShowReceiveModal(po.id)}
-                        style={{ background: 'var(--green)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer', color: '#fff' }}>Terima</button>
+                        style={{ background: 'var(--green-solid)', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer', color: '#fff' }}>Terima</button>
                     )}
                     {['draft', 'submitted'].includes(po.status) && (
                       <button onClick={async () => { if (confirm('Batalkan PO ini?')) { await cancelPurchaseOrder(po.id); refresh(); } }}
@@ -426,7 +427,7 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
             <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--text)' }}>Item PO</span>
             <button onClick={addItem}
-              style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 13, cursor: 'pointer' }}>+ Tambah</button>
+              style={{ background: 'var(--accent-solid)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 14px', fontSize: 13, cursor: 'pointer' }}>+ Tambah</button>
           </div>
 
           {/* Column headers */}
@@ -508,8 +509,8 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
           </div>
           {isVendorPKP && (
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0' }}>
-              <span style={{ fontSize: 13, color: '#60a5fa' }}>PPN ({ppnRate}%)</span>
-              <span style={{ fontSize: 13, color: '#60a5fa' }}>Rp {fmtNum(ppnAmount)}</span>
+              <span style={{ fontSize: 13, color: 'var(--tone-blue)' }}>PPN ({ppnRate}%)</span>
+              <span style={{ fontSize: 13, color: 'var(--tone-blue)' }}>Rp {fmtNum(ppnAmount)}</span>
             </div>
           )}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--border)', marginTop: 6, paddingTop: 10 }}>
@@ -524,7 +525,7 @@ function CreatePOModal({ onClose, onSuccess }: { onClose: () => void; onSuccess:
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 14, marginTop: 4, borderTop: '1px solid var(--border)' }}>
           <button onClick={onClose} style={{ padding: '8px 20px', fontSize: 14, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', cursor: 'pointer' }}>Batal</button>
           <button onClick={handleSubmit} disabled={submitting}
-            style={{ background: 'var(--accent)', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', opacity: submitting ? 0.6 : 1 }}>
+            style={{ background: 'var(--accent-solid)', color: '#fff', border: 'none', padding: '8px 20px', borderRadius: 8, fontSize: 14, fontWeight: 500, cursor: 'pointer', opacity: submitting ? 0.6 : 1 }}>
             {submitting ? 'Menyimpan...' : 'Simpan Draft'}
           </button>
         </div>
@@ -695,7 +696,7 @@ function ReceivePOModal({ poId, onClose, onSuccess }: { poId: number; onClose: (
         <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button onClick={onClose} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 20px', fontSize: 13, cursor: 'pointer', color: 'var(--text)' }}>Batal</button>
           <button onClick={handleSubmit} disabled={submitting}
-            style={{ background: 'var(--green)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: submitting ? 0.6 : 1 }}>
+            style={{ background: 'var(--green-solid)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: submitting ? 0.6 : 1 }}>
             {submitting ? 'Menyimpan...' : 'Terima Barang'}
           </button>
         </div>
@@ -761,7 +762,7 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
 
         {/* Header info */}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16, fontSize: 13 }}>
-          <div><span style={{ color: 'var(--dim)' }}>Vendor:</span> <strong>{po?.warehouse_vendors?.name}</strong>{isDetailPKP && <span style={{ marginLeft: 6, padding: '1px 5px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(59,130,246,0.15)', color: '#60a5fa' }}>PKP</span>}</div>
+          <div><span style={{ color: 'var(--dim)' }}>Vendor:</span> <strong>{po?.warehouse_vendors?.name}</strong>{isDetailPKP && <span style={{ marginLeft: 6, padding: '1px 5px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: 'rgba(59,130,246,0.15)', color: 'var(--tone-blue)' }}>PKP</span>}</div>
           <div><span style={{ color: 'var(--dim)' }}>Entity:</span> <strong>{po?.entity}</strong></div>
           <div><span style={{ color: 'var(--dim)' }}>Tanggal PO:</span> {fmtDate(po?.po_date)}</div>
           <div><span style={{ color: 'var(--dim)' }}>Exp. Delivery:</span> {fmtDate(po?.expected_date)}</div>
@@ -790,7 +791,7 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
                   <td style={{ padding: '8px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtNum(Number(item.quantity_requested))}</td>
                   <td style={{ padding: '8px', textAlign: 'right', fontFamily: 'monospace' }}>
                     {fmtNum(Number(item.quantity_received))}
-                    <span style={{ fontSize: 10, color: pct >= 100 ? 'var(--green)' : '#f59e0b', marginLeft: 4 }}>({pct}%)</span>
+                    <span style={{ fontSize: 10, color: pct >= 100 ? 'var(--green)' : 'var(--tone-amber)', marginLeft: 4 }}>({pct}%)</span>
                   </td>
                   <td style={{ padding: '8px', textAlign: 'right', fontFamily: 'monospace' }}>Rp {fmtNum(Number(item.unit_price))}</td>
                   <td style={{ padding: '8px', textAlign: 'right', fontFamily: 'monospace' }}>Rp {fmtNum(Number(item.quantity_requested) * Number(item.unit_price))}</td>
@@ -818,8 +819,8 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
                   <td style={{ padding: '8px', textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: 'var(--dim)' }}>Rp {fmtNum(subtotalBeforePPN)}</td>
                 </tr>
                 <tr>
-                  <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontSize: 12, color: '#60a5fa' }}>PPN ({ppnRate}%):</td>
-                  <td style={{ padding: '8px', textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: '#60a5fa' }}>Rp {fmtNum(detailPPN)}</td>
+                  <td colSpan={5} style={{ padding: '8px', textAlign: 'right', fontSize: 12, color: 'var(--tone-blue)' }}>PPN ({ppnRate}%):</td>
+                  <td style={{ padding: '8px', textAlign: 'right', fontSize: 12, fontFamily: 'monospace', color: 'var(--tone-blue)' }}>Rp {fmtNum(detailPPN)}</td>
                 </tr>
               </>
             )}
@@ -840,7 +841,7 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
                     try { await submitPurchaseOrder(poId); onRefresh(); onClose(); } catch (e: any) { setError(e?.message || 'Gagal submit'); }
                     setActionLoading('');
                   }} disabled={!!actionLoading}
-                  style={{ background: 'var(--green)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading === 'submit' ? 0.6 : 1 }}>
+                  style={{ background: 'var(--green-solid)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading === 'submit' ? 0.6 : 1 }}>
                   {actionLoading === 'submit' ? 'Submitting...' : 'Submit PO'}
                 </button>
                 <button onClick={() => { if (onEdit) onEdit(poId); }}
@@ -858,7 +859,7 @@ function PODetailModal({ poId, onClose, onRefresh, onEdit }: { poId: number; onC
                       try { await cancelPurchaseOrder(poId); onRefresh(); onClose(); } catch (e: any) { setError(e?.message || 'Gagal cancel'); }
                       setActionLoading('');
                     }} disabled={!!actionLoading}
-                    style={{ background: 'var(--red)', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                    style={{ background: 'var(--red-solid)', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                     Ya, Batalkan
                   </button>
                   <button onClick={() => setConfirmCancel(false)}
@@ -973,7 +974,7 @@ function DemandTab() {
   const selectStyle = { background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '6px 12px', color: 'var(--text)', fontSize: 13, outline: 'none' };
   const toggleBtnStyle = (active: boolean) => ({
     padding: '6px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none', borderRadius: 6,
-    background: active ? 'var(--accent)' : 'var(--bg)',
+    background: active ? 'var(--accent-solid)' : 'var(--bg)',
     color: active ? '#fff' : 'var(--dim)',
   });
 
@@ -1002,7 +1003,7 @@ function DemandTab() {
         </label>
         <div style={{ flex: 1 }} />
         <button onClick={handleInit} disabled={initializing}
-          style={{ background: 'var(--accent)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: initializing ? 0.6 : 1 }}>
+          style={{ background: 'var(--accent-solid)', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 16px', fontWeight: 600, fontSize: 13, cursor: 'pointer', opacity: initializing ? 0.6 : 1 }}>
           {initializing ? 'Menghitung...' : 'Inisialisasi dari Scalev'}
         </button>
       </div>
@@ -1071,7 +1072,7 @@ function DemandTab() {
                           <td key={`${w}t`} style={{ padding: '6px 6px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--dim)', fontSize: 11, borderLeft: '1px solid var(--border)' }}>
                             {fmtNum(target)}
                           </td>
-                          <td key={`${w}a`} style={{ padding: '6px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600, color }}>
+                          <td key={`${w}a`} style={{ padding: '6px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, fontWeight: 600, color: toneText(color) }}>
                             {isFuture ? '-' : fmtNum(actual)}
                           </td>
                         </>
@@ -1137,13 +1138,13 @@ function DemandTab() {
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--green)' }}>{fmtNum(Number(plan.actual_in))}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtNum(actualOut)}</td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: 'var(--dim)' }}>{fmtNum(proratedTarget)}</td>
-                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: varianceColor, fontWeight: 600 }}>
+                    <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', color: toneText(varianceColor), fontWeight: 600 }}>
                       {variance > 0 ? '+' : ''}{fmtNum(variance)}
                       <span style={{ fontSize: 10, marginLeft: 4 }}>({variancePct}%)</span>
                     </td>
                     <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtNum(projected)}</td>
                     <td style={{ padding: '8px 10px' }}>
-                      <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, background: paceColor, color: '#fff' }}>
+                      <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, background: toneFill(paceColor), color: '#fff' }}>
                         {paceLabel}
                       </span>
                     </td>
@@ -1271,11 +1272,11 @@ function ITOTab() {
       {/* Source toggle */}
       <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
         <button onClick={() => setSource('warehouse')}
-          style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${source === 'warehouse' ? 'var(--accent)' : 'var(--border)'}`, background: source === 'warehouse' ? 'var(--accent)' : 'transparent', color: source === 'warehouse' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+          style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${source === 'warehouse' ? 'var(--accent)' : 'var(--border)'}`, background: source === 'warehouse' ? 'var(--accent-solid)' : 'transparent', color: source === 'warehouse' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
           Warehouse PoV
         </button>
         <button onClick={() => setSource('scalev')}
-          style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${source === 'scalev' ? 'var(--accent)' : 'var(--border)'}`, background: source === 'scalev' ? 'var(--accent)' : 'transparent', color: source === 'scalev' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
+          style={{ padding: '4px 12px', borderRadius: 6, border: `1px solid ${source === 'scalev' ? 'var(--accent)' : 'var(--border)'}`, background: source === 'scalev' ? 'var(--accent-solid)' : 'transparent', color: source === 'scalev' ? '#fff' : 'var(--dim)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}>
           Scalev PoV
         </button>
       </div>
@@ -1325,13 +1326,13 @@ function ITOTab() {
                   <td style={{ padding: '6px 10px' }}>{prod.entity}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtNum(prod.current_stock)}</td>
                   <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{prod.avg_out_per_day > 0 ? prod.avg_out_per_day.toFixed(1) : '-'}</td>
-                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: getDOSColor(prod.days_of_stock) }}>{prod.days_of_stock >= 999 ? '∞' : prod.days_of_stock > 0 ? prod.days_of_stock : '-'}</td>
+                  <td style={{ padding: '6px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: toneText(getDOSColor(prod.days_of_stock)) }}>{prod.days_of_stock >= 999 ? '∞' : prod.days_of_stock > 0 ? prod.days_of_stock : '-'}</td>
                   {monthColumns.map(mc => {
                     const [y, m] = mc.split('-');
                     const monthData = prod.months.find((md: any) => md.year === Number(y) && md.month === Number(m));
                     const ito = monthData?.ito || 0;
                     return (
-                      <td key={mc} style={{ padding: '6px 10px', textAlign: 'center', fontFamily: 'monospace', fontWeight: 600, color: ito > 0 ? getITOColor(ito) : 'var(--dim)' }}>
+                      <td key={mc} style={{ padding: '6px 10px', textAlign: 'center', fontFamily: 'monospace', fontWeight: 600, color: toneText(ito > 0 ? getITOColor(ito) : 'var(--dim)') }}>
                         {ito > 0 ? ito.toFixed(1) : '-'}
                       </td>
                     );
@@ -1533,8 +1534,8 @@ function ROPTab() {
                       borderRadius: 4,
                       fontSize: 10,
                       fontWeight: 600,
-                      background: CATEGORY_COLORS[row.category] ? `${CATEGORY_COLORS[row.category]}20` : 'var(--bg-deep)',
-                      color: CATEGORY_COLORS[row.category] || 'var(--dim)',
+                      background: CATEGORY_COLORS[row.category] ? `color-mix(in srgb, ${CATEGORY_COLORS[row.category]} 12%, transparent)` : 'var(--bg-deep)',
+                      color: toneText(CATEGORY_COLORS[row.category] || 'var(--dim)'),
                     }}>
                       {row.category || '-'}
                     </span>
@@ -1573,11 +1574,11 @@ function ROPTab() {
 
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{fmtNum(row.safety_stock_qty)}</td>
                   <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700 }}>{fmtNum(row.rop)}</td>
-                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: row.days_of_stock > 30 ? 'var(--green)' : row.days_of_stock > 14 ? '#f59e0b' : 'var(--red)' }}>
+                  <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 600, color: row.days_of_stock > 30 ? 'var(--green)' : row.days_of_stock > 14 ? 'var(--tone-amber)' : 'var(--red)' }}>
                     {row.days_of_stock >= 999 ? '∞' : `${row.days_of_stock}d`}
                   </td>
                   <td style={{ padding: '8px 10px' }}>
-                    <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, background: statusColors[row.status as keyof typeof statusColors], color: '#fff' }}>
+                    <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, background: toneFill(statusColors[row.status as keyof typeof statusColors]), color: '#fff' }}>
                       {statusLabels[row.status as keyof typeof statusLabels]}
                     </span>
                   </td>

@@ -40,7 +40,7 @@ export default function ForgotPasswordPage() {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: 'linear-gradient(135deg, var(--bg) 0%, #1e1b4b 50%, var(--bg) 100%)',
+      background: 'linear-gradient(135deg, var(--bg) 0%, color-mix(in srgb, var(--accent) 12%, var(--bg)) 50%, var(--bg) 100%)',
       padding: 20,
     }}>
       <div style={{
@@ -55,7 +55,7 @@ export default function ForgotPasswordPage() {
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <div style={{
             width: 56, height: 56, borderRadius: 14,
-            background: 'linear-gradient(135deg, var(--accent), #8b5cf6)',
+            background: 'linear-gradient(135deg, var(--accent-solid), #7c3aed)',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 24, fontWeight: 800, color: '#fff', marginBottom: 16,
           }}>R</div>
@@ -71,7 +71,7 @@ export default function ForgotPasswordPage() {
           <div>
             <div style={{
               padding: '14px 16px', borderRadius: 8,
-              background: '#052e16', color: '#4ade80', fontSize: 14,
+              background: 'var(--badge-green-bg)', color: 'var(--badge-green-text)', fontSize: 14,
               lineHeight: 1.5, marginBottom: 24,
             }}>
               Link reset password telah dikirim ke <strong>{email}</strong>. Silakan cek inbox atau folder spam Anda.
@@ -111,7 +111,7 @@ export default function ForgotPasswordPage() {
             {error && (
               <div style={{
                 padding: '10px 14px', borderRadius: 8, marginBottom: 16,
-                background: '#7f1d1d', color: 'var(--red)', fontSize: 13,
+                background: 'var(--badge-red-bg)', color: 'var(--badge-red-text)', fontSize: 13,
               }}>{error}</div>
             )}
 
@@ -119,7 +119,7 @@ export default function ForgotPasswordPage() {
               width: '100%', padding: '12px 16px', borderRadius: 10,
               border: 'none', cursor: loading ? 'not-allowed' : 'pointer',
               fontSize: 14, fontWeight: 700, letterSpacing: '-0.01em',
-              background: loading ? '#1e40af' : 'linear-gradient(135deg, var(--accent), #6366f1)',
+              background: loading ? '#1e40af' : 'linear-gradient(135deg, var(--accent-solid), #4f46e5)',
               color: '#fff', transition: 'all 0.2s',
               opacity: loading ? 0.7 : 1,
             }}>

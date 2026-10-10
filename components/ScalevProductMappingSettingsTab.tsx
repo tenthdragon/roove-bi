@@ -16,6 +16,7 @@ import {
   filterWarehouseProductsForMapping,
   formatWarehouseTargets,
 } from '@/lib/warehouse-mapping-targets';
+import { toneText } from '@/lib/theme-tones';
 
 const inputStyle: CSSProperties = {
   background: 'var(--bg)',
@@ -33,19 +34,19 @@ function renderStatusBadge(status: ScalevCatalogMappingRow['status']) {
     mapped: {
       bg: 'rgba(16,185,129,0.12)',
       border: 'rgba(52,211,153,0.22)',
-      color: '#6ee7b7',
+      color: 'var(--tone-emerald)',
       label: 'Mapped',
     },
     recommended: {
       bg: 'rgba(59,130,246,0.12)',
       border: 'rgba(96,165,250,0.22)',
-      color: '#93c5fd',
+      color: 'var(--tone-blue)',
       label: 'Recommended',
     },
     unmapped: {
       bg: 'rgba(239,68,68,0.12)',
       border: 'rgba(248,113,113,0.2)',
-      color: '#fca5a5',
+      color: 'var(--tone-red)',
       label: 'Unmapped',
     },
   } as const;
@@ -60,7 +61,7 @@ function renderStatusBadge(status: ScalevCatalogMappingRow['status']) {
         borderRadius: 999,
         border: `1px solid ${style.border}`,
         background: style.bg,
-        color: style.color,
+        color: toneText(style.color),
         fontSize: 10,
         fontWeight: 700,
         whiteSpace: 'nowrap',
@@ -103,7 +104,7 @@ function renderVisibilityBadge(visibilityKind: ScalevCatalogMappingRow['visibili
         borderRadius: 999,
         background: visibilityKind === 'shared' ? 'rgba(59,130,246,0.12)' : 'rgba(148,163,184,0.08)',
         border: visibilityKind === 'shared' ? '1px solid rgba(96,165,250,0.22)' : '1px solid rgba(148,163,184,0.16)',
-        color: visibilityKind === 'shared' ? '#93c5fd' : 'var(--dim)',
+        color: visibilityKind === 'shared' ? 'var(--tone-blue)' : 'var(--dim)',
         fontSize: 9,
         fontWeight: 700,
         whiteSpace: 'nowrap',
@@ -120,14 +121,14 @@ function renderCatalogReadyBadge(isReady: boolean) {
     ? {
         bg: 'rgba(16,185,129,0.12)',
         border: 'rgba(52,211,153,0.22)',
-        color: '#6ee7b7',
+        color: 'var(--tone-emerald)',
         dot: '#34d399',
         label: 'Catalog Ready',
       }
     : {
         bg: 'rgba(251,191,36,0.12)',
         border: 'rgba(251,191,36,0.22)',
-        color: '#fde68a',
+        color: 'var(--tone-amber)',
         dot: '#fbbf24',
         label: 'Catalog Missing',
       };
@@ -145,7 +146,7 @@ function renderCatalogReadyBadge(isReady: boolean) {
         fontSize: 10,
         fontWeight: 700,
         whiteSpace: 'nowrap',
-        color: palette.color,
+        color: toneText(palette.color),
         background: palette.bg,
         border: `1px solid ${palette.border}`,
       }}
@@ -426,7 +427,7 @@ export default function ScalevProductMappingSettingsTab() {
             boxShadow: '0 18px 50px rgba(2,6,23,0.42)',
             border: `1px solid ${message.type === 'success' ? 'rgba(52,211,153,0.22)' : 'rgba(248,113,113,0.22)'}`,
             background: message.type === 'success' ? 'rgba(6,78,59,0.96)' : 'rgba(127,29,29,0.96)',
-            color: message.type === 'success' ? '#a7f3d0' : '#fecaca',
+            color: message.type === 'success' ? 'var(--tone-emerald)' : 'var(--tone-red)',
             backdropFilter: 'blur(10px)',
           }}
         >
@@ -507,7 +508,7 @@ export default function ScalevProductMappingSettingsTab() {
               borderRadius: 10,
               border: '1px solid rgba(251,191,36,0.35)',
               background: 'rgba(251,191,36,0.08)',
-              color: '#fde68a',
+              color: 'var(--tone-amber)',
               fontSize: 12,
               lineHeight: 1.6,
             }}
@@ -620,7 +621,7 @@ export default function ScalevProductMappingSettingsTab() {
             border: '1px solid rgba(251,191,36,0.25)',
             borderRadius: 12,
             padding: 20,
-            color: '#fde68a',
+            color: 'var(--tone-amber)',
             fontSize: 13,
             lineHeight: 1.7,
           }}
@@ -670,7 +671,7 @@ export default function ScalevProductMappingSettingsTab() {
                           {row.identifiers_preview.slice(0, 3).join(' • ')}
                         </div>
                       ) : null}
-                      <div style={{ marginTop: 6, color: row.visibility_kind === 'shared' ? '#93c5fd' : 'var(--dim)', fontSize: 10, lineHeight: 1.6 }}>
+                      <div style={{ marginTop: 6, color: row.visibility_kind === 'shared' ? 'var(--tone-blue)' : 'var(--dim)', fontSize: 10, lineHeight: 1.6 }}>
                         viewer: {row.viewer_business_code} • owner: {row.owner_business_code} • processor: {row.processor_business_code}
                       </div>
                       {row.mapping_business_code ? (
@@ -769,7 +770,7 @@ export default function ScalevProductMappingSettingsTab() {
                             background: 'rgba(59,130,246,0.08)',
                           }}
                         >
-                          <div style={{ color: '#93c5fd', fontSize: 10, fontWeight: 700, marginBottom: 4 }}>
+                          <div style={{ color: 'var(--tone-blue)', fontSize: 10, fontWeight: 700, marginBottom: 4 }}>
                             Rekomendasi {row.recommendation.confidence}%
                           </div>
                           <div style={{ color: 'var(--text)', fontWeight: 700 }}>{row.recommendation.warehouse_product_name}</div>
@@ -803,7 +804,7 @@ export default function ScalevProductMappingSettingsTab() {
                               borderRadius: 6,
                               border: '1px solid rgba(96,165,250,0.35)',
                               background: 'rgba(59,130,246,0.12)',
-                              color: '#93c5fd',
+                              color: 'var(--tone-blue)',
                               fontSize: 10,
                               fontWeight: 700,
                               cursor: 'pointer',
@@ -841,7 +842,7 @@ export default function ScalevProductMappingSettingsTab() {
                               borderRadius: 6,
                               border: '1px solid var(--border)',
                               background: 'transparent',
-                              color: '#fca5a5',
+                              color: 'var(--tone-red)',
                               fontSize: 10,
                               fontWeight: 700,
                               cursor: 'pointer',

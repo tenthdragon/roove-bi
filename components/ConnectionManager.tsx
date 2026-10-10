@@ -15,6 +15,7 @@ import {
   fetchStoresFromScalev,
   toggleStoreChannel,
 } from '@/lib/webhook-actions';
+import { toneText } from '@/lib/theme-tones';
 
 type Business = {
   id: number;
@@ -47,8 +48,8 @@ type FormData = {
 const EMPTY_FORM: FormData = { business_code: '', business_name: '', webhook_secret: '', api_key: '' };
 
 const STORE_TYPES = [
-  { value: 'marketplace' as const, label: 'Marketplace', color: '#0ea5e9', bg: 'var(--accent-subtle)' },
-  { value: 'scalev' as const, label: 'Scalev', color: '#a78bfa', bg: 'var(--accent-subtle)' },
+  { value: 'marketplace' as const, label: 'Marketplace', color: 'var(--tone-sky)', bg: 'var(--accent-subtle)' },
+  { value: 'scalev' as const, label: 'Scalev', color: 'var(--tone-violet)', bg: 'var(--accent-subtle)' },
   { value: 'reseller' as const, label: 'Reseller', color: 'var(--yellow)', bg: 'var(--badge-yellow-bg)' },
 ];
 
@@ -284,7 +285,7 @@ export default function ConnectionManager() {
             onClick={openAddForm}
             style={{
               padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-              background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600,
+              background: 'var(--accent-solid)', color: '#fff', fontSize: 12, fontWeight: 600,
             }}
           >
             + Tambah Business
@@ -379,7 +380,7 @@ export default function ConnectionManager() {
                   disabled={saving || !form.business_code.trim() || !form.business_name.trim() || (!form.id && !form.webhook_secret.trim())}
                   style={{
                     padding: '8px 16px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                    background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600,
+                    background: 'var(--accent-solid)', color: '#fff', fontSize: 12, fontWeight: 600,
                     opacity: saving ? 0.5 : 1,
                   }}
                 >
@@ -498,7 +499,7 @@ export default function ConnectionManager() {
                                   disabled={fetchingStores}
                                   style={{
                                     padding: '4px 10px', borderRadius: 4, border: 'none', cursor: 'pointer',
-                                    background: 'var(--accent)', color: '#fff', fontSize: 11, fontWeight: 600,
+                                    background: 'var(--accent-solid)', color: '#fff', fontSize: 11, fontWeight: 600,
                                     opacity: fetchingStores ? 0.5 : 1,
                                   }}
                                 >
@@ -531,7 +532,7 @@ export default function ConnectionManager() {
                                       title={sc.is_active ? 'Nonaktifkan store' : 'Aktifkan store'}
                                       style={{
                                         width: 14, height: 14, borderRadius: 3, border: 'none', cursor: 'pointer',
-                                        background: sc.is_active ? 'var(--green)' : 'var(--text-muted)', flexShrink: 0,
+                                        background: sc.is_active ? 'var(--green-solid)' : 'var(--muted-solid)', flexShrink: 0,
                                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                                         padding: 0, fontSize: 9, color: '#fff', lineHeight: 1,
                                       }}
@@ -554,7 +555,7 @@ export default function ConnectionManager() {
                                             padding: '3px 8px', borderRadius: 4, border: 'none', cursor: 'pointer',
                                             fontSize: 10, fontWeight: 600,
                                             background: sc.store_type === st.value ? st.bg : 'transparent',
-                                            color: sc.store_type === st.value ? st.color : 'var(--text-muted)',
+                                            color: toneText(sc.store_type === st.value ? st.color : 'var(--text-muted)'),
                                             opacity: sc.store_type === st.value ? 1 : 0.6,
                                           }}
                                         >

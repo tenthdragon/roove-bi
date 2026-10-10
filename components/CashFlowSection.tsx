@@ -5,6 +5,7 @@
 import { useState, useEffect } from 'react';
 import { fetchLiveCashFlow } from '@/lib/cashflow-actions';
 import { fmtCompact } from '@/lib/utils';
+import { toneText } from '@/lib/theme-tones';
 
 const CHANNEL_ORDER = [
   'TikTok Shop', 'Shopee', 'MP Lainnya',
@@ -87,7 +88,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
         {warn && <span style={{ color:'var(--red)', marginLeft:6 }}>!</span>}
         <span style={{ fontSize:10, fontFamily:'monospace', opacity:0.65, marginLeft:6 }}>{pctVal.toFixed(1)}%</span>
       </span>
-      <span style={{ fontFamily:'monospace', fontSize:12, color, whiteSpace:'nowrap' }}>
+      <span style={{ fontFamily:'monospace', fontSize:12, color: toneText(color), whiteSpace:'nowrap' }}>
         Rp {fmtCompact(amount)}
         {orders != null && <span style={{ fontSize:10, color:'var(--dim)', marginLeft:6 }}>{orders.toLocaleString('id-ID')} ord</span>}
       </span>
@@ -95,12 +96,12 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
   );
 
   const SeparatorRow = ({ label, pctVal, amount, orders, color }: any) => (
-    <div style={{ padding:'11px 16px', background:`${color}14`, borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
-      <span style={{ fontSize:12, fontWeight:700, color }}>
+    <div style={{ padding:'11px 16px', background:`color-mix(in srgb, ${color} 8%, transparent)`, borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:8 }}>
+      <span style={{ fontSize:12, fontWeight:700, color: toneText(color) }}>
         {label}
         <span style={{ fontSize:10, fontFamily:'monospace', fontWeight:400, opacity:0.75, marginLeft:6 }}>{pctVal.toFixed(1)}%</span>
       </span>
-      <span style={{ fontFamily:'monospace', fontSize:14, fontWeight:700, color, whiteSpace:'nowrap' }}>
+      <span style={{ fontFamily:'monospace', fontSize:14, fontWeight:700, color: toneText(color), whiteSpace:'nowrap' }}>
         Rp {fmtCompact(amount)}
         {orders != null && <span style={{ fontSize:10, fontWeight:400, color:'var(--dim)', marginLeft:6 }}>{orders.toLocaleString('id-ID')} ord</span>}
       </span>
@@ -128,7 +129,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
                 strokeDasharray={`${spillOverArc} ${circumference - spillOverArc}`} strokeDashoffset={-receivedArc} transform="rotate(-90 60 60)" />
             </svg>
             <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', pointerEvents:'none' }}>
-              <div style={{ fontFamily:'monospace', fontSize:20, fontWeight:800, color:'#10b981' }}>{totalCashInPct.toFixed(1)}%</div>
+              <div style={{ fontFamily:'monospace', fontSize:20, fontWeight:800, color:'var(--tone-emerald)' }}>{totalCashInPct.toFixed(1)}%</div>
               <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>cash masuk</div>
             </div>
           </div>
@@ -143,7 +144,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
               <div key={item.label} style={{ marginBottom:8 }}>
                 <div style={{ display:'flex', justifyContent:'space-between', gap:10, fontSize:10, marginBottom:3 }}>
                   <span style={{ color:'var(--text-secondary)' }}>{item.label}</span>
-                  <span style={{ fontFamily:'monospace', color:item.color }}>{item.value.toFixed(1)}%</span>
+                  <span style={{ fontFamily:'monospace', color:toneText(item.color) }}>{item.value.toFixed(1)}%</span>
                 </div>
                 <div style={{ height:5, background:'var(--bg-deep)', borderRadius:999, overflow:'hidden' }}>
                   <div style={{ width:`${Math.min(item.value, 100)}%`, height:'100%', background:item.color, borderRadius:999 }} />
@@ -179,7 +180,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
                     <th style={{ ...thStyle, textAlign:'left', minWidth:110 }}>Channel</th>
                     {CATEGORY_KEYS.map(cat => (
                       <th key={cat} style={{ ...thStyle, textAlign:'right' }}>
-                        <span style={{ color:CAT_COLORS[cat] }}>{CAT_LABELS[cat]}</span>
+                        <span style={{ color:toneText(CAT_COLORS[cat]) }}>{CAT_LABELS[cat]}</span>
                       </th>
                     ))}
                   </tr>
@@ -191,7 +192,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
                       <tr key={ch} style={{ borderBottom:'1px solid var(--border)' }}>
                         <td style={{ padding:'8px 6px', whiteSpace:'nowrap' }}>
                           <span style={{ display:'inline-block', width:7, height:7, borderRadius:2, background:chColor, marginRight:6, verticalAlign:'middle' }} />
-                          <span style={{ color:chColor, fontWeight:600 }}>{ch}</span>
+                          <span style={{ color:toneText(chColor), fontWeight:600 }}>{ch}</span>
                         </td>
                         {CATEGORY_KEYS.map(cat => {
                           const cell = byChannel[cat]?.[ch];
@@ -218,7 +219,7 @@ export default function CashFlowSection({ netSales, periodStart }: Props) {
                       const catOrders = activeChannels.reduce((s,ch) => s+(byChannel[cat]?.[ch]?.orders||0),0);
                       return (
                         <td key={cat} style={{ padding:'7px 6px', textAlign:'right', fontFamily:'monospace' }}>
-                          <div style={{ color:CAT_COLORS[cat], fontWeight:700 }}>{fmtCompact(catTotal)}</div>
+                          <div style={{ color:toneText(CAT_COLORS[cat]), fontWeight:700 }}>{fmtCompact(catTotal)}</div>
                           <div style={{ color:'var(--dim)', fontSize:9 }}>{catOrders.toLocaleString('id-ID')} ord</div>
                         </td>
                       );

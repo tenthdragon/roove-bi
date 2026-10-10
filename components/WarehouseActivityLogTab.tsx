@@ -6,6 +6,7 @@ import {
   type WarehouseActivityLogPayload,
   type WarehouseActivityLogRow,
 } from '@/lib/warehouse-activity-log-actions';
+import { toneText } from '@/lib/theme-tones';
 
 const inputStyle = {
   background: 'var(--bg)',
@@ -44,37 +45,37 @@ function renderScopeBadge(scope: string) {
     legacy_scalev_mapping: {
       bg: 'rgba(59,130,246,0.12)',
       border: 'rgba(96,165,250,0.24)',
-      color: '#93c5fd',
+      color: 'var(--tone-blue)',
       label: 'Mapping Scalev',
     },
     scalev_catalog_product_mapping: {
       bg: 'rgba(16,185,129,0.12)',
       border: 'rgba(52,211,153,0.24)',
-      color: '#86efac',
+      color: 'var(--tone-green)',
       label: 'Product Mapping',
     },
     warehouse_business_mapping: {
       bg: 'rgba(245,158,11,0.12)',
       border: 'rgba(251,191,36,0.24)',
-      color: '#fde68a',
+      color: 'var(--tone-amber)',
       label: 'Business Mapping',
     },
     scalev_catalog_sync: {
       bg: 'rgba(168,85,247,0.12)',
       border: 'rgba(192,132,252,0.24)',
-      color: '#d8b4fe',
+      color: 'var(--tone-purple)',
       label: 'Catalog Sync',
     },
     scalev_bundle_sync: {
       bg: 'rgba(14,165,233,0.12)',
       border: 'rgba(56,189,248,0.24)',
-      color: '#7dd3fc',
+      color: 'var(--tone-sky)',
       label: 'Bundle Sync',
     },
     warehouse_product_config: {
       bg: 'rgba(148,163,184,0.12)',
       border: 'rgba(148,163,184,0.24)',
-      color: '#cbd5e1',
+      color: 'var(--text-secondary)',
       label: 'Master Produk',
     },
   };
@@ -82,7 +83,7 @@ function renderScopeBadge(scope: string) {
   const style = palette[scope] || {
     bg: 'rgba(148,163,184,0.12)',
     border: 'rgba(148,163,184,0.24)',
-    color: '#cbd5e1',
+    color: 'var(--text-secondary)',
     label: scope,
   };
 
@@ -97,7 +98,7 @@ function renderScopeBadge(scope: string) {
         fontWeight: 700,
         background: style.bg,
         border: `1px solid ${style.border}`,
-        color: style.color,
+        color: toneText(style.color),
         whiteSpace: 'nowrap',
       }}
     >
@@ -208,7 +209,7 @@ export default function WarehouseActivityLogTab() {
               borderRadius: 10,
               border: '1px solid rgba(251,191,36,0.24)',
               background: 'rgba(251,191,36,0.08)',
-              color: '#fde68a',
+              color: 'var(--tone-amber)',
               fontSize: 12,
               lineHeight: 1.6,
             }}
@@ -318,7 +319,7 @@ export default function WarehouseActivityLogTab() {
                               borderRadius: 7,
                               border: '1px solid var(--border)',
                               background: 'transparent',
-                              color: '#60a5fa',
+                              color: 'var(--tone-blue)',
                               fontSize: 10,
                               fontWeight: 700,
                               cursor: 'pointer',

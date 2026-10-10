@@ -141,7 +141,7 @@ export default function WarehouseBusinessDirectoryTab({
           marginBottom: 12,
           fontSize: 12,
           background: message.type === 'success' ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
-          color: message.type === 'success' ? '#6ee7b7' : '#fca5a5',
+          color: message.type === 'success' ? 'var(--tone-emerald)' : 'var(--tone-red)',
         }}>
           {message.text}
         </div>
@@ -199,7 +199,7 @@ export default function WarehouseBusinessDirectoryTab({
           <button
             type="submit"
             disabled={saving}
-            style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: saving ? 0.7 : 1 }}
+            style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: 'var(--accent-solid)', color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: saving ? 0.7 : 1 }}
           >
             Simpan
           </button>
@@ -233,7 +233,7 @@ export default function WarehouseBusinessDirectoryTab({
                         borderRadius: 999,
                         border: '1px solid var(--border)',
                         background: entry.is_active ? 'rgba(16,185,129,0.12)' : 'rgba(239,68,68,0.12)',
-                        color: entry.is_active ? '#6ee7b7' : '#fca5a5',
+                        color: entry.is_active ? 'var(--tone-emerald)' : 'var(--tone-red)',
                         cursor: 'pointer',
                         fontSize: 10,
                         fontWeight: 700,
@@ -246,7 +246,7 @@ export default function WarehouseBusinessDirectoryTab({
                     <button
                       onClick={() => handleDelete(entry.id)}
                       disabled={saving}
-                      style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: '#fca5a5', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}
+                      style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--tone-red)', cursor: 'pointer', fontSize: 11, fontWeight: 700 }}
                     >
                       Hapus
                     </button>

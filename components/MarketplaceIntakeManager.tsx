@@ -4,6 +4,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { invalidateAll } from '@/lib/dashboard-cache';
 import { useMarketplaceIntakeSources } from '@/lib/use-marketplace-intake-sources';
+import { toneText } from '@/lib/theme-tones';
 
 const panelStyle = {
   background: 'var(--card)',
@@ -14,19 +15,19 @@ const panelStyle = {
 };
 
 const REVIEW_STATUS_META = {
-  ready: { label: 'Ready', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
-  needs_review: { label: 'Needs Review', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-  identified: { label: 'Identified', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
-  not_identified: { label: 'Not Identified', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
-  store_unmapped: { label: 'Store Unmapped', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-  entity_mismatch: { label: 'Entity Mismatch', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
+  ready: { label: 'Ready', color: 'var(--tone-green)', bg: 'rgba(34,197,94,0.12)' },
+  needs_review: { label: 'Needs Review', color: 'var(--tone-amber)', bg: 'rgba(245,158,11,0.12)' },
+  identified: { label: 'Identified', color: 'var(--tone-green)', bg: 'rgba(34,197,94,0.12)' },
+  not_identified: { label: 'Not Identified', color: 'var(--tone-red)', bg: 'rgba(239,68,68,0.12)' },
+  store_unmapped: { label: 'Store Unmapped', color: 'var(--tone-amber)', bg: 'rgba(245,158,11,0.12)' },
+  entity_mismatch: { label: 'Entity Mismatch', color: 'var(--tone-red)', bg: 'rgba(239,68,68,0.12)' },
 };
 
 const WAREHOUSE_STATUS_META = {
-  staged: { label: 'Belum Dikirim', color: '#94a3b8', bg: 'rgba(148,163,184,0.12)' },
-  scheduled: { label: 'Shipped', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
-  hold: { label: 'Hold', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
-  canceled: { label: 'Canceled', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
+  staged: { label: 'Belum Dikirim', color: 'var(--dim)', bg: 'rgba(148,163,184,0.12)' },
+  scheduled: { label: 'Shipped', color: 'var(--tone-green)', bg: 'rgba(34,197,94,0.12)' },
+  hold: { label: 'Hold', color: 'var(--tone-amber)', bg: 'rgba(245,158,11,0.12)' },
+  canceled: { label: 'Canceled', color: 'var(--tone-red)', bg: 'rgba(239,68,68,0.12)' },
 };
 
 function fmtNumber(value) {
@@ -120,7 +121,7 @@ function StatusPill({ status, warehouse = false }) {
         fontSize: 11,
         fontWeight: 700,
         background: meta.bg,
-        color: meta.color,
+        color: toneText(meta.color),
         whiteSpace: 'nowrap',
       }}
     >
@@ -131,11 +132,11 @@ function StatusPill({ status, warehouse = false }) {
 
 function SyncStatusPill({ status, successLabel, failedLabel, idleLabel, partialLabel }) {
   const meta = status === 'success'
-    ? { label: successLabel, color: '#22c55e', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.24)' }
+    ? { label: successLabel, color: 'var(--tone-green)', bg: 'rgba(34,197,94,0.12)', border: 'rgba(34,197,94,0.24)' }
     : status === 'partial'
-      ? { label: partialLabel || 'Sebagian', color: '#fcd34d', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.24)' }
+      ? { label: partialLabel || 'Sebagian', color: 'var(--tone-amber)', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.24)' }
     : status === 'failed'
-      ? { label: failedLabel, color: '#fca5a5', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.24)' }
+      ? { label: failedLabel, color: 'var(--tone-red)', bg: 'rgba(239,68,68,0.12)', border: 'rgba(239,68,68,0.24)' }
       : { label: idleLabel, color: 'var(--dim)', bg: 'rgba(148,163,184,0.10)', border: 'var(--border)' };
 
   return (
@@ -149,7 +150,7 @@ function SyncStatusPill({ status, successLabel, failedLabel, idleLabel, partialL
         fontSize: 11,
         fontWeight: 700,
         background: meta.bg,
-        color: meta.color,
+        color: toneText(meta.color),
         border: `1px solid ${meta.border}`,
         whiteSpace: 'nowrap',
       }}
@@ -165,13 +166,13 @@ function FeedbackNotice({ message, compact = false }) {
   const meta = message.type === 'success'
     ? {
       bg: 'rgba(34,197,94,0.12)',
-      color: '#86efac',
+      color: 'var(--tone-green)',
       border: 'rgba(34,197,94,0.24)',
     }
     : message.type === 'error'
       ? {
         bg: 'rgba(239,68,68,0.12)',
-        color: '#fca5a5',
+        color: 'var(--tone-red)',
         border: 'rgba(239,68,68,0.24)',
       }
       : {
@@ -187,7 +188,7 @@ function FeedbackNotice({ message, compact = false }) {
         borderRadius: 10,
         fontSize: compact ? 12 : 13,
         background: meta.bg,
-        color: meta.color,
+        color: toneText(meta.color),
         border: `1px solid ${meta.border}`,
       }}
     >
@@ -226,7 +227,7 @@ function SummaryCard({ label, value, tone = 'default', helper }) {
       <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
         {label}
       </div>
-      <div style={{ marginTop: 6, fontSize: 22, fontWeight: 800, color }}>
+      <div style={{ marginTop: 6, fontSize: 22, fontWeight: 800, color: toneText(color) }}>
         {fmtNumber(value)}
       </div>
       {helper ? (
@@ -298,11 +299,11 @@ function ActionButton({ children, onClick, tone = 'default', disabled = false })
   const palette = tone === 'primary'
     ? { bg: '#2563eb', color: '#fff', border: '#2563eb' }
     : tone === 'success'
-      ? { bg: 'rgba(34,197,94,0.12)', color: '#86efac', border: 'rgba(34,197,94,0.24)' }
+      ? { bg: 'rgba(34,197,94,0.12)', color: 'var(--tone-green)', border: 'rgba(34,197,94,0.24)' }
     : tone === 'warn'
-      ? { bg: 'rgba(245,158,11,0.12)', color: '#fcd34d', border: 'rgba(245,158,11,0.24)' }
+      ? { bg: 'rgba(245,158,11,0.12)', color: 'var(--tone-amber)', border: 'rgba(245,158,11,0.24)' }
       : tone === 'danger'
-        ? { bg: 'rgba(239,68,68,0.12)', color: '#fca5a5', border: 'rgba(239,68,68,0.24)' }
+        ? { bg: 'rgba(239,68,68,0.12)', color: 'var(--tone-red)', border: 'rgba(239,68,68,0.24)' }
         : { bg: 'var(--bg)', color: 'var(--text-secondary)', border: 'var(--border)' };
 
   return (
@@ -314,7 +315,7 @@ function ActionButton({ children, onClick, tone = 'default', disabled = false })
         borderRadius: 8,
         border: `1px solid ${palette.border}`,
         background: disabled ? 'var(--bg)' : palette.bg,
-        color: disabled ? 'var(--dim)' : palette.color,
+        color: toneText(disabled ? 'var(--dim)' : palette.color),
         fontSize: 12,
         fontWeight: 700,
         cursor: disabled ? 'not-allowed' : 'pointer',
@@ -420,13 +421,13 @@ function DetailLineTable({ order }) {
       </div>
 
       {(order.issueCodes || []).length ? (
-        <div style={{ fontSize: 12, color: '#fcd34d' }}>
+        <div style={{ fontSize: 12, color: 'var(--tone-amber)' }}>
           Issue intake: {order.issueCodes.join(', ')}
         </div>
       ) : null}
 
       {order.warehouseNote ? (
-        <div style={{ fontSize: 12, color: '#93c5fd' }}>
+        <div style={{ fontSize: 12, color: 'var(--tone-blue)' }}>
           Catatan warehouse: {order.warehouseNote}
         </div>
       ) : null}
@@ -453,7 +454,7 @@ function DetailLineTable({ order }) {
                 <td style={{ padding: '8px 10px', borderBottom: '1px solid var(--border)', fontSize: 12 }}>
                   <div>{line.rawSellerSku || line.mpSku || line.rawPlatformSkuId || '-'}</div>
                   {line.normalizedSku && line.normalizedSku !== (line.rawSellerSku || line.mpSku || '') ? (
-                    <div style={{ marginTop: 4, color: '#93c5fd' }}>Normalized → {line.normalizedSku}</div>
+                    <div style={{ marginTop: 4, color: 'var(--tone-blue)' }}>Normalized → {line.normalizedSku}</div>
                   ) : null}
                   {line.skuNormalizationReason ? (
                     <div style={{ marginTop: 4, color: 'var(--dim)' }}>{line.skuNormalizationReason}</div>
@@ -2067,7 +2068,7 @@ export default function MarketplaceIntakeManager() {
               borderRadius: 10,
               fontSize: 13,
               background: 'rgba(239,68,68,0.12)',
-              color: '#fca5a5',
+              color: 'var(--tone-red)',
               border: '1px solid rgba(239,68,68,0.24)',
             }}
           >
@@ -2138,7 +2139,7 @@ export default function MarketplaceIntakeManager() {
                   animation: 'spin 0.8s linear infinite',
                 }}
               />
-              <div style={{ fontSize: 13, fontWeight: 700, color: '#ee4d2d' }}>Membaca file marketplace…</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--tone-shopee)' }}>Membaca file marketplace…</div>
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
@@ -2208,7 +2209,7 @@ export default function MarketplaceIntakeManager() {
                               fontSize: 11,
                               fontWeight: 700,
                               background: 'rgba(34,197,94,0.12)',
-                              color: '#86efac',
+                              color: 'var(--tone-green)',
                             }}
                           >
                             Aktif
@@ -2307,7 +2308,7 @@ export default function MarketplaceIntakeManager() {
                   borderRadius: 10,
                   fontSize: 13,
                   background: 'rgba(245,158,11,0.12)',
-                  color: '#fcd34d',
+                  color: 'var(--tone-amber)',
                   border: '1px solid rgba(245,158,11,0.24)',
                 }}
               >
@@ -2399,35 +2400,35 @@ export default function MarketplaceIntakeManager() {
                         >
                           <div style={{ fontSize: 12, color: 'var(--dim)' }}>
                             <strong style={{ color: 'var(--text-secondary)' }}>Produk MP:</strong>{' '}
-                            <span style={{ color: getIssueFieldToneColor(productMeta.tone) }}>{productMeta.text}</span>
+                            <span style={{ color: toneText(getIssueFieldToneColor(productMeta.tone)) }}>{productMeta.text}</span>
                           </div>
                           <div style={{ fontSize: 12, color: 'var(--dim)' }}>
                             <strong style={{ color: 'var(--text-secondary)' }}>Seller SKU:</strong>{' '}
-                            <span style={{ color: getIssueFieldToneColor(sellerSkuMeta.tone) }}>{sellerSkuMeta.text}</span>
+                            <span style={{ color: toneText(getIssueFieldToneColor(sellerSkuMeta.tone)) }}>{sellerSkuMeta.text}</span>
                           </div>
                           <div style={{ fontSize: 12, color: 'var(--dim)' }}>
                             <strong style={{ color: 'var(--text-secondary)' }}>SKU MP:</strong>{' '}
-                            <span style={{ color: getIssueFieldToneColor(mpSkuMeta.tone) }}>{mpSkuMeta.text}</span>
+                            <span style={{ color: toneText(getIssueFieldToneColor(mpSkuMeta.tone)) }}>{mpSkuMeta.text}</span>
                           </div>
                           <div style={{ fontSize: 12, color: 'var(--dim)' }}>
                             <strong style={{ color: 'var(--text-secondary)' }}>Platform SKU ID:</strong>{' '}
-                            <span style={{ color: getIssueFieldToneColor(platformSkuIdMeta.tone) }}>{platformSkuIdMeta.text}</span>
+                            <span style={{ color: toneText(getIssueFieldToneColor(platformSkuIdMeta.tone)) }}>{platformSkuIdMeta.text}</span>
                           </div>
                           <div style={{ fontSize: 12, color: 'var(--dim)' }}>
                             <strong style={{ color: 'var(--text-secondary)' }}>Variation:</strong>{' '}
-                            <span style={{ color: getIssueFieldToneColor(variationMeta.tone) }}>{variationMeta.text}</span>
+                            <span style={{ color: toneText(getIssueFieldToneColor(variationMeta.tone)) }}>{variationMeta.text}</span>
                           </div>
                           <div style={{ fontSize: 12, color: 'var(--dim)' }}>
                             <strong style={{ color: 'var(--text-secondary)' }}>Bundle saat ini:</strong>{' '}
-                            <span style={{ color: getIssueFieldToneColor(entityMeta.tone) }}>{entityMeta.text}</span>
+                            <span style={{ color: toneText(getIssueFieldToneColor(entityMeta.tone)) }}>{entityMeta.text}</span>
                           </div>
                           <div style={{ fontSize: 12, color: 'var(--dim)' }}>
                             <strong style={{ color: 'var(--text-secondary)' }}>Store atribusi saat ini:</strong>{' '}
-                            <span style={{ color: getIssueFieldToneColor(storeMeta.tone) }}>{storeMeta.text}</span>
+                            <span style={{ color: toneText(getIssueFieldToneColor(storeMeta.tone)) }}>{storeMeta.text}</span>
                           </div>
                         </div>
                         <details style={{ marginTop: 4 }}>
-                          <summary style={{ cursor: 'pointer', fontSize: 12, color: '#93c5fd' }}>
+                          <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--tone-blue)' }}>
                             Lihat order yang terdampak ({fmtNumber(cluster.orderCount)} order)
                           </summary>
                           <div style={{ marginTop: 8, fontSize: 12, color: 'var(--dim)', lineHeight: 1.6 }}>
@@ -2732,7 +2733,7 @@ export default function MarketplaceIntakeManager() {
                                       {line.rawSellerSku || line.mpSku || line.rawPlatformSkuId || 'Kosong'}
                                     </div>
                                     {line.normalizedSku && line.normalizedSku !== (line.rawSellerSku || line.mpSku || '') ? (
-                                      <div style={{ marginTop: 4, fontSize: 12, color: '#93c5fd' }}>
+                                      <div style={{ marginTop: 4, fontSize: 12, color: 'var(--tone-blue)' }}>
                                         Normalized → {line.normalizedSku}
                                       </div>
                                     ) : null}
@@ -2753,7 +2754,7 @@ export default function MarketplaceIntakeManager() {
                                   <div>
                                     <div style={{ fontWeight: 700 }}>{line.mpProductName}</div>
                                     {(line.effectiveIssueCodes || []).length ? (
-                                      <div style={{ marginTop: 6, fontSize: 12, color: actionableIssueCodes.length ? '#fca5a5' : '#93c5fd' }}>
+                                      <div style={{ marginTop: 6, fontSize: 12, color: actionableIssueCodes.length ? 'var(--tone-red)' : 'var(--tone-blue)' }}>
                                         {(line.effectiveIssueCodes || []).join(', ')}
                                       </div>
                                     ) : null}
@@ -3082,7 +3083,7 @@ export default function MarketplaceIntakeManager() {
               borderRadius: 10,
               fontSize: 13,
               background: 'rgba(239,68,68,0.12)',
-              color: '#fca5a5',
+              color: 'var(--tone-red)',
               border: '1px solid rgba(239,68,68,0.24)',
             }}
           >

@@ -140,7 +140,7 @@ export default function WarehouseSheetManager() {
           disabled={loading || !newId.trim() || !newLabel.trim() || !newWarehouse.trim()}
           style={{
             padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-            background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600,
+            background: 'var(--accent-solid)', color: '#fff', fontSize: 13, fontWeight: 600,
             opacity: loading || !newId.trim() || !newLabel.trim() || !newWarehouse.trim() ? 0.5 : 1,
           }}
         >
@@ -154,7 +154,7 @@ export default function WarehouseSheetManager() {
         disabled={syncing || connections.filter(c => c.is_active).length === 0}
         style={{
           padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-          background: 'var(--green)', color: '#fff', fontSize: 13, fontWeight: 600,
+          background: 'var(--green-solid)', color: '#fff', fontSize: 13, fontWeight: 600,
           marginBottom: 12,
           opacity: syncing || connections.filter(c => c.is_active).length === 0 ? 0.5 : 1,
           display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -201,7 +201,7 @@ export default function WarehouseSheetManager() {
                   <span style={{ color: 'var(--text)', fontSize: 13, fontWeight: 600 }}>{conn.label}</span>
                   <span style={{
                     padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-                    background: 'var(--accent-subtle)', color: '#60a5fa',
+                    background: 'var(--accent-subtle)', color: 'var(--tone-blue)',
                   }}>
                     {conn.warehouse_name}
                   </span>

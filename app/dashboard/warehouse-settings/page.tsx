@@ -98,7 +98,7 @@ export default function WarehouseSettingsPage() {
           <div style={{ color: 'var(--dim)', fontSize: 12, lineHeight: 1.6 }}>
             Kepemilikan business dan routing warehouse tetap dikelola terpusat di Business &amp; Fulfillment.
           </div>
-          <Link href="/dashboard/business-settings" style={{ color: '#93c5fd', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
+          <Link href="/dashboard/business-settings" style={{ color: 'var(--tone-blue)', fontSize: 12, fontWeight: 700, textDecoration: 'none' }}>
             Kelola Business &amp; Fulfillment →
           </Link>
         </div>
@@ -111,7 +111,7 @@ export default function WarehouseSettingsPage() {
               padding: '8px 16px', borderRadius: '8px 8px 0 0', border: 'none',
               cursor: 'pointer', fontSize: 13, fontWeight: 600,
               background: effectiveTab === t.id ? 'var(--border)' : 'transparent',
-              color: effectiveTab === t.id ? '#60a5fa' : 'var(--dim)',
+              color: effectiveTab === t.id ? 'var(--tone-blue)' : 'var(--dim)',
               borderBottom: effectiveTab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
               whiteSpace: 'nowrap',
             }}>
@@ -274,7 +274,7 @@ function MasterProdukTab() {
   return (
     <>
       {message && (
-        <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 12, background: message.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: message.type === 'success' ? '#6ee7b7' : '#fca5a5' }}>
+        <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 12, background: message.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: message.type === 'success' ? 'var(--tone-emerald)' : 'var(--tone-red)' }}>
           {message.text}
         </div>
       )}
@@ -282,7 +282,7 @@ function MasterProdukTab() {
       {/* Filters + Add */}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
         <button onClick={() => setShowAdd(!showAdd)}
-          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--green)', color: '#fff' }}>
+          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--green-solid)', color: '#fff' }}>
           + Tambah Produk
         </button>
         <div style={{ flex: 1 }} />
@@ -315,7 +315,7 @@ function MasterProdukTab() {
             <div><label style={{ fontSize: 10, color: 'var(--dim)' }}>Vendor</label><select value={newProduct.vendor_id} onChange={e => setNewProduct({...newProduct, vendor_id: e.target.value})} style={inputStyle}><option value="">-</option>{vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}</select></div>
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button onClick={handleAdd} disabled={saving} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600 }}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
+            <button onClick={handleAdd} disabled={saving} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--green-solid)', color: '#fff', fontSize: 12, fontWeight: 600 }}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
             <button onClick={() => setShowAdd(false)} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 12, cursor: 'pointer' }}>Batal</button>
           </div>
         </div>
@@ -395,14 +395,14 @@ function MasterProdukTab() {
                     ) : p.unit}
                   </td>
                   <td style={{ padding: '5px 8px' }}>
-                    <span style={{ padding: '1px 5px', borderRadius: 3, fontSize: 9, fontWeight: 600, background: p.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: p.is_active ? '#6ee7b7' : '#fca5a5' }}>
+                    <span style={{ padding: '1px 5px', borderRadius: 3, fontSize: 9, fontWeight: 600, background: p.is_active ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)', color: p.is_active ? 'var(--tone-emerald)' : 'var(--tone-red)' }}>
                       {p.is_active ? 'Active' : 'Inactive'}
                     </span>
                   </td>
                   <td style={{ padding: '5px 8px' }}>
                     {isEditing ? (
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button onClick={saveEdit} disabled={saving} style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: 'var(--green)', color: '#fff', fontSize: 10, cursor: 'pointer' }}>Save</button>
+                        <button onClick={saveEdit} disabled={saving} style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: 'var(--green-solid)', color: '#fff', fontSize: 10, cursor: 'pointer' }}>Save</button>
                         <button onClick={() => setEditingId(null)} style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 10, cursor: 'pointer' }}>X</button>
                       </div>
                     ) : (
@@ -498,14 +498,14 @@ function VendorTab() {
   return (
     <>
       {message && (
-        <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 12, background: message.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: message.type === 'success' ? '#6ee7b7' : '#fca5a5' }}>
+        <div style={{ padding: '8px 12px', borderRadius: 8, marginBottom: 12, fontSize: 12, background: message.type === 'success' ? 'rgba(16,185,129,0.1)' : 'rgba(239,68,68,0.1)', color: message.type === 'success' ? 'var(--tone-emerald)' : 'var(--tone-red)' }}>
           {message.text}
         </div>
       )}
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
         <button onClick={() => setShowAdd(!showAdd)}
-          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--green)', color: '#fff' }}>
+          style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, background: 'var(--green-solid)', color: '#fff' }}>
           + Tambah Vendor
         </button>
         <div style={{ flex: 1 }} />
@@ -529,7 +529,7 @@ function VendorTab() {
             </label>
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-            <button onClick={handleAdd} disabled={saving} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600 }}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
+            <button onClick={handleAdd} disabled={saving} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--green-solid)', color: '#fff', fontSize: 12, fontWeight: 600 }}>{saving ? 'Menyimpan...' : 'Simpan'}</button>
             <button onClick={() => setShowAdd(false)} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 12, cursor: 'pointer' }}>Batal</button>
           </div>
         </div>
@@ -556,7 +556,7 @@ function VendorTab() {
                     {isEditing ? (
                       <input type="checkbox" checked={!!editData.is_pkp} onChange={e => setEditData({...editData, is_pkp: e.target.checked})} />
                     ) : (
-                      <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: v.is_pkp ? 'rgba(59,130,246,0.15)' : 'rgba(148,163,184,0.15)', color: v.is_pkp ? '#60a5fa' : '#94a3b8' }}>
+                      <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: v.is_pkp ? 'rgba(59,130,246,0.15)' : 'rgba(148,163,184,0.15)', color: v.is_pkp ? 'var(--tone-blue)' : 'var(--dim)' }}>
                         {v.is_pkp ? 'PKP' : 'Non-PKP'}
                       </span>
                     )}
@@ -576,7 +576,7 @@ function VendorTab() {
                   <td style={{ padding: '6px 10px' }}>
                     {isEditing ? (
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button onClick={saveEdit} disabled={saving} style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: 'var(--green)', color: '#fff', fontSize: 10, cursor: 'pointer' }}>Save</button>
+                        <button onClick={saveEdit} disabled={saving} style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: 'var(--green-solid)', color: '#fff', fontSize: 10, cursor: 'pointer' }}>Save</button>
                         <button onClick={() => setEditingId(null)} style={{ padding: '2px 8px', borderRadius: 4, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 10, cursor: 'pointer' }}>X</button>
                       </div>
                     ) : (

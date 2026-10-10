@@ -22,6 +22,7 @@ import { getCommercialMomentAttribution, getOverviewPageData } from '@/lib/overv
 import { getCached, setCache } from '@/lib/dashboard-cache';
 import { calculateProfitabilityTarget } from '@/lib/financial-targets';
 import { fmtCompact, fmtRupiah } from '@/lib/utils';
+import { toneText } from '@/lib/theme-tones';
 
 const MONTHS = [
   'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -116,14 +117,14 @@ function KpiCard({ label, value, sub, tone = 'var(--accent)', badge, delta, delt
       <div style={{ position:'absolute', inset:'0 0 auto', height:2, background:tone }} />
       <div style={{ display:'flex', justifyContent:'space-between', gap:8, alignItems:'center', marginBottom:7 }}>
         <div style={{ color:'var(--dim)', fontSize:10, fontWeight:700, letterSpacing:'.06em', textTransform:'uppercase' }}>{label}</div>
-        {badge && <span style={{ padding:'2px 7px', borderRadius:999, background:'var(--accent-subtle)', color:tone, fontSize:9, fontWeight:700 }}>{badge}</span>}
+        {badge && <span style={{ padding:'2px 7px', borderRadius:999, background:'var(--accent-subtle)', color:toneText(tone), fontSize:9, fontWeight:700 }}>{badge}</span>}
       </div>
       <div style={{ fontFamily:'monospace', fontSize:19, lineHeight:1.15, fontWeight:700, color:'var(--text)' }}>{value}</div>
       {delta != null && (
         <div style={{ display:'flex', alignItems:'center', gap:6, marginTop:9, flexWrap:'wrap' }}>
           <span style={{
             display:'inline-flex', alignItems:'center', gap:4, padding:'4px 8px',
-            borderRadius:999, background:deltaBg, color:deltaColor,
+            borderRadius:999, background:deltaBg, color:toneText(deltaColor),
             border:`1px solid ${deltaPositive ? 'rgba(16,185,129,.25)' : 'rgba(239,68,68,.25)'}`,
             fontFamily:'monospace', fontSize:10, fontWeight:800,
           }}>
@@ -160,7 +161,7 @@ function ChartTooltip({ active, payload, label }: any) {
         return (
           <div key={p.dataKey} style={{ marginBottom:carryover > 0 ? 4 : 0 }}>
             <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10, lineHeight:1.8 }}>
-              <span style={{ color:p.color }}>{p.name}{operationalDate ? ` · ${operationalDate}` : ''}</span>
+              <span style={{ color:toneText(p.color) }}>{p.name}{operationalDate ? ` · ${operationalDate}` : ''}</span>
               <span style={{ fontFamily:'monospace', color:'var(--text)', fontWeight:600 }}>Rp {fmtCompact(p.value)}</span>
             </div>
             {carryover > 0 && (
@@ -605,7 +606,7 @@ export default function RevenueRunRatePage() {
 
   if (error || brandError) {
     return (
-      <div style={{ background:'rgba(127,29,29,.15)', border:'1px solid #991b1b', borderRadius:12, padding:18, color:'#fca5a5' }}>
+      <div style={{ background:'rgba(127,29,29,.15)', border:'1px solid #991b1b', borderRadius:12, padding:18, color:'var(--tone-red)' }}>
         <div style={{ fontWeight:700, marginBottom:5 }}>Sales Channel Analysis Gagal Dimuat</div>
         <div style={{ fontSize:12 }}>{error || brandError}</div>
       </div>
@@ -660,7 +661,7 @@ export default function RevenueRunRatePage() {
         <div style={{
           display:'flex', alignItems:'center', gap:8, padding:'8px 11px', borderRadius:9,
           background:statusBackground,
-          color:statusColor, fontSize:11, fontWeight:700,
+          color:toneText(statusColor), fontSize:11, fontWeight:700,
           border:`1px solid ${financialStatus.tone === 'green' ? 'rgba(16,185,129,.25)' : financialStatus.tone === 'red' ? 'rgba(239,68,68,.25)' : 'var(--border)'}`,
         }}>
           <span style={{ width:7, height:7, borderRadius:'50%', background:'currentColor' }} />
@@ -751,7 +752,7 @@ export default function RevenueRunRatePage() {
                   onClick={() => setChartMode(mode as any)}
                   style={{
                     padding:'6px 10px', border:0, borderRadius:6, cursor:'pointer',
-                    background:chartMode === mode ? 'var(--accent)' : 'transparent',
+                    background:chartMode === mode ? 'var(--accent-solid)' : 'transparent',
                     color:chartMode === mode ? '#fff' : 'var(--dim)',
                     fontSize:10, fontWeight:700,
                   }}
@@ -808,7 +809,7 @@ export default function RevenueRunRatePage() {
               {chartMode === 'cumulative' && (
                 <>
                   {analysis.targetConfigured && analysis.minimumRevenue > 0 && (
-                    <ReferenceLine y={analysis.minimumRevenue} stroke="#f59e0b" strokeDasharray="4 4" label={{ value:'Target', fill:'#f59e0b', fontSize:9, position:'insideTopRight' }} />
+                    <ReferenceLine y={analysis.minimumRevenue} stroke="#f59e0b" strokeDasharray="4 4" label={{ value:'Target', fill:'var(--tone-amber)', fontSize:9, position:'insideTopRight' }} />
                   )}
                   <Area type="monotone" dataKey="actual" name={monthLabel + ' aktual'} stroke="#3b82f6" strokeWidth={2.5} fill="url(#actualRevenueFill)" connectNulls={false} />
                   <Line type="monotone" dataKey="projection" name={monthLabel + ' prediksi'} stroke="#06b6d4" strokeWidth={2.2} strokeDasharray="7 5" dot={false} connectNulls={false} />
@@ -842,7 +843,7 @@ export default function RevenueRunRatePage() {
                     stroke="#f59e0b"
                     strokeWidth={2}
                     strokeDasharray="6 4"
-                    label={{ value:`Avg 6 event · Rp ${fmtCompact(analysis.historicalAverageTotal)}`, fill:'#f59e0b', fontSize:9, position:'insideTopRight' }}
+                    label={{ value:`Avg 6 event · Rp ${fmtCompact(analysis.historicalAverageTotal)}`, fill:'var(--tone-amber)', fontSize:9, position:'insideTopRight' }}
                   />
                   {[...analysis.currentEvent.definition.labels, 'Spillover ≤12'].map((label: string, index: number) => (
                     <Bar
@@ -977,7 +978,7 @@ export default function RevenueRunRatePage() {
         <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
           <div style={{ fontSize:13, fontWeight:700, marginBottom:12 }}>Efisiensi CM3</div>
           <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom:8 }}>
-            <span style={{ fontFamily:'monospace', fontSize:24, fontWeight:750, color:unitEconomicsHealthy ? '#8b5cf6' : 'var(--red)' }}>{(analysis.currentCm3Margin * 100).toFixed(1)}%</span>
+            <span style={{ fontFamily:'monospace', fontSize:24, fontWeight:750, color:unitEconomicsHealthy ? 'var(--tone-violet)' : 'var(--red)' }}>{(analysis.currentCm3Margin * 100).toFixed(1)}%</span>
             <span style={{ color:'var(--dim)', fontSize:10 }}>margin berjalan</span>
           </div>
           <div style={{ fontSize:11, color:'var(--text-secondary)', lineHeight:1.6 }}>

@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
+    "test:theme": "node --import tsx --test tests/theme-contrast.test.ts tests/theme-preference.test.ts",
     "test:financial-targets": "tsx --test tests/financial-targets.test.ts",
     "test:warehouse-mapping-targets": "tsx --test tests/warehouse-mapping-targets.test.ts",
     "test:source-class": "tsx --test tests/scalev-source-class.test.ts",

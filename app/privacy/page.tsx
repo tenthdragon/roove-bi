@@ -11,9 +11,9 @@ export default function PrivacyPage() {
   const supportEmail = getSupportEmail();
 
   return (
-    <div style={{ maxWidth: 720, margin: '0 auto', padding: '48px 24px', fontFamily: 'system-ui, sans-serif', lineHeight: 1.7, color: '#e2e8f0' }}>
-      <h1 style={{ fontSize: 28, marginBottom: 8, color: '#f1f5f9' }}>Privacy Policy</h1>
-      <p style={{ color: '#94a3b8', marginBottom: 32 }}>Last updated: April 7, 2026</p>
+    <div style={{ maxWidth: 720, margin: '0 auto', padding: '48px 24px', fontFamily: 'system-ui, sans-serif', lineHeight: 1.7, color: 'var(--text)' }}>
+      <h1 style={{ fontSize: 28, marginBottom: 8, color: 'var(--text)' }}>Privacy Policy</h1>
+      <p style={{ color: 'var(--dim)', marginBottom: 32 }}>Last updated: April 7, 2026</p>
 
       <p>
         PT Roove Tijara Internasional (&quot;Roove&quot;, &quot;we&quot;, &quot;us&quot;, or &quot;our&quot;) operates the Roove BI platform
@@ -94,7 +94,7 @@ export default function PrivacyPage() {
       </p>
       <p>
         <strong>PT Roove Tijara Internasional</strong><br />
-        Email: <a href={`mailto:${supportEmail}`} style={{ color: '#2563eb' }}>{supportEmail}</a>
+        Email: <a href={`mailto:${supportEmail}`} style={{ color: 'var(--tone-blue)' }}>{supportEmail}</a>
       </p>
     </div>
   );

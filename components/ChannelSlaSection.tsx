@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { fetchChannelSla, type SlaRow } from '@/lib/sla-actions';
+import { toneText } from '@/lib/theme-tones';
 
 function displayName(ch: string) {
   return ch;
@@ -23,9 +24,9 @@ function slaBg(days: number): string {
 }
 
 const PAYMENT_STYLE: Record<string, { bg: string; color: string; label: string }> = {
-  cod:           { bg: '#7c2d12', color: '#fb923c', label: 'COD' },
-  marketplace:   { bg: '#1e3a5f', color: '#60a5fa', label: 'Marketplace' },
-  bank_transfer: { bg: '#064e3b', color: '#34d399', label: 'Bank Transfer' },
+  cod:           { bg: 'rgba(249,115,22,0.14)', color: 'var(--tone-orange)', label: 'COD' },
+  marketplace:   { bg: 'var(--accent-subtle)', color: 'var(--tone-blue)', label: 'Marketplace' },
+  bank_transfer: { bg: 'var(--badge-green-bg)', color: 'var(--tone-emerald)', label: 'Bank Transfer' },
   no_payment:    { bg: 'var(--bg-deep)', color: 'var(--text-secondary)', label: 'No Payment' },
   unknown:       { bg: 'var(--bg-deep)', color: 'var(--dim)', label: 'Unknown' },
 };
@@ -184,7 +185,7 @@ export default function ChannelSlaSection({ from, to }: Props) {
         }}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'var(--dim)' }} />
           <div style={{ fontSize: 9, color: 'var(--dim)', textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: 4 }}>Semua</div>
-          <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: slaColor(overallAvg) }}>
+          <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: toneText(slaColor(overallAvg)) }}>
             {overallAvg}d
           </div>
           <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>{totalOrders.toLocaleString('id-ID')} orders</div>
@@ -197,10 +198,10 @@ export default function ChannelSlaSection({ from, to }: Props) {
               padding: '10px 14px', flex: '1 1 120px', minWidth: 110, position: 'relative', overflow: 'hidden',
             }}>
               <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: ps.color }} />
-              <div style={{ fontSize: 9, color: ps.color, textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: 4 }}>
+              <div style={{ fontSize: 9, color: toneText(ps.color), textTransform: 'uppercase', fontWeight: 600, letterSpacing: '0.05em', marginBottom: 4 }}>
                 {ps.label}
               </div>
-              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: slaColor(p.avgDays) }}>
+              <div style={{ fontSize: 18, fontWeight: 700, fontFamily: 'monospace', color: toneText(slaColor(p.avgDays)) }}>
                 {p.avgDays}d
               </div>
               <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>{p.orders.toLocaleString('id-ID')} orders</div>
@@ -269,7 +270,7 @@ export default function ChannelSlaSection({ from, to }: Props) {
                         return (
                           <span style={{
                             padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-                            background: ps.bg, color: ps.color,
+                            background: ps.bg, color: toneText(ps.color),
                           }}>
                             {ps.label}
                           </span>
@@ -292,7 +293,7 @@ export default function ChannelSlaSection({ from, to }: Props) {
                       <span style={{
                         padding: '2px 8px', borderRadius: 4, fontSize: 11,
                         fontWeight: isChannel ? 700 : 600, fontFamily: 'monospace',
-                        background: slaBg(row.median), color: slaColor(row.median),
+                        background: slaBg(row.median), color: toneText(slaColor(row.median)),
                       }}>
                         {row.median}d
                       </span>
@@ -333,7 +334,7 @@ export default function ChannelSlaSection({ from, to }: Props) {
           <div style={{ display: 'flex', gap: 16, marginTop: 12, fontSize: 10, color: 'var(--text-muted)' }}>
             <span><span style={{ color: 'var(--green)' }}>●</span> ≤5 hari</span>
             <span><span style={{ color: 'var(--yellow)' }}>●</span> 6–10 hari</span>
-            <span><span style={{ color: '#f97316' }}>●</span> 11–15 hari</span>
+            <span><span style={{ color: 'var(--tone-orange)' }}>●</span> 11–15 hari</span>
             <span><span style={{ color: 'var(--red)' }}>●</span> &gt;15 hari</span>
             <span style={{ marginLeft: 'auto', fontStyle: 'italic' }}>P90 = 90% orders selesai dalam X hari</span>
           </div>

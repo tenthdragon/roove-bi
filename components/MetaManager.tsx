@@ -15,6 +15,7 @@ import {
   updateWabaAccount,
 } from '@/lib/admin-actions';
 import { invalidateAll } from '@/lib/dashboard-cache';
+import { toneText } from '@/lib/theme-tones';
 
 interface MetaAccount {
   id: number;
@@ -472,7 +473,7 @@ export default function MetaManager() {
       case 'success': return { bg: 'var(--badge-green-bg)', color: 'var(--green)', label: 'Sukses' };
       case 'partial': return { bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)', label: 'Partial' };
       case 'failed': return { bg: 'var(--badge-red-bg)', color: 'var(--red)', label: 'Gagal' };
-      case 'running': return { bg: '#1e3a5f', color: '#60a5fa', label: 'Running' };
+      case 'running': return { bg: 'var(--accent-subtle)', color: 'var(--tone-blue)', label: 'Running' };
       default: return { bg: 'var(--border)', color: 'var(--dim)', label: s };
     }
   };
@@ -530,7 +531,7 @@ export default function MetaManager() {
               }}
               style={{
                 padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-                background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600,
+                background: 'var(--accent-solid)', color: '#fff', fontSize: 12, fontWeight: 600,
                 flexShrink: 0,
               }}
             >
@@ -617,7 +618,7 @@ export default function MetaManager() {
                 style={{
                   padding: '7px 18px', borderRadius: 6, border: 'none',
                   cursor: credentialSaving ? 'not-allowed' : 'pointer',
-                  background: credentialSaving ? 'var(--border)' : 'var(--green)',
+                  background: credentialSaving ? 'var(--muted-solid)' : 'var(--green-solid)',
                   color: '#fff', fontSize: 12, fontWeight: 700, opacity: credentialSaving ? 0.6 : 1,
                 }}
               >
@@ -652,7 +653,7 @@ export default function MetaManager() {
                 : undefined}
             style={{
               padding: '6px 14px', borderRadius: 6, border: 'none', cursor: loadingRemote || !credentialStatus?.available || brandOptions.length === 0 ? 'not-allowed' : 'pointer',
-              background: loadingRemote || !credentialStatus?.available || brandOptions.length === 0 ? 'var(--border)' : 'var(--accent)', color: '#fff',
+              background: loadingRemote || !credentialStatus?.available || brandOptions.length === 0 ? 'var(--muted-solid)' : 'var(--accent-solid)', color: '#fff',
               fontSize: 12, fontWeight: 600, opacity: loadingRemote || !credentialStatus?.available || brandOptions.length === 0 ? 0.6 : 1,
             }}
           >
@@ -707,7 +708,7 @@ export default function MetaManager() {
               style={{
                 padding: '6px 16px', borderRadius: 6, border: 'none',
                 cursor: syncing ? 'not-allowed' : 'pointer',
-                background: syncing ? 'var(--border)' : 'var(--green)', color: syncing ? 'var(--dim)' : '#fff',
+                background: syncing ? 'var(--border)' : 'var(--green-solid)', color: syncing ? 'var(--dim)' : '#fff',
                 fontSize: 12, fontWeight: 600, opacity: syncing ? 0.4 : 1,
                 marginLeft: 'auto',
                 display: 'inline-flex', alignItems: 'center', gap: 6,
@@ -872,7 +873,7 @@ export default function MetaManager() {
                   disabled={savingBulk}
                   style={{
                     padding: '8px 24px', borderRadius: 6, border: 'none', cursor: savingBulk ? 'not-allowed' : 'pointer',
-                    background: savingBulk ? 'var(--border)' : 'var(--accent)', color: '#fff',
+                    background: savingBulk ? 'var(--muted-solid)' : 'var(--accent-solid)', color: '#fff',
                     fontSize: 13, fontWeight: 600, opacity: savingBulk ? 0.6 : 1,
                   }}
                 >
@@ -940,7 +941,7 @@ export default function MetaManager() {
                           <div style={{ display: 'flex', gap: 4 }}>
                             <button onClick={handleEditSave} style={{
                               padding: '4px 8px', borderRadius: 4, border: 'none',
-                              background: 'var(--accent)', color: '#fff', fontSize: 10, cursor: 'pointer',
+                              background: 'var(--accent-solid)', color: '#fff', fontSize: 10, cursor: 'pointer',
                             }}>Simpan</button>
                             <button onClick={() => setEditingId(null)} style={{
                               padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)',
@@ -972,7 +973,7 @@ export default function MetaManager() {
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button onClick={() => handleEdit(acc)} style={{
                               padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)',
-                              background: 'transparent', color: '#60a5fa', fontSize: 11, cursor: 'pointer',
+                              background: 'transparent', color: 'var(--tone-blue)', fontSize: 11, cursor: 'pointer',
                             }}>Edit</button>
                             <button onClick={() => handleToggleActive(acc)} style={{
                               padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)',
@@ -1031,7 +1032,7 @@ export default function MetaManager() {
                       <td style={{ padding: '10px 12px' }}>
                         <span style={{
                           padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                          background: ss.bg, color: ss.color,
+                          background: ss.bg, color: toneText(ss.color),
                         }}>{ss.label}</span>
                         {log.error_message && (
                           <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 2, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1060,7 +1061,7 @@ export default function MetaManager() {
             onClick={() => setShowWabaForm(true)}
             style={{
               padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-              background: '#25D366', color: '#fff',
+              background: '#0e7a3f', color: '#fff',
               fontSize: 12, fontWeight: 600,
             }}
           >
@@ -1098,7 +1099,7 @@ export default function MetaManager() {
               style={{
                 padding: '6px 16px', borderRadius: 6, border: 'none',
                 cursor: wabaSyncing ? 'not-allowed' : 'pointer',
-                background: wabaSyncing ? 'var(--border)' : '#25D366', color: '#fff',
+                background: wabaSyncing ? 'var(--muted-solid)' : '#0e7a3f', color: '#fff',
                 fontSize: 12, fontWeight: 600, opacity: wabaSyncing ? 0.4 : 1,
                 marginLeft: 'auto',
               }}
@@ -1192,7 +1193,7 @@ export default function MetaManager() {
                 disabled={savingWaba}
                 style={{
                   padding: '8px 24px', borderRadius: 6, border: 'none', cursor: savingWaba ? 'not-allowed' : 'pointer',
-                  background: savingWaba ? 'var(--border)' : '#25D366', color: '#fff',
+                  background: savingWaba ? 'var(--muted-solid)' : '#0e7a3f', color: '#fff',
                   fontSize: 13, fontWeight: 600, opacity: savingWaba ? 0.6 : 1,
                 }}
               >
@@ -1254,7 +1255,7 @@ export default function MetaManager() {
                           <div style={{ display: 'flex', gap: 4 }}>
                             <button onClick={handleWabaEditSave} style={{
                               padding: '4px 8px', borderRadius: 4, border: 'none',
-                              background: '#25D366', color: '#fff', fontSize: 10, cursor: 'pointer',
+                              background: '#0e7a3f', color: '#fff', fontSize: 10, cursor: 'pointer',
                             }}>Simpan</button>
                             <button onClick={() => setWabaEditingId(null)} style={{
                               padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)',
@@ -1285,7 +1286,7 @@ export default function MetaManager() {
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button onClick={() => handleWabaEdit(acc)} style={{
                               padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)',
-                              background: 'transparent', color: '#60a5fa', fontSize: 11, cursor: 'pointer',
+                              background: 'transparent', color: 'var(--tone-blue)', fontSize: 11, cursor: 'pointer',
                             }}>Edit</button>
                             <button onClick={() => handleWabaToggleActive(acc)} style={{
                               padding: '4px 10px', borderRadius: 4, border: '1px solid var(--border)',
@@ -1344,7 +1345,7 @@ export default function MetaManager() {
                       <td style={{ padding: '10px 12px' }}>
                         <span style={{
                           padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700,
-                          background: ss.bg, color: ss.color,
+                          background: ss.bg, color: toneText(ss.color),
                         }}>{ss.label}</span>
                         {log.error_message && (
                           <div style={{ fontSize: 10, color: 'var(--red)', marginTop: 2, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -1503,7 +1504,7 @@ function XlsxAdsUploader() {
           ))}
           <button onClick={uploadAll} disabled={uploading} style={{
             marginTop: 10, padding: '8px 20px', borderRadius: 8, border: 'none',
-            background: uploading ? 'var(--dim)' : 'var(--accent)',
+            background: uploading ? 'var(--muted-solid)' : 'var(--accent-solid)',
             color: '#fff', fontSize: 13, fontWeight: 600, cursor: uploading ? 'not-allowed' : 'pointer',
           }}>
             {uploading ? 'Uploading...' : `Upload ${files.length} file${files.length > 1 ? 's' : ''}`}
@@ -1519,7 +1520,7 @@ function XlsxAdsUploader() {
             <div key={i} style={{
               padding: '10px 14px', borderRadius: 8, marginBottom: 6,
               background: r.success ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
-              border: `1px solid ${r.success ? 'var(--green)' : 'var(--red)'}20`,
+              border: `1px solid color-mix(in srgb, ${r.success ? 'var(--green)' : 'var(--red)'} 12%, transparent)`,
             }}>
               <div style={{ fontWeight: 600, fontSize: 12, color: r.success ? 'var(--green)' : 'var(--red)' }}>
                 {r.filename}

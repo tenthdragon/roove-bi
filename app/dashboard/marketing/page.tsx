@@ -20,6 +20,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { toneText } from '@/lib/theme-tones';
 
 function formatIsoDate(year: number, month: number, day: number): string {
   return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -1012,7 +1013,7 @@ export default function MarketingPage() {
   const C = { bg: 'var(--bg)', card: 'var(--card)', bdr: 'var(--border)', dim: 'var(--dim)', txt: 'var(--text)' };
 
   const DeltaLine = ({ value, suffix, higherIsBetter, label: lbl }: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }) => (
-    <div style={{ fontSize: 10, marginTop: 4, color: value === 0 ? 'var(--dim)' : ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
+    <div style={{ fontSize: 10, marginTop: 4, color: value === 0 ? 'var(--dim)' : ((value > 0) === (higherIsBetter !== false)) ? 'var(--delta-up)' : 'var(--delta-down)' }}>
       {value > 0 ? '▲' : value < 0 ? '▼' : '•'} {value > 0 ? '+' : ''}{value.toFixed(1)}{suffix || '%'}{lbl ? ` ${lbl}` : ` vs ${prevMonthLabel}`}
     </div>
   );
@@ -1033,7 +1034,7 @@ export default function MarketingPage() {
     return (
       <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 8, padding: '10px 12px', boxShadow: '0 8px 24px rgba(0,0,0,0.18)', fontSize: 11 }}>
         <div style={{ color: C.dim, marginBottom: 6 }}>{point.fullLabel}</div>
-        <div style={{ fontSize: 15, fontWeight: 800, color: brandFilter === 'all' ? 'var(--accent)' : BRAND_COLORS[brandFilter] || 'var(--accent)' }}>
+        <div style={{ fontSize: 15, fontWeight: 800, color: toneText(brandFilter === 'all' ? 'var(--accent)' : BRAND_COLORS[brandFilter] || 'var(--accent)') }}>
           {point.roas == null ? '—' : `${point.roas.toFixed(2)}x`}
         </div>
         <div style={{ color: C.dim, marginTop: 6 }}>Net Sales: {fmtRupiah(point.revenue)}</div>
@@ -1082,15 +1083,15 @@ export default function MarketingPage() {
         <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: compact ? 600 : 800, fontSize: 11, whiteSpace: 'nowrap' }}>
           <div>{fmtRupiah(row.revenue)}</div>
           {row.revenueDelta !== null && (
-            <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: row.revenueDelta >= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+            <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: row.revenueDelta >= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
               {row.revenueDelta >= 0 ? '▲' : '▼'} {row.revenueDelta >= 0 ? '+' : ''}{row.revenueDelta.toFixed(1)}%
             </div>
           )}
         </td>
-        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: compact ? 600 : 800, fontSize: 11, whiteSpace: 'nowrap', color: row.mktFee > 0 ? 'var(--yellow)' : `${C.dim}66` }}>
+        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: compact ? 600 : 800, fontSize: 11, whiteSpace: 'nowrap', color: row.mktFee > 0 ? 'var(--yellow)' : 'var(--text-muted)' }}>
           <div>{row.mktFee > 0 ? fmtRupiah(row.mktFee) : '—'}</div>
           {row.mktFeeDelta !== null && (
-            <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: row.mktFeeDelta <= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+            <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: row.mktFeeDelta <= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
               {row.mktFeeDelta >= 0 ? '▲' : '▼'} {row.mktFeeDelta >= 0 ? '+' : ''}{row.mktFeeDelta.toFixed(1)}%
             </div>
           )}
@@ -1104,7 +1105,7 @@ export default function MarketingPage() {
             fontWeight: compact ? 600 : 800,
             fontSize: 11,
             whiteSpace: 'nowrap',
-            color: shippingError ? `${C.dim}66` : row.cm3 >= 0 ? 'var(--green)' : 'var(--red)',
+            color: shippingError ? 'var(--text-muted)' : row.cm3 >= 0 ? 'var(--green)' : 'var(--red)',
           }}
         >
           {shippingError ? (
@@ -1116,31 +1117,31 @@ export default function MarketingPage() {
                 {row.revenue > 0 ? `${row.cm3Pct.toFixed(1)}%` : '—'}
               </div>
               {!prevRangeShippingError && row.cm3Delta !== null && (
-                <div style={{ marginTop: 3, fontSize: 10, fontWeight: 500, color: row.cm3Delta >= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                <div style={{ marginTop: 3, fontSize: 10, fontWeight: 500, color: row.cm3Delta >= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                   {row.cm3Delta >= 0 ? '▲' : '▼'} {row.cm3Delta >= 0 ? '+' : ''}{row.cm3Delta.toFixed(1)}%
                 </div>
               )}
             </>
           )}
         </td>
-        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: compact ? 600 : 800, fontSize: 11, color: mktFeePctColor }}>
+        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: compact ? 600 : 800, fontSize: 11, color: toneText(mktFeePctColor) }}>
           <div>{row.mktFeePct > 0 ? `${row.mktFeePct.toFixed(1)}%` : '—'}</div>
           {row.mktFee > 0 && row.mktFeePctDelta !== null && (
-            <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: row.mktFeePctDelta <= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+            <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: row.mktFeePctDelta <= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
               {row.mktFeePctDelta >= 0 ? '▲' : '▼'} {row.mktFeePctDelta >= 0 ? '+' : ''}{row.mktFeePctDelta.toFixed(1)}pp
             </div>
           )}
         </td>
-        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: compact ? 600 : 800, fontSize: 11, color: row.roas >= 3 ? 'var(--green)' : row.roas >= 1.5 ? 'var(--yellow)' : row.roas > 0 ? 'var(--red)' : `${C.dim}66` }}>
+        <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: compact ? 600 : 800, fontSize: 11, color: row.roas >= 3 ? 'var(--green)' : row.roas >= 1.5 ? 'var(--yellow)' : row.roas > 0 ? 'var(--red)' : 'var(--text-muted)' }}>
           <div>{row.roas > 0 ? `${row.roas.toFixed(1)}x` : '—'}</div>
           {row.roasDelta !== null && (
-            <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: row.roasDelta >= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+            <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: row.roasDelta >= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
               {row.roasDelta >= 0 ? '▲' : '▼'} {row.roasDelta >= 0 ? '+' : ''}{row.roasDelta.toFixed(1)}x
             </div>
           )}
         </td>
         <td style={{ padding: '8px 10px', textAlign: 'right' }}>
-          <span style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 800, background: signal.bg, color: signal.color, whiteSpace: 'nowrap' }}>
+          <span style={{ padding: '3px 8px', borderRadius: 5, fontSize: 10, fontWeight: 800, background: signal.bg, color: toneText(signal.color), whiteSpace: 'nowrap' }}>
             {row.signal}
           </span>
         </td>
@@ -1327,8 +1328,8 @@ export default function MarketingPage() {
                   <div key={point.month} style={{ minWidth: 0, padding: '8px 4px', textAlign: 'center', borderLeft: index === 0 ? 'none' : `1px solid ${C.bdr}` }}>
                     <div style={{ color: C.dim, fontSize: 9, fontWeight: 700, textTransform: 'uppercase' }}>{point.label}</div>
                     <div style={{ color: C.txt, fontSize: 11, fontWeight: 800, marginTop: 5 }}>{point.roas == null ? '—' : `${point.roas.toFixed(1)}x`}</div>
-                    <div style={{ color: '#10b981', fontSize: 9, fontWeight: 700, marginTop: 4, whiteSpace: 'nowrap' }}>Rev {point.revenue > 0 ? fmtCompact(point.revenue) : '—'}</div>
-                    <div style={{ color: '#f59e0b', fontSize: 9, fontWeight: 700, marginTop: 3, whiteSpace: 'nowrap' }}>Spend {point.spend > 0 ? fmtCompact(point.spend) : '—'}</div>
+                    <div style={{ color: 'var(--tone-emerald)', fontSize: 9, fontWeight: 700, marginTop: 4, whiteSpace: 'nowrap' }}>Rev {point.revenue > 0 ? fmtCompact(point.revenue) : '—'}</div>
+                    <div style={{ color: 'var(--tone-amber)', fontSize: 9, fontWeight: 700, marginTop: 3, whiteSpace: 'nowrap' }}>Spend {point.spend > 0 ? fmtCompact(point.spend) : '—'}</div>
                   </div>
                 ))}
               </div>
@@ -1365,9 +1366,9 @@ export default function MarketingPage() {
                   <span style={{ color: C.dim }}>revenue turun, marketing cost naik</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', fontFamily: 'monospace' }}>
-                  <span style={{ color: '#9b6b6b' }}>Sales {row.revenueDelta !== null ? `${row.revenueDelta >= 0 ? '+' : ''}${row.revenueDelta.toFixed(1)}%` : '—'}</span>
+                  <span style={{ color: 'var(--delta-down)' }}>Sales {row.revenueDelta !== null ? `${row.revenueDelta >= 0 ? '+' : ''}${row.revenueDelta.toFixed(1)}%` : '—'}</span>
                   <span style={{ color: 'var(--yellow)' }}>Mkt {row.mktFeeDelta !== null ? `${row.mktFeeDelta >= 0 ? '+' : ''}${row.mktFeeDelta.toFixed(1)}%` : '—'}</span>
-                  {row.spendSalesGap !== null && <span style={{ color: '#9b6b6b' }}>Gap {row.spendSalesGap >= 0 ? '+' : ''}{row.spendSalesGap.toFixed(1)}pp</span>}
+                  {row.spendSalesGap !== null && <span style={{ color: 'var(--delta-down)' }}>Gap {row.spendSalesGap >= 0 ? '+' : ''}{row.spendSalesGap.toFixed(1)}pp</span>}
                 </div>
               </>
             );
@@ -1444,7 +1445,7 @@ export default function MarketingPage() {
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, fontSize: 11, whiteSpace: 'nowrap' }}>
                 <div>{fmtRupiah(efficiencyTotals.revenue)}</div>
                 {prevEfficiencyTotals.revenue > 0 && (
-                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.revenue >= prevEfficiencyTotals.revenue ? '#5b8a7a' : '#9b6b6b' }}>
+                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.revenue >= prevEfficiencyTotals.revenue ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                     {efficiencyTotals.revenue >= prevEfficiencyTotals.revenue ? '▲' : '▼'} {((efficiencyTotals.revenue - prevEfficiencyTotals.revenue) / prevEfficiencyTotals.revenue) >= 0 ? '+' : ''}{(((efficiencyTotals.revenue - prevEfficiencyTotals.revenue) / prevEfficiencyTotals.revenue) * 100).toFixed(1)}%
                   </div>
                 )}
@@ -1452,7 +1453,7 @@ export default function MarketingPage() {
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, fontSize: 11, whiteSpace: 'nowrap', color: 'var(--yellow)' }}>
                 <div>{fmtRupiah(efficiencyTotals.mktFee)}</div>
                 {prevEfficiencyTotals.mktFee > 0 && (
-                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.mktFee <= prevEfficiencyTotals.mktFee ? '#5b8a7a' : '#9b6b6b' }}>
+                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.mktFee <= prevEfficiencyTotals.mktFee ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                     {efficiencyTotals.mktFee >= prevEfficiencyTotals.mktFee ? '▲' : '▼'} {((efficiencyTotals.mktFee - prevEfficiencyTotals.mktFee) / prevEfficiencyTotals.mktFee) >= 0 ? '+' : ''}{(((efficiencyTotals.mktFee - prevEfficiencyTotals.mktFee) / prevEfficiencyTotals.mktFee) * 100).toFixed(1)}%
                   </div>
                 )}
@@ -1466,7 +1467,7 @@ export default function MarketingPage() {
                   fontWeight: 800,
                   fontSize: 11,
                   whiteSpace: 'nowrap',
-                  color: shippingError ? C.dim : efficiencyTotals.cm3 >= 0 ? 'var(--green)' : 'var(--red)',
+                  color: toneText(shippingError ? C.dim : efficiencyTotals.cm3 >= 0 ? 'var(--green)' : 'var(--red)'),
                 }}
               >
                 {shippingError ? (
@@ -1478,7 +1479,7 @@ export default function MarketingPage() {
                       {efficiencyTotals.revenue > 0 ? `${efficiencyTotals.cm3Pct.toFixed(1)}%` : '—'}
                     </div>
                     {!prevRangeShippingError && prevEfficiencyTotals.cm3 !== 0 && (
-                      <div style={{ marginTop: 3, fontSize: 10, fontWeight: 500, color: efficiencyTotals.cm3 >= prevEfficiencyTotals.cm3 ? '#5b8a7a' : '#9b6b6b' }}>
+                      <div style={{ marginTop: 3, fontSize: 10, fontWeight: 500, color: efficiencyTotals.cm3 >= prevEfficiencyTotals.cm3 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                         {efficiencyTotals.cm3 >= prevEfficiencyTotals.cm3 ? '▲' : '▼'} {((efficiencyTotals.cm3 - prevEfficiencyTotals.cm3) / Math.abs(prevEfficiencyTotals.cm3)) >= 0 ? '+' : ''}{(((efficiencyTotals.cm3 - prevEfficiencyTotals.cm3) / Math.abs(prevEfficiencyTotals.cm3)) * 100).toFixed(1)}%
                       </div>
                     )}
@@ -1488,7 +1489,7 @@ export default function MarketingPage() {
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, fontSize: 11 }}>
                 <div>{efficiencyTotals.mktFeePct.toFixed(1)}%</div>
                 {prevEfficiencyTotals.mktFeePct > 0 && (
-                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.mktFeePct <= prevEfficiencyTotals.mktFeePct ? '#5b8a7a' : '#9b6b6b' }}>
+                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.mktFeePct <= prevEfficiencyTotals.mktFeePct ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                     {(efficiencyTotals.mktFeePct - prevEfficiencyTotals.mktFeePct) >= 0 ? '▲' : '▼'} {(efficiencyTotals.mktFeePct - prevEfficiencyTotals.mktFeePct) >= 0 ? '+' : ''}{(efficiencyTotals.mktFeePct - prevEfficiencyTotals.mktFeePct).toFixed(1)}pp
                   </div>
                 )}
@@ -1496,7 +1497,7 @@ export default function MarketingPage() {
               <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 800, fontSize: 11 }}>
                 <div>{efficiencyTotals.roas.toFixed(1)}x</div>
                 {prevEfficiencyTotals.roas > 0 && (
-                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.roas >= prevEfficiencyTotals.roas ? '#5b8a7a' : '#9b6b6b' }}>
+                  <div style={{ marginTop: 4, fontSize: 10, fontWeight: 500, color: efficiencyTotals.roas >= prevEfficiencyTotals.roas ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                     {(efficiencyTotals.roas - prevEfficiencyTotals.roas) >= 0 ? '▲' : '▼'} {(efficiencyTotals.roas - prevEfficiencyTotals.roas) >= 0 ? '+' : ''}{(efficiencyTotals.roas - prevEfficiencyTotals.roas).toFixed(1)}x
                   </div>
                 )}
@@ -1522,22 +1523,22 @@ export default function MarketingPage() {
                 <tr style={{ borderBottom: `1px solid ${C.bdr}` }}>
                   <th style={{ padding: '8px 10px', textAlign: 'left', color: C.dim, fontWeight: 600, fontSize: 11, position: 'sticky', left: 0, background: C.card }}>Brand</th>
                   {brandPlatformMatrix.platforms?.map((p: string) => (
-                    <th key={p} style={{ padding: '8px 6px', textAlign: 'right', color: PLATFORM_COLORS[p] || C.dim, fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap' }}>{p}</th>
+                    <th key={p} style={{ padding: '8px 6px', textAlign: 'right', color: toneText(PLATFORM_COLORS[p] || C.dim), fontWeight: 600, fontSize: 10, whiteSpace: 'nowrap' }}>{p}</th>
                   ))}
-                  <th style={{ padding: '8px 10px', textAlign: 'right', color: '#f1f5f9', fontWeight: 700, fontSize: 11 }}>Total</th>
-                  <th title="Net Sales brand ÷ total marketing spend seluruh traffic source" style={{ padding: '8px 10px', textAlign: 'right', color: '#06b6d4', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>ROAS Total</th>
-                  <th title="Gross profit − MP fee − shipping − total marketing spend brand" style={{ padding: '8px 10px', textAlign: 'right', color: '#8b5cf6', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>CM3</th>
+                  <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--text)', fontWeight: 700, fontSize: 11 }}>Total</th>
+                  <th title="Net Sales brand ÷ total marketing spend seluruh traffic source" style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--tone-cyan)', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>ROAS Total</th>
+                  <th title="Gross profit − MP fee − shipping − total marketing spend brand" style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--tone-violet)', fontWeight: 700, fontSize: 11, whiteSpace: 'nowrap' }}>CM3</th>
                 </tr>
               </thead>
               <tbody>
                 {brandPlatformMatrix.rows?.map((row: any) => (
-                  <tr key={row.brand} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
+                  <tr key={row.brand} style={{ borderBottom: `1px solid ${C.bdr}` }}>
                     <td style={{ padding: '8px 10px', fontWeight: 600, position: 'sticky', left: 0, background: C.card, display: 'flex', alignItems: 'center', gap: 6 }}>
                       <div style={{ width: 8, height: 8, borderRadius: 2, background: BRAND_COLORS[row.brand] || '#64748b', flexShrink: 0 }} />
                       {row.brand}
                     </td>
                     {brandPlatformMatrix.platforms?.map((p: string) => (
-                      <td key={p} style={{ padding: '8px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: row[p] > 0 ? C.txt : `${C.dim}66` }}>
+                      <td key={p} style={{ padding: '8px 6px', textAlign: 'right', fontFamily: 'monospace', fontSize: 11, color: toneText(row[p] > 0 ? C.txt : 'var(--text-muted)') }}>
                         {row[p] > 0 ? fmtCompact(row[p]) : '—'}
                       </td>
                     ))}
@@ -1548,7 +1549,7 @@ export default function MarketingPage() {
                       fontFamily: 'monospace',
                       fontWeight: 700,
                       fontSize: 11,
-                      color: row._roas == null ? C.dim : row._roas >= 3 ? 'var(--green)' : row._roas >= 2 ? 'var(--yellow)' : 'var(--red)',
+                      color: toneText(row._roas == null ? C.dim : row._roas >= 3 ? 'var(--green)' : row._roas >= 2 ? 'var(--yellow)' : 'var(--red)'),
                     }}>
                       {row._roas == null ? '—' : `${row._roas.toFixed(1)}x`}
                     </td>
@@ -1559,7 +1560,7 @@ export default function MarketingPage() {
                       fontWeight: 700,
                       fontSize: 11,
                       whiteSpace: 'nowrap',
-                      color: shippingError ? C.dim : row._cm3 >= 0 ? 'var(--green)' : 'var(--red)',
+                      color: toneText(shippingError ? C.dim : row._cm3 >= 0 ? 'var(--green)' : 'var(--red)'),
                     }}>
                       {shippingError ? '—' : (
                         <>
@@ -1595,7 +1596,7 @@ export default function MarketingPage() {
                   {dailyTrafficSource.sources.map(s => {
                     const tooltip = s === 'Meta Ads' ? 'Meta Ads (not include Meta CPAS)' : s === 'Shopee Ads' ? 'Shopee Ads (include Meta CPAS)' : undefined;
                     return (
-                      <th key={s} title={tooltip} style={{ padding: '8px 8px', textAlign: 'right', color: PLATFORM_COLORS[s] || C.dim, fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', cursor: tooltip ? 'help' : undefined }}>
+                      <th key={s} title={tooltip} style={{ padding: '8px 8px', textAlign: 'right', color: toneText(PLATFORM_COLORS[s] || C.dim), fontWeight: 600, fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', cursor: tooltip ? 'help' : undefined }}>
                         {s}{tooltip ? ' ⓘ' : ''}
                       </th>
                     );
@@ -1606,10 +1607,10 @@ export default function MarketingPage() {
               </thead>
               <tbody>
                 {dailyTrafficSource.rows.map((r) => (
-                  <tr key={r.date} style={{ borderBottom: `1px solid ${C.bdr}22` }}>
+                  <tr key={r.date} style={{ borderBottom: `1px solid ${C.bdr}` }}>
                     <td style={{ padding: '8px 10px', fontWeight: 500, whiteSpace: 'nowrap', fontSize: 12, position: 'sticky', left: 0, background: C.card, zIndex: 1 }}>{r.dateLabel}</td>
                     {dailyTrafficSource.sources.map(s => (
-                      <td key={s} style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: (r.values[s] || 0) > 0 ? C.txt : `${C.dim}44` }}>
+                      <td key={s} style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'monospace', fontSize: 12, color: toneText((r.values[s] || 0) > 0 ? C.txt : 'var(--text-muted)') }}>
                         {(r.values[s] || 0) > 0 ? fmtCompact(r.values[s]) : '—'}
                       </td>
                     ))}
@@ -1626,12 +1627,12 @@ export default function MarketingPage() {
                     const prev = prevAdSpend?.byPlatform[s];
                     const delta = prev && prev > 0 ? ((cur - prev) / prev) * 100 : null;
                     return (
-                      <td key={s} style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: PLATFORM_COLORS[s] || C.txt }}>
+                      <td key={s} style={{ padding: '8px 8px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: toneText(PLATFORM_COLORS[s] || C.txt) }}>
                         {cur > 0 ? (
                           <>
                             <div>{fmtCompact(cur)}</div>
                             {delta !== null && (
-                              <div style={{ fontSize: 10, marginTop: 2, fontWeight: 400, color: delta <= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                              <div style={{ fontSize: 10, marginTop: 2, fontWeight: 400, color: delta <= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                                 {delta >= 0 ? '▲' : '▼'} {delta >= 0 ? '+' : ''}{delta.toFixed(1)}%
                               </div>
                             )}
@@ -1646,7 +1647,7 @@ export default function MarketingPage() {
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12 }}>
                         <div>{fmtCompact(dailyTrafficSource.grandTotal)}</div>
                         {grandDelta !== null && (
-                          <div style={{ fontSize: 10, marginTop: 2, fontWeight: 400, color: grandDelta <= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                          <div style={{ fontSize: 10, marginTop: 2, fontWeight: 400, color: grandDelta <= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                             {grandDelta >= 0 ? '▲' : '▼'} {grandDelta >= 0 ? '+' : ''}{grandDelta.toFixed(1)}% vs prev
                           </div>
                         )}
@@ -1659,7 +1660,7 @@ export default function MarketingPage() {
                       <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace', fontWeight: 700, fontSize: 12, color: dailyTrafficSource.grandRatio > 40 ? 'var(--red)' : dailyTrafficSource.grandRatio > 25 ? 'var(--yellow)' : 'var(--green)' }}>
                         <div>{dailyTrafficSource.grandRatio.toFixed(1)}%</div>
                         {ratioDelta !== null && (
-                          <div style={{ fontSize: 10, marginTop: 2, fontWeight: 400, color: ratioDelta <= 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                          <div style={{ fontSize: 10, marginTop: 2, fontWeight: 400, color: ratioDelta <= 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                             {ratioDelta >= 0 ? '▲' : '▼'} {ratioDelta >= 0 ? '+' : ''}{ratioDelta.toFixed(1)}pp
                           </div>
                         )}

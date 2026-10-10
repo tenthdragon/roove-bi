@@ -27,6 +27,7 @@ import { fmtCompact, fmtRupiah, shortDate, PRODUCT_COLORS, getBrandColor } from 
 import CashFlowSection from '@/components/CashFlowSection';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
+import { toneText } from '@/lib/theme-tones';
 
 // Daily trend color coding for margin
 const marginColor = (v: number) => v >= 30 ? 'var(--green)' : v >= 0 ? 'var(--yellow)' : 'var(--red)';
@@ -580,17 +581,17 @@ export default function OverviewPage() {
   const isOwnerOrAdmin = role === 'owner' || role === 'admin';
 
   const DeltaLine = ({ value, suffix, higherIsBetter, label: lbl }: { value: number; suffix?: string; higherIsBetter?: boolean; label?: string }) => (
-    <div style={{ fontSize: 10, marginTop: 4, color: ((value > 0) === (higherIsBetter !== false)) ? '#5b8a7a' : '#9b6b6b' }}>
+    <div style={{ fontSize: 10, marginTop: 4, color: ((value > 0) === (higherIsBetter !== false)) ? 'var(--delta-up)' : 'var(--delta-down)' }}>
       {value > 0 ? '▲' : '▼'} {value >= 0 ? '+' : ''}{value.toFixed(1)}{suffix || '%'}{lbl ? ` ${lbl}` : ` vs ${prevMonthLabel}`}
     </div>
   );
   const pctOf = (value: number, base: number) => base > 0 ? `${(value / base * 100).toFixed(1)}%` : '—';
   const TrendValue = ({ value, base, color = 'var(--text)', muted = false, badge = false }: { value: number; base: number; color?: string; muted?: boolean; badge?: boolean }) => (
-    <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color }}>
+    <td style={{ padding:'8px 10px', textAlign:'right', fontFamily:'monospace', fontSize:11, color: toneText(color) }}>
       <div title={fmtRupiah(value)}>Rp {fmtCompact(value)}</div>
       <div style={{ fontSize:9, color: muted ? 'var(--text-muted)' : 'var(--dim)', marginTop:2 }}>
         {badge ? (
-          <span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(base > 0 ? value / base * 100 : 0), color: marginColor(base > 0 ? value / base * 100 : 0) }}>
+          <span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(base > 0 ? value / base * 100 : 0), color: toneText(marginColor(base > 0 ? value / base * 100 : 0)) }}>
             {pctOf(value, base)}
           </span>
         ) : pctOf(value, base)}
@@ -606,24 +607,24 @@ export default function OverviewPage() {
         <div style={{ fontSize:11, fontWeight:700, marginBottom:6 }}>{row.label}{row.isPartial ? ` · s.d. hari ${row.throughDay}` : ''}</div>
         <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10, marginBottom:4 }}>
           <span style={{ color:'var(--dim)' }}>CM3</span>
-          <span style={{ fontFamily:'monospace', color:row.cm3 >= 0 ? '#8b5cf6' : 'var(--red)', fontWeight:700 }}>Rp {fmtCompact(row.cm3)}</span>
+          <span style={{ fontFamily:'monospace', color:row.cm3 >= 0 ? 'var(--tone-violet)' : 'var(--red)', fontWeight:700 }}>Rp {fmtCompact(row.cm3)}</span>
         </div>
         <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10, marginBottom:4 }}>
           <span style={{ color:'var(--dim)' }}>CM3 margin</span>
-          <span style={{ fontFamily:'monospace', color:'#06b6d4', fontWeight:700 }}>{row.margin.toFixed(1)}%</span>
+          <span style={{ fontFamily:'monospace', color:'var(--tone-cyan)', fontWeight:700 }}>{row.margin.toFixed(1)}%</span>
         </div>
         <div style={{ borderTop:'1px solid var(--border)', margin:'6px 0' }} />
         <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10, marginBottom:4 }}>
           <span style={{ color:'var(--dim)' }}>Overhead</span>
-          <span style={{ fontFamily:'monospace', color:'#a78bfa' }}>Rp {fmtCompact(row.overhead)}</span>
+          <span style={{ fontFamily:'monospace', color:'var(--tone-violet)' }}>Rp {fmtCompact(row.overhead)}</span>
         </div>
         <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10, marginBottom:4 }}>
           <span style={{ color:'var(--dim)' }}>After OH</span>
-          <span style={{ fontFamily:'monospace', color:row.netProfit >= 0 ? '#6d28d9' : 'var(--red)', fontWeight:700 }}>Rp {fmtCompact(row.netProfit)}</span>
+          <span style={{ fontFamily:'monospace', color:row.netProfit >= 0 ? 'var(--tone-violet)' : 'var(--red)', fontWeight:700 }}>Rp {fmtCompact(row.netProfit)}</span>
         </div>
         <div style={{ display:'flex', justifyContent:'space-between', gap:16, fontSize:10 }}>
           <span style={{ color:'var(--dim)' }}>After OH margin</span>
-          <span style={{ fontFamily:'monospace', color:row.netProfit >= 0 ? '#a78bfa' : 'var(--red)', fontWeight:700 }}>{row.netProfitMargin.toFixed(1)}%</span>
+          <span style={{ fontFamily:'monospace', color:row.netProfit >= 0 ? 'var(--tone-violet)' : 'var(--red)', fontWeight:700 }}>{row.netProfitMargin.toFixed(1)}%</span>
         </div>
       </div>
     );
@@ -651,7 +652,7 @@ export default function OverviewPage() {
   if (loadError) {
     return (
       <div style={{ padding: 24 }}>
-        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: 'var(--tone-red)' }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Overview Gagal Dimuat</div>
           <div style={{ fontSize: 13 }}>{loadError}</div>
         </div>
@@ -662,7 +663,7 @@ export default function OverviewPage() {
   if (activeBrandsError) {
     return (
       <div style={{ padding: 24 }}>
-        <div style={{ background: 'rgba(120,53,15,0.12)', border: '1px solid rgba(146,64,14,0.45)', borderRadius: 12, padding: 18, color: '#fcd34d' }}>
+        <div style={{ background: 'rgba(120,53,15,0.12)', border: '1px solid rgba(146,64,14,0.45)', borderRadius: 12, padding: 18, color: 'var(--tone-amber)' }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Filter Brand Gagal Dimuat</div>
           <div style={{ fontSize: 13 }}>{activeBrandsError}</div>
         </div>
@@ -688,12 +689,12 @@ export default function OverviewPage() {
       <h2 style={{ margin:'0 0 16px', fontSize:18, fontWeight:700 }}>Overview</h2>
 
       {feeError && (
-        <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:12, fontSize:12, color:'#fcd34d' }}>
+        <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:12, fontSize:12, color:'var(--tone-amber)' }}>
           Data biaya marketing gagal dimuat penuh: {feeError}
         </div>
       )}
       {shipmentError && (
-        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(146,64,14,0.45)', background: 'rgba(120,53,15,0.12)', color: '#fcd34d', fontSize: 12 }}>
+        <div style={{ marginBottom: 12, padding: '10px 12px', borderRadius: 10, border: '1px solid rgba(146,64,14,0.45)', background: 'rgba(120,53,15,0.12)', color: 'var(--tone-amber)', fontSize: 12 }}>
           Data shipment sementara tidak tersedia. KPI finansial lainnya tetap ditampilkan.
         </div>
       )}
@@ -710,15 +711,15 @@ export default function OverviewPage() {
             <div style={{ background:'var(--card)', border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px', position:'relative', overflow:'hidden' }}>
               <div style={{ position:'absolute', top:0, left:0, right:0, height:2, background:color }} />
               <div style={{ fontSize:10, color:'var(--dim)', textTransform:'uppercase', letterSpacing:'0.05em', fontWeight:600, marginBottom:5, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{label}</div>
-              <div style={{ fontSize:16, fontWeight:700, fontFamily:'monospace', lineHeight:1.2, color }}>{value}</div>
+              <div style={{ fontSize:16, fontWeight:700, fontFamily:'monospace', lineHeight:1.2, color: toneText(color) }}>{value}</div>
               {sub && <div style={{ fontSize:10, color:'var(--dim)', marginTop:3, lineHeight:1.3 }}>{sub}</div>}
               {hasD && (
-                <div style={{ fontSize:9, marginTop:3, color: deltaVal === 0 ? 'var(--dim)' : ((deltaVal>0) === !lowerBetter) ? '#5b8a7a' : '#9b6b6b' }}>
+                <div style={{ fontSize:9, marginTop:3, color: deltaVal === 0 ? 'var(--dim)' : ((deltaVal>0) === !lowerBetter) ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                   {deltaVal>0?'▲':deltaVal<0?'▼':'•'} {deltaVal>0?'+':''}{deltaVal.toFixed(1)}% vs {prevMonthLabel}
                 </div>
               )}
               {hasMarginDelta && (
-                <div style={{ fontSize:9, marginTop:3, color: marginDelta === 0 ? 'var(--dim)' : marginDelta > 0 ? '#5b8a7a' : '#9b6b6b' }}>
+                <div style={{ fontSize:9, marginTop:3, color: marginDelta === 0 ? 'var(--dim)' : marginDelta > 0 ? 'var(--delta-up)' : 'var(--delta-down)' }}>
                   {marginDelta>0?'▲':marginDelta<0?'▼':'•'} {marginDelta>0?'+':''}{marginDelta.toFixed(1)}pp {marginLabel} vs {prevMonthLabel}
                 </div>
               )}
@@ -763,13 +764,13 @@ export default function OverviewPage() {
         <CashFlowSection netSales={kpi.ts} periodStart={cashFlowPeriodStart} />
       )}
       {isOwnerOrAdmin && !cashFlowPeriodStart && (
-        <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:12, color:'#fcd34d' }}>
+        <div style={{ background:'rgba(120,53,15,0.12)', border:'1px solid rgba(146,64,14,0.45)', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:12, color:'var(--tone-amber)' }}>
           Cash Flow Status hanya ditampilkan untuk rentang 1 bulan yang dimulai dari tanggal 1.
         </div>
       )}
 
       {hasPreFebData && (
-        <div style={{ background:'#1e1b4b', border:'1px solid #3730a3', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:11, color:'#a5b4fc', display:'flex', alignItems:'center', gap:8 }}>
+        <div style={{ background:'rgba(99,102,241,0.1)', border:'1px solid rgba(99,102,241,0.35)', borderRadius:8, padding:'10px 14px', marginBottom:16, fontSize:11, color:'var(--tone-indigo)', display:'flex', alignItems:'center', gap:8 }}>
           <span style={{ fontSize:16 }}>ℹ️</span>
           <span>Data sebelum Feb 2026 tidak termasuk biaya admin marketplace (MP Fee).</span>
         </div>
@@ -781,7 +782,7 @@ export default function OverviewPage() {
             <span style={{ transition:'transform 0.2s', display:'inline-block', transform: showTren ? 'rotate(90deg)' : 'rotate(0deg)', fontSize:10, color:'var(--dim)' }}>&#9654;</span>
             Tren Harian
             {showTren && (
-              <button onClick={e => { e.stopPropagation(); setShowDetail(v => !v); }} style={{ background:'none', border:'1px solid var(--border)', borderRadius:6, padding:'2px 8px', cursor:'pointer', fontSize:10, color: showDetail ? '#a78bfa' : 'var(--dim)', display:'flex', alignItems:'center', gap:4 }}>
+              <button onClick={e => { e.stopPropagation(); setShowDetail(v => !v); }} style={{ background:'none', border:'1px solid var(--border)', borderRadius:6, padding:'2px 8px', cursor:'pointer', fontSize:10, color: showDetail ? 'var(--tone-violet)' : 'var(--dim)', display:'flex', alignItems:'center', gap:4 }}>
                 <span style={{ transition:'transform 0.2s', display:'inline-block', transform: showDetail ? 'rotate(90deg)' : 'rotate(0deg)', fontSize:8 }}>&#9654;</span>
                 Detail
               </button>
@@ -795,12 +796,12 @@ export default function OverviewPage() {
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--accent)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Net Sales</th>
                 {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--dim)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>COGS</th>}
                 <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--green)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>CM1</th>
-                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'#8b5cf6', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>MP Fee</th>}
-                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'#0ea5e9', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Shipping</th>}
-                <th style={{ padding:'8px 10px', textAlign:'right', color:'#0ea5e9', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>CM2</th>
+                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--tone-violet)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>MP Fee</th>}
+                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--tone-sky)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Shipping</th>}
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--tone-sky)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>CM2</th>
                 {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--yellow)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Mkt Fee</th>}
-                <th style={{ padding:'8px 10px', textAlign:'right', color:'#8b5cf6', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>CM3</th>
-                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'#a78bfa', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Overhead</th>}
+                <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--tone-violet)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>CM3</th>
+                {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--tone-violet)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>Overhead</th>}
                 {showDetail && <th style={{ padding:'8px 10px', textAlign:'right', color:'var(--green)', fontWeight:600, fontSize:10, textTransform:'uppercase' }}>After OH</th>}
               </tr>
             </thead>
@@ -865,18 +866,18 @@ export default function OverviewPage() {
                 </td>
                 {showDetail && (
                   <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                    <div style={{ fontFamily:'monospace', fontSize:11, color:'#8b5cf6' }}>{fmtRupiah(kpi.tMp)}</div>
+                    <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--tone-violet)' }}>{fmtRupiah(kpi.tMp)}</div>
                     <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tMp / kpi.ts * 100).toFixed(1) : 0}%</div>
                   </td>
                 )}
                 {showDetail && (
                   <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                    <div style={{ fontFamily:'monospace', fontSize:11, color:'#0ea5e9' }}>{fmtRupiah(kpi.tShipping)}</div>
+                    <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--tone-sky)' }}>{fmtRupiah(kpi.tShipping)}</div>
                     <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tShipping / kpi.ts * 100).toFixed(1) : 0}%</div>
                   </td>
                 )}
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:'#0ea5e9' }}>{fmtRupiah(kpi.tCm2)}</div>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--tone-sky)' }}>{fmtRupiah(kpi.tCm2)}</div>
                   <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.cm2M.toFixed(1)}%</div>
                 </td>
                 {showDetail && (
@@ -886,19 +887,19 @@ export default function OverviewPage() {
                   </td>
                 )}
                 <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                  <div style={{ fontFamily:'monospace', fontSize:11, color:kpi.tCm3 >= 0 ? '#8b5cf6' : 'var(--red)' }}>{fmtRupiah(kpi.tCm3)}</div>
-                  <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.cm3M), color: marginColor(kpi.cm3M) }}>{kpi.cm3M.toFixed(1)}%</span></div>
+                  <div style={{ fontFamily:'monospace', fontSize:11, color:kpi.tCm3 >= 0 ? 'var(--tone-violet)' : 'var(--red)' }}>{fmtRupiah(kpi.tCm3)}</div>
+                  <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.cm3M), color: toneText(marginColor(kpi.cm3M)) }}>{kpi.cm3M.toFixed(1)}%</span></div>
                 </td>
                 {showDetail && (
                   <td style={{ padding:'10px 10px', textAlign:'right' }}>
-                    <div style={{ fontFamily:'monospace', fontSize:11, color:'#a78bfa' }}>{fmtRupiah(kpi.tOverhead)}</div>
+                    <div style={{ fontFamily:'monospace', fontSize:11, color:'var(--tone-violet)' }}>{fmtRupiah(kpi.tOverhead)}</div>
                     <div style={{ fontSize:9, color:'var(--dim)', marginTop:2 }}>{kpi.ts > 0 ? (kpi.tOverhead / kpi.ts * 100).toFixed(1) : 0}%</div>
                   </td>
                 )}
                 {showDetail && (
                   <td style={{ padding:'10px 10px', textAlign:'right' }}>
                     <div style={{ fontFamily:'monospace', fontSize:11, color: kpi.tNetProfit >= 0 ? 'var(--green)' : 'var(--red)' }}>{fmtRupiah(kpi.tNetProfit)}</div>
-                    <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.npM), color: marginColor(kpi.npM) }}>{kpi.npM.toFixed(1)}%</span></div>
+                    <div style={{ fontSize:9, marginTop:2 }}><span style={{ padding:'1px 5px', borderRadius:4, fontWeight:700, background: marginBg(kpi.npM), color: toneText(marginColor(kpi.npM)) }}>{kpi.npM.toFixed(1)}%</span></div>
                   </td>
                 )}
               </tr>
@@ -930,7 +931,7 @@ export default function OverviewPage() {
                 <CartesianGrid stroke="var(--border)" strokeDasharray="3 4" vertical={false} />
                 <XAxis dataKey="label" tick={{ fill:'var(--dim)', fontSize:9 }} axisLine={{ stroke:'var(--border)' }} tickLine={false} />
                 <YAxis yAxisId="amount" tickFormatter={(value) => fmtCompact(value)} tick={{ fill:'var(--dim)', fontSize:9 }} axisLine={false} tickLine={false} width={52} />
-                <YAxis yAxisId="margin" orientation="right" tickFormatter={(value) => `${value.toFixed(0)}%`} tick={{ fill:'#06b6d4', fontSize:9 }} axisLine={false} tickLine={false} width={38} />
+                <YAxis yAxisId="margin" orientation="right" tickFormatter={(value) => `${value.toFixed(0)}%`} tick={{ fill:'var(--tone-cyan)', fontSize:9 }} axisLine={false} tickLine={false} width={38} />
                 <Tooltip content={<Cm3HistoryTooltip />} />
                 <ReferenceLine yAxisId="amount" y={0} stroke="var(--border)" />
                 <Bar yAxisId="amount" dataKey="cm3" name="CM3" radius={[4,4,0,0]} barSize={42}>

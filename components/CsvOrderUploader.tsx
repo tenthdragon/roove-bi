@@ -3,6 +3,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { getCsvUploadHistory } from '@/lib/admin-actions';
+import { toneText } from '@/lib/theme-tones';
 
 export default function CsvOrderUploader() {
   const [dragOver, setDragOver] = useState(false);
@@ -162,19 +163,19 @@ export default function CsvOrderUploader() {
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>Upload Order</div>
         <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 14 }}>
-          Upload <strong style={{ color: '#06b6d4' }}>CSV Scalev</strong>, <strong style={{ color: 'var(--green)' }}>CSV Tim Ops</strong>, atau <strong style={{ color: '#f59e0b' }}>Excel Marketplace</strong>.
+          Upload <strong style={{ color: 'var(--tone-cyan)' }}>CSV Scalev</strong>, <strong style={{ color: 'var(--green)' }}>CSV Tim Ops</strong>, atau <strong style={{ color: 'var(--tone-amber)' }}>Excel Marketplace</strong>.
           Format akan dipilih otomatis.
         </div>
 
         {/* Format info */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: 'var(--accent-subtle)', color: '#06b6d4', fontWeight: 600 }}>
+          <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: 'var(--accent-subtle)', color: 'var(--tone-cyan)', fontWeight: 600 }}>
             📋 Scalev → financial + COGS
           </span>
           <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: 'var(--green-subtle)', color: 'var(--green)', fontWeight: 600 }}>
             👥 Tim Ops → customer identity
           </span>
-          <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: 'rgba(245,158,11,0.14)', color: '#f59e0b', fontWeight: 600 }}>
+          <span style={{ fontSize: 11, padding: '3px 8px', borderRadius: 5, background: 'rgba(245,158,11,0.14)', color: 'var(--tone-amber)', fontWeight: 600 }}>
             📦 Marketplace Excel → create order API
           </span>
         </div>
@@ -215,7 +216,7 @@ export default function CsvOrderUploader() {
                 border: '3px solid var(--border)', borderTop: '3px solid #06b6d4',
                 borderRadius: '50%', margin: '0 auto 8px'
               }} />
-              <div style={{ color: '#06b6d4', fontWeight: 600, fontSize: 12 }}>
+              <div style={{ color: 'var(--tone-cyan)', fontWeight: 600, fontSize: 12 }}>
                 {(() => {
                   const processing = fileQueue.find(f => f.status === 'processing');
                   const done = fileQueue.filter(f => f.status === 'done').length;
@@ -277,7 +278,7 @@ export default function CsvOrderUploader() {
                       <>
                         <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 }}>
                           {isDone && <span style={{ color: 'var(--green)', fontSize: 10, flexShrink: 0 }}>✅</span>}
-                          {isProcessing && <span style={{ color: '#06b6d4', fontSize: 10, flexShrink: 0, display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>}
+                          {isProcessing && <span style={{ color: 'var(--tone-cyan)', fontSize: 10, flexShrink: 0, display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>}
                           {isPending && <span style={{ color: 'var(--text-muted)', fontSize: 10, flexShrink: 0 }}>⏳</span>}
                           {isDone && (
                             <span style={{
@@ -290,14 +291,14 @@ export default function CsvOrderUploader() {
                               color: result.stats.format === 'ops-marketplace'
                                 ? 'var(--green)'
                                 : result.stats.format === 'marketplace-api'
-                                  ? '#f59e0b'
-                                  : '#06b6d4',
+                                  ? 'var(--tone-amber)'
+                                  : 'var(--tone-cyan)',
                             }}>
                               {result.stats.format === 'ops-marketplace' ? 'OPS' : result.stats.format === 'marketplace-api' ? 'MP' : 'SCV'}
                             </span>
                           )}
                           <span style={{
-                            color: isDone ? 'var(--text)' : isProcessing ? '#06b6d4' : 'var(--text-muted)',
+                            color: isDone ? 'var(--text)' : isProcessing ? 'var(--tone-cyan)' : 'var(--text-muted)',
                             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11,
                           }}>
                             {fq.name}
@@ -307,8 +308,8 @@ export default function CsvOrderUploader() {
                           <>
                             <span style={{ width: 40, textAlign: 'right', color: 'var(--text-secondary)', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{result.stats.totalRows}</span>
                             <span style={{ width: 40, textAlign: 'right', color: 'var(--green)', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{result.stats.newInserted}</span>
-                            <span style={{ width: 40, textAlign: 'right', color: '#06b6d4', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{result.stats.updated || 0}</span>
-                            <span style={{ width: 40, textAlign: 'right', color: '#8b5cf6', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{result.stats.lineItems || 0}</span>
+                            <span style={{ width: 40, textAlign: 'right', color: 'var(--tone-cyan)', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{result.stats.updated || 0}</span>
+                            <span style={{ width: 40, textAlign: 'right', color: 'var(--tone-violet)', fontFamily: "'JetBrains Mono', monospace", fontSize: 10 }}>{result.stats.lineItems || 0}</span>
                           </>
                         ) : isProcessing && fq.totalChunks > 1 ? (
                           <span style={{ width: 172, textAlign: 'right', color: 'var(--text-muted)', fontSize: 10 }}>
@@ -335,10 +336,10 @@ export default function CsvOrderUploader() {
                 <span style={{ width: 40, textAlign: 'right', color: 'var(--green)', fontFamily: "'JetBrains Mono', monospace" }}>
                   {results.filter(r => !r.error).reduce((s, r) => s + r.stats.newInserted, 0)}
                 </span>
-                <span style={{ width: 40, textAlign: 'right', color: '#06b6d4', fontFamily: "'JetBrains Mono', monospace" }}>
+                <span style={{ width: 40, textAlign: 'right', color: 'var(--tone-cyan)', fontFamily: "'JetBrains Mono', monospace" }}>
                   {results.filter(r => !r.error).reduce((s, r) => s + (r.stats.updated || 0), 0)}
                 </span>
-                <span style={{ width: 40, textAlign: 'right', color: '#8b5cf6', fontFamily: "'JetBrains Mono', monospace" }}>
+                <span style={{ width: 40, textAlign: 'right', color: 'var(--tone-violet)', fontFamily: "'JetBrains Mono', monospace" }}>
                   {results.filter(r => !r.error).reduce((s, r) => s + (r.stats.lineItems || 0), 0)}
                 </span>
               </div>
@@ -397,8 +398,8 @@ export default function CsvOrderUploader() {
                         color: h.sync_type === 'ops_upload'
                           ? 'var(--green)'
                           : h.sync_type === 'marketplace_api_upload'
-                            ? '#f59e0b'
-                            : '#06b6d4',
+                            ? 'var(--tone-amber)'
+                            : 'var(--tone-cyan)',
                       }}>
                         {h.sync_type === 'ops_upload' ? 'OPS' : h.sync_type === 'marketplace_api_upload' ? 'MP' : 'SCV'}
                       </span>
@@ -413,7 +414,7 @@ export default function CsvOrderUploader() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
                       {h.orders_inserted > 0 && <span style={{ color: 'var(--green)', fontSize: 11 }}>+{h.orders_inserted}</span>}
-                      {h.orders_updated > 0 && <span style={{ color: '#06b6d4', fontSize: 11 }}>↑{h.orders_updated}</span>}
+                      {h.orders_updated > 0 && <span style={{ color: 'var(--tone-cyan)', fontSize: 11 }}>↑{h.orders_updated}</span>}
                       {h.uploaded_by && <span style={{ color: 'var(--text-muted)', fontSize: 10 }}>{h.uploaded_by.split('@')[0]}</span>}
                     </div>
                   </div>
@@ -437,7 +438,7 @@ function StatBox({ label, value, color }: { label: string; value: number; color:
   return (
     <div style={{ padding: 10, background: 'var(--bg)', borderRadius: 6, border: '1px solid var(--border)' }}>
       <div style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
-      <div style={{ fontSize: 18, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace" }}>
+      <div style={{ fontSize: 18, fontWeight: 800, color: toneText(color), fontFamily: "'JetBrains Mono', monospace" }}>
         {value.toLocaleString('id-ID')}
       </div>
     </div>

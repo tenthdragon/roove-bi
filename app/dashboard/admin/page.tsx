@@ -437,24 +437,24 @@ export default function AdminPage() {
 
   const roleLabel = (r) => {
     switch (r) {
-      case 'owner':              return { text: 'Owner',             bg: 'var(--accent-subtle)',    color: '#818cf8' };
-      case 'workspace_owner':    return { text: 'Owner Workspace',   bg: 'var(--accent-subtle)',    color: '#818cf8' };
+      case 'owner':              return { text: 'Owner',             bg: 'var(--accent-subtle)',    color: 'var(--tone-indigo)' };
+      case 'workspace_owner':    return { text: 'Owner Workspace',   bg: 'var(--accent-subtle)',    color: 'var(--tone-indigo)' };
       case 'admin':              return { text: 'Admin',             bg: 'var(--badge-green-bg)',   color: 'var(--green)' };
-      case 'marketing_api_reviewer': return { text: 'Marketing API Reviewer', bg: 'var(--accent-subtle)', color: '#f97316' };
-      case 'direktur_ops':       return { text: 'Direktur Ops',      bg: 'var(--badge-green-bg)',   color: '#34d399' };
-      case 'staf_ops':           return { text: 'Staf Ops',          bg: 'var(--accent-subtle)',    color: '#38bdf8' };
-      case 'direktur_finance':   return { text: 'Direktur Finance',  bg: 'var(--accent-subtle)',    color: '#60a5fa' };
-      case 'staf_finance':       return { text: 'Staf Finance',      bg: 'var(--accent-subtle)',    color: '#93c5fd' };
+      case 'marketing_api_reviewer': return { text: 'Marketing API Reviewer', bg: 'var(--accent-subtle)', color: 'var(--tone-orange)' };
+      case 'direktur_ops':       return { text: 'Direktur Ops',      bg: 'var(--badge-green-bg)',   color: 'var(--tone-emerald)' };
+      case 'staf_ops':           return { text: 'Staf Ops',          bg: 'var(--accent-subtle)',    color: 'var(--tone-sky)' };
+      case 'direktur_finance':   return { text: 'Direktur Finance',  bg: 'var(--accent-subtle)',    color: 'var(--tone-blue)' };
+      case 'staf_finance':       return { text: 'Staf Finance',      bg: 'var(--accent-subtle)',    color: 'var(--tone-blue)' };
       case 'brand_manager':      return { text: 'Brand Manager',     bg: 'var(--badge-yellow-bg)',  color: 'var(--yellow)' };
-      case 'sales_manager':      return { text: 'Sales Manager',     bg: 'var(--accent-subtle)',    color: '#c084fc' };
-      case 'warehouse_manager':  return { text: 'WH Manager',        bg: 'var(--accent-subtle)',    color: '#06b6d4' };
-      case 'ppic_manager':       return { text: 'PPIC Manager',      bg: 'var(--badge-yellow-bg)',  color: '#f59e0b' };
+      case 'sales_manager':      return { text: 'Sales Manager',     bg: 'var(--accent-subtle)',    color: 'var(--tone-purple)' };
+      case 'warehouse_manager':  return { text: 'WH Manager',        bg: 'var(--accent-subtle)',    color: 'var(--tone-cyan)' };
+      case 'ppic_manager':       return { text: 'PPIC Manager',      bg: 'var(--badge-yellow-bg)',  color: 'var(--tone-amber)' };
       case 'pending':            return { text: 'Menunggu Approval', bg: 'var(--badge-red-bg)',     color: 'var(--red)' };
       // legacy fallbacks
-      case 'finance':            return { text: 'Finance (lama)',    bg: 'var(--accent-subtle)',    color: '#60a5fa' };
-      case 'staff':              return { text: 'Staff (lama)',      bg: 'var(--accent-subtle)',    color: '#38bdf8' };
-      case 'direktur_operasional': return { text: 'Dir. Ops (lama)',  bg: 'var(--badge-green-bg)',  color: '#34d399' };
-      case 'ppic':               return { text: 'PPIC (lama)',       bg: 'var(--badge-yellow-bg)',  color: '#f59e0b' };
+      case 'finance':            return { text: 'Finance (lama)',    bg: 'var(--accent-subtle)',    color: 'var(--tone-blue)' };
+      case 'staff':              return { text: 'Staff (lama)',      bg: 'var(--accent-subtle)',    color: 'var(--tone-sky)' };
+      case 'direktur_operasional': return { text: 'Dir. Ops (lama)',  bg: 'var(--badge-green-bg)',  color: 'var(--tone-emerald)' };
+      case 'ppic':               return { text: 'PPIC (lama)',       bg: 'var(--badge-yellow-bg)',  color: 'var(--tone-amber)' };
       default: return { text: r, bg: 'var(--border)', color: 'var(--dim)' };
     }
   };
@@ -572,7 +572,7 @@ export default function AdminPage() {
                 padding: '9px 16px',
                 borderRadius: 7,
                 border: 'none',
-                background: 'var(--accent)',
+                background: 'var(--accent-solid)',
                 color: '#fff',
                 fontSize: 12,
                 fontWeight: 700,
@@ -690,7 +690,7 @@ export default function AdminPage() {
               <div style={{ fontSize: 14, fontWeight: 700 }}>Marketplace MP Fee Settings</div>
               <button
                 onClick={() => setEditingRate({ setting_key: '', rate: '', effective_from: '2026-05-01', isNew: true })}
-                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600 }}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-solid)', color: '#fff', fontSize: 12, fontWeight: 600 }}
               >
                 + Tambah Rate
               </button>
@@ -765,7 +765,7 @@ export default function AdminPage() {
                     <button
                       onClick={() => handleSaveRate(editingRate)}
                       disabled={commSaving}
-                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: commSaving ? 'not-allowed' : 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: commSaving ? 0.6 : 1 }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: commSaving ? 'not-allowed' : 'pointer', background: 'var(--green-solid)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: commSaving ? 0.6 : 1 }}
                     >
                       {commSaving ? 'Saving...' : 'Simpan'}
                     </button>
@@ -814,7 +814,7 @@ export default function AdminPage() {
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button
                               onClick={() => setEditingRate({ setting_key: r.setting_key, rate: String(r.rate), effective_from: r.effective_from, isNew: false })}
-                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
+                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: 'var(--tone-blue)', fontSize: 11, fontWeight: 500 }}
                             >
                               Edit
                             </button>
@@ -842,7 +842,7 @@ export default function AdminPage() {
               <div style={{ fontSize: 14, fontWeight: 700 }}>Tax Rates</div>
               <button
                 onClick={() => setEditingTax({ name: 'PPN', rate: '', effective_from: new Date().toISOString().slice(0, 10), isNew: true })}
-                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600 }}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-solid)', color: '#fff', fontSize: 12, fontWeight: 600 }}
               >
                 + Tambah Rate
               </button>
@@ -905,7 +905,7 @@ export default function AdminPage() {
                     <button
                       onClick={() => handleSaveTax(editingTax)}
                       disabled={taxSaving}
-                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: taxSaving ? 'not-allowed' : 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: taxSaving ? 0.6 : 1 }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: taxSaving ? 'not-allowed' : 'pointer', background: 'var(--green-solid)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: taxSaving ? 0.6 : 1 }}
                     >
                       {taxSaving ? 'Saving...' : 'Simpan'}
                     </button>
@@ -954,7 +954,7 @@ export default function AdminPage() {
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button
                               onClick={() => setEditingTax({ name: r.name, rate: String(r.rate), effective_from: r.effective_from, isNew: false })}
-                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
+                              style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: 'var(--tone-blue)', fontSize: 11, fontWeight: 500 }}
                             >
                               Edit
                             </button>
@@ -1001,7 +1001,7 @@ export default function AdminPage() {
                   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
                   setEditingOverhead({ year_month: ym, amount: '', isNew: true });
                 }}
-                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600 }}
+                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--accent-solid)', color: '#fff', fontSize: 12, fontWeight: 600 }}
               >
                 + Set Bulan
               </button>
@@ -1055,7 +1055,7 @@ export default function AdminPage() {
                     <button
                       onClick={() => handleSaveOverhead(editingOverhead)}
                       disabled={overheadSaving}
-                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: overheadSaving ? 'not-allowed' : 'pointer', background: 'var(--green)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: overheadSaving ? 0.6 : 1 }}
+                      style={{ padding: '7px 16px', borderRadius: 6, border: 'none', cursor: overheadSaving ? 'not-allowed' : 'pointer', background: 'var(--green-solid)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: overheadSaving ? 0.6 : 1 }}
                     >
                       {overheadSaving ? 'Saving...' : 'Simpan'}
                     </button>
@@ -1107,7 +1107,7 @@ export default function AdminPage() {
                             <div style={{ display: 'flex', gap: 6 }}>
                               <button
                                 onClick={() => setEditingOverhead({ year_month: r.year_month, amount: String(r.amount), isNew: false })}
-                                style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: '#60a5fa', fontSize: 11, fontWeight: 500 }}
+                                style={{ padding: '3px 10px', borderRadius: 4, border: '1px solid var(--border)', cursor: 'pointer', background: 'transparent', color: 'var(--tone-blue)', fontSize: 11, fontWeight: 500 }}
                               >
                                 Edit
                               </button>
@@ -1185,14 +1185,14 @@ export default function AdminPage() {
             case 'success': return { bg: 'var(--badge-green-bg)', color: 'var(--green)', label: 'Sukses' };
             case 'partial': return { bg: 'var(--badge-yellow-bg)', color: 'var(--yellow)', label: 'Partial' };
             case 'error': return { bg: 'var(--badge-red-bg)', color: 'var(--red)', label: 'Error' };
-            case 'running': return { bg: 'var(--accent-subtle)', color: '#60a5fa', label: 'Running' };
+            case 'running': return { bg: 'var(--accent-subtle)', color: 'var(--tone-blue)', label: 'Running' };
             default: return { bg: 'var(--border)', color: 'var(--dim)', label: s };
           }
         };
         const typeStyle = (t) => {
-          if (t.includes('CSV') || t.includes('OPS')) return { bg: 'var(--accent-subtle)', color: '#06b6d4' };
-          if (t === 'Webhook' || t.includes('Webhook')) return { bg: 'var(--green-subtle)', color: '#22c55e' };
-          if (t.includes('Scalev')) return { bg: 'var(--accent-subtle)', color: '#8b5cf6' };
+          if (t.includes('CSV') || t.includes('OPS')) return { bg: 'var(--accent-subtle)', color: 'var(--tone-cyan)' };
+          if (t === 'Webhook' || t.includes('Webhook')) return { bg: 'var(--green-subtle)', color: 'var(--tone-green)' };
+          if (t.includes('Scalev')) return { bg: 'var(--accent-subtle)', color: 'var(--tone-violet)' };
           if (t.includes('Excel')) return { bg: 'var(--accent-subtle)', color: 'var(--accent)' };
           return { bg: 'var(--border)', color: 'var(--dim)' };
         };
@@ -1206,7 +1206,7 @@ export default function AdminPage() {
                   padding: '6px 14px', borderRadius: 20, border: '1px solid',
                   borderColor: logFilter === f.id ? 'var(--accent)' : 'var(--border)',
                   background: logFilter === f.id ? 'var(--accent-subtle)' : 'transparent',
-                  color: logFilter === f.id ? '#60a5fa' : 'var(--text-secondary)',
+                  color: logFilter === f.id ? 'var(--tone-blue)' : 'var(--text-secondary)',
                   fontSize: 12, fontWeight: 600, cursor: 'pointer',
                 }}>
                   {f.label} {f.count !== null && <span style={{ opacity: 0.7 }}>({f.count})</span>}
@@ -1242,10 +1242,10 @@ export default function AdminPage() {
                               {new Date(log.time).toLocaleString('id-ID', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
                             </td>
                             <td style={{ padding: '10px 12px' }}>
-                              <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600, background: ts.bg, color: ts.color }}>{log.type}</span>
+                              <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 600, background: ts.bg, color: toneText(ts.color) }}>{log.type}</span>
                             </td>
                             <td style={{ padding: '10px 12px' }}>
-                              <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: ss.bg, color: ss.color }}>{ss.label}</span>
+                              <span style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: ss.bg, color: toneText(ss.color) }}>{ss.label}</span>
                             </td>
                             <td style={{ padding: '10px 12px', color: 'var(--text)' }}>
                               {log.webhookEvent && (
@@ -1306,7 +1306,7 @@ export default function AdminPage() {
                 style={{
                   padding: '8px 20px', borderRadius: 6, border: 'none',
                   cursor: inviting ? 'not-allowed' : 'pointer',
-                  background: inviting ? 'var(--border)' : 'var(--accent)', color: '#fff',
+                  background: inviting ? 'var(--muted-solid)' : 'var(--accent-solid)', color: '#fff',
                   fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
                   opacity: inviting ? 0.6 : 1
                 }}
@@ -1365,7 +1365,7 @@ export default function AdminPage() {
                         }}
                         style={{
                           padding: '8px 12px', borderRadius: 6, border: 'none',
-                          cursor: 'pointer', background: 'var(--accent)', color: '#fff',
+                          cursor: 'pointer', background: 'var(--accent-solid)', color: '#fff',
                           fontSize: 12, fontWeight: 600
                         }}
                       >
@@ -1399,7 +1399,7 @@ export default function AdminPage() {
             ].map(({ r, desc }) => {
               const rl = roleLabel(r);
               return (
-                <span key={r} style={{ padding: '2px 8px', borderRadius: 5, background: rl.bg, color: rl.color, fontWeight: 600 }}>
+                <span key={r} style={{ padding: '2px 8px', borderRadius: 5, background: rl.bg, color: toneText(rl.color), fontWeight: 600 }}>
                   {rl.text} — {desc}
                 </span>
               );
@@ -1419,7 +1419,7 @@ export default function AdminPage() {
                 }}>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 13 }}>{u.email}</div>
-                    <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: rl.bg, color: rl.color }}>
+                    <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: rl.bg, color: toneText(rl.color) }}>
                       {rl.text}
                     </span>
                   </div>
@@ -1431,7 +1431,7 @@ export default function AdminPage() {
                             const rl = roleLabel(mr.id);
                             return (
                               <button key={mr.id} onClick={() => handleRoleChange(u.id, mr.id)}
-                                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: rl.bg, color: rl.color, fontSize: 12, fontWeight: 600 }}>
+                                style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: rl.bg, color: toneText(rl.color), fontSize: 12, fontWeight: 600 }}>
                                 ✓ {mr.label}
                               </button>
                             );
@@ -1580,7 +1580,7 @@ function PermissionsMatrix() {
         </div>
         <button onClick={save} disabled={saving}
           style={{ padding: '7px 18px', borderRadius: 7, border: 'none', cursor: saving ? 'not-allowed' : 'pointer',
-            background: saved ? 'var(--green)' : 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 600 }}>
+            background: saved ? 'var(--green-solid)' : 'var(--accent-solid)', color: '#fff', fontSize: 13, fontWeight: 600 }}>
           {saving ? 'Menyimpan...' : saved ? '✓ Tersimpan' : 'Simpan'}
         </button>
       </div>

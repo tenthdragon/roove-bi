@@ -4,6 +4,7 @@
 
 import { useState, useEffect } from 'react';
 import FinancialTargetManager from './FinancialTargetManager';
+import { toneText } from '@/lib/theme-tones';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,7 @@ function BankBadge({ bank }: { bank: string }) {
     <span style={{
       display: 'inline-block', padding: '2px 10px', borderRadius: 999,
       fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
-      background: color + '22', color,
+      background: color + '22', color: toneText(color),
     }}>
       {bank}
     </span>
@@ -182,7 +183,7 @@ function AccountForm({
           <button type="button" onClick={onCancel} style={{ padding: '8px 20px', borderRadius: 8, border: '1px solid var(--border)', background: 'transparent', color: 'var(--dim)', fontSize: 13, cursor: 'pointer' }}>
             Batal
           </button>
-          <button type="submit" disabled={saving} style={{ padding: '8px 24px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1 }}>
+          <button type="submit" disabled={saving} style={{ padding: '8px 24px', borderRadius: 8, border: 'none', background: 'var(--accent-solid)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.7 : 1 }}>
             {saving ? 'Menyimpan…' : 'Simpan'}
           </button>
         </div>
@@ -288,7 +289,7 @@ export default function FinancialSettingsPage() {
         </div>
         <button
           onClick={() => setModal({ mode: 'add', data: { ...EMPTY_FORM } })}
-          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 18px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+          style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 18px', borderRadius: 8, border: 'none', background: 'var(--accent-solid)', color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
         >
           + Tambah Rekening
         </button>
@@ -305,7 +306,7 @@ export default function FinancialSettingsPage() {
               onClick={() => setFilterActive(f)}
               style={{
                 padding: '5px 14px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 12, cursor: 'pointer',
-                background: filterActive === f ? 'var(--accent)' : 'var(--bg-deep)',
+                background: filterActive === f ? 'var(--accent-solid)' : 'var(--bg-deep)',
                 color: filterActive === f ? '#fff' : 'var(--text-secondary)',
                 fontWeight: filterActive === f ? 700 : 400,
               }}
@@ -319,7 +320,7 @@ export default function FinancialSettingsPage() {
       {/* ── Loading / Error ── */}
       {loading && <div style={{ textAlign: 'center', padding: 40, color: 'var(--dim)', fontSize: 12 }}>Memuat…</div>}
       {!loading && error && (
-        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 8, padding: 16, color: '#fca5a5', fontSize: 13 }}>{error}</div>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 8, padding: 16, color: 'var(--tone-red)', fontSize: 13 }}>{error}</div>
       )}
 
       {/* ── Empty state ── */}
@@ -330,7 +331,7 @@ export default function FinancialSettingsPage() {
           <div style={{ fontSize: 12, color: 'var(--dim)', marginBottom: 20 }}>Tambahkan rekening bank yang digunakan untuk masing-masing bisnis.</div>
           <button
             onClick={() => setModal({ mode: 'add', data: { ...EMPTY_FORM } })}
-            style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: 'var(--accent)', color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 700 }}
+            style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: 'var(--accent-solid)', color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 700 }}
           >
             + Tambah Rekening
           </button>

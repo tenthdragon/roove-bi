@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { getScalevStatus, getPendingOrders, type PendingOrder } from '@/lib/scalev-actions';
+import { toneText } from '@/lib/theme-tones';
 
 type ViewMode = 'pending' | 'repair';
 
@@ -15,11 +16,11 @@ const PRE_TERMINAL = ['pending', 'confirmed', 'processing', 'ready', 'in_process
 const SYNC_ALL_BATCH_SIZE = 50;
 
 const STATUS_COLORS: Record<string, { bg: string; color: string }> = {
-  pending: { bg: 'var(--badge-yellow-bg)', color: '#fbbf24' },
+  pending: { bg: 'var(--badge-yellow-bg)', color: 'var(--tone-amber)' },
   confirmed: { bg: 'var(--badge-green-bg)', color: 'var(--green)' },
-  processing: { bg: 'var(--accent-subtle)', color: '#a78bfa' },
-  ready: { bg: 'var(--accent-subtle)', color: '#60a5fa' },
-  in_process: { bg: 'var(--accent-subtle)', color: '#f97316' },
+  processing: { bg: 'var(--accent-subtle)', color: 'var(--tone-violet)' },
+  ready: { bg: 'var(--accent-subtle)', color: 'var(--tone-blue)' },
+  in_process: { bg: 'var(--accent-subtle)', color: 'var(--tone-orange)' },
 };
 
 function formatTime(ts: string | null) {
@@ -268,7 +269,7 @@ export default function SyncManager() {
 
   const pill = (active: boolean) => ({
     padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
-    background: active ? 'var(--accent)' : 'var(--border)',
+    background: active ? 'var(--accent-solid)' : 'var(--border)',
     color: active ? '#fff' : 'var(--dim)',
     fontSize: 12, fontWeight: 600 as const,
   });
@@ -297,7 +298,7 @@ export default function SyncManager() {
         <div style={{
           padding: '10px 14px', borderRadius: 8, fontSize: 13,
           background: message.type === 'success' ? 'var(--badge-green-bg)' : 'var(--badge-red-bg)',
-          color: message.type === 'success' ? 'var(--green)' : '#fca5a5',
+          color: message.type === 'success' ? 'var(--green)' : 'var(--tone-red)',
         }}>
           {message.text}
         </div>
@@ -321,7 +322,7 @@ export default function SyncManager() {
                   </span>
                   <button
                     onClick={() => { abortRef.current = true; }}
-                    style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--badge-red-bg)', background: 'transparent', color: '#fca5a5', fontSize: 11, cursor: 'pointer' }}
+                    style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid var(--badge-red-bg)', background: 'transparent', color: 'var(--tone-red)', fontSize: 11, cursor: 'pointer' }}
                   >
                     Batal
                   </button>
@@ -392,7 +393,7 @@ export default function SyncManager() {
                             </span>
                           </td>
                           <td style={cellStyle}>
-                            <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: sc.bg, color: sc.color }}>
+                            <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: sc.bg, color: toneText(sc.color) }}>
                               {o.status}
                             </span>
                           </td>
@@ -400,7 +401,7 @@ export default function SyncManager() {
                             {o.has_lines ? (
                               <span style={{ color: 'var(--dim)' }}>Update</span>
                             ) : (
-                              <span style={{ color: '#60a5fa' }}>Enrichment</span>
+                              <span style={{ color: 'var(--tone-blue)' }}>Enrichment</span>
                             )}
                           </td>
                           <td style={{ ...cellStyle, textAlign: 'right', minWidth: 120 }}>
@@ -422,7 +423,7 @@ export default function SyncManager() {
                                 disabled={!configured || syncingAll}
                                 style={{
                                   padding: '3px 10px', borderRadius: 4, border: 'none',
-                                  background: 'var(--green)', color: '#fff', fontSize: 11, fontWeight: 600,
+                                  background: 'var(--green-solid)', color: '#fff', fontSize: 11, fontWeight: 600,
                                   cursor: configured && !syncingAll ? 'pointer' : 'not-allowed',
                                   opacity: configured && !syncingAll ? 1 : 0.5,
                                 }}
@@ -471,7 +472,7 @@ export default function SyncManager() {
                 style={{
                   padding: '8px 20px', borderRadius: 6, border: 'none',
                   cursor: repairSyncing || !configured ? 'not-allowed' : 'pointer',
-                  background: repairSyncing ? 'var(--bg-deep)' : 'var(--accent)',
+                  background: repairSyncing ? 'var(--muted-solid)' : 'var(--accent-solid)',
                   color: '#fff', fontSize: 13, fontWeight: 600,
                   opacity: repairSyncing || !configured ? 0.5 : 1,
                 }}
@@ -506,7 +507,7 @@ export default function SyncManager() {
                   style={{
                     padding: '8px 20px', borderRadius: 6, border: 'none',
                     cursor: repairByIdSyncing || !configured ? 'not-allowed' : 'pointer',
-                    background: repairByIdSyncing ? 'var(--bg-deep)' : '#047857',
+                    background: repairByIdSyncing ? 'var(--muted-solid)' : '#047857',
                     color: '#fff', fontSize: 13, fontWeight: 600,
                     opacity: repairByIdSyncing || !configured ? 0.5 : 1,
                     whiteSpace: 'nowrap',
@@ -533,7 +534,7 @@ export default function SyncManager() {
                         </thead>
                         <tbody>
                           {repairByIdResult.details.map((d: any, i: number) => (
-                            <tr key={i} style={{ color: d.error ? '#fca5a5' : 'var(--text-secondary)' }}>
+                            <tr key={i} style={{ color: d.error ? 'var(--tone-red)' : 'var(--text-secondary)' }}>
                               <td style={{ ...cellStyle, fontFamily: 'monospace' }}>{d.order_id}</td>
                               <td style={cellStyle}>{d.business_code || '-'}</td>
                               <td style={cellStyle}>{d.error || d.action || `${d.old_status} → ${d.new_status}`}</td>
@@ -564,7 +565,7 @@ export default function SyncManager() {
                       </thead>
                       <tbody>
                         {repairResult.details.map((d: any, i: number) => (
-                          <tr key={i} style={{ color: d.error ? '#fca5a5' : 'var(--text-secondary)' }}>
+                          <tr key={i} style={{ color: d.error ? 'var(--tone-red)' : 'var(--text-secondary)' }}>
                             <td style={{ ...cellStyle, fontFamily: 'monospace' }}>{d.order_id}</td>
                             <td style={cellStyle}>{d.business_code || '-'}</td>
                             <td style={cellStyle}>{d.error || d.action || `${d.old_status} → ${d.new_status}`}</td>

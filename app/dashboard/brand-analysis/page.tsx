@@ -27,6 +27,7 @@ import {
   Line,
 } from 'recharts';
 import { ChevronDown, Info, ShoppingBag } from 'lucide-react';
+import { toneText } from '@/lib/theme-tones';
 
 export default function BrandAnalysisPage() {
   const [activeView, setActiveView] = useState('brand-health'); // 'brand-health' | 'cross-brand'
@@ -280,7 +281,7 @@ export default function BrandAnalysisPage() {
       ) : (
         <>
       {refreshError && (
-        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 14, color: '#fca5a5', marginBottom: 16 }}>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 14, color: 'var(--tone-red)', marginBottom: 16 }}>
           <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 4 }}>Refresh Brand Analysis Bermasalah</div>
           <div style={{ fontSize: 12 }}>{refreshError}</div>
         </div>
@@ -291,7 +292,7 @@ export default function BrandAnalysisPage() {
           <div className="spinner" style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTop: '3px solid var(--accent)', borderRadius: '50%' }} />
         </div>
       ) : loadError ? (
-        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+        <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: 'var(--tone-red)' }}>
           <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Data Brand Analysis Gagal Dimuat</div>
           <div style={{ fontSize: 13 }}>{loadError}</div>
         </div>
@@ -301,7 +302,7 @@ export default function BrandAnalysisPage() {
           <div style={{ marginTop: 12 }}>
             <button onClick={handleRefresh} disabled={refreshing} style={{
               padding: '8px 16px', borderRadius: 8, border: 'none', cursor: 'pointer',
-              background: '#1e40af', color: '#93c5fd', fontSize: 13, fontWeight: 600,
+              background: 'var(--accent-solid)', color: '#fff', fontSize: 13, fontWeight: 600,
             }}>{refreshing ? 'Refreshing...' : '🔄 Refresh Data'}</button>
           </div>
         </div>
@@ -349,7 +350,7 @@ export default function BrandAnalysisPage() {
                 <div style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 6 }}>
                   Multi-Brand
                   {crossFilter !== 'all' && (
-                    <span style={{ fontWeight: 400, marginLeft: 4, fontSize: 10, color: '#0d9488' }}>
+                    <span style={{ fontWeight: 400, marginLeft: 4, fontSize: 10, color: 'var(--tone-teal)' }}>
                       ({filterLabel[crossFilter]})
                     </span>
                   )}
@@ -393,7 +394,7 @@ export default function BrandAnalysisPage() {
                   <span style={{ color: 'var(--dim)', marginLeft: 4 }}>cross-purchase</span>
                 </div>
                 <div style={{ padding: '6px 12px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 11 }}>
-                  <span style={{ color: '#8b5cf6', fontWeight: 700 }}>{crossType.mixed || 0}</span>
+                  <span style={{ color: 'var(--tone-violet)', fontWeight: 700 }}>{crossType.mixed || 0}</span>
                   <span style={{ color: 'var(--dim)', marginLeft: 4 }}>mixed</span>
                 </div>
               </div>
@@ -426,7 +427,7 @@ export default function BrandAnalysisPage() {
                   const pct = totalCustomers > 0 ? (g.count / totalCustomers) * 100 : 0;
                   return (
                     <div key={g.brand} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <div style={{ width: 80, fontSize: 12, fontWeight: 600, color: BRAND_COLORS[g.brand] || 'var(--text-secondary)' }}>{g.brand}</div>
+                      <div style={{ width: 80, fontSize: 12, fontWeight: 600, color: toneText(BRAND_COLORS[g.brand] || 'var(--text-secondary)') }}>{g.brand}</div>
                       <div style={{ flex: 1, height: 24, background: 'var(--bg)', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
                         <div style={{
                           height: '100%', borderRadius: 4,
@@ -434,7 +435,7 @@ export default function BrandAnalysisPage() {
                           width: `${(g.count / maxCount) * 100}%`,
                           opacity: 0.7,
                         }} />
-                        <span style={{ position: 'absolute', left: 8, top: 4, fontSize: 11, fontWeight: 700, color: '#fff' }}>
+                        <span style={{ position: 'absolute', left: 8, top: 4, fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>
                           {g.count.toLocaleString('id-ID')}
                         </span>
                       </div>
@@ -460,14 +461,14 @@ export default function BrandAnalysisPage() {
                   <tr>
                     <th style={{ padding: '8px 10px', textAlign: 'left', color: 'var(--dim)', borderBottom: '2px solid var(--border)', fontWeight: 600, fontSize: 10 }}>DARI ↓ / KE →</th>
                     {matrixBrands.map(b => (
-                      <th key={b} style={{ padding: '8px 6px', textAlign: 'center', borderBottom: '2px solid var(--border)', color: BRAND_COLORS[b] || 'var(--text-secondary)', fontWeight: 700, fontSize: 10 }}>{b}</th>
+                      <th key={b} style={{ padding: '8px 6px', textAlign: 'center', borderBottom: '2px solid var(--border)', color: toneText(BRAND_COLORS[b] || 'var(--text-secondary)'), fontWeight: 700, fontSize: 10 }}>{b}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {matrixBrands.map(from => (
                     <tr key={from} style={{ borderBottom: '1px solid var(--bg-deep)' }}>
-                      <td style={{ padding: '8px 10px', fontWeight: 600, color: BRAND_COLORS[from] || 'var(--text)', fontSize: 12 }}>{from}</td>
+                      <td style={{ padding: '8px 10px', fontWeight: 600, color: toneText(BRAND_COLORS[from] || 'var(--text)'), fontSize: 12 }}>{from}</td>
                       {matrixBrands.map(to => {
                         if (from === to) return <td key={to} style={{ padding: '8px 6px', textAlign: 'center', color: 'var(--border)' }}>—</td>;
                         const cell = matrixLookup[`${from}→${to}`];
@@ -508,9 +509,9 @@ export default function BrandAnalysisPage() {
                   const maxC = journey[0]?.customer_count || 1;
                   return (
                     <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 60, fontSize: 12, fontWeight: 700, color: BRAND_COLORS[j.from_brand] || 'var(--text-secondary)', textAlign: 'right' }}>{j.from_brand}</div>
+                      <div style={{ width: 60, fontSize: 12, fontWeight: 700, color: toneText(BRAND_COLORS[j.from_brand] || 'var(--text-secondary)'), textAlign: 'right' }}>{j.from_brand}</div>
                       <div style={{ fontSize: 14, color: 'var(--text-muted)' }}>→</div>
-                      <div style={{ width: 60, fontSize: 12, fontWeight: 700, color: BRAND_COLORS[j.to_brand] || 'var(--text-secondary)' }}>{j.to_brand}</div>
+                      <div style={{ width: 60, fontSize: 12, fontWeight: 700, color: toneText(BRAND_COLORS[j.to_brand] || 'var(--text-secondary)') }}>{j.to_brand}</div>
                       <div style={{ flex: 1, height: 22, background: 'var(--bg)', borderRadius: 4, overflow: 'hidden', position: 'relative' }}>
                         <div style={{
                           height: '100%', borderRadius: 4,
@@ -518,7 +519,7 @@ export default function BrandAnalysisPage() {
                           width: `${(j.customer_count / maxC) * 100}%`,
                           opacity: 0.6,
                         }} />
-                        <span style={{ position: 'absolute', left: 8, top: 3, fontSize: 11, fontWeight: 700, color: '#fff' }}>
+                        <span style={{ position: 'absolute', left: 8, top: 3, fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>
                           {j.customer_count} customers
                         </span>
                       </div>
@@ -603,7 +604,7 @@ function BrandHealthView({ data, loading, error, selectedBrand, setSelectedBrand
 
   if (error) {
     return (
-      <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: '#fca5a5' }}>
+      <div style={{ background: 'rgba(127,29,29,0.15)', border: '1px solid #991b1b', borderRadius: 12, padding: 18, color: 'var(--tone-red)' }}>
         <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6 }}>Brand Health Gagal Dimuat</div>
         <div style={{ fontSize: 13 }}>{error}</div>
       </div>
@@ -641,7 +642,7 @@ function BrandHealthView({ data, loading, error, selectedBrand, setSelectedBrand
         />
         <div style={{ padding: 16, background: 'var(--card)', border: `1px solid ${statusMeta?.color || 'var(--border)'}`, borderRadius: 8 }}>
           <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>Status</div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: statusMeta?.color || 'var(--text)', lineHeight: 1.2 }}>{statusMeta?.label}</div>
+          <div style={{ fontSize: 18, fontWeight: 800, color: toneText(statusMeta?.color || 'var(--text)'), lineHeight: 1.2 }}>{statusMeta?.label}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6, lineHeight: 1.45 }}>{statusMeta?.copy}</div>
         </div>
       </div>
@@ -696,7 +697,7 @@ function BrandHealthView({ data, loading, error, selectedBrand, setSelectedBrand
                 borderRadius: 8,
                 border: marketplaceContextOpen ? '1px solid #38bdf8' : '1px solid var(--border)',
                 background: marketplaceContextOpen ? 'rgba(56,189,248,0.12)' : 'var(--bg)',
-                color: marketplaceContextOpen ? '#38bdf8' : 'var(--dim)',
+                color: marketplaceContextOpen ? 'var(--tone-sky)' : 'var(--dim)',
                 fontSize: 11,
                 fontWeight: 700,
                 cursor: 'pointer',
@@ -817,19 +818,19 @@ function BrandHealthView({ data, loading, error, selectedBrand, setSelectedBrand
               }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', marginBottom: 8 }}>
-                <div style={{ fontSize: 13, fontWeight: 800, color: brandColors[summary.brand] || 'var(--text)' }}>{summary.brand}</div>
-                <div style={{ fontSize: 10, color: meta.color, fontWeight: 800, textTransform: 'uppercase' }}>{meta.label}</div>
+                <div style={{ fontSize: 13, fontWeight: 800, color: toneText(brandColors[summary.brand] || 'var(--text)') }}>{summary.brand}</div>
+                <div style={{ fontSize: 10, color: toneText(meta.color), fontWeight: 800, textTransform: 'uppercase' }}>{meta.label}</div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase' }}>Base 90D</div>
                   <div style={{ fontSize: 18, color: 'var(--text)', fontFamily: 'monospace', fontWeight: 800 }}>{summary.latestActiveBuyers.toLocaleString('id-ID')}</div>
-                  <div style={{ fontSize: 10, color: deltaColor(summary.activeAvgDelta) }}>{formatSigned(roundMaybe(summary.activeAvgDelta))} avg13W</div>
+                  <div style={{ fontSize: 10, color: toneText(deltaColor(summary.activeAvgDelta)) }}>{formatSigned(roundMaybe(summary.activeAvgDelta))} avg13W</div>
                 </div>
                 <div>
                   <div style={{ fontSize: 10, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase' }}>New</div>
                   <div style={{ fontSize: 18, color: 'var(--green)', fontFamily: 'monospace', fontWeight: 800 }}>{summary.latestNewBuyers.toLocaleString('id-ID')}</div>
-                  <div style={{ fontSize: 10, color: deltaColor(summary.newDelta) }}>{formatSigned(summary.newDelta)} WoW</div>
+                  <div style={{ fontSize: 10, color: toneText(deltaColor(summary.newDelta)) }}>{formatSigned(summary.newDelta)} WoW</div>
                 </div>
               </div>
             </button>
@@ -844,7 +845,7 @@ function BrandHealthKpi({ label, value, sub, color }) {
   return (
     <div style={{ padding: 16, background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 8 }}>
       <div style={{ fontSize: 11, color: 'var(--dim)', fontWeight: 700, textTransform: 'uppercase', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 24, fontWeight: 800, color, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
+      <div style={{ fontSize: 24, fontWeight: 800, color: toneText(color), fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
       <div style={{ fontSize: 11, color: sub?.startsWith('+') ? 'var(--green)' : sub?.startsWith('-') ? 'var(--red)' : 'var(--text-muted)', marginTop: 4 }}>{sub}</div>
     </div>
   );
@@ -860,7 +861,7 @@ function BrandHealthTooltip({ active, payload, label }) {
       <div style={{ fontSize: 12, color: 'var(--text)' }}>Active Base 90D: <strong>{Number(row.trailingActiveBuyers || 0).toLocaleString('id-ID')}</strong></div>
       <div style={{ fontSize: 12, color: 'var(--green)' }}>New Buyer: <strong>{Number(row.newBuyers || 0).toLocaleString('id-ID')}</strong></div>
       {row.showMarketplaceOrders && (
-        <div style={{ fontSize: 12, color: '#38bdf8' }}>Marketplace Orders: <strong>{Number(row.marketplaceOrders || 0).toLocaleString('id-ID')}</strong></div>
+        <div style={{ fontSize: 12, color: 'var(--tone-sky)' }}>Marketplace Orders: <strong>{Number(row.marketplaceOrders || 0).toLocaleString('id-ID')}</strong></div>
       )}
     </div>
   );
@@ -876,7 +877,7 @@ function BrandHealthStatusGuide() {
             <div key={key} style={{ display: 'grid', gridTemplateColumns: '10px 1fr', gap: 8, alignItems: 'start', minWidth: 0 }}>
               <span style={{ width: 8, height: 8, borderRadius: 999, background: meta.color, marginTop: 5 }} />
               <div style={{ minWidth: 0 }}>
-                <div style={{ color: meta.color, fontSize: 11, fontWeight: 900, textTransform: 'uppercase', marginBottom: 3 }}>
+                <div style={{ color: toneText(meta.color), fontSize: 11, fontWeight: 900, textTransform: 'uppercase', marginBottom: 3 }}>
                   {meta.label}
                 </div>
                 <div style={{ color: 'var(--text)', fontSize: 12, lineHeight: 1.45 }}>

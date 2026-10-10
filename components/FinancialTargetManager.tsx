@@ -208,7 +208,7 @@ export default function FinancialTargetManager() {
             key={value}
             type="button"
             onClick={() => selectScope(value)}
-            style={{ border: 'none', borderRadius: 6, padding: '6px 11px', background: scope === value ? 'var(--accent)' : 'transparent', color: scope === value ? '#fff' : 'var(--dim)', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
+            style={{ border: 'none', borderRadius: 6, padding: '6px 11px', background: scope === value ? 'var(--accent-solid)' : 'transparent', color: scope === value ? '#fff' : 'var(--dim)', fontSize: 10, fontWeight: 700, cursor: 'pointer' }}
           >
             {label}
           </button>
@@ -286,7 +286,7 @@ export default function FinancialTargetManager() {
                   Hapus Override
                 </button>
               )}
-              <button type="submit" disabled={saving} style={{ border: 'none', borderRadius: 7, padding: '7px 15px', background: 'var(--accent)', color: '#fff', fontSize: 11, fontWeight: 750, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.6 : 1 }}>
+              <button type="submit" disabled={saving} style={{ border: 'none', borderRadius: 7, padding: '7px 15px', background: 'var(--accent-solid)', color: '#fff', fontSize: 11, fontWeight: 750, cursor: saving ? 'wait' : 'pointer', opacity: saving ? 0.6 : 1 }}>
                 {saving ? 'Menyimpan…' : scope === 'month' ? 'Simpan Override' : 'Simpan Default'}
               </button>
             </div>

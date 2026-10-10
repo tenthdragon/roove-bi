@@ -5,6 +5,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { fetchShipmentStatus, type ShipmentChannelRow } from '@/lib/shipment-actions';
 import { fmtCompact, fmtRupiah, CHANNEL_COLORS } from '@/lib/utils';
+import { toneText } from '@/lib/theme-tones';
 
 function displayName(ch: string) {
   return ch;
@@ -178,7 +179,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
           }}>
             <div style={{ width: '100%', background: '#a855f7', transition: 'width 0.5s' }} />
           </div>
-          <div style={{ fontSize: 9, color: '#a855f7', marginTop: 2, fontFamily: 'monospace' }}>
+          <div style={{ fontSize: 9, color: 'var(--tone-purple)', marginTop: 2, fontFamily: 'monospace' }}>
             {totals.overdue.toLocaleString('id-ID')} orders · Rp {fmtCompact(totals.overdueRev)}
           </div>
         </div>
@@ -213,7 +214,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--green)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Completed</th>
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--yellow)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>In Transit</th>
                 <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--red)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Returned</th>
-                <th style={{ padding: '8px 10px', textAlign: 'right', color: '#a855f7', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Overdue</th>
+                <th style={{ padding: '8px 10px', textAlign: 'right', color: 'var(--tone-purple)', fontWeight: 600, fontSize: 10, textTransform: 'uppercase' }}>Overdue</th>
               </tr>
             </thead>
             <tbody>
@@ -268,7 +269,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
                           <span style={{ fontFamily: 'monospace', fontSize: 11 }}>{row.overdue_orders.toLocaleString('id-ID')}</span>
                           <span style={{
                             marginLeft: 6, padding: '1px 6px', borderRadius: 4, fontSize: 10, fontWeight: 600,
-                            background: '#581c87', color: '#a855f7', fontFamily: 'monospace',
+                            background: 'rgba(168,85,247,0.14)', color: 'var(--tone-purple)', fontFamily: 'monospace',
                           }}>{wordsOverduePct.toFixed(0)}%</span>
                         </>
                       ) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
@@ -323,7 +324,7 @@ export default function ShipmentStatusSection({ from, to }: Props) {
             <span><span style={{ color: 'var(--green)' }}>●</span> Completed — sudah sampai & selesai</span>
             <span><span style={{ color: 'var(--yellow)' }}>●</span> In Transit — sudah dikirim, belum completed</span>
             <span><span style={{ color: 'var(--red)' }}>●</span> RTS / Cancel — dikembalikan / dibatalkan</span>
-            <span><span style={{ color: '#a855f7' }}>●</span> Overdue — ship bulan lalu, belum completed</span>
+            <span><span style={{ color: 'var(--tone-purple)' }}>●</span> Overdue — ship bulan lalu, belum completed</span>
           </div>
         </>
       )}
@@ -345,7 +346,7 @@ function StatusCard({ label, subtitle, orders, revenue, pctValue, color, bgAccen
       {subtitle && (
         <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 4, fontStyle: 'italic' }}>{subtitle}</div>
       )}
-      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', color, lineHeight: 1.1 }}>
+      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', color: toneText(color), lineHeight: 1.1 }}>
         {orders.toLocaleString('id-ID')}
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11, alignItems: 'center' }}>
@@ -353,7 +354,7 @@ function StatusCard({ label, subtitle, orders, revenue, pctValue, color, bgAccen
         {!hidePct && (
           <span style={{
             padding: '1px 6px', borderRadius: 4, fontWeight: 700, fontSize: 10,
-            background: bgAccent, color, fontFamily: 'monospace',
+            background: bgAccent, color: toneText(color), fontFamily: 'monospace',
           }}>
             {pctValue.toFixed(1)}%
           </span>
