@@ -12,6 +12,7 @@ import DateRangePicker from '@/components/DateRangePicker';
 import { ActiveBrandsProvider } from '@/lib/ActiveBrandsContext';
 import ThemeToggle from '@/components/ThemeToggle';
 import WorkspaceSwitcher from '@/components/WorkspaceSwitcher';
+import MetaFunnelNotifications from '@/components/MetaFunnelNotifications';
 import DashboardFrame from '@/components/DashboardFrame';
 import DashboardNavigation from '@/components/DashboardNavigation';
 import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
@@ -22,7 +23,7 @@ import { profileThemePreference } from '@/lib/theme-preference';
 
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
-  return seg || 'overview';
+  return seg.startsWith('meta-funnels/') ? 'meta-funnels' : seg || 'overview';
 }
 
 function getTabPath(tabId) {
@@ -46,6 +47,7 @@ function hasAdminAreaAccess(role, permissions) {
 function canAccessLayoutTab(role, tab, permissions) {
   // Sales Channel Analysis inherits its parent Sales Channel permission.
   if (tab.id === 'sales-channel-analysis') return canAccessTab(role, 'channels', permissions);
+  if (tab.id === 'meta-funnels') return canAccessTab(role, 'marketing', permissions);
   // Shopee Details normally inherits Marketing Channel, while the dedicated
   // Shopee reviewer can receive access to this child page without the parent.
   if (tab.id === 'shopee-details') {
@@ -607,7 +609,8 @@ export default function DashboardLayout({ children }) {
       .filter(Boolean);
   }
 
-  const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake', 'growth-work'].includes(currentTab);
+  const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake', 'growth-work'].includes(currentTab)
+    && !['/dashboard/meta-funnels/mapping', '/dashboard/meta-funnels/notifications'].includes(pathname);
   const canSyncSheets = canRoleAccessPermission(accessRole, permissions, 'admin:daily');
   const canSyncMeta = canRoleAccessPermission(accessRole, permissions, 'admin:meta');
   const showRefreshButton = canSyncSheets || canSyncMeta;
@@ -707,6 +710,7 @@ export default function DashboardLayout({ children }) {
         )}
         headerActions={<>
           <WorkspaceSwitcher />
+          {canAccessTab(accessRole, 'marketing', permissions) && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'marketing') && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'meta-funnels') && <MetaFunnelNotifications />}
           {showRefreshButton && <RefreshViewsButton canSyncSheets={canSyncSheets} canSyncMeta={canSyncMeta} />}
           {showDatePicker && <HeaderDatePicker />}
           <ThemeToggle
