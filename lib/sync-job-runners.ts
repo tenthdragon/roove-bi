@@ -2,6 +2,11 @@ import { getTodayWIB } from './sync-schedule';
 import { runDailyAdsSync } from './daily-ads-sync-runner';
 import { triggerFinancialSync } from './financial-actions';
 import { runMetaSync } from './meta-sync-runner';
+import { runMetaAdSync } from './meta-ad-sync-runner';
+import { runMetaAdMappingSync } from './meta-ad-mapping-sync';
+import { enqueueScheduledMetaAdMapping } from './meta-ad-mapping-queue';
+import { enqueueScheduledMetaAdBatches } from './meta-funnel-sync-queue';
+import { createServiceSupabase } from './service-supabase';
 import { runScalevSync, type ScalevSyncMode } from './scalev-sync-runner';
 import { type SyncJobRecord } from './sync-jobs';
 import { triggerWarehouseSync } from './warehouse-actions';
@@ -37,6 +42,22 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
 
     case 'meta_sync': {
       const payload = job.payload || {};
+      if (payload.ad_mapping_only === true) {
+        if (payload.creative_ad_ids !== undefined && (!Array.isArray(payload.creative_ad_ids) || !payload.creative_ad_ids.every(id => typeof id === 'string'))) throw new Error('Payload creative mapping tidak valid.');
+        const result = await runMetaAdMappingSync({ workspaceId: job.workspace_id,
+          accountId: typeof payload.account_id === 'string' ? payload.account_id : undefined,
+          creativeAdIds: payload.creative_ad_ids as string[] | undefined });
+        if (result.status !== 'success') throw new Error(result.errors.join('; '));
+        return { status: result.status, rowsProcessed: result.rows_inserted, resultSummary: result };
+      }
+      if (payload.ad_funnels_only === true) {
+        const result = await runMetaAdSync({ workspaceId: job.workspace_id,
+          accountId: typeof payload.account_id === 'string' ? payload.account_id : undefined,
+          dateStart: typeof payload.date_start === 'string' ? payload.date_start : undefined,
+          dateEnd: typeof payload.date_end === 'string' ? payload.date_end : undefined });
+        if (result.status !== 'success') throw new Error(result.errors.join('; '));
+        return { status: result.status, rowsProcessed: result.rows_inserted, resultSummary: result };
+      }
       const result = await runMetaSync({
         workspaceId: job.workspace_id,
         dateStart: job.mode === 'cron' ? getTodayWIB() : typeof payload.date_start === 'string' ? payload.date_start : null,
@@ -45,10 +66,16 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
       if (result.status !== 'success') {
         throw new Error((result.errors || ['Meta sync incomplete']).join('; '));
       }
+      // The existing timer runs every ten minutes. Queue ad reports once per WIB
+      // day, in one-account/week batches compatible with the HTTP worker.
+      const adFunnelsQueued = job.mode === 'cron'
+        ? await enqueueScheduledMetaAdBatches(createServiceSupabase(), job.workspace_id) : 0;
+      const adMappingsQueued = job.mode === 'cron'
+        ? await enqueueScheduledMetaAdMapping(createServiceSupabase(), job.workspace_id) : 0;
       return {
         status: result.status,
         rowsProcessed: result.rows_inserted,
-        resultSummary: result,
+        resultSummary: { ...result, ad_funnels_queued: adFunnelsQueued, ad_mappings_queued: adMappingsQueued },
       };
     }
 

@@ -55,6 +55,7 @@ docs/*
 docs/runbooks/*
 !docs/runbooks/marketplace-tracking-backfill.md
 !docs/runbooks/workspace-rollout.md
+!docs/runbooks/meta-ad-funnels.md
 
 # supabase temp
 supabase/.temp/

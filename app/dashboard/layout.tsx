@@ -11,6 +11,7 @@ import { DateRangeProvider, useDateRange } from '@/lib/DateRangeContext';
 import DateRangePicker from '@/components/DateRangePicker';
 import { ActiveBrandsProvider } from '@/lib/ActiveBrandsContext';
 import ThemeToggle from '@/components/ThemeToggle';
+import MetaFunnelNotifications from '@/components/MetaFunnelNotifications';
 import { useSupabaseSessionReady } from '@/lib/useSupabaseSessionReady';
 import { WorkspaceProvider, useWorkspace } from '@/lib/WorkspaceContext';
 import { isWorkspaceModuleEnabled } from '@/lib/workspaces';
@@ -18,7 +19,7 @@ import { profileThemePreference } from '@/lib/theme-preference';
 
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
-  return seg || 'overview';
+  return seg.startsWith('meta-funnels/') ? 'meta-funnels' : seg || 'overview';
 }
 
 function getTabPath(tabId) {
@@ -39,6 +40,7 @@ function hasAdminAreaAccess(role, permissions) {
 function canAccessLayoutTab(role, tab, permissions) {
   // Sales Channel Analysis inherits its parent Sales Channel permission.
   if (tab.id === 'sales-channel-analysis') return canAccessTab(role, 'channels', permissions);
+  if (tab.id === 'meta-funnels') return canAccessTab(role, 'marketing', permissions);
   if (tab.id === 'admin') return hasAdminAreaAccess(role, permissions);
   if (tab.ownerOnly && role !== 'owner') return false;
   return canAccessTab(role, tab.id, permissions);
@@ -643,7 +645,8 @@ export default function DashboardLayout({ children }) {
       }));
   }
 
-  const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake'].includes(currentTab);
+  const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake'].includes(currentTab)
+    && !['/dashboard/meta-funnels/mapping', '/dashboard/meta-funnels/notifications'].includes(pathname);
   const canSyncSheets = accessRole === 'owner' || permissions.has('admin:daily');
   const canSyncMeta = accessRole === 'owner' || permissions.has('admin:meta');
   const showRefreshButton = canSyncSheets || canSyncMeta;
@@ -1062,6 +1065,7 @@ export default function DashboardLayout({ children }) {
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
               <WorkspaceSwitcher />
+              {canAccessTab(accessRole, 'marketing', permissions) && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'marketing') && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'meta-funnels') && <MetaFunnelNotifications />}
               {showRefreshButton && (
                 <RefreshViewsButton canSyncSheets={canSyncSheets} canSyncMeta={canSyncMeta} />
               )}
