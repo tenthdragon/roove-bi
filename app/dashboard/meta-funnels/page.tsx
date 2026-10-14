@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowDown, ArrowUp, ArrowUpDown, Info, X, BellOff, AlertCircle, ChevronDown } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Info, X, BellOff, AlertCircle, ChevronDown, LoaderCircle, CheckCircle2, Clock3 } from 'lucide-react';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
@@ -17,9 +17,11 @@ import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
 import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
 import type { MetaReportInput } from '@/lib/meta-ad-report';
 import type { AdCreative } from '@/lib/meta-funnel-domain';
+import { metaSyncProgress, restoreMetaSyncRequest, type MetaSyncRequest, type MetaSyncJob } from '@/lib/meta-funnel-sync-status';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaFunnelData>>, { schemaReady: true }>;
 type HistoryData = Extract<Awaited<ReturnType<typeof getMetaFunnelHistory>>, { schemaReady: true }>;
+type SyncStatusData = Awaited<ReturnType<typeof getMetaFunnelSyncStatus>>;
 type TableSort = { metricId: string | null; direction: 'asc' | 'desc' };
 const measureOptions = Object.entries(MEASURES);
 const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
@@ -74,6 +76,17 @@ export default function MetaFunnelsPage() {
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [syncStarting, setSyncStarting] = useState(false);
+  const [syncRequest, setSyncRequest] = useState<{ workspaceId: string; request: MetaSyncRequest | null } | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatusData | null>(null);
+  const [syncStatusError, setSyncStatusError] = useState('');
+  const [syncRefresh, setSyncRefresh] = useState(0);
+  useEffect(() => {
+    let saved: MetaSyncRequest | null = null;
+    try { saved = restoreMetaSyncRequest(localStorage.getItem(`meta-funnel-sync:${activeWorkspace.id}`)); } catch { /* Storage may be unavailable. */ }
+    setSyncRequest({ workspaceId: activeWorkspace.id, request: saved });
+    setSyncStatus(null); setSyncStatusError('');
+  }, [activeWorkspace.id]);
   const [editor, setEditor] = useState<{ id?: string; version?: number; config: FunnelConfig } | null>(null);
   const [destinationEditor, setDestinationEditor] = useState<{ accountId: string; adId: string; name: string; url: string } | null>(null);
   const request = useRef(0);
@@ -101,23 +114,32 @@ export default function MetaFunnelsPage() {
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { const guard = request; return () => { guard.current++; }; }, []);
   useEffect(() => { if (dataKey === overviewKey && groupKey && data && !data.groups.some(g => g.key === groupKey)) setGroupKey(''); }, [data, dataKey, overviewKey, groupKey]);
-  const hasPendingJobs = data?.jobs.some(j => ['queued', 'running'].includes(j.status));
+  const trackedSync = syncRequest?.workspaceId === activeWorkspace.id ? syncRequest.request : null;
+  const currentSyncStatus = syncStatus?.workspaceId === activeWorkspace.id ? syncStatus : null;
+  const syncProgress = trackedSync && currentSyncStatus?.trackedJobs ? metaSyncProgress(trackedSync.jobIds, currentSyncStatus.trackedJobs) : null;
+  const hasPendingJobs = currentSyncStatus ? currentSyncStatus.pending > 0 : data?.jobs.some(j => ['queued', 'running'].includes(j.status));
   useEffect(() => {
-    if (!hasPendingJobs) return;
+    if (!schemaReady || syncRequest?.workspaceId !== activeWorkspace.id) return;
     let alive = true, polling = false;
-    const timer = setInterval(async () => {
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
       if (polling) return;
       polling = true;
+      let again = true;
       try {
-        const status = await getMetaFunnelSyncStatus();
-        if (!alive) return;
+        const status = await getMetaFunnelSyncStatus(syncRequest?.request?.jobIds);
+        if (!alive || status.workspaceId !== activeWorkspace.id) return;
+        setSyncStatus(status); setSyncStatusError('');
+        const tracked = syncRequest?.request;
+        again = status.pending > 0 || !!(tracked && status.trackedJobs && metaSyncProgress(tracked.jobIds, status.trackedJobs).active);
         if (status.reportVersion !== reportVersion.current) await load();
         else setData(current => current ? { ...current, jobs: status.jobs } : current);
-      } catch (e) { if (alive) setError(message(e)); }
-      finally { polling = false; }
-    }, 15000);
-    return () => { alive = false; clearInterval(timer); };
-  }, [hasPendingJobs, load]);
+      } catch (e) { if (alive) setSyncStatusError(message(e)); }
+      finally { polling = false; if (alive && again) timer = setTimeout(() => void poll(), 5000); }
+    }
+    void poll();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [syncRequest, activeWorkspace.id, schemaReady, syncRefresh, load]);
   const overviewReady = dataKey === overviewKey && !!data && !data.reportingError;
   useEffect(() => {
     if (tab === 'overview' || loading || !overviewReady) return;
@@ -133,13 +155,16 @@ export default function MetaFunnelsPage() {
     return () => { alive = false; };
   }, [tab, period, reportInput, groupKey, historyKey, overviewReady, loading]);
   async function sync() {
-    setBusy(true); setError('');
+    setBusy(true); setSyncStarting(true); setError(''); setNotice('');
     try {
       const to = shiftDay(getTodayWIB(), -1);
       const result = await queueMetaFunnelSync(shiftDay(to, -89), to, data?.selectedId || undefined);
-      setNotice(`${result.jobs.length} batch sync 90 hari masuk antrean. Data dan notifikasi diperbarui oleh worker.`);
+      const queued = { jobIds: result.jobs, startedAt: new Date().toISOString() };
+      try { localStorage.setItem(`meta-funnel-sync:${activeWorkspace.id}`, JSON.stringify(queued)); } catch { /* Progress still works without persistence. */ }
+      setSyncStatus(null); setSyncStatusError('');
+      setSyncRequest({ workspaceId: activeWorkspace.id, request: queued });
       await load();
-    } catch (e) { setError(message(e)); } finally { setBusy(false); }
+    } catch (e) { setError(message(e)); } finally { setBusy(false); setSyncStarting(false); setSyncRefresh(value => value + 1); }
   }
   async function save() {
     if (!editor) return;
@@ -193,13 +218,15 @@ export default function MetaFunnelsPage() {
       <div><div className={styles.eyebrow}>MARKETING / AD PERFORMANCE</div><h1>Meta Ad Funnels</h1><p>Filter ads berdasarkan brand, CEP, intention, dan objective Meta.</p></div>
       <div className={styles.actions}>
         <Link className={styles.button} href="/dashboard/meta-funnels/mapping">Pemetaan Ads</Link>
-        <button className={styles.button} onClick={() => void load()} disabled={loading}>Muat ulang</button>
-        {canManage && <><button className={styles.button} disabled={busy || !schemaReady} onClick={() => void sync()}>Sync 90 hari</button>
+        <button className={styles.button} onClick={() => { void load(); setSyncRefresh(value => value + 1); }} disabled={loading}>Muat ulang</button>
+        {canManage && <><button className={styles.button} disabled={busy || hasPendingJobs || !schemaReady} onClick={() => void sync()}>{syncStarting ? 'Menyiapkan sync…' : hasPendingJobs ? 'Sync berlangsung…' : 'Sync 90 hari'}</button>
           <button className={styles.primary} disabled={!schemaReady} onClick={() => setEditor({ config: defaultFunnel() })}>+ Funnel baru</button></>}
       </div>
     </div>
     {error && <div role="alert" className={styles.error}>{error}</div>}
     {notice && <div role="status" className={styles.info}>{notice}</div>}
+    <SyncProgress progress={syncProgress} preparing={syncStarting} checking={!!trackedSync && !currentSyncStatus} status={currentSyncStatus}
+      accounts={data?.accounts || []} error={syncStatusError} onRefresh={() => setSyncRefresh(value => value + 1)} />
     {!schemaReady ? <div className={styles.card}>Migration laporan Meta belum terpasang (203).</div> : <>
       {editor && <FunnelEditor value={editor.config} onChange={config => setEditor({ ...editor, config })} accounts={data?.accounts || []} busy={busy}
         onSave={() => void save()} onClose={() => setEditor(null)} onArchive={editor.id ? () => void archive() : undefined} />}
@@ -300,9 +327,50 @@ export default function MetaFunnelsPage() {
           <p className={styles.muted}>{tab === 'daily' ? 'Δ dibanding hari sebelumnya, termasuk baseline sebelum awal rentang.' : 'Minggu dimulai Senin. Bulan/minggu pertama dan terakhir dapat mencakup sebagian periode dalam histori 90 hari. Δ periode parsial perlu dibaca dengan hati-hati.'} {(!historyResult.complete && tab === 'trends') && 'Histori belum lengkap; titik tanpa data bukan bukti performa nol.'} Tanggal mengikuti timezone ad account.</p>
           </>}
         </>}
-        {!!data.jobs.length && <details className={styles.card}><summary>Status sync histori</summary>{data.jobs.map(j => <p key={j.id}>{j.payload.date_start} – {j.payload.date_end}: <b>{j.status}</b>{j.error_message && ` · ${j.error_message}`}</p>)}</details>}
       </>}
     </>}
+  </div>;
+}
+
+const syncLabels: Record<string, string> = { queued: 'Menunggu', running: 'Berjalan', success: 'Berhasil', partial: 'Sebagian', failed: 'Gagal', canceled: 'Dibatalkan' };
+function SyncProgress({ progress, preparing, checking, status, accounts, error, onRefresh }: {
+  progress: ReturnType<typeof metaSyncProgress> | null; preparing: boolean; checking: boolean;
+  status: SyncStatusData | null; accounts: Data['accounts']; error: string; onRefresh: () => void;
+}) {
+  const latest = status?.jobs[0];
+  if (!preparing && !checking && !progress && !latest && !error && !status?.pending) return null;
+  const active = preparing || checking || (progress ? progress.active : !!status?.pending);
+  const issues = progress ? progress.issues > 0 || progress.missing > 0 : latest && !['success', 'queued', 'running'].includes(latest.status);
+  const label = preparing ? 'Menyiapkan sync…' : checking ? 'Memeriksa sync…'
+    : progress ? (progress.canceled === progress.total ? 'Sync dibatalkan' : progress.failed === progress.total ? 'Sync gagal'
+      : { queued: 'Menunggu giliran', running: 'Sync berjalan', complete: 'Sync selesai', issues: 'Sync selesai dengan kendala', unavailable: 'Status sync tidak tersedia' }[progress.state])
+      : status?.pending ? (status.running ? 'Sync berjalan' : 'Menunggu giliran') : latest ? `Sync terakhir: ${syncLabels[latest.status]?.toLowerCase() || latest.status}` : 'Status sync tidak tersedia';
+  const Icon = preparing || checking || (active && (progress ? progress.state === 'running' : status?.running)) ? LoaderCircle : active ? Clock3 : issues ? AlertCircle : CheckCircle2;
+  const jobs: MetaSyncJob[] = status?.trackedJobs || status?.jobs || [];
+  const completedAt = progress?.completedAt || latest?.completed_at;
+  const stamp = !active && completedAt ? new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }).format(new Date(completedAt)) : '';
+  return <div className={styles.syncArea}>
+    <div className={`${styles.syncStatus} ${issues ? styles.syncWarning : !active ? styles.syncSuccess : ''}`} role="status" aria-live="polite">
+      <Icon size={15} aria-hidden="true" className={Icon === LoaderCircle ? styles.syncSpinner : undefined} />
+      <span>{label}</span>
+      {progress && !preparing && !checking && <>
+        <span className={styles.muted}>{progress.completed}/{progress.total} batch</span>
+        {!progress.missing && <progress aria-label="Progres sync 90 hari" max={progress.total} value={progress.completed} />}
+        {!!progress.failed && <span>{progress.failed} gagal</span>}
+        {!!progress.partial && <span>{progress.partial} sebagian</span>}
+        {!!progress.canceled && <span>{progress.canceled} dibatalkan</span>}
+      </>}
+      {!progress && !!status?.pending && <span className={styles.muted}>{status.pending} batch tersisa</span>}
+      {stamp && <span className={styles.muted}>{stamp} WIB</span>}
+      {error && <button type="button" className={styles.syncRetry} onClick={onRefresh} title={error}>Status belum diperbarui · Coba lagi</button>}
+    </div>
+    {!!jobs.length && <details className={styles.syncDetails}><summary>Detail</summary>
+      <div className={styles.syncJobList}>{jobs.map(job => <div key={job.id} className={styles.syncJob}>
+        <span>{job.payload.date_start} – {job.payload.date_end}</span><span>{syncLabels[job.status] || job.status}</span>
+        <span className={styles.syncAccount}>{accounts.find(account => account.account_id === job.payload.account_id)?.account_name || job.payload.account_id}</span>
+        {job.error_message && <small>{job.error_message}</small>}
+      </div>)}</div>
+    </details>}
   </div>;
 }
 

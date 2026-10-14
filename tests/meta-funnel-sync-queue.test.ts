@@ -4,6 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { enqueueScheduledMetaAdBatches } from '../lib/meta-funnel-sync-queue';
 import { getTodayWIB } from '../lib/sync-schedule';
 import { shiftDay } from '../lib/meta-funnel-domain';
+import { loadMetaSyncJobs, metaSyncProgress, restoreMetaSyncRequest, validateMetaSyncJobIds, type MetaSyncJob } from '../lib/meta-funnel-sync-status';
 
 function service(configs: { account_ids: string[]; group_by?: string }[], covered: string[], error?: { code: string; message: string }) {
   const workspace = '00000000-0000-4000-8000-000000000001';
@@ -51,4 +52,81 @@ test('without saved funnels or before migration the scheduler leaves normal Meta
 test('legacy naming configurations do not enqueue landing-page monitoring jobs', async () => {
   const { svc, workspace } = service([{ account_ids: [], group_by: 'cep_funnel' }], []);
   assert.equal(await enqueueScheduledMetaAdBatches(svc, workspace, async () => { throw new Error('Must not enqueue legacy monitoring'); }), 0);
+});
+
+const batchIds = Array.from({ length: 156 }, (_, i) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`);
+function batch(id: string, status: string): MetaSyncJob {
+  return { id, status, error_message: null, payload: { date_start: '2026-10-07', date_end: '2026-10-13' },
+    created_at: '2026-10-14T13:00:00Z', started_at: status === 'queued' ? null : '2026-10-14T13:01:00Z',
+    completed_at: ['queued', 'running'].includes(status) ? null : '2026-10-14T13:02:00Z' };
+}
+test('sync progress distinguishes waiting, running, and all batches successfully finished', () => {
+  const ids = batchIds.slice(0, 13);
+  const queued = ids.map(id => batch(id, 'queued'));
+  assert.equal(metaSyncProgress(ids, queued).state, 'queued');
+  const running = queued.map((job, i) => ({ ...job, status: i < 5 ? 'success' : i === 5 ? 'running' : 'queued' }));
+  assert.equal(metaSyncProgress(ids, running).state, 'running');
+  assert.equal(metaSyncProgress(ids, running).completed, 5);
+  const finished = metaSyncProgress(ids, ids.map(id => batch(id, 'success')));
+  assert.equal(finished.state, 'complete'); assert.equal(finished.active, false);
+  assert.equal(finished.completed, 13); assert.equal(finished.total, 13);
+  assert.equal(finished.completedAt, '2026-10-14T13:02:00Z');
+});
+test('between worker ticks a partly processed request remains in progress', () => {
+  const ids = batchIds.slice(0, 2), progress = metaSyncProgress(ids, [batch(ids[0], 'success'), batch(ids[1], 'queued')]);
+  assert.equal(progress.state, 'running'); assert.equal(progress.active, true); assert.equal(progress.completed, 1);
+});
+test('failed, partial, and canceled batches finish with issues instead of reporting success', () => {
+  const ids = batchIds.slice(0, 4), progress = metaSyncProgress(ids, ids.map((id, i) => batch(id, ['success', 'failed', 'partial', 'canceled'][i])));
+  assert.equal(progress.state, 'issues'); assert.equal(progress.active, false); assert.equal(progress.completed, 4);
+  assert.equal(progress.issues, 3); assert.equal(progress.success, 1);
+});
+test('progress tracks reused job IDs and excludes unrelated jobs, duplicates, and old failures', () => {
+  const ids = batchIds.slice(0, 13), jobs = [...ids.map(id => batch(id, 'success')), batch(ids[0], 'success'), batch(batchIds[13], 'failed')];
+  const progress = metaSyncProgress([...ids, ids[0]], jobs);
+  assert.equal(progress.total, 13); assert.equal(progress.completed, 13); assert.equal(progress.failed, 0);
+});
+test('missing or unknown batches never produce a false success state', () => {
+  const ids = batchIds.slice(0, 2);
+  for (const jobs of [[batch(ids[0], 'success')], [batch(ids[0], 'success'), batch(ids[1], 'unknown')]]) {
+    const progress = metaSyncProgress(ids, jobs);
+    assert.equal(progress.state, 'unavailable'); assert.equal(progress.missing, 1); assert.equal(progress.completed, 1);
+  }
+});
+test('stale-worker requeue goes back to waiting without completing that batch', () => {
+  const ids = batchIds.slice(0, 1);
+  assert.equal(metaSyncProgress(ids, [batch(ids[0], 'running')]).state, 'running');
+  assert.equal(metaSyncProgress(ids, [batch(ids[0], 'queued')]).state, 'queued');
+  assert.equal(metaSyncProgress(ids, [batch(ids[0], 'queued')]).completed, 0);
+});
+test('saved sync progress restores after reload and rejects malformed storage', () => {
+  const saved = { jobIds: batchIds.slice(0, 13), startedAt: '2026-10-14T13:00:00Z' };
+  assert.deepEqual(restoreMetaSyncRequest(JSON.stringify(saved)), saved);
+  for (const value of [null, 'bad json', '{}', JSON.stringify({ ...saved, startedAt: 'invalid' }), JSON.stringify({ ...saved, jobIds: ['bad'] })]) {
+    assert.equal(restoreMetaSyncRequest(value), null);
+  }
+  for (const input of [null, [], ['invalid'], Array(5001).fill(batchIds[0])]) assert.throws(() => validateMetaSyncJobIds(input));
+  assert.deepEqual(validateMetaSyncJobIds([batchIds[0], batchIds[0]]), [batchIds[0]]);
+});
+test('status retrieval reads all 156 requested batches and always scopes workspace and Meta jobs', async () => {
+  const workspace = '00000000-0000-4000-8000-000000001000', chunks: string[][] = [];
+  const svc = { from(table: string) {
+    assert.equal(table, 'sync_jobs');
+    const filters: Record<string, unknown> = {};
+    const query = {
+      select() { return query; },
+      eq(key: string, value: unknown) { filters[key] = value; return query; },
+      contains(key: string, value: unknown) { filters[key] = value; return query; },
+      in(key: string, ids: string[]) {
+        assert.equal(key, 'id'); assert.equal(filters.workspace_id, workspace); assert.equal(filters.job_name, 'meta_sync');
+        assert.deepEqual(filters.payload, { ad_funnels_only: true }); assert.ok(ids.length <= 100);
+        chunks.push(ids);
+        return Promise.resolve({ data: ids.map(id => batch(id, 'success')), error: null });
+      },
+    };
+    return query;
+  } } as unknown as SupabaseClient;
+  const jobs = await loadMetaSyncJobs(svc, workspace, batchIds);
+  assert.deepEqual(chunks.map(chunk => chunk.length), [100, 56]);
+  assert.equal(jobs.length, 156); assert.equal(metaSyncProgress(batchIds, jobs).state, 'complete');
 });
