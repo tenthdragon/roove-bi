@@ -41,6 +41,11 @@ export interface MetaInsight {
   account_name?: string;
 }
 
+export interface MetaActionMetric {
+  action_type: string;
+  value: string;
+}
+
 export interface DailyAdSpendRow {
   date: string;
   ad_account: string;
@@ -135,6 +140,32 @@ export async function fetchAccountInsights(
   }
 
   return insights;
+}
+
+const PURCHASE_ACTION_PRIORITY = [
+  'omni_purchase',
+  'purchase',
+  'offsite_conversion.fb_pixel_purchase',
+  'onsite_web_purchase',
+  'onsite_conversion.purchase',
+];
+
+export function selectPurchaseMetric(metrics: MetaActionMetric[] | null | undefined) {
+  const candidates = (metrics || [])
+    .map((metric) => ({
+      actionType: String(metric?.action_type || '').trim(),
+      value: Number(metric?.value),
+    }))
+    .filter((metric) => metric.actionType && Number.isFinite(metric.value));
+
+  for (const actionType of PURCHASE_ACTION_PRIORITY) {
+    const exact = candidates.find((metric) => metric.actionType === actionType);
+    if (exact) return exact;
+  }
+
+  return candidates.find((metric) => (
+    metric.actionType.toLowerCase().includes('purchase')
+  )) || null;
 }
 
 /**
