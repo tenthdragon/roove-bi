@@ -14,6 +14,7 @@ import { completedMetaRange, metaCoverageGaps } from './meta-report-status';
 
 import { metaReportQuery, metaReportGroups, metaReportOptions, metaReportHistory, type MetaReportInput } from './meta-ad-report';
 import { getCachedMetaAdReport } from './meta-ad-report-data';
+import { loadMetaSyncJobs, META_SYNC_JOB_FIELDS } from './meta-funnel-sync-status';
 
 function uuid(id: string) { if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error('ID tidak valid.'); return id; }
 async function reportingAccess() {
@@ -55,7 +56,7 @@ async function reportContext(input: MetaReportInput, includeJobs = false) {
     input: { ...input, ...reportRange, filters, brandId } };
 }
 function reportJobs(svc: ReturnType<typeof createServiceSupabase>, workspaceId: string) {
-  return svc.from('sync_jobs').select('id,status,error_message,created_at,payload').eq('workspace_id', workspaceId)
+  return svc.from('sync_jobs').select(META_SYNC_JOB_FIELDS).eq('workspace_id', workspaceId)
     .eq('job_name', 'meta_sync').contains('payload', { ad_funnels_only: true }).order('created_at', { ascending: false }).limit(20);
 }
 const currencyError = 'Funnel mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama pada konfigurasi.';
@@ -92,14 +93,18 @@ export async function getMetaFunnelCreatives(input: MetaReportInput) {
   const raw = await getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, metaReportQuery(ctx.input, ctx.config, 'creatives'));
   return { schemaReady: true as const, creatives: raw.creatives, reportVersion: ctx.reportVersion };
 }
-export async function getMetaFunnelSyncStatus() {
+export async function getMetaFunnelSyncStatus(jobIds?: string[]) {
   const { workspaceId } = await reportingAccess();
   const svc = createServiceSupabase();
-  const [version, jobs] = await Promise.all([
+  const [version, jobs, trackedJobs, active] = await Promise.all([
     svc.from('meta_ad_report_versions').select('revision').eq('workspace_id', workspaceId).maybeSingle(), reportJobs(svc, workspaceId),
+    jobIds ? loadMetaSyncJobs(svc, workspaceId, jobIds) : Promise.resolve(null),
+    svc.from('sync_jobs').select('status', { count: 'exact' }).eq('workspace_id', workspaceId).eq('job_name', 'meta_sync')
+      .contains('payload', { ad_funnels_only: true }).in('status', ['queued', 'running']).order('status', { ascending: false }).limit(1),
   ]);
-  if (version.error || jobs.error) throw new Error(version.error?.message || jobs.error?.message);
-  return { reportVersion: String(version.data?.revision || 0), jobs: jobs.data || [] };
+  if (version.error || jobs.error || active.error) throw new Error(version.error?.message || jobs.error?.message || active.error?.message);
+  return { workspaceId, reportVersion: String(version.data?.revision || 0), jobs: jobs.data || [], trackedJobs,
+    pending: active.count || 0, running: active.data?.[0]?.status === 'running' };
 }
 export async function getMetaFunnelNotifications() {
   const { workspaceId, profile } = await reportingAccess();

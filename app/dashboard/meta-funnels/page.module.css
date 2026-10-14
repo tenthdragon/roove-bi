@@ -19,6 +19,25 @@
 .error, .info { padding: 12px 16px; border-radius: 8px; border: 1px solid var(--border); font-size: 13px; line-height: 1.6; }
 .error { color: var(--red); background: var(--red-subtle); }
 .info { color: var(--accent); background: var(--accent-subtle); }
+.syncArea { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; font-size: 12px; }
+.syncStatus { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.syncStatus > svg { flex-shrink: 0; }
+.syncStatus progress { width: 96px; height: 5px; border: 0; border-radius: 4px; overflow: hidden; appearance: none; background: var(--border); }
+.syncStatus progress::-webkit-progress-bar { background: var(--border); border-radius: 4px; }
+.syncStatus progress::-webkit-progress-value { background: var(--accent); border-radius: 4px; }
+.syncStatus progress::-moz-progress-bar { background: var(--accent); border-radius: 4px; }
+.syncSuccess { color: var(--green); }
+.syncWarning { color: var(--yellow); }
+.syncRetry { color: var(--yellow); text-decoration: underline; font-size: 11px; cursor: pointer; }
+.syncDetails summary { color: var(--dim); }
+.syncJobList { position: absolute; top: calc(100% + 8px); left: 0; z-index: 11; width: min(100%,520px); max-height: 280px; overflow-y: auto; padding: 8px 12px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 18px rgb(0 0 0 / 8%); }
+.syncJob { display: grid; grid-template-columns: 1fr max-content; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.syncJob:last-child { border-bottom: 0; }
+.syncAccount { grid-column: 1 / -1; color: var(--dim); font-size: 10px; }
+.syncJob small { grid-column: 1 / -1; color: var(--red); overflow-wrap: anywhere; }
+.syncSpinner { animation: sync-spin 1s linear infinite; }
+@keyframes sync-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .syncSpinner { animation: none; } }
 .filters { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
 .page label { display: flex; flex-direction: column; gap: 6px; color: var(--dim); font-size: 12px; }
 .page input:not([type='checkbox']), .page textarea, .page select { background: var(--card); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 9px; font-size: 12px; min-width: 0; }
