@@ -22,6 +22,7 @@ test('ratios derive from database event sums and keep zero-denominator values ab
   assert.equal(groups[0].metrics.find(m => m.id === 'lpv_rate')?.current, 0.8);
   assert.equal(groups[0].metrics.find(m => m.id === 'purchase_rate')?.current, null);
   assert.deepEqual(groups[0].creatives, []);
+  assert.equal(metaReportGroups(raw({ groups: [{ ...groups[0], name: '', ad_ids: ['1'] }] }), config)[0].name, '1');
 });
 test('daily comparison keeps the preceding day while incomplete buckets remain gaps', () => {
   const report = raw({ history: [
@@ -43,5 +44,12 @@ test('facet totals remain database distinct-ad counts even when one ad appears u
   assert.equal(options.dimensionOptions.objectiveTotal, 4);
   assert.deepEqual(options.dimensionOptions.objectives.map(o => o.label), ['Sales','Traffic']);
   assert.deepEqual(options.dimensionOptions.ceps, [{ value: 'joint', label: 'Sendi', count: 0 }]);
+  assert.equal(options.brandOptions.total, 4);
+});
+test('brands outside the saved monitoring account scope remain selectable with zero ads', () => {
+  const options = metaReportOptions(raw({ brandCounts: { '1': 4 } }),
+    [{ account_id: 'act_1', default_brand_id: 1 }, { account_id: 'act_2', default_brand_id: 2 }],
+    [{ id: 1, name: 'Roove' }, { id: 2, name: 'Pluve' }]);
+  assert.deepEqual(options.brandOptions.choices.map(b => [b.label, b.count]), [['Roove', 4], ['Pluve', 0]]);
   assert.equal(options.brandOptions.total, 4);
 });

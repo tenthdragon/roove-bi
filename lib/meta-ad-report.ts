@@ -30,7 +30,7 @@ export function metaReportGroups(raw: RawMetaReport, config: FunnelConfig): Grou
     const current = { ...emptyTotals(), ...g.current }, previous = { ...emptyTotals(), ...g.previous };
     const categories = new Map<string, GroupComparison['categories'][number]>();
     for (const name of g.ad_names) { const parsed = parseRooveAdName(name); if (parsed.valid) categories.set(`${parsed.cep}:${parsed.funnel}`, { cep: parsed.cep!, funnel: parsed.funnel! }); }
-    return { ...g, current, previous, categories: [...categories.values()], classified: categories.size > 0, creatives: [],
+    return { ...g, name: g.name || g.ad_ids[0] || g.key, current, previous, categories: [...categories.values()], classified: categories.size > 0, creatives: [],
       metrics: config.metrics.map(m => { const a = metricValue(current, m), b = metricValue(previous, m); return { id: m.id, current: a, previous: b, change: relativeChange(a, b) }; }) };
   });
 }

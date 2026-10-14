@@ -67,7 +67,7 @@ export async function getMetaFunnelData(input: MetaReportInput) {
   const prevFrom = shiftDay(from, -daysBetween(from, to)), reportingError = raw.currencies.length > 1 ? currencyError : null;
   return { schemaReady: true as const, funnels: ctx.funnels, selectedId: ctx.selectedId, config: ctx.config, accounts: ctx.accounts,
     scopedAccountIds: ctx.scopedAccountIds, brandId: ctx.brandId, reportRange: ctx.reportRange, reportVersion: ctx.reportVersion,
-    ...metaReportOptions(raw, ctx.configuredAccounts, ctx.brands), dimensionsReady: true, filters: ctx.filters,
+    ...metaReportOptions(raw, ctx.accounts, ctx.brands), dimensionsReady: true, filters: ctx.filters,
     matchingAds: raw.matchingAds, objectiveUnknownAds: raw.objectiveUnknownAds,
     coverageGaps: metaCoverageGaps(raw.coverage, ctx.scopedAccountIds, ctx.reportRange),
     groups: reportingError ? [] : metaReportGroups(raw, ctx.config), summary: reportingError ? emptyTotals() : raw.summary,
