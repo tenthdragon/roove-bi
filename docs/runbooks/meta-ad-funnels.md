@@ -20,7 +20,7 @@ tables and the snapshot RPC have no browser grants.
 
 1. Apply `198_meta_ad_funnels.sql`, `199_meta_ad_landing_pages.sql`, and
    `200_meta_verified_ad_destinations.sql`, `201_meta_ad_mappings.sql`, and
-   `202_meta_ad_campaign_dimensions.sql` using the
+   `202_meta_ad_campaign_dimensions.sql` and `203_meta_ad_report_performance.sql` using the
    normal migration process. This task applies migrations to the local clone only.
 2. Deploy the app and sync-job worker together. The worker must understand
    `meta_sync` jobs with `ad_funnels_only: true` before processing them.
@@ -37,6 +37,29 @@ the most recent seven days of ad data for accounts used by saved landing-page
 monitoring configurations. A coverage record for yesterday refreshed today
 prevents repeated backfills on every ten-minute tick. Keep the worker running
 and scheduled Meta sync enabled; no additional scheduler is required.
+
+## Report loading and cache
+
+Migration 203 provides a service-role-only aggregate RPC. Performa reads only
+the selected dates plus an equally long comparison period. Brand, account,
+name, CEP, intention and objective filters, distinct-ad facet counts and event
+sums run in PostgreSQL. Ratios use event sums, preserving the existing formulas.
+Daily comparison and the 90-day weekly/monthly history load only when their
+tab/period is opened. Creative bodies load when creative details are opened.
+
+The Next.js cache is keyed by workspace, canonical report parameters and the
+workspace's database revision, with a five-minute fallback TTL. Statement
+triggers change the revision in the same transaction as facts, coverage,
+creative, mapping, verified URL, account and brand writes. CLI worker syncs
+therefore invalidate results without Next.js-specific calls. Failed transactions
+do not change the revision; successful zero-delivery syncs do. Authorization is
+checked before every cached read. Job polling reads only status and revision;
+it reloads performance when the revision changes.
+
+Run `npm run test:meta-report-db` on the isolated local clone after migration 203.
+The fixture transaction rolls back and compares SQL output with the existing
+reporting rules, including facet counts, historical objectives, URL precedence,
+manual mapping overrides, partial coverage, cache revision and workspace scope.
 
 ## Automatic granular ad mapping
 
