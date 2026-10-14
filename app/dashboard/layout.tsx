@@ -330,6 +330,7 @@ function RefreshViewsButton({
 }
 
 function HeaderDatePicker() {
+  const isMetaReport = usePathname() === '/dashboard/meta-funnels';
   const { dateRange, dateExtent, setDateRange } = useDateRange();
   if (!dateRange.from) return null;
   return (
@@ -339,6 +340,7 @@ function HeaderDatePicker() {
       onChange={(f, t) => setDateRange(f, t)}
       earliest={dateExtent.earliest}
       latest={dateExtent.latest}
+      completedDaysOnly={isMetaReport}
     />
   );
 }

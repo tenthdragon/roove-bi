@@ -1,6 +1,10 @@
 // @ts-nocheck
 'use client';
 import { createContext, useContext, useState, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
+import { completedMetaRange, defaultMetaRange } from './meta-report-status';
+import { getTodayWIB } from './sync-schedule';
+import { shiftDay } from './meta-funnel-domain';
 import { useSupabase } from '@/lib/supabase-browser';
 import { getDatePartsInTimeZone } from '@/lib/utils';
 import { useWorkspace } from '@/lib/WorkspaceContext';
@@ -30,14 +34,18 @@ export function useDateRange() {
 
 export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   const supabase = useSupabase();
+  const isMetaReport = usePathname() === '/dashboard/meta-funnels';
+  const today = getTodayWIB();
   const { activeWorkspace } = useWorkspace();
   const { role } = usePermissions();
   const [dateRange, setDateRangeState] = useState({ from: '', to: '' });
+  const [hasCustomRange, setHasCustomRange] = useState(false);
   const [dateExtent, setDateExtent] = useState({ earliest: '', latest: '' });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function init() {
+      setHasCustomRange(false);
       const { year, month, iso: todayStr } = getDatePartsInTimeZone('Asia/Jakarta');
       const monthStart = `${year}-${month}-01`;
 
@@ -99,11 +107,17 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   }, [activeWorkspace.id, role, supabase]);
 
   const setDateRange = (from: string, to: string) => {
-    setDateRangeState({ from, to });
+    setHasCustomRange(true);
+    setDateRangeState(isMetaReport ? completedMetaRange({ from, to }, today) : { from, to });
   };
 
+  const visibleRange = isMetaReport && dateRange.from
+    ? hasCustomRange ? completedMetaRange(dateRange, today) : defaultMetaRange(today)
+    : dateRange;
+
   return (
-    <DateRangeContext.Provider value={{ dateRange, dateExtent, setDateRange, loading }}>
+    <DateRangeContext.Provider value={{ dateRange: visibleRange,
+      dateExtent: isMetaReport ? { ...dateExtent, latest: shiftDay(today, -1) } : dateExtent, setDateRange, loading }}>
       {children}
     </DateRangeContext.Provider>
   );

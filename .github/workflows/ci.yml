@@ -36,6 +36,9 @@ jobs:
       - name: Check Shopee reviewer and integrations
         run: node --import tsx --test tests/shopee-reviewer-access.test.ts tests/shopee-open-platform.test.ts tests/shopee-sync-runner.test.ts tests/shopee-campaign-metrics.test.ts
 
+      - name: Check Meta ad performance reporting
+        run: npm run test:meta-funnels
+
       - name: Typecheck app
         run: npm run typecheck:app
 

@@ -3,6 +3,8 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { getPresetRanges } from '@/lib/utils';
+import { metaReportPresets } from '@/lib/meta-report-status';
+import { getTodayWIB } from '@/lib/sync-schedule';
 
 interface DateRangePickerProps {
   from: string;
@@ -10,12 +12,13 @@ interface DateRangePickerProps {
   onChange: (from: string, to: string) => void;
   earliest?: string;
   latest?: string;
+  completedDaysOnly?: boolean;
 }
 
-export default function DateRangePicker({ from, to, onChange, earliest, latest }: DateRangePickerProps) {
+export default function DateRangePicker({ from, to, onChange, earliest, latest, completedDaysOnly = false }: DateRangePickerProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const presets = getPresetRanges();
+  const presets = completedDaysOnly ? metaReportPresets(getTodayWIB()) : getPresetRanges();
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -103,7 +106,7 @@ export default function DateRangePicker({ from, to, onChange, earliest, latest }
           </div>
 
           {/* All time */}
-          {earliest && latest && (
+          {earliest && latest && !completedDaysOnly && (
             <button onClick={() => { onChange(earliest, latest); setOpen(false); }}
               style={{
                 marginTop: 8, width: '100%', padding: '6px 10px', borderRadius: 6,
