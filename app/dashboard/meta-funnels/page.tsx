@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowDown, ArrowUp, ArrowUpDown, Info } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Info, X } from 'lucide-react';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
@@ -53,6 +53,8 @@ export default function MetaFunnelsPage() {
   const [schemaReady, setSchemaReady] = useState(true);
   const [selectedId, setSelectedId] = useState('');
   const [groupKey, setGroupKey] = useState('');
+  const [brandId, setBrandId] = useState('');
+  useEffect(() => { setBrandId(''); setGroupKey(''); }, [activeWorkspace.id]);
   const [dimensionFilters, setDimensionFilters] = useState<AdDimensionFilters>({});
   const [groupBy, setGroupBy] = useState<'ad'|'landing_page'>('landing_page');
   const [tab, setTab] = useState<'overview' | 'daily' | 'trends'>('overview');
@@ -77,13 +79,13 @@ export default function MetaFunnelsPage() {
     const currentRequest = ++request.current;
     setLoading(true); setError('');
     try {
-      const result = await getMetaFunnelData({ ...dateRange, funnelId: selectedId || undefined, groupKey: groupKey || undefined, filters:dimensionFilters, groupBy });
+      const result = await getMetaFunnelData({ ...dateRange, brandId: brandId || undefined, funnelId: selectedId || undefined, groupKey: groupKey || undefined, filters:dimensionFilters, groupBy });
       if (currentRequest !== request.current) return;
       setSchemaReady(result.schemaReady);
       if (result.schemaReady) { setData(result); if (groupKey && !result.groups.some(g => g.key === groupKey)) setGroupKey(''); }
     } catch (e) { if (currentRequest === request.current) setError(message(e)); }
     finally { if (currentRequest === request.current) setLoading(false); }
-  }, [dateRange.from, dateRange.to, selectedId, groupKey, activeWorkspace.id, dimensionFilters.cep, dimensionFilters.objective, dimensionFilters.intention, groupBy]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dateRange.from, dateRange.to, selectedId, brandId, groupKey, activeWorkspace.id, dimensionFilters.cep, dimensionFilters.objective, dimensionFilters.intention, groupBy]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { const guard = request; return () => { guard.current++; }; }, []);
   const hasPendingJobs = data?.jobs.some(j => ['queued', 'running'].includes(j.status));
@@ -125,7 +127,7 @@ export default function MetaFunnelsPage() {
     } catch (e) { setError(message(e)); } finally { setBusy(false); }
   }
   const config = data?.config || defaultFunnel();
-  const monitoredAccounts = data?.accounts.filter(a => !config.account_ids.length || config.account_ids.includes(a.account_id)) || [];
+  const monitoredAccounts = data?.accounts.filter(a => data.scopedAccountIds.includes(a.account_id)) || [];
   const metric = config.metrics.find(m => m.id === metricId) || config.metrics[0];
   const group = data?.groups.find(g => g.key === groupKey);
   const sort = tableSort.metricId === null || config.metrics.some(m => m.id === tableSort.metricId) ? tableSort : { ...tableSort, metricId: config.metrics[0].id };
@@ -149,7 +151,7 @@ export default function MetaFunnelsPage() {
   const chartData = history.map(p => ({ date: p.date, value: p.metrics[metric.id] === null ? null : p.metrics[metric.id]! * (metric.format === 'percent' ? 100 : 1) }));
   return <div className={styles.page}>
     <div className={styles.header}>
-      <div><div className={styles.eyebrow}>MARKETING / AD PERFORMANCE</div><h1>Meta Ad Funnels</h1><p>Filter ads berdasarkan CEP dan objective Meta, lalu bandingkan performanya.</p></div>
+      <div><div className={styles.eyebrow}>MARKETING / AD PERFORMANCE</div><h1>Meta Ad Funnels</h1><p>Filter ads berdasarkan brand, CEP, intention, dan objective Meta.</p></div>
       <div className={styles.actions}>
         <Link className={styles.button} href="/dashboard/meta-funnels/mapping">Pemetaan Ads</Link>
         <button className={styles.button} onClick={() => void load()} disabled={loading}>Muat ulang</button>
@@ -169,18 +171,22 @@ export default function MetaFunnelsPage() {
         <div className={styles.actions}><button type="submit" className={styles.primary} disabled={busy}>Simpan URL terverifikasi</button><button type="button" className={styles.button} disabled={busy} onClick={() => setDestinationEditor(null)}>Batal</button></div>
       </form>}
       <div className={styles.filterArea}><div className={styles.monitoringFilters}>
+        <label>Brand<select aria-label="Brand" title="Brand mengikuti pemetaan akun di Admin Meta" value={brandId} onChange={e => { setBrandId(e.target.value); setGroupKey(''); }}>
+          <option value="">Semua brand ({data?.brandOptions.total || 0})</option>
+          {data?.brandOptions.choices.map(b => <option key={b.value} value={b.value}>{b.label} ({b.count})</option>)}
+        </select></label>
         <label>Monitoring<select value={selectedId || data?.selectedId || ''} onChange={e => { setSelectedId(e.target.value); setGroupKey(''); }}>
           {!data?.funnels.length && <option value="">Semua landing page (preview)</option>}
           {data?.funnels.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select></label>
-        <label>Tampilkan<select value={groupBy} onChange={e=>{setGroupBy(e.target.value as typeof groupBy);setGroupKey('');setSearch('');}}><option value="landing_page">Per URL landing page</option><option value="ad">Per ad</option></select></label>
-        <label>{groupBy === 'ad' ? 'Ad' : 'URL landing page'}<select aria-label={groupBy === 'ad' ? 'Ad' : 'URL landing page'} value={groupKey} onChange={e => setGroupKey(e.target.value)}><option value="">{groupBy === 'ad' ? 'Semua ad' : 'Semua landing page'}</option>{data?.groups.map(g => <option key={g.key} value={g.key}>{g.name}</option>)}</select></label>
+        <label>Breakdown<select aria-label="Breakdown" value={groupBy} onChange={e=>{setGroupBy(e.target.value as typeof groupBy);setGroupKey('');setSearch('');}}><option value="landing_page">Per URL landing page</option><option value="ad">Per ad</option></select></label>
         {canManage && data?.selectedId && <button className={styles.button} onClick={() => { const f = data.funnels.find(f => f.id === data.selectedId)!; setEditor({ id: f.id, version: f.version, config: f }); }}>Konfigurasi</button>}
       </div>
-      {data && <MetaAdDimensionFilters value={dimensionFilters} options={data.dimensionOptions} ready={data.dimensionsReady} onChange={filters=>{setDimensionFilters(filters);setGroupKey('');}} />}
+      {data && <MetaAdDimensionFilters value={dimensionFilters} options={data.dimensionOptions} ready={data.dimensionsReady} onChange={filters=>{setDimensionFilters(filters);setGroupKey('');}} hasOtherFilters={!!brandId} onReset={()=>{setDimensionFilters({});setBrandId('');setGroupKey('');}} />}
       </div>
       {data && <>
         <div className={styles.contextBar}>
+          {group && <button className={styles.selectedGroup} title={group.name} aria-label={`Hapus pilihan ${groupBy === 'ad' ? 'ad' : 'landing page'}: ${group.name}`} onClick={() => setGroupKey('')}><span>{group.name}</span><X size={12} aria-hidden="true" /></button>}
           <span role="status" className={styles.contextCount} title="Ad dengan data performa pada periode dan filter yang dipilih">{data.matchingAds} ad</span>
           {monitoredAccounts.length === 1 ? <span className={styles.contextAccount}>{monitoredAccounts[0].account_name}</span> : <details className={styles.contextDetails}>
             <summary>{monitoredAccounts.length} akun</summary><div className={styles.contextPanel}>{monitoredAccounts.length ? monitoredAccounts.map(a => <p key={a.account_id}>{a.account_name}</p>) : <p>Belum ada akun aktif.</p>}</div>
@@ -215,7 +221,7 @@ export default function MetaFunnelsPage() {
         ] as const).map(([id, label]) => <button key={id} className={tab === id ? styles.activeTab : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
         {!data.reportingError && totals && prev && <>
           <div className={styles.period}>Periode {dateRange.from} – {dateRange.to} <span>vs {data.prevFrom} – {data.prevTo} · {data.currency}</span></div>
-          {(tab !== 'overview' || !groupKey) && <div className={styles.cards}>{config.metrics.filter(m => tab !== 'overview' || groupBy === 'ad' || Object.values(dimensionFilters).some(Boolean) || ['spent', 'outbound_ctr', 'lpv'].includes(m.id)).map(m => <div className={styles.card} key={m.id}><div className={styles.muted}>{m.label}</div><strong>{format(metricValue(totals, m), m.format, data.currency)}</strong><Change value={relativeChange(metricValue(totals, m), metricValue(prev, m))} direction={m.direction} neutral={!m.monitor} /></div>)}</div>}
+          {(tab !== 'overview' || !groupKey) && <div className={styles.cards}>{config.metrics.filter(m => tab !== 'overview' || groupBy === 'ad' || brandId || Object.values(dimensionFilters).some(Boolean) || ['spent', 'outbound_ctr', 'lpv'].includes(m.id)).map(m => <div className={styles.card} key={m.id}><div className={styles.muted}>{m.label}</div><strong>{format(metricValue(totals, m), m.format, data.currency)}</strong><Change value={relativeChange(metricValue(totals, m), metricValue(prev, m))} direction={m.direction} neutral={!m.monitor} /></div>)}</div>}
         </>}
         {tab === 'overview' && !data.reportingError && <>
           <div className={styles.sectionHeader}><h2>{groupBy === 'ad' ? 'Breakdown per ad' : 'Breakdown per landing page'}</h2><input aria-label={groupBy === 'ad' ? 'Cari ad' : 'Cari landing page'} placeholder={groupBy === 'ad' ? 'Cari nama atau ID ad…' : 'Cari URL landing page…'} value={search} onChange={e => setSearch(e.target.value)} /></div>

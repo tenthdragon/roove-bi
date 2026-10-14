@@ -94,6 +94,17 @@ Mapping/review and combined CEP/objective/intention filters are available.
 Performance can group the selected ads by ad ID or landing-page URL. General
 pivot tabulation and custom business-funnel classification are subsequent work.
 
+## Brand filtering
+
+The Brand filter uses each active ad account's brand mapping in Admin Meta.
+It applies to the summary, ad/landing-page tables, daily comparisons, trends,
+and coverage checks. Brand choices count distinct ads in the selected period
+and other filters; missing mappings appear as **Brand belum dipetakan**.
+This is the current account classification and does not infer brand from ad
+names or URLs. Changing brand does not require another insights sync.
+The Breakdown control changes table aggregation; select an individual row
+for detail and clear its selection with the compact × control.
+
 ## Presenting CEP and campaign-objective cohorts
 
 In **Performa**, select **CEP = Sendi**, **Objective Meta = Sales**, and

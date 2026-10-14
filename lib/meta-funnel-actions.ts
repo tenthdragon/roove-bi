@@ -10,6 +10,7 @@ import { getTodayWIB } from './sync-schedule';
 import { isWorkspaceModuleEnabled } from './workspaces';
 import { canonicalLandingPage } from './meta-ad-destinations';
 import { dimensionOptions, validateDimensionFilters, withAdDimensions, matchesAdDimensions, type AdDimensionFilters } from './meta-ad-dimensions';
+import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
 
 const FACT_FIELDS = 'account_id,account_name,ad_id,ad_name,creative_id,metric_date,currency,metrics,landing_page_urls,campaign_id:raw_insights->>campaign_id,campaign_objective:raw_insights->>objective';
 const CREATIVE_FIELDS = 'account_id,ad_id,creative_id,name,thumbnail_url,video_id,body,landing_page_urls';
@@ -25,23 +26,28 @@ async function manageAccess() {
   if (manage.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
   return ctx;
 }
-export async function getMetaFunnelData(input: { from: string; to: string; funnelId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: 'ad'|'landing_page' }) {
+export async function getMetaFunnelData(input: { from: string; to: string; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: 'ad'|'landing_page' }) {
   const { workspaceId } = await reportingAccess();
   validateRange(input.from, input.to);
   const filters = validateDimensionFilters(input.filters);
+  const brandId = validateMetaBrandFilter(input.brandId);
   if (input.groupBy !== undefined && !['ad','landing_page'].includes(input.groupBy)) throw new Error('Tampilan agregasi tidak valid.');
   const svc = createServiceSupabase();
   const schema = await svc.from('meta_ad_creatives').select('landing_page_urls').eq('workspace_id', workspaceId).limit(1);
   if (schema.error && ['42P01', 'PGRST205', '42703', 'PGRST204'].includes(schema.error.code)) return { schemaReady: false as const };
   if (schema.error) throw new Error(schema.error.message);
-  const [funnels, accountsResult, jobsResult] = await Promise.all([
+  const [funnels, accountsResult, brandsResult, jobsResult] = await Promise.all([
     loadFunnels(svc, workspaceId).then(saved => saved.filter(f => f.group_by === 'landing_page')),
-    svc.from('meta_ad_accounts').select('account_id,account_name').eq('workspace_id', workspaceId).eq('is_active', true).order('account_name'),
+    svc.from('meta_ad_accounts').select('account_id,account_name,default_brand_id').eq('workspace_id', workspaceId).eq('is_active', true).order('account_name'),
+    svc.from('brands').select('id,name').eq('workspace_id', workspaceId).order('name'),
     svc.from('sync_jobs').select('id,status,error_message,created_at,payload').eq('workspace_id', workspaceId).eq('job_name', 'meta_sync').contains('payload', { ad_funnels_only: true }).order('created_at', { ascending: false }).limit(20),
   ]);
   if (accountsResult.error) throw new Error(accountsResult.error.message);
   if (jobsResult.error) throw new Error(jobsResult.error.message);
+  if (brandsResult.error) throw new Error(brandsResult.error.message);
   const accounts = accountsResult.data || [];
+  const brands = brandsResult.data || [];
+  if (brandId && !metaBrandOptions(accounts, brands, []).choices.some(b => b.value === brandId)) throw new Error('Brand tidak tersedia pada akun Meta workspace ini.');
   const selected = funnels.find(f => f.id === input.funnelId) || funnels[0] || null;
   const config: FunnelConfig = { ...(selected || defaultFunnel()), group_by:input.groupBy === 'ad' ? 'ad_id' : 'landing_page' };
   const prevFrom = shiftDay(input.from, -daysBetween(input.from, input.to));
@@ -55,15 +61,18 @@ export async function getMetaFunnelData(input: { from: string; to: string; funne
   ]);
   const activeIds = accounts.map(a => a.account_id);
   if (!dimensions.ready && Object.keys(filters).length) throw new Error('Pasang migration 202_meta_ad_campaign_dimensions.sql untuk memfilter CEP dan objective.');
-  const scopedMappings = dimensions.rows.filter(m => activeIds.includes(m.account_id) && (!config.account_ids.length || config.account_ids.includes(m.account_id)));
-  const enriched = withAdDimensions(withLandingPages(facts, creatives, verified.rows),scopedMappings);
+  const configuredAccounts = accounts.filter(a => !config.account_ids.length || config.account_ids.includes(a.account_id));
+  const scopedAccounts = metaBrandAccountIds(configuredAccounts, brands, brandId);
+  const configuredMappings = dimensions.rows.filter(m => activeIds.includes(m.account_id) && (!config.account_ids.length || config.account_ids.includes(m.account_id)));
+  const scopedMappings = configuredMappings.filter(m => scopedAccounts.includes(m.account_id));
+  const enriched = withAdDimensions(withLandingPages(facts, creatives, verified.rows),configuredMappings);
   const configuredRows = enriched.filter(r => activeIds.includes(r.account_id) && matchesFunnel(r, config));
-  const scoped = configuredRows.filter(r => matchesAdDimensions(r, filters));
+  const brandRows = configuredRows.filter(r => scopedAccounts.includes(r.account_id));
+  const scoped = brandRows.filter(r => matchesAdDimensions(r, filters));
   const currencies = [...new Set(scoped.map(r => r.currency))];
   const reportingError = currencies.length > 1 ? 'Funnel mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama pada konfigurasi.' : null;
   // Keep account/configuration controls available so users can fix a mixed-currency scope.
   const reportRows = reportingError ? [] : scoped;
-  const scopedAccounts = activeIds.filter(a => !config.account_ids.length || config.account_ids.includes(a));
   const groups = compareGroups(reportRows, config, input.from, input.to, creatives);
   const summary = totalFacts(reportRows.filter(r => r.metric_date >= input.from));
   const previous = totalFacts(reportRows.filter(r => r.metric_date >= prevFrom && r.metric_date < input.from));
@@ -79,10 +88,11 @@ export async function getMetaFunnelData(input: { from: string; to: string; funne
   });
   const daily = coveredTrend(shiftDay(input.from, -1), 'day');
   const currentRows = scoped.filter(r => r.metric_date >= input.from);
-  return { schemaReady: true as const, funnels, selectedId: selected?.id || null, config, accounts,
-    dimensionsReady:dimensions.ready, dimensionOptions:dimensionOptions(scopedMappings, configuredRows.filter(r => r.metric_date >= input.from), filters), filters,
+  return { schemaReady: true as const, funnels, selectedId: selected?.id || null, config, accounts, scopedAccountIds: scopedAccounts, brandId,
+    brandOptions: metaBrandOptions(accounts, brands, configuredRows.filter(r => r.metric_date >= input.from && matchesAdDimensions(r, filters))),
+    dimensionsReady:dimensions.ready, dimensionOptions:dimensionOptions(scopedMappings, brandRows.filter(r => r.metric_date >= input.from), filters), filters,
     matchingAds:new Set(currentRows.map(r=>`${r.account_id}:${r.ad_id}`)).size,
-    objectiveUnknownAds:new Set(enriched.filter(r=>activeIds.includes(r.account_id) && matchesFunnel(r,config) && r.metric_date >= input.from && !r.campaign_objective).map(r=>`${r.account_id}:${r.ad_id}`)).size,
+    objectiveUnknownAds:new Set(brandRows.filter(r=>r.metric_date >= input.from && !r.campaign_objective).map(r=>`${r.account_id}:${r.ad_id}`)).size,
     groups, summary, previous, reportingError, currency: currencies[0] || 'IDR',
     destinations: destinationQuality(scoped, config, input.from, input.to), verifiedDestinationsReady: verified.ready,
     daily: daily.slice(1).map((p, i) => ({ ...p, previousMetrics: daily[i].metrics })),
