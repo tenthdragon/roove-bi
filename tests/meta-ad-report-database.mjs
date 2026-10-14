@@ -1,8 +1,8 @@
-// Only the fixed local Docker clone is accessible through localQuery.
+// Only the fixed local Docker clone is accessible; no remote connection option.
 // Install migration 203 before running; the fixture transaction always rolls back.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { localQuery } from '../scripts/local-production-access.mjs';
 import { compareGroups, defaultFunnel, totalFacts, withLandingPages, destinationQuality, trend, hasCoverage, shiftDay, daysBetween } from '../lib/meta-funnel-domain.ts';
 import { withAdDimensions, matchesAdDimensions, dimensionOptions } from '../lib/meta-ad-dimensions.ts';
 import { metaBrandAccountIds, metaBrandOptions } from '../lib/meta-ad-brands.ts';
@@ -10,9 +10,13 @@ import { metaReportGroups, metaReportOptions, metaReportHistory } from '../lib/m
 let sql = await readFile(new URL('meta-ad-report-db.sql', import.meta.url), 'utf8');
 if (process.argv.includes('--with-migration')) {
   const migration = (await readFile(new URL('../supabase/migrations/203_meta_ad_report_performance.sql', import.meta.url), 'utf8')).replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
-  sql = sql.replace('BEGIN;', () => `BEGIN;\n${migration}`);
+  sql = sql.replace('CREATE TEMP TABLE report_test_scope', () => `${migration}\nCREATE TEMP TABLE report_test_scope`);
 }
-const data = JSON.parse(localQuery(sql, 'postgres', true));
+const output = execFileSync('docker', ['exec', '-i', 'supabase_db_roove-bi-local', 'sh', '-c',
+  'export PGPASSWORD="$POSTGRES_PASSWORD"; exec "$@"', 'roove-meta-report-test',
+  'psql', '-U', 'supabase_admin', '-X', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-Atq'],
+  { input: sql, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+const data = JSON.parse(output);
 const enriched = withAdDimensions(withLandingPages(data.facts, data.creatives || [], data.verified || []), data.mappings || []);
 const sortedGroups = rows => rows.map(g => ({ ...g, creatives: [], ad_names: [...g.ad_names].sort(), ad_ids: [...g.ad_ids].sort(),
   accounts: [...g.accounts].sort(), verified_ad_ids: [...g.verified_ad_ids].sort(), categories: g.categories.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) })).sort((a, b) => a.key.localeCompare(b.key));
@@ -26,7 +30,7 @@ for (const { name, params: p, raw } of data.cases) {
   const branded = named.filter(r => ids.includes(r.account_id));
   const rows = branded.filter(r => matchesAdDimensions(r, p.filters));
   if (p.view === 'overview') {
-    assert.deepEqual(metaReportGroups(raw, config) && sortedGroups(metaReportGroups(raw, config)), sortedGroups(compareGroups(rows, config, p.from, p.to)), `${name}: groups`);
+    assert.deepEqual(sortedGroups(metaReportGroups(raw, config)), sortedGroups(compareGroups(rows, config, p.from, p.to)), `${name}: groups`);
     assert.deepEqual(raw.summary, totalFacts(rows.filter(r => r.metric_date >= p.from)), `${name}: summary`);
     assert.deepEqual(raw.previous, totalFacts(rows.filter(r => r.metric_date < p.from)), `${name}: previous`);
     const expectedOptions = dimensionOptions((data.mappings || []).filter(m => ids.includes(m.account_id)), branded.filter(r => r.metric_date >= p.from), p.filters);
