@@ -34,9 +34,9 @@ for (const { name, params: p, raw } of data.cases) {
     assert.deepEqual(raw.summary, totalFacts(rows.filter(r => r.metric_date >= p.from)), `${name}: summary`);
     assert.deepEqual(raw.previous, totalFacts(rows.filter(r => r.metric_date < p.from)), `${name}: previous`);
     const expectedOptions = dimensionOptions((data.mappings || []).filter(m => ids.includes(m.account_id)), branded.filter(r => r.metric_date >= p.from), p.filters);
-    const options = metaReportOptions(raw, configured, data.brands);
+    const options = metaReportOptions(raw, data.accounts, data.brands);
     assert.deepEqual(options.dimensionOptions, expectedOptions, `${name}: facet counts and zero-count choices`);
-    assert.deepEqual(options.brandOptions, metaBrandOptions(configured, data.brands, named.filter(r => r.metric_date >= p.from && matchesAdDimensions(r, p.filters))), `${name}: brand counts`);
+    assert.deepEqual(options.brandOptions, metaBrandOptions(data.accounts, data.brands, named.filter(r => r.metric_date >= p.from && matchesAdDimensions(r, p.filters))), `${name}: brand counts`);
     const quality = destinationQuality(rows, config, p.from, p.to);
     for (const key of ['urls', 'missing_ads', 'multi_ads']) assert.equal(raw.destinations[key], quality[key], `${name}: URL quality ${key}`);
     assert.equal(raw.matchingAds, new Set(rows.filter(r => r.metric_date >= p.from).map(r => `${r.account_id}:${r.ad_id}`)).size, `${name}: ad count`);
