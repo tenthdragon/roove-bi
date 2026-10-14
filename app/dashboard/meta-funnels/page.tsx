@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -8,15 +8,18 @@ import { ArrowDown, ArrowUp, ArrowUpDown, Info, X, BellOff, AlertCircle, Chevron
 import { useDateRange } from '@/lib/DateRangeContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
-import { archiveMetaFunnel, getMetaFunnelData, queueMetaFunnelSync, saveMetaFunnel, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
+import { archiveMetaFunnel, getMetaFunnelData, getMetaFunnelHistory, getMetaFunnelCreatives, getMetaFunnelSyncStatus, queueMetaFunnelSync, saveMetaFunnel, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
 import { defaultFunnel, MEASURES, metricValue, relativeChange, shiftDay, type FunnelConfig, type FunnelMetric, type Measure } from '@/lib/meta-funnel-domain';
 import { getTodayWIB } from '@/lib/sync-schedule';
 import styles from './page.module.css';
 import MetaAdCreative from '@/components/MetaAdCreative';
 import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
 import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
+import type { MetaReportInput } from '@/lib/meta-ad-report';
+import type { AdCreative } from '@/lib/meta-funnel-domain';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaFunnelData>>, { schemaReady: true }>;
+type HistoryData = Extract<Awaited<ReturnType<typeof getMetaFunnelHistory>>, { schemaReady: true }>;
 type TableSort = { metricId: string | null; direction: 'asc' | 'desc' };
 const measureOptions = Object.entries(MEASURES);
 const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
@@ -51,6 +54,11 @@ export default function MetaFunnelsPage() {
   const canManage = can('admin:meta');
   const [data, setData] = useState<Data | null>(null);
   const [schemaReady, setSchemaReady] = useState(true);
+  const [dataKey, setDataKey] = useState('');
+  const [historyData, setHistoryData] = useState<{ key: string; result: HistoryData } | null>(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const reportVersion = useRef('');
   const [selectedId, setSelectedId] = useState('');
   const [groupKey, setGroupKey] = useState('');
   const [brandId, setBrandId] = useState('');
@@ -74,26 +82,56 @@ export default function MetaFunnelsPage() {
     if (view === 'alerts') router.replace('/dashboard/meta-funnels/notifications');
     if (view === 'mapping') router.replace('/dashboard/meta-funnels/mapping');
   }, [router]);
+  const reportInput = useMemo<MetaReportInput>(() => ({ from: dateRange.from, to: dateRange.to, brandId: brandId || undefined, funnelId: selectedId || undefined, filters: dimensionFilters, groupBy }),
+    [dateRange.from, dateRange.to, brandId, selectedId, dimensionFilters, groupBy]);
+  const overviewKey = JSON.stringify([activeWorkspace.id, reportInput]);
+  const historyKey = JSON.stringify([overviewKey, data?.reportVersion, tab, tab === 'trends' ? period : 'daily', groupKey]);
   const load = useCallback(async () => {
-    if (!dateRange.from || !dateRange.to) return;
+    if (!reportInput.from || !reportInput.to) return;
     const currentRequest = ++request.current;
     setLoading(true); setError('');
     try {
-      const result = await getMetaFunnelData({ ...dateRange, brandId: brandId || undefined, funnelId: selectedId || undefined, groupKey: groupKey || undefined, filters:dimensionFilters, groupBy });
+      const result = await getMetaFunnelData(reportInput);
       if (currentRequest !== request.current) return;
       setSchemaReady(result.schemaReady);
-      if (result.schemaReady) { setData(result); if (groupKey && !result.groups.some(g => g.key === groupKey)) setGroupKey(''); }
+      if (result.schemaReady) { setData(result); setDataKey(overviewKey); reportVersion.current = result.reportVersion; }
     } catch (e) { if (currentRequest === request.current) setError(message(e)); }
     finally { if (currentRequest === request.current) setLoading(false); }
-  }, [dateRange.from, dateRange.to, selectedId, brandId, groupKey, activeWorkspace.id, dimensionFilters.cep, dimensionFilters.objective, dimensionFilters.intention, groupBy]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [reportInput, overviewKey]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { const guard = request; return () => { guard.current++; }; }, []);
+  useEffect(() => { if (dataKey === overviewKey && groupKey && data && !data.groups.some(g => g.key === groupKey)) setGroupKey(''); }, [data, dataKey, overviewKey, groupKey]);
   const hasPendingJobs = data?.jobs.some(j => ['queued', 'running'].includes(j.status));
   useEffect(() => {
     if (!hasPendingJobs) return;
-    const timer = setInterval(() => { void load(); }, 15000);
-    return () => clearInterval(timer);
+    let alive = true, polling = false;
+    const timer = setInterval(async () => {
+      if (polling) return;
+      polling = true;
+      try {
+        const status = await getMetaFunnelSyncStatus();
+        if (!alive) return;
+        if (status.reportVersion !== reportVersion.current) await load();
+        else setData(current => current ? { ...current, jobs: status.jobs } : current);
+      } catch (e) { if (alive) setError(message(e)); }
+      finally { polling = false; }
+    }, 15000);
+    return () => { alive = false; clearInterval(timer); };
   }, [hasPendingJobs, load]);
+  const overviewReady = dataKey === overviewKey && !!data && !data.reportingError;
+  useEffect(() => {
+    if (tab === 'overview' || loading || !overviewReady) return;
+    let alive = true;
+    setHistoryLoading(true); setHistoryError('');
+    void getMetaFunnelHistory({ ...reportInput, groupKey: groupKey || undefined, view: tab, period })
+      .then(result => {
+        if (!alive) return;
+        if (!result.schemaReady) throw new Error('Migration laporan Meta belum tersedia.');
+        setHistoryData({ key: historyKey, result });
+      }).catch(e => { if (alive) setHistoryError(message(e)); })
+      .finally(() => { if (alive) setHistoryLoading(false); });
+    return () => { alive = false; };
+  }, [tab, period, reportInput, groupKey, historyKey, overviewReady, loading]);
   async function sync() {
     setBusy(true); setError('');
     try {
@@ -147,9 +185,10 @@ export default function MetaFunnelsPage() {
   });
   const totals = group?.current || data?.summary;
   const prev = group?.previous || data?.previous;
-  const history = data ? tab === 'daily' ? data.daily : data[period] : [];
+  const historyResult = historyData?.key === historyKey ? historyData.result : null;
+  const history = historyResult?.history || [];
   const chartData = history.map(p => ({ date: p.date, value: p.metrics[metric.id] === null ? null : p.metrics[metric.id]! * (metric.format === 'percent' ? 100 : 1) }));
-  return <div className={styles.page}>
+  return <div className={styles.page} aria-busy={loading || (tab !== 'overview' && historyLoading)}>
     <div className={styles.header}>
       <div><div className={styles.eyebrow}>MARKETING / AD PERFORMANCE</div><h1>Meta Ad Funnels</h1><p>Filter ads berdasarkan brand, CEP, intention, dan objective Meta.</p></div>
       <div className={styles.actions}>
@@ -161,7 +200,7 @@ export default function MetaFunnelsPage() {
     </div>
     {error && <div role="alert" className={styles.error}>{error}</div>}
     {notice && <div role="status" className={styles.info}>{notice}</div>}
-    {!schemaReady ? <div className={styles.card}>Fitur membutuhkan migration 198_meta_ad_funnels.sql dan 199_meta_ad_landing_pages.sql. Setelah migrasi dipasang, muat ulang halaman.</div> : <>
+    {!schemaReady ? <div className={styles.card}>Migration laporan Meta belum terpasang (203).</div> : <>
       {editor && <FunnelEditor value={editor.config} onChange={config => setEditor({ ...editor, config })} accounts={data?.accounts || []} busy={busy}
         onSave={() => void save()} onClose={() => setEditor(null)} onArchive={editor.id ? () => void archive() : undefined} />}
       {destinationEditor && <form className={`${styles.card} ${styles.editor}`} onSubmit={e => { e.preventDefault(); void verifyDestination(); }}>
@@ -228,11 +267,11 @@ export default function MetaFunnelsPage() {
         <div className={styles.tabs}>{([
           ['overview', 'Performa'], ['daily', 'Comparison harian'], ['trends', 'Tren'],
         ] as const).map(([id, label]) => <button key={id} className={tab === id ? styles.activeTab : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
-        {!data.reportingError && totals && prev && <>
+        {overviewReady && totals && prev && <>
           <div className={styles.period}>Periode {data.reportRange.from} – {data.reportRange.to} <span>vs {data.prevFrom} – {data.prevTo} · {data.currency}</span></div>
           {(tab !== 'overview' || !groupKey) && <div className={styles.cards}>{config.metrics.filter(m => tab !== 'overview' || groupBy === 'ad' || brandId || Object.values(dimensionFilters).some(Boolean) || ['spent', 'outbound_ctr', 'lpv'].includes(m.id)).map(m => <div className={styles.card} key={m.id}><div className={styles.muted}>{m.label}</div><strong>{format(metricValue(totals, m), m.format, data.currency)}</strong><Change value={relativeChange(metricValue(totals, m), metricValue(prev, m))} direction={m.direction} neutral={!m.monitor} /></div>)}</div>}
         </>}
-        {tab === 'overview' && !data.reportingError && <>
+        {tab === 'overview' && overviewReady && <>
           <div className={styles.sectionHeader}><h2>{groupBy === 'ad' ? 'Breakdown per ad' : 'Breakdown per landing page'}</h2><input aria-label={groupBy === 'ad' ? 'Cari ad' : 'Cari landing page'} placeholder={groupBy === 'ad' ? 'Cari nama atau ID ad…' : 'Cari URL landing page…'} value={search} onChange={e => setSearch(e.target.value)} /></div>
           {!visibleGroups.length ? <div className={styles.card}>{data.groups.length ? `Tidak ada ${groupBy === 'ad' ? 'ad' : 'URL'} yang sesuai pencarian.` : 'Belum ada data yang sesuai. Periksa akun yang dipantau atau jalankan sync histori.'}</div> : <div className={styles.tableWrap}>
             <table className={styles.breakdownTable} aria-label={groupBy === 'ad' ? 'Breakdown per ad' : 'Breakdown per landing page'}>
@@ -240,7 +279,7 @@ export default function MetaFunnelsPage() {
               <tbody>{visibleGroups.map(g => <tr key={g.key}>
                 <td><button className={styles.nameButton} onClick={() => setGroupKey(g.key)}>{g.name}</button><small>{groupBy === 'ad' ? `Ad ${g.ad_ids.join(', ')}` : `${g.ad_ids.length} ad`} · {g.accounts.join(', ')}</small>
                   {g.landing_page_urls.length > 1 && <small>Creative memiliki beberapa tujuan; Meta tidak membagi hasil per URL.</small>}
-                  <GroupDetails group={g} currency={data.currency} />
+                  <GroupDetails group={g} currency={data.currency} input={reportInput} cacheKey={`${overviewKey}:${data.reportVersion}`} />
                 </td>
                 {config.metrics.map(m => { const c = g.metrics.find(v => v.id === m.id)!; return <td key={m.id}>{format(c.current, m.format, data.currency)}<small><Change value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}
               </tr>)}</tbody>
@@ -253,9 +292,13 @@ export default function MetaFunnelsPage() {
             {tab === 'trends' && <select aria-label="Periode tren" value={period} onChange={e => setPeriod(e.target.value as typeof period)}><option value="weekly">Mingguan</option><option value="monthly">Bulanan</option></select>}
             <select aria-label="Metrik grafik" value={metric.id} onChange={e => setMetricId(e.target.value)}>{config.metrics.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select>
           </div></div>
+          {historyLoading && <p role="status" className={styles.muted}>Memuat {tab === 'daily' ? 'comparison harian' : 'tren'}…</p>}
+          {(historyError || historyResult?.reportingError) && <p role="alert" className={styles.error}>{historyError || historyResult?.reportingError}</p>}
+          {!historyLoading && historyResult && !historyResult.reportingError && <>
           <div className={styles.chart}><ResponsiveContainer width="100%" height={280}><LineChart data={chartData}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" /><XAxis dataKey="date" tick={{ fill: 'var(--dim)', fontSize: 11 }} /><YAxis tick={{ fill: 'var(--dim)', fontSize: 11 }} /><Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }} formatter={(value: number) => [format(value / (metric.format === 'percent' ? 100 : 1), metric.format, data.currency), metric.label]} /><Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2} dot={false} connectNulls={false} /></LineChart></ResponsiveContainer></div>
           <div className={styles.tableWrap}><table><thead><tr><th>Periode mulai</th>{config.metrics.map(m => <th key={m.id}>{m.label} / Δ</th>)}</tr></thead><tbody>{history.map((p, i) => <tr key={p.date}><td>{p.date}{p.partial && <small>Periode parsial</small>}{!p.complete && <small>Data belum lengkap</small>}</td>{config.metrics.map(m => <td key={m.id}>{format(p.metrics[m.id], m.format, data.currency)}<small><Change value={relativeChange(p.metrics[m.id], 'previousMetrics' in p ? (p.previousMetrics as Record<string, number | null>)[m.id] : history[i - 1]?.metrics[m.id] ?? null)} direction={m.direction} neutral={!m.monitor} /></small></td>)}</tr>)}</tbody></table></div>
-          <p className={styles.muted}>{tab === 'daily' ? 'Δ dibanding hari sebelumnya, termasuk baseline sebelum awal rentang.' : 'Minggu dimulai Senin. Bulan/minggu pertama dan terakhir dapat mencakup sebagian periode dalam histori 90 hari. Δ periode parsial perlu dibaca dengan hati-hati.'} {(!data.trendCoverageComplete && tab === 'trends') && 'Histori belum lengkap; titik tanpa data bukan bukti performa nol.'} Tanggal mengikuti timezone ad account.</p>
+          <p className={styles.muted}>{tab === 'daily' ? 'Δ dibanding hari sebelumnya, termasuk baseline sebelum awal rentang.' : 'Minggu dimulai Senin. Bulan/minggu pertama dan terakhir dapat mencakup sebagian periode dalam histori 90 hari. Δ periode parsial perlu dibaca dengan hati-hati.'} {(!historyResult.complete && tab === 'trends') && 'Histori belum lengkap; titik tanpa data bukan bukti performa nol.'} Tanggal mengikuti timezone ad account.</p>
+          </>}
         </>}
         {!!data.jobs.length && <details className={styles.card}><summary>Status sync histori</summary>{data.jobs.map(j => <p key={j.id}>{j.payload.date_start} – {j.payload.date_end}: <b>{j.status}</b>{j.error_message && ` · ${j.error_message}`}</p>)}</details>}
       </>}
@@ -263,15 +306,33 @@ export default function MetaFunnelsPage() {
   </div>;
 }
 
-function GroupDetails({ group: g, currency }: { group: Data['groups'][number]; currency: string }) {
+function GroupDetails({ group: g, currency, input, cacheKey }: { group: Data['groups'][number]; currency: string; input: MetaReportInput; cacheKey: string }) {
+  const [open, setOpen] = useState(false);
+  const [creatives, setCreatives] = useState<{ key: string; rows: AdCreative[] } | null>(null);
+  const [loading, setLoading] = useState(false), [error, setError] = useState('');
+  const key = `${cacheKey}:${g.key}`;
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    setLoading(true); setError('');
+    void getMetaFunnelCreatives({ ...input, groupKey: g.key }).then(result => {
+      if (!alive) return;
+      if (!result.schemaReady) throw new Error('Migration laporan Meta belum tersedia.');
+      setCreatives({ key, rows: result.creatives });
+    }).catch(e => { if (alive) setError(message(e)); }).finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [open, key, input, g.key]);
+  const rows = creatives?.key === key ? creatives.rows : [];
   return <details><summary>Detail volume & creative</summary><p className={styles.muted}>Impressions {format(g.current.impressions, 'number', currency)} · Outbound clicks {format(g.current.outbound_clicks, 'number', currency)} · ATC {format(g.current.atc, 'number', currency)} · IC {format(g.current.checkout, 'number', currency)} · Purchase {format(g.current.purchases, 'number', currency)}</p>
     {g.landing_page_urls.map(url => <p key={url}><a href={url} target="_blank" rel="noopener noreferrer">{url}</a></p>)}
     {g.verified_ad_ids.length > 0 && <><p className={styles.muted}>{g.verified_ad_ids.length} ad menggunakan URL terverifikasi dari Ads Manager sebagai fallback.</p>
-      {g.verified_ad_ids.map(id => <p key={id}>{g.creatives.find(c => c.ad_id === id)?.name || `Ad ${id}`}<small className={styles.muted}> · Ad {id}</small></p>)}
+      {g.verified_ad_ids.map(id => <p key={id}>{rows.find(c => c.ad_id === id)?.name || `Ad ${id}`}<small className={styles.muted}> · Ad {id}</small></p>)}
     </>}
-    <details><summary>{g.ad_names.length} nama ad & creative</summary>
+    <details onToggle={e => setOpen(e.currentTarget.open)}><summary>{g.ad_names.length} nama ad & creative</summary>
       {g.ad_names.map(name => <p className={styles.muted} key={name}>{name}</p>)}
-      {g.creatives.map(c => <MetaAdCreative key={`${c.account_id}:${c.ad_id}`} creative={c} />)}
+      {loading && <p role="status" className={styles.muted}>Memuat creative…</p>}
+      {error && <p role="alert" className={styles.error}>{error}</p>}
+      {rows.map(c => <MetaAdCreative key={`${c.account_id}:${c.ad_id}`} creative={c} />)}
     </details>
   </details>;
 }
