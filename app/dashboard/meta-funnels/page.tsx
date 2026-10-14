@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { ArrowDown, ArrowUp, ArrowUpDown, Info, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, Info, X, BellOff, AlertCircle, ChevronDown } from 'lucide-react';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
@@ -176,7 +176,7 @@ export default function MetaFunnelsPage() {
           {data?.brandOptions.choices.map(b => <option key={b.value} value={b.value}>{b.label} ({b.count})</option>)}
         </select></label>
         <label>Monitoring<select value={selectedId || data?.selectedId || ''} onChange={e => { setSelectedId(e.target.value); setGroupKey(''); }}>
-          {!data?.funnels.length && <option value="">Semua landing page (preview)</option>}
+          {!data?.funnels.length && <option value="">Semua landing page</option>}
           {data?.funnels.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
         </select></label>
         <label>Breakdown<select aria-label="Breakdown" value={groupBy} onChange={e=>{setGroupBy(e.target.value as typeof groupBy);setGroupKey('');setSearch('');}}><option value="landing_page">Per URL landing page</option><option value="ad">Per ad</option></select></label>
@@ -202,6 +202,17 @@ export default function MetaFunnelsPage() {
               {canManage && <p className={styles.muted}>Sync 90 hari memperbarui URL creative dan histori.</p>}
             </div>
           </details>}
+          {(!data.selectedId || !config.alerts_enabled) && <span className={styles.notificationState} title="Atur notifikasi di konfigurasi monitoring"><BellOff size={13} aria-hidden="true" />Notifikasi nonaktif</span>}
+          {!data.reportingError && data.coverageGaps.length > 0 && <details className={`${styles.contextDetails} ${styles.coverageState}`}>
+            <summary><AlertCircle size={13} aria-hidden="true" />{data.coverageGaps.some(g => g.currentMissing > 0) ? 'Data parsial' : 'Pembanding parsial'}<ChevronDown size={12} aria-hidden="true" /></summary>
+            <div className={styles.contextPanel}>
+              <dl>{data.coverageGaps.map(g => <div className={styles.coverageAccount} key={g.account_id}>
+                <dt>{data.accounts.find(a => a.account_id === g.account_id)?.account_name || g.account_id}</dt>
+                <dd>{[g.currentMissing > 0 && `Periode: ${g.currentMissing} hari`, g.baselineMissing > 0 && `Pembanding: ${g.baselineMissing} hari`].filter(Boolean).join(' · ')}<small>{g.firstMissing} – {g.lastMissing}</small></dd>
+              </div>)}</dl>
+              {hasPendingJobs ? <p className={styles.muted}>Sync berjalan…</p> : canManage && data.coverageGaps.every(g => g.firstMissing >= shiftDay(getTodayWIB(), -90)) && <button className={styles.button} disabled={busy} onClick={() => void sync()}>Sync histori</button>}
+            </div>
+          </details>}
           {data.objectiveUnknownAds > 0 && <span className={styles.contextQuality}>Objective belum terbaca ({data.objectiveUnknownAds})</span>}
           <details className={`${styles.contextDetails} ${styles.contextInfo}`}>
             <summary aria-label="Informasi data" title="Informasi data"><Info size={15} aria-hidden="true" /></summary>
@@ -211,16 +222,14 @@ export default function MetaFunnelsPage() {
           </details>
         </div>
       </>}
-      {!data?.funnels.length && !loading && <div className={styles.info}>Ini preview funnel default. Simpan funnel untuk mengaktifkan monitoring dan notifikasi otomatis.</div>}
       {loading && <p role="status" className={styles.muted}>Memuat performa…</p>}
       {data && <>
         {data.reportingError && <div role="alert" className={styles.error}>{data.reportingError}</div>}
-        {(!data.currentComplete || !data.baselineComplete) && <div className={styles.info}>Data periode atau baseline belum lengkap. Perbandingan bersifat sementara; alarm menunggu seluruh akun dan tanggal tersinkron. {canManage && 'Gunakan Sync 90 hari untuk mengisi histori.'}</div>}
         <div className={styles.tabs}>{([
           ['overview', 'Performa'], ['daily', 'Comparison harian'], ['trends', 'Tren'],
         ] as const).map(([id, label]) => <button key={id} className={tab === id ? styles.activeTab : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
         {!data.reportingError && totals && prev && <>
-          <div className={styles.period}>Periode {dateRange.from} – {dateRange.to} <span>vs {data.prevFrom} – {data.prevTo} · {data.currency}</span></div>
+          <div className={styles.period}>Periode {data.reportRange.from} – {data.reportRange.to} <span>vs {data.prevFrom} – {data.prevTo} · {data.currency}</span></div>
           {(tab !== 'overview' || !groupKey) && <div className={styles.cards}>{config.metrics.filter(m => tab !== 'overview' || groupBy === 'ad' || brandId || Object.values(dimensionFilters).some(Boolean) || ['spent', 'outbound_ctr', 'lpv'].includes(m.id)).map(m => <div className={styles.card} key={m.id}><div className={styles.muted}>{m.label}</div><strong>{format(metricValue(totals, m), m.format, data.currency)}</strong><Change value={relativeChange(metricValue(totals, m), metricValue(prev, m))} direction={m.direction} neutral={!m.monitor} /></div>)}</div>}
         </>}
         {tab === 'overview' && !data.reportingError && <>

@@ -132,6 +132,14 @@ this fallback is an observed current classification, not a reconstruction of
 past changes. CEP/intention use the current ad mapping. Updating creative
 metadata does not erase these campaign dimensions or manual corrections.
 
+## Date range and status
+
+Meta reporting and its date presets stop at yesterday in WIB. Other dashboard
+pages retain their existing date behavior. Comparisons use equally long closed
+periods. Complete coverage produces no warning; missing account-days appear in
+the compact Data/Pembanding parsial disclosure, with account and date details.
+Unsaved or disabled monitoring uses the muted Notifikasi nonaktif indicator.
+
 ## Seven default metrics
 
 | Metric | Calculation |

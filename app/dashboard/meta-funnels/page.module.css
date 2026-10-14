@@ -41,6 +41,11 @@
 .contextDetails summary:hover, .contextDetails[open] summary { color: var(--text); }
 .contextDetails summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
 .contextQuality { color: var(--accent); }
+.notificationState { display: inline-flex; align-items: center; gap: 5px; }
+.coverageState { color: var(--yellow); }
+.coverageState summary { display: inline-flex; align-items: center; gap: 5px; }
+.contextPanel .coverageAccount { display: contents; }
+.coverageAccount small { display: block; margin-top: 3px; color: var(--dim); font-size: 10px; }
 .contextInfo { margin-left: auto; }
 .contextInfo summary { display: flex; align-items: center; padding: 6px; list-style: none; }
 .contextInfo summary::-webkit-details-marker { display: none; }
