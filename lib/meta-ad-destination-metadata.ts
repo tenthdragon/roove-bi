@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeLandingPages } from './meta-ad-destinations';
 import { classifyMetaCpas } from './meta-cpas-evidence';
 import { metaGraph } from './meta-ad-insights';
+import { enqueueNewMetaProductSets } from './meta-product-set-queue';
 
 const BASE = 'https://graph.facebook.com/v21.0';
 export const META_DESTINATION_FIELDS = 'id,account_id,adset{id,destination_type,promoted_object},creative{id,object_story_spec,asset_feed_spec,link_url,object_url,product_set_id,omnichannel_link_spec,object_store_url,link_deep_link_url}';
@@ -69,11 +70,12 @@ export async function fetchAdDestinationBatch(ids: string[], token: string): Pro
 }
 
 /** Verify every returned product, not the catalog name or a single sample. */
-export async function verifyShopeeProductSet(productSetId: string, token: string) {
+export async function verifyShopeeProductSet(productSetId: string, token: string, options: { signal?: AbortSignal } = {}) {
   if (!/^\d+$/.test(productSetId)) throw new Error('Invalid product set identity.');
   const products = new Map<string, string>(); const cursors = new Set<string>(); let after = '';
   for (let pageNumber = 0; pageNumber < 100; pageNumber++) {
-    const page = await metaGraph(`${productSetId}/products`, token, { fields: 'id,url', limit: '500', ...(after ? { after } : {}) });
+    options.signal?.throwIfAborted();
+    const page = await metaGraph(`${productSetId}/products`, token, { fields: 'id,url', limit: '500', ...(after ? { after } : {}) }, options);
     if (!Array.isArray(page.data)) throw new Error('Invalid product set products response.');
     for (const product of page.data) {
       const url = normalizeLandingPages([product.url])[0];
@@ -96,17 +98,19 @@ export async function verifyShopeeProductSet(productSetId: string, token: string
 }
 
 /** Used only by explicitly requested/scheduled mapping workers, never page reads. */
-export async function refreshMetaAdDestinations(svc: SupabaseClient, workspaceId: string, accountId: string, ids: string[], token: string) {
+export async function refreshMetaAdDestinations(svc: SupabaseClient, workspaceId: string, accountId: string, ids: string[], token: string,
+  enqueueProductSets = enqueueNewMetaProductSets) {
   if (!workspaceId || !/^act_\d+$/.test(accountId)) throw new Error('Invalid destination workspace/account scope.');
   const schema = await svc.from('meta_ad_destination_metadata').select('ad_id').eq('workspace_id', workspaceId).limit(1);
   if (schema.error) throw new Error(`Destination metadata schema unavailable: ${schema.error.message}`);
   const owned = await svc.from('meta_ad_mappings').select('ad_id').eq('workspace_id', workspaceId).eq('account_id', accountId).in('ad_id', ids);
   if (owned.error) throw new Error(owned.error.message);
   if (new Set((owned.data || []).map(r => r.ad_id)).size !== new Set(ids).size) throw new Error('Destination IDs outside workspace/account.');
-  const verified = await svc.from('meta_shopee_product_sets').select('product_set_id').eq('workspace_id', workspaceId).eq('account_id', accountId);
-  if (verified.error) throw new Error(verified.error.message);
   const result = await fetchAdDestinationBatch(ids, token);
   if (result.rows.some(r => r.account_id !== accountId)) throw new Error('Meta returned an ad outside its expected account.');
+  const verified = await svc.from('meta_shopee_product_sets').select('product_set_id').eq('workspace_id', workspaceId).eq('account_id', accountId);
+  if (verified.error) throw new Error(verified.error.message);
+  let productSetJobs = 0;
   if (result.rows.length) {
     const observedAt = new Date().toISOString();
     const saved = await svc.from('meta_ad_destination_metadata').upsert(result.rows.map(r => ({
@@ -115,6 +119,9 @@ export async function refreshMetaAdDestinations(svc: SupabaseClient, workspaceId
       ...classifyMetaCpas(r.metadata, (verified.data || []).map(v => v.product_set_id)), observed_at: observedAt,
     })), { onConflict: 'workspace_id,account_id,ad_id' });
     if (saved.error) throw new Error(saved.error.message);
+    const known = new Set((verified.data || []).map(v => v.product_set_id));
+    const newIds = [...new Set(result.rows.flatMap(r => r.metadata.product_set_ids))].filter(id => !known.has(id));
+    if (newIds.length) productSetJobs = (await enqueueProductSets(svc, workspaceId, accountId, newIds)).length;
   }
-  return { saved: result.rows.length, failures: result.failures };
+  return { saved: result.rows.length, failures: result.failures, product_set_jobs_queued: productSetJobs };
 }

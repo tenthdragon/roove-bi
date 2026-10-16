@@ -3,6 +3,7 @@ import { runFinancialSync } from './financial-sync-runner';
 import { runMetaSync } from './meta-sync-runner';
 import { runMetaAdSync } from './meta-ad-sync-runner';
 import { runMetaAdMappingSync } from './meta-ad-mapping-sync';
+import { runMetaProductSetVerification } from './meta-product-set-sync';
 import { metaSpendRange } from './meta-incremental-sync';
 import { createServiceSupabase } from './service-supabase';
 import { runScalevSync, type ScalevSyncMode } from './scalev-sync-runner';
@@ -40,6 +41,14 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
 
     case 'meta_sync': {
       const payload = job.payload || {};
+      if (payload.verify_shopee_product_set !== undefined || job.mode === 'meta_product_set_verify') {
+        if (payload.verify_shopee_product_set !== true || payload.ad_mapping_only !== true
+          || typeof payload.account_id !== 'string' || !/^act_\d+$/.test(payload.account_id)
+          || typeof payload.product_set_id !== 'string' || !/^\d+$/.test(payload.product_set_id)
+          || payload.creative_ad_ids !== undefined || payload.ad_funnels_only === true) throw new Error('Payload verifikasi product set tidak valid.');
+        const result = await runMetaProductSetVerification({ workspaceId: job.workspace_id, accountId: payload.account_id, productSetId: payload.product_set_id });
+        return { status: result.status, rowsProcessed: result.rows_inserted, resultSummary: result };
+      }
       if (payload.ad_mapping_only === true) {
         if (payload.creative_ad_ids !== undefined && (!Array.isArray(payload.creative_ad_ids) || !payload.creative_ad_ids.every(id => typeof id === 'string'))) throw new Error('Payload creative mapping tidak valid.');
         const result = await runMetaAdMappingSync({ workspaceId: job.workspace_id,
