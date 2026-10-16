@@ -8,6 +8,10 @@
   ad-level metrics/creatives, and inventory/mapping. No saved funnel is required;
   all active workspace Meta accounts participate. Spend failure does not block
   enqueueing ad details or mapping.
+- Opening a page, reloading its status, restarting the app, and deploying a
+  release do not enqueue Meta syncs. The Meta timer has no startup catch-up;
+  if the server misses 17:00, the next scheduled/manual sync catches up from
+  the persisted data checkpoint.
 - Sync is incremental. Spend resumes from the last fully successful workspace
   log through today, re-reading at least yesterday to finalize prior intraday
   data. Ad-level metrics resume separately per account from its last successful
@@ -69,9 +73,12 @@ Do not combine this worker cron with an existing continuously running worker.
 log rotation exists. A worker run can exceed one minute on a Droplet; unlike a
 Vercel request it is not subject to the route's 60-second timeout.
 
-After deployment, check app health, trigger `scheduled-sync.ts ads`, run the
-worker once and inspect job/log results. Confirm that spend, ad detail, and mapping jobs are enqueued for active
-Meta accounts, and that their date ranges follow the persisted checkpoints. Check installed cron entries and confirm they execute under the
+Deployment does not enqueue a Meta sync. After deployment, check app health,
+inspect the installed timer and existing job/log results. Verify the next
+17:00 WIB run, or explicitly request a manual sync when one is wanted.
+For that run, confirm spend, ad detail and mapping jobs cover active Meta
+accounts and their date ranges follow the persisted checkpoints.
+Check installed cron entries and confirm they execute under the
 correct user and timezone. Retain the previous app release for rollback; the
 additive database function may remain installed if rolling back the app.
 
