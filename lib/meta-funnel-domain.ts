@@ -14,7 +14,7 @@ export type Totals = Record<Measure, number>;
 export type FunnelMetric = {
   id: string; label: string; numerator: Measure; denominator: Measure | null;
   format: 'number' | 'percent' | 'money' | 'multiple'; direction: 'higher' | 'lower'; monitor: boolean;
-  min_denominator: number;
+  min_denominator: number; multiplier?: number;
 };
 export type FunnelConfig = {
   name: string; description: string; name_filter: string; match: 'contains' | 'exact';
@@ -50,21 +50,27 @@ export type GroupComparison = {
   metrics: { id: string; current: number | null; previous: number | null; change: number | null }[];
 };
 
+export function metaPerformanceMetrics(): FunnelMetric[] {
+  return [
+    { id: 'spent', label: 'Spent', numerator: 'spend', denominator: null, format: 'money', direction: 'lower', monitor: false, min_denominator: 0 },
+    { id: 'cpm', label: 'CPM', numerator: 'spend', denominator: 'impressions', multiplier: 1000, format: 'money', direction: 'lower', monitor: true, min_denominator: 1000 },
+    { id: 'outbound_ctr', label: 'CTR (outbound link)', numerator: 'outbound_clicks', denominator: 'impressions', format: 'percent', direction: 'higher', monitor: true, min_denominator: 1000 },
+    { id: 'lpv_rate', label: 'LPV ratio', numerator: 'lpv', denominator: 'outbound_clicks', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 },
+    { id: 'atc_rate', label: 'ATC ratio', numerator: 'atc', denominator: 'lpv', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 },
+    { id: 'ic_rate', label: 'IC ratio', numerator: 'checkout', denominator: 'atc', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 },
+    { id: 'purchase_rate', label: 'Purchase ratio', numerator: 'purchases', denominator: 'checkout', format: 'percent', direction: 'higher', monitor: true, min_denominator: 10 },
+    { id: 'cpic', label: 'CPIC', numerator: 'spend', denominator: 'checkout', format: 'money', direction: 'lower', monitor: true, min_denominator: 10 },
+    { id: 'cpp', label: 'CPP', numerator: 'spend', denominator: 'purchases', format: 'money', direction: 'lower', monitor: true, min_denominator: 10 },
+  ];
+}
+
 export function defaultFunnel(): FunnelConfig {
   return {
     name: 'Landing page performance', description: 'Outbound click → landing page → add to cart / initiate checkout → purchase',
     name_filter: '', match: 'contains', account_ids: [],
     group_by: 'landing_page', cep_keys: [], funnel_keys: [], naming_status: 'all',
     stages: ['impressions', 'outbound_clicks', 'lpv', 'atc', 'checkout', 'purchases'],
-    metrics: [
-      { id: 'spent', label: 'Spent', numerator: 'spend', denominator: null, format: 'money', direction: 'lower', monitor: false, min_denominator: 0 },
-      { id: 'outbound_ctr', label: 'CTR outbound link', numerator: 'outbound_clicks', denominator: 'impressions', format: 'percent', direction: 'higher', monitor: true, min_denominator: 1000 },
-      { id: 'lpv', label: 'LPV', numerator: 'lpv', denominator: null, format: 'number', direction: 'higher', monitor: true, min_denominator: 0 },
-      { id: 'lpv_rate', label: 'LPV ratio', numerator: 'lpv', denominator: 'outbound_clicks', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 },
-      { id: 'atc_rate', label: 'ATC ratio', numerator: 'atc', denominator: 'lpv', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 },
-      { id: 'ic_rate', label: 'IC ratio', numerator: 'checkout', denominator: 'lpv', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 },
-      { id: 'purchase_rate', label: 'Purchase ratio', numerator: 'purchases', denominator: 'checkout', format: 'percent', direction: 'higher', monitor: true, min_denominator: 10 },
-    ],
+    metrics: metaPerformanceMetrics(),
     alerts_enabled: true, window_days: 7, drop_percent: 20, min_impressions: 1000, min_spend: 50000, lag_days: 2,
   };
 }
@@ -92,7 +98,7 @@ export function validateFunnel(input: unknown): FunnelConfig {
       || !validMeasure(m.numerator) || (m.denominator !== null && !validMeasure(m.denominator))
       || !['number', 'percent', 'money', 'multiple'].includes(m.format)
       || !['higher', 'lower'].includes(m.direction) || typeof m.monitor !== 'boolean'
-      || !bounded(m.min_denominator, 0, 1e12)) throw new Error('Definisi metrik tidak valid.');
+      || !bounded(m.min_denominator, 0, 1e12) || (m.multiplier !== undefined && !bounded(m.multiplier, 1, 1000))) throw new Error('Definisi metrik tidak valid.');
   }
   if (new Set(c.metrics.map(m => m.id)).size !== c.metrics.length) throw new Error('ID metrik harus unik.');
   const validKeys = (v: unknown, keys: object) => Array.isArray(v) && v.length <= Object.keys(keys).length && v.every(k => typeof k === 'string' && Object.hasOwn(keys, k));
@@ -192,8 +198,8 @@ export function totalFacts(rows: AdFact[]): Totals {
   return total;
 }
 export function metricValue(total: Totals, m: FunnelMetric): number | null {
-  if (m.denominator === null) return total[m.numerator];
-  return total[m.denominator] > 0 ? total[m.numerator] / total[m.denominator] : null;
+  if (m.denominator === null) return total[m.numerator] * (m.multiplier ?? 1);
+  return total[m.denominator] > 0 ? total[m.numerator] / total[m.denominator] * (m.multiplier ?? 1) : null;
 }
 export function relativeChange(current: number | null, previous: number | null) {
   return current === null || previous === null || previous <= 0 ? null : (current - previous) / previous * 100;

@@ -96,11 +96,11 @@
 .page td:first-child { min-width: 220px; max-width: 380px; white-space: normal; }
 .page td small { display: block; margin-top: 5px; color: var(--dim); font-size: 10px; }
 .nameButton { text-align: left; color: var(--accent); font-weight: 600; }
-.breakdownTable { min-width: 820px; table-layout: fixed; }
+.breakdownTable { min-width: 1280px; table-layout: fixed; }
 .page .breakdownTable th, .page .breakdownTable td { padding: 12px 8px; text-align: right; }
 .page .breakdownTable th { white-space: normal; }
-.page .breakdownTable th:first-child, .page .breakdownTable td:first-child { width: 28%; text-align: left; overflow-wrap: anywhere; }
-.page .breakdownTable th:nth-child(2), .page .breakdownTable td:nth-child(2) { width: 14%; }
+.page .breakdownTable th:first-child, .page .breakdownTable td:first-child { width: 24%; text-align: left; overflow-wrap: anywhere; }
+.page .breakdownTable th:nth-child(2), .page .breakdownTable td:nth-child(2) { width: 12%; }
 .breakdownTable .nameButton { line-height: 1.5; overflow-wrap: anywhere; }
 .breakdownTable details { text-align: left; }
 .breakdownTable a { color: var(--accent); }
@@ -147,3 +147,10 @@
   .mappingTable td:first-child, .mappingTable td:nth-child(2), .mappingTable td:nth-child(5), .mappingTable td:nth-child(6) { grid-column: 1 / -1; }
   .mappingTable td::before { content: attr(data-label); display: block; color: var(--dim); font-size: 10px; font-weight: 600; margin-bottom: 5px; }
 }
+
+.brandSection { display: grid; gap: 12px; min-width: 0; padding: 18px 0; border-top: 1px solid var(--border); }
+.brandHeading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px; }
+.brandHeading h3 { margin: 0; font-size: 18px; }
+.breakdownTable tfoot th, .breakdownTable tfoot td { background: var(--card); border-top: 2px solid var(--border); font-weight: 650; }
+.breakdownTable tfoot th { text-align: left; }
+.breakdownTable tfoot small { font-weight: 400; }
