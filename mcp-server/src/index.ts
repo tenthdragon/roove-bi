@@ -7,6 +7,7 @@ import { config } from "dotenv";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { z } from "zod";
+import { registerMetaFunnelTools } from "./meta-funnel-tools.js";
 
 // ── Load env from parent .env.local ──
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -43,6 +44,8 @@ const server = new McpServer({
   name: "roove-bi",
   version: "1.0.0",
 });
+
+registerMetaFunnelTools(server, svc, workspaceId);
 
 type SafeDataset = {
   table: string;
@@ -242,6 +245,8 @@ server.tool(
           "business_snapshot",
           "marketing_spend_summary",
           "meta_ads_spend_by_account",
+          "meta_ad_funnel_catalog",
+          "meta_ad_funnel_report",
           "search_products",
         ],
         ppic: [
