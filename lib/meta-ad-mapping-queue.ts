@@ -20,13 +20,12 @@ export async function enqueueMetaAdMappingCreatives(workspaceId: string, account
   }
   return jobs;
 }
-export async function enqueueScheduledMetaAdMapping(svc: SupabaseClient, workspaceId: string, enqueue = enqueueMetaAdMapping) {
-  const state = await svc.from('meta_ad_mapping_sync_state').select('account_id').eq('workspace_id', workspaceId).gte('last_inventory_at', `${getTodayWIB()}T00:00:00+07:00`);
-  if (state.error && ['42P01', 'PGRST205'].includes(state.error.code)) return 0;
-  if (state.error) throw new Error(state.error.message);
+export async function enqueueScheduledMetaAdMapping(svc: SupabaseClient, workspaceId: string, enqueue = enqueueMetaAdMapping, requestedBy?: string) {
   const accounts = await svc.from('meta_ad_accounts').select('account_id').eq('workspace_id', workspaceId).eq('is_active', true);
   if (accounts.error) throw new Error(accounts.error.message);
-  const done = new Set((state.data || []).map(s => s.account_id));
-  const needed = (accounts.data || []).map(a => a.account_id).filter(a => !done.has(a));
-  return needed.length ? (await enqueue(workspaceId, needed)).length : 0;
+  // Inventory is current metadata rather than a historical Insights range.
+  // Refresh it in every daily/manual bundle, including ads added since a manual
+  // sync earlier today. Active jobs are deduplicated by the queue as before.
+  const ids = (accounts.data || []).map(a => a.account_id);
+  return ids.length ? enqueue(workspaceId, ids, requestedBy) : [];
 }

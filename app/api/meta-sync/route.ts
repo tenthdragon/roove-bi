@@ -84,9 +84,13 @@ async function queueMetaSync(req: NextRequest, method: 'GET' | 'POST') {
     }
 
     if (isCron) {
+      const source = new URL(req.url).searchParams.get('source') || 'meta';
+      if (!['meta', 'daily_ads'].includes(source)) return NextResponse.json({ error: 'Invalid sync source' }, { status: 400 });
       return NextResponse.json(await enqueueScheduledAdsSync(
         new URL(req.url).searchParams.get('workspace_id'),
         requestId,
+        undefined,
+        source as 'meta' | 'daily_ads',
       ), { status: 202 });
     }
 

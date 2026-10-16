@@ -9,7 +9,7 @@ old=$(readlink -f "$base/current")
 release="$base/${commit:0:8}-$(date +%Y%m%d-%H%M%S)"
 backup="/root/roove-sync-backup-$(date +%Y%m%d-%H%M%S)"
 override=/etc/systemd/system/roove-bi-cron@sync-jobs-worker.service.d/override.conf
-timers=(roove-bi-cron-meta-sync.timer roove-bi-cron-scalev-sync.timer roove-bi-cron-sync-jobs-worker.timer)
+timers=(roove-bi-cron-meta-sync.timer roove-bi-cron-scalev-sync.timer roove-bi-cron-sync-jobs-worker.timer roove-bi-cron-sheets-sync.timer)
 worker=roove-bi-cron@sync-jobs-worker.service
 
 git clone --single-branch --branch main https://github.com/tenthdragon/roove-bi.git "$release"
@@ -18,33 +18,42 @@ cp -p "$old/.env.local" "$release/.env.local"
 chown -R roove:roove "$release"
 cd "$release"
 runuser -u roove -- npm ci --include=dev --no-audit --no-fund
-runuser -u roove -- node --import tsx --test tests/sync-schedule.test.ts tests/scheduled-ads-sync.test.ts tests/daily-ads-sync-runner.test.ts tests/meta-pagination.test.ts tests/scalev-sync-runner.test.ts tests/scalev-request-timeout.test.ts
+runuser -u roove -- node --import tsx --test tests/sync-schedule.test.ts tests/scheduled-ads-sync.test.ts tests/meta-incremental-sync.test.ts tests/meta-funnel-sync-queue.test.ts tests/daily-ads-sync-runner.test.ts tests/meta-pagination.test.ts tests/scalev-sync-runner.test.ts tests/scalev-request-timeout.test.ts
 runuser -u roove -- env NEXT_TELEMETRY_DISABLED=1 NODE_OPTIONS=--max-old-space-size=2048 npm run build
 
 mkdir -m 700 "$backup"
 for timer in "${timers[@]}"; do
-  cp -a "/etc/systemd/system/$timer" "$backup/$timer"
+  if [ -f "/etc/systemd/system/$timer" ]; then cp -a "/etc/systemd/system/$timer" "$backup/$timer"; fi
 done
 if [ -f "$override" ]; then cp -a "$override" "$backup/override.conf"; fi
+sheets_service=/etc/systemd/system/roove-bi-cron-sheets-sync.service
+if [ -f "$sheets_service" ]; then cp -a "$sheets_service" "$backup/sheets.service"; fi
 rollback() {
   trap - ERR
   set +e
   echo 'Deploy failed; restoring previous release and schedules.'
-  systemctl stop "${timers[@]}" "$worker"
-  for timer in "${timers[@]}"; do cp -a "$backup/$timer" "/etc/systemd/system/$timer"; done
+  for timer in "${timers[@]}"; do systemctl stop "$timer" 2>/dev/null || true; done
+  systemctl stop "$worker"
+  systemctl stop roove-bi-cron-sheets-sync.service 2>/dev/null || true
+  for timer in "${timers[@]}"; do
+    if [ -f "$backup/$timer" ]; then cp -a "$backup/$timer" "/etc/systemd/system/$timer";
+    else systemctl disable "$timer"; rm -f "/etc/systemd/system/$timer"; fi
+  done
   if [ -f "$backup/override.conf" ]; then cp -a "$backup/override.conf" "$override"; else rm -f "$override"; fi
   ln -sfn "$old" "$base/current.rollback"
   mv -Tf "$base/current.rollback" "$base/current"
+  if [ -f "$backup/sheets.service" ]; then cp -a "$backup/sheets.service" "$sheets_service"; else rm -f "$sheets_service"; fi
   systemctl daemon-reload
   systemctl restart roove-bi
   systemctl start "${timers[@]}"
   exit 1
 }
 trap rollback ERR
-systemctl stop "${timers[@]}"
+for timer in "${timers[@]}"; do systemctl stop "$timer" 2>/dev/null || true; done
 # Stop the prior CLI process so it does not keep executing old code. Interrupted
 # jobs remain recorded and are recovered by the existing 30-minute stale lease.
 systemctl stop "$worker"
+systemctl stop roove-bi-cron-sheets-sync.service 2>/dev/null || true
 ln -sfn "$old" "$base/previous"
 ln -sfn "$release" "$base/current.next"
 mv -Tf "$base/current.next" "$base/current"
@@ -58,6 +67,7 @@ done
 for timer in "${timers[@]}"; do
   install -m 644 "$release/deploy/digitalocean/$timer" "/etc/systemd/system/$timer"
 done
+install -m 644 "$release/deploy/digitalocean/roove-bi-cron-sheets-sync.service" "$sheets_service"
 mkdir -p "$(dirname "$override")"
 install -m 644 "$release/deploy/digitalocean/roove-bi-cron@sync-jobs-worker.service.d/override.conf" "$override"
 systemctl daemon-reload

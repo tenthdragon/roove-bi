@@ -97,11 +97,11 @@ test('inventory failure on a later page rejects instead of returning partial ads
   try { await assert.rejects(fetchAdInventory('act_1', 'test'), /Meta API/); }
   finally { globalThis.fetch = original; }
 });
-test('mapping scheduler does not need saved funnels and queues only active accounts not mapped today', async () => {
+test('mapping scheduler refreshes active account inventory without saved funnels or daily-state gating', async () => {
   const h = harness(); h.svc.from = (table: string) => {
     assert.notEqual(table, 'meta_ad_funnels');
     const q: any = { select: () => q, eq: () => q, gte: () => q, then: (resolve: any) => resolve({ error: null, data: [{ account_id: table === 'meta_ad_accounts' ? 'act_2' : 'act_1' }] }) }; return q;
   };
   const queued = await enqueueScheduledMetaAdMapping(h.svc, options.workspaceId, async (workspace, accounts) => { assert.equal(workspace, options.workspaceId); assert.deepEqual(accounts, ['act_2']); return ['job']; });
-  assert.equal(queued, 1);
+  assert.deepEqual(queued, ['job']);
 });

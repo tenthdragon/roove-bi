@@ -157,8 +157,7 @@ export default function MetaFunnelsPage() {
   async function sync() {
     setBusy(true); setSyncStarting(true); setError(''); setNotice('');
     try {
-      const to = shiftDay(getTodayWIB(), -1);
-      const result = await queueMetaFunnelSync(shiftDay(to, -89), to, data?.selectedId || undefined);
+      const result = await queueMetaFunnelSync();
       const queued = { jobIds: result.jobs, startedAt: new Date().toISOString() };
       try { localStorage.setItem(`meta-funnel-sync:${activeWorkspace.id}`, JSON.stringify(queued)); } catch { /* Progress still works without persistence. */ }
       setSyncStatus(null); setSyncStatusError('');
@@ -219,7 +218,7 @@ export default function MetaFunnelsPage() {
       <div className={styles.actions}>
         <Link className={styles.button} href="/dashboard/meta-funnels/mapping">Pemetaan Ads</Link>
         <button className={styles.button} onClick={() => { void load(); setSyncRefresh(value => value + 1); }} disabled={loading}>Muat ulang</button>
-        {canManage && <><button className={styles.button} disabled={busy || hasPendingJobs || !schemaReady} onClick={() => void sync()}>{syncStarting ? 'Menyiapkan sync…' : hasPendingJobs ? 'Sync berlangsung…' : 'Sync 90 hari'}</button>
+        {canManage && <><button className={styles.button} disabled={busy || hasPendingJobs || !schemaReady} onClick={() => void sync()}>{syncStarting ? 'Menyiapkan sync…' : hasPendingJobs ? 'Sync berlangsung…' : 'Sync'}</button>
           <button className={styles.primary} disabled={!schemaReady} onClick={() => setEditor({ config: defaultFunnel() })}>+ Funnel baru</button></>}
       </div>
     </div>
@@ -265,7 +264,7 @@ export default function MetaFunnelsPage() {
                 {canManage && data.verifiedDestinationsReady && <button className={styles.button} onClick={() => setDestinationEditor({ accountId: ad.account_id, adId: ad.ad_id, name: ad.ad_name, url: '' })}>Tetapkan URL untuk ad {ad.ad_id}</button>}
               </div>)}
               {canManage && !data.verifiedDestinationsReady && <p>Pasang migration 200_meta_verified_ad_destinations.sql untuk menyimpan URL yang telah diverifikasi.</p>}
-              {canManage && <p className={styles.muted}>Sync 90 hari memperbarui URL creative dan histori.</p>}
+              {canManage && <p className={styles.muted}>Sync memperbarui data terbaru sejak sync terakhir, termasuk spend, iklan, dan creative.</p>}
             </div>
           </details>}
           {(!data.selectedId || !config.alerts_enabled) && <span className={styles.notificationState} title="Atur notifikasi di konfigurasi monitoring"><BellOff size={13} aria-hidden="true" />Notifikasi nonaktif</span>}
@@ -276,7 +275,7 @@ export default function MetaFunnelsPage() {
                 <dt>{data.accounts.find(a => a.account_id === g.account_id)?.account_name || g.account_id}</dt>
                 <dd>{[g.currentMissing > 0 && `Periode: ${g.currentMissing} hari`, g.baselineMissing > 0 && `Pembanding: ${g.baselineMissing} hari`].filter(Boolean).join(' · ')}<small>{g.firstMissing} – {g.lastMissing}</small></dd>
               </div>)}</dl>
-              {hasPendingJobs ? <p className={styles.muted}>Sync berjalan…</p> : canManage && data.coverageGaps.every(g => g.firstMissing >= shiftDay(getTodayWIB(), -90)) && <button className={styles.button} disabled={busy} onClick={() => void sync()}>Sync histori</button>}
+              {hasPendingJobs ? <p className={styles.muted}>Sync berjalan…</p> : canManage && <button className={styles.button} disabled={busy} onClick={() => void sync()}>Sync</button>}
             </div>
           </details>}
           {data.objectiveUnknownAds > 0 && <span className={styles.contextQuality}>Objective belum terbaca ({data.objectiveUnknownAds})</span>}
@@ -339,9 +338,10 @@ function SyncProgress({ progress, preparing, checking, status, accounts, error, 
 }) {
   const latest = status?.jobs[0];
   if (!preparing && !checking && !progress && !latest && !error && !status?.pending) return null;
-  const active = preparing || checking || (progress ? progress.active : !!status?.pending);
+  const active = preparing || checking || !!status?.pending || !!progress?.active;
   const issues = progress ? progress.issues > 0 || progress.missing > 0 : latest && !['success', 'queued', 'running'].includes(latest.status);
   const label = preparing ? 'Menyiapkan sync…' : checking ? 'Memeriksa sync…'
+    : progress && !progress.active && status?.pending ? 'Melengkapi data iklan…'
     : progress ? (progress.canceled === progress.total ? 'Sync dibatalkan' : progress.failed === progress.total ? 'Sync gagal'
       : { queued: 'Menunggu giliran', running: 'Sync berjalan', complete: 'Sync selesai', issues: 'Sync selesai dengan kendala', unavailable: 'Status sync tidak tersedia' }[progress.state])
       : status?.pending ? (status.running ? 'Sync berjalan' : 'Menunggu giliran') : latest ? `Sync terakhir: ${syncLabels[latest.status]?.toLowerCase() || latest.status}` : 'Status sync tidak tersedia';
@@ -355,7 +355,7 @@ function SyncProgress({ progress, preparing, checking, status, accounts, error, 
       <span>{label}</span>
       {progress && !preparing && !checking && <>
         <span className={styles.muted}>{progress.completed}/{progress.total} batch</span>
-        {!progress.missing && <progress aria-label="Progres sync 90 hari" max={progress.total} value={progress.completed} />}
+        {!progress.missing && <progress aria-label="Progres sync" max={progress.total} value={progress.completed} />}
         {!!progress.failed && <span>{progress.failed} gagal</span>}
         {!!progress.partial && <span>{progress.partial} sebagian</span>}
         {!!progress.canceled && <span>{progress.canceled} dibatalkan</span>}
@@ -366,8 +366,8 @@ function SyncProgress({ progress, preparing, checking, status, accounts, error, 
     </div>
     {!!jobs.length && <details className={styles.syncDetails}><summary>Detail</summary>
       <div className={styles.syncJobList}>{jobs.map(job => <div key={job.id} className={styles.syncJob}>
-        <span>{job.payload.date_start} – {job.payload.date_end}</span><span>{syncLabels[job.status] || job.status}</span>
-        <span className={styles.syncAccount}>{accounts.find(account => account.account_id === job.payload.account_id)?.account_name || job.payload.account_id}</span>
+        <span>{job.payload.date_start ? `${job.payload.date_start} – ${job.payload.date_end}` : 'Data terbaru'}</span><span>{syncLabels[job.status] || job.status}</span>
+        <span className={styles.syncAccount}>{accounts.find(account => account.account_id === job.payload.account_id)?.account_name || job.payload.account_id || 'Seluruh akun'}</span>
         {job.error_message && <small>{job.error_message}</small>}
       </div>)}</div>
     </details>}

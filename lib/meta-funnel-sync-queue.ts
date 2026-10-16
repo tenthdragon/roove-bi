@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { createSyncJobDedupeKey, enqueueSyncJob } from './sync-jobs';
-import { getTodayWIB } from './sync-schedule';
+import { metaAdAccountRange } from './meta-incremental-sync';
 import { shiftDay } from './meta-funnel-domain';
 
 export async function enqueueMetaAdBatches(workspaceId: string, accounts: string[], from: string, to: string, requestedBy?: string) {
@@ -18,22 +18,14 @@ export async function enqueueMetaAdBatches(workspaceId: string, accounts: string
   }
   return jobs;
 }
-export async function enqueueScheduledMetaAdBatches(svc: SupabaseClient, workspaceId: string, enqueue = enqueueMetaAdBatches) {
-  const funnel = await svc.from('meta_ad_funnels').select('config').eq('workspace_id', workspaceId).eq('archived', false);
-  if (funnel.error) {
-    if (['42P01', 'PGRST205'].includes(funnel.error.code)) return 0;
-    throw new Error(funnel.error.message);
-  }
-  if (!funnel.data?.length) return 0;
-  const today = getTodayWIB(); const end = shiftDay(today, -1);
-  const [accounts, coverage] = await Promise.all([
-    svc.from('meta_ad_accounts').select('account_id').eq('workspace_id', workspaceId).eq('is_active', true),
-    svc.from('meta_ad_sync_coverage').select('account_id').eq('workspace_id', workspaceId).eq('metric_date', end).gte('synced_at', `${today}T00:00:00+07:00`),
-  ]);
-  if (accounts.error || coverage.error) throw new Error(accounts.error?.message || coverage.error?.message);
-  const alreadySynced = new Set((coverage.data || []).map(c => c.account_id));
-  const configs = funnel.data.map(f => f.config).filter(c => c.group_by === 'landing_page');
-  const needed = (accounts.data || []).filter(a => !alreadySynced.has(a.account_id)
-    && configs.some(c => !c.account_ids.length || c.account_ids.includes(a.account_id))).map(a => a.account_id);
-  return needed.length ? (await enqueue(workspaceId, needed, shiftDay(end, -6), end)).length : 0;
+export async function enqueueScheduledMetaAdBatches(svc: SupabaseClient, workspaceId: string, enqueue = enqueueMetaAdBatches, requestedBy?: string) {
+  const accounts = await svc.from('meta_ad_accounts').select('account_id').eq('workspace_id', workspaceId).eq('is_active', true);
+  if (accounts.error) throw new Error(accounts.error.message);
+  // No saved funnel is required. Each account resumes from its own successful
+  // coverage, so a failed account is not skipped when another account succeeds.
+  const jobs = await Promise.all((accounts.data || []).map(async account => {
+    const range = await metaAdAccountRange(svc, workspaceId, account.account_id);
+    return enqueue(workspaceId, [account.account_id], range.from, range.to, requestedBy);
+  }));
+  return jobs.flat();
 }

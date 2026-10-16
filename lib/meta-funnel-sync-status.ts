@@ -47,7 +47,7 @@ export async function loadMetaSyncJobs(svc: SupabaseClient, workspaceId: string,
   // Keep PostgREST URLs bounded and read every requested batch, including reused jobs.
   for (let offset = 0; offset < ids.length; offset += 100) {
     const result = await svc.from('sync_jobs').select(META_SYNC_JOB_FIELDS)
-      .eq('workspace_id', workspaceId).eq('job_name', 'meta_sync').contains('payload', { ad_funnels_only: true })
+      .eq('workspace_id', workspaceId).eq('job_name', 'meta_sync')
       .in('id', ids.slice(offset, offset + 100));
     if (result.error) throw new Error(result.error.message);
     jobs.push(...(result.data || []) as MetaSyncJob[]);

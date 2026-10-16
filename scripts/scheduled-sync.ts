@@ -7,8 +7,9 @@ async function main() {
   const routes: Record<string, string> = {
     orders: '/api/scalev-sync',
     ads: '/api/meta-sync',
+    sheets: '/api/meta-sync?source=daily_ads',
   };
-  if (!routes[job]) throw new Error('Expected orders or ads');
+  if (!routes[job]) throw new Error('Expected orders, ads, or sheets');
   if (!process.env.CRON_SECRET) throw new Error('CRON_SECRET is required');
   const baseUrl = process.env.SYNC_BASE_URL || 'http://127.0.0.1:3000';
   const response = await fetch(new URL(routes[job], baseUrl), {

@@ -4,7 +4,7 @@ import { requireDashboardPermissionAccess, requireDashboardTabAccess } from './d
 import { createServiceSupabase } from './service-supabase';
 import { defaultFunnel, daysBetween, hasCoverage, shiftDay, emptyTotals, validateFunnel, validateRange, type FunnelConfig } from './meta-funnel-domain';
 import { evaluateWorkspaceAlerts, loadFunnels } from './meta-funnel-store';
-import { enqueueMetaAdBatches } from './meta-funnel-sync-queue';
+import { enqueueIncrementalMetaSync } from './meta-sync-queue';
 import { getTodayWIB } from './sync-schedule';
 import { isWorkspaceModuleEnabled } from './workspaces';
 import { canonicalLandingPage } from './meta-ad-destinations';
@@ -57,7 +57,7 @@ async function reportContext(input: MetaReportInput, includeJobs = false) {
 }
 function reportJobs(svc: ReturnType<typeof createServiceSupabase>, workspaceId: string) {
   return svc.from('sync_jobs').select(META_SYNC_JOB_FIELDS).eq('workspace_id', workspaceId)
-    .eq('job_name', 'meta_sync').contains('payload', { ad_funnels_only: true }).order('created_at', { ascending: false }).limit(20);
+    .eq('job_name', 'meta_sync').order('created_at', { ascending: false }).limit(20);
 }
 const currencyError = 'Funnel mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama pada konfigurasi.';
 export async function getMetaFunnelData(input: MetaReportInput) {
@@ -100,7 +100,7 @@ export async function getMetaFunnelSyncStatus(jobIds?: string[]) {
     svc.from('meta_ad_report_versions').select('revision').eq('workspace_id', workspaceId).maybeSingle(), reportJobs(svc, workspaceId),
     jobIds ? loadMetaSyncJobs(svc, workspaceId, jobIds) : Promise.resolve(null),
     svc.from('sync_jobs').select('status', { count: 'exact' }).eq('workspace_id', workspaceId).eq('job_name', 'meta_sync')
-      .contains('payload', { ad_funnels_only: true }).in('status', ['queued', 'running']).order('status', { ascending: false }).limit(1),
+      .in('status', ['queued', 'running']).order('status', { ascending: false }).limit(1),
   ]);
   if (version.error || jobs.error || active.error) throw new Error(version.error?.message || jobs.error?.message || active.error?.message);
   return { workspaceId, reportVersion: String(version.data?.revision || 0), jobs: jobs.data || [], trackedJobs,
@@ -188,21 +188,13 @@ export async function verifyMetaAdDestination(input: { accountId: string; adId: 
   if (result.error) throw new Error(result.error.message);
   return { url };
 }
-export async function queueMetaFunnelSync(from: string, to: string, funnelId?: string) {
+export async function queueMetaFunnelSync() {
   const { workspaceId, profile } = await manageAccess();
-  validateRange(from, to);
-  if (to >= getTodayWIB()) throw new Error('Sync funnel sampai kemarin agar periode harian sudah selesai.');
   const svc = createServiceSupabase();
-  let scope: string[] = [];
-  if (funnelId) {
-    const result = await svc.from('meta_ad_funnels').select('config').eq('workspace_id', workspaceId).eq('id', uuid(funnelId)).eq('archived', false).single();
-    if (result.error) throw new Error('Funnel tidak ditemukan.');
-    scope = result.data.config.account_ids;
-  }
-  const accounts = await svc.from('meta_ad_accounts').select('account_id').eq('workspace_id', workspaceId).eq('is_active', true);
+  const accounts = await svc.from('meta_ad_accounts').select('account_id').eq('workspace_id', workspaceId).eq('is_active', true).limit(1);
   if (accounts.error) throw new Error(accounts.error.message);
-  const ids = (accounts.data || []).map(a => a.account_id).filter(a => !scope.length || scope.includes(a));
-  if (!ids.length) throw new Error('Belum ada akun Meta aktif. Hubungkan akun melalui Admin Meta.');
-  const jobs = await enqueueMetaAdBatches(workspaceId, ids, from, to, profile.id);
+  if (!accounts.data?.length) throw new Error('Belum ada akun Meta aktif. Hubungkan akun melalui Admin Meta.');
+  const jobs = await enqueueIncrementalMetaSync(svc, workspaceId, profile.id);
+  if (!jobs.length) throw new Error('Belum ada akun Meta aktif. Hubungkan akun melalui Admin Meta.');
   return { jobs };
 }
