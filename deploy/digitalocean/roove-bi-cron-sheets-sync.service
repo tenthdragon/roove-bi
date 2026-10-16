@@ -1,0 +1,11 @@
+[Unit]
+Description=Queue Roove BI Google Sheets ads imports
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=roove
+WorkingDirectory=/var/www/releases/roove-bi/current
+ExecStart=/usr/bin/node --import tsx scripts/scheduled-sync.ts sheets
+TimeoutStartSec=90

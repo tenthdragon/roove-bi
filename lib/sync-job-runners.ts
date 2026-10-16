@@ -1,11 +1,9 @@
-import { getTodayWIB } from './sync-schedule';
 import { runDailyAdsSync } from './daily-ads-sync-runner';
 import { runFinancialSync } from './financial-sync-runner';
 import { runMetaSync } from './meta-sync-runner';
 import { runMetaAdSync } from './meta-ad-sync-runner';
 import { runMetaAdMappingSync } from './meta-ad-mapping-sync';
-import { enqueueScheduledMetaAdMapping } from './meta-ad-mapping-queue';
-import { enqueueScheduledMetaAdBatches } from './meta-funnel-sync-queue';
+import { metaSpendRange } from './meta-incremental-sync';
 import { createServiceSupabase } from './service-supabase';
 import { runScalevSync, type ScalevSyncMode } from './scalev-sync-runner';
 import { type SyncJobRecord } from './sync-jobs';
@@ -58,25 +56,15 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
         if (result.status !== 'success') throw new Error(result.errors.join('; '));
         return { status: result.status, rowsProcessed: result.rows_inserted, resultSummary: result };
       }
+      const range = payload.incremental === true || job.mode === 'cron'
+        ? await metaSpendRange(createServiceSupabase(), job.workspace_id) : null;
       const result = await runMetaSync({
         workspaceId: job.workspace_id,
-        dateStart: job.mode === 'cron' ? getTodayWIB() : typeof payload.date_start === 'string' ? payload.date_start : null,
-        dateEnd: job.mode === 'cron' ? getTodayWIB() : typeof payload.date_end === 'string' ? payload.date_end : null,
+        dateStart: range?.from || (typeof payload.date_start === 'string' ? payload.date_start : null),
+        dateEnd: range?.to || (typeof payload.date_end === 'string' ? payload.date_end : null),
       });
-      if (result.status !== 'success') {
-        throw new Error((result.errors || ['Meta sync incomplete']).join('; '));
-      }
-      // The existing timer runs every ten minutes. Queue ad reports once per WIB
-      // day, in one-account/week batches compatible with the HTTP worker.
-      const adFunnelsQueued = job.mode === 'cron'
-        ? await enqueueScheduledMetaAdBatches(createServiceSupabase(), job.workspace_id) : 0;
-      const adMappingsQueued = job.mode === 'cron'
-        ? await enqueueScheduledMetaAdMapping(createServiceSupabase(), job.workspace_id) : 0;
-      return {
-        status: result.status,
-        rowsProcessed: result.rows_inserted,
-        resultSummary: { ...result, ad_funnels_queued: adFunnelsQueued, ad_mappings_queued: adMappingsQueued },
-      };
+      if (result.status !== 'success') throw new Error((result.errors || ['Meta sync incomplete']).join('; '));
+      return { status: result.status, rowsProcessed: result.rows_inserted, resultSummary: result };
     }
 
     case 'financial_sync': {

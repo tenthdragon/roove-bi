@@ -4,16 +4,25 @@
 
 - ScaleV reconciliation starts at **02:00, 17:00 and 18:00 WIB**. Existing
   non-final orders, including `processing` and today's orders, are rechecked.
-- Meta ad spend is queued **every ten minutes**, using **today in WIB only**.
-  The old D-3 through D-1 automatic refresh is removed. Historical corrections
-  are now picked up only if a user explicitly syncs those dates manually.
-- Google Sheets ads imports are queued alongside Meta every ten minutes by
-  `/api/meta-sync` (including the CLI `scheduled-sync.ts ads` entry point).
-  Each feed uses its own active workspace connections, including workspaces
-  with Sheets but no Meta account. Sheets refreshes the full available Ads tab
-  so late entries are imported; Meta still refreshes today only. Active Sheets
-  jobs are deduplicated per workspace, with priority 15 after Meta (10) and
-  before ScaleV (20). The manual Sheets sync button remains available.
+- All Meta Ads syncs are queued **once daily at 17:00 WIB**: account spend,
+  ad-level metrics/creatives, and inventory/mapping. No saved funnel is required;
+  all active workspace Meta accounts participate. Spend failure does not block
+  enqueueing ad details or mapping.
+- Sync is incremental. Spend resumes from the last fully successful workspace
+  log through today, re-reading at least yesterday to finalize prior intraday
+  data. Ad-level metrics resume separately per account from its last successful
+  coverage date through yesterday, including the boundary day for corrections.
+  A first sync with no checkpoint reads yesterday (spend also includes today),
+  rather than automatically backfilling 90 days. Failed/partial spend logs do
+  not advance its checkpoint; failed ad snapshots do not write coverage.
+- The Meta Ad Funnel **Sync** button uses the same incremental bundle and tracks
+  spend, detail and mapping jobs. It ignores the displayed report date filter;
+  existing 90-day reports remain readable without re-fetching 90 days.
+- Google Sheets ads imports retain their **ten-minute** schedule via
+  `/api/meta-sync?source=daily_ads` (`scheduled-sync.ts sheets`). This is a
+  separate schedule so Sheets-only workspaces retain their existing behavior.
+  Each feed uses its active workspace connections and refreshes the available
+  Ads tab. Manual Sheets sync remains available.
 - Active workspace connections determine the workspaces to enqueue. An active
   queued/running Meta job for the same date/workspace is deduplicated.
 - Meta snapshot replacement is atomic per account/date range. Fetch/pagination
@@ -50,7 +59,8 @@ Do not combine this worker cron with an existing continuously running worker.
 ```cron
 # UTC 10:00/11:00/19:00 = WIB 17:00/18:00/02:00
 0 10,11,19 * * * cd /path/to/roove-bi && /usr/bin/flock -n /tmp/roove-orders.lock /usr/bin/node --import tsx scripts/scheduled-sync.ts orders >> /path/to/logs/sync-orders.log 2>&1
-*/10 * * * * cd /path/to/roove-bi && /usr/bin/flock -n /tmp/roove-ads.lock /usr/bin/node --import tsx scripts/scheduled-sync.ts ads >> /path/to/logs/sync-ads.log 2>&1
+0 10 * * * cd /path/to/roove-bi && /usr/bin/flock -n /tmp/roove-ads.lock /usr/bin/node --import tsx scripts/scheduled-sync.ts ads >> /path/to/logs/sync-ads.log 2>&1
+*/10 * * * * cd /path/to/roove-bi && /usr/bin/flock -n /tmp/roove-sheets.lock /usr/bin/node --import tsx scripts/scheduled-sync.ts sheets >> /path/to/logs/sync-sheets.log 2>&1
 * * * * * cd /path/to/roove-bi && /usr/bin/flock -n /tmp/roove-worker.lock /usr/bin/node --import tsx scripts/sync-jobs-worker.ts --max-jobs=20 >> /path/to/logs/sync-worker.log 2>&1
 ```
 
@@ -60,8 +70,8 @@ log rotation exists. A worker run can exceed one minute on a Droplet; unlike a
 Vercel request it is not subject to the route's 60-second timeout.
 
 After deployment, check app health, trigger `scheduled-sync.ts ads`, run the
-worker once and inspect job/log results. Confirm the returned date range is
-today WIB. Check installed cron entries and confirm they execute under the
+worker once and inspect job/log results. Confirm that spend, ad detail, and mapping jobs are enqueued for active
+Meta accounts, and that their date ranges follow the persisted checkpoints. Check installed cron entries and confirm they execute under the
 correct user and timezone. Retain the previous app release for rollback; the
 additive database function may remain installed if rolling back the app.
 
@@ -73,11 +83,11 @@ run Vercel and Droplet cron against the same production database simultaneously.
 
 ## Capacity
 
-Ten-minute refresh means 144 scheduled runs/day. With A accounts and one page
-per account, baseline Insights traffic is roughly 144*A requests/day, plus
-pagination/token checks/retries. Actual capacity depends on account counts,
-provider throttling and database timings. Monitor duration, queue age and
-errors after enabling; no production load guarantee is implied.
+Meta runs once per day, plus explicit manual requests. Normal daily catch-up
+reads only the boundary/new dates instead of 90 days. Mapping refreshes account
+inventory and may enqueue bounded creative follow-ups. Actual capacity depends
+on account counts, pagination and provider throttling. Monitor duration, queue
+age and errors. Sheets retains 144 enqueue ticks/day.
 
 ## Existing production Droplet
 
@@ -85,11 +95,21 @@ Production at `app.rti-hq.com` runs as user `roove` under `roove-bi.service`.
 The active release is `/var/www/releases/roove-bi/current`; keep `previous`
 pointing to the prior release when switching. Preserve its `.env.local`.
 
-This server already uses systemd timers rather than crontab. Install the three
+This server already uses systemd timers rather than crontab. Install the four
 versioned timer files from `deploy/digitalocean/` into `/etc/systemd/system/`,
-and its worker override into the corresponding service drop-in directory.
+the dedicated `roove-bi-cron-sheets-sync.service`, and its worker override into the corresponding service drop-in directory.
 The existing shared `roove-bi-cron@.service` and HTTP cron runner remain in use
 for Meta and orders. Only the worker switches to the CLI to drain up to five
 jobs per run. systemd does not start a second instance while that unit runs.
-Reload systemd and restart/enable the three timers after the app is healthy.
+Reload systemd and restart/enable the four timers after the app is healthy.
 Do not also install the example crontab above. Journald handles these job logs.
+
+### Applying this schedule change
+
+Changing the repository timer does not change the running Droplet by itself.
+Deploy the matching app/worker release and install all four timers plus the
+Sheets service together; otherwise the old ten-minute timer still invokes Meta.
+Do not start a second worker. Verify the effective Meta timer is 17:00 WIB,
+the Sheets timer is every ten minutes, and the first Meta run enqueues spend,
+ad-detail and mapping jobs even without saved funnels. Existing deployment
+rollback restores previous timers and removes newly introduced timer files.

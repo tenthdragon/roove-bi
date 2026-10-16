@@ -1,8 +1,8 @@
 [Unit]
-Description=Refresh Roove BI Meta spend every ten minutes
+Description=Refresh Roove BI Meta Ads daily at 17:00 WIB
 
 [Timer]
-OnCalendar=*-*-* *:0/10:00 Asia/Jakarta
+OnCalendar=*-*-* 17:00:00 Asia/Jakarta
 AccuracySec=1s
 Persistent=true
 Unit=roove-bi-cron@meta-sync.service

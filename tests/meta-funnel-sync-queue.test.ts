@@ -6,52 +6,47 @@ import { getTodayWIB } from '../lib/sync-schedule';
 import { shiftDay } from '../lib/meta-funnel-domain';
 import { loadMetaSyncJobs, metaSyncProgress, restoreMetaSyncRequest, validateMetaSyncJobIds, type MetaSyncJob } from '../lib/meta-funnel-sync-status';
 
-function service(configs: { account_ids: string[]; group_by?: string }[], covered: string[], error?: { code: string; message: string }) {
+function service(lastDates: Record<string, string | null>, error?: { message: string }) {
   const workspace = '00000000-0000-4000-8000-000000000001';
   const queries: string[] = [];
   const svc = { from(table: string) {
-    queries.push(table);
-    const query = {
+    queries.push(table); let account: string;
+    const query: any = {
       select() { return query; },
-      eq(key: string, value: unknown) {
+      eq(key: string, value: string) {
         if (key === 'workspace_id') assert.equal(value, workspace);
-        if (key === 'metric_date') assert.equal(value, shiftDay(getTodayWIB(), -1));
+        if (key === 'account_id') account = value;
         return query;
       },
-      gte(key: string, value: unknown) { assert.equal(key, 'synced_at'); assert.equal(value, `${getTodayWIB()}T00:00:00+07:00`); return query; },
+      lte() { return query; }, order() { return query; }, limit() { return query; }, maybeSingle() { return query; },
       then(resolve: (result: unknown) => void) {
-        resolve(table === 'meta_ad_funnels' ? { data: configs.map(config => ({ config: { group_by: 'landing_page', ...config } })), error }
-          : { data: (table === 'meta_ad_accounts' ? ['act_1', 'act_2', 'act_3'] : covered).map(account_id => ({ account_id })), error: null });
+        resolve(table === 'meta_ad_accounts' ? { data: Object.keys(lastDates).map(account_id => ({ account_id })), error: null }
+          : { data: lastDates[account] ? { metric_date: lastDates[account] } : null, error: error || null });
       },
     };
     return query;
   } } as unknown as SupabaseClient;
   return { svc, workspace, queries };
 }
-test('scheduled refresh queues only configured accounts not already refreshed today', async () => {
-  const { svc, workspace } = service([{ account_ids: ['act_1', 'act_2'] }], ['act_1']);
-  let calls = 0;
-  const result = await enqueueScheduledMetaAdBatches(svc, workspace, async (id, accounts, from, to) => {
-    calls++; assert.equal(id, workspace); assert.deepEqual(accounts, ['act_2']);
-    assert.equal(to, shiftDay(getTodayWIB(), -1)); assert.equal(from, shiftDay(to, -6));
-    return ['job-1'];
-  });
-  assert.equal(result, 1); assert.equal(calls, 1);
+test('all active accounts resume from their own coverage without saved funnels; first sync only yesterday', async () => {
+  const yesterday = shiftDay(getTodayWIB(), -1), earlier = shiftDay(yesterday, -3);
+  const { svc, workspace, queries } = service({ act_1: yesterday, act_2: earlier, act_3: null });
+  const calls: any[] = [];
+  const jobs = await enqueueScheduledMetaAdBatches(svc, workspace, async (id, accounts, from, to, user) => {
+    calls.push({ id, accounts, from, to, user }); return [accounts[0]];
+  }, 'user');
+  assert.deepEqual(jobs, ['act_1', 'act_2', 'act_3']);
+  assert.deepEqual(calls.map(c => c.from), [yesterday, earlier, yesterday]);
+  assert.ok(calls.every(c => c.to === yesterday && c.id === workspace && c.user === 'user'));
+  assert.ok(!queries.includes('meta_ad_funnels'));
 });
-test('repeated scheduler ticks with complete daily coverage enqueue no further ad jobs', async () => {
-  const { svc, workspace } = service([{ account_ids: [] }], ['act_1', 'act_2', 'act_3']);
-  assert.equal(await enqueueScheduledMetaAdBatches(svc, workspace, async () => { throw new Error('Must not enqueue'); }), 0);
+test('coverage lookup errors do not silently restart at yesterday and skip missed days', async () => {
+  const { svc, workspace } = service({ act_1: null }, { message: 'Database unavailable' });
+  await assert.rejects(enqueueScheduledMetaAdBatches(svc, workspace, async () => { throw new Error('Must not enqueue'); }), /Database unavailable/);
 });
-test('without saved funnels or before migration the scheduler leaves normal Meta sync intact', async () => {
-  for (const error of [undefined, { code: 'PGRST205', message: 'Migration missing' }]) {
-    const { svc, workspace, queries } = service([], [], error);
-    assert.equal(await enqueueScheduledMetaAdBatches(svc, workspace, async () => { throw new Error('Must not enqueue'); }), 0);
-    assert.deepEqual(queries, ['meta_ad_funnels']);
-  }
-});
-test('legacy naming configurations do not enqueue landing-page monitoring jobs', async () => {
-  const { svc, workspace } = service([{ account_ids: [], group_by: 'cep_funnel' }], []);
-  assert.equal(await enqueueScheduledMetaAdBatches(svc, workspace, async () => { throw new Error('Must not enqueue legacy monitoring'); }), 0);
+test('no active accounts queues no ad batches', async () => {
+  const { svc, workspace } = service({});
+  assert.deepEqual(await enqueueScheduledMetaAdBatches(svc, workspace, async () => { throw new Error('Must not enqueue'); }), []);
 });
 
 const batchIds = Array.from({ length: 156 }, (_, i) => `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`);
@@ -108,7 +103,7 @@ test('saved sync progress restores after reload and rejects malformed storage', 
   for (const input of [null, [], ['invalid'], Array(5001).fill(batchIds[0])]) assert.throws(() => validateMetaSyncJobIds(input));
   assert.deepEqual(validateMetaSyncJobIds([batchIds[0], batchIds[0]]), [batchIds[0]]);
 });
-test('status retrieval reads all 156 requested batches and always scopes workspace and Meta jobs', async () => {
+test('status retrieval reads all 156 requested batches and always scopes workspace and Meta jobs, including spend and mapping', async () => {
   const workspace = '00000000-0000-4000-8000-000000001000', chunks: string[][] = [];
   const svc = { from(table: string) {
     assert.equal(table, 'sync_jobs');
@@ -119,7 +114,7 @@ test('status retrieval reads all 156 requested batches and always scopes workspa
       contains(key: string, value: unknown) { filters[key] = value; return query; },
       in(key: string, ids: string[]) {
         assert.equal(key, 'id'); assert.equal(filters.workspace_id, workspace); assert.equal(filters.job_name, 'meta_sync');
-        assert.deepEqual(filters.payload, { ad_funnels_only: true }); assert.ok(ids.length <= 100);
+        assert.ok(ids.length <= 100);
         chunks.push(ids);
         return Promise.resolve({ data: ids.map(id => batch(id, 'success')), error: null });
       },
