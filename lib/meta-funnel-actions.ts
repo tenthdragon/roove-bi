@@ -2,7 +2,7 @@
 
 import { requireDashboardPermissionAccess, requireDashboardTabAccess } from './dashboard-access';
 import { createServiceSupabase } from './service-supabase';
-import { defaultFunnel, daysBetween, hasCoverage, shiftDay, emptyTotals, validateFunnel, validateRange, type FunnelConfig } from './meta-funnel-domain';
+import { defaultFunnel, metaPerformanceMetrics, daysBetween, hasCoverage, shiftDay, emptyTotals, validateFunnel, validateRange, type FunnelConfig } from './meta-funnel-domain';
 import { evaluateWorkspaceAlerts, loadFunnels } from './meta-funnel-store';
 import { enqueueIncrementalMetaSync } from './meta-sync-queue';
 import { getTodayWIB } from './sync-schedule';
@@ -12,7 +12,7 @@ import { validateDimensionFilters } from './meta-ad-dimensions';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
 import { completedMetaRange, metaCoverageGaps } from './meta-report-status';
 
-import { metaReportQuery, metaReportGroups, metaReportOptions, metaReportHistory, type MetaReportInput } from './meta-ad-report';
+import { metaReportBrandSections, metaReportQuery, metaReportGroups, metaReportOptions, metaReportHistory, type MetaReportInput } from './meta-ad-report';
 import { getCachedMetaAdReport } from './meta-ad-report-data';
 import { loadMetaSyncJobs, META_SYNC_JOB_FIELDS } from './meta-funnel-sync-status';
 
@@ -48,7 +48,7 @@ async function reportContext(input: MetaReportInput, includeJobs = false) {
   const accounts = accountsResult.data || [], brands = brandsResult.data || [];
   if (brandId && !metaBrandOptions(accounts, brands, []).choices.some(b => b.value === brandId)) throw new Error('Brand tidak tersedia pada akun Meta workspace ini.');
   const selected = funnels.find(f => f.id === input.funnelId) || funnels[0] || null;
-  const config: FunnelConfig = { ...(selected || defaultFunnel()), group_by: input.groupBy === 'ad' ? 'ad_id' : 'landing_page' };
+  const config: FunnelConfig = { ...(selected || defaultFunnel()), metrics: metaPerformanceMetrics(), group_by: input.groupBy === 'ad' ? 'ad_id' : 'landing_page' };
   const configuredAccounts = accounts.filter(a => !config.account_ids.length || config.account_ids.includes(a.account_id));
   return { schemaReady: true as const, workspaceId, reportVersion: String(version.data?.revision || 0), reportRange, filters, brandId,
     funnels, selectedId: selected?.id || null, config, accounts, configuredAccounts, brands,
@@ -64,6 +64,8 @@ export async function getMetaFunnelData(input: MetaReportInput) {
   const ctx = await reportContext(input, true);
   if (!ctx.schemaReady) return ctx;
   const raw = await getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, metaReportQuery(ctx.input, ctx.config));
+  const brandSections = await metaReportBrandSections(ctx.input, ctx.config, ctx.configuredAccounts, ctx.brands,
+    query => getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query));
   const { from, to } = ctx.reportRange;
   const prevFrom = shiftDay(from, -daysBetween(from, to)), reportingError = raw.currencies.length > 1 ? currencyError : null;
   return { schemaReady: true as const, funnels: ctx.funnels, selectedId: ctx.selectedId, config: ctx.config, accounts: ctx.accounts,
@@ -71,7 +73,7 @@ export async function getMetaFunnelData(input: MetaReportInput) {
     ...metaReportOptions(raw, ctx.accounts, ctx.brands), dimensionsReady: true, filters: ctx.filters,
     matchingAds: raw.matchingAds, objectiveUnknownAds: raw.objectiveUnknownAds,
     coverageGaps: metaCoverageGaps(raw.coverage, ctx.scopedAccountIds, ctx.reportRange),
-    groups: reportingError ? [] : metaReportGroups(raw, ctx.config), summary: reportingError ? emptyTotals() : raw.summary,
+    brandSections, groups: reportingError ? [] : metaReportGroups(raw, ctx.config), summary: reportingError ? emptyTotals() : raw.summary,
     previous: reportingError ? emptyTotals() : raw.previous, reportingError, currency: raw.currencies[0] || 'IDR',
     destinations: raw.destinations, verifiedDestinationsReady: true,
     currentComplete: hasCoverage(raw.coverage, ctx.scopedAccountIds, from, to),

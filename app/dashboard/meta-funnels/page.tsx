@@ -9,7 +9,7 @@ import { useDateRange } from '@/lib/DateRangeContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { archiveMetaFunnel, getMetaFunnelData, getMetaFunnelHistory, getMetaFunnelCreatives, getMetaFunnelSyncStatus, queueMetaFunnelSync, saveMetaFunnel, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
-import { defaultFunnel, MEASURES, metricValue, relativeChange, shiftDay, type FunnelConfig, type FunnelMetric, type Measure } from '@/lib/meta-funnel-domain';
+import { defaultFunnel, MEASURES, metricValue, relativeChange, shiftDay, type FunnelConfig, type FunnelMetric, type Measure, type Totals } from '@/lib/meta-funnel-domain';
 import { getTodayWIB } from '@/lib/sync-schedule';
 import styles from './page.module.css';
 import MetaAdCreative from '@/components/MetaAdCreative';
@@ -197,7 +197,7 @@ export default function MetaFunnelsPage() {
     const value = g.metrics.find(m => m.id === sort.metricId)?.current;
     return typeof value === 'number' && Number.isFinite(value) ? value : null;
   };
-  const visibleGroups = (data?.groups.filter(g => (!groupKey || g.key === groupKey) && [g.name, ...g.ad_ids, ...g.landing_page_urls].some(n => n.toLowerCase().includes(search.toLowerCase()))) || []).sort((a, b) => {
+  const visibleGroups = (groups: Data['groups']) => groups.filter(g => (!groupKey || g.key === groupKey) && [g.name, ...g.ad_ids, ...g.landing_page_urls].some(n => n.toLowerCase().includes(search.toLowerCase()))).sort((a, b) => {
     const byName = a.name.localeCompare(b.name, 'id', { numeric: true, sensitivity: 'base' }) || a.key.localeCompare(b.key);
     const direction = sort.direction === 'asc' ? 1 : -1;
     if (sort.metricId === null) return direction * byName;
@@ -207,6 +207,19 @@ export default function MetaFunnelsPage() {
     if (right === null) return -1;
     return direction * (left - right) || byName;
   });
+  const breakdown = (groups: Data['groups'], summary: Totals, previous: Totals, currency: string, sectionBrand?: string) => <div className={styles.tableWrap}>
+            <table className={styles.breakdownTable} aria-label={groupBy === 'ad' ? 'Breakdown per ad' : 'Breakdown per landing page'}>
+              <thead><tr><SortableHeader label={groupBy === 'ad' ? 'Ad' : 'URL landing page'} metricId={null} sort={sort} onSort={setTableSort} />{config.metrics.map(m => <SortableHeader key={m.id} label={m.label} metricId={m.id} sort={sort} onSort={setTableSort} description={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}${m.multiplier ? ` × ${m.multiplier}` : ''}` : MEASURES[m.numerator]} />)}</tr></thead>
+              <tbody>{visibleGroups(groups).map(g => <tr key={g.key}>
+                <td><button className={styles.nameButton} onClick={() => { if (sectionBrand) setBrandId(sectionBrand); setGroupKey(g.key); }}>{g.name}</button><small>{groupBy === 'ad' ? `Ad ${g.ad_ids.join(', ')}` : `${g.ad_ids.length} ad`} · {g.accounts.join(', ')}</small>
+                  {g.landing_page_urls.length > 1 && <small>Creative memiliki beberapa tujuan; Meta tidak membagi hasil per URL.</small>}
+                  <GroupDetails group={g} currency={currency} input={{ ...reportInput, brandId: sectionBrand || reportInput.brandId }} cacheKey={`${overviewKey}:${data?.reportVersion}`} />
+                </td>
+                {config.metrics.map(m => { const c = g.metrics.find(v => v.id === m.id)!; return <td key={m.id}>{format(c.current, m.format, currency)}<small><Change value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}
+              </tr>)}</tbody>
+              <tfoot><tr><th scope="row">{sectionBrand ? 'Total brand' : 'Total'}<small>Periode & filter aktif</small></th>{config.metrics.map(m => <td key={m.id}>{format(metricValue(summary, m), m.format, currency)}<small><Change value={relativeChange(metricValue(summary, m), metricValue(previous, m))} direction={m.direction} neutral={!m.monitor} /></small></td>)}</tr></tfoot>
+            </table>
+  </div>;
   const totals = group?.current || data?.summary;
   const prev = group?.previous || data?.previous;
   const historyResult = historyData?.key === historyKey ? historyData.result : null;
@@ -295,23 +308,19 @@ export default function MetaFunnelsPage() {
         ] as const).map(([id, label]) => <button key={id} className={tab === id ? styles.activeTab : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
         {overviewReady && totals && prev && <>
           <div className={styles.period}>Periode {data.reportRange.from} – {data.reportRange.to} <span>vs {data.prevFrom} – {data.prevTo} · {data.currency}</span></div>
-          {(tab !== 'overview' || !groupKey) && <div className={styles.cards}>{config.metrics.filter(m => tab !== 'overview' || groupBy === 'ad' || brandId || Object.values(dimensionFilters).some(Boolean) || ['spent', 'outbound_ctr', 'lpv'].includes(m.id)).map(m => <div className={styles.card} key={m.id}><div className={styles.muted}>{m.label}</div><strong>{format(metricValue(totals, m), m.format, data.currency)}</strong><Change value={relativeChange(metricValue(totals, m), metricValue(prev, m))} direction={m.direction} neutral={!m.monitor} /></div>)}</div>}
+          <div className={styles.cards}>{config.metrics.map(m => <div className={styles.card} key={m.id}><div className={styles.muted}>{m.label}</div><strong>{format(metricValue(totals, m), m.format, data.currency)}</strong><Change value={relativeChange(metricValue(totals, m), metricValue(prev, m))} direction={m.direction} neutral={!m.monitor} /></div>)}</div>
         </>}
         {tab === 'overview' && overviewReady && <>
           <div className={styles.sectionHeader}><h2>{groupBy === 'ad' ? 'Breakdown per ad' : 'Breakdown per landing page'}</h2><input aria-label={groupBy === 'ad' ? 'Cari ad' : 'Cari landing page'} placeholder={groupBy === 'ad' ? 'Cari nama atau ID ad…' : 'Cari URL landing page…'} value={search} onChange={e => setSearch(e.target.value)} /></div>
-          {!visibleGroups.length ? <div className={styles.card}>{data.groups.length ? `Tidak ada ${groupBy === 'ad' ? 'ad' : 'URL'} yang sesuai pencarian.` : 'Belum ada data yang sesuai. Periksa akun yang dipantau atau jalankan sync histori.'}</div> : <div className={styles.tableWrap}>
-            <table className={styles.breakdownTable} aria-label={groupBy === 'ad' ? 'Breakdown per ad' : 'Breakdown per landing page'}>
-              <thead><tr><SortableHeader label={groupBy === 'ad' ? 'Ad' : 'URL landing page'} metricId={null} sort={sort} onSort={setTableSort} />{config.metrics.map(m => <SortableHeader key={m.id} label={m.label} metricId={m.id} sort={sort} onSort={setTableSort} description={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}` : MEASURES[m.numerator]} />)}</tr></thead>
-              <tbody>{visibleGroups.map(g => <tr key={g.key}>
-                <td><button className={styles.nameButton} onClick={() => setGroupKey(g.key)}>{g.name}</button><small>{groupBy === 'ad' ? `Ad ${g.ad_ids.join(', ')}` : `${g.ad_ids.length} ad`} · {g.accounts.join(', ')}</small>
-                  {g.landing_page_urls.length > 1 && <small>Creative memiliki beberapa tujuan; Meta tidak membagi hasil per URL.</small>}
-                  <GroupDetails group={g} currency={data.currency} input={reportInput} cacheKey={`${overviewKey}:${data.reportVersion}`} />
-                </td>
-                {config.metrics.map(m => { const c = g.metrics.find(v => v.id === m.id)!; return <td key={m.id}>{format(c.current, m.format, data.currency)}<small><Change value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}
-              </tr>)}</tbody>
-            </table>
-          </div>}
-          <details className={styles.card}><summary>Definisi metrik & pengelompokan</summary><p>CTR outbound = outbound clicks ÷ impressions. LPV ratio = LPV ÷ outbound clicks. ATC ratio = ATC ÷ LPV. IC ratio = IC ÷ LPV. Purchase ratio = purchase ÷ IC. Semua rasio memakai total event, bukan rata-rata rasio ad.</p><p className={styles.muted}>URL diambil dari destination creative yang terbaca saat sync. Parameter UTM/click ID dan fragment diabaikan; query lain tetap dibedakan. Riwayat tanpa URL memakai metadata creative terkini. Data menggunakan atribusi Meta per adset.</p></details>
+          {!brandId && data.brandSections.length > 0 ? data.brandSections.map(section => <section key={section.id} className={styles.brandSection} aria-label={`Brand ${section.name}`}>
+            <div className={styles.brandHeading}><h3>{section.name}</h3><span className={styles.muted}>{section.matchingAds} ad · {section.currency}</span></div>
+            {section.reportingError ? <p role="alert" className={styles.error}>{section.reportingError}</p>
+              : <>{visibleGroups(section.groups).length === 0 && <p className={styles.muted}>{search ? 'Tidak ada baris yang sesuai pencarian.' : 'Belum ada data pada periode ini.'}</p>}
+                {breakdown(section.groups, section.summary, section.previous, section.currency, section.id)}</>}
+          </section>) : visibleGroups(data.groups).length === 0 ? <div className={styles.card}>{data.groups.length ? `Tidak ada ${groupBy === 'ad' ? 'ad' : 'URL'} yang sesuai pencarian.` : 'Belum ada data yang sesuai. Periksa akun yang dipantau atau jalankan Sync.'}</div>
+            : breakdown(data.groups, totals!, prev!, data.currency)}
+
+          <details className={styles.card}><summary>Definisi metrik & pengelompokan</summary><p>CTR outbound = outbound clicks ÷ impressions. LPV ratio = LPV ÷ outbound clicks. ATC ratio = ATC ÷ LPV. IC ratio = IC ÷ ATC. Purchase ratio = purchase ÷ IC. CPM = spent ÷ impressions × 1.000. CPIC = spent ÷ IC. CPP = spent ÷ purchase. Semua rasio memakai total event, bukan rata-rata rasio ad.</p><p className={styles.muted}>URL diambil dari destination creative yang terbaca saat sync. Parameter UTM/click ID dan fragment diabaikan; query lain tetap dibedakan. Riwayat tanpa URL memakai metadata creative terkini. Data menggunakan atribusi Meta per adset.</p></details>
         </>}
         {(tab === 'daily' || tab === 'trends') && !data.reportingError && <>
           <div className={styles.sectionHeader}><h2>{tab === 'daily' ? 'Hari dibanding hari sebelumnya' : 'Histori 90 hari'}</h2><div className={styles.actions}>

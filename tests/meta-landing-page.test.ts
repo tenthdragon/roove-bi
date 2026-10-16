@@ -28,13 +28,13 @@ test('landing-page grouping ignores naming categories and aggregates ratios from
   const config = { ...defaultFunnel(), cep_keys: ['skin'] as const, naming_status: 'tagged' as const };
   const [group] = compareGroups(rows, { ...config, cep_keys: [...config.cep_keys] }, '2026-10-02', '2026-10-02');
   assert.equal(group.ad_ids.length, 2); assert.equal(group.key, 'landing:https://roove.co.id/LP');
-  assert.deepEqual(Object.fromEntries(group.metrics.map(m => [m.id, m.current])), { spent: 100, outbound_ctr: .025, lpv: 20, lpv_rate: .8, atc_rate: .4, ic_rate: .25, purchase_rate: .4 });
+  assert.deepEqual(Object.fromEntries(group.metrics.map(m => [m.id, m.current])), { spent: 100, cpm: 100, outbound_ctr: .025, lpv_rate: .8, atc_rate: .4, ic_rate: .625, purchase_rate: .4, cpic: 20, cpp: 50 });
 });
 test('purchase ratio uses IC, undefined denominators remain unknown, and budget is absent', () => {
   const config = defaultFunnel(); const total = { ...emptyTotals(), lpv: 100, checkout: 10, purchases: 2 };
   assert.equal(metricValue(total, config.metrics.find(m => m.id === 'purchase_rate')!), .2);
   total.checkout = 0; assert.equal(metricValue(total, config.metrics.find(m => m.id === 'purchase_rate')!), null);
-  assert.equal(config.metrics.length, 7); assert.equal(config.metrics.some(m => /budget|utili/i.test(m.id)), false);
+  assert.equal(config.metrics.length, 9); assert.equal(config.metrics.some(m => /budget|utili/i.test(m.id)), false);
 });
 test('multiple destinations are one separate group and never duplicate spent across URLs', () => {
   const rows = [row('1', ['https://roove.co.id/A', 'https://roove.co.id/B'], { spend: 100 }), row('2', ['https://roove.co.id/B', 'https://roove.co.id/A'], { spend: 50 }), row('3', [], { spend: 20 })];

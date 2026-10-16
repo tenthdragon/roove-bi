@@ -50,3 +50,29 @@ export function metaReportHistory(raw: RawMetaReport, config: FunnelConfig, view
     metrics: Object.fromEntries(config.metrics.map(m => [m.id, valid && p.complete ? metricValue(p.totals, m) : null])) as Record<string, number | null> }));
   return view === 'daily' ? points.slice(1).map((p, i) => ({ ...p, previousMetrics: points[i].metrics })) : points;
 }
+
+// Fetch each brand before aggregation: a landing page or ad name can be shared
+// across brands, and its global totals cannot be split safely in the browser.
+export async function metaReportBrandSections(
+  input: MetaReportInput, config: FunnelConfig, accounts: MetaAccountBrand[], brands: MetaBrand[],
+  fetchReport: (query: ReportQuery) => Promise<RawMetaReport>,
+) {
+  if (input.brandId) return [];
+  const choices = metaBrandOptions(accounts, brands, []).choices;
+  const sections: {
+    id: string; name: string; summary: Totals; previous: Totals; groups: GroupComparison[];
+    currency: string; matchingAds: number; reportingError: string | null;
+  }[] = [];
+  // Bound concurrent database work even in workspaces with many brands.
+  for (let offset = 0; offset < choices.length; offset += 2) {
+    const batch = await Promise.all(choices.slice(offset, offset + 2).map(async brand => {
+      const raw = await fetchReport(metaReportQuery({ ...input, brandId: brand.value }, config));
+      const reportingError = raw.currencies.length > 1 ? 'Brand mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama.' : null;
+      return { id: brand.value, name: brand.label, summary: reportingError ? emptyTotals() : raw.summary,
+        previous: reportingError ? emptyTotals() : raw.previous, groups: reportingError ? [] : metaReportGroups(raw, config),
+        currency: raw.currencies[0] || 'IDR', matchingAds: raw.matchingAds, reportingError };
+    }));
+    sections.push(...batch);
+  }
+  return sections.sort((a, b) => a.name.localeCompare(b.name, 'id'));
+}
