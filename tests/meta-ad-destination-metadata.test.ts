@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { fetchAdDestinationBatch, META_DESTINATION_FIELDS, normalizeMetaDestination, verifyShopeeProductSet } from '../lib/meta-ad-destination-metadata';
+import { fetchAdDestinationBatch, META_DESTINATION_FIELDS, normalizeMetaDestination, refreshMetaAdDestinations, verifyShopeeProductSet } from '../lib/meta-ad-destination-metadata';
 
 const raw = (patch: Record<string, any> = {}) => ({
   id: '10', account_id: '1', adset: { id: '30', destination_type: 'WEBSITE', promoted_object: {} },
@@ -167,4 +167,47 @@ test('product-set verifier accepts all-Shopee products and returns complete coun
     assert.equal(result.complete, true); assert.equal(result.product_count, 25); assert.equal(result.samples.length, 20);
     assert.deepEqual(result.samples[0], { product_id: '1', url: 'https://shp.ee/1' });
   });
+});
+
+test('destination sync persists new catalog observations then queues a unique unseen product set', async () => {
+  const originalFetch = globalThis.fetch; const writes: any[] = [], queued: any[] = []; let requests = 0;
+  const svc: any = { from(table: string) {
+    const q: any = { select: () => q, eq: () => q, in: () => q, limit: () => q,
+      upsert: async (rows: any[]) => { writes.push(...rows); return { error: null }; },
+      then: (resolve: any) => resolve({ error: null, data: table === 'meta_ad_mappings'
+        ? [{ ad_id: '10' }, { ad_id: '11' }, { ad_id: '12' }]
+        : table === 'meta_shopee_product_sets' ? [{ product_set_id: '789' }] : [] }) };
+    return q;
+  } };
+  globalThis.fetch = async () => {
+    requests++;
+    return batchResponse(['10', '11', '12'], [
+      raw({ id: '10', creative: { id: '20', product_set_id: '456' } }),
+      raw({ id: '11', creative: { id: '21', product_set_id: '456' } }),
+      raw({ id: '12', creative: { id: '22', product_set_id: '789' } }),
+    ]);
+  };
+  try {
+    const result = await refreshMetaAdDestinations(svc, '00000000-0000-4000-8000-000000000001', 'act_1', ['10', '11', '12'], 'token',
+      async (_svc, workspace, account, ids) => {
+        assert.equal(writes.length, 3); queued.push({ workspace, account, ids }); return ['verify-job'];
+      });
+    assert.equal(requests, 1); assert.equal(result.product_set_jobs_queued, 1);
+    assert.deepEqual(queued[0].ids, ['456']);
+    assert.deepEqual(writes.map(r => [r.ad_id, r.classification]), [['10', 'unknown'], ['11', 'unknown'], ['12', 'cpas']]);
+    assert.ok(writes.every(r => r.workspace_id === queued[0].workspace && r.account_id === queued[0].account));
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('verification cancellation cannot register partially read catalog evidence', async () => {
+  const originalFetch = globalThis.fetch; const controller = new AbortController(); let requests = 0;
+  globalThis.fetch = async () => {
+    requests++; controller.abort();
+    return new Response(JSON.stringify({ data: [{ id: '1', url: 'https://shopee.co.id/a' }],
+      paging: { next: 'next', cursors: { after: 'cursor' } } }));
+  };
+  try {
+    await assert.rejects(verifyShopeeProductSet('456', 'token', { signal: controller.signal }), /abort/i);
+    assert.equal(requests, 1);
+  } finally { globalThis.fetch = originalFetch; }
 });

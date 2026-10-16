@@ -30,17 +30,18 @@ export async function fetchAdInventory(accountId: string, token: string): Promis
   return [...ads.values()];
 }
 
-export async function metaGraph(path: string, token: string, params: Record<string, string> = {}) {
+export async function metaGraph(path: string, token: string, params: Record<string, string> = {}, options: { signal?: AbortSignal } = {}) {
   const url = new URL(`${BASE}/${path}`);
   Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  return metaGraphUrl(url.toString(), token);
+  return metaGraphUrl(url.toString(), token, options.signal);
 }
-async function metaGraphUrl(url: string, token: string) {
+async function metaGraphUrl(url: string, token: string, signal?: AbortSignal) {
   const parsed = new URL(url);
   if (parsed.origin !== 'https://graph.facebook.com') throw new Error('Invalid Meta pagination host');
   // Pagination URLs may embed credentials; never log them or their values.
   parsed.searchParams.delete('access_token');
-  const response = await fetch(parsed, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(60000) });
+  const timeout = AbortSignal.timeout(60000);
+  const response = await fetch(parsed, { headers: { Authorization: `Bearer ${token}` }, signal: signal ? AbortSignal.any([timeout, signal]) : timeout });
   const body = await response.json().catch(() => ({}));
   if (!response.ok || body.error) throw new Error(`Meta API (${body.error?.code || response.status}): ${String(body.error?.message || response.statusText).split(token).join('[redacted]')}`);
   return body;

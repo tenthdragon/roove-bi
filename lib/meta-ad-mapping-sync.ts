@@ -23,7 +23,7 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
   if (accounts.error) throw new Error(accounts.error.message);
   if (options.accountId && !accounts.data?.length) throw new Error('Akun Meta tidak aktif atau tidak tersedia dalam workspace.');
   const token = await dependencies.resolveWorkspaceCredential({ supabase: svc, workspaceId, provider: 'meta', fallbackEnvKeys: ['META_ACCESS_TOKEN'] });
-  const errors: string[] = []; const warnings: string[] = []; let count = 0; let synced = 0; let creativeJobs = 0;
+  const errors: string[] = []; const warnings: string[] = []; let count = 0; let synced = 0; let creativeJobs = 0; let productSetJobs = 0;
   for (const account of accounts.data || []) {
     const observedAt = new Date().toISOString();
     try {
@@ -47,6 +47,7 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
           if (successes.length !== ids.length) warnings.push(`${account.account_name}: ${ids.length - successes.length} creative belum terbaca; pemetaan nama tetap disimpan.`);
           try {
             const destinations = await dependencies.refreshMetaAdDestinations?.(svc, workspaceId, account.account_id, ids, token);
+            productSetJobs += destinations?.product_set_jobs_queued || 0;
             if (destinations?.failures.length) warnings.push(`${account.account_name}: ${destinations.failures.length} metadata tujuan belum terbaca; bukti sebelumnya dipertahankan.`);
           } catch (e) { warnings.push(`${account.account_name}: ${e instanceof Error ? e.message : 'Metadata tujuan gagal'}`); }
         }
@@ -86,5 +87,5 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
       synced++;
     } catch (e) { errors.push(`${account.account_name}: ${e instanceof Error ? e.message : 'Pemetaan ad gagal'}`); }
   }
-  return { status: errors.length ? synced ? 'partial' as const : 'failed' as const : 'success' as const, rows_inserted: count, accounts_synced: synced, accounts_total: accounts.data?.length || 0, creative_jobs_queued: creativeJobs, errors, warnings };
+  return { status: errors.length ? synced ? 'partial' as const : 'failed' as const : 'success' as const, rows_inserted: count, accounts_synced: synced, accounts_total: accounts.data?.length || 0, creative_jobs_queued: creativeJobs, product_set_jobs_queued: productSetJobs, errors, warnings };
 }

@@ -310,3 +310,34 @@ After the updated worker is deployed, scheduled/manual mapping creative jobs
 refresh these observations in batches of 50 ads (one creative batch request plus
 one destination batch request). Page reads never request this metadata. Deploy
 migration 204 before deploying the worker change.
+
+## Automatic verification of new product sets
+
+Apply migration `205_meta_product_set_auto_verification.sql` before deploying
+the updated app and worker together. Drain the previous worker before switching
+releases: it does not understand the `verify_shopee_product_set` payload.
+
+Daily 17:00 WIB sync and explicit manual sync discover product sets while saving
+ad destination metadata. Each new workspace/account/product-set identity queues
+one `meta_sync` job in mode `meta_product_set_verify`. Active-job deduplication
+uses a stable key without a calendar day. The job has mapping markers so mapping
+and global Meta progress include it. Page loads do not enqueue verification.
+
+Product reads share a 20-second cancellation budget and follow every page before
+accepting Shopee evidence. A successful check records the verified product set
+and updates all currently observed ads referencing it, including ads without a
+direct URL. The classifier preserves conflicts with a brand website. The write
+RPC updates classification/evidence only when the source metadata still matches;
+it cannot overwrite a new creative observation or performance metrics.
+
+Known verified product sets reuse their registry entry. Empty, inaccessible,
+non-Shopee, incomplete or timed-out checks record an explicit warning and a
+cooldown until the next midnight in WIB. Repeated jobs in the same day do not
+make further product API requests. The next scheduled/manual sync after that
+deadline may try again. Existing direct app/URL evidence stays intact.
+
+Additional local database validation:
+
+```sh
+docker exec -i supabase_db_roove-bi-local psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 -f - < tests/meta-product-set-db.sql
+```
