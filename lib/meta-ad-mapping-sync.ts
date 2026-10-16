@@ -5,8 +5,9 @@ import { normalizeLandingPages } from './meta-ad-destinations';
 import { parseAdMapping } from './meta-ad-mapping';
 import { requireExplicitWorkspaceId } from './workspace-scope';
 import { enqueueMetaAdMappingCreatives } from './meta-ad-mapping-queue';
+import { refreshMetaAdDestinations } from './meta-ad-destination-metadata';
 
-const defaultDependencies = { createServiceSupabase, resolveWorkspaceCredential, fetchAdInventory, fetchCreativeBatch, enqueueMetaAdMappingCreatives };
+const defaultDependencies = { createServiceSupabase, resolveWorkspaceCredential, fetchAdInventory, fetchCreativeBatch, enqueueMetaAdMappingCreatives, refreshMetaAdDestinations };
 export async function runMetaAdMappingSync(options: { workspaceId: string; accountId?: string; creativeAdIds?: string[] }, dependencies = defaultDependencies) {
   const workspaceId = requireExplicitWorkspaceId(options.workspaceId, 'Meta ad mapping sync');
   if (options.creativeAdIds && (!options.accountId || !options.creativeAdIds.length || options.creativeAdIds.length > 100 || options.creativeAdIds.some(id => !/^\d+$/.test(id)))) throw new Error('Batch creative harus memiliki satu akun dan 1–100 ad ID.');
@@ -44,6 +45,10 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
             if (result.error) throw new Error(result.error.message); count += Number(result.data || 0);
           }
           if (successes.length !== ids.length) warnings.push(`${account.account_name}: ${ids.length - successes.length} creative belum terbaca; pemetaan nama tetap disimpan.`);
+          try {
+            const destinations = await dependencies.refreshMetaAdDestinations?.(svc, workspaceId, account.account_id, ids, token);
+            if (destinations?.failures.length) warnings.push(`${account.account_name}: ${destinations.failures.length} metadata tujuan belum terbaca; bukti sebelumnya dipertahankan.`);
+          } catch (e) { warnings.push(`${account.account_name}: ${e instanceof Error ? e.message : 'Metadata tujuan gagal'}`); }
         }
         synced++; continue;
       }
