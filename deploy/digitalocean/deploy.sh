@@ -74,7 +74,9 @@ systemctl daemon-reload
 systemctl enable "${timers[@]}"
 systemctl restart "${timers[@]}"
 trap - ERR
-systemctl start roove-bi-cron@meta-sync.service
+# Deploying the app must not enqueue a new Meta sync. Only the 17:00 WIB
+# timer or an explicit manual request may start one; workers may drain jobs
+# that were already queued before this deployment.
 systemctl start --no-block "$worker"
 echo 'DEPLOY BERHASIL; worker verification is still required.'
 readlink -f "$base/current"

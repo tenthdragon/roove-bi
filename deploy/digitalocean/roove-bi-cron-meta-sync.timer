@@ -4,7 +4,7 @@ Description=Refresh Roove BI Meta Ads daily at 17:00 WIB
 [Timer]
 OnCalendar=*-*-* 17:00:00 Asia/Jakarta
 AccuracySec=1s
-Persistent=true
+Persistent=false
 Unit=roove-bi-cron@meta-sync.service
 
 [Install]
