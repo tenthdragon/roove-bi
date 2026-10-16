@@ -22,6 +22,7 @@ tables and the snapshot RPC have no browser grants.
    `200_meta_verified_ad_destinations.sql`, `201_meta_ad_mappings.sql`, and
    `202_meta_ad_campaign_dimensions.sql` and `203_meta_ad_report_performance.sql` using the
    normal migration process. This task applies migrations to the local clone only.
+
 2. Deploy the app and sync-job worker together. The worker must understand
    `meta_sync` jobs with `ad_funnels_only: true` before processing them.
    Mapping jobs additionally use `ad_mapping_only: true`.
@@ -267,3 +268,45 @@ workspace validation, RLS, and grants. The local preview's network guard blocks
 live provider sync. During this task, Meta read-only reports and metadata were
 copied into the isolated database without production writes. Browser verification
 uses the normal login flow.
+
+## Shopee destination evidence and metadata backfill
+
+Migration `204_meta_ad_destination_metadata.sql` adds backend-only current
+destination observations and a workspace/account-scoped verified Shopee product
+set registry. These tables do not change daily performance facts or the current
+report UI. Unknown destinations are not classified as non-CPAS.
+
+`lib/meta-ad-destination-metadata.ts` reads Shopee app identity, store URLs,
+omnichannel configuration, ad set promoted objects and product set IDs. CPAS
+requires an explicit Shopee identity/URL or a separately verified product set;
+generic app destinations, Canvas URLs, account names and unverified catalog IDs
+are insufficient. A failed or opaque read leaves previous observations intact.
+Catalog permission failures must be reported rather than worked around by
+guessing catalog ownership. Product set verification reads every available
+product URL across all pages; every returned product must have a Shopee URL.
+Empty, inaccessible, mixed or incomplete product sets remain unverified. A
+verified product set with a conflicting external website stays unknown unless
+the ad also supplies a direct Shopee URL/app identity. API observation time is
+not historical delivery time.
+
+Run the backfill explicitly against the intended environment:
+
+```sh
+node --import tsx scripts/ops/backfill-meta-ad-destinations.ts --workspace=<workspace-uuid> --apply
+node --import tsx scripts/ops/verify-meta-shopee-product-sets.ts --workspace=<workspace-uuid> --apply
+```
+
+Without `--apply`, the command reads metadata and writes only a local checkpoint.
+It visits the union of stored creative, mapping and daily-fact ad IDs, including
+paused ads and inactive accounts. `--max-batches=1` limits a canary to 50 ads.
+`--resume` skips successfully saved checkpoint entries and retries failed ones.
+Checkpoints default to ignored `.local/` files; do not commit them. Token expiry
+or rate limits stop the run. No Insights requests or sync queue jobs are created.
+The verifier's `--reclassify-only` option reuses the stored verified registry
+without querying product sets again. `--unverified-only` checks only product sets
+that do not already have a verified registry entry.
+
+After the updated worker is deployed, scheduled/manual mapping creative jobs
+refresh these observations in batches of 50 ads (one creative batch request plus
+one destination batch request). Page reads never request this metadata. Deploy
+migration 204 before deploying the worker change.

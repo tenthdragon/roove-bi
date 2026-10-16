@@ -63,6 +63,22 @@ test('bounded follow-up refreshes destinations without re-reading inventory or m
   assert.deepEqual(h.writes.find(w => w.table === 'upsert_meta_ad_mappings')!.data.p_rows[0].landing_page_urls, ['https://roove.co.id/new']);
   assert.equal(h.writes.some(w => w.table === 'meta_ad_mapping_sync_state'), false); assert.equal(h.queued.length, 0);
 });
+test('destination metadata refresh runs only for explicit creative follow-up batches', async () => {
+  const h = harness(); const calls: any[] = [];
+  h.deps.refreshMetaAdDestinations = async (...args: any[]) => { calls.push(args.slice(1)); return { saved: 1, failures: [] }; };
+  const inventory = await runMetaAdMappingSync(options, h.deps);
+  assert.equal(inventory.status, 'success'); assert.equal(calls.length, 0);
+  const followup = await runMetaAdMappingSync({ ...options, creativeAdIds: ['10'] }, h.deps);
+  assert.equal(followup.status, 'success'); assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].slice(0, 3), [options.workspaceId, 'act_1', ['10']]);
+});
+test('destination metadata refresh failures warn without failing mapping follow-up', async () => {
+  const h = harness();
+  h.deps.refreshMetaAdDestinations = async () => { throw new Error('Destination metadata unavailable'); };
+  const result = await runMetaAdMappingSync({ ...options, creativeAdIds: ['10'] }, h.deps);
+  assert.equal(result.status, 'success'); assert.equal(result.rows_inserted, 1);
+  assert.match(result.warnings.join(' '), /Destination metadata unavailable/);
+});
 test('creative follow-up validates ad ownership and the 100-ad batch limit', async () => {
   const h = harness(); const result = await runMetaAdMappingSync({ ...options, creativeAdIds: ['999'] }, h.deps);
   assert.equal(result.status, 'failed'); assert.equal(h.writes.length, 0); assert.match(result.errors.join(), /workspace/);
@@ -74,10 +90,10 @@ test('an opaque creative response without its ID cannot erase an observed identi
   assert.equal(result.status, 'success'); assert.equal(result.rows_inserted, 0); assert.equal(result.warnings.length, 1);
   assert.equal(h.writes.length, 0);
 });
-test('creative enrichment queues stable batches of at most 100 owned ad IDs', async () => {
+test('creative and destination enrichment queues at most 50 owned ads per job', async () => {
   const calls: any[] = []; const ids = Array.from({ length: 251 }, (_, i) => String(1000 + i));
   await enqueueMetaAdMappingCreatives(options.workspaceId, options.accountId, [...ids].reverse(), async input => { calls.push(input); return { job: { id: 'job' } as any, isDuplicate: false }; });
-  assert.deepEqual(calls.map(c => c.payload.creative_ad_ids.length), [100, 100, 51]);
+  assert.deepEqual(calls.map(c => c.payload.creative_ad_ids.length), [50, 50, 50, 50, 50, 1]);
   assert.deepEqual(calls.flatMap(c => c.payload.creative_ad_ids), ids);
   assert.ok(calls.every(c => c.workspaceId === options.workspaceId && c.payload.account_id === options.accountId));
 });

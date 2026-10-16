@@ -11,9 +11,10 @@ export async function enqueueMetaAdMapping(workspaceId: string, accounts: string
 }
 export async function enqueueMetaAdMappingCreatives(workspaceId: string, accountId: string, adIds: string[], enqueue = enqueueSyncJob) {
   const jobs: string[] = []; const ids = [...new Set(adIds)].sort();
-  // At most two Meta batch requests per job, within the HTTP worker's 60s limit.
-  for (let offset = 0; offset < ids.length; offset += 100) {
-    const payload = { ad_mapping_only: true, account_id: accountId, creative_ad_ids: ids.slice(offset, offset + 100), requested_day: getTodayWIB() };
+  // One creative read plus one destination read per job. Keep the request count
+  // bounded now that each ad also needs its application/catalog configuration.
+  for (let offset = 0; offset < ids.length; offset += 50) {
+    const payload = { ad_mapping_only: true, account_id: accountId, creative_ad_ids: ids.slice(offset, offset + 50), requested_day: getTodayWIB() };
     const result = await enqueue({ workspaceId, jobName: 'meta_sync', route: '/dashboard/meta-funnels', mode: 'ad_mapping_creatives', payload,
       dedupeKey: createSyncJobDedupeKey('meta_sync', 'ad_mapping_creatives', payload), maxAttempts: 3, priority: 20 });
     jobs.push(result.job.id);

@@ -61,6 +61,8 @@ scripts/*
 !scripts/backfill-marketplace-tracking.ts
 !scripts/ops/
 !scripts/ops/backfill-marketplace-tracking.ts
+!scripts/ops/backfill-meta-ad-destinations.ts
+!scripts/ops/verify-meta-shopee-product-sets.ts
 
 # docs
 docs/*
