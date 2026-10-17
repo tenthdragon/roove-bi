@@ -55,7 +55,7 @@ export default function MetaGroupDrawer({ group, section, world, input, currency
     <div className={styles.drawerBackdrop} onClick={onClose} aria-hidden="true" />
     <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label={`Detail ${group.name}`}>
       <div className={styles.drawerHead}>
-        <div><div className={styles.muted}>{world === 'website' ? `Landing page · ${section.name}` : 'Ad · CPAS Shopee'}</div><h2>{group.name}</h2><div className={styles.muted}>{group.ad_ids.length} ad · {group.accounts.join(', ')}</div></div>
+        <div><div className={styles.muted}>{world === 'website' ? `${group.destination ? 'WhatsApp' : 'Landing page'} · ${section.name}` : 'Ad · CPAS Shopee'}</div><h2>{group.name}</h2><div className={styles.muted}>{group.ad_ids.length} ad · {group.accounts.join(', ')}</div></div>
         <button type="button" className={styles.drawerClose} aria-label="Tutup detail" onClick={onClose}><X size={16} aria-hidden="true" /></button>
       </div>
       <div className={styles.miniGrid}>

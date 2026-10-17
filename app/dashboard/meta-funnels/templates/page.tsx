@@ -8,14 +8,15 @@ import { createMetaTemplatePreset, deleteMetaTemplateRule, getMetaTemplateConfig
 import { MEASURES, type FunnelConfig } from '@/lib/meta-funnel-domain';
 import { TEMPLATE_KIND_LABELS, validateTemplateRule, type TemplateMatchKind } from '@/lib/meta-funnel-templates';
 import { applyMetaTemplateRules, metaTemplateError } from '@/lib/meta-template-settings';
-import { formatCompactMoney, formatDate } from '@/lib/meta-format';
+import { templateDestinationRule } from '@/lib/meta-ctwa-destinations';
+import { formatCompactMoney, formatCount, formatMetric, formatDate } from '@/lib/meta-format';
 import MetaAdsNav from '@/components/MetaAdsNav';
 import MetaFunnelEditor from '@/components/MetaFunnelEditor';
 import styles from '../page.module.css';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaTemplateSettings>>, { schemaReady: true }>;
 const message = (e: unknown) => metaTemplateError(e, 'Permintaan belum berhasil. Silakan coba muat ulang halaman.');
-const kindLabels: Record<TemplateMatchKind, string> = { exact: 'URL persis', prefix: 'Awalan URL', domain: 'Domain' };
+const kindLabels: Record<TemplateMatchKind, string> = { exact: 'URL persis', prefix: 'Awalan URL', domain: 'Domain', ctwa: 'Tujuan WhatsApp' };
 
 export default function MetaTemplatesPage() {
   const { activeWorkspace } = useWorkspace();
@@ -80,7 +81,7 @@ export default function MetaTemplatesPage() {
         : before.rules.filter(r => !('remove' in change) || r.id !== change.remove);
       const optimistic = applyMetaTemplateRules(before, optimisticRules);
       mutation.current = true; setBusy(true); setError(''); setNotice('');
-      setPendingUrls(optimistic.landingPages.filter((lp, i) => lp.templateId !== before.landingPages[i].templateId || lp.rule?.id !== before.landingPages[i].rule?.id).map(lp => lp.url));
+      setPendingUrls(optimistic.landingPages.filter((lp, i) => lp.templateId !== before.landingPages[i].templateId || lp.rule?.id !== before.landingPages[i].rule?.id).map(lp => lp.key));
       setData(optimistic);
       const result = 'save' in change ? await saveMetaTemplateRule(change.save) : await deleteMetaTemplateRule(change.remove);
       if (current !== request.current) return false;
@@ -98,18 +99,44 @@ export default function MetaTemplatesPage() {
     }
   }
   const selected = data?.templates.find(t => t.id === selectedId) || null;
-  const ruleFor = (url: string) => data?.landingPages.find(lp => lp.url === url)?.rule || null;
-  function assign(url: string, funnelId: string) {
-    const existing = ruleFor(url);
+  function assign(lp: Data['landingPages'][number], funnelId: string) {
+    const existing = lp.rule;
+    const target = templateDestinationRule(lp);
     if (!funnelId) {
-      if (existing?.match_kind === 'exact') return changeRule({ remove: existing.id }, 'Aturan URL dihapus.');
-      setNotice(existing ? `URL ini mengikuti aturan ${kindLabels[existing.match_kind]} "${existing.pattern}". Ubah atau hapus aturan itu di daftar aturan.` : 'URL ini belum punya aturan.');
+      if (existing?.match_kind === target.match_kind) return changeRule({ remove: existing.id }, 'Aturan tujuan dihapus.');
+      setNotice(existing ? `Tujuan ini mengikuti aturan ${kindLabels[existing.match_kind]} "${existing.pattern}". Ubah atau hapus aturan itu di daftar aturan.` : 'Tujuan ini belum punya aturan.');
       return;
     }
-    return changeRule({ save: { id: existing?.match_kind === 'exact' ? existing.id : undefined, funnelId, match_kind: 'exact', pattern: url } }, 'Template ditetapkan.');
+    return changeRule({ save: { id: existing?.match_kind === target.match_kind ? existing.id : undefined, funnelId, ...target } }, 'Template ditetapkan.');
+  }
+  function assignmentTable(rows: Data['landingPages'], ctwa = false, total?: Data['ctwaBrands'][number]) {
+    return <div className={styles.sectionCard}><div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}><table className={styles.rulesTable}>
+      <thead><tr><th>{ctwa ? 'Tujuan WhatsApp' : 'Landing page'}</th><th>Brand</th><th style={{ textAlign: 'right' }}>Spend</th>{ctwa && <><th>Percakapan</th><th>Biaya / percakapan</th></>}<th>Bukti dari data</th><th>Template</th><th>Status</th></tr></thead>
+      <tbody>{rows.map(lp => {
+        const confirmed = lp.rule?.match_kind === 'exact' || lp.rule?.match_kind === 'ctwa';
+        const status = lp.templateId ? { cls: styles.statusOk, label: confirmed ? 'Dikonfirmasi' : `Ikut aturan ${kindLabels[lp.rule!.match_kind]}` } : lp.suggestion.funnelId ? { cls: styles.statusWarn, label: 'Belum ditetapkan' } : { cls: styles.statusInfo, label: 'Perlu keputusan' };
+        const pending = pendingUrls.includes(lp.key);
+        return <tr key={lp.key}>
+          <td style={{ minWidth: 240 }}><b style={{ overflowWrap: 'anywhere' }}>{lp.label}</b><small>{lp.ads} ad · {lp.accounts.join(', ')}</small>
+            {lp.destination?.status === 'missing' && <small>Nomor belum diberikan Meta · {lp.destination.page_id ? `Page ${lp.destination.page_id}` : 'Page belum tersedia'} · dipisahkan per akun</small>}
+            {lp.destination?.status === 'multiple' && <small>Beberapa nomor ditemukan; metrik ad ini dihitung sekali dalam kelompok tersendiri.</small>}
+            {ctwa && lp.landing_page_urls.map(url => <small key={url} style={{ overflowWrap: 'anywhere' }}>{url}</small>)}
+          </td>
+          <td>{lp.brands.join(', ')}</td><td style={{ textAlign: 'right' }}>{lp.currency ? formatCompactMoney(lp.spend, lp.currency) : 'Beda mata uang'}</td>
+          {ctwa && <><td>{formatCount(lp.evidence.conversations)}</td><td>{lp.currency ? formatMetric(lp.evidence.conversations > 0 ? lp.spend / lp.evidence.conversations : null, 'money', lp.currency) : '—'}</td></>}
+          <td style={{ minWidth: 200 }}>{lp.suggestion.reason}</td>
+          <td><select aria-label={`Template untuk ${lp.label}`} disabled={!canManage || busy || !data?.rulesReady} value={lp.templateId || ''} onChange={e => void assign(lp, e.target.value)}>
+            <option value="">{lp.suggestion.funnelId ? `Saran: ${data?.templates.find(t => t.id === lp.suggestion.funnelId)?.name}` : 'Tanpa template'}</option>
+            {data?.templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+          </select></td>
+          <td><span role={pending ? 'status' : undefined} className={`${styles.statusTag} ${pending ? styles.statusWarn : status.cls}`}>{pending ? 'Menyimpan…' : status.label}</span>{canManage && !lp.templateId && lp.suggestion.funnelId && data?.rulesReady && <small><button type="button" className={styles.nameButton} disabled={busy} onClick={() => void assign(lp, lp.suggestion.funnelId!)}>Konfirmasi saran</button></small>}</td>
+        </tr>;
+      })}</tbody>
+      {total && <tfoot><tr><th scope="row">Total CTWA {total.name}</th><td>{total.name}</td><td style={{ textAlign: 'right' }}>{total.currency ? formatCompactMoney(total.summary.spend, total.currency) : 'Beda mata uang'}</td><td>{formatCount(total.summary.conversations)}</td><td>{total.currency ? formatMetric(total.summary.conversations > 0 ? total.summary.spend / total.summary.conversations : null, 'money', total.currency) : '—'}</td><td colSpan={3}>Termasuk tujuan yang belum memiliki template atau nomor</td></tr></tfoot>}
+    </table>{!rows.length && <p className={styles.muted} style={{ padding: 16 }}>Belum ada tujuan pada 30 hari terakhir.</p>}</div></div>;
   }
   return <div className={styles.page} aria-busy={loading}>
-    <MetaAdsNav title="Template funnel" subtitle="Template menentukan tahapan dan kolom hasil untuk landing page Website. Satu landing page memakai satu template. CPAS tidak memakai template karena tahapannya tetap: outbound → Shopee → purchase."
+    <MetaAdsNav title="Template funnel" subtitle="Template menentukan tahapan dan kolom hasil untuk tujuan Website dan WhatsApp. Setiap tujuan memakai satu template; nomor WhatsApp dipisahkan per brand. CPAS tidak memakai template karena tahapannya tetap: outbound → Shopee → purchase."
       actions={canManage && schemaReady ? <>
         <button className={styles.button} disabled={busy || loading || !data} onClick={() => void run(() => createMetaTemplatePreset('transaction'), 'Template Transaksi dibuat.')}>+ Template Transaksi</button>
         <button className={styles.button} disabled={busy || loading || !data} onClick={() => void run(() => createMetaTemplatePreset('lead'), 'Template Lead dibuat.')}>+ Template Lead</button>
@@ -124,7 +151,7 @@ export default function MetaTemplatesPage() {
           {!data.templates.length && <div className={styles.card}>Belum ada template. Mulai dari template Transaksi atau Lead di atas, lalu sesuaikan tahapannya.</div>}
           {data.templates.map(t => <button key={t.id} type="button" className={`${styles.templateItem} ${t.id === selectedId ? styles.templateItemActive : ''}`} aria-pressed={t.id === selectedId} onClick={() => { setSelectedId(t.id); setEditor(null); }}>
             <strong>{t.name}</strong>
-            <span>{TEMPLATE_KIND_LABELS[t.kind]} · {t.rules} aturan URL · hasil utama {t.mainMetric?.label || '—'}</span>
+            <span>{TEMPLATE_KIND_LABELS[t.kind]} · {t.rules} aturan tujuan · hasil utama {t.mainMetric?.label || '—'}</span>
             <div className={styles.stageChips}>{t.stages.filter(s => s !== 'spend').map(s => <span key={s} className={styles.stageChip}>{MEASURES[s]}</span>)}</div>
           </button>)}
           <div className={styles.card}><span className={styles.muted}>Formulir "Funnel baru" yang lama menjadi editor template ini. Tahapan dan kolom hasil yang diisi di sini dipakai oleh laporan brand. Notifikasi penurunan dievaluasi per template, hanya untuk landing page yang terpetakan ke template itu.</span></div>
@@ -144,38 +171,29 @@ export default function MetaTemplatesPage() {
           </div> : null}
         </section>
       </div>}
+      {data && data.ctwaBrands.length > 0 && <section aria-label="Pencocokan tujuan WhatsApp" style={{ display: 'grid', gap: 12 }}>
+        <div className={styles.sectionTitle}><h2>Tujuan WhatsApp · CTWA</h2><span>{formatDate(data.range.from)} – {formatDate(data.range.to)}</span></div>
+        <p className={styles.muted}>Dipisahkan berdasarkan brand dan nomor tujuan, termasuk lintas akun. Nomor berbeda dapat memakai template yang sama; metrik tetap terpisah. Biaya per percakapan dihitung dari total spend dibagi total percakapan.</p>
+        {data.ctwaBrands.map(brand => <section key={brand.id} aria-label={`WhatsApp ${brand.name}`} style={{ display: 'grid', gap: 8 }}>
+          <h3>{brand.name}</h3>{assignmentTable(data.landingPages.filter(lp => lp.destination?.brand_id === brand.id), true, brand)}
+        </section>)}
+      </section>}
       {data && <section aria-label="Pencocokan landing page" style={{ display: 'grid', gap: 10 }}>
         <div className={styles.sectionTitle}><h2>Pencocokan landing page</h2><span>Landing page Website dengan spend {formatDate(data.range.from)} – {formatDate(data.range.to)} · pola URL atau domain → template</span></div>
-        <div className={styles.sectionCard}><div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}><table className={styles.rulesTable}>
-          <thead><tr><th>Landing page</th><th>Brand</th><th style={{ textAlign: 'right' }}>Spend</th><th>Bukti dari data</th><th>Template</th><th>Status</th></tr></thead>
-          <tbody>{data.landingPages.map(lp => {
-            const status = lp.templateId ? { cls: styles.statusOk, label: lp.rule?.match_kind === 'exact' ? 'Dikonfirmasi' : `Ikut aturan ${kindLabels[lp.rule!.match_kind]}` } : lp.suggestion.funnelId ? { cls: styles.statusWarn, label: 'Belum ditetapkan' } : { cls: styles.statusInfo, label: 'Perlu keputusan' };
-            return <tr key={lp.key}>
-              <td style={{ minWidth: 240 }}><b style={{ overflowWrap: 'anywhere' }}>{lp.url}</b><small>{lp.ads} ad · {lp.accounts.join(', ')}</small></td>
-              <td>{lp.brands.join(', ')}</td>
-              <td style={{ textAlign: 'right' }}>{formatCompactMoney(lp.spend, data.currency)}</td>
-              <td style={{ minWidth: 200 }}>{lp.suggestion.reason}</td>
-              <td><select aria-label={`Template untuk ${lp.url}`} disabled={!canManage || busy || !data.rulesReady} value={lp.templateId || ''} onChange={e => void assign(lp.url, e.target.value)}>
-                <option value="">{lp.suggestion.funnelId ? `Saran: ${data.templates.find(t => t.id === lp.suggestion.funnelId)?.name}` : 'Tanpa template'}</option>
-                {data.templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select></td>
-              <td><span role={pendingUrls.includes(lp.url) ? 'status' : undefined} className={`${styles.statusTag} ${pendingUrls.includes(lp.url) ? styles.statusWarn : status.cls}`}>{pendingUrls.includes(lp.url) ? 'Menyimpan…' : status.label}</span>{canManage && !lp.templateId && lp.suggestion.funnelId && data.rulesReady && <small><button type="button" className={styles.nameButton} disabled={busy} onClick={() => void assign(lp.url, lp.suggestion.funnelId!)}>Konfirmasi saran</button></small>}</td>
-            </tr>;
-          })}</tbody>
-        </table>{!data.landingPages.length && <p className={styles.muted} style={{ padding: 16 }}>Belum ada landing page Website dengan URL tunggal pada 30 hari terakhir.</p>}</div></div>
+        {assignmentTable(data.landingPages.filter(lp => !lp.destination))}
         <p className={styles.muted}>Saran otomatis membaca 30 hari terakhir: purchase &gt; 0 dan lead = 0 menyarankan Transaksi; lead &gt; 0 dan purchase = 0 menyarankan Lead; keduanya ada atau keduanya nol dibiarkan tanpa saran. Saran tidak pernah diterapkan sendiri.</p>
       </section>}
       {data && <section aria-label="Aturan URL" style={{ display: 'grid', gap: 10 }}>
-        <div className={styles.sectionTitle}><h2>Aturan URL</h2><span>URL persis menang atas awalan URL, awalan menang atas domain; pola terpanjang didahulukan</span></div>
+        <div className={styles.sectionTitle}><h2>Aturan URL</h2><span>Aturan tujuan WhatsApp didahulukan untuk brand dan nomor tersebut. Untuk website: URL persis → awalan URL → domain.</span></div>
         {canManage && data.rulesReady && data.templates.length > 0 && <form className={`${styles.card} ${styles.inlineForm}`} onSubmit={e => { e.preventDefault(); void changeRule({ save: ruleForm }, 'Aturan tersimpan.').then(saved => { if (saved) setRuleForm(f => ({ ...f, pattern: '' })); }); }}>
-          <label>Jenis<select value={ruleForm.match_kind} onChange={e => setRuleForm({ ...ruleForm, match_kind: e.target.value as TemplateMatchKind })}>{(Object.keys(kindLabels) as TemplateMatchKind[]).map(k => <option key={k} value={k}>{kindLabels[k]}</option>)}</select></label>
+          <label>Jenis<select value={ruleForm.match_kind} onChange={e => setRuleForm({ ...ruleForm, match_kind: e.target.value as TemplateMatchKind })}>{(['exact', 'prefix', 'domain'] as const).map(k => <option key={k} value={k}>{kindLabels[k]}</option>)}</select></label>
           <label style={{ flex: 1 }}>Pola<input required maxLength={4096} placeholder={ruleForm.match_kind === 'domain' ? 'purvu.id' : 'https://purvu.id/konsultasi'} value={ruleForm.pattern} onChange={e => setRuleForm({ ...ruleForm, pattern: e.target.value })} /></label>
           <label>Template<select required value={ruleForm.funnelId} onChange={e => setRuleForm({ ...ruleForm, funnelId: e.target.value })}><option value="">Pilih template…</option>{data.templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
           <button type="submit" className={styles.primary} disabled={busy || !ruleForm.funnelId}>+ Aturan URL</button>
         </form>}
         <div className={styles.sectionCard}><div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}><table className={styles.rulesTable}>
           <thead><tr><th>Jenis</th><th>Pola</th><th>Template</th><th /></tr></thead>
-          <tbody>{data.rules.map(r => <tr key={r.id}><td>{kindLabels[r.match_kind]}</td><td style={{ overflowWrap: 'anywhere' }}>{r.pattern}</td><td>{r.templateName}</td>
+          <tbody>{data.rules.map(r => <tr key={r.id}><td>{kindLabels[r.match_kind]}</td><td style={{ overflowWrap: 'anywhere' }}>{r.match_kind === 'ctwa' ? data.landingPages.find(lp => lp.destination?.key === r.pattern)?.label || `WhatsApp · brand ${r.pattern.split(':')[1]} · ${r.pattern.includes(':phone:') ? r.pattern.split(':phone:')[1] : 'Nomor belum tersedia'}` : r.pattern}</td><td>{r.templateName}</td>
             <td style={{ textAlign: 'right' }}>{canManage && <button type="button" className={styles.button} disabled={busy} onClick={() => void changeRule({ remove: r.id }, 'Aturan dihapus.')}>Hapus</button>}</td></tr>)}</tbody>
         </table>{!data.rules.length && <p className={styles.muted} style={{ padding: 16 }}>Belum ada aturan. Tetapkan template dari tabel pencocokan atau tambahkan aturan domain agar seluruh website langsung terpetakan.</p>}</div></div>
       </section>}

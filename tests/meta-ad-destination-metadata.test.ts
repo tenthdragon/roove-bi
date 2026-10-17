@@ -1,10 +1,48 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fetchAdDestinationBatch, META_DESTINATION_FIELDS, normalizeMetaDestination, refreshMetaAdDestinations, verifyShopeeProductSet } from '../lib/meta-ad-destination-metadata';
+import { normalizeMetaAdContactIdentity, normalizeWhatsAppNumber } from '../lib/meta-ad-contact-identity';
 
 const raw = (patch: Record<string, any> = {}) => ({
   id: '10', account_id: '1', adset: { id: '30', destination_type: 'WEBSITE', promoted_object: {} },
   creative: { id: '20' }, ...patch,
+});
+
+test('CTWA identity keeps promoted Page, creative Page conflicts and structured international numbers', () => {
+  const metadata = normalizeMetaDestination(raw({ adset: { id: '30', destination_type: 'WHATSAPP', promoted_object: { page_id: '100', whatsapp_phone_number: '+62 812-3456-7890' } },
+    creative: { id: '20', actor_id: '200', object_story_spec: { page_id: '100' }, effective_object_story_id: '100_333' } }));
+  const identity = metadata.contact_identity!;
+  assert.equal(identity.page_id, '100');
+  assert.deepEqual(identity.page_ids, ['100', '200']);
+  assert.deepEqual(identity.whatsapp_phone_numbers, ['+6281234567890']);
+  assert.deepEqual(identity.whatsapp_sources, [{ path: 'adset.promoted_object.whatsapp_phone_number', number: '+6281234567890' }]);
+  assert.equal(identity.creative_id, '20'); assert.equal(identity.adset_id, '30');
+  assert.match(META_DESTINATION_FIELDS, /actor_id,effective_object_story_id,object_story_id/);
+});
+
+test('contact identity reads WhatsApp destinations and deduplicates equivalent numbers without keeping message text', () => {
+  const identity = normalizeMetaAdContactIdentity(raw({ adset: { id: '30', destination_type: 'WHATSAPP' }, creative: { id: '20',
+    object_story_spec: { page_id: '100', whats_app_business_phone_number: { id: '999999999999', display_phone_number: '+62 (812) 3456-7890' } },
+    call_to_action: { value: { link: 'https://api.whatsapp.com/send?phone=6281234567890&text=private-message' } },
+    asset_feed_spec: { link_urls: [{ website_url: 'https://wa.me/6281234567890' }] },
+    body: 'https://wa.me/6289999999999', message: 'private-message', name: 'Name +6289999999999' } }))!;
+  assert.deepEqual(identity.whatsapp_phone_numbers, ['+6281234567890']);
+  assert.equal(JSON.stringify(identity).includes('private-message'), false);
+  assert.equal(JSON.stringify(identity).includes('999999999999'), false, 'Phone-number resource IDs are not phone numbers');
+});
+
+test('contact identity ignores unrelated CTA phones and uses existing-post Page fallback', () => {
+  const identity = normalizeMetaAdContactIdentity(raw({ creative: { id: '20', effective_object_story_id: '123_456',
+    call_to_action: { type: 'CALL_NOW', value: { phone_number: '+6281234567890', phone_number_id: '6289999999999' } } } }))!;
+  assert.equal(identity.page_id, '123'); assert.deepEqual(identity.whatsapp_phone_numbers, []);
+  assert.equal(normalizeMetaAdContactIdentity(raw({ creative: { id: '20', actor_id: 'invalid' } })), null);
+  assert.equal(normalizeMetaAdContactIdentity(raw({ creative: { id: '20', actor_id: '123' }, adset: {} })), null);
+});
+
+test('phone normalization retains international identity and never guesses missing country codes', () => {
+  assert.equal(normalizeWhatsAppNumber('0062 81234567890'), '+6281234567890');
+  assert.equal(normalizeWhatsAppNumber('6281234567890'), '+6281234567890');
+  for (const value of ['081234567890', 'call +6281234567890', '', '123', '1'.repeat(16), 6281234567890]) assert.equal(normalizeWhatsAppNumber(value), null);
 });
 
 test('existing-post and partnership destinations include the root creative CTA', () => {

@@ -1,6 +1,7 @@
 // Pure reporting rules shared by the dashboard, sync worker, and tests.
 import { CEP_KEYS, FUNNEL_KEYS, GROUPING_OPTIONS, parseRooveAdName, type AdGrouping, type CepKey, type NamingFunnelKey } from './meta-ad-naming';
 import { landingPageGroup, normalizeLandingPages } from './meta-ad-destinations';
+import { ctwaLabel, type CtwaDestination } from './meta-ctwa-destinations';
 export const MEASURES = {
   spend: 'Spent', impressions: 'Impressions', clicks: 'All clicks', link_clicks: 'Link clicks',
   outbound_clicks: 'Outbound clicks', lpv: 'Landing page views', view_content: 'View content',
@@ -32,6 +33,8 @@ export type AdFact = {
   campaign_id?: string | null; campaign_objective?: string | null;
   cep_key?: string | null; intention_key?: string | null;
   landing_page_source?: 'meta' | 'cache' | 'verified' | 'unknown';
+  destination?: CtwaDestination | null;
+  raw_insights?: { adset_id?: string };
 };
 export type Coverage = { account_id: string; metric_date: string };
 export type AdCreative = {
@@ -47,6 +50,7 @@ export type GroupComparison = {
   classified: boolean;
   landing_page_urls: string[];
   verified_ad_ids: string[];
+  destination?: CtwaDestination;
   metrics: { id: string; current: number | null; previous: number | null; change: number | null }[];
 };
 
@@ -142,7 +146,7 @@ function matchesNameAndAccount(row: AdFact, config: FunnelConfig) {
 }
 export function adGroup(row: AdFact, config: FunnelConfig) {
   if (config.group_by === 'ad_id') return { key: `ad:${row.account_id}:${row.ad_id}`, name: row.ad_name || row.ad_id };
-  if (config.group_by === 'landing_page') return landingPageGroup(row.landing_page_urls);
+  if (config.group_by === 'landing_page') return row.destination ? { key: row.destination.key, name: ctwaLabel(row.destination) } : landingPageGroup(row.landing_page_urls);
   const parsed = parseRooveAdName(row.ad_name);
   const nameKey = normalizedName(row.ad_name) || `(unnamed:${row.ad_id})`;
   if (!config.group_by || config.group_by === 'ad_name') return { key: nameKey, name: row.ad_name || row.ad_id };
@@ -221,6 +225,7 @@ export function compareGroups(rows: AdFact[], config: FunnelConfig, from: string
     for (const row of facts) { const parsed = parseRooveAdName(row.ad_name); if (parsed.valid) categories.set(`${parsed.cep}:${parsed.funnel}`, { cep: parsed.cep!, funnel: parsed.funnel! }); }
     return {
       key, name: adGroup(facts[facts.length - 1], config).name, current, previous,
+      ...(config.group_by === 'landing_page' && facts[0].destination ? { destination: facts[0].destination } : {}),
       ad_names: [...new Set(facts.map(r => r.ad_name))], categories: [...categories.values()], classified: categories.size > 0,
       landing_page_urls: normalizeLandingPages(facts.flatMap(r => r.landing_page_urls ?? [])),
       verified_ad_ids: [...new Set(facts.filter(r => r.landing_page_source === 'verified').map(r => r.ad_id))],
@@ -291,7 +296,7 @@ export function evaluateDeclines(rows: AdFact[], coverage: Coverage[], config: F
   const scopedAccounts = accountIds.filter(a => !config.account_ids.length || config.account_ids.includes(a));
   if (!config.alerts_enabled || !hasCoverage(coverage, scopedAccounts, baselineFrom, end)) return [];
   return compareGroups(rows, config, from, end, creatives).flatMap(group => {
-    if (config.group_by === 'landing_page' && group.landing_page_urls.length !== 1) return [];
+    if (config.group_by === 'landing_page' && !group.destination && group.landing_page_urls.length !== 1) return [];
     if (group.current.impressions < config.min_impressions || group.previous.impressions < config.min_impressions
       || group.current.spend < config.min_spend || group.previous.spend < config.min_spend) return [];
     return config.metrics.flatMap(metric => {

@@ -15,6 +15,6 @@ export const getCachedMetaAdReport = unstable_cache(
     if (result.error) throw new Error(`Gagal memuat performa Meta: ${result.error.message}`);
     return result.data as RawMetaReport;
   },
-  ['meta-ad-report-v2'],
+  ['meta-ad-report-v3-ctwa'],
   { revalidate: 300 },
 );

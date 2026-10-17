@@ -3,11 +3,12 @@
 // template; observed events only suggest one, never assign it.
 import { canonicalLandingPage } from './meta-ad-destinations';
 import { emptyTotals, metricValue, relativeChange, type FunnelConfig, type FunnelMetric, type SavedFunnel, type Totals } from './meta-funnel-domain';
+import { CTWA_KEY_PATTERN, type CtwaDestination } from './meta-ctwa-destinations';
 
 export type MetaBrandWorld = 'website' | 'cpas';
 export const WORLD_CHANNEL = { website: 'non_cpas', cpas: 'cpas' } as const;
-export const WORLD_LABELS: Record<MetaBrandWorld, string> = { website: 'Website', cpas: 'CPAS Shopee' };
-export const TEMPLATE_MATCH_KINDS = ['exact', 'prefix', 'domain'] as const;
+export const WORLD_LABELS: Record<MetaBrandWorld, string> = { website: 'Website & WhatsApp', cpas: 'CPAS Shopee' };
+export const TEMPLATE_MATCH_KINDS = ['exact', 'prefix', 'domain', 'ctwa'] as const;
 export type TemplateMatchKind = typeof TEMPLATE_MATCH_KINDS[number];
 export type TemplateRule = { id: string; funnel_id: string; match_kind: TemplateMatchKind; pattern: string };
 export type TemplateKind = 'transaction' | 'lead' | 'other';
@@ -16,6 +17,8 @@ export const TEMPLATE_KIND_LABELS: Record<TemplateKind, string> = { transaction:
 export type ReportGroup = {
   key: string; name: string; current: Totals; previous: Totals; ad_ids: string[];
   accounts: string[]; ad_names: string[]; landing_page_urls: string[]; verified_ad_ids: string[];
+  destination?: CtwaDestination | null;
+  currencies?: string[];
 };
 export type MetricComparison = { id: string; current: number | null; previous: number | null; change: number | null };
 export type TemplateGroup = ReportGroup & { metrics: MetricComparison[] };
@@ -36,6 +39,10 @@ export function validateTemplateRule(input: { match_kind?: unknown; pattern?: un
   if (typeof kind !== 'string' || !TEMPLATE_MATCH_KINDS.includes(kind as TemplateMatchKind)) throw new Error('Jenis pencocokan tidak valid.');
   const raw = typeof input.pattern === 'string' ? input.pattern.trim() : '';
   if (!raw || raw.length > 4096) throw new Error('Pola URL wajib diisi.');
+  if (kind === 'ctwa') {
+    if (!CTWA_KEY_PATTERN.test(raw)) throw new Error('Tujuan WhatsApp tidak valid. Pilih tujuan dari tabel pencocokan.');
+    return { match_kind: 'ctwa', pattern: raw };
+  }
   if (kind === 'domain') {
     const domain = raw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '').toLowerCase();
     if (!validDomain(domain)) throw new Error('Domain tidak valid. Contoh: purvu.id');
@@ -58,6 +65,20 @@ export function matchTemplateRule(url: string, rules: TemplateRule[]): TemplateR
   if (prefix.length) return prefix[0];
   const domain = rules.filter(r => r.match_kind === 'domain' && host && (host === r.pattern || host.endsWith(`.${r.pattern}`))).sort(byLength);
   return domain[0] || null;
+}
+
+/** A CTWA assignment belongs to its brand and phone; URL rules remain a shared fallback. */
+export function matchDestinationTemplate(group: { key?: string; url?: string; landing_page_urls?: string[]; destination?: CtwaDestination | null }, rules: TemplateRule[]) {
+  if (group.destination) {
+    const scoped = rules.find(r => r.match_kind === 'ctwa' && r.pattern === group.destination!.key);
+    if (scoped) return scoped;
+  }
+  const urls = group.landing_page_urls || (group.url ? [group.url] : []);
+  // CTWA may have several URL variants leading to the same number. A fallback
+  // applies only if every URL resolves to the same template; never pick one URL.
+  if (!urls.length) return null;
+  const matches = urls.map(url => matchTemplateRule(url, rules));
+  return matches.every(r => r && r.funnel_id === matches[0]?.funnel_id) ? matches[0] : null;
 }
 
 export function templateKind(config: Pick<FunnelConfig, 'stages' | 'metrics'>): TemplateKind {
@@ -124,9 +145,9 @@ export function assignTemplateSections(groups: ReportGroup[], funnels: SavedFunn
   const unassigned: UnassignedGroup[] = [];
   for (const g of groups) {
     const urls = g.landing_page_urls;
-    const rule = urls.length === 1 ? matchTemplateRule(urls[0], rules) : null;
+    const rule = g.destination || urls.length === 1 ? matchDestinationTemplate(g, rules) : null;
     if (rule && byFunnel.has(rule.funnel_id)) { byFunnel.get(rule.funnel_id)!.push(g); continue; }
-    unassigned.push({ ...g, reason: !urls.length ? 'no_url' : urls.length > 1 ? 'multi_url' : 'no_rule', suggestion: suggestTemplate(g.current, funnels) });
+    unassigned.push({ ...g, reason: g.destination ? 'no_rule' : !urls.length ? 'no_url' : urls.length > 1 ? 'multi_url' : 'no_rule', suggestion: suggestTemplate(g.current, funnels) });
   }
   const sections: TemplateSection[] = funnels.map(f => {
     const members = byFunnel.get(f.id)!;
