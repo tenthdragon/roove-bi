@@ -1,50 +1,61 @@
 'use client';
 
 import { AlertCircle, CheckCircle2, Clock3, LoaderCircle } from 'lucide-react';
-import { metaSyncProgress, type MetaSyncJob } from '@/lib/meta-funnel-sync-status';
+import { metaSyncProgress, metaSyncStages, metaSyncStage, type MetaSyncJob } from '@/lib/meta-funnel-sync-status';
 import type { getMetaFunnelSyncStatus } from '@/lib/meta-funnel-actions';
 import styles from '@/app/dashboard/meta-funnels/page.module.css';
 
 type SyncStatusData = Awaited<ReturnType<typeof getMetaFunnelSyncStatus>>;
 const syncLabels: Record<string, string> = { queued: 'Menunggu', running: 'Berjalan', success: 'Berhasil', partial: 'Sebagian', failed: 'Gagal', canceled: 'Dibatalkan' };
+const stageLabels = { metrics: 'Metrik', metadata: 'Metadata iklan', catalog: 'Katalog' };
+const stamp = (value: string | null) => value ? new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }).format(new Date(value)) + ' WIB' : '';
 
 export default function MetaSyncProgress({ progress, preparing, checking, status, accounts, error, onRefresh }: {
   progress: ReturnType<typeof metaSyncProgress> | null; preparing: boolean; checking: boolean;
   status: SyncStatusData | null; accounts: { account_id: string; account_name: string }[]; error: string; onRefresh: () => void;
 }) {
-  const latest = status?.jobs[0];
-  if (!preparing && !checking && !progress && !latest && !error && !status?.pending) return null;
-  const active = preparing || checking || !!status?.pending || !!progress?.active;
-  const issues = progress ? progress.issues > 0 || progress.missing > 0 : latest && !['success', 'queued', 'running'].includes(latest.status);
-  const label = preparing ? 'Menyiapkan sync…' : checking ? 'Memeriksa sync…'
-    : progress && !progress.active && status?.pending ? 'Melengkapi data iklan…'
-    : progress ? (progress.canceled === progress.total ? 'Sync dibatalkan' : progress.failed === progress.total ? 'Sync gagal'
-      : { queued: 'Menunggu giliran', running: 'Sync berjalan', complete: 'Sync selesai', issues: 'Sync selesai dengan kendala', unavailable: 'Status sync tidak tersedia' }[progress.state])
-      : status?.pending ? (status.running ? 'Sync berjalan' : 'Menunggu giliran') : latest ? `Sync terakhir: ${syncLabels[latest.status]?.toLowerCase() || latest.status}` : 'Status sync tidak tersedia';
-  const Icon = preparing || checking || (active && (progress ? progress.state === 'running' : status?.running)) ? LoaderCircle : active ? Clock3 : issues ? AlertCircle : CheckCircle2;
   const jobs: MetaSyncJob[] = (progress ? status?.trackedJobs : status?.jobs) || [];
-  const completedAt = progress?.completedAt || latest?.completed_at;
-  const stamp = !active && completedAt ? new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }).format(new Date(completedAt)) : '';
+  if (!preparing && !checking && !jobs.length && !error && !status?.pending) return null;
+  const stages = metaSyncStages(jobs), metrics = stages.metrics, metadata = stages.metadata, catalog = stages.catalog;
+  const busy = preparing || checking || stages.preparing || metrics.active;
+  const issues = !!stages.queueError || !!progress?.missing || metrics.issues > 0;
+  const label = preparing || stages.preparing ? 'Menyiapkan sync…' : checking ? 'Memeriksa sync…'
+    : progress?.missing ? 'Status metrik belum lengkap' : stages.queueError ? 'Antrean sync belum lengkap'
+    : metrics.active ? metrics.running ? 'Sync metrik berjalan' : 'Metrik menunggu giliran'
+    : metrics.total ? metrics.issues ? 'Sync metrik dengan kendala' : 'Metrik tersinkron'
+    : 'Status metrik belum tersedia';
+  const Icon = busy ? metrics.running || preparing || checking ? LoaderCircle : Clock3 : issues ? AlertCircle : metrics.total ? CheckCircle2 : Clock3;
+  const metadataIssues = metadata.jobs.filter(j => !['success', 'queued', 'running'].includes(j.status) || (j.result_summary?.warnings || []).length > 0).length;
+  const catalogIssues = catalog.issues + catalog.jobs.filter(j => !['partial', 'failed', 'canceled'].includes(j.status) && (j.result_summary?.warnings || []).length).length;
   return <div className={styles.syncArea}>
-    <div className={`${styles.syncStatus} ${issues ? styles.syncWarning : !active ? styles.syncSuccess : ''}`} role="status" aria-live="polite">
+    <div className={`${styles.syncStatus} ${issues ? styles.syncWarning : !busy && metrics.total ? styles.syncSuccess : ''}`} role="status" aria-live="polite">
       <Icon size={15} aria-hidden="true" className={Icon === LoaderCircle ? styles.syncSpinner : undefined} />
       <span>{label}</span>
-      {progress && !preparing && !checking && <>
-        <span className={styles.muted}>{progress.completed}/{progress.total} batch</span>
-        {!progress.missing && <progress aria-label="Progres sync" max={progress.total} value={progress.completed} />}
-        {!!progress.failed && <span>{progress.failed} gagal</span>}
-        {!!progress.partial && <span>{progress.partial} sebagian</span>}
-        {!!progress.canceled && <span>{progress.canceled} dibatalkan</span>}
+      {!!metrics.total && !preparing && !checking && <>
+        <span className={styles.muted}>{metrics.completed}/{metrics.total} batch metrik</span>
+        {!progress?.missing && !stages.queueError && <progress aria-label="Progres metrik" max={metrics.total} value={metrics.completed} />}
       </>}
-      {!progress && !!status?.pending && <span className={styles.muted}>{status.pending} batch tersisa</span>}
-      {stamp && <span className={styles.muted}>{stamp} WIB</span>}
+      {!busy && metrics.completedAt && <span className={styles.muted}>{stamp(metrics.completedAt)}</span>}
       {error && <button type="button" className={styles.syncRetry} onClick={onRefresh} title={error}>Status belum diperbarui · Coba lagi</button>}
     </div>
+    {!!metadata.total && <div className={`${styles.syncStatus} ${metadataIssues ? styles.syncWarning : !metadata.active ? styles.syncSuccess : ''}`} role="status" aria-live="polite">
+      {metadata.active ? <LoaderCircle size={15} aria-hidden="true" className={styles.syncSpinner} /> : metadataIssues ? <AlertCircle size={15} aria-hidden="true" /> : <CheckCircle2 size={15} aria-hidden="true" />}
+      <span>{metadata.active ? stages.discovering ? 'Metadata · mendeteksi perubahan…' : 'Memperbarui metadata iklan…' : metadataIssues ? 'Metadata iklan dengan kendala' : 'Metadata iklan diperbarui'}</span>
+      <span className={styles.muted}>{metadata.completed}/{metadata.total} batch metadata</span>
+      {!stages.discovering && <progress aria-label="Progres metadata" max={metadata.total} value={metadata.completed} />}
+      {!!metadataIssues && <span>{metadataIssues} batch perlu diperiksa</span>}
+    </div>}
+    {!!catalog.total && <div className={`${styles.syncStatus} ${catalogIssues ? styles.syncWarning : !catalog.active ? styles.syncSuccess : ''}`} role="status" aria-live="polite">
+      {catalog.active ? <LoaderCircle size={15} aria-hidden="true" className={styles.syncSpinner} /> : catalogIssues ? <AlertCircle size={15} aria-hidden="true" /> : <CheckCircle2 size={15} aria-hidden="true" />}
+      <span>{catalog.active ? 'Memeriksa katalog…' : catalogIssues ? `Katalog: ${catalogIssues} perlu diperiksa` : 'Katalog terverifikasi'}</span>
+      {catalog.active && <span className={styles.muted}>{catalog.completed}/{catalog.total} batch katalog</span>}
+    </div>}
     {!!jobs.length && <details className={styles.syncDetails}><summary>Detail</summary>
       <div className={styles.syncJobList}>{jobs.map(job => <div key={job.id} className={styles.syncJob}>
-        <span>{job.payload.date_start ? `${job.payload.date_start} – ${job.payload.date_end}` : 'Data terbaru'}</span><span>{syncLabels[job.status] || job.status}</span>
+        <span>{stageLabels[metaSyncStage(job)]}{job.payload.date_start ? ` · ${job.payload.date_start} – ${job.payload.date_end}` : ''}</span><span>{syncLabels[job.status] || job.status}</span>
         <span className={styles.syncAccount}>{accounts.find(account => account.account_id === job.payload.account_id)?.account_name || job.payload.account_id || 'Seluruh akun'}</span>
         {job.error_message && <small>{job.error_message}</small>}
+        {(job.result_summary?.warnings || []).map((warning, i) => <small key={i}>{warning}</small>)}
       </div>)}</div>
     </details>}
   </div>;

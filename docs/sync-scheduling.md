@@ -65,7 +65,7 @@ Do not combine this worker cron with an existing continuously running worker.
 0 10,11,19 * * * cd /path/to/roove-bi && /usr/bin/flock -n /tmp/roove-orders.lock /usr/bin/node --import tsx scripts/scheduled-sync.ts orders >> /path/to/logs/sync-orders.log 2>&1
 0 10 * * * cd /path/to/roove-bi && /usr/bin/flock -n /tmp/roove-ads.lock /usr/bin/node --import tsx scripts/scheduled-sync.ts ads >> /path/to/logs/sync-ads.log 2>&1
 */10 * * * * cd /path/to/roove-bi && /usr/bin/flock -n /tmp/roove-sheets.lock /usr/bin/node --import tsx scripts/scheduled-sync.ts sheets >> /path/to/logs/sync-sheets.log 2>&1
-* * * * * cd /path/to/roove-bi && /usr/bin/flock -n /tmp/roove-worker.lock /usr/bin/node --import tsx scripts/sync-jobs-worker.ts --max-jobs=20 >> /path/to/logs/sync-worker.log 2>&1
+* * * * * cd /path/to/roove-bi && /usr/bin/flock -n /tmp/roove-worker.lock /usr/bin/node --import tsx scripts/sync-jobs-worker.ts --max-jobs=100 --max-runtime-seconds=240 >> /path/to/logs/sync-worker.log 2>&1
 ```
 
 `flock` prevents overlapping CLI worker invocations; each worker drains up to
@@ -120,3 +120,5 @@ Do not start a second worker. Verify the effective Meta timer is 17:00 WIB,
 the Sheets timer is every ten minutes, and the first Meta run enqueues spend,
 ad-detail and mapping jobs even without saved funnels. Existing deployment
 rollback restores previous timers and removes newly introduced timer files.
+
+The production systemd worker uses `--max-jobs=100 --max-runtime-seconds=240` to keep draining available jobs without a pause after every five batches. It remains sequential and finishes its current job before honoring the time budget. The one-minute timer prevents overlapping instances of the same unit.

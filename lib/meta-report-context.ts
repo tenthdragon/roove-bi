@@ -26,7 +26,7 @@ export async function manageAccess() {
 export const currencyError = 'Funnel mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama pada konfigurasi.';
 export function reportJobs(svc: ReturnType<typeof createServiceSupabase>, workspaceId: string) {
   return svc.from('sync_jobs').select(META_SYNC_JOB_FIELDS).eq('workspace_id', workspaceId)
-    .eq('job_name', 'meta_sync').order('created_at', { ascending: false }).limit(20);
+    .eq('job_name', 'meta_sync').in('mode', ['cron', 'incremental', 'ad_funnels']).order('created_at', { ascending: false }).limit(20);
 }
 export async function reportContext(input: MetaReportInput, includeJobs = false) {
   const { workspaceId } = await reportingAccess();

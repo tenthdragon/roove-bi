@@ -1,4 +1,5 @@
 import { buildNextScalevSyncJobPayload } from '../lib/scalev-sync-job-payload';
+import { parseSyncWorkerArgs, drainSyncQueue } from '../lib/sync-worker-loop';
 import { hostname } from 'os';
 import { loadEnvConfig } from '@next/env';
 import { executeSyncJob } from '../lib/sync-job-runners';
@@ -14,54 +15,6 @@ import {
 import { logRouteEvent } from '../lib/structured-logger';
 
 loadEnvConfig(process.cwd());
-
-type WorkerOptions = {
-  loop: boolean;
-  pollMs: number;
-  staleAfterMinutes: number;
-  maxJobs: number | null;
-};
-
-function sleep(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function parsePositiveInt(value: string | undefined, fallback: number) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function parseArgs(argv: string[]): WorkerOptions {
-  const options: WorkerOptions = {
-    loop: false,
-    pollMs: 5000,
-    staleAfterMinutes: 30,
-    maxJobs: null,
-  };
-
-  for (const arg of argv) {
-    if (arg === '--loop') {
-      options.loop = true;
-      continue;
-    }
-
-    if (arg.startsWith('--poll-ms=')) {
-      options.pollMs = parsePositiveInt(arg.split('=')[1], options.pollMs);
-      continue;
-    }
-
-    if (arg.startsWith('--stale-after-minutes=')) {
-      options.staleAfterMinutes = parsePositiveInt(arg.split('=')[1], options.staleAfterMinutes);
-      continue;
-    }
-
-    if (arg.startsWith('--max-jobs=')) {
-      options.maxJobs = parsePositiveInt(arg.split('=')[1], 1);
-    }
-  }
-
-  return options;
-}
 
 async function processNextJob(workerId: string) {
   const job = await claimNextSyncJob(workerId);
@@ -141,7 +94,7 @@ async function processNextJob(workerId: string) {
 }
 
 async function main() {
-  const options = parseArgs(process.argv.slice(2));
+  const options = parseSyncWorkerArgs(process.argv.slice(2));
   const workerId = `${hostname()}:${process.pid}`;
   const requeued = await requeueStaleSyncJobs(options.staleAfterMinutes);
 
@@ -154,24 +107,7 @@ async function main() {
     }));
   }
 
-  let processedJobs = 0;
-
-  while (true) {
-    const processed = await processNextJob(workerId);
-    if (processed) {
-      processedJobs += 1;
-      if (options.maxJobs && processedJobs >= options.maxJobs) {
-        break;
-      }
-      continue;
-    }
-
-    if (!options.loop) {
-      break;
-    }
-
-    await sleep(options.pollMs);
-  }
+  const processedJobs = await drainSyncQueue(options, () => processNextJob(workerId));
 
   console.log(JSON.stringify({
     ts: new Date().toISOString(),

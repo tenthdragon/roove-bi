@@ -8,7 +8,7 @@ function harness(fetchError = false, creativeError = false, accountMissing = fal
     from(table: string) {
       const q: any = { select: () => q, limit: () => q, in: () => q, eq: (key: string, value: unknown) => { filters.push({ table, key, value }); return q; },
         upsert: (data: unknown) => { creatives.push(data); return Promise.resolve({ error: null }); },
-        then: (resolve: any) => resolve({ error: null, data: table === 'meta_ad_accounts' ? accountMissing ? [] : [{ account_id: 'act_1', account_name: 'Test' }] : table === 'meta_ad_creatives' && cachedUrls.length ? [{ ad_id: '1', landing_page_urls: cachedUrls }] : [] }) };
+        then: (resolve: any) => resolve({ error: null, data: table === 'meta_ad_accounts' ? accountMissing ? [] : [{ account_id: 'act_1', account_name: 'Test' }] : table === 'meta_ad_creatives' && cachedUrls.length ? [{ ad_id: '1', creative_id: '2', landing_page_urls: cachedUrls }] : table === 'meta_ad_metadata_sync_state' && cachedUrls.length ? [{ ad_id: '1', creative_id: '2', adset_id: '3' }] : [] }) };
       return q;
     },
     async rpc(name: string, args: unknown) { snapshots.push({ name, args }); return { error: null }; },
@@ -26,11 +26,11 @@ test('ad sync never replaces stored facts when the API report fails', async () =
   assert.equal(result.status, 'failed'); assert.equal(h.snapshots.length, 0);
   assert.match(result.errors.join(' '), /Second page failed/);
 });
-test('metadata failure preserves successful performance snapshot and reports a warning', async () => {
+test('new ads preserve successful performance snapshots while metadata is populated separately', async () => {
   const h = harness(false, true); const result = await runMetaAdSync(options, h.deps);
   assert.equal(result.status, 'success'); assert.equal(h.snapshots.length, 1); assert.equal(h.creatives.length, 0);
   assert.equal(h.snapshots[0].args.p_workspace_id, options.workspaceId);
-  assert.equal(h.snapshots[0].args.p_account_id, 'act_1'); assert.equal(result.warnings?.length, 1);
+  assert.equal(h.snapshots[0].args.p_account_id, 'act_1'); assert.equal(result.warnings?.length, 0);
   assert.ok(h.filters.some(f => f.table === 'meta_ad_accounts' && f.key === 'workspace_id' && f.value === options.workspaceId));
   assert.ok(h.filters.some(f => f.table === 'meta_ad_accounts' && f.key === 'account_id' && f.value === options.accountId));
 });
@@ -45,16 +45,25 @@ test('a week with no ad rows still performs an empty replacement for coverage', 
   assert.equal(result.accounts_synced, 1);
 });
 test('daily snapshots capture normalized creative URLs without copying a shared budget', async () => {
-  const h = harness(); h.deps.fetchCreativeBatch = async () => [{ ad_id: '1', creative_id: '2', name: 'A', thumbnail_url: null, video_id: null, body: null, landing_page_urls: ['https://roove.co.id/LP?utm_source=meta'] }];
+  const h = harness(false, false, false, ['https://roove.co.id/LP?utm_source=meta']); h.deps.fetchCreativeBatch = async () => { throw Error('Metrics must not refresh creative metadata'); };
   const result = await runMetaAdSync(options, h.deps);
   assert.equal(result.status, 'success'); assert.deepEqual(h.snapshots[0].args.p_rows[0].landing_page_urls, ['https://roove.co.id/LP']);
   assert.equal('budget' in h.snapshots[0].args.p_rows[0], false);
 });
-test('a metadata outage falls back to the same workspace/account cache while preserving metrics', async () => {
+test('performance snapshots use certified workspace/account caches without rereading creative metadata', async () => {
   const h = harness(false, true, false, ['https://roove.co.id/LP?fbclid=test']);
   const result = await runMetaAdSync(options, h.deps);
   assert.equal(result.status, 'success'); assert.deepEqual(h.snapshots[0].args.p_rows[0].landing_page_urls, ['https://roove.co.id/LP']);
   assert.equal(h.snapshots[0].args.p_rows[0].metrics.spend, 100);
   assert.ok(h.filters.some(f => f.table === 'meta_ad_creatives' && f.key === 'workspace_id' && f.value === options.workspaceId));
   assert.ok(h.filters.some(f => f.table === 'meta_ad_creatives' && f.key === 'account_id' && f.value === 'act_1'));
+});
+
+test('uncertified and mismatched adset caches are not frozen into metric snapshots', async () => {
+  const h = harness(false, false, false, ['https://roove.co.id/old']);
+  h.deps.fetchAdInsights = async () => [{ ad_id: '1', ad_name: 'A', adset_id: '4', date_start: '2026-10-01', spend: '100' }];
+  h.deps.fetchCreativeBatch = async () => { throw Error('Must not read creative API'); };
+  const result = await runMetaAdSync(options, h.deps);assert.equal(result.status, 'success');
+  assert.equal(h.snapshots[0].args.p_rows[0].creative_id, null);assert.deepEqual(h.snapshots[0].args.p_rows[0].landing_page_urls, []);
+  assert.equal(h.snapshots[0].args.p_rows[0].metrics.spend, 100);assert.equal(h.creatives.length, 0);
 });

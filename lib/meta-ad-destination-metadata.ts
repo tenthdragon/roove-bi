@@ -2,11 +2,12 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { normalizeLandingPages } from './meta-ad-destinations';
 import { classifyMetaCpas } from './meta-cpas-evidence';
 import { metaGraph } from './meta-ad-insights';
+import { metaMetadataSource, type MetadataSource } from './meta-ad-metadata-state';
 import { enqueueNewMetaProductSets } from './meta-product-set-queue';
 import { normalizeMetaAdContactIdentity, type MetaAdContactIdentity } from './meta-ad-contact-identity';
 
 const BASE = 'https://graph.facebook.com/v21.0';
-export const META_DESTINATION_FIELDS = 'id,account_id,adset{id,destination_type,promoted_object},creative{id,call_to_action,object_story_spec,asset_feed_spec,link_url,object_url,product_set_id,omnichannel_link_spec,object_store_url,link_deep_link_url,actor_id,effective_object_story_id,object_story_id}';
+export const META_DESTINATION_FIELDS = 'id,account_id,updated_time,adset_id,adset{id,updated_time,destination_type,promoted_object},creative{id,call_to_action,object_story_spec,asset_feed_spec,link_url,object_url,product_set_id,omnichannel_link_spec,object_store_url,link_deep_link_url,actor_id,effective_object_story_id,object_story_id}';
 export type MetaDestinationMetadata = {
   version: 1; urls: string[]; application_ids: string[]; android_packages: string[];
   ios_app_ids: string[]; product_set_ids: string[]; destination_type: string | null;
@@ -48,7 +49,7 @@ export function normalizeMetaDestination(raw: Record<string, any>): MetaDestinat
     ...(contactIdentity ? { contact_identity: contactIdentity } : {}) };
 }
 
-export type DestinationRead = { ad_id: string; account_id: string; creative_id: string | null; adset_id: string | null; metadata: MetaDestinationMetadata };
+export type DestinationRead = { ad_id: string; account_id: string; creative_id: string | null; adset_id: string | null; metadata: MetaDestinationMetadata; source?: MetadataSource };
 export type DestinationFailure = { ad_id: string; error: string; code?: number };
 export async function fetchAdDestinationBatch(ids: string[], token: string): Promise<{ rows: DestinationRead[]; failures: DestinationFailure[] }> {
   if (!ids.length || ids.length > 50 || ids.some(id => !/^\d+$/.test(id))) throw new Error('Destination batch requires 1–50 numeric ad IDs.');
@@ -68,7 +69,7 @@ export async function fetchAdDestinationBatch(ids: string[], token: string): Pro
     if (!raw.creative?.id) { failures.push({ ad_id: ids[i], error: 'Creative identity unavailable' }); continue; }
     if (!raw.adset?.id) { failures.push({ ad_id: ids[i], error: 'Ad set identity unavailable' }); continue; }
     rows.push({ ad_id: ids[i], account_id: `act_${raw.account_id}`, creative_id: raw.creative.id,
-      adset_id: raw.adset?.id || null, metadata: normalizeMetaDestination(raw) });
+      adset_id: raw.adset?.id || null, metadata: normalizeMetaDestination(raw), source: metaMetadataSource(raw) });
   }
   return { rows, failures };
 }
@@ -103,7 +104,7 @@ export async function verifyShopeeProductSet(productSetId: string, token: string
 
 /** Used only by explicitly requested/scheduled mapping workers, never page reads. */
 export async function refreshMetaAdDestinations(svc: SupabaseClient, workspaceId: string, accountId: string, ids: string[], token: string,
-  enqueueProductSets = enqueueNewMetaProductSets) {
+  enqueueProductSets = enqueueNewMetaProductSets, parentJobId?: string) {
   if (!workspaceId || !/^act_\d+$/.test(accountId)) throw new Error('Invalid destination workspace/account scope.');
   const schema = await svc.from('meta_ad_destination_metadata').select('ad_id').eq('workspace_id', workspaceId).limit(1);
   if (schema.error) throw new Error(`Destination metadata schema unavailable: ${schema.error.message}`);
@@ -114,18 +115,18 @@ export async function refreshMetaAdDestinations(svc: SupabaseClient, workspaceId
   if (result.rows.some(r => r.account_id !== accountId)) throw new Error('Meta returned an ad outside its expected account.');
   const verified = await svc.from('meta_shopee_product_sets').select('product_set_id').eq('workspace_id', workspaceId).eq('account_id', accountId);
   if (verified.error) throw new Error(verified.error.message);
-  let productSetJobs = 0;
+  let productSetJobs = 0; let productSetJobIds: string[] = [];
   if (result.rows.length) {
     const observedAt = new Date().toISOString();
     const saved = await svc.from('meta_ad_destination_metadata').upsert(result.rows.map(r => ({
       workspace_id: workspaceId, account_id: accountId, ad_id: r.ad_id, creative_id: r.creative_id, adset_id: r.adset_id,
-      destination_type: r.metadata.destination_type, metadata: r.metadata,
+      destination_type: r.metadata.destination_type, metadata: { ...r.metadata, contact_identity_checked: true },
       ...classifyMetaCpas(r.metadata, (verified.data || []).map(v => v.product_set_id)), observed_at: observedAt,
     })), { onConflict: 'workspace_id,account_id,ad_id' });
     if (saved.error) throw new Error(saved.error.message);
     const known = new Set((verified.data || []).map(v => v.product_set_id));
     const newIds = [...new Set(result.rows.flatMap(r => r.metadata.product_set_ids))].filter(id => !known.has(id));
-    if (newIds.length) productSetJobs = (await enqueueProductSets(svc, workspaceId, accountId, newIds)).length;
+    if (newIds.length) { productSetJobIds = await enqueueProductSets(svc, workspaceId, accountId, newIds, undefined, undefined, parentJobId); productSetJobs = productSetJobIds.length; }
   }
-  return { saved: result.rows.length, failures: result.failures, product_set_jobs_queued: productSetJobs };
+  return { saved: result.rows.length, failures: result.failures, product_set_jobs_queued: productSetJobs, child_job_ids: productSetJobIds, refreshed_ads: result.rows };
 }

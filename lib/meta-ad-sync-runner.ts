@@ -1,13 +1,13 @@
 import { createServiceSupabase } from './service-supabase';
 import { resolveWorkspaceCredential } from './workspace-integration-server';
-import { fetchAdInsights, fetchCreativeBatch, metaGraph, normalizeAdInsight, normalizeCreativeMetadata } from './meta-ad-insights';
+import { fetchAdInsights, metaGraph, normalizeAdInsight } from './meta-ad-insights';
 import { shiftDay, validateRange } from './meta-funnel-domain';
 import { evaluateWorkspaceAlerts } from './meta-funnel-store';
 import { requireExplicitWorkspaceId } from './workspace-scope';
 import { getTodayWIB } from './sync-schedule';
 import { normalizeLandingPages } from './meta-ad-destinations';
 
-const defaultDependencies = { createServiceSupabase, resolveWorkspaceCredential, fetchAdInsights, fetchCreativeBatch, metaGraph, evaluateWorkspaceAlerts };
+const defaultDependencies = { createServiceSupabase, resolveWorkspaceCredential, fetchAdInsights, metaGraph, evaluateWorkspaceAlerts };
 export async function runMetaAdSync(options: { workspaceId: string; dateStart?: string; dateEnd?: string; accountId?: string }, dependencies = defaultDependencies) {
   const workspaceId = requireExplicitWorkspaceId(options.workspaceId, 'Meta ad funnel sync');
   const svc = dependencies.createServiceSupabase();
@@ -33,37 +33,32 @@ export async function runMetaAdSync(options: { workspaceId: string; dateStart?: 
       if (!info.currency || !info.timezone_name) throw new Error('Currency/timezone ad account tidak tersedia.');
       const profileObservedAt = new Date().toISOString();
       const raw = await dependencies.fetchAdInsights(account.account_id, start, end, token);
-      // Refresh current metadata in batched read requests; failed reads preserve cached metadata.
+      // The light inventory validates metadata before metric jobs. Rich provider
+      // reads belong exclusively to changed-ad mapping jobs, never this path.
       const adIds = [...new Set(raw.map(r => r.ad_id))];
-      const destinations = new Map<string, string[]>();
-      const creativeIds = new Map<string, string | null>();
-      for (let offset = 0; offset < adIds.length; offset += 50) {
-        try {
-          const metadata = await dependencies.fetchCreativeBatch(adIds.slice(offset, offset + 50), token);
-          const successes = metadata.filter((m): m is ReturnType<typeof normalizeCreativeMetadata> => !('error' in m));
-          for (const m of successes) destinations.set(m.ad_id, normalizeLandingPages(m.landing_page_urls));
-          for (const m of successes) creativeIds.set(m.ad_id, m.creative_id);
-          if (successes.length) {
-            const saved = await svc.from('meta_ad_creatives').upsert(successes.map(m => ({ ...m, workspace_id: workspaceId, account_id: account.account_id, updated_at: new Date().toISOString() })), { onConflict: 'workspace_id,account_id,ad_id' });
-            if (saved.error) throw new Error(saved.error.message);
+      const destinations = new Map<string, string[]>(), creativeIds = new Map<string, string | null>();
+      const states = new Map<string, { creative_id: string; adset_id: string }>();
+      for (let offset = 0; offset < adIds.length; offset += 500) {
+        const ids = adIds.slice(offset, offset + 500);
+        const [cached, certified] = await Promise.all([
+          svc.from('meta_ad_creatives').select('ad_id,creative_id,landing_page_urls').eq('workspace_id', workspaceId).eq('account_id', account.account_id).in('ad_id', ids),
+          svc.from('meta_ad_metadata_sync_state').select('ad_id,creative_id,adset_id').eq('workspace_id', workspaceId).eq('account_id', account.account_id).in('ad_id', ids),
+        ]);
+        if (cached.error || certified.error) warnings.push(`${account.account_name}: cache metadata belum tersedia; metrik tetap disimpan.`);
+        else {
+          for (const state of certified.data || []) states.set(state.ad_id, state);
+          for (const c of cached.data || []) if (states.get(c.ad_id)?.creative_id === c.creative_id) {
+            destinations.set(c.ad_id, normalizeLandingPages(c.landing_page_urls)); creativeIds.set(c.ad_id, c.creative_id);
           }
-          if (successes.length !== metadata.length) warnings.push(`${account.account_name}: ${metadata.length - successes.length} metadata creative belum tersedia.`);
-        } catch (e) { warnings.push(`${account.account_name}: ${e instanceof Error ? e.message : 'Metadata creative gagal'}`); }
-      }
-      const missing = adIds.filter(id => !destinations.has(id));
-      for (let offset = 0; offset < missing.length; offset += 500) {
-        const cached = await svc.from('meta_ad_creatives').select('ad_id,creative_id,landing_page_urls').eq('workspace_id', workspaceId)
-          .eq('account_id', account.account_id).in('ad_id', missing.slice(offset, offset + 500));
-        if (cached.error) warnings.push(`${account.account_name}: cache URL landing page belum tersedia.`);
-        else for (const c of cached.data || []) { destinations.set(c.ad_id, normalizeLandingPages(c.landing_page_urls)); creativeIds.set(c.ad_id, c.creative_id); }
+        }
       }
       const rows = raw.map(r => {
         const metrics = normalizeAdInsight(r);
         return { ad_id: r.ad_id, ad_name: r.ad_name || '', metric_date: r.date_start,
-          creative_id: creativeIds.get(r.ad_id) ?? null, metrics,
+          creative_id: (!r.adset_id || states.get(r.ad_id)?.adset_id === r.adset_id) ? creativeIds.get(r.ad_id) ?? null : null, metrics,
           raw_insights: { ...r, ig_profile_visit_observation: { observed_at: profileObservedAt,
             status: metrics.instagram_profile_visits === null ? 'not_returned' : 'available', source: 'meta_insights' } },
-          landing_page_urls: destinations.get(r.ad_id) ?? [] };
+          landing_page_urls: (!r.adset_id || states.get(r.ad_id)?.adset_id === r.adset_id) ? destinations.get(r.ad_id) ?? [] : [] };
       });
       // Replace only after all pagination completes. Coverage includes successful zero-row days.
       const { error: replaceError } = await svc.rpc('replace_meta_ad_snapshot', {

@@ -7,7 +7,7 @@ import { enqueueScheduledMetaAdMapping, enqueueMetaAdMappingCreatives } from '..
 function harness(cachedCreative?: { ad_id: string; creative_id: string; landing_page_urls: string[] }) {
   const writes: { table: string; data: any }[] = []; const filters: any[] = []; const queued: string[][] = [];
   const svc: any = { from(table: string) {
-    const q: any = { select: () => q, limit: () => q, in: () => q,
+    const q: any = { select: () => q, limit: () => q, in: () => q, delete: () => q, lte: () => q,
       eq: (key: string, value: unknown) => { filters.push({ table, key, value }); return q; },
       upsert: async (data: any) => { writes.push({ table, data }); return { error: null }; },
       then: (resolve: any) => resolve({ error: null, data: table === 'meta_ad_accounts' ? [{ account_id: 'act_1', account_name: 'Test' }] : table === 'meta_ad_mappings' ? [{ ad_id: '10', ad_name: '[new-cep][new-stage][video]', effective_status: 'PAUSED' }] : table === 'meta_ad_creatives' && cachedCreative ? [cachedCreative] : [] }) };
@@ -120,4 +120,52 @@ test('mapping scheduler refreshes active account inventory without saved funnels
   };
   const queued = await enqueueScheduledMetaAdMapping(h.svc, options.workspaceId, async (workspace, accounts) => { assert.equal(workspace, options.workspaceId); assert.deepEqual(accounts, ['act_2']); return ['job']; });
   assert.deepEqual(queued, ['job']);
+});
+
+import { metaMetadataSource } from '../lib/meta-ad-metadata-state';
+const versionedAd = { id: '10', name: 'A', creative: { id: '20' }, updated_time: '2026-10-15T00:00:00Z', adset_id: '30',
+  adset: { id: '30', updated_time: '2026-10-15T00:00:00Z', destination_type: 'WHATSAPP', promoted_object: { page_id: '100' } } };
+function versionedHarness(certified: boolean) {
+  const h = harness({ ad_id: '10', creative_id: '20', landing_page_urls: ['https://roove.co.id/cached'] });
+  const original = h.svc.from.bind(h.svc);
+  h.svc.from = (table: string) => {
+    const q = original(table);
+    if (table === 'meta_ad_metadata_sync_state') q.then = (resolve: any) => resolve({ error: null, data: certified ? [{ ad_id: '10', ...metaMetadataSource(versionedAd), observed_at: '2026-10-16T00:00:00Z' }] : [] });
+    if (table === 'meta_ad_destination_metadata') q.then = (resolve: any) => resolve({ error: null, data: [{ ad_id: '10', creative_id: '20', adset_id: '30', observed_at: '2026-10-16T00:00:00Z', metadata: { contact_identity_checked: true, product_set_ids: ['500'] } }] });
+    if (table === 'meta_ad_creatives') q.then = (resolve: any) => resolve({ error: null, data: [{ ad_id: '10', creative_id: '20', updated_at: '2026-10-16T00:00:00Z', landing_page_urls: ['https://roove.co.id/cached'] }] });
+    return q;
+  };
+  h.deps.fetchAdInventory = async () => [versionedAd];
+  h.deps.enqueueNewMetaProductSets = async () => [];
+  return h;
+}
+test('unchanged inventory uses existing successful metadata and does not queue creative reads', async () => {
+  for (const certified of [false, true]) {
+    const h = versionedHarness(certified); h.deps.fetchCreativeBatch = async () => { throw Error('Unchanged metadata must not be fetched'); };
+    const result = await runMetaAdMappingSync(options, h.deps);
+    assert.equal(result.status, 'success'); assert.equal(result.metadata_ads_skipped, 1); assert.equal(result.creative_jobs_queued, 0); assert.deepEqual(h.queued, []);
+    assert.equal(h.writes.filter(w => w.table === 'save_meta_ad_metadata_state').length, certified ? 0 : 1);
+  }
+});
+test('ad-set changes refresh metadata even when the creative ID stays the same', async () => {
+  const h = versionedHarness(true);
+  h.deps.fetchAdInventory = async () => [{ ...versionedAd, adset: { ...versionedAd.adset, promoted_object: { page_id: '200' } } }];
+  const result = await runMetaAdMappingSync(options, h.deps);
+  assert.equal(result.status, 'success'); assert.equal(result.metadata_ads_skipped, 0); assert.deepEqual(h.queued, [['10']]);
+});
+test('an unchanged ad still schedules due verification for its previously unverified product set', async () => {
+  const h = versionedHarness(true); const calls: any[] = [];
+  h.deps.enqueueNewMetaProductSets = async (...args: any[]) => { calls.push(args); return ['catalog-job']; };
+  const result = await runMetaAdMappingSync({ ...options, parentJobId: 'parent' }, h.deps);
+  assert.equal(result.creative_jobs_queued, 0); assert.equal(result.product_set_jobs_queued, 1); assert.deepEqual(result.child_job_ids, ['catalog-job']);
+  assert.deepEqual(calls[0].slice(1, 4), [options.workspaceId, options.accountId, ['500']]); assert.equal(calls[0][6], 'parent');
+});
+test('only complete matching creative and destination reads certify the next cache hit', async () => {
+  for (const fail of [false, true]) {
+    const h = harness(); h.deps.refreshMetaAdDestinations = async () => fail ? { saved: 0, failures: [{ ad_id: '10' }] }
+      : { saved: 1, failures: [], refreshed_ads: [{ ad_id: '10', creative_id: '20', adset_id: '30', source: metaMetadataSource(versionedAd) }] };
+    const result = await runMetaAdMappingSync({ ...options, creativeAdIds: ['10'] }, h.deps);
+    assert.equal(result.status, 'success'); assert.equal(h.writes.filter(w => w.table === 'save_meta_ad_metadata_state').length, fail ? 0 : 1);
+    if (fail) assert.ok(result.warnings.length>0);
+  }
 });
