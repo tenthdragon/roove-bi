@@ -1,0 +1,211 @@
+'use server';
+
+// Brand-first Meta Ads reporting: one summary per brand, one detail per brand
+// and world (website or CPAS), and template rule management.
+import { createServiceSupabase } from './service-supabase';
+import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, type FunnelMetric, type Totals } from './meta-funnel-domain';
+import { loadTemplateRules } from './meta-funnel-store';
+import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaReport } from './meta-ad-report';
+import { getCachedMetaAdReport } from './meta-ad-report-data';
+import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
+import { metaCoverageGaps } from './meta-report-status';
+import { assignTemplateSections, compareMetrics, cpasSection, defaultLeadFunnel, matchTemplateRule, responseMetrics, suggestTemplate, templateKind, templateMainMetric, validateTemplateRule, WORLD_CHANNEL, type MetaBrandWorld, type MetricComparison, type ReportGroup, type TemplateSection, type UnassignedGroup } from './meta-funnel-templates';
+import { brandHealth, brandHighlights, type Highlight } from './meta-ad-highlights';
+import { manageAccess, reportContext, uuid } from './meta-report-context';
+import { defaultFunnel } from './meta-funnel-domain';
+import { saveMetaFunnel } from './meta-funnel-actions';
+import { getTodayWIB } from './sync-schedule';
+
+const CPP: FunnelMetric = { id: 'cpp', label: 'CPP', numerator: 'spend', denominator: 'purchases', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
+const CPL: FunnelMetric = { id: 'cpl', label: 'CPL', numerator: 'spend', denominator: 'leads', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
+const CPC_CONVERSATION: FunnelMetric = { ...CPL, id: 'cost_per_conversation', label: 'Biaya / conversation', denominator: 'conversations' };
+const ROAS: FunnelMetric = { id: 'roas', label: 'ROAS', numerator: 'purchase_value', denominator: 'spend', format: 'multiple', direction: 'higher', monitor: true, min_denominator: 1 };
+const CTR: FunnelMetric = responseMetrics('website')[1];
+export type BrandInput = { from: string; to: string; filters?: MetaReportInput['filters'] };
+type Context = Extract<Awaited<ReturnType<typeof reportContext>>, { schemaReady: true }>;
+
+function validateWorld(value: unknown): MetaBrandWorld {
+  if (value !== 'website' && value !== 'cpas') throw new Error('Dunia iklan tidak valid.');
+  return value;
+}
+function normalizeGroups(raw: RawMetaReport): ReportGroup[] {
+  return raw.groups.map(g => ({ ...g, name: g.name || g.ad_ids[0] || g.key, current: { ...emptyTotals(), ...g.current }, previous: { ...emptyTotals(), ...g.previous } }));
+}
+function compare(current: Totals, previous: Totals, m: FunnelMetric): MetricComparison {
+  const a = metricValue(current, m), b = metricValue(previous, m);
+  return { id: m.id, current: a, previous: b, change: relativeChange(a, b) };
+}
+function sumTotals(items: Totals[]): Totals {
+  const total = emptyTotals();
+  for (const t of items) for (const key of Object.keys(total) as (keyof Totals)[]) total[key] += Number(t[key]) || 0;
+  return total;
+}
+function fetchWorld(ctx: Context, world: MetaBrandWorld, brandId: string | undefined, view: 'overview' = 'overview') {
+  const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: world === 'website' ? 'landing_page' : 'ad' }, ctx.config, view);
+  return getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query);
+}
+/** The lead cost metric follows whichever lead-type event the brand actually records. */
+function leadCostMetric(totals: Totals): FunnelMetric { return totals.leads > 0 || totals.conversations === 0 ? CPL : CPC_CONVERSATION; }
+
+function websiteWorld(ctx: Context, raw: RawMetaReport, brandAccounts: string[], rules: Awaited<ReturnType<typeof loadTemplateRules>>['rows']) {
+  const reportingError = raw.currencies.length > 1 ? 'Brand mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama.' : null;
+  const summary = reportingError ? emptyTotals() : raw.summary, previous = reportingError ? emptyTotals() : raw.previous;
+  const { sections, unassigned } = reportingError ? { sections: [] as TemplateSection[], unassigned: [] as UnassignedGroup[] } : assignTemplateSections(normalizeGroups(raw), ctx.funnels, rules);
+  const coverageGaps = metaCoverageGaps(raw.coverage, brandAccounts, ctx.reportRange);
+  const highlights = brandHighlights({ world: 'website', sections, summary, previous, currency: raw.currencies[0] || 'IDR', unassigned, coverageGaps, missingUrls: raw.destinations.missing_ads })
+    .map(h => ({ ...h, world: 'website' as const }));
+  const transaction = sumTotals(sections.filter(s => s.kind === 'transaction').map(s => s.summary)), transactionPrev = sumTotals(sections.filter(s => s.kind === 'transaction').map(s => s.previous));
+  const lead = sumTotals(sections.filter(s => s.kind === 'lead').map(s => s.summary)), leadPrev = sumTotals(sections.filter(s => s.kind === 'lead').map(s => s.previous));
+  return { reportingError, summary, previous, sections, unassigned, coverageGaps, highlights,
+    cpp: sections.some(s => s.kind === 'transaction') ? compare(transaction, transactionPrev, CPP) : null,
+    cpl: sections.some(s => s.kind === 'lead') ? compare(lead, leadPrev, leadCostMetric(lead)) : null,
+    cplLabel: leadCostMetric(lead).label, matchingAds: raw.matchingAds, currency: raw.currencies[0] || 'IDR' };
+}
+function cpasWorld(ctx: Context, raw: RawMetaReport, brandAccounts: string[]) {
+  const reportingError = raw.currencies.length > 1 ? 'Brand mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama.' : null;
+  const summary = reportingError ? emptyTotals() : raw.summary, previous = reportingError ? emptyTotals() : raw.previous;
+  const section = cpasSection(reportingError ? [] : normalizeGroups(raw), summary, previous);
+  const coverageGaps = metaCoverageGaps(raw.coverage, brandAccounts, ctx.reportRange);
+  const highlights = brandHighlights({ world: 'cpas', sections: [section], summary, previous, currency: raw.currencies[0] || 'IDR', coverageGaps })
+    .map(h => ({ ...h, world: 'cpas' as const }));
+  return { reportingError, summary, previous, section, coverageGaps, highlights, cpp: compare(summary, previous, CPP), roas: compare(summary, previous, ROAS),
+    matchingAds: raw.matchingAds, currency: raw.currencies[0] || 'IDR' };
+}
+const rank: Record<Highlight['severity'], number> = { bad: 0, warn: 1, good: 2, info: 3 };
+function mergeHighlights(...lists: (Highlight & { world: MetaBrandWorld })[][]) {
+  return lists.flat().filter(h => h.kind !== 'stable').sort((a, b) => rank[a.severity] - rank[b.severity] || b.weight - a.weight);
+}
+
+export async function getMetaBrandOverview(input: BrandInput) {
+  const ctx = await reportContext({ from: input.from, to: input.to, filters: input.filters }, true);
+  if (!ctx.schemaReady) return ctx;
+  const rules = await loadTemplateRules(createServiceSupabase(), ctx.workspaceId);
+  const choices = metaBrandOptions(ctx.accounts, ctx.brands, []).choices;
+  const brands: {
+    id: string; name: string; currency: string; adCount: number; health: ReturnType<typeof brandHealth>; reportingError: string | null;
+    spend: { total: number; website: number; cpas: number; change: number | null }; ctr: MetricComparison;
+    website: { cpp: MetricComparison | null; cpl: MetricComparison | null; cplLabel: string; templates: number; unassigned: number };
+    cpas: { cpp: MetricComparison; roas: MetricComparison; ads: number } | null;
+    highlights: (Highlight & { world: MetaBrandWorld })[]; dataNotes: number; summary: Totals; previous: Totals;
+  }[] = [];
+  // Two brands at a time bounds concurrent database work; each brand reads both worlds.
+  for (let offset = 0; offset < choices.length; offset += 2) {
+    const batch = await Promise.all(choices.slice(offset, offset + 2).map(async brand => {
+      const brandAccounts = metaBrandAccountIds(ctx.accounts, ctx.brands, brand.value);
+      const [rawWeb, rawCpas] = await Promise.all([fetchWorld(ctx, 'website', brand.value), fetchWorld(ctx, 'cpas', brand.value)]);
+      const web = websiteWorld(ctx, rawWeb, brandAccounts, rules.rows), cpas = cpasWorld(ctx, rawCpas, brandAccounts);
+      const summary = sumTotals([web.summary, cpas.summary]), previous = sumTotals([web.previous, cpas.previous]);
+      const highlights = mergeHighlights(web.highlights, cpas.matchingAds ? cpas.highlights : []);
+      const dataNotes = highlights.filter(h => h.kind === 'data').length;
+      return { id: brand.value, name: brand.label, currency: web.currency, adCount: web.matchingAds + cpas.matchingAds, health: brandHealth(highlights), summary, previous,
+        reportingError: web.reportingError || cpas.reportingError,
+        spend: { total: summary.spend, website: web.summary.spend, cpas: cpas.summary.spend, change: relativeChange(summary.spend, previous.spend) },
+        ctr: compare(summary, previous, CTR),
+        website: { cpp: web.cpp, cpl: web.cpl, cplLabel: web.cplLabel, templates: web.sections.filter(s => s.groups.length).length, unassigned: web.unassigned.filter(u => u.reason === 'no_rule').length },
+        cpas: cpas.matchingAds ? { cpp: cpas.cpp, roas: cpas.roas, ads: cpas.matchingAds } : null,
+        highlights: highlights.slice(0, 3), dataNotes };
+    }));
+    brands.push(...batch);
+  }
+  brands.sort((a, b) => b.spend.total - a.spend.total || a.name.localeCompare(b.name, 'id'));
+  const { from, to } = ctx.reportRange;
+  const summary = sumTotals(brands.map(b => b.summary)), previous = sumTotals(brands.map(b => b.previous));
+  const totals = { spend: summary.spend, website: brands.reduce((s, b) => s + b.spend.website, 0), cpas: brands.reduce((s, b) => s + b.spend.cpas, 0),
+    spendChange: relativeChange(summary.spend, previous.spend), ctr: compare(summary, previous, CTR) };
+  const allRaw = await fetchWorld(ctx, 'website', undefined);
+  return { schemaReady: true as const, reportRange: ctx.reportRange, prevFrom: shiftDay(from, -daysBetween(from, to)), prevTo: shiftDay(from, -1),
+    reportVersion: ctx.reportVersion, accounts: ctx.accounts, jobs: ctx.jobs, brands, totals, rulesReady: rules.ready,
+    templates: ctx.funnels.map(f => ({ id: f.id, name: f.name, kind: templateKind(f) })),
+    dimensionOptions: metaReportOptions(allRaw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true,
+    dataNotes: brands.reduce((s, b) => s + b.dataNotes, 0), currency: brands[0]?.currency || allRaw.currencies[0] || 'IDR' };
+}
+
+export async function getMetaBrandDetail(input: BrandInput & { brandId: string; world: MetaBrandWorld }) {
+  const world = validateWorld(input.world);
+  const brandId = validateMetaBrandFilter(input.brandId);
+  if (!brandId) throw new Error('Pilih brand terlebih dahulu.');
+  const ctx = await reportContext({ from: input.from, to: input.to, filters: input.filters, brandId });
+  if (!ctx.schemaReady) return ctx;
+  const rules = await loadTemplateRules(createServiceSupabase(), ctx.workspaceId);
+  const brandAccounts = metaBrandAccountIds(ctx.accounts, ctx.brands, brandId);
+  const [rawWeb, rawCpas] = await Promise.all([fetchWorld(ctx, 'website', brandId), fetchWorld(ctx, 'cpas', brandId)]);
+  const web = websiteWorld(ctx, rawWeb, brandAccounts, rules.rows), cpas = cpasWorld(ctx, rawCpas, brandAccounts);
+  const active = world === 'website' ? web : cpas;
+  const raw = world === 'website' ? rawWeb : rawCpas;
+  const { from, to } = ctx.reportRange;
+  const brandOptions = metaBrandOptions(ctx.accounts, ctx.brands, []).choices.map(b => ({ value: b.value, label: b.label }));
+  return { schemaReady: true as const, world, brand: { id: brandId, name: brandOptions.find(b => b.value === brandId)?.label || brandId }, brandOptions,
+    reportRange: ctx.reportRange, prevFrom: shiftDay(from, -daysBetween(from, to)), prevTo: shiftDay(from, -1), reportVersion: ctx.reportVersion,
+    currency: active.currency, reportingError: active.reportingError, matchingAds: active.matchingAds,
+    worlds: { website: { spend: web.summary.spend, ads: web.matchingAds }, cpas: { spend: cpas.summary.spend, ads: cpas.matchingAds } },
+    accounts: ctx.accounts.filter(a => brandAccounts.includes(a.account_id)).map(a => ({ account_id: a.account_id, account_name: a.account_name })),
+    summary: active.summary, previous: active.previous, response: compareMetrics(active.summary, active.previous, responseMetrics(world)), responseMetrics: responseMetrics(world),
+    sections: world === 'website' ? web.sections : [cpas.section], unassigned: world === 'website' ? web.unassigned : [],
+    highlights: active.highlights.slice(0, 6), coverageGaps: active.coverageGaps, destinations: raw.destinations, objectiveUnknownAds: raw.objectiveUnknownAds,
+    dimensionOptions: metaReportOptions(raw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true, rulesReady: rules.ready, verifiedDestinationsReady: true,
+    templates: ctx.funnels.map(f => ({ id: f.id, name: f.name, kind: templateKind(f) })) };
+}
+
+export async function getMetaTemplateSettings() {
+  const today = getTodayWIB();
+  const ctx = await reportContext({ from: shiftDay(today, -30), to: shiftDay(today, -1) });
+  if (!ctx.schemaReady) return ctx;
+  const svc = createServiceSupabase();
+  const [rules, raw] = await Promise.all([loadTemplateRules(svc, ctx.workspaceId), fetchWorld(ctx, 'website', undefined)]);
+  const accountBrand = new Map(ctx.accounts.map(a => [a.account_name, ctx.brands.find(b => b.id === a.default_brand_id)?.name || 'Brand belum dipetakan']));
+  const templates = ctx.funnels.map(f => ({ ...f, kind: templateKind(f), mainMetric: templateMainMetric(f), rules: rules.rows.filter(r => r.funnel_id === f.id).length }));
+  const landingPages = normalizeGroups(raw).filter(g => g.landing_page_urls.length === 1).map(g => {
+    const rule = matchTemplateRule(g.landing_page_urls[0], rules.rows);
+    const template = rule ? ctx.funnels.find(f => f.id === rule.funnel_id) : null;
+    return { key: g.key, url: g.landing_page_urls[0], spend: g.current.spend, ads: g.ad_ids.length, accounts: g.accounts,
+      brands: [...new Set(g.accounts.map(a => accountBrand.get(a) || a))], evidence: { purchases: g.current.purchases, leads: g.current.leads, conversations: g.current.conversations },
+      rule: rule ? { id: rule.id, match_kind: rule.match_kind, pattern: rule.pattern } : null, templateId: template?.id || null, templateName: template?.name || null,
+      suggestion: suggestTemplate(g.current, ctx.funnels) };
+  }).sort((a, b) => Number(!!a.templateId) - Number(!!b.templateId) || b.spend - a.spend);
+  return { schemaReady: true as const, rulesReady: rules.ready, range: ctx.reportRange, currency: raw.currencies[0] || 'IDR', templates, accounts: ctx.accounts,
+    rules: rules.rows.map(r => ({ ...r, templateName: ctx.funnels.find(f => f.id === r.funnel_id)?.name || 'Template diarsipkan' })), landingPages, reportVersion: ctx.reportVersion };
+}
+export async function saveMetaTemplateRule(input: { id?: string; funnelId: string; match_kind: string; pattern: string }) {
+  const { workspaceId, profile } = await manageAccess();
+  const rule = validateTemplateRule(input);
+  const svc = createServiceSupabase();
+  const funnel = await svc.from('meta_ad_funnels').select('id').eq('workspace_id', workspaceId).eq('id', uuid(input.funnelId)).eq('archived', false).maybeSingle();
+  if (funnel.error || !funnel.data) throw new Error('Template tidak ditemukan.');
+  const row = { workspace_id: workspaceId, funnel_id: input.funnelId, ...rule, updated_at: new Date().toISOString() };
+  const result = input.id
+    ? await svc.from('meta_landing_page_templates').update(row).eq('workspace_id', workspaceId).eq('id', uuid(input.id)).select('id').maybeSingle()
+    : await svc.from('meta_landing_page_templates').upsert({ ...row, created_by: profile.id }, { onConflict: 'workspace_id,match_kind,pattern' }).select('id').maybeSingle();
+  if (result.error) {
+    if (['42P01', 'PGRST205'].includes(result.error.code)) throw new Error('Pasang migration 211_meta_landing_page_templates.sql untuk menyimpan aturan template.');
+    throw new Error(result.error.message);
+  }
+  if (!result.data) throw new Error('Aturan tidak ditemukan.');
+  return { id: result.data.id as string, ...rule };
+}
+export async function deleteMetaTemplateRule(id: string) {
+  const { workspaceId } = await manageAccess();
+  const result = await createServiceSupabase().from('meta_landing_page_templates').delete().eq('workspace_id', workspaceId).eq('id', uuid(id));
+  if (result.error) throw new Error(result.error.message);
+}
+/** Creates a standard template so a workspace can start without designing one. */
+export async function createMetaTemplatePreset(kind: 'transaction' | 'lead') {
+  if (kind !== 'transaction' && kind !== 'lead') throw new Error('Jenis template tidak valid.');
+  const config = kind === 'transaction' ? { ...defaultFunnel(), name: 'Transaksi website', description: 'Outbound click → landing page → add to cart → initiate checkout → purchase' } : defaultLeadFunnel();
+  return saveMetaFunnel({ config });
+}
+
+/** Per-ad rows behind one landing page or CPAS group, for the detail drawer. */
+export async function getMetaGroupAds(input: BrandInput & { brandId: string; world: MetaBrandWorld; adIds: string[] }) {
+  const world = validateWorld(input.world);
+  const brandId = validateMetaBrandFilter(input.brandId);
+  if (!brandId) throw new Error('Pilih brand terlebih dahulu.');
+  if (!Array.isArray(input.adIds) || input.adIds.length > 5000 || input.adIds.some(id => typeof id !== 'string' || !/^\d+$/.test(id))) throw new Error('Daftar ad tidak valid.');
+  const ctx = await reportContext({ from: input.from, to: input.to, filters: input.filters, brandId });
+  if (!ctx.schemaReady) return ctx;
+  const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: 'ad' }, ctx.config);
+  const raw = await getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query);
+  const wanted = new Set(input.adIds);
+  return { schemaReady: true as const, currency: raw.currencies[0] || 'IDR',
+    ads: normalizeGroups(raw).filter(g => g.ad_ids.some(id => wanted.has(id))).sort((a, b) => b.current.spend - a.current.spend)
+      .map(g => ({ key: g.key, ad_id: g.ad_ids[0], name: g.name, account: g.accounts[0] || '', current: g.current, previous: g.previous })) };
+}
