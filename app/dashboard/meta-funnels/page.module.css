@@ -173,9 +173,9 @@
 @media(max-width:600px) { .channelPicker { grid-template-columns: 1fr; gap: 6px; } .channelChoice { padding: 10px 12px; gap: 3px 12px; } .channelDescription { font-size: 10px; } }
 
 /* Brand-first Meta Ads pages */
-.subnavArea { display: grid; gap: 14px; }
-.subnav { display: flex; gap: 4px; border-bottom: 1px solid var(--border); overflow-x: auto; }
-.subnav a { display: inline-flex; align-items: center; gap: 6px; padding: 10px 14px; font-size: 13px; color: var(--dim); white-space: nowrap; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.subnavArea { display: grid; gap: 14px; min-width: 0; }
+.subnav { display: flex; gap: 4px; min-width: 0; border-bottom: 1px solid var(--border); overflow-x: auto; overflow-y: hidden; }
+.subnav a { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; padding: 10px 14px; font-size: 13px; color: var(--dim); white-space: nowrap; border-bottom: 2px solid transparent; }
 .subnav a:hover { color: var(--text); }
 .subnav .subnavActive { color: var(--accent); border-color: var(--accent); font-weight: 650; }
 .subnavBadge { background: var(--red); color: #fff; font-size: 10px; font-weight: 650; padding: 1px 6px; border-radius: 10px; }

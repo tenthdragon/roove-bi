@@ -48,8 +48,11 @@ export async function loadTemplateRules(svc: SupabaseClient, workspaceId: string
 export async function evaluateWorkspaceAlerts(svc: SupabaseClient, workspaceId: string, accountIds: string[], refreshed?: { from: string; to: string }) {
   const funnels = await loadFunnels(svc, workspaceId);
   const today = getTodayWIB();
-  const enabled = funnels.filter(f => f.group_by === 'landing_page' && f.alerts_enabled && (!refreshed || (shiftDay(today, -f.lag_days) >= refreshed.from
-    && shiftDay(today, -f.lag_days - f.window_days * 2 + 1) <= refreshed.to)));
+  // Incremental sync may refresh only yesterday while the alert window ends
+  // two or more days ago. Evaluate that complete cached window as well, so
+  // template edits do not depend on an overlapping historical backfill.
+  const enabled = funnels.filter(f => f.group_by === 'landing_page' && f.alerts_enabled
+    && (!refreshed || shiftDay(today, -f.lag_days) <= refreshed.to));
   if (!enabled.length) return 0;
   const earliest = enabled.map(f => shiftDay(today, -f.lag_days - f.window_days * 2 + 1)).sort()[0];
   const coverage = await readAll<Coverage>(svc, 'meta_ad_sync_coverage', 'account_id,metric_date', workspaceId, earliest, today);

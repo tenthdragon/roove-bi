@@ -2,7 +2,6 @@
 
 import { createServiceSupabase } from './service-supabase';
 import { daysBetween, hasCoverage, shiftDay, emptyTotals, validateFunnel, type FunnelConfig } from './meta-funnel-domain';
-import { evaluateWorkspaceAlerts } from './meta-funnel-store';
 import { enqueueIncrementalMetaSync } from './meta-sync-queue';
 import { metaAdChannelCounts } from './meta-ad-channels';
 import { canonicalLandingPage } from './meta-ad-destinations';
@@ -111,10 +110,9 @@ export async function saveMetaFunnel(input: { id?: string; version?: number; con
     if (result.error) throw new Error(result.error.message);
     savedId = result.data.id;
   }
-  let warning: string | null = null;
-  try { await evaluateWorkspaceAlerts(svc, workspaceId, accounts.map(a => a.account_id)); }
-  catch { warning = 'Funnel tersimpan; evaluasi notifikasi akan dicoba lagi saat sync berikutnya.'; }
-  return { id: savedId, warning };
+  // The sync worker evaluates alerts with the saved template. Saving a template
+  // must not read and aggregate the entire metrics history in the request.
+  return { id: savedId, warning: null as string | null };
 }
 export async function archiveMetaFunnel(id: string) {
   const { workspaceId } = await manageAccess();

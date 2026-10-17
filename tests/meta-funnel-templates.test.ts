@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { defaultFunnel, emptyTotals, metricValue, type SavedFunnel } from '../lib/meta-funnel-domain';
 import { assignTemplateSections, cpasSection, defaultLeadFunnel, matchTemplateRule, median, responseMetrics, suggestTemplate, templateKind, templateMainMetric, validateTemplateRule, type ReportGroup, type TemplateRule } from '../lib/meta-funnel-templates';
 import { brandHealth, brandHighlights } from '../lib/meta-ad-highlights';
+import { applyMetaTemplateRules, metaTemplateError, type MetaTemplateConfiguration } from '../lib/meta-template-settings';
+import { evaluateWorkspaceAlerts } from '../lib/meta-funnel-store';
+import { shiftDay } from '../lib/meta-funnel-domain';
+import { getTodayWIB } from '../lib/sync-schedule';
+import type { SupabaseClient } from '@supabase/supabase-js';
 
 const trx: SavedFunnel = { ...defaultFunnel(), id: 'trx', updated_at: '' };
 const lead: SavedFunnel = { ...defaultLeadFunnel(), id: 'lead', updated_at: '' };
@@ -14,6 +19,61 @@ const rules: TemplateRule[] = [
 const group = (name: string, current: Partial<ReturnType<typeof emptyTotals>>, previous: Partial<ReturnType<typeof emptyTotals>> = {}, urls = [name]): ReportGroup => ({
   key: `landing:${name}`, name, current: { ...emptyTotals(), ...current }, previous: { ...emptyTotals(), ...previous },
   ad_ids: ['1'], accounts: ['A'], ad_names: ['a'], landing_page_urls: urls, verified_ad_ids: [],
+});
+
+test('changing URL assignments recomputes precedence and counts without changing performance or row order', () => {
+  const templates: MetaTemplateConfiguration['templates'] = [trx, lead].map(t => ({ ...t, version: 1, kind: templateKind(t), mainMetric: templateMainMetric(t), rules: 0 }));
+  const urls = ['https://purvu.id/konsultasi-sendi', 'https://purvu.id/serum'];
+  const data = { templates, rules: [] as MetaTemplateConfiguration['rules'], reportVersion: '15',
+    landingPages: urls.map((url, i) => ({ key: `landing:${url}`, url, spend: 100 + i, ads: 2 + i, brands: ['Purvu'], accounts: ['RTI'],
+      evidence: { purchases: i, leads: 0, conversations: 0 }, rule: null, templateId: null, templateName: null,
+      suggestion: suggestTemplate({ purchases: i, leads: 0, conversations: 0 }, templates) })) };
+  const assigned = applyMetaTemplateRules(data, rules);
+  assert.deepEqual(assigned.landingPages.map(lp => lp.templateId), ['lead', 'trx']);
+  assert.deepEqual(assigned.templates.map(t => t.rules), [2, 1]);
+  const overridden = applyMetaTemplateRules(assigned, [...rules, { id: 'exact', funnel_id: 'trx', match_kind: 'exact', pattern: urls[0] }]);
+  assert.equal(overridden.landingPages[0].templateId, 'trx');
+  const removed = applyMetaTemplateRules(overridden, rules);
+  assert.equal(removed.landingPages[0].templateId, 'lead', 'Deleting exact rule restores prefix rule');
+  assert.deepEqual(removed.landingPages.map(({ key, spend, ads, evidence, accounts, brands }) => ({ key, spend, ads, evidence, accounts, brands })),
+    data.landingPages.map(({ key, spend, ads, evidence, accounts, brands }) => ({ key, spend, ads, evidence, accounts, brands })));
+  assert.equal(removed.reportVersion, '15');
+  assert.ok(data.landingPages.every(lp => lp.templateId === null), 'A failed optimistic save can restore the unchanged snapshot');
+  const archived = applyMetaTemplateRules(assigned, rules.filter(r => r.funnel_id !== 'lead'), templates.filter(t => t.id !== 'lead'));
+  assert.equal(archived.landingPages[0].templateId, 'trx', 'Archiving restores remaining matching rule');
+});
+
+test('template errors expose validation or a retry message without leaking production internals', () => {
+  assert.match(metaTemplateError(new Error('Gagal memuat performa Meta: canceling statement due to statement timeout'), 'Gagal'), /Server sedang sibuk/);
+  assert.equal(metaTemplateError(new Error('URL tidak valid. Gunakan URL lengkap dengan https://'), 'Gagal'), 'URL tidak valid. Gunakan URL lengkap dengan https://');
+  for (const secret of ['database credentials: private', 'An error occurred in the Server Components render. digest: 123']) {
+    assert.equal(metaTemplateError(new Error(secret), 'Belum berhasil disimpan.'), 'Belum berhasil disimpan.');
+  }
+});
+
+test('the next incremental sync evaluates a saved template even when attribution lag predates the refreshed day', async () => {
+  const today = getTodayWIB(), end = shiftDay(today, -2), start = shiftDay(end, -1);
+  const config = { ...defaultFunnel(), alerts_enabled: true, lag_days: 2, window_days: 1, min_impressions: 0, min_spend: 0 };
+  const tables: Record<string, unknown[]> = {
+    meta_ad_funnels: [{ id: 'trx', config, version: 2, updated_at: new Date().toISOString() }],
+    meta_ad_sync_coverage: [start, end].map(metric_date => ({ account_id: 'act_1', metric_date })),
+    meta_ad_daily_metrics: [start, end].map((metric_date, i) => ({ account_id: 'act_1', account_name: 'A', ad_id: '1', ad_name: 'Test',
+      metric_date, currency: 'IDR', landing_page_urls: ['https://purvu.id/serum'], metrics: { ...emptyTotals(), spend: 100, impressions: 1000, outbound_clicks: i ? 50 : 100 } })),
+  };
+  const saved: unknown[] = [];
+  const svc = { from(table: string) {
+    const query = { select() { return this; }, eq() { return this; }, order() { return this; }, gte() { return this; }, lte() { return this; },
+      range() { return this; }, limit() { return this; },
+      upsert(payload: unknown) { saved.push(payload); return Promise.resolve({ error: null }); },
+      then(resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) { return Promise.resolve({ data: tables[table] || [], error: null }).then(resolve, reject); } };
+    return query;
+  } } as unknown as SupabaseClient;
+  assert.equal(await evaluateWorkspaceAlerts(svc, 'workspace', ['act_1'], { from: shiftDay(today, -1), to: shiftDay(today, -1) }), 1);
+  assert.equal(saved.length, 1);
+  saved.length = 0;
+  tables.meta_ad_sync_coverage = [];
+  assert.equal(await evaluateWorkspaceAlerts(svc, 'workspace', ['act_1'], { from: shiftDay(today, -1), to: shiftDay(today, -1) }), 0, 'Incomplete coverage still blocks alerts');
+  assert.equal(saved.length, 0);
 });
 
 test('rule validation canonicalizes URLs and domains and rejects junk', () => {

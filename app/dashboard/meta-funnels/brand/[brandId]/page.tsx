@@ -101,7 +101,11 @@ export default function MetaBrandDetailPage() {
   }
   async function applySuggestion(url: string, funnelId: string) {
     setBusy(true); setError('');
-    try { await saveMetaTemplateRule({ funnelId, match_kind: 'exact', pattern: url }); setNotice(`Template ditetapkan untuk ${url}.`); await load(); }
+    try {
+      const result = await saveMetaTemplateRule({ funnelId, match_kind: 'exact', pattern: url });
+      if ('error' in result) { setError(result.error); return; }
+      setNotice(`Template ditetapkan untuk ${url}.`); await load();
+    }
     catch (e) { setError(message(e)); } finally { setBusy(false); }
   }
   async function verifyDestination() {

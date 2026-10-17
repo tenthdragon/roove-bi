@@ -4,16 +4,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { archiveMetaFunnel, saveMetaFunnel } from '@/lib/meta-funnel-actions';
-import { createMetaTemplatePreset, deleteMetaTemplateRule, getMetaTemplateSettings, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
+import { createMetaTemplatePreset, deleteMetaTemplateRule, getMetaTemplateConfiguration, getMetaTemplateSettings, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
 import { MEASURES, type FunnelConfig } from '@/lib/meta-funnel-domain';
-import { TEMPLATE_KIND_LABELS, type TemplateMatchKind } from '@/lib/meta-funnel-templates';
+import { TEMPLATE_KIND_LABELS, validateTemplateRule, type TemplateMatchKind } from '@/lib/meta-funnel-templates';
+import { applyMetaTemplateRules, metaTemplateError } from '@/lib/meta-template-settings';
 import { formatCompactMoney, formatDate } from '@/lib/meta-format';
 import MetaAdsNav from '@/components/MetaAdsNav';
 import MetaFunnelEditor from '@/components/MetaFunnelEditor';
 import styles from '../page.module.css';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaTemplateSettings>>, { schemaReady: true }>;
-const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
+const message = (e: unknown) => metaTemplateError(e, 'Permintaan belum berhasil. Silakan coba muat ulang halaman.');
 const kindLabels: Record<TemplateMatchKind, string> = { exact: 'URL persis', prefix: 'Awalan URL', domain: 'Domain' };
 
 export default function MetaTemplatesPage() {
@@ -24,47 +25,96 @@ export default function MetaTemplatesPage() {
   const [schemaReady, setSchemaReady] = useState(true);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [pendingUrls, setPendingUrls] = useState<string[]>([]);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [editor, setEditor] = useState<{ id?: string; version?: number; config: FunnelConfig } | null>(null);
   const [ruleForm, setRuleForm] = useState<{ funnelId: string; match_kind: TemplateMatchKind; pattern: string }>({ funnelId: '', match_kind: 'domain', pattern: '' });
   const request = useRef(0);
+  const mutation = useRef(false);
   const load = useCallback(async () => {
     const current = ++request.current;
     setLoading(true); setError('');
     try {
       const result = await getMetaTemplateSettings();
       if (current !== request.current) return;
+      if ('error' in result) { setError(result.error); return; }
       setSchemaReady(result.schemaReady);
       if (result.schemaReady) { setData(result); setSelectedId(id => result.templates.some(t => t.id === id) ? id : result.templates[0]?.id || ''); }
     } catch (e) { if (current === request.current) setError(message(e)); }
     finally { if (current === request.current) setLoading(false); }
   }, []);
-  useEffect(() => { const guard = request; setData(null); setEditor(null); void load(); return () => { guard.current++; }; }, [load, activeWorkspace.id]);
-  async function run(work: () => Promise<unknown>, done?: string) {
+  useEffect(() => {
+    const guard = request;
+    mutation.current = false; setBusy(false); setPendingUrls([]); setNotice(''); setData(null); setEditor(null);
+    void load();
+    return () => { guard.current++; };
+  }, [load, activeWorkspace.id]);
+  async function run(work: (isCurrent: () => boolean) => Promise<unknown>, done?: string) {
+    if (mutation.current) return;
+    mutation.current = true;
+    const current = request.current;
     setBusy(true); setError(''); setNotice('');
-    try { await work(); if (done) setNotice(done); await load(); }
-    catch (e) { setError(message(e)); } finally { setBusy(false); }
+    try {
+      await work(() => current === request.current);
+      if (current !== request.current) return;
+      if (done) setNotice(done);
+      const config = await getMetaTemplateConfiguration();
+      if (current !== request.current) return;
+      if ('error' in config) { setNotice(`${done || 'Perubahan tersimpan.'} ${config.error}`); return; }
+      setData(previous => previous ? applyMetaTemplateRules({ ...previous, rulesReady: config.rulesReady }, config.rules, config.templates) : previous);
+      setSelectedId(id => config.templates.some(t => t.id === id) ? id : config.templates[0]?.id || '');
+    }
+    catch (e) { if (current === request.current) setError(message(e)); }
+    finally { if (current === request.current) { mutation.current = false; setBusy(false); } }
+  }
+  async function changeRule(change: { save: Parameters<typeof saveMetaTemplateRule>[0] } | { remove: string }, done: string) {
+    if (!data || mutation.current) return false;
+    const before = data, current = request.current;
+    try {
+      const rule = 'save' in change ? validateTemplateRule(change.save) : null;
+      const optimisticRules = 'save' in change && rule
+        ? [...before.rules.filter(r => !(r.id === change.save.id || (r.match_kind === rule.match_kind && r.pattern === rule.pattern))),
+          { ...rule, id: change.save.id || 'pending-rule', funnel_id: change.save.funnelId }]
+        : before.rules.filter(r => !('remove' in change) || r.id !== change.remove);
+      const optimistic = applyMetaTemplateRules(before, optimisticRules);
+      mutation.current = true; setBusy(true); setError(''); setNotice('');
+      setPendingUrls(optimistic.landingPages.filter((lp, i) => lp.templateId !== before.landingPages[i].templateId || lp.rule?.id !== before.landingPages[i].rule?.id).map(lp => lp.url));
+      setData(optimistic);
+      const result = 'save' in change ? await saveMetaTemplateRule(change.save) : await deleteMetaTemplateRule(change.remove);
+      if (current !== request.current) return false;
+      if ('error' in result) { setData(before); setError(result.error); return false; }
+      const rules = 'deletedId' in result
+        ? before.rules.filter(r => r.id !== result.deletedId)
+        : [...before.rules.filter(r => !(r.id === result.id || (r.match_kind === result.match_kind && r.pattern === result.pattern))), result];
+      setData(applyMetaTemplateRules(before, rules)); setNotice(done);
+      return true;
+    } catch (e) {
+      if (current === request.current) { setData(before); setError(message(e)); }
+      return false;
+    } finally {
+      if (current === request.current) { mutation.current = false; setBusy(false); setPendingUrls([]); }
+    }
   }
   const selected = data?.templates.find(t => t.id === selectedId) || null;
   const ruleFor = (url: string) => data?.landingPages.find(lp => lp.url === url)?.rule || null;
   function assign(url: string, funnelId: string) {
     const existing = ruleFor(url);
     if (!funnelId) {
-      if (existing?.match_kind === 'exact') return run(() => deleteMetaTemplateRule(existing.id), 'Aturan URL dihapus.');
+      if (existing?.match_kind === 'exact') return changeRule({ remove: existing.id }, 'Aturan URL dihapus.');
       setNotice(existing ? `URL ini mengikuti aturan ${kindLabels[existing.match_kind]} "${existing.pattern}". Ubah atau hapus aturan itu di daftar aturan.` : 'URL ini belum punya aturan.');
       return;
     }
-    return run(() => saveMetaTemplateRule({ id: existing?.match_kind === 'exact' ? existing.id : undefined, funnelId, match_kind: 'exact', pattern: url }), 'Template ditetapkan.');
+    return changeRule({ save: { id: existing?.match_kind === 'exact' ? existing.id : undefined, funnelId, match_kind: 'exact', pattern: url } }, 'Template ditetapkan.');
   }
   return <div className={styles.page} aria-busy={loading}>
     <MetaAdsNav title="Template funnel" subtitle="Template menentukan tahapan dan kolom hasil untuk landing page Website. Satu landing page memakai satu template. CPAS tidak memakai template karena tahapannya tetap: outbound → Shopee → purchase."
       actions={canManage && schemaReady ? <>
-        <button className={styles.button} disabled={busy} onClick={() => void run(() => createMetaTemplatePreset('transaction'), 'Template Transaksi dibuat.')}>+ Template Transaksi</button>
-        <button className={styles.button} disabled={busy} onClick={() => void run(() => createMetaTemplatePreset('lead'), 'Template Lead dibuat.')}>+ Template Lead</button>
+        <button className={styles.button} disabled={busy || loading || !data} onClick={() => void run(() => createMetaTemplatePreset('transaction'), 'Template Transaksi dibuat.')}>+ Template Transaksi</button>
+        <button className={styles.button} disabled={busy || loading || !data} onClick={() => void run(() => createMetaTemplatePreset('lead'), 'Template Lead dibuat.')}>+ Template Lead</button>
       </> : undefined} />
-    {error && <div role="alert" className={styles.error}>{error}</div>}
+    {error && <div role="alert" className={styles.error}>{error} <button type="button" className={styles.button} disabled={busy || loading} onClick={() => void load()}>Muat ulang</button></div>}
     {notice && <div role="status" className={styles.info}>{notice}</div>}
     {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
       {loading && !data && <p role="status" className={styles.muted}>Memuat template…</p>}
@@ -81,9 +131,9 @@ export default function MetaTemplatesPage() {
         </section>
         <section aria-label="Editor template" style={{ display: 'grid', gap: 12, minWidth: 0 }}>
           {editor ? <MetaFunnelEditor value={editor.config} onChange={config => setEditor({ ...editor, config })} accounts={data.accounts} busy={busy}
-            onSave={() => void run(async () => { const result = await saveMetaFunnel(editor); setEditor(null); setSelectedId(result.id); if (result.warning) setNotice(result.warning); }, 'Template tersimpan.')}
+            onSave={() => void run(async isCurrent => { const result = await saveMetaFunnel(editor); if (isCurrent()) { setEditor(null); setSelectedId(result.id); if (result.warning) setNotice(result.warning); } }, 'Template tersimpan.')}
             onClose={() => setEditor(null)}
-            onArchive={editor.id ? () => { if (window.confirm('Arsipkan template ini? Aturan URL-nya ikut dihapus.')) void run(async () => { await archiveMetaFunnel(editor.id!); setEditor(null); }, 'Template diarsipkan.'); } : undefined} />
+            onArchive={editor.id ? () => { if (window.confirm('Arsipkan template ini? Aturan URL-nya ikut dihapus.')) void run(async isCurrent => { await archiveMetaFunnel(editor.id!); if (isCurrent()) setEditor(null); }, 'Template diarsipkan.'); } : undefined} />
           : selected ? <div className={styles.card} style={{ display: 'grid', gap: 10 }}>
             <div className={styles.sectionHeader}><div><h2 style={{ margin: 0 }}>{selected.name}</h2><p className={styles.muted}>{selected.description || 'Tanpa deskripsi'}</p></div>
               {canManage && <button className={styles.primary} onClick={() => setEditor({ id: selected.id, version: selected.version, config: selected })}>Ubah template</button>}</div>
@@ -109,7 +159,7 @@ export default function MetaTemplatesPage() {
                 <option value="">{lp.suggestion.funnelId ? `Saran: ${data.templates.find(t => t.id === lp.suggestion.funnelId)?.name}` : 'Tanpa template'}</option>
                 {data.templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
               </select></td>
-              <td><span className={`${styles.statusTag} ${status.cls}`}>{status.label}</span>{canManage && !lp.templateId && lp.suggestion.funnelId && data.rulesReady && <small><button type="button" className={styles.nameButton} disabled={busy} onClick={() => void assign(lp.url, lp.suggestion.funnelId!)}>Konfirmasi saran</button></small>}</td>
+              <td><span role={pendingUrls.includes(lp.url) ? 'status' : undefined} className={`${styles.statusTag} ${pendingUrls.includes(lp.url) ? styles.statusWarn : status.cls}`}>{pendingUrls.includes(lp.url) ? 'Menyimpan…' : status.label}</span>{canManage && !lp.templateId && lp.suggestion.funnelId && data.rulesReady && <small><button type="button" className={styles.nameButton} disabled={busy} onClick={() => void assign(lp.url, lp.suggestion.funnelId!)}>Konfirmasi saran</button></small>}</td>
             </tr>;
           })}</tbody>
         </table>{!data.landingPages.length && <p className={styles.muted} style={{ padding: 16 }}>Belum ada landing page Website dengan URL tunggal pada 30 hari terakhir.</p>}</div></div>
@@ -117,7 +167,7 @@ export default function MetaTemplatesPage() {
       </section>}
       {data && <section aria-label="Aturan URL" style={{ display: 'grid', gap: 10 }}>
         <div className={styles.sectionTitle}><h2>Aturan URL</h2><span>URL persis menang atas awalan URL, awalan menang atas domain; pola terpanjang didahulukan</span></div>
-        {canManage && data.rulesReady && data.templates.length > 0 && <form className={`${styles.card} ${styles.inlineForm}`} onSubmit={e => { e.preventDefault(); void run(() => saveMetaTemplateRule(ruleForm), 'Aturan tersimpan.').then(() => setRuleForm(f => ({ ...f, pattern: '' }))); }}>
+        {canManage && data.rulesReady && data.templates.length > 0 && <form className={`${styles.card} ${styles.inlineForm}`} onSubmit={e => { e.preventDefault(); void changeRule({ save: ruleForm }, 'Aturan tersimpan.').then(saved => { if (saved) setRuleForm(f => ({ ...f, pattern: '' })); }); }}>
           <label>Jenis<select value={ruleForm.match_kind} onChange={e => setRuleForm({ ...ruleForm, match_kind: e.target.value as TemplateMatchKind })}>{(Object.keys(kindLabels) as TemplateMatchKind[]).map(k => <option key={k} value={k}>{kindLabels[k]}</option>)}</select></label>
           <label style={{ flex: 1 }}>Pola<input required maxLength={4096} placeholder={ruleForm.match_kind === 'domain' ? 'purvu.id' : 'https://purvu.id/konsultasi'} value={ruleForm.pattern} onChange={e => setRuleForm({ ...ruleForm, pattern: e.target.value })} /></label>
           <label>Template<select required value={ruleForm.funnelId} onChange={e => setRuleForm({ ...ruleForm, funnelId: e.target.value })}><option value="">Pilih template…</option>{data.templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
@@ -126,7 +176,7 @@ export default function MetaTemplatesPage() {
         <div className={styles.sectionCard}><div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}><table className={styles.rulesTable}>
           <thead><tr><th>Jenis</th><th>Pola</th><th>Template</th><th /></tr></thead>
           <tbody>{data.rules.map(r => <tr key={r.id}><td>{kindLabels[r.match_kind]}</td><td style={{ overflowWrap: 'anywhere' }}>{r.pattern}</td><td>{r.templateName}</td>
-            <td style={{ textAlign: 'right' }}>{canManage && <button type="button" className={styles.button} disabled={busy} onClick={() => void run(() => deleteMetaTemplateRule(r.id), 'Aturan dihapus.')}>Hapus</button>}</td></tr>)}</tbody>
+            <td style={{ textAlign: 'right' }}>{canManage && <button type="button" className={styles.button} disabled={busy} onClick={() => void changeRule({ remove: r.id }, 'Aturan dihapus.')}>Hapus</button>}</td></tr>)}</tbody>
         </table>{!data.rules.length && <p className={styles.muted} style={{ padding: 16 }}>Belum ada aturan. Tetapkan template dari tabel pencocokan atau tambahkan aturan domain agar seluruh website langsung terpetakan.</p>}</div></div>
       </section>}
     </>}

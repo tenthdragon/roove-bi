@@ -48,7 +48,17 @@ lead = 0 → Transaksi; lead > 0 and purchase = 0 → Lead) and are only applied
 when an admin confirms. Archiving a template deletes its rules. Rule writes bump
 the report revision so cached reports invalidate.
 
-Decline notifications are evaluated per template. A template that has at least
+URL assignment saves update the matching rows, rule list, and template counts
+without reloading the performance report. The selected value appears immediately
+with a pending label; a failed save restores the previous assignment. Expected
+read/write failures return a safe message rather than a production render digest.
+Template edits reload only configuration, not spend or event totals. Row order
+stays stable while assigning URLs.
+
+Decline notifications are evaluated by the sync worker, not inside template-save
+requests. Incremental sync evaluates complete cached windows even when attribution
+lag puts the alert window before the newly refreshed day. Missing coverage still
+blocks evaluation. A template that has at least
 one URL rule only monitors landing pages matched to it; a template without
 rules keeps monitoring every landing page in its account scope.
 
