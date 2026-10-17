@@ -22,7 +22,7 @@ export default function MetaSyncProgress({ progress, preparing, checking, status
       : { queued: 'Menunggu giliran', running: 'Sync berjalan', complete: 'Sync selesai', issues: 'Sync selesai dengan kendala', unavailable: 'Status sync tidak tersedia' }[progress.state])
       : status?.pending ? (status.running ? 'Sync berjalan' : 'Menunggu giliran') : latest ? `Sync terakhir: ${syncLabels[latest.status]?.toLowerCase() || latest.status}` : 'Status sync tidak tersedia';
   const Icon = preparing || checking || (active && (progress ? progress.state === 'running' : status?.running)) ? LoaderCircle : active ? Clock3 : issues ? AlertCircle : CheckCircle2;
-  const jobs: MetaSyncJob[] = status?.trackedJobs || status?.jobs || [];
+  const jobs: MetaSyncJob[] = (progress ? status?.trackedJobs : status?.jobs) || [];
   const completedAt = progress?.completedAt || latest?.completed_at;
   const stamp = !active && completedAt ? new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }).format(new Date(completedAt)) : '';
   return <div className={styles.syncArea}>

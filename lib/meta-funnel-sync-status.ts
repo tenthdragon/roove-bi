@@ -42,6 +42,18 @@ export function metaSyncProgress(jobIds: string[], jobs: MetaSyncJob[]) {
     completedAt: [...found.values()].map(j => j.completed_at || '').sort().at(-1) || null };
 }
 
+/** A saved manual run must not cover a newer scheduled/manual run forever. */
+export function visibleMetaSyncProgress(request: MetaSyncRequest | null, trackedJobs: MetaSyncJob[] | null, recentJobs: MetaSyncJob[]) {
+  if (!request || !trackedJobs) return null;
+  const progress = metaSyncProgress(request.jobIds, trackedJobs);
+  // Keep following every requested batch while it is actually queued/running.
+  if (progress.active) return progress;
+  const wanted = new Set(request.jobIds);
+  const started = Math.max(Date.parse(request.startedAt), ...trackedJobs.map(j => Date.parse(j.created_at) || 0));
+  const superseded = recentJobs.some(j => !wanted.has(j.id) && Date.parse(j.created_at) > started);
+  return superseded ? null : progress;
+}
+
 export async function loadMetaSyncJobs(svc: SupabaseClient, workspaceId: string, input: unknown): Promise<MetaSyncJob[]> {
   const ids = validateMetaSyncJobIds(input), jobs: MetaSyncJob[] = [];
   // Keep PostgREST URLs bounded and read every requested batch, including reused jobs.
