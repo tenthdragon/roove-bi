@@ -1,12 +1,12 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { getMetaFunnelNotifications, markMetaFunnelAlertRead } from '@/lib/meta-funnel-actions';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { GROUPING_OPTIONS, type AdGrouping } from '@/lib/meta-ad-naming';
 import type { FunnelMetric } from '@/lib/meta-funnel-domain';
 import MetaAdCreative, { type MetaAdCreativeData } from '@/components/MetaAdCreative';
+import MetaAdsNav from '@/components/MetaAdsNav';
 import styles from '../page.module.css';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaFunnelNotifications>>, { schemaReady: true }>;
@@ -53,10 +53,8 @@ export default function MetaFunnelNotificationsPage() {
   }
   const unread = data?.alerts.filter(alert => !alert.read).length || 0;
   return <div className={styles.page}>
-    <Link className={styles.backLink} href="/dashboard/meta-funnels">← Kembali ke performa</Link>
-    <div className={styles.header}><div><h1>Notifikasi Meta Ads</h1>{data && <span className={styles.muted}>{unread} belum dibaca</span>}</div>
-      <button className={styles.button} disabled={loading} onClick={() => void load()}>Muat ulang</button>
-    </div>
+    <MetaAdsNav title="Notifikasi" subtitle={data ? `${unread} belum dibaca · penurunan per landing page menurut template funnel` : undefined}
+      actions={<button className={styles.button} disabled={loading} onClick={() => void load()}>Muat ulang</button>} />
     {error && <div role="alert" className={styles.error}>{error}</div>}
     {loading && <p role="status" className={styles.muted}>Memuat notifikasi…</p>}
     {!schemaReady && <div className={styles.card}>Pasang migration 198_meta_ad_funnels.sql untuk mengaktifkan notifikasi.</div>}

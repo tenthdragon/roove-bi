@@ -29,7 +29,8 @@ export function useDateRange() {
 
 export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   const supabase = useSupabase();
-  const isMetaReport = usePathname() === '/dashboard/meta-funnels';
+  const metaPath = usePathname();
+  const isMetaReport = metaPath === '/dashboard/meta-funnels' || metaPath.startsWith('/dashboard/meta-funnels/brand');
   const today = getTodayWIB();
   const { activeWorkspace } = useWorkspace();
   const [dateRange, setDateRangeState] = useState({ from: '', to: '' });

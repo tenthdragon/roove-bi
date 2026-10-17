@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AdFact, AdCreative, Coverage, SavedFunnel, VerifiedDestination } from './meta-funnel-domain';
 import { evaluateDeclines, hasCoverage, shiftDay, validateFunnel, withLandingPages } from './meta-funnel-domain';
+import { matchTemplateRule, TEMPLATE_MATCH_KINDS, type TemplateRule } from './meta-funnel-templates';
 import { getTodayWIB } from './sync-schedule';
 import type { AdDimensions } from './meta-ad-dimensions';
 
@@ -38,6 +39,12 @@ export async function loadFunnels(svc: SupabaseClient, workspaceId: string): Pro
   if (error) throw new Error(`Funnel belum tersedia: ${error.message}`);
   return (data || []).map(r => ({ ...validateFunnel(r.config), id: r.id, version: r.version, updated_at: r.updated_at }));
 }
+export async function loadTemplateRules(svc: SupabaseClient, workspaceId: string): Promise<{ ready: boolean; rows: TemplateRule[] }> {
+  const { data, error } = await svc.from('meta_landing_page_templates').select('id,funnel_id,match_kind,pattern').eq('workspace_id', workspaceId).order('created_at');
+  if (error && ['42P01', 'PGRST205'].includes(error.code)) return { ready: false, rows: [] };
+  if (error) throw new Error(`Aturan template belum tersedia: ${error.message}`);
+  return { ready: true, rows: (data || []).filter(r => TEMPLATE_MATCH_KINDS.includes(r.match_kind)) as TemplateRule[] };
+}
 export async function evaluateWorkspaceAlerts(svc: SupabaseClient, workspaceId: string, accountIds: string[], refreshed?: { from: string; to: string }) {
   const funnels = await loadFunnels(svc, workspaceId);
   const today = getTodayWIB();
@@ -49,15 +56,20 @@ export async function evaluateWorkspaceAlerts(svc: SupabaseClient, workspaceId: 
   const eligible = enabled.filter(f => hasCoverage(coverage, accountIds.filter(a => !f.account_ids.length || f.account_ids.includes(a)),
     shiftDay(today, -f.lag_days - f.window_days * 2 + 1), shiftDay(today, -f.lag_days)));
   if (!eligible.length) return 0;
-  const [facts, creatives, verified] = await Promise.all([
+  const [facts, creatives, verified, rules] = await Promise.all([
     readAll<AdFact>(svc, 'meta_ad_daily_metrics', 'account_id,account_name,ad_id,ad_name,creative_id,metric_date,currency,metrics,landing_page_urls', workspaceId, earliest, today),
     readAll<AdCreative>(svc, 'meta_ad_creatives', 'account_id,ad_id,creative_id,name,thumbnail_url,video_id,body,landing_page_urls', workspaceId),
     loadVerifiedDestinations(svc, workspaceId),
+    loadTemplateRules(svc, workspaceId),
   ]);
   let count = 0;
   for (const funnel of eligible) {
     const end = shiftDay(today, -funnel.lag_days);
-    const scoped = withLandingPages(facts, creatives, verified.rows).filter(r => accountIds.includes(r.account_id) && (!funnel.account_ids.length || funnel.account_ids.includes(r.account_id)));
+    // A template with URL rules monitors only its own landing pages. Templates
+    // without rules keep the earlier behavior and monitor every landing page.
+    const ownRules = rules.rows.some(r => r.funnel_id === funnel.id);
+    const scoped = withLandingPages(facts, creatives, verified.rows).filter(r => accountIds.includes(r.account_id) && (!funnel.account_ids.length || funnel.account_ids.includes(r.account_id))
+      && (!ownRules || (r.landing_page_urls?.length === 1 && matchTemplateRule(r.landing_page_urls[0], rules.rows)?.funnel_id === funnel.id)));
     // Never combine monetary performance from different account currencies.
     if (new Set(scoped.map(r => r.currency)).size > 1) continue;
     const declines = evaluateDeclines(scoped, coverage, funnel, accountIds, end, creatives);
