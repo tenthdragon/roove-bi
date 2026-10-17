@@ -17,7 +17,7 @@
     "start": "next start",
     "lint": "next lint",
     "test:growth": "node --import tsx --test tests/growth-domain.test.ts tests/growth-case-domain.test.ts",
-    "test:meta-funnels": "node --import tsx --test tests/meta-funnel-domain.test.ts tests/meta-funnel-templates.test.ts tests/meta-ctwa-destinations.test.ts tests/meta-landing-page.test.ts tests/meta-ad-sync-runner.test.ts tests/meta-funnel-sync-queue.test.ts tests/meta-incremental-sync.test.ts tests/scheduled-ads-sync.test.ts tests/meta-ad-mapping.test.ts tests/meta-ad-mapping-sync.test.ts tests/meta-ad-dimensions.test.ts tests/meta-ad-brands.test.ts tests/meta-report-status.test.ts tests/meta-ad-report.test.ts tests/meta-ad-channels.test.ts tests/meta-ad-channel-picker.test.tsx tests/meta-marketing.test.ts tests/meta-pagination.test.ts tests/meta-cpas-evidence.test.ts tests/meta-ad-destination-metadata.test.ts tests/meta-product-set-queue.test.ts tests/meta-product-set-sync.test.ts tests/meta-product-set-dispatch.test.ts tests/meta-instagram-profile-visits.test.ts",
+    "test:meta-funnels": "node --import tsx --test tests/meta-funnel-domain.test.ts tests/meta-funnel-templates.test.ts tests/meta-ctwa-destinations.test.ts tests/meta-landing-page.test.ts tests/meta-ad-sync-runner.test.ts tests/meta-funnel-sync-queue.test.ts tests/meta-incremental-sync.test.ts tests/scheduled-ads-sync.test.ts tests/meta-ad-mapping.test.ts tests/meta-ad-mapping-sync.test.ts tests/meta-ad-dimensions.test.ts tests/meta-ad-brands.test.ts tests/meta-report-status.test.ts tests/meta-ad-report.test.ts tests/meta-ad-channels.test.ts tests/meta-ad-channel-picker.test.tsx tests/meta-marketing.test.ts tests/meta-pagination.test.ts tests/meta-cpas-evidence.test.ts tests/meta-ad-destination-metadata.test.ts tests/meta-product-set-queue.test.ts tests/meta-product-set-sync.test.ts tests/meta-product-set-dispatch.test.ts tests/meta-instagram-profile-visits.test.ts tests/meta-ad-metadata-state.test.ts tests/sync-worker-loop.test.ts",
     "test:meta-cpas-catalog-db": "node tests/meta-cpas-catalog-priority-database.mjs",
     "test:meta-channel-db": "node tests/meta-ad-channel-database.mjs",
     "test:meta-destination-cache-db": "node tests/meta-ad-destination-cache-database.mjs",
@@ -41,7 +41,8 @@
     "mcp:start": "npm --prefix mcp-server run start",
     "sync-jobs:once": "tsx scripts/sync-jobs-worker.ts",
     "sync-jobs:loop": "tsx scripts/sync-jobs-worker.ts --loop",
-    "test:meta-instagram-db": "node tests/meta-instagram-profile-visits-database.mjs"
+    "test:meta-instagram-db": "node tests/meta-instagram-profile-visits-database.mjs",
+    "test:meta-incremental-db": "node tests/meta-sync-incremental-database.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",

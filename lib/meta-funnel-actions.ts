@@ -10,7 +10,8 @@ import { currencyError, manageAccess, reportContext, reportJobs, reportingAccess
 
 import { metaReportBrandSections, metaReportQuery, metaReportGroups, metaReportOptions, metaReportHistory, type MetaReportInput } from './meta-ad-report';
 import { getCachedMetaAdReport } from './meta-ad-report-data';
-import { loadMetaSyncJobs } from './meta-funnel-sync-status';
+import { validateMetaSyncJobIds } from './meta-funnel-sync-status';
+import { loadMetaSyncJobTree } from './meta-sync-job-tree';
 
 export async function getMetaFunnelData(input: MetaReportInput) {
   const ctx = await reportContext(input, true);
@@ -51,13 +52,13 @@ export async function getMetaFunnelSyncStatus(jobIds?: string[]) {
   const { workspaceId } = await reportingAccess();
   const svc = createServiceSupabase();
   const [version, jobs, trackedJobs, active] = await Promise.all([
-    svc.from('meta_ad_report_versions').select('revision').eq('workspace_id', workspaceId).maybeSingle(), reportJobs(svc, workspaceId),
-    jobIds ? loadMetaSyncJobs(svc, workspaceId, jobIds) : Promise.resolve(null),
+    svc.from('meta_ad_report_versions').select('revision').eq('workspace_id', workspaceId).maybeSingle(), loadMetaSyncJobTree(svc, workspaceId),
+    jobIds ? loadMetaSyncJobTree(svc, workspaceId, validateMetaSyncJobIds(jobIds)) : Promise.resolve(null),
     svc.from('sync_jobs').select('status', { count: 'exact' }).eq('workspace_id', workspaceId).eq('job_name', 'meta_sync')
       .in('status', ['queued', 'running']).order('status', { ascending: false }).limit(1),
   ]);
-  if (version.error || jobs.error || active.error) throw new Error(version.error?.message || jobs.error?.message || active.error?.message);
-  return { workspaceId, reportVersion: String(version.data?.revision || 0), jobs: jobs.data || [], trackedJobs,
+  if (version.error || active.error) throw new Error(version.error?.message || active.error?.message);
+  return { workspaceId, reportVersion: String(version.data?.revision || 0), jobs, trackedJobs,
     pending: active.count || 0, running: active.data?.[0]?.status === 'running' };
 }
 export async function getMetaFunnelNotifications() {

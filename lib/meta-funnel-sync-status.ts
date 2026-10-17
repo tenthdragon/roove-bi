@@ -1,10 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-export const META_SYNC_JOB_FIELDS = 'id,status,error_message,created_at,started_at,completed_at,payload';
+export const META_SYNC_JOB_FIELDS = 'id,status,error_message,created_at,started_at,completed_at,payload,mode,result_summary';
 export type MetaSyncJob = {
-  id: string; status: string; error_message: string | null;
+  id: string; mode?: string; result_summary?: { warnings?: string[]; errors?: string[] }; status: string; error_message: string | null;
   created_at: string; started_at: string | null; completed_at: string | null;
-  payload: { date_start?: string; date_end?: string; account_id?: string };
+  payload: { date_start?: string; date_end?: string; account_id?: string; ad_mapping_only?: boolean; verify_shopee_product_set?: boolean;
+    meta_sync_bundle?: boolean; meta_bundle_enqueued?: boolean; meta_bundle_queue_error?: string | null };
 };
 export type MetaSyncRequest = { jobIds: string[]; startedAt: string };
 
@@ -45,7 +46,7 @@ export function metaSyncProgress(jobIds: string[], jobs: MetaSyncJob[]) {
 /** A saved manual run must not cover a newer scheduled/manual run forever. */
 export function visibleMetaSyncProgress(request: MetaSyncRequest | null, trackedJobs: MetaSyncJob[] | null, recentJobs: MetaSyncJob[]) {
   if (!request || !trackedJobs) return null;
-  const progress = metaSyncProgress(request.jobIds, trackedJobs);
+  const progress = metaSyncProgress([...request.jobIds, ...trackedJobs.map(j => j.id)], trackedJobs);
   // Keep following every requested batch while it is actually queued/running.
   if (progress.active) return progress;
   const wanted = new Set(request.jobIds);
@@ -65,4 +66,29 @@ export async function loadMetaSyncJobs(svc: SupabaseClient, workspaceId: string,
     jobs.push(...(result.data || []) as MetaSyncJob[]);
   }
   return jobs;
+}
+
+export function metaSyncStage(job: MetaSyncJob): 'metrics' | 'metadata' | 'catalog' {
+  if (job.mode === 'meta_product_set_verify' || job.payload.verify_shopee_product_set) return 'catalog';
+  if (['ad_mapping', 'ad_mapping_creatives'].includes(job.mode || '') || job.payload.ad_mapping_only) return 'metadata';
+  return 'metrics';
+}
+export function metaSyncStages(jobs: MetaSyncJob[]) {
+  const stage = (key: ReturnType<typeof metaSyncStage>) => {
+    const rows = jobs.filter(j => metaSyncStage(j) === key);
+    return { ...metaSyncProgress(rows.map(j => j.id), rows), jobs: rows,
+      warnings: rows.filter(j => (j.result_summary?.warnings || []).length > 0).length };
+  };
+  return { metrics: stage('metrics'), metadata: stage('metadata'), catalog: stage('catalog'),
+    discovering: jobs.some(j => j.mode === 'ad_mapping' && ['queued', 'running'].includes(j.status)),
+    queueError: jobs.find(j => j.payload.meta_bundle_queue_error)?.payload.meta_bundle_queue_error || null,
+    preparing: jobs.some(j => j.payload.meta_sync_bundle && j.payload.meta_bundle_enqueued === false && !j.payload.meta_bundle_queue_error) };
+}
+export function metaMetricCompletedAt(jobs: MetaSyncJob[]) {
+  return jobs.filter(j => metaSyncStage(j) === 'metrics' && j.completed_at).map(j => j.completed_at!).sort((a, b) => Date.parse(b) - Date.parse(a))[0] || null;
+}
+
+/** Job reads and the global active count can straddle a worker commit. */
+export function shouldPollMetaSync(status: { pending: number; jobs: MetaSyncJob[]; trackedJobs: MetaSyncJob[] | null }) {
+  return status.pending > 0 || [...status.jobs, ...(status.trackedJobs || [])].some(j => ['queued', 'running'].includes(j.status));
 }

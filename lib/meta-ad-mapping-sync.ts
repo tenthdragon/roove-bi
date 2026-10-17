@@ -3,12 +3,14 @@ import { resolveWorkspaceCredential } from './workspace-integration-server';
 import { fetchAdInventory, fetchCreativeBatch, normalizeCreativeMetadata } from './meta-ad-insights';
 import { normalizeLandingPages } from './meta-ad-destinations';
 import { parseAdMapping } from './meta-ad-mapping';
+import { metaMetadataSource, metadataRefreshDecision, type MetadataState } from './meta-ad-metadata-state';
 import { requireExplicitWorkspaceId } from './workspace-scope';
 import { enqueueMetaAdMappingCreatives } from './meta-ad-mapping-queue';
+import { enqueueNewMetaProductSets } from './meta-product-set-queue';
 import { refreshMetaAdDestinations } from './meta-ad-destination-metadata';
 
-const defaultDependencies = { createServiceSupabase, resolveWorkspaceCredential, fetchAdInventory, fetchCreativeBatch, enqueueMetaAdMappingCreatives, refreshMetaAdDestinations };
-export async function runMetaAdMappingSync(options: { workspaceId: string; accountId?: string; creativeAdIds?: string[] }, dependencies = defaultDependencies) {
+const defaultDependencies = { createServiceSupabase, resolveWorkspaceCredential, fetchAdInventory, fetchCreativeBatch, enqueueMetaAdMappingCreatives, refreshMetaAdDestinations, enqueueNewMetaProductSets };
+export async function runMetaAdMappingSync(options: { workspaceId: string; accountId?: string; creativeAdIds?: string[]; parentJobId?: string }, dependencies = defaultDependencies) {
   const workspaceId = requireExplicitWorkspaceId(options.workspaceId, 'Meta ad mapping sync');
   if (options.creativeAdIds && (!options.accountId || !options.creativeAdIds.length || options.creativeAdIds.length > 100 || options.creativeAdIds.some(id => !/^\d+$/.test(id)))) throw new Error('Batch creative harus memiliki satu akun dan 1–100 ad ID.');
   const svc = dependencies.createServiceSupabase();
@@ -23,7 +25,7 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
   if (accounts.error) throw new Error(accounts.error.message);
   if (options.accountId && !accounts.data?.length) throw new Error('Akun Meta tidak aktif atau tidak tersedia dalam workspace.');
   const token = await dependencies.resolveWorkspaceCredential({ supabase: svc, workspaceId, provider: 'meta', fallbackEnvKeys: ['META_ACCESS_TOKEN'] });
-  const errors: string[] = []; const warnings: string[] = []; let count = 0; let synced = 0; let creativeJobs = 0; let productSetJobs = 0;
+  const errors: string[] = []; const warnings: string[] = []; let count = 0; let synced = 0; let creativeJobs = 0; let productSetJobs = 0; let metadataSkipped = 0; const childJobIds: string[] = [];
   for (const account of accounts.data || []) {
     const observedAt = new Date().toISOString();
     try {
@@ -46,8 +48,16 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
           }
           if (successes.length !== ids.length) warnings.push(`${account.account_name}: ${ids.length - successes.length} creative belum terbaca; pemetaan nama tetap disimpan.`);
           try {
-            const destinations = await dependencies.refreshMetaAdDestinations?.(svc, workspaceId, account.account_id, ids, token);
+            const destinations = await dependencies.refreshMetaAdDestinations?.(svc, workspaceId, account.account_id, ids, token, undefined, options.parentJobId);
             productSetJobs += destinations?.product_set_jobs_queued || 0;
+            childJobIds.push(...(destinations?.child_job_ids || []));
+            const certified = (destinations?.refreshed_ads || []).filter(r => r.source?.creative_id && r.source.adset_id
+              && r.source.source_updated_at && r.source.adset_updated_at && successes.some(c => c.ad_id === r.ad_id && c.creative_id === r.creative_id));
+            if (certified.length) {
+              const state = await svc.rpc('save_meta_ad_metadata_state', { p_workspace_id: workspaceId, p_account_id: account.account_id,
+                p_observed_at: observedAt, p_rows: certified.map(r => ({ ad_id: r.ad_id, ...r.source })) });
+              if (state.error) throw new Error(state.error.message);
+            }
             if (destinations?.failures.length) warnings.push(`${account.account_name}: ${destinations.failures.length} metadata tujuan belum terbaca; bukti sebelumnya dipertahankan.`);
           } catch (e) { warnings.push(`${account.account_name}: ${e instanceof Error ? e.message : 'Metadata tujuan gagal'}`); }
         }
@@ -58,13 +68,40 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
       const inventory = await dependencies.fetchAdInventory(account.account_id, token);
       const dimensionSchema = await svc.from('meta_ad_mappings').select('campaign_objective').eq('workspace_id', workspaceId).limit(1);
       const dimensionsReady = !dimensionSchema.error;
+      const refreshIds: string[] = []; const cachedProductSets = new Set<string>();
       if (dimensionSchema.error && !['42703','PGRST204'].includes(dimensionSchema.error.code)) throw new Error(dimensionSchema.error.message);
       for (let offset = 0; offset < inventory.length; offset += 50) {
         const ads = inventory.slice(offset, offset + 50);
-        const cache = await svc.from('meta_ad_creatives').select('ad_id,creative_id,landing_page_urls')
+        const cache = await svc.from('meta_ad_creatives').select('ad_id,creative_id,landing_page_urls,updated_at')
           .eq('workspace_id', workspaceId).eq('account_id', account.account_id).in('ad_id', ads.map(a => a.id));
         if (cache.error) throw new Error(cache.error.message);
         const cached = new Map((cache.data || []).map(c => [c.ad_id, c]));
+        const [states, destinationsCache] = await Promise.all([
+          svc.from('meta_ad_metadata_sync_state').select('*').eq('workspace_id', workspaceId).eq('account_id', account.account_id).in('ad_id', ads.map(a => a.id)),
+          svc.from('meta_ad_destination_metadata').select('ad_id,creative_id,adset_id,observed_at,metadata').eq('workspace_id', workspaceId).eq('account_id', account.account_id).in('ad_id', ads.map(a => a.id)),
+        ]);
+        if (states.error || destinationsCache.error) throw new Error(states.error?.message || destinationsCache.error?.message);
+        const savedStates = new Map((states.data || []).map(r => [r.ad_id, r as MetadataState]));
+        const savedDestinations = new Map((destinationsCache.data || []).map(r => [r.ad_id, r]));
+        const adopted: Record<string, unknown>[] = []; const invalidated: string[] = [];
+        for (const ad of ads) {
+          const source = metaMetadataSource(ad);
+          const decision = metadataRefreshDecision(source, savedStates.get(ad.id), cached.get(ad.id), savedDestinations.get(ad.id));
+          if (decision === 'refresh') { refreshIds.push(ad.id); invalidated.push(ad.id); }
+          else {
+            metadataSkipped++; if (decision === 'adopt') adopted.push({ ad_id: ad.id, ...source });
+            for (const id of savedDestinations.get(ad.id)?.metadata?.product_set_ids || []) cachedProductSets.add(id);
+          }
+        }
+        if (invalidated.length) {
+          const removed = await svc.from('meta_ad_metadata_sync_state').delete().eq('workspace_id', workspaceId).eq('account_id', account.account_id)
+            .in('ad_id', invalidated).lte('observed_at', observedAt);
+          if (removed.error) throw new Error(removed.error.message);
+        }
+        if (adopted.length) {
+          const saved = await svc.rpc('save_meta_ad_metadata_state', { p_workspace_id: workspaceId, p_account_id: account.account_id, p_rows: adopted, p_observed_at: observedAt });
+          if (saved.error) throw new Error(saved.error.message);
+        }
         const destinations = new Map(ads.map(a => [a.id, a.creative?.id && a.creative.id === cached.get(a.id)?.creative_id ? normalizeLandingPages(cached.get(a.id)?.landing_page_urls) : []]));
         const creativeIds = new Map(ads.map(a => [a.id, a.creative?.id || null]));
         if (ads.some(ad => !ad.creative?.id)) warnings.push(`${account.account_name}: identitas beberapa creative belum terbaca; pemetaan nama tetap disimpan.`);
@@ -81,11 +118,16 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
       }
       // Read rich destinations separately: expanding every creative on /ads can
       // hit Meta's response-size limit; one huge worker job can also time out.
-      creativeJobs += (await dependencies.enqueueMetaAdMappingCreatives(workspaceId, account.account_id, inventory.map(a => a.id))).length;
+      const children = refreshIds.length ? await dependencies.enqueueMetaAdMappingCreatives(workspaceId, account.account_id, refreshIds, undefined, options.parentJobId, svc) : [];
+      creativeJobs += children.length; childJobIds.push(...children);
+      if (cachedProductSets.size) {
+        const catalogJobs = await dependencies.enqueueNewMetaProductSets(svc, workspaceId, account.account_id, [...cachedProductSets], undefined, undefined, options.parentJobId);
+        productSetJobs += catalogJobs.length; childJobIds.push(...catalogJobs);
+      }
       const state = await svc.from('meta_ad_mapping_sync_state').upsert({ workspace_id: workspaceId, account_id: account.account_id, last_inventory_at: observedAt, ads_count: inventory.length }, { onConflict: 'workspace_id,account_id' });
       if (state.error) throw new Error(state.error.message);
       synced++;
     } catch (e) { errors.push(`${account.account_name}: ${e instanceof Error ? e.message : 'Pemetaan ad gagal'}`); }
   }
-  return { status: errors.length ? synced ? 'partial' as const : 'failed' as const : 'success' as const, rows_inserted: count, accounts_synced: synced, accounts_total: accounts.data?.length || 0, creative_jobs_queued: creativeJobs, product_set_jobs_queued: productSetJobs, errors, warnings };
+  return { status: errors.length ? synced ? 'partial' as const : 'failed' as const : 'success' as const, rows_inserted: count, accounts_synced: synced, accounts_total: accounts.data?.length || 0, creative_jobs_queued: creativeJobs, product_set_jobs_queued: productSetJobs, child_job_ids: childJobIds, metadata_ads_skipped: metadataSkipped, errors, warnings };
 }

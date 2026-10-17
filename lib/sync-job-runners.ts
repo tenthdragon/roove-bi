@@ -53,7 +53,7 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
         if (payload.creative_ad_ids !== undefined && (!Array.isArray(payload.creative_ad_ids) || !payload.creative_ad_ids.every(id => typeof id === 'string'))) throw new Error('Payload creative mapping tidak valid.');
         const result = await runMetaAdMappingSync({ workspaceId: job.workspace_id,
           accountId: typeof payload.account_id === 'string' ? payload.account_id : undefined,
-          creativeAdIds: payload.creative_ad_ids as string[] | undefined });
+          creativeAdIds: payload.creative_ad_ids as string[] | undefined, parentJobId: job.id });
         if (result.status !== 'success') throw new Error(result.errors.join('; '));
         return { status: result.status, rowsProcessed: result.rows_inserted, resultSummary: result };
       }

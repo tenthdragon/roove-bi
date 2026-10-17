@@ -142,3 +142,36 @@ test('superseded missing/failed history does not hide a newer run, while a new m
   assert.equal(visibleMetaSyncProgress({ ...request, startedAt: '2026-10-17T11:00:00Z' }, [batch(ids[0], 'success')], [newer])?.state, 'complete');
   assert.equal(visibleMetaSyncProgress(null, null, [newer]), null);
 });
+
+import { metaSyncStages, metaMetricCompletedAt } from '../lib/meta-funnel-sync-status';
+test('all discovered descendants count once and catalog warnings cannot make successful metrics partial', () => {
+  const root = { ...batch(batchIds[0], 'success'), mode: 'incremental' };
+  const metric = { ...batch(batchIds[1], 'success'), mode: 'ad_funnels' };
+  const inventory = { ...batch(batchIds[2], 'success'), mode: 'ad_mapping' };
+  const creative = { ...batch(batchIds[3], 'running'), mode: 'ad_mapping_creatives' };
+  const catalog = { ...batch(batchIds[4], 'partial'), mode: 'meta_product_set_verify', result_summary: { warnings: ['Empty catalog'] }, completed_at: '2026-10-14T20:00:00Z' };
+  const jobs = [root, metric, inventory, creative, catalog];
+  const progress = visibleMetaSyncProgress({ jobIds: [root.id, metric.id, inventory.id], startedAt: root.created_at }, jobs, jobs)!;
+  assert.equal(progress.total, 5); assert.equal(progress.completed, 4); assert.equal(progress.active, true);
+  const stages = metaSyncStages(jobs);
+  assert.equal(stages.metrics.state, 'complete'); assert.equal(stages.metrics.issues, 0);
+  assert.equal(stages.metadata.total, 2); assert.equal(stages.metadata.active, true); assert.equal(stages.catalog.issues, 1);
+  assert.equal(metaMetricCompletedAt(jobs), '2026-10-14T13:02:00Z', 'Catalog completion must not replace performance freshness');
+});
+test('inventory discovery and incomplete enqueue cannot be shown as a finished bundle', () => {
+  const inventory = { ...batch(batchIds[0], 'running'), mode: 'ad_mapping' };
+  assert.equal(metaSyncStages([inventory]).discovering, true);
+  const root = { ...batch(batchIds[1], 'success'), mode: 'incremental', payload: { meta_sync_bundle: true, meta_bundle_enqueued: false } };
+  assert.equal(metaSyncStages([root]).preparing, true);
+  assert.equal(metaSyncStages([{ ...root, payload: { ...root.payload, meta_bundle_queue_error: 'Queue incomplete' } }]).queueError, 'Queue incomplete');
+});
+
+
+import { shouldPollMetaSync } from '../lib/meta-funnel-sync-status';
+test('polling continues for active descendants even when roots and the separately read global count have finished', () => {
+  const root = { ...batch(batchIds[0], 'success'), mode: 'incremental' };
+  const child = { ...batch(batchIds[1], 'running'), mode: 'ad_mapping_creatives' };
+  assert.equal(shouldPollMetaSync({ pending: 0, jobs: [root, child], trackedJobs: [root, child] }), true);
+  assert.equal(shouldPollMetaSync({ pending: 0, jobs: [root], trackedJobs: [root, child] }), true);
+  assert.equal(shouldPollMetaSync({ pending: 0, jobs: [root], trackedJobs: [{ ...child, status: 'success' }] }), false);
+});

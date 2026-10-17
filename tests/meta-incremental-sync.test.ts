@@ -36,7 +36,8 @@ test('manual sync tracks spend, ad, and mapping jobs; detail enqueue still runs 
       },
       enqueueScheduledMetaAdMapping: async () => { calls.push('mapping'); return ['map']; },
     };
-    const result = enqueueIncrementalMetaSync({} as any, 'roove', 'user', undefined, deps);
+    const svc = { rpc: async (name: string, input: any) => { assert.equal(name, 'complete_meta_sync_bundle'); assert.equal(input.p_root_id, 'spend'); assert.deepEqual(input.p_child_ids, ['ad1', 'ad2', 'map']); return { error: null }; } };
+    const result = enqueueIncrementalMetaSync(svc as any, 'roove', 'user', undefined, deps);
     if (failSpend) await assert.rejects(result, /Spend unavailable/);
     else assert.deepEqual(await result, ['spend', 'ad1', 'ad2', 'map']);
     assert.deepEqual(calls, ['spend', 'ads', 'mapping']);

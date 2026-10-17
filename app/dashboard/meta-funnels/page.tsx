@@ -8,7 +8,7 @@ import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { getMetaFunnelSyncStatus, queueMetaFunnelSync } from '@/lib/meta-funnel-actions';
 import { getMetaBrandOverview } from '@/lib/meta-brand-actions';
-import { metaSyncProgress, restoreMetaSyncRequest, visibleMetaSyncProgress, type MetaSyncRequest } from '@/lib/meta-funnel-sync-status';
+import { shouldPollMetaSync, restoreMetaSyncRequest, visibleMetaSyncProgress, metaMetricCompletedAt, type MetaSyncRequest } from '@/lib/meta-funnel-sync-status';
 import { WORLD_LABELS } from '@/lib/meta-funnel-templates';
 import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
 import { formatChange, formatCompactMoney, formatDate, formatMetric } from '@/lib/meta-format';
@@ -79,7 +79,7 @@ export default function MetaBrandOverviewPage() {
   const trackedSync = syncRequest?.workspaceId === activeWorkspace.id ? syncRequest.request : null;
   const currentSyncStatus = syncStatus?.workspaceId === activeWorkspace.id ? syncStatus : null;
   const syncProgress = visibleMetaSyncProgress(trackedSync, currentSyncStatus?.trackedJobs || null, currentSyncStatus?.jobs || []);
-  const hasPendingJobs = currentSyncStatus ? currentSyncStatus.pending > 0 : data?.jobs.some(j => ['queued', 'running'].includes(j.status));
+  const hasPendingJobs = currentSyncStatus ? shouldPollMetaSync(currentSyncStatus) : data?.jobs.some(j => ['queued', 'running'].includes(j.status));
   useEffect(() => {
     if (!schemaReady || syncRequest?.workspaceId !== activeWorkspace.id) return;
     let alive = true, polling = false;
@@ -93,7 +93,7 @@ export default function MetaBrandOverviewPage() {
         if (!alive || status.workspaceId !== activeWorkspace.id) return;
         setSyncStatus(status); setSyncStatusError('');
         const tracked = syncRequest?.request;
-        again = status.pending > 0 || !!(tracked && status.trackedJobs && metaSyncProgress(tracked.jobIds, status.trackedJobs).active);
+        again = shouldPollMetaSync(status);
         if (tracked && status.trackedJobs && !visibleMetaSyncProgress(tracked, status.trackedJobs, status.jobs)) {
           try { localStorage.removeItem(`meta-funnel-sync:${activeWorkspace.id}`); } catch { /* Display still uses the latest server status. */ }
           setSyncRequest({ workspaceId: activeWorkspace.id, request: null });
@@ -116,7 +116,7 @@ export default function MetaBrandOverviewPage() {
       setNotice('Sync masuk antrean. Laporan diperbarui otomatis setelah data baru tersimpan.');
     } catch (e) { setError(message(e)); } finally { setBusy(false); setSyncStarting(false); setSyncRefresh(v => v + 1); }
   }
-  const lastSync = data?.jobs.find(j => j.completed_at)?.completed_at;
+  const lastSync = metaMetricCompletedAt(currentSyncStatus?.jobs || data?.jobs || []);
   const subtitle = data ? `Periode ${formatDate(data.reportRange.from)} – ${formatDate(data.reportRange.to)} dibanding ${formatDate(data.prevFrom)} – ${formatDate(data.prevTo)}${lastSync ? ` · sync terakhir ${new Intl.DateTimeFormat('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Jakarta' }).format(new Date(lastSync))} WIB` : ''}` : 'Respon iklan dinilai sama di kedua dunia. Hasil dinilai per dunia.';
   const hasFilters = !!(filters.cep || filters.intention || filters.objective);
   const currency = data?.currency || 'IDR';
