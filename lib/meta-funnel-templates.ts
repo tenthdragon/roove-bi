@@ -2,7 +2,7 @@
 // columns of one kind of landing page. URL rules assign landing pages to a
 // template; observed events only suggest one, never assign it.
 import { canonicalLandingPage } from './meta-ad-destinations';
-import { emptyTotals, metricValue, relativeChange, type FunnelConfig, type FunnelMetric, type SavedFunnel, type Totals } from './meta-funnel-domain';
+import { emptyTotals, metricValue, relativeChange, sumMetricTotals, type FunnelConfig, type FunnelMetric, type SavedFunnel, type Totals } from './meta-funnel-domain';
 import { CTWA_KEY_PATTERN, type CtwaDestination } from './meta-ctwa-destinations';
 
 export type MetaBrandWorld = 'website' | 'cpas';
@@ -90,10 +90,10 @@ export function templateKind(config: Pick<FunnelConfig, 'stages' | 'metrics'>): 
 /** The cost metric a template is judged by: CPP for transactions, CPL for leads. */
 export function templateMainMetric(config: Pick<FunnelConfig, 'stages' | 'metrics'>): FunnelMetric | null {
   const kind = templateKind(config);
-  const denominators = kind === 'transaction' ? ['purchases'] : kind === 'lead' ? ['leads', 'conversations', 'replies'] : [];
+  const denominators = kind === 'transaction' ? ['purchases'] : kind === 'lead' ? ['leads', 'conversations', 'replies'] : config.stages.includes('instagram_profile_visits') ? ['instagram_profile_visits'] : [];
   for (const d of denominators) { const found = config.metrics.find(m => m.numerator === 'spend' && m.denominator === d); if (found) return found; }
   const last = [...config.stages].reverse()[0];
-  return last && last !== 'spend' ? { id: `cost_${last}`, label: `Biaya per ${last}`, numerator: 'spend', denominator: last, format: 'money', direction: 'lower', monitor: false, min_denominator: 1 } : null;
+  return last && last !== 'spend' ? { id: `cost_${last}`, label: last === 'instagram_profile_visits' ? 'Biaya per profile visit' : `Biaya per ${last}`, numerator: 'spend', denominator: last, format: 'money', direction: 'lower', monitor: false, min_denominator: 1 } : null;
 }
 
 export function defaultLeadFunnel(): FunnelConfig {
@@ -127,11 +127,7 @@ export function suggestTemplate(totals: Pick<Totals, 'purchases' | 'leads' | 'co
 function compare(current: Totals, previous: Totals, metrics: FunnelMetric[]): MetricComparison[] {
   return metrics.map(m => { const a = metricValue(current, m), b = metricValue(previous, m); return { id: m.id, current: a, previous: b, change: relativeChange(a, b) }; });
 }
-function sum(groups: ReportGroup[], field: 'current' | 'previous'): Totals {
-  const total = emptyTotals();
-  for (const g of groups) for (const key of Object.keys(total) as (keyof Totals)[]) total[key] += Number(g[field][key]) || 0;
-  return total;
-}
+function sum(groups: ReportGroup[], field: 'current' | 'previous'): Totals { return sumMetricTotals(groups.map(g => g[field])); }
 export function median(values: number[]): number | null {
   const sorted = values.filter(v => Number.isFinite(v)).sort((a, b) => a - b);
   if (!sorted.length) return null;

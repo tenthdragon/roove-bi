@@ -68,8 +68,8 @@ export default function MetaGroupDrawer({ group, section, world, input, currency
         <div className={styles.sectionTitle}><h3 style={{ margin: 0, fontSize: 13 }}>Tahap funnel</h3><span>Rasio terhadap tahap sebelumnya</span></div>
         <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>{stages.map((stage, i) => {
           const value = group.current[stage], prev = i ? group.current[stages[i - 1]] : 0;
-          const ratio = i && prev > 0 ? value / prev : null;
-          return <div key={stage} className={styles.stageRow}><span>{MEASURES[stage]}</span><div className={styles.stageTrack}><div className={styles.stageFill} style={{ width: `${first > 0 ? Math.max(1, Math.min(100, value / first * 100)) : 0}%` }} /></div><span className={styles.num}>{i === 0 ? formatCount(value) : formatMetric(ratio, 'percent', currency)}</span></div>;
+          const ratio = i && value != null && prev != null && prev > 0 ? value / prev : null;
+          return <div key={stage} className={styles.stageRow}><span>{MEASURES[stage]}</span><div className={styles.stageTrack}><div className={styles.stageFill} style={{ width: `${first != null && first > 0 && value != null ? Math.max(1, Math.min(100, value / first * 100)) : 0}%` }} /></div><span className={styles.num}>{i === 0 ? formatCount(value) : formatMetric(ratio, 'percent', currency)}</span></div>;
         })}</div>
       </div>
       {main && <div>

@@ -31,6 +31,7 @@ export async function runMetaAdSync(options: { workspaceId: string; dateStart?: 
     try {
       const info = await dependencies.metaGraph(account.account_id, token, { fields: 'currency,timezone_name' });
       if (!info.currency || !info.timezone_name) throw new Error('Currency/timezone ad account tidak tersedia.');
+      const profileObservedAt = new Date().toISOString();
       const raw = await dependencies.fetchAdInsights(account.account_id, start, end, token);
       // Refresh current metadata in batched read requests; failed reads preserve cached metadata.
       const adIds = [...new Set(raw.map(r => r.ad_id))];
@@ -56,9 +57,14 @@ export async function runMetaAdSync(options: { workspaceId: string; dateStart?: 
         if (cached.error) warnings.push(`${account.account_name}: cache URL landing page belum tersedia.`);
         else for (const c of cached.data || []) { destinations.set(c.ad_id, normalizeLandingPages(c.landing_page_urls)); creativeIds.set(c.ad_id, c.creative_id); }
       }
-      const rows = raw.map(r => ({ ad_id: r.ad_id, ad_name: r.ad_name || '', metric_date: r.date_start,
-        creative_id: creativeIds.get(r.ad_id) ?? null,
-        metrics: normalizeAdInsight(r), raw_insights: r, landing_page_urls: destinations.get(r.ad_id) ?? [] }));
+      const rows = raw.map(r => {
+        const metrics = normalizeAdInsight(r);
+        return { ad_id: r.ad_id, ad_name: r.ad_name || '', metric_date: r.date_start,
+          creative_id: creativeIds.get(r.ad_id) ?? null, metrics,
+          raw_insights: { ...r, ig_profile_visit_observation: { observed_at: profileObservedAt,
+            status: metrics.instagram_profile_visits === null ? 'not_returned' : 'available', source: 'meta_insights' } },
+          landing_page_urls: destinations.get(r.ad_id) ?? [] };
+      });
       // Replace only after all pagination completes. Coverage includes successful zero-row days.
       const { error: replaceError } = await svc.rpc('replace_meta_ad_snapshot', {
         p_workspace_id: workspaceId, p_account_id: account.account_id, p_account_name: account.account_name,

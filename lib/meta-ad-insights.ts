@@ -3,7 +3,7 @@ import { selectPurchaseMetric, type MetaActionMetric } from './meta-marketing';
 import { creativeLandingPages } from './meta-ad-destinations';
 
 const BASE = 'https://graph.facebook.com/v21.0';
-export const AD_INSIGHT_FIELDS = 'ad_id,ad_name,campaign_id,campaign_name,objective,adset_id,adset_name,spend,impressions,reach,frequency,clicks,inline_link_clicks,outbound_clicks,actions,action_values,purchase_roas,video_play_actions,video_thruplay_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions';
+export const AD_INSIGHT_FIELDS = 'ad_id,ad_name,campaign_id,campaign_name,objective,adset_id,adset_name,spend,impressions,reach,frequency,clicks,inline_link_clicks,outbound_clicks,instagram_profile_visits,actions,action_values,purchase_roas,video_play_actions,video_thruplay_watched_actions,video_p25_watched_actions,video_p50_watched_actions,video_p75_watched_actions,video_p100_watched_actions';
 export type RawAdInsight = {
   ad_id: string; ad_name: string; date_start: string; date_stop: string;
   [key: string]: unknown;
@@ -72,6 +72,12 @@ function action(raw: unknown, types: string[]) {
   for (const type of types) { const found = actions.find(a => a.action_type === type); if (found) return value(found.value); }
   return 0;
 }
+export function normalizeInstagramProfileVisits(raw: unknown): number | null {
+  if ((typeof raw !== 'string' && typeof raw !== 'number') || String(raw).trim() === '') return null;
+  const n = Number(raw);
+  return Number.isSafeInteger(n) && n >= 0 ? n : null;
+}
+
 export function normalizeAdInsight(raw: RawAdInsight): Totals {
   const total = emptyTotals();
   total.spend = value(raw.spend); total.impressions = value(raw.impressions); total.clicks = value(raw.clicks);
@@ -89,6 +95,7 @@ export function normalizeAdInsight(raw: RawAdInsight): Totals {
   for (const percent of [25, 50, 75, 100] as const) total[`video_${percent}`] = action(raw[`video_p${percent}_watched_actions`], ['video_view']);
   total.leads = action(raw.actions, ['lead', 'onsite_conversion.lead_grouped', 'onsite_conversion.lead']);
   total.conversations = action(raw.actions, ['onsite_conversion.messaging_conversation_started_7d']);
+  total.instagram_profile_visits = normalizeInstagramProfileVisits(raw.instagram_profile_visits);
   total.replies = action(raw.actions, ['onsite_conversion.messaging_first_reply']);
   return total;
 }

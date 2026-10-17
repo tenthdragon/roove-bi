@@ -541,7 +541,8 @@ and CTWA. Each row shows its URL, with the WhatsApp number underneath and the
 brand in the existing Brand column. Identical URLs can appear on distinct
 brand/phone rows. Mapping retains Spend, evidence, Template and Status; it has
 no separate CTWA table, conversation-cost columns or CTWA totals. The brand
-performance report retains separate destination metrics and CTWA brand totals.
+performance report retains separate destination rows and per-template totals,
+with no additional CTWA summary card.
 Costs and ratios are recalculated from summed raw counts, never averaged from
 row costs. Different currencies are not shown as one monetary total.
 
@@ -568,3 +569,11 @@ npm run test:meta-ctwa-db
 The database test uses the fixed local Docker clone and rolls back all fixture
 writes. Before installing 213 locally, use `node tests/meta-ctwa-destinations-database.mjs --with-migration`
 to test the migration itself inside the rollback transaction.
+
+### Instagram Profile Visits
+
+Sync harian mengambil field Ads Insights `instagram_profile_visits` untuk seluruh ad. Nilai eksplisit `0` disimpan sebagai nol; field/baris yang tidak dikembalikan Meta disimpan sebagai `null` dan tampil tidak tersedia. Agregat yang mencakup histori belum lengkap juga tetap tidak tersedia, agar biaya per profile visit tidak menyesatkan. Event ini tersedia pada editor template; tidak mengubah template atau aturan URL yang sudah ada.
+
+Migrasi 214 memperluas agregat JSON dan menyediakan RPC service-only untuk backfill. Snapshot dari worker lama mempertahankan observasi backfill yang lebih baru pada workspace/account/ad/day/adset yang sama.
+
+Jalankan `scripts/ops/backfill-meta-instagram-profile-visits.cjs` **di server aplikasi** dengan `--app-root <release>` dan `--backup-dir <direktori privat absolut>` untuk mengumpulkan seluruh histori harian yang sudah tersimpan. Semua halaman Meta harus berhasil sebelum payload akun disimpan. Setelah migrasi dan pemeriksaan ringkasan, jalankan dengan `--apply-cache <direktori yang sama>`. Kredensial dan backup tetap di server; script hanya memperbarui metric Profile Visits serta audit observasinya, tidak membuat fact baru atau memicu sync. Baris dengan adset berbeda atau observasi lebih baru dilewati. Akun gagal dicatat pada manifest; ulangi koleksi akun tersebut setelah kendala selesai.

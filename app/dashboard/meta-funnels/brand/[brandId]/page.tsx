@@ -33,8 +33,8 @@ function Delta({ value, direction = 'higher', neutral = false }: { value: number
 function StageChips({ group, stages, currency }: { group: TemplateGroup; stages: Measure[]; currency: string }) {
   const steps = stages.filter(s => s !== 'spend');
   return <div className={styles.stageChips}>{steps.map((stage, i) => {
-    const prev = i ? group.current[steps[i - 1]] : 0;
-    return <span key={stage} className={styles.stageChip} title={`${MEASURES[stage]}${i ? ` ÷ ${MEASURES[steps[i - 1]]}` : ''}`}>{MEASURES[stage].replace('Landing page views', 'LPV').replace('Initiate checkout', 'IC').replace('Add to cart', 'ATC').replace('Outbound clicks', 'Outbound').replace('Messaging conversations', 'Conv')} {i === 0 ? formatCount(group.current[stage]) : formatMetric(prev > 0 ? group.current[stage] / prev : null, 'percent', currency)}</span>;
+    const value = group.current[stage], prev = i ? group.current[steps[i - 1]] : 0;
+    return <span key={stage} className={styles.stageChip} title={`${MEASURES[stage]}${i ? ` ÷ ${MEASURES[steps[i - 1]]}` : ''}`}>{MEASURES[stage].replace('Landing page views', 'LPV').replace('Initiate checkout', 'IC').replace('Add to cart', 'ATC').replace('Outbound clicks', 'Outbound').replace('Messaging conversations', 'Conv')} {i === 0 ? formatCount(value) : formatMetric(value != null && prev != null && prev > 0 ? value / prev : null, 'percent', currency)}</span>;
   })}</div>;
 }
 
@@ -178,15 +178,6 @@ export default function MetaBrandDetailPage() {
             <span className={styles.muted}>{m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}${m.multiplier ? ` × ${m.multiplier}` : ''}` : MEASURES[m.numerator]}</span>
           </div>; })}</div>
         </section>
-        {data.ctwa && data.ctwa.destinations > 0 && <section className={styles.card} aria-label={`Total CTWA ${data.brand.name}`}>
-          <div className={styles.sectionTitle}><h2>Total CTWA · {data.brand.name}</h2><span>{data.ctwa.destinations} tujuan · termasuk yang belum memiliki template</span></div>
-          <div className={styles.miniGrid}>
-            <div className={styles.mini}><span className={styles.muted}>Spend</span><strong>{data.reportingError ? '—' : formatMetric(data.ctwa.summary.spend, 'money', currency)}</strong></div>
-            <div className={styles.mini}><span className={styles.muted}>Percakapan</span><strong>{formatMetric(data.ctwa.summary.conversations, 'number', currency)}</strong></div>
-            <div className={styles.mini}><span className={styles.muted}>Biaya / percakapan</span><strong>{data.reportingError ? '—' : formatMetric(data.ctwa.summary.conversations > 0 ? data.ctwa.summary.spend / data.ctwa.summary.conversations : null, 'money', currency)}</strong></div>
-          </div>
-          <p className={styles.muted}>Setiap nomor tampil terpisah pada tabel template. Total brand menghitung seluruh tujuan sekali.</p>
-        </section>}
         <section aria-label={`Hasil ${WORLD_LABELS[world]}`} style={{ display: 'grid', gap: 12 }}>
           <div className={styles.sectionTitle}><h2>Hasil · {WORLD_LABELS[world]}</h2><span>{world === 'website' ? 'Per template · Website per URL, WhatsApp per brand dan nomor' : 'Per ad · purchase Shopee dengan atribusi Meta'}</span></div>
           {world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
