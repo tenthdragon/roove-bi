@@ -4,17 +4,18 @@
 // and world (website or CPAS), and template rule management.
 import { createServiceSupabase } from './service-supabase';
 import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, type FunnelMetric, type Totals } from './meta-funnel-domain';
-import { loadTemplateRules } from './meta-funnel-store';
+import { loadFunnels, loadTemplateRules } from './meta-funnel-store';
 import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaReport } from './meta-ad-report';
 import { getCachedMetaAdReport } from './meta-ad-report-data';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
 import { metaCoverageGaps } from './meta-report-status';
-import { assignTemplateSections, compareMetrics, cpasSection, defaultLeadFunnel, matchTemplateRule, responseMetrics, suggestTemplate, templateKind, templateMainMetric, validateTemplateRule, WORLD_CHANNEL, type MetaBrandWorld, type MetricComparison, type ReportGroup, type TemplateSection, type UnassignedGroup } from './meta-funnel-templates';
+import { assignTemplateSections, compareMetrics, cpasSection, defaultLeadFunnel, matchTemplateRule, responseMetrics, suggestTemplate, templateKind, templateMainMetric, validateTemplateRule, WORLD_CHANNEL, type MetaBrandWorld, type MetricComparison, type ReportGroup, type TemplateRule, type TemplateSection, type UnassignedGroup } from './meta-funnel-templates';
 import { brandHealth, brandHighlights, type Highlight } from './meta-ad-highlights';
-import { manageAccess, reportContext, uuid } from './meta-report-context';
+import { manageAccess, reportContext, reportingAccess, uuid } from './meta-report-context';
 import { defaultFunnel } from './meta-funnel-domain';
 import { saveMetaFunnel } from './meta-funnel-actions';
 import { getTodayWIB } from './sync-schedule';
+import { metaTemplateError, type MetaTemplateConfiguration, type MetaTemplateResult } from './meta-template-settings';
 
 const CPP: FunnelMetric = { id: 'cpp', label: 'CPP', numerator: 'spend', denominator: 'purchases', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
 const CPL: FunnelMetric = { id: 'cpl', label: 'CPL', numerator: 'spend', denominator: 'leads', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
@@ -146,7 +147,7 @@ export async function getMetaBrandDetail(input: BrandInput & { brandId: string; 
     templates: ctx.funnels.map(f => ({ id: f.id, name: f.name, kind: templateKind(f) })) };
 }
 
-export async function getMetaTemplateSettings() {
+async function loadMetaTemplateSettings() {
   const today = getTodayWIB();
   const ctx = await reportContext({ from: shiftDay(today, -30), to: shiftDay(today, -1) });
   if (!ctx.schemaReady) return ctx;
@@ -165,27 +166,60 @@ export async function getMetaTemplateSettings() {
   return { schemaReady: true as const, rulesReady: rules.ready, range: ctx.reportRange, currency: raw.currencies[0] || 'IDR', templates, accounts: ctx.accounts,
     rules: rules.rows.map(r => ({ ...r, templateName: ctx.funnels.find(f => f.id === r.funnel_id)?.name || 'Template diarsipkan' })), landingPages, reportVersion: ctx.reportVersion };
 }
-export async function saveMetaTemplateRule(input: { id?: string; funnelId: string; match_kind: string; pattern: string }) {
-  const { workspaceId, profile } = await manageAccess();
-  const rule = validateTemplateRule(input);
-  const svc = createServiceSupabase();
-  const funnel = await svc.from('meta_ad_funnels').select('id').eq('workspace_id', workspaceId).eq('id', uuid(input.funnelId)).eq('archived', false).maybeSingle();
-  if (funnel.error || !funnel.data) throw new Error('Template tidak ditemukan.');
-  const row = { workspace_id: workspaceId, funnel_id: input.funnelId, ...rule, updated_at: new Date().toISOString() };
-  const result = input.id
-    ? await svc.from('meta_landing_page_templates').update(row).eq('workspace_id', workspaceId).eq('id', uuid(input.id)).select('id').maybeSingle()
-    : await svc.from('meta_landing_page_templates').upsert({ ...row, created_by: profile.id }, { onConflict: 'workspace_id,match_kind,pattern' }).select('id').maybeSingle();
-  if (result.error) {
-    if (['42P01', 'PGRST205'].includes(result.error.code)) throw new Error('Pasang migration 211_meta_landing_page_templates.sql untuk menyimpan aturan template.');
-    throw new Error(result.error.message);
+export async function getMetaTemplateSettings(): Promise<MetaTemplateResult<Awaited<ReturnType<typeof loadMetaTemplateSettings>>>> {
+  try { return await loadMetaTemplateSettings(); }
+  catch (error) {
+    console.error('[meta-template-settings] Load failed', error);
+    return { error: metaTemplateError(error, 'Data template belum berhasil dimuat. Silakan coba muat ulang.') };
   }
-  if (!result.data) throw new Error('Aturan tidak ditemukan.');
-  return { id: result.data.id as string, ...rule };
 }
-export async function deleteMetaTemplateRule(id: string) {
-  const { workspaceId } = await manageAccess();
-  const result = await createServiceSupabase().from('meta_landing_page_templates').delete().eq('workspace_id', workspaceId).eq('id', uuid(id));
-  if (result.error) throw new Error(result.error.message);
+/** Refresh configuration after edits without rereading the performance report. */
+export async function getMetaTemplateConfiguration(): Promise<MetaTemplateResult<MetaTemplateConfiguration & { rulesReady: boolean }>> {
+  try {
+    const { workspaceId } = await reportingAccess();
+    const svc = createServiceSupabase();
+    const [funnels, rules] = await Promise.all([loadFunnels(svc, workspaceId), loadTemplateRules(svc, workspaceId)]);
+    return { rulesReady: rules.ready,
+      templates: funnels.filter(f => f.group_by === 'landing_page').map(f => ({ ...f, kind: templateKind(f), mainMetric: templateMainMetric(f), rules: rules.rows.filter(r => r.funnel_id === f.id).length })),
+      rules: rules.rows.map(r => ({ ...r, templateName: funnels.find(f => f.id === r.funnel_id)?.name || 'Template diarsipkan' })) };
+  } catch (error) {
+    console.error('[meta-template-settings] Configuration load failed', error);
+    return { error: metaTemplateError(error, 'Konfigurasi template belum berhasil dimuat. Silakan muat ulang halaman.') };
+  }
+}
+export async function saveMetaTemplateRule(input: { id?: string; funnelId: string; match_kind: string; pattern: string }): Promise<MetaTemplateResult<TemplateRule>> {
+  try {
+    const { workspaceId, profile } = await manageAccess();
+    const rule = validateTemplateRule(input);
+    const svc = createServiceSupabase();
+    const funnel = await svc.from('meta_ad_funnels').select('id').eq('workspace_id', workspaceId).eq('id', uuid(input.funnelId)).eq('archived', false).maybeSingle();
+    if (funnel.error) throw new Error(funnel.error.message);
+    if (!funnel.data) throw new Error('Template tidak ditemukan.');
+    const row = { workspace_id: workspaceId, funnel_id: input.funnelId, ...rule, updated_at: new Date().toISOString() };
+    const result = input.id
+      ? await svc.from('meta_landing_page_templates').update(row).eq('workspace_id', workspaceId).eq('id', uuid(input.id)).select('id').maybeSingle()
+      : await svc.from('meta_landing_page_templates').upsert({ ...row, created_by: profile.id }, { onConflict: 'workspace_id,match_kind,pattern' }).select('id').maybeSingle();
+    if (result.error) {
+      if (['42P01', 'PGRST205'].includes(result.error.code)) throw new Error('Pasang migration 211_meta_landing_page_templates.sql untuk menyimpan aturan template.');
+      throw new Error(result.error.message);
+    }
+    if (!result.data) throw new Error('Aturan tidak ditemukan.');
+    return { id: result.data.id as string, funnel_id: input.funnelId, ...rule };
+  } catch (error) {
+    console.error('[meta-template-settings] Rule save failed', error);
+    return { error: metaTemplateError(error, 'Penetapan template belum dapat dikonfirmasi. Muat ulang halaman sebelum mencoba lagi.') };
+  }
+}
+export async function deleteMetaTemplateRule(id: string): Promise<MetaTemplateResult<{ deletedId: string }>> {
+  try {
+    const { workspaceId } = await manageAccess();
+    const result = await createServiceSupabase().from('meta_landing_page_templates').delete().eq('workspace_id', workspaceId).eq('id', uuid(id));
+    if (result.error) throw new Error(result.error.message);
+    return { deletedId: id };
+  } catch (error) {
+    console.error('[meta-template-settings] Rule delete failed', error);
+    return { error: metaTemplateError(error, 'Penghapusan aturan belum dapat dikonfirmasi. Muat ulang halaman sebelum mencoba lagi.') };
+  }
 }
 /** Creates a standard template so a workspace can start without designing one. */
 export async function createMetaTemplatePreset(kind: 'transaction' | 'lead') {

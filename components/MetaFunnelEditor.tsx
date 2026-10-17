@@ -44,6 +44,7 @@ export default function MetaFunnelEditor({ value: c, onChange, accounts, busy, o
       <button type="button" className={styles.button} disabled={c.metrics.length >= 12} onClick={() => set('metrics', [...c.metrics, { id: `metric_${Date.now()}`, label: 'Metrik baru', numerator: 'purchases', denominator: null, format: 'number', direction: 'higher', monitor: true, min_denominator: 0 }])}>+ Metrik</button>
     </div>
     <details><summary>Notifikasi penurunan · {c.alerts_enabled ? `aktif, ambang ${c.drop_percent}%, jendela ${c.window_days} hari, jeda atribusi ${c.lag_days} hari` : 'nonaktif'}</summary><div className={styles.advanced}>
+      <p className={styles.muted}>Perubahan aturan notifikasi dievaluasi saat sync berikutnya.</p>
       <label className={styles.check}><input type="checkbox" checked={c.alerts_enabled} onChange={e => set('alerts_enabled', e.target.checked)} />Aktifkan notifikasi dalam aplikasi untuk landing page template ini</label>
       <div className={styles.formGrid}>{([
         ['window_days', 'Periode dibanding periode sebelumnya (hari)', 1, 30], ['drop_percent', 'Ambang perubahan buruk (%)', 1, 100],
