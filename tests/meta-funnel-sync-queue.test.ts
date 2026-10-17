@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { enqueueScheduledMetaAdBatches } from '../lib/meta-funnel-sync-queue';
 import { getTodayWIB } from '../lib/sync-schedule';
 import { shiftDay } from '../lib/meta-funnel-domain';
-import { loadMetaSyncJobs, metaSyncProgress, restoreMetaSyncRequest, validateMetaSyncJobIds, type MetaSyncJob } from '../lib/meta-funnel-sync-status';
+import { loadMetaSyncJobs, metaSyncProgress, restoreMetaSyncRequest, validateMetaSyncJobIds, visibleMetaSyncProgress, type MetaSyncJob } from '../lib/meta-funnel-sync-status';
 
 function service(lastDates: Record<string, string | null>, error?: { message: string }) {
   const workspace = '00000000-0000-4000-8000-000000000001';
@@ -124,4 +124,21 @@ test('status retrieval reads all 156 requested batches and always scopes workspa
   const jobs = await loadMetaSyncJobs(svc, workspace, batchIds);
   assert.deepEqual(chunks.map(chunk => chunk.length), [100, 56]);
   assert.equal(jobs.length, 156); assert.equal(metaSyncProgress(batchIds, jobs).state, 'complete');
+});
+
+test('a completed 156-batch manual run gives way to the next daily scheduled sync', () => {
+  const request = { jobIds: batchIds, startedAt: '2026-10-16T11:27:00Z' };
+  const old = batchIds.map(id => ({ ...batch(id, 'success'), created_at: '2026-10-16T11:27:01Z', completed_at: '2026-10-16T11:59:00Z' }));
+  const cron = { ...batch('00000000-0000-4000-8000-999999999999', 'success'), created_at: '2026-10-17T10:00:00Z', completed_at: '2026-10-17T10:03:16Z' };
+  assert.equal(visibleMetaSyncProgress(request, old, [cron]), null, 'Do not display yesterday’s completion date or 156/156 counter');
+  assert.equal(visibleMetaSyncProgress(request, old, [old[0]])?.completed, 156, 'Keep the completed run until newer work exists');
+  assert.equal(visibleMetaSyncProgress(request, old.map((j, i) => i === 0 ? { ...j, status: 'running', completed_at: null } : j), [cron])?.active, true, 'Do not hide requested batches that are still running');
+});
+test('superseded missing/failed history does not hide a newer run, while a new manual request can reuse older batches', () => {
+  const ids = batchIds.slice(0, 1), request = { jobIds: ids, startedAt: '2026-10-14T13:00:00Z' };
+  const newer = { ...batch(batchIds[1], 'success'), created_at: '2026-10-17T10:00:00Z' };
+  assert.equal(visibleMetaSyncProgress(request, [], [newer]), null);
+  assert.equal(visibleMetaSyncProgress(request, [batch(ids[0], 'failed')], [newer]), null);
+  assert.equal(visibleMetaSyncProgress({ ...request, startedAt: '2026-10-17T11:00:00Z' }, [batch(ids[0], 'success')], [newer])?.state, 'complete');
+  assert.equal(visibleMetaSyncProgress(null, null, [newer]), null);
 });

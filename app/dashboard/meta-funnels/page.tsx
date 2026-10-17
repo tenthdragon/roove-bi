@@ -8,7 +8,7 @@ import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { getMetaFunnelSyncStatus, queueMetaFunnelSync } from '@/lib/meta-funnel-actions';
 import { getMetaBrandOverview } from '@/lib/meta-brand-actions';
-import { metaSyncProgress, restoreMetaSyncRequest, type MetaSyncRequest } from '@/lib/meta-funnel-sync-status';
+import { metaSyncProgress, restoreMetaSyncRequest, visibleMetaSyncProgress, type MetaSyncRequest } from '@/lib/meta-funnel-sync-status';
 import { WORLD_LABELS } from '@/lib/meta-funnel-templates';
 import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
 import { formatChange, formatCompactMoney, formatDate, formatMetric } from '@/lib/meta-format';
@@ -78,7 +78,7 @@ export default function MetaBrandOverviewPage() {
   useEffect(() => { const guard = request; return () => { guard.current++; }; }, []);
   const trackedSync = syncRequest?.workspaceId === activeWorkspace.id ? syncRequest.request : null;
   const currentSyncStatus = syncStatus?.workspaceId === activeWorkspace.id ? syncStatus : null;
-  const syncProgress = trackedSync && currentSyncStatus?.trackedJobs ? metaSyncProgress(trackedSync.jobIds, currentSyncStatus.trackedJobs) : null;
+  const syncProgress = visibleMetaSyncProgress(trackedSync, currentSyncStatus?.trackedJobs || null, currentSyncStatus?.jobs || []);
   const hasPendingJobs = currentSyncStatus ? currentSyncStatus.pending > 0 : data?.jobs.some(j => ['queued', 'running'].includes(j.status));
   useEffect(() => {
     if (!schemaReady || syncRequest?.workspaceId !== activeWorkspace.id) return;
@@ -94,6 +94,10 @@ export default function MetaBrandOverviewPage() {
         setSyncStatus(status); setSyncStatusError('');
         const tracked = syncRequest?.request;
         again = status.pending > 0 || !!(tracked && status.trackedJobs && metaSyncProgress(tracked.jobIds, status.trackedJobs).active);
+        if (tracked && status.trackedJobs && !visibleMetaSyncProgress(tracked, status.trackedJobs, status.jobs)) {
+          try { localStorage.removeItem(`meta-funnel-sync:${activeWorkspace.id}`); } catch { /* Display still uses the latest server status. */ }
+          setSyncRequest({ workspaceId: activeWorkspace.id, request: null });
+        }
         if (status.reportVersion !== reportVersion.current) await load();
       } catch (e) { if (alive) setSyncStatusError(message(e)); }
       finally { polling = false; if (alive && again) timer = setTimeout(() => void poll(), 5000); }
@@ -165,11 +169,6 @@ export default function MetaBrandOverviewPage() {
           </table>
         </div>}
       </div>}
-      <div className={styles.kpiGrid}>
-        <div className={styles.kpi}><span><b>Respon iklan</b> dihitung sama untuk semua ad: CPM, CTR outbound, hook rate, LPV ratio.</span></div>
-        <div className={styles.kpi}><span><b className={styles.good} style={{ color: 'var(--accent)' }}>Website</b> dinilai per template funnel landing page: Transaksi memakai CPP dan ROAS, Lead memakai CPL.</span></div>
-        <div className={styles.kpi}><span><b className={styles.warn}>CPAS</b> dinilai dari purchase Shopee: CPP dan ROAS. Atribusi shared items 1 hari / 7 hari belum dipisahkan.</span></div>
-      </div>
     </>}
   </div>;
 }
