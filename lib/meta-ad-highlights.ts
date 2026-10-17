@@ -34,8 +34,9 @@ export function brandHighlights(input: HighlightInput): Highlight[] {
       let worst: { from: Measure; to: Measure; now: number; before: number; change: number } | null = null;
       for (let i = 1; i < stages.length; i++) {
         const from = stages[i - 1], to = stages[i];
-        if (g.current[from] < 30 || g.previous[from] < 30) continue;
-        const now = g.current[to] / g.current[from], before = g.previous[to] / g.previous[from];
+        const nowFrom = g.current[from], beforeFrom = g.previous[from], nowTo = g.current[to], beforeTo = g.previous[to];
+        if (nowFrom == null || beforeFrom == null || nowTo == null || beforeTo == null || nowFrom < 30 || beforeFrom < 30) continue;
+        const now = nowTo / nowFrom, before = beforeTo / beforeFrom;
         const change = relativeChange(now, before);
         if (change !== null && change <= -15 && (!worst || change < worst.change)) worst = { from, to, now, before, change };
       }
@@ -47,7 +48,7 @@ export function brandHighlights(input: HighlightInput): Highlight[] {
       const spendMedian = median(section.groups.map(g => g.current.spend)) ?? 0;
       for (const g of section.groups) {
         const value = metricValue(g.current, main);
-        if (value === null || (main.denominator && g.current[main.denominator] < main.min_denominator)) continue;
+        if (value === null || (main.denominator && (g.current[main.denominator] ?? 0) < main.min_denominator)) continue;
         const ratio = value / section.mainMedian;
         if (ratio >= 1.5) out.push({ kind: 'outlier', severity: 'bad', title: 'Pencilan biaya', sectionKey: section.key, groupKey: g.key, weight: g.current.spend,
           text: `${main.label} ${shortName(g.name)} ${formatMetric(value, main, input.currency)}, ${ratio.toFixed(2)}× median template ${section.name}.` });

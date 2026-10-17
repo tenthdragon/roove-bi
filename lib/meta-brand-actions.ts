@@ -3,7 +3,7 @@
 // Brand-first Meta Ads reporting: one summary per brand, one detail per brand
 // and world (website or CPAS), and template rule management.
 import { createServiceSupabase } from './service-supabase';
-import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, type FunnelMetric, type Totals } from './meta-funnel-domain';
+import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, sumMetricTotals, type FunnelMetric, type Totals } from './meta-funnel-domain';
 import { loadFunnels, loadTemplateRules } from './meta-funnel-store';
 import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaReport } from './meta-ad-report';
 import { getCachedMetaAdReport } from './meta-ad-report-data';
@@ -39,11 +39,7 @@ function compare(current: Totals, previous: Totals, m: FunnelMetric): MetricComp
   const a = metricValue(current, m), b = metricValue(previous, m);
   return { id: m.id, current: a, previous: b, change: relativeChange(a, b) };
 }
-function sumTotals(items: Totals[]): Totals {
-  const total = emptyTotals();
-  for (const t of items) for (const key of Object.keys(total) as (keyof Totals)[]) total[key] += Number(t[key]) || 0;
-  return total;
-}
+const sumTotals = sumMetricTotals;
 function fetchWorld(ctx: Context, world: MetaBrandWorld, brandId: string | undefined, view: 'overview' = 'overview') {
   const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: world === 'website' ? 'landing_page' : 'ad' }, ctx.config, view);
   return getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query);
@@ -56,14 +52,12 @@ function websiteWorld(ctx: Context, raw: RawMetaReport, brandAccounts: string[],
   const summary = reportingError ? emptyTotals() : raw.summary, previous = reportingError ? emptyTotals() : raw.previous;
   const groups = reportingError ? [] : normalizeGroups(raw, ctx.brands);
   const { sections, unassigned } = assignTemplateSections(groups, ctx.funnels, rules);
-  const ctwaGroups = groups.filter(g => g.destination);
-  const ctwa = { destinations: ctwaGroups.length, summary: sumTotals(ctwaGroups.map(g => g.current)), previous: sumTotals(ctwaGroups.map(g => g.previous)) };
   const coverageGaps = metaCoverageGaps(raw.coverage, brandAccounts, ctx.reportRange);
   const highlights = brandHighlights({ world: 'website', sections, summary, previous, currency: raw.currencies[0] || 'IDR', unassigned, coverageGaps, missingUrls: raw.destinations.missing_ads })
     .map(h => ({ ...h, world: 'website' as const }));
   const transaction = sumTotals(sections.filter(s => s.kind === 'transaction').map(s => s.summary)), transactionPrev = sumTotals(sections.filter(s => s.kind === 'transaction').map(s => s.previous));
   const lead = sumTotals(sections.filter(s => s.kind === 'lead').map(s => s.summary)), leadPrev = sumTotals(sections.filter(s => s.kind === 'lead').map(s => s.previous));
-  return { reportingError, summary, previous, sections, unassigned, ctwa, coverageGaps, highlights,
+  return { reportingError, summary, previous, sections, unassigned, coverageGaps, highlights,
     cpp: sections.some(s => s.kind === 'transaction') ? compare(transaction, transactionPrev, CPP) : null,
     cpl: sections.some(s => s.kind === 'lead') ? compare(lead, leadPrev, leadCostMetric(lead)) : null,
     cplLabel: leadCostMetric(lead).label, matchingAds: raw.matchingAds, currency: raw.currencies[0] || 'IDR' };
@@ -147,7 +141,6 @@ export async function getMetaBrandDetail(input: BrandInput & { brandId: string; 
     worlds: { website: { spend: web.summary.spend, ads: web.matchingAds }, cpas: { spend: cpas.summary.spend, ads: cpas.matchingAds } },
     accounts: ctx.accounts.filter(a => brandAccounts.includes(a.account_id)).map(a => ({ account_id: a.account_id, account_name: a.account_name })),
     summary: active.summary, previous: active.previous, response: compareMetrics(active.summary, active.previous, responseMetrics(world)), responseMetrics: responseMetrics(world),
-    ctwa: world === 'website' ? web.ctwa : null,
     sections: world === 'website' ? web.sections : [cpas.section], unassigned: world === 'website' ? web.unassigned : [],
     highlights: active.highlights.slice(0, 6), coverageGaps: active.coverageGaps, destinations: raw.destinations, objectiveUnknownAds: raw.objectiveUnknownAds,
     dimensionOptions: metaReportOptions(raw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true, rulesReady: rules.ready, verifiedDestinationsReady: true,

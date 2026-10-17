@@ -9,9 +9,10 @@ export const MEASURES = {
   video_plays: 'Video plays', video_3s: 'Video views 3s', thruplay: 'ThruPlay',
   video_25: 'Video 25%', video_50: 'Video 50%', video_75: 'Video 75%', video_100: 'Video 100%',
   leads: 'Leads', conversations: 'Messaging conversations', replies: 'Messaging first replies',
+  instagram_profile_visits: 'Instagram profile visits',
 } as const;
 export type Measure = keyof typeof MEASURES;
-export type Totals = Record<Measure, number>;
+export type Totals = Record<Exclude<Measure, 'instagram_profile_visits'>, number> & { instagram_profile_visits: number | null };
 export type FunnelMetric = {
   id: string; label: string; numerator: Measure; denominator: Measure | null;
   format: 'number' | 'percent' | 'money' | 'multiple'; direction: 'higher' | 'lower'; monitor: boolean;
@@ -196,14 +197,23 @@ export function namingQuality(rows: AdFact[], config: FunnelConfig, from: string
     invalid: invalid.slice(0, 30).map(n => ({ name: n.name, reason: n.reason, spend: n.spend, ads: n.ad_ids.size })) };
 }
 export function emptyTotals(): Totals { return Object.fromEntries(Object.keys(MEASURES).map(k => [k, 0])) as Totals; }
-export function totalFacts(rows: AdFact[]): Totals {
+/** An omitted/new metric is unknown, rather than silently converted to zero. */
+export function sumMetricTotals(items: Partial<Totals>[]): Totals {
   const total = emptyTotals();
-  for (const row of rows) for (const key of Object.keys(MEASURES) as Measure[]) total[key] += Number(row.metrics[key]) || 0;
+  for (const row of items) for (const key of Object.keys(MEASURES) as Measure[]) {
+    if (key === 'instagram_profile_visits') {
+      total[key] = total[key] === null || row[key] == null ? null : total[key]! + row[key]!;
+    } else total[key] += Number(row[key]) || 0;
+  }
   return total;
 }
+export function totalFacts(rows: AdFact[]): Totals { return sumMetricTotals(rows.map(r => r.metrics)); }
 export function metricValue(total: Totals, m: FunnelMetric): number | null {
-  if (m.denominator === null) return total[m.numerator] * (m.multiplier ?? 1);
-  return total[m.denominator] > 0 ? total[m.numerator] / total[m.denominator] * (m.multiplier ?? 1) : null;
+  const numerator = total[m.numerator];
+  if (numerator == null) return null;
+  if (m.denominator === null) return numerator * (m.multiplier ?? 1);
+  const denominator = total[m.denominator];
+  return denominator != null && denominator > 0 ? numerator / denominator * (m.multiplier ?? 1) : null;
 }
 export function relativeChange(current: number | null, previous: number | null) {
   return current === null || previous === null || previous <= 0 ? null : (current - previous) / previous * 100;
@@ -266,7 +276,7 @@ export function hasCoverage(coverage: Coverage[], accounts: string[], from: stri
 }
 export function diagnose(group: GroupComparison, config?: FunnelConfig): string[] {
   const a = group.current; const b = group.previous;
-  const ratio = (n: Measure, d: Measure, t: Totals) => t[d] > 0 ? t[n] / t[d] : null;
+  const ratio = (n: Measure, d: Measure, t: Totals) => { const numerator = t[n], denominator = t[d]; return numerator != null && denominator != null && denominator > 0 ? numerator / denominator : null; };
   const fell = (n: Measure, d: Measure) => {
     const x = ratio(n, d, a); const y = ratio(n, d, b);
     return x !== null && y !== null && y > 0 && x < y * 0.85;
@@ -302,7 +312,7 @@ export function evaluateDeclines(rows: AdFact[], coverage: Coverage[], config: F
     return config.metrics.flatMap(metric => {
       const comparison = group.metrics.find(m => m.id === metric.id)!;
       if (!metric.monitor || comparison.change === null
-        || (metric.denominator && (group.current[metric.denominator] < metric.min_denominator || group.previous[metric.denominator] < metric.min_denominator))) return [];
+        || (metric.denominator && ((group.current[metric.denominator] ?? 0) < metric.min_denominator || (group.previous[metric.denominator] ?? 0) < metric.min_denominator))) return [];
       const decline = metric.direction === 'higher' ? -comparison.change : comparison.change;
       if (decline < config.drop_percent) return [];
       // Rank individual ad IDs within the name group, preserving their account identity.
@@ -318,7 +328,7 @@ export function evaluateDeclines(rows: AdFact[], coverage: Coverage[], config: F
         const previous = totalFacts(facts.filter(r => r.metric_date < from));
         const change = relativeChange(metricValue(current, metric), metricValue(previous, metric));
         if (change === null || (metric.direction === 'higher' ? -change : change) <= 0
-          || (metric.denominator && (current[metric.denominator] < metric.min_denominator || previous[metric.denominator] < metric.min_denominator))) return [];
+          || (metric.denominator && ((current[metric.denominator] ?? 0) < metric.min_denominator || (previous[metric.denominator] ?? 0) < metric.min_denominator))) return [];
         return [{ ad_id: facts[0].ad_id, ad_name: facts[facts.length - 1].ad_name, account_name: facts[0].account_name,
           account_id: facts[0].account_id, spend: current.spend, change,
           creative: creatives.find(c => c.account_id === facts[0].account_id && c.ad_id === facts[0].ad_id) || null }];
