@@ -173,14 +173,8 @@ async function loadMetaTemplateSettings() {
       rule: rule ? { id: rule.id, match_kind: rule.match_kind, pattern: rule.pattern } : null, templateId: template?.id || null, templateName: template?.name || null,
       suggestion: suggestTemplate(g.current, ctx.funnels) };
   }).sort((a, b) => Number(!!a.templateId) - Number(!!b.templateId) || b.spend - a.spend);
-  const ctwaBrands = [...new Set(landingPages.flatMap(g => g.destination ? [g.destination.brand_id] : []))].map(id => {
-    const groups = raw.groups.filter(g => g.destination?.brand_id === id);
-    const currencies = [...new Set(groups.flatMap(g => g.currencies || raw.currencies))];
-    return { id, name: ctx.brands.find(b => String(b.id) === id)?.name || 'Brand belum dipetakan', summary: sumTotals(groups.map(g => g.current)),
-      currency: currencies.length === 1 ? currencies[0] : null };
-  });
   return { schemaReady: true as const, rulesReady: rules.ready, range: ctx.reportRange, currency: raw.currencies[0] || 'IDR', templates, accounts: ctx.accounts,
-    rules: rules.rows.map(r => ({ ...r, templateName: ctx.funnels.find(f => f.id === r.funnel_id)?.name || 'Template diarsipkan' })), landingPages, ctwaBrands, reportVersion: ctx.reportVersion };
+    rules: rules.rows.map(r => ({ ...r, templateName: ctx.funnels.find(f => f.id === r.funnel_id)?.name || 'Template diarsipkan' })), landingPages, reportVersion: ctx.reportVersion };
 }
 export async function getMetaTemplateSettings(): Promise<MetaTemplateResult<Awaited<ReturnType<typeof loadMetaTemplateSettings>>>> {
   try { return await loadMetaTemplateSettings(); }

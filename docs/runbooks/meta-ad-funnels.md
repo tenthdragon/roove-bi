@@ -536,11 +536,14 @@ isolated by brand/account/Page, or by ad when Page is unavailable; no phone is
 inferred from another ad. Reporting uses the identity currently available for
 the matching creative/adset, not a historical audit of phone changes.
 
-The template matching screen displays `WhatsApp · Brand · +62…`, conversation
-count and cost per conversation for each destination, with a CTWA total per
-brand. Totals include unassigned and unresolved destinations. Costs and ratios
-are recalculated from summed raw counts, never averaged from row costs.
-Different currencies are not shown as one monetary total.
+The template matching screen uses one landing-page mapping table for Website
+and CTWA. Each row shows its URL, with the WhatsApp number underneath and the
+brand in the existing Brand column. Identical URLs can appear on distinct
+brand/phone rows. Mapping retains Spend, evidence, Template and Status; it has
+no separate CTWA table, conversation-cost columns or CTWA totals. The brand
+performance report retains separate destination metrics and CTWA brand totals.
+Costs and ratios are recalculated from summed raw counts, never averaged from
+row costs. Different currencies are not shown as one monetary total.
 
 A `ctwa` template rule stores the opaque destination key. Choosing a template
 on one CTWA row changes only that brand/destination. Many destinations can use
