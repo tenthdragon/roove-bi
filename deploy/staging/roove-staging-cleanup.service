@@ -1,0 +1,12 @@
+[Unit]
+Description=Retain staging releases and database backups
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/roove-staging/config/cleanup.py --apply
+Nice=19
+IOSchedulingClass=idle
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/www/releases/roove-bi-staging /opt/roove-staging/backups /run/lock
+ProtectHome=true

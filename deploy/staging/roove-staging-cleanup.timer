@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily staging disk retention
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Jakarta
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

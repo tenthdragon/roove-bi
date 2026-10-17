@@ -146,3 +146,24 @@ be replayed on the local clone or staging. The imported legacy auto-deployment
 job/script is excluded from this integration. The server's legacy
 `/usr/local/sbin/deploy-roove-bi-staging` entrypoint is disabled so the old
 Shopee branch cannot replace the combined release. Use the isolated workflow above.
+
+## Staging disk retention
+
+`roove-staging-cleanup.timer` runs daily at 03:30 WIB (up to ten minutes
+random delay). Its service executes `/opt/roove-staging/config/cleanup.py --apply`.
+Install `cleanup.py` there and the matching service/timer from `deploy/staging`
+into `/etc/systemd/system`, then reload systemd and enable the timer.
+Run the script without `--apply` to preview deletions.
+
+Cleanup preserves `current`, `previous`, all other release symlink targets,
+and releases referenced by running processes. Other release directories and
+release `.tar.gz` archives become eligible after 24 hours. Do not leave release
+preparation paused for more than a day without a protective symlink. Cleanup
+refuses to proceed if current/previous pointers are missing or outside staging.
+It never targets production directories or Docker volumes.
+
+Database dumps in `/opt/roove-staging/backups` are retained for at least 14 days
+and at least five newest dumps are kept regardless of age. `initial.dump`,
+configuration backups, and non-dump files remain preserved. This timer manages
+retention only; it does not create scheduled backups. Logs are available through
+`journalctl -u roove-staging-cleanup.service`.
