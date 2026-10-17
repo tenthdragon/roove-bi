@@ -1,34 +1,88 @@
-# Meta Ad Funnels: landing-page performance
+# Meta Ads: brand-first ad quality reporting
 
-Available in Marketing Channel → Meta Ad Funnels (`/dashboard/meta-funnels`).
+Available in Marketing Channel → Meta Ads (`/dashboard/meta-funnels`). Every
+Meta Ads page shares one sub-navigation: Ringkasan brand, Pemetaan Ads,
+Notifikasi, Template funnel.
 
-The performance page keeps one filter area across Performa, Comparison harian,
-and Tren. The header's **Pemetaan Ads** link opens `/dashboard/meta-funnels/mapping`.
-The global notification bell opens `/dashboard/meta-funnels/notifications`.
-Both pages have their own context and omit the global performance date picker.
-Legacy `?view=alerts` links redirect to the notification page.
-The primary report groups ad-level performance by **landing-page destination URL**.
-Naming-based configurations from earlier development remain stored but are
-excluded from this report, scheduled monitoring, and notification inbox.
+## Pages
+
+- **Ringkasan brand** (`/dashboard/meta-funnels`): one row per brand with
+  spend split by world (Website = Non-CPAS ads, CPAS = Shopee ads), the shared
+  ad-response CTR, the Website CPP/CPL, the CPAS CPP/ROAS, a health dot and the
+  top automatic highlights. Sync status and the manual **Sync** button live here.
+- **Detail brand** (`/dashboard/meta-funnels/brand/<brandId>?world=website|cpas`):
+  a Website / CPAS segmented control, ranked **Sorotan** (highlights), the
+  shared **Respon iklan** layer (CPM, CTR outbound, hook rate, LPV ratio or
+  purchase per click), then **Hasil**. On Website, results are grouped per
+  funnel template with that template's own columns; landing pages without a
+  template appear in a "Belum ditetapkan" block with automatic suggestions.
+  On CPAS, results are per ad with CPP and ROAS from Meta attribution. Clicking
+  a row opens a drawer with stage ratios, a 14-day trend of the template's main
+  cost metric, and the ads behind the row. The "catatan data" drawer collects
+  coverage gaps, unread URLs (with the verified-URL form), unread objectives and
+  unassigned landing pages.
+- **Template funnel** (`/dashboard/meta-funnels/templates`): the former
+  "Funnel baru" form is now the template editor, and its stages and metrics are
+  used by the report again. The page also holds URL matching (landing pages
+  with spend in the last 30 days, evidence, suggestion, template select) and
+  the rule list. Presets create a Transaksi or Lead template.
+- Legacy `?view=alerts` and `?view=mapping` links still redirect.
+
+Only Ringkasan brand and Detail brand show the global completed-days date
+picker; the other pages have their own context.
+
+## Funnel templates and URL rules
+
+A saved `meta_ad_funnels` row with `group_by = landing_page` is a template. Its
+kind is derived, never stored: stages or metrics using purchases mean
+Transaksi, leads/conversations/replies mean Lead, otherwise Lainnya. Its main
+cost metric is spend ÷ purchases (CPP) or spend ÷ leads (CPL), falling back to
+spend ÷ last stage.
+
+`meta_landing_page_templates` (migration 211) assigns landing pages by rule:
+`exact` (canonical URL), `prefix` (canonical URL prefix) or `domain`
+(hostname, subdomains included). Precedence is exact > prefix > domain, then the
+longest pattern. A landing page with several URLs or no readable URL is never
+assigned. Suggestions come from events in the period (purchase > 0 and
+lead = 0 → Transaksi; lead > 0 and purchase = 0 → Lead) and are only applied
+when an admin confirms. Archiving a template deletes its rules. Rule writes bump
+the report revision so cached reports invalidate.
+
+Decline notifications are evaluated per template. A template that has at least
+one URL rule only monitors landing pages matched to it; a template without
+rules keeps monitoring every landing page in its account scope.
+
+## Highlights
+
+`lib/meta-ad-highlights.ts` ranks five pure rules by severity, then spend:
+stage leak (a consecutive-stage ratio down ≥ 15% with ≥ 30 events in both
+periods), cost outlier (main cost ≥ 1.5× the template median, ≥ 3 landing
+pages), hidden winner (≤ 0.8× median with spend at or below the median),
+weak response (CTR or hook rate down ≥ 15% brand-wide, or a landing page below
+half the brand CTR with ≥ 10% of spend) and data notes (coverage gaps, unread
+URLs, unassigned landing pages). Brand health is bad if any bad highlight
+exists, warn for warnings, else good.
 
 Marketing access permits reporting and per-user notification acknowledgments;
-`admin:meta` additionally permits configuration, archive, and manual sync. All
-server reads and writes use the authenticated user's active workspace. Reporting
-tables and the snapshot RPC have no browser grants.
+`admin:meta` additionally permits template, rule, verified-URL and manual sync
+writes. All server reads and writes use the authenticated user's active
+workspace. Reporting tables and the snapshot RPC have no browser grants.
 
 ## Enable in production
 
 1. Apply `198_meta_ad_funnels.sql`, `199_meta_ad_landing_pages.sql`, and
    `200_meta_verified_ad_destinations.sql`, `201_meta_ad_mappings.sql`, and
    `202_meta_ad_campaign_dimensions.sql` and `203_meta_ad_report_performance.sql` using the
-   normal migration process. This task applies migrations to the local clone only.
+   normal migration process, plus `211_meta_landing_page_templates.sql` for URL
+   rules. Without 211 the pages still work; rule writes report the missing
+   migration and every landing page stays "belum ditetapkan".
 
 2. Deploy the app and sync-job worker together. The worker must understand
    `meta_sync` jobs with `ad_funnels_only: true` before processing them.
    Mapping jobs additionally use `ad_mapping_only: true`.
 3. Confirm an active Meta integration and connected ad accounts in Admin Meta.
-4. Save landing-page monitoring with the desired accounts, decline threshold,
-   minimum samples, window length, and attribution lag.
+4. Create a Transaksi and, if used, a Lead template on Template funnel, then
+   assign landing pages (a domain rule covers a whole website at once).
 5. Use **Sync 90 hari** to initialize metrics and destinations. Jobs fetch one
    account and at most seven days each, newest weeks first. Follow progress in
    **Status sync histori**.

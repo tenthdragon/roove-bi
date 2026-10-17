@@ -21,6 +21,10 @@ import { isWorkspaceModuleEnabled } from '@/lib/workspaces';
 import { canRoleAccessPermission } from '@/lib/role-access';
 import { profileThemePreference } from '@/lib/theme-preference';
 
+function isMetaReportPath(path) {
+  return path === '/dashboard/meta-funnels' || path.startsWith('/dashboard/meta-funnels/brand');
+}
+
 function getCurrentTab(path) {
   const seg = path.replace('/dashboard', '').replace(/^\//, '');
   return seg.startsWith('meta-funnels/') ? 'meta-funnels' : seg || 'overview';
@@ -330,7 +334,7 @@ function RefreshViewsButton({
 }
 
 function HeaderDatePicker() {
-  const isMetaReport = usePathname() === '/dashboard/meta-funnels';
+  const isMetaReport = isMetaReportPath(usePathname());
   const { dateRange, dateExtent, setDateRange } = useDateRange();
   if (!dateRange.from) return null;
   return (
@@ -612,7 +616,7 @@ export default function DashboardLayout({ children }) {
   }
 
   const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake', 'growth-work'].includes(currentTab)
-    && !['/dashboard/meta-funnels/mapping', '/dashboard/meta-funnels/notifications'].includes(pathname);
+    && !(pathname.startsWith('/dashboard/meta-funnels') && !isMetaReportPath(pathname));
   const canSyncSheets = canRoleAccessPermission(accessRole, permissions, 'admin:daily');
   const canSyncMeta = canRoleAccessPermission(accessRole, permissions, 'admin:meta');
   const showRefreshButton = canSyncSheets || canSyncMeta;

@@ -313,7 +313,7 @@ export const ALL_TABS: TabDef[] = [
   { id: 'overview',       label: 'Dashboard',           icon: 'LayoutDashboard', group: 'Main Menu' },
   // { id: 'products',    label: 'Products',           icon: 'Package' },  // Hidden — merged into Overview
   { id: 'marketing',      label: 'Marketing Channel',  icon: 'Megaphone', group: 'Main Menu', children: [
-    { id: 'meta-funnels', label: 'Meta Ad Funnels', icon: 'Megaphone' },
+    { id: 'meta-funnels', label: 'Meta Ads', icon: 'Megaphone' },
     { id: 'shopee-details', label: 'Shopee Details', icon: 'ShoppingBag' },
   ]},
   { id: 'channels',       label: 'Sales Channel',      icon: 'Share2', group: 'Main Menu', children: [

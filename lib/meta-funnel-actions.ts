@@ -1,68 +1,18 @@
 'use server';
 
-import { requireDashboardPermissionAccess, requireDashboardTabAccess } from './dashboard-access';
 import { createServiceSupabase } from './service-supabase';
-import { defaultFunnel, metaPerformanceMetrics, daysBetween, hasCoverage, shiftDay, emptyTotals, validateFunnel, validateRange, type FunnelConfig } from './meta-funnel-domain';
-import { evaluateWorkspaceAlerts, loadFunnels } from './meta-funnel-store';
+import { daysBetween, hasCoverage, shiftDay, emptyTotals, validateFunnel, type FunnelConfig } from './meta-funnel-domain';
+import { evaluateWorkspaceAlerts } from './meta-funnel-store';
 import { enqueueIncrementalMetaSync } from './meta-sync-queue';
-import { getTodayWIB } from './sync-schedule';
-import { isWorkspaceModuleEnabled } from './workspaces';
-import { validateMetaAdChannel, metaAdChannelCounts } from './meta-ad-channels';
+import { metaAdChannelCounts } from './meta-ad-channels';
 import { canonicalLandingPage } from './meta-ad-destinations';
-import { validateDimensionFilters } from './meta-ad-dimensions';
-import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
-import { completedMetaRange, metaCoverageGaps } from './meta-report-status';
+import { metaCoverageGaps } from './meta-report-status';
+import { currencyError, manageAccess, reportContext, reportJobs, reportingAccess, uuid } from './meta-report-context';
 
 import { metaReportBrandSections, metaReportQuery, metaReportGroups, metaReportOptions, metaReportHistory, type MetaReportInput } from './meta-ad-report';
 import { getCachedMetaAdReport } from './meta-ad-report-data';
-import { loadMetaSyncJobs, META_SYNC_JOB_FIELDS } from './meta-funnel-sync-status';
+import { loadMetaSyncJobs } from './meta-funnel-sync-status';
 
-function uuid(id: string) { if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error('ID tidak valid.'); return id; }
-async function reportingAccess() {
-  const ctx = await requireDashboardTabAccess('marketing', 'Marketing Channel');
-  if (!isWorkspaceModuleEnabled(ctx.workspace, 'meta-funnels')) throw new Error('Meta Ad Funnels tidak diaktifkan untuk workspace ini.');
-  return ctx;
-}
-async function manageAccess() {
-  const ctx = await reportingAccess();
-  const manage = await requireDashboardPermissionAccess('admin:meta', 'Kelola funnel Meta');
-  if (manage.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
-  return ctx;
-}
-async function reportContext(input: MetaReportInput, includeJobs = false) {
-  const { workspaceId } = await reportingAccess();
-  validateRange(input.from, input.to);
-  if (input.groupBy !== undefined && !['ad', 'landing_page'].includes(input.groupBy)) throw new Error('Tampilan agregasi tidak valid.');
-  if (input.groupKey !== undefined && (typeof input.groupKey !== 'string' || input.groupKey.length > 50000)) throw new Error('Pilihan breakdown tidak valid.');
-  const channel = validateMetaAdChannel(input.channel);
-  const reportRange = completedMetaRange(input, getTodayWIB());
-  const filters = validateDimensionFilters(input.filters), brandId = validateMetaBrandFilter(input.brandId);
-  const svc = createServiceSupabase();
-  const [version, funnels, accountsResult, brandsResult, jobsResult, channelSchema] = await Promise.all([
-    svc.from('meta_ad_report_versions').select('revision').eq('workspace_id', workspaceId).maybeSingle(),
-    loadFunnels(svc, workspaceId).then(saved => saved.filter(f => f.group_by === 'landing_page')),
-    svc.from('meta_ad_accounts').select('account_id,account_name,default_brand_id').eq('workspace_id', workspaceId).eq('is_active', true).order('account_name'),
-    svc.from('brands').select('id,name').eq('workspace_id', workspaceId).order('name'),
-    includeJobs ? reportJobs(svc, workspaceId) : Promise.resolve({ data: [], error: null }),
-    svc.from('meta_ad_mapping_channels').select('ad_channel').eq('workspace_id', workspaceId).limit(1),
-  ]);
-  if ([version, channelSchema].some(r => r.error && ['42P01', 'PGRST205'].includes(r.error.code))) return { schemaReady: false as const };
-  for (const result of [version, accountsResult, brandsResult, jobsResult, channelSchema]) if (result.error) throw new Error(result.error.message);
-  const accounts = accountsResult.data || [], brands = brandsResult.data || [];
-  if (brandId && !metaBrandOptions(accounts, brands, []).choices.some(b => b.value === brandId)) throw new Error('Brand tidak tersedia pada akun Meta workspace ini.');
-  const selected = funnels.find(f => f.id === input.funnelId) || funnels[0] || null;
-  const config: FunnelConfig = { ...(selected || defaultFunnel()), metrics: metaPerformanceMetrics(), group_by: input.groupBy === 'ad' ? 'ad_id' : 'landing_page' };
-  const configuredAccounts = accounts.filter(a => !config.account_ids.length || config.account_ids.includes(a.account_id));
-  return { schemaReady: true as const, workspaceId, reportVersion: String(version.data?.revision || 0), reportRange, filters, brandId, channel,
-    funnels, selectedId: selected?.id || null, config, accounts, configuredAccounts, brands,
-    scopedAccountIds: metaBrandAccountIds(configuredAccounts, brands, brandId), jobs: jobsResult.data || [],
-    input: { ...input, ...reportRange, filters, brandId, channel } };
-}
-function reportJobs(svc: ReturnType<typeof createServiceSupabase>, workspaceId: string) {
-  return svc.from('sync_jobs').select(META_SYNC_JOB_FIELDS).eq('workspace_id', workspaceId)
-    .eq('job_name', 'meta_sync').order('created_at', { ascending: false }).limit(20);
-}
-const currencyError = 'Funnel mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama pada konfigurasi.';
 export async function getMetaFunnelData(input: MetaReportInput) {
   const ctx = await reportContext(input, true);
   if (!ctx.schemaReady) return ctx;
@@ -168,8 +118,12 @@ export async function saveMetaFunnel(input: { id?: string; version?: number; con
 }
 export async function archiveMetaFunnel(id: string) {
   const { workspaceId } = await manageAccess();
-  const result = await createServiceSupabase().from('meta_ad_funnels').update({ archived: true, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', uuid(id));
+  const svc = createServiceSupabase();
+  const result = await svc.from('meta_ad_funnels').update({ archived: true, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', uuid(id));
   if (result.error) throw new Error(result.error.message);
+  // Landing pages of an archived template return to "belum ditetapkan".
+  const rules = await svc.from('meta_landing_page_templates').delete().eq('workspace_id', workspaceId).eq('funnel_id', id);
+  if (rules.error && !['42P01', 'PGRST205'].includes(rules.error.code)) throw new Error(rules.error.message);
 }
 export async function markMetaFunnelAlertRead(id: string) {
   const { workspaceId, profile } = await reportingAccess();

@@ -1,0 +1,238 @@
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Link from 'next/link';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { X } from 'lucide-react';
+import { useDateRange } from '@/lib/DateRangeContext';
+import { usePermissions } from '@/lib/PermissionsContext';
+import { getMetaFunnelHistory, queueMetaFunnelSync, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
+import { getMetaBrandDetail, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
+import { MEASURES, metricValue, type FunnelMetric, type Measure, type Totals } from '@/lib/meta-funnel-domain';
+import { TEMPLATE_KIND_LABELS, WORLD_CHANNEL, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
+import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
+import { formatChange, formatCompactMoney, formatCount, formatDate, formatMetric } from '@/lib/meta-format';
+import MetaAdsNav from '@/components/MetaAdsNav';
+import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
+import MetaSparkline from '@/components/MetaSparkline';
+import MetaGroupDrawer from '@/components/MetaGroupDrawer';
+import styles from '../../page.module.css';
+
+type Data = Extract<Awaited<ReturnType<typeof getMetaBrandDetail>>, { schemaReady: true }>;
+type HistoryPoint = { date: string; totals: Totals; complete: boolean; partial: boolean };
+const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
+const severityClass = { bad: styles.bad, warn: styles.warn, good: styles.good, info: styles.neutral } as const;
+
+function Delta({ value, direction = 'higher', neutral = false }: { value: number | null; direction?: 'higher' | 'lower'; neutral?: boolean }) {
+  if (value === null) return <span className={styles.neutral}>—</span>;
+  const good = direction === 'higher' ? value >= 0 : value <= 0;
+  return <span className={neutral ? styles.neutral : good ? styles.good : styles.bad}>{formatChange(value)}</span>;
+}
+function StageChips({ group, stages, currency }: { group: TemplateGroup; stages: Measure[]; currency: string }) {
+  const steps = stages.filter(s => s !== 'spend');
+  return <div className={styles.stageChips}>{steps.map((stage, i) => {
+    const prev = i ? group.current[steps[i - 1]] : 0;
+    return <span key={stage} className={styles.stageChip} title={`${MEASURES[stage]}${i ? ` ÷ ${MEASURES[steps[i - 1]]}` : ''}`}>{MEASURES[stage].replace('Landing page views', 'LPV').replace('Initiate checkout', 'IC').replace('Add to cart', 'ATC').replace('Outbound clicks', 'Outbound').replace('Messaging conversations', 'Conv')} {i === 0 ? formatCount(group.current[stage]) : formatMetric(prev > 0 ? group.current[stage] / prev : null, 'percent', currency)}</span>;
+  })}</div>;
+}
+
+export default function MetaBrandDetailPage() {
+  const params = useParams<{ brandId: string }>();
+  const search = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const { dateRange } = useDateRange();
+  const { can } = usePermissions();
+  const canManage = can('admin:meta');
+  const brandId = params.brandId;
+  const world: MetaBrandWorld = search.get('world') === 'cpas' ? 'cpas' : 'website';
+  const [filters, setFilters] = useState<AdDimensionFilters>({});
+  const [data, setData] = useState<Data | null>(null);
+  const [schemaReady, setSchemaReady] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [drawer, setDrawer] = useState<{ group: TemplateGroup; section: TemplateSection } | null>(null);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [destinationEditor, setDestinationEditor] = useState<{ accountId: string; adId: string; name: string; url: string } | null>(null);
+  const [history, setHistory] = useState<{ key: string; points: HistoryPoint[]; complete: boolean } | null>(null);
+  const [historyError, setHistoryError] = useState('');
+  const [trendMetricId, setTrendMetricId] = useState('');
+  const request = useRef(0);
+  const input = useMemo(() => ({ from: dateRange.from, to: dateRange.to, brandId, filters }), [dateRange.from, dateRange.to, brandId, filters]);
+  const load = useCallback(async () => {
+    if (!input.from || !input.to) return;
+    const current = ++request.current;
+    setLoading(true); setError('');
+    try {
+      const result = await getMetaBrandDetail({ ...input, world });
+      if (current !== request.current) return;
+      setSchemaReady(result.schemaReady);
+      if (result.schemaReady) setData(result);
+    } catch (e) { if (current === request.current) setError(message(e)); }
+    finally { if (current === request.current) setLoading(false); }
+  }, [input, world]);
+  useEffect(() => { void load(); }, [load]);
+  useEffect(() => { const guard = request; return () => { guard.current++; }; }, []);
+  useEffect(() => { setDrawer(null); setNotesOpen(false); }, [world, brandId]);
+  const historyKey = JSON.stringify([input, world, data?.reportVersion]);
+  useEffect(() => {
+    if (!data || !input.from) return;
+    let alive = true; setHistoryError('');
+    void getMetaFunnelHistory({ from: input.from, to: input.to, brandId, filters, channel: WORLD_CHANNEL[world], groupBy: world === 'website' ? 'landing_page' : 'ad', view: 'trends', period: 'weekly' })
+      .then(result => { if (!alive) return; if (!result.schemaReady) throw new Error('Migration laporan Meta belum tersedia.'); setHistory({ key: historyKey, points: result.history, complete: result.complete }); })
+      .catch(e => { if (alive) setHistoryError(message(e)); });
+    return () => { alive = false; };
+  }, [data, input, brandId, filters, world, historyKey]);
+  const points = history?.key === historyKey ? history.points : [];
+  const trendMetrics = useMemo<FunnelMetric[]>(() => {
+    if (!data) return [];
+    const seen = new Map<string, FunnelMetric>();
+    for (const m of [...data.responseMetrics, ...data.sections.flatMap(s => s.config.metrics)]) if (!seen.has(m.id)) seen.set(m.id, m);
+    return [...seen.values()];
+  }, [data]);
+  const trendMetric = trendMetrics.find(m => m.id === trendMetricId) || data?.sections.find(s => s.groups.length)?.mainMetric || trendMetrics[1] || trendMetrics[0];
+  const series = (m: FunnelMetric) => points.map(p => p.complete ? metricValue(p.totals, m) : null);
+  function setWorld(next: MetaBrandWorld) {
+    const query = new URLSearchParams(search.toString()); query.set('world', next);
+    router.replace(`${pathname}?${query.toString()}`, { scroll: false });
+  }
+  async function applySuggestion(url: string, funnelId: string) {
+    setBusy(true); setError('');
+    try { await saveMetaTemplateRule({ funnelId, match_kind: 'exact', pattern: url }); setNotice(`Template ditetapkan untuk ${url}.`); await load(); }
+    catch (e) { setError(message(e)); } finally { setBusy(false); }
+  }
+  async function verifyDestination() {
+    if (!destinationEditor) return;
+    setBusy(true); setError('');
+    try { const saved = await verifyMetaAdDestination(destinationEditor); setDestinationEditor(null); setNotice(`URL ad terverifikasi: ${saved.url}`); await load(); }
+    catch (e) { setError(message(e)); } finally { setBusy(false); }
+  }
+  async function sync() {
+    setBusy(true); setError('');
+    try { await queueMetaFunnelSync(); setNotice('Sync masuk antrean. Buka Ringkasan brand untuk memantau progresnya.'); }
+    catch (e) { setError(message(e)); } finally { setBusy(false); }
+  }
+  const currency = data?.currency || 'IDR';
+  const unassignedRules = data?.unassigned.filter(u => u.reason === 'no_rule') || [];
+  const noteCount = data ? data.coverageGaps.length + (data.destinations.missing_ads ? 1 : 0) + (data.destinations.multi_ads ? 1 : 0) + (data.objectiveUnknownAds ? 1 : 0) + (unassignedRules.length ? 1 : 0) : 0;
+  const hasFilters = !!(filters.cep || filters.intention || filters.objective);
+  const openHighlight = (h: Data['highlights'][number]) => {
+    if (h.groupKey && data) {
+      const section = data.sections.find(s => s.key === h.sectionKey) || data.sections[0];
+      const group = section?.groups.find(g => g.key === h.groupKey);
+      if (section && group) { setDrawer({ group, section }); return; }
+    }
+    if (h.kind === 'data') setNotesOpen(true);
+  };
+  return <div className={styles.page} aria-busy={loading}>
+    <MetaAdsNav />
+    <div className={styles.toolbar}>
+      <div className={styles.toolbarGroup}>
+        <Link href="/dashboard/meta-funnels" className={styles.backLink}>← Ringkasan</Link>
+        <select className={styles.brandSwitch} aria-label="Pilih brand" value={brandId} onChange={e => router.push(`/dashboard/meta-funnels/brand/${e.target.value}?world=${world}`)}>
+          {(data?.brandOptions || [{ value: brandId, label: data?.brand.name || 'Brand' }]).map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
+        </select>
+        <div className={styles.segmented} role="group" aria-label="Dunia iklan">
+          {(['website', 'cpas'] as const).map(w => <button key={w} type="button" className={`${styles.segment} ${world === w ? styles.segmentActive : ''}`} aria-pressed={world === w} onClick={() => setWorld(w)}>
+            {WORLD_LABELS[w]}{data && ` · ${formatCompactMoney(data.worlds[w].spend, currency)}`}
+          </button>)}
+        </div>
+      </div>
+      <div className={styles.toolbarGroup}>
+        {data && <span className={styles.muted}>{data.matchingAds} ad · {data.accounts.length} akun</span>}
+        <details className={styles.filterDetails}><summary>Filter{hasFilters ? ' · aktif' : ''}</summary>
+          <div className={styles.filterPanel}>{data && <MetaAdDimensionFilters value={filters} options={data.dimensionOptions} ready={data.dimensionsReady} onChange={setFilters} onReset={() => setFilters({})} />}</div>
+        </details>
+        <button type="button" className={`${styles.button} ${noteCount ? styles.notesButton : ''}`} onClick={() => setNotesOpen(true)} disabled={!data}>{noteCount ? `${noteCount} catatan data` : 'Catatan data'}</button>
+      </div>
+    </div>
+    {error && <div role="alert" className={styles.error}>{error}</div>}
+    {notice && <div role="status" className={styles.info}>{notice}</div>}
+    {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
+      {loading && !data && <p role="status" className={styles.muted}>Memuat detail brand…</p>}
+      {data && <>
+        <p className={styles.period}>Periode {formatDate(data.reportRange.from)} – {formatDate(data.reportRange.to)} <span>vs {formatDate(data.prevFrom)} – {formatDate(data.prevTo)} · {currency}</span></p>
+        {data.reportingError && <div role="alert" className={styles.error}>{data.reportingError}</div>}
+        <section aria-label="Sorotan" style={{ display: 'grid', gap: 10 }}>
+          <div className={styles.sectionTitle}><h2>Sorotan</h2><span>Insight otomatis · diurutkan menurut tingkat masalah dan spend yang terdampak</span></div>
+          <div className={styles.highlights}>{data.highlights.map((h, i) => <div key={i} className={styles.highlight}>
+            <span className={`${styles.highlightKind} ${severityClass[h.severity]}`}><i aria-hidden="true" />{h.title}</span>
+            <span>{h.text}</span>
+            {(h.groupKey || h.kind === 'data') && <button type="button" className={styles.nameButton} onClick={() => openHighlight(h)}>{h.groupKey ? 'Lihat detail →' : 'Lihat catatan data →'}</button>}
+          </div>)}</div>
+        </section>
+        <section aria-label="Respon iklan" style={{ display: 'grid', gap: 10 }}>
+          <div className={styles.sectionTitle}><h2>Respon iklan</h2><span>Lapisan bersama · dinilai sama di Website dan CPAS · sparkline mingguan 90 hari</span></div>
+          <div className={styles.responseGrid}>{data.responseMetrics.map(m => { const c = data.response.find(r => r.id === m.id)!; return <div key={m.id} className={styles.kpi}>
+            <span className={styles.muted} style={{ display: 'flex', justifyContent: 'space-between' }}><span>{m.label}</span><Delta value={c.change} direction={m.direction} /></span>
+            <span className={styles.kpiValue}>{formatMetric(c.current, m.format, currency)}</span>
+            <MetaSparkline values={series(m)} />
+            <span className={styles.muted}>{m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}${m.multiplier ? ` × ${m.multiplier}` : ''}` : MEASURES[m.numerator]}</span>
+          </div>; })}</div>
+        </section>
+        <section aria-label={`Hasil ${WORLD_LABELS[world]}`} style={{ display: 'grid', gap: 12 }}>
+          <div className={styles.sectionTitle}><h2>Hasil · {WORLD_LABELS[world]}</h2><span>{world === 'website' ? 'Dikelompokkan per template funnel landing page' : 'Per ad · purchase Shopee dengan atribusi Meta'}</span></div>
+          {world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
+          {data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <div key={section.key} className={styles.sectionCard}>
+            <div className={styles.sectionHead}>
+              <div><span className={`${styles.templateTag} ${world === 'cpas' ? styles.templateTagCpas : ''}`}>{world === 'cpas' ? 'CPAS' : 'TEMPLATE'}</span><strong>{section.name}</strong><span>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')} · {section.groups.length} {world === 'website' ? 'landing page' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span></div>
+              <span>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric.format, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
+            </div>
+            {!section.groups.length ? <p className={styles.muted} style={{ padding: '12px 16px' }}>Belum ada ad {WORLD_LABELS[world]} pada periode dan filter ini.</p> : <div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}>
+              <table className={styles.resultTable}>
+                <thead><tr><th scope="col">{world === 'website' ? 'Landing page' : 'Ad'}</th>{section.config.metrics.map(m => <th key={m.id} scope="col" title={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}` : MEASURES[m.numerator]}>{m.label}</th>)}<th scope="col">Funnel</th></tr></thead>
+                <tbody>{section.groups.map(g => <tr key={g.key}>
+                  <td><button type="button" className={styles.nameButton} onClick={() => setDrawer({ group: g, section })}>{g.name}</button><small>{g.ad_ids.length} ad · {g.accounts.join(', ')}</small></td>
+                  {section.config.metrics.map(m => { const c = g.metrics.find(v => v.id === m.id)!; const main = section.mainMetric?.id === m.id; return <td key={m.id}><span style={main ? { fontWeight: 650 } : undefined}>{formatMetric(c.current, m.format, currency)}</span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}
+                  <td><StageChips group={g} stages={section.config.stages} currency={currency} /></td>
+                </tr>)}</tbody>
+                <tfoot><tr><th scope="row">Total {section.name}</th>{section.config.metrics.map(m => { const c = section.metrics.find(v => v.id === m.id)!; return <td key={m.id}>{formatMetric(c.current, m.format, currency)}<small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}<td /></tr></tfoot>
+              </table>
+            </div>}
+          </div>)}
+          {world === 'website' && data.unassigned.length > 0 && <div className={styles.unassigned}>
+            <div className={styles.sectionTitle}><strong className={styles.warn}>Belum ditetapkan</strong><span>{data.unassigned.length} landing page · {formatCompactMoney(data.unassigned.reduce((s, u) => s + u.current.spend, 0), currency)} · belum masuk template mana pun</span></div>
+            {data.unassigned.slice(0, 8).map(u => <div key={u.key} className={styles.unassignedRow}>
+              <span>{u.name} · {formatCompactMoney(u.current.spend, currency)} · <span className={styles.muted}>{u.reason === 'no_url' ? 'URL belum terbaca' : u.reason === 'multi_url' ? 'beberapa URL dalam satu creative' : u.suggestion.reason}</span></span>
+              {u.reason === 'no_rule' && canManage && u.suggestion.funnelId && <button type="button" className={styles.button} disabled={busy} onClick={() => void applySuggestion(u.landing_page_urls[0], u.suggestion.funnelId!)}>Terapkan saran</button>}
+            </div>)}
+            <Link href="/dashboard/meta-funnels/templates">Atur template dan aturan URL →</Link>
+          </div>}
+          {world === 'cpas' && <p className={styles.muted}>Metrik CPAS memakai atribusi Meta per adset. Purchase shared items 1 hari dan 7 hari belum dipisahkan; ROAS dibaca sebagai indikasi arah.</p>}
+        </section>
+        <section aria-label="Tren" style={{ display: 'grid', gap: 10 }}>
+          <div className={styles.sectionTitle}><h2>Tren 90 hari</h2><div className={styles.actions}><span className={styles.muted}>Mingguan · {WORLD_LABELS[world]}</span>
+            <select aria-label="Metrik tren" value={trendMetric?.id || ''} onChange={e => setTrendMetricId(e.target.value)}>{trendMetrics.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div></div>
+          {historyError && <p role="alert" className={styles.error}>{historyError}</p>}
+          {trendMetric && <div className={styles.chartCard}><ResponsiveContainer width="100%" height={240}><LineChart data={points.map(p => ({ date: p.date, value: p.complete ? (metricValue(p.totals, trendMetric) ?? null) : null }))}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" /><XAxis dataKey="date" tick={{ fill: 'var(--dim)', fontSize: 11 }} /><YAxis tick={{ fill: 'var(--dim)', fontSize: 11 }} tickFormatter={(v: number) => trendMetric.format === 'percent' ? `${(v * 100).toFixed(1)}%` : formatCompactMoney(v, currency).replace('Rp ', '')} width={70} /><Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }} formatter={(value: number) => [formatMetric(value, trendMetric.format, currency), trendMetric.label]} /><Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2} dot={false} connectNulls={false} /></LineChart></ResponsiveContainer>
+            <p className={styles.muted}>Minggu dimulai Senin. Minggu pertama dan terakhir dapat parsial. {history && !history.complete && 'Histori belum lengkap; titik tanpa data bukan bukti performa nol.'}</p></div>}
+        </section>
+      </>}
+    </>}
+    {drawer && data && <MetaGroupDrawer group={drawer.group} section={drawer.section} world={world} input={{ from: data.reportRange.from, to: data.reportRange.to, brandId, filters }} currency={currency} onClose={() => setDrawer(null)} />}
+    {notesOpen && data && <>
+      <div className={styles.drawerBackdrop} onClick={() => setNotesOpen(false)} aria-hidden="true" />
+      <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label="Catatan data">
+        <div className={styles.drawerHead}><div><h2>Catatan data</h2><div className={styles.muted}>{data.brand.name} · {WORLD_LABELS[world]}</div></div><button type="button" className={styles.drawerClose} aria-label="Tutup catatan" onClick={() => setNotesOpen(false)}><X size={16} aria-hidden="true" /></button></div>
+        {!noteCount && <p className={styles.muted}>Tidak ada catatan. Data periode dan pembanding lengkap, semua URL terbaca.</p>}
+        {data.coverageGaps.length > 0 && <div className={styles.card}><b className={styles.warn}>Data parsial</b>
+          <dl style={{ margin: '8px 0 0', display: 'grid', gap: 6 }}>{data.coverageGaps.map(g => <div key={g.account_id}><dt style={{ fontWeight: 600 }}>{data.accounts.find(a => a.account_id === g.account_id)?.account_name || g.account_id}</dt><dd style={{ margin: 0 }} className={styles.muted}>{[g.currentMissing > 0 && `periode ${g.currentMissing} hari`, g.baselineMissing > 0 && `pembanding ${g.baselineMissing} hari`].filter(Boolean).join(' · ')} · {g.firstMissing} – {g.lastMissing}</dd></div>)}</dl>
+          {canManage && <button type="button" className={styles.button} style={{ marginTop: 8 }} disabled={busy} onClick={() => void sync()}>Sync</button>}</div>}
+        {(data.destinations.missing_ads > 0 || data.destinations.multi_ads > 0) && <div className={styles.card}><b className={styles.warn}>URL landing page</b>
+          <p className={styles.muted}>{data.destinations.missing_ads} ad dengan URL belum terbaca · {data.destinations.multi_ads} ad dengan beberapa URL. Metrik tetap dihitung sekali; ad ini belum masuk template mana pun.</p>
+          {data.destinations.missing.map(ad => <div className={styles.namingIssue} key={`${ad.account_id}:${ad.ad_id}`}><b>{ad.ad_name}</b><small>{ad.account_name} · ad {ad.ad_id}</small>
+            {canManage && <button className={styles.button} onClick={() => setDestinationEditor({ accountId: ad.account_id, adId: ad.ad_id, name: ad.ad_name, url: '' })}>Tetapkan URL</button>}</div>)}
+          {destinationEditor && <form className={styles.editor} style={{ marginTop: 10 }} onSubmit={e => { e.preventDefault(); void verifyDestination(); }}>
+            <p><b>{destinationEditor.name}</b><br /><span className={styles.muted}>Gunakan Website URL yang sudah diperiksa di Ads Manager. URL ini berlaku selama creative yang sama digunakan.</span></p>
+            <label>Website URL<input required type="url" maxLength={4096} value={destinationEditor.url} onChange={e => setDestinationEditor({ ...destinationEditor, url: e.target.value })} /></label>
+            <div className={styles.actions}><button type="submit" className={styles.primary} disabled={busy}>Simpan URL terverifikasi</button><button type="button" className={styles.button} disabled={busy} onClick={() => setDestinationEditor(null)}>Batal</button></div>
+          </form>}</div>}
+        {data.objectiveUnknownAds > 0 && <div className={styles.card}><b className={styles.warn}>Objective belum terbaca</b><p className={styles.muted}>{data.objectiveUnknownAds} ad. Gunakan Sync pemetaan di <Link href="/dashboard/meta-funnels/mapping">Pemetaan Ads</Link> untuk melengkapinya.</p></div>}
+        {unassignedRules.length > 0 && <div className={styles.card}><b className={styles.warn}>Template belum ditetapkan</b><p className={styles.muted}>{unassignedRules.length} landing page. Atur di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</p></div>}
+      </aside>
+    </>}
+  </div>;
+}
