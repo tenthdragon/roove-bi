@@ -9,12 +9,12 @@ export const getCachedMetaAdReport = unstable_cache(
   async (workspaceId: string, _revision: string, query: ReportQuery): Promise<RawMetaReport> => {
     const result = await createServiceSupabase().rpc('get_meta_ad_report', {
       p_workspace_id: workspaceId, p_from: query.from, p_to: query.to, p_config: query.config,
-      p_filters: query.filters, p_brand: query.brand, p_group_by: query.groupBy,
+      p_filters: { ...query.filters, ...(query.channel ? { channel: query.channel } : {}) }, p_brand: query.brand, p_group_by: query.groupBy,
       p_view: query.view, p_period: query.period, p_group_key: query.groupKey,
     });
     if (result.error) throw new Error(`Gagal memuat performa Meta: ${result.error.message}`);
     return result.data as RawMetaReport;
   },
-  ['meta-ad-report-v1'],
+  ['meta-ad-report-v2'],
   { revalidate: 300 },
 );

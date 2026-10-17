@@ -7,6 +7,7 @@ import { evaluateWorkspaceAlerts, loadFunnels } from './meta-funnel-store';
 import { enqueueIncrementalMetaSync } from './meta-sync-queue';
 import { getTodayWIB } from './sync-schedule';
 import { isWorkspaceModuleEnabled } from './workspaces';
+import { validateMetaAdChannel, metaAdChannelCounts } from './meta-ad-channels';
 import { canonicalLandingPage } from './meta-ad-destinations';
 import { validateDimensionFilters } from './meta-ad-dimensions';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
@@ -33,27 +34,29 @@ async function reportContext(input: MetaReportInput, includeJobs = false) {
   validateRange(input.from, input.to);
   if (input.groupBy !== undefined && !['ad', 'landing_page'].includes(input.groupBy)) throw new Error('Tampilan agregasi tidak valid.');
   if (input.groupKey !== undefined && (typeof input.groupKey !== 'string' || input.groupKey.length > 50000)) throw new Error('Pilihan breakdown tidak valid.');
+  const channel = validateMetaAdChannel(input.channel);
   const reportRange = completedMetaRange(input, getTodayWIB());
   const filters = validateDimensionFilters(input.filters), brandId = validateMetaBrandFilter(input.brandId);
   const svc = createServiceSupabase();
-  const [version, funnels, accountsResult, brandsResult, jobsResult] = await Promise.all([
+  const [version, funnels, accountsResult, brandsResult, jobsResult, channelSchema] = await Promise.all([
     svc.from('meta_ad_report_versions').select('revision').eq('workspace_id', workspaceId).maybeSingle(),
     loadFunnels(svc, workspaceId).then(saved => saved.filter(f => f.group_by === 'landing_page')),
     svc.from('meta_ad_accounts').select('account_id,account_name,default_brand_id').eq('workspace_id', workspaceId).eq('is_active', true).order('account_name'),
     svc.from('brands').select('id,name').eq('workspace_id', workspaceId).order('name'),
     includeJobs ? reportJobs(svc, workspaceId) : Promise.resolve({ data: [], error: null }),
+    svc.from('meta_ad_mapping_channels').select('ad_channel').eq('workspace_id', workspaceId).limit(1),
   ]);
-  if (version.error && ['42P01', 'PGRST205'].includes(version.error.code)) return { schemaReady: false as const };
-  for (const result of [version, accountsResult, brandsResult, jobsResult]) if (result.error) throw new Error(result.error.message);
+  if ([version, channelSchema].some(r => r.error && ['42P01', 'PGRST205'].includes(r.error.code))) return { schemaReady: false as const };
+  for (const result of [version, accountsResult, brandsResult, jobsResult, channelSchema]) if (result.error) throw new Error(result.error.message);
   const accounts = accountsResult.data || [], brands = brandsResult.data || [];
   if (brandId && !metaBrandOptions(accounts, brands, []).choices.some(b => b.value === brandId)) throw new Error('Brand tidak tersedia pada akun Meta workspace ini.');
   const selected = funnels.find(f => f.id === input.funnelId) || funnels[0] || null;
   const config: FunnelConfig = { ...(selected || defaultFunnel()), metrics: metaPerformanceMetrics(), group_by: input.groupBy === 'ad' ? 'ad_id' : 'landing_page' };
   const configuredAccounts = accounts.filter(a => !config.account_ids.length || config.account_ids.includes(a.account_id));
-  return { schemaReady: true as const, workspaceId, reportVersion: String(version.data?.revision || 0), reportRange, filters, brandId,
+  return { schemaReady: true as const, workspaceId, reportVersion: String(version.data?.revision || 0), reportRange, filters, brandId, channel,
     funnels, selectedId: selected?.id || null, config, accounts, configuredAccounts, brands,
     scopedAccountIds: metaBrandAccountIds(configuredAccounts, brands, brandId), jobs: jobsResult.data || [],
-    input: { ...input, ...reportRange, filters, brandId } };
+    input: { ...input, ...reportRange, filters, brandId, channel } };
 }
 function reportJobs(svc: ReturnType<typeof createServiceSupabase>, workspaceId: string) {
   return svc.from('sync_jobs').select(META_SYNC_JOB_FIELDS).eq('workspace_id', workspaceId)
@@ -71,7 +74,7 @@ export async function getMetaFunnelData(input: MetaReportInput) {
   return { schemaReady: true as const, funnels: ctx.funnels, selectedId: ctx.selectedId, config: ctx.config, accounts: ctx.accounts,
     scopedAccountIds: ctx.scopedAccountIds, brandId: ctx.brandId, reportRange: ctx.reportRange, reportVersion: ctx.reportVersion,
     ...metaReportOptions(raw, ctx.accounts, ctx.brands), dimensionsReady: true, filters: ctx.filters,
-    matchingAds: raw.matchingAds, objectiveUnknownAds: raw.objectiveUnknownAds,
+    channel: ctx.channel, channelCounts: metaAdChannelCounts(raw.channelCounts), matchingAds: raw.matchingAds, objectiveUnknownAds: raw.objectiveUnknownAds,
     coverageGaps: metaCoverageGaps(raw.coverage, ctx.scopedAccountIds, ctx.reportRange),
     brandSections, groups: reportingError ? [] : metaReportGroups(raw, ctx.config), summary: reportingError ? emptyTotals() : raw.summary,
     previous: reportingError ? emptyTotals() : raw.previous, reportingError, currency: raw.currencies[0] || 'IDR',

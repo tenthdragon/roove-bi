@@ -1,12 +1,13 @@
+import type { MetaAdChannel } from './meta-ad-channels';
 import { emptyTotals, metricValue, relativeChange, type Totals, type FunnelConfig, type GroupComparison, type Coverage, type AdCreative } from './meta-funnel-domain';
 import { dimensionLabel, objectiveLabel, type AdDimensionFilters } from './meta-ad-dimensions';
 import { metaBrandOptions, type MetaAccountBrand, type MetaBrand } from './meta-ad-brands';
 import { parseRooveAdName } from './meta-ad-naming';
 
-export type MetaReportInput = { from: string; to: string; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: 'ad' | 'landing_page' };
+export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: 'ad' | 'landing_page' };
 export type ReportQuery = {
   from: string; to: string; config: Pick<FunnelConfig, 'account_ids' | 'name_filter' | 'match'>;
-  filters: AdDimensionFilters; brand: string | null; groupBy: 'ad' | 'landing_page';
+  filters: AdDimensionFilters; channel: MetaAdChannel | null; brand: string | null; groupBy: 'ad' | 'landing_page';
   view: 'overview' | 'daily' | 'trends' | 'creatives'; period: 'week' | 'month'; groupKey: string | null;
 };
 export type ReportBucket = { date: string; totals: Totals; complete: boolean; partial: boolean };
@@ -15,14 +16,14 @@ export type RawMetaReport = {
   groups: Omit<GroupComparison, 'metrics' | 'creatives' | 'categories' | 'classified'>[];
   coverage: Coverage[]; facets: { dimension: keyof AdDimensionFilters; value: string; count: number }[];
   facetTotals: Partial<Record<keyof AdDimensionFilters, number>>; brandCounts: Record<string, number>;
-  matchingAds: number; objectiveUnknownAds: number;
+  channelCounts?: Partial<Record<MetaAdChannel, number>>; matchingAds: number; objectiveUnknownAds: number;
   destinations: { urls: number; missing_ads: number; multi_ads: number; missing: { account_id: string; ad_id: string; account_name: string; ad_name: string }[] };
   history: ReportBucket[]; historyComplete: boolean; creatives: AdCreative[];
 };
 export function metaReportQuery(input: MetaReportInput, config: FunnelConfig, view: ReportQuery['view'] = 'overview', period: ReportQuery['period'] = 'week'): ReportQuery {
   return { from: input.from, to: input.to, config: { account_ids: [...config.account_ids].sort(), name_filter: config.name_filter, match: config.match },
     filters: { cep: input.filters?.cep, intention: input.filters?.intention, objective: input.filters?.objective },
-    brand: input.brandId || null, groupBy: input.groupBy || 'landing_page', view, period,
+    channel: input.channel || null, brand: input.brandId || null, groupBy: input.groupBy || 'landing_page', view, period,
     groupKey: view === 'overview' ? null : input.groupKey || null };
 }
 export function metaReportGroups(raw: RawMetaReport, config: FunnelConfig): GroupComparison[] {

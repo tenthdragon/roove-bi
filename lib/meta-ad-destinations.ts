@@ -23,7 +23,7 @@ export function normalizeLandingPages(values: unknown): string[] {
 export function creativeLandingPages(creative: Record<string, any>): string[] {
   const story = creative.object_story_spec || {};
   const link = story.link_data || {}; const template = story.template_data || {};
-  const explicit = [creative.link_url, link.link, link.call_to_action?.value?.link,
+  const explicit = [creative.link_url, creative.call_to_action?.value?.link, link.link, link.call_to_action?.value?.link,
     story.video_data?.call_to_action?.value?.link, template.link, template.call_to_action?.value?.link,
     ...(link.child_attachments || []).map((card: any) => card.link),
     ...(template.child_attachments || []).map((card: any) => card.link),

@@ -326,7 +326,7 @@ and global Meta progress include it. Page loads do not enqueue verification.
 Product reads share a 20-second cancellation budget and follow every page before
 accepting Shopee evidence. A successful check records the verified product set
 and updates all currently observed ads referencing it, including ads without a
-direct URL. The classifier preserves conflicts with a brand website. The write
+direct URL. A verified Shopee product set is definitive CPAS evidence, including ads whose creative also links to a brand website. The write
 RPC updates classification/evidence only when the source metadata still matches;
 it cannot overwrite a new creative observation or performance metrics.
 
@@ -341,3 +341,89 @@ Additional local database validation:
 ```sh
 docker exec -i supabase_db_roove-bi-local psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 -f - < tests/meta-product-set-db.sql
 ```
+
+### Pengelompokan CPAS dan Non-CPAS
+
+Migration `206_meta_ad_channel_groups.sql` menambahkan dimensi jenis iklan pada
+performa dan inventori pemetaan. Pilihan awal adalah **Non-CPAS**. Pilihan
+**CPAS** memakai bukti Shopee yang sudah tersimpan, termasuk product set
+terverifikasi tanpa URL. **Perlu verifikasi** menampung tujuan yang belum cukup
+jelas, katalog belum terverifikasi, atau creative yang berubah.
+Nama akun, nama katalog, dan generic app bukan bukti CPAS maupun Non-CPAS.
+Non-CPAS memerlukan sumber yang teridentifikasi bukan Shopee: website eksternal,
+tujuan pesan/native, atau katalog non-Shopee yang terkonfirmasi. Ketiadaan URL
+akibat kegagalan API/preview tidak menjadi bukti bahwa tujuan Shopee tidak ada.
+
+Aturan pembagi: katalog Shopee **atau** URL/identitas aplikasi Shopee cukup untuk
+CPAS, meskipun bukti yang satunya tidak ada. Tanpa sumber Shopee, iklan masuk
+Non-CPAS; katalog RTI yang broken tetap Non-CPAS. Data sumber yang belum berhasil
+dibaca adalah masalah kelengkapan data, bukan jenis iklan ketiga.
+
+Filter jenis iklan diterapkan di database sebelum penggabungan landing page,
+total brand, rasio, histori, dan detail creative. Cache menyertakan jenis iklan
+dan berubah ketika metadata tujuan/registry product set diperbarui. Web selalu
+mengirim satu jenis iklan; RPC yang dipanggil integrasi tanpa `p_filters.channel`
+mempertahankan perilaku sebelumnya. View pemetaan hanya dapat dibaca service
+role setelah pemeriksaan akses workspace oleh server action.
+
+Klasifikasi berdasarkan bukti tujuan terkini, bukan rekonstruksi tujuan historis.
+Jika identitas creative/adset pada fact diketahui berbeda, fact masuk Perlu
+verifikasi. Fact lama tanpa creative ID mengikuti creative terkini, sesuai aturan
+resolusi URL report sebelumnya. Jumlah ad di pilihan mengikuti periode/filter
+aktif; satu ad yang berubah creative dapat muncul dalam lebih dari satu kelompok
+pada tanggal berbeda, tetapi setiap fact dan total metrik hanya masuk satu jenis.
+Inventori pemetaan menghitung semua tanggal dan mencakup ad tanpa delivery.
+
+Tahap ini hanya memisahkan kelompok iklan. Metrik purchase shared items serta
+pilihan atribusi 1 hari/7 hari belum ditambahkan; tampilan CPAS menjelaskan batas
+tersebut. Membuka halaman, mengganti kelompok, dan memuat ulang tetap hanya
+membaca database, tanpa menjadwalkan sync.
+
+Validasi lokal: `npm run test:meta-funnels`, `npm run test:meta-report-db`, `npm run test:meta-channel-db`,
+`npm run test:meta-cpas-catalog-db`, dan `npm run test:meta-destination-cache-db`. Uji database menggunakan container lokal tetap
+dan transaksi fixture yang di-rollback; tidak ada opsi target production.
+
+Migration `208_meta_ad_destination_evidence_cache.sql` menyimpan hasil backfill
+provider pada tabel service-only `meta_ad_destination_resolutions`, terikat ke
+workspace/account/ad/creative/adset. Simpan URL kanonis, jenis sumber, waktu,
+dan bukti terstruktur; jangan menyimpan HTML, signed iframe URL, token, atau
+media pada tabel ini. Root `creative.call_to_action` ikut dibaca saat sync biasa
+agar URL existing post/partnership yang tersedia langsung tidak terlewat.
+
+Trigger database memakai kembali hasil yang cocok ketika observasi sync tidak
+mengandung URL, termasuk dari worker versi lama. URL terstruktur terbaru tetap
+diutamakan; creative/adset yang berubah tidak mewarisi bukti lama. Migration
+`209_meta_native_destination_evidence.sql` juga melekatkan bukti tujuan native
+saat URL profil terstruktur masih sama. Katalog/app yang belum terverifikasi
+tetap menghalangi penetapan Non-CPAS, termasuk ketika ada cache URL website.
+
+Migration `210_meta_confirmed_non_shopee_catalog.sql` menerima konfirmasi pengguna
+tentang katalog non-Shopee sebagai `user_catalog_confirmation`, dengan jenis
+`non_shopee_catalog` dan daftar product set yang dikonfirmasi pada proof. Ini
+mengatasi katalog kosong/broken yang identitas induknya tidak dapat dibaca API.
+Bukti melekat hanya pada workspace/account/ad/creative/adset yang sama, menutup
+seluruh product set pada observasi, dan tetap berlaku bila URL website berubah.
+Katalog baru yang belum dikenal tidak mewarisi konfirmasi lama. Bukti Shopee
+yang positif selalu diprioritaskan di atas konfirmasi katalog non-Shopee.
+
+Backfill preview menggunakan preview resmi Meta di komputer lokal tanpa model
+AI. Pilih target CTA/kartu yang eksplisit, bukan URL pada caption atau profil
+pengiklan. Bukti yang diwarisi dari existing post dicatat sebagai
+`inherited_existing_post_cta`, bukan pengamatan langsung target: ID post dan
+jenis CTA harus sama, sumber memiliki URL eksplisit yang konsisten, dan target
+tidak memiliki override tujuan sendiri. Tujuan video native memerlukan bukti
+konfigurasi dan preview, bukan hanya `ON_VIDEO` tanpa URL.
+
+Render browser otomatis saat sync dan tombol refresh tujuan manual belum
+diterapkan. Refresh manual nantinya perlu menangani existing post yang berubah
+tanpa creative ID berubah. Render yang berhasil tidak perlu diulang pada sync
+biasa; kegagalan pencarian nantinya memerlukan cooldown retry. Pembacaan halaman
+tidak merender preview atau membuat pekerjaan sync.
+
+Aturan bisnis katalog Shopee: product set yang terverifikasi milik Shopee selalu
+menentukan CPAS meskipun creative memuat URL brand, termasuk roove.co.id.
+Migration `207_meta_shopee_catalog_priority.sql` memperbaiki klasifikasi lama
+yang ditahan sebagai konflik URL. Registry harus cocok workspace dan akun serta
+product set yang benar-benar ada di metadata; nama katalog/akun tidak cukup.
+Migration hanya memperbarui classification/evidence, mempertahankan URL asli,
+creative/adset, waktu observasi, serta semua metrik delivery.
