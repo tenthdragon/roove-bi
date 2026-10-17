@@ -1,7 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AdFact, AdCreative, Coverage, SavedFunnel, VerifiedDestination } from './meta-funnel-domain';
 import { evaluateDeclines, hasCoverage, shiftDay, validateFunnel, withLandingPages } from './meta-funnel-domain';
-import { matchTemplateRule, TEMPLATE_MATCH_KINDS, type TemplateRule } from './meta-funnel-templates';
+import { matchDestinationTemplate, TEMPLATE_MATCH_KINDS, type TemplateRule } from './meta-funnel-templates';
+import { ctwaDestination } from './meta-ctwa-destinations';
 import { getTodayWIB } from './sync-schedule';
 import type { AdDimensions } from './meta-ad-dimensions';
 
@@ -12,7 +13,7 @@ export async function readAll<T>(svc: SupabaseClient, table: string, fields: str
     if (from) query = query.gte('metric_date', from);
     if (to) query = query.lte('metric_date', to);
     // Stable order for PostgREST pagination, including multiple ads on the same date.
-    query = ['meta_ad_creatives', 'meta_ad_verified_destinations', 'meta_ad_mappings'].includes(table) ? query.order('account_id').order('ad_id')
+    query = ['meta_ad_creatives', 'meta_ad_verified_destinations', 'meta_ad_mappings', 'meta_ad_destination_metadata'].includes(table) ? query.order('account_id').order('ad_id')
       : query.order('metric_date').order('account_id');
     if (table === 'meta_ad_daily_metrics') query = query.order('ad_id');
     const result = await query.range(offset, offset + 999);
@@ -59,20 +60,39 @@ export async function evaluateWorkspaceAlerts(svc: SupabaseClient, workspaceId: 
   const eligible = enabled.filter(f => hasCoverage(coverage, accountIds.filter(a => !f.account_ids.length || f.account_ids.includes(a)),
     shiftDay(today, -f.lag_days - f.window_days * 2 + 1), shiftDay(today, -f.lag_days)));
   if (!eligible.length) return 0;
-  const [facts, creatives, verified, rules] = await Promise.all([
-    readAll<AdFact>(svc, 'meta_ad_daily_metrics', 'account_id,account_name,ad_id,ad_name,creative_id,metric_date,currency,metrics,landing_page_urls', workspaceId, earliest, today),
+  const [facts, creatives, verified, rules, contacts, accounts] = await Promise.all([
+    readAll<AdFact>(svc, 'meta_ad_daily_metrics', 'account_id,account_name,ad_id,ad_name,creative_id,raw_insights,metric_date,currency,metrics,landing_page_urls', workspaceId, earliest, today),
     readAll<AdCreative>(svc, 'meta_ad_creatives', 'account_id,ad_id,creative_id,name,thumbnail_url,video_id,body,landing_page_urls', workspaceId),
     loadVerifiedDestinations(svc, workspaceId),
     loadTemplateRules(svc, workspaceId),
+    readAll<{ account_id: string; ad_id: string; creative_id: string; adset_id: string; classification: string; metadata: Record<string, any> }>(svc,
+      'meta_ad_destination_metadata', 'account_id,ad_id,creative_id,adset_id,classification,metadata', workspaceId),
+    svc.from('meta_ad_accounts').select('account_id,default_brand_id').eq('workspace_id', workspaceId).eq('is_active', true),
   ]);
+  if (accounts.error) throw new Error(accounts.error.message);
+  const byAd = new Map(contacts.map(d => [`${d.account_id}:${d.ad_id}`, d]));
+  const brandByAccount = new Map((accounts.data || []).map(a => [a.account_id, String(a.default_brand_id || '__unmapped__')]));
+  const enriched = withLandingPages(facts, creatives, verified.rows).map(r => {
+    const d = byAd.get(`${r.account_id}:${r.ad_id}`);
+    const creative = r.creative_id || creatives.find(c => c.account_id === r.account_id && c.ad_id === r.ad_id)?.creative_id;
+    const current = d && d.creative_id === creative && (!r.raw_insights?.adset_id || d.adset_id === r.raw_insights.adset_id);
+    // Strong CPAS classification takes priority over WhatsApp contact evidence.
+    const destination = current && d.classification === 'cpas' ? null : ctwaDestination({
+      accountId: r.account_id, adId: r.ad_id, brandId: brandByAccount.get(r.account_id) || '__unmapped__',
+      urls: r.landing_page_urls || [], metadata: current ? d.metadata : null,
+    });
+    return { ...r, destination };
+  });
   let count = 0;
   for (const funnel of eligible) {
     const end = shiftDay(today, -funnel.lag_days);
     // A template with URL rules monitors only its own landing pages. Templates
     // without rules keep the earlier behavior and monitor every landing page.
     const ownRules = rules.rows.some(r => r.funnel_id === funnel.id);
-    const scoped = withLandingPages(facts, creatives, verified.rows).filter(r => accountIds.includes(r.account_id) && (!funnel.account_ids.length || funnel.account_ids.includes(r.account_id))
-      && (!ownRules || (r.landing_page_urls?.length === 1 && matchTemplateRule(r.landing_page_urls[0], rules.rows)?.funnel_id === funnel.id)));
+    const scoped = enriched.filter(r => accountIds.includes(r.account_id) && (!funnel.account_ids.length || funnel.account_ids.includes(r.account_id))
+      && (!ownRules || ((r.destination || r.landing_page_urls?.length === 1) && matchDestinationTemplate({
+        destination: r.destination, landing_page_urls: r.landing_page_urls,
+      }, rules.rows)?.funnel_id === funnel.id)));
     // Never combine monetary performance from different account currencies.
     if (new Set(scoped.map(r => r.currency)).size > 1) continue;
     const declines = evaluateDeclines(scoped, coverage, funnel, accountIds, end, creatives);

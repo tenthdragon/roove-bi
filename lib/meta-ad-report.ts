@@ -3,6 +3,7 @@ import { emptyTotals, metricValue, relativeChange, type Totals, type FunnelConfi
 import { dimensionLabel, objectiveLabel, type AdDimensionFilters } from './meta-ad-dimensions';
 import { metaBrandOptions, type MetaAccountBrand, type MetaBrand } from './meta-ad-brands';
 import { parseRooveAdName } from './meta-ad-naming';
+import type { CtwaDestination } from './meta-ctwa-destinations';
 
 export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: 'ad' | 'landing_page' };
 export type ReportQuery = {
@@ -13,7 +14,7 @@ export type ReportQuery = {
 export type ReportBucket = { date: string; totals: Totals; complete: boolean; partial: boolean };
 export type RawMetaReport = {
   currencies: string[]; summary: Totals; previous: Totals;
-  groups: Omit<GroupComparison, 'metrics' | 'creatives' | 'categories' | 'classified'>[];
+  groups: (Omit<GroupComparison, 'metrics' | 'creatives' | 'categories' | 'classified' | 'destination'> & { destination?: CtwaDestination | null; currencies?: string[] })[];
   coverage: Coverage[]; facets: { dimension: keyof AdDimensionFilters; value: string; count: number }[];
   facetTotals: Partial<Record<keyof AdDimensionFilters, number>>; brandCounts: Record<string, number>;
   channelCounts?: Partial<Record<MetaAdChannel, number>>; matchingAds: number; objectiveUnknownAds: number;
@@ -27,11 +28,11 @@ export function metaReportQuery(input: MetaReportInput, config: FunnelConfig, vi
     groupKey: view === 'overview' ? null : input.groupKey || null };
 }
 export function metaReportGroups(raw: RawMetaReport, config: FunnelConfig): GroupComparison[] {
-  return raw.groups.map(g => {
+  return raw.groups.map(({ currencies: _currencies, destination, ...g }) => {
     const current = { ...emptyTotals(), ...g.current }, previous = { ...emptyTotals(), ...g.previous };
     const categories = new Map<string, GroupComparison['categories'][number]>();
     for (const name of g.ad_names) { const parsed = parseRooveAdName(name); if (parsed.valid) categories.set(`${parsed.cep}:${parsed.funnel}`, { cep: parsed.cep!, funnel: parsed.funnel! }); }
-    return { ...g, name: g.name || g.ad_ids[0] || g.key, current, previous, categories: [...categories.values()], classified: categories.size > 0, creatives: [],
+    return { ...g, ...(destination ? { destination } : {}), name: g.name || g.ad_ids[0] || g.key, current, previous, categories: [...categories.values()], classified: categories.size > 0, creatives: [],
       metrics: config.metrics.map(m => { const a = metricValue(current, m), b = metricValue(previous, m); return { id: m.id, current: a, previous: b, change: relativeChange(a, b) }; }) };
   });
 }

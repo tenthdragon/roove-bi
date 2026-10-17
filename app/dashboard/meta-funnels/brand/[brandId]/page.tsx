@@ -10,6 +10,7 @@ import { usePermissions } from '@/lib/PermissionsContext';
 import { getMetaFunnelHistory, queueMetaFunnelSync, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
 import { getMetaBrandDetail, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
 import { MEASURES, metricValue, type FunnelMetric, type Measure, type Totals } from '@/lib/meta-funnel-domain';
+import { templateDestinationRule } from '@/lib/meta-ctwa-destinations';
 import { TEMPLATE_KIND_LABELS, WORLD_CHANNEL, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
 import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
 import { formatChange, formatCompactMoney, formatCount, formatDate, formatMetric } from '@/lib/meta-format';
@@ -99,12 +100,12 @@ export default function MetaBrandDetailPage() {
     const query = new URLSearchParams(search.toString()); query.set('world', next);
     router.replace(`${pathname}?${query.toString()}`, { scroll: false });
   }
-  async function applySuggestion(url: string, funnelId: string) {
+  async function applySuggestion(group: Data['unassigned'][number], funnelId: string) {
     setBusy(true); setError('');
     try {
-      const result = await saveMetaTemplateRule({ funnelId, match_kind: 'exact', pattern: url });
+      const result = await saveMetaTemplateRule({ funnelId, ...templateDestinationRule(group) });
       if ('error' in result) { setError(result.error); return; }
-      setNotice(`Template ditetapkan untuk ${url}.`); await load();
+      setNotice(`Template ditetapkan untuk ${group.name}.`); await load();
     }
     catch (e) { setError(message(e)); } finally { setBusy(false); }
   }
@@ -177,17 +178,26 @@ export default function MetaBrandDetailPage() {
             <span className={styles.muted}>{m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}${m.multiplier ? ` × ${m.multiplier}` : ''}` : MEASURES[m.numerator]}</span>
           </div>; })}</div>
         </section>
+        {data.ctwa && data.ctwa.destinations > 0 && <section className={styles.card} aria-label={`Total CTWA ${data.brand.name}`}>
+          <div className={styles.sectionTitle}><h2>Total CTWA · {data.brand.name}</h2><span>{data.ctwa.destinations} tujuan · termasuk yang belum memiliki template</span></div>
+          <div className={styles.miniGrid}>
+            <div className={styles.mini}><span className={styles.muted}>Spend</span><strong>{data.reportingError ? '—' : formatMetric(data.ctwa.summary.spend, 'money', currency)}</strong></div>
+            <div className={styles.mini}><span className={styles.muted}>Percakapan</span><strong>{formatMetric(data.ctwa.summary.conversations, 'number', currency)}</strong></div>
+            <div className={styles.mini}><span className={styles.muted}>Biaya / percakapan</span><strong>{data.reportingError ? '—' : formatMetric(data.ctwa.summary.conversations > 0 ? data.ctwa.summary.spend / data.ctwa.summary.conversations : null, 'money', currency)}</strong></div>
+          </div>
+          <p className={styles.muted}>Setiap nomor tampil terpisah pada tabel template. Total brand menghitung seluruh tujuan sekali.</p>
+        </section>}
         <section aria-label={`Hasil ${WORLD_LABELS[world]}`} style={{ display: 'grid', gap: 12 }}>
-          <div className={styles.sectionTitle}><h2>Hasil · {WORLD_LABELS[world]}</h2><span>{world === 'website' ? 'Dikelompokkan per template funnel landing page' : 'Per ad · purchase Shopee dengan atribusi Meta'}</span></div>
+          <div className={styles.sectionTitle}><h2>Hasil · {WORLD_LABELS[world]}</h2><span>{world === 'website' ? 'Per template · Website per URL, WhatsApp per brand dan nomor' : 'Per ad · purchase Shopee dengan atribusi Meta'}</span></div>
           {world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
           {data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <div key={section.key} className={styles.sectionCard}>
             <div className={styles.sectionHead}>
-              <div><span className={`${styles.templateTag} ${world === 'cpas' ? styles.templateTagCpas : ''}`}>{world === 'cpas' ? 'CPAS' : 'TEMPLATE'}</span><strong>{section.name}</strong><span>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')} · {section.groups.length} {world === 'website' ? 'landing page' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span></div>
+              <div><span className={`${styles.templateTag} ${world === 'cpas' ? styles.templateTagCpas : ''}`}>{world === 'cpas' ? 'CPAS' : 'TEMPLATE'}</span><strong>{section.name}</strong><span>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')} · {section.groups.length} {world === 'website' ? 'tujuan' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span></div>
               <span>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric.format, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
             </div>
             {!section.groups.length ? <p className={styles.muted} style={{ padding: '12px 16px' }}>Belum ada ad {WORLD_LABELS[world]} pada periode dan filter ini.</p> : <div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}>
               <table className={styles.resultTable}>
-                <thead><tr><th scope="col">{world === 'website' ? 'Landing page' : 'Ad'}</th>{section.config.metrics.map(m => <th key={m.id} scope="col" title={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}` : MEASURES[m.numerator]}>{m.label}</th>)}<th scope="col">Funnel</th></tr></thead>
+                <thead><tr><th scope="col">{world === 'website' ? 'Tujuan' : 'Ad'}</th>{section.config.metrics.map(m => <th key={m.id} scope="col" title={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}` : MEASURES[m.numerator]}>{m.label}</th>)}<th scope="col">Funnel</th></tr></thead>
                 <tbody>{section.groups.map(g => <tr key={g.key}>
                   <td><button type="button" className={styles.nameButton} onClick={() => setDrawer({ group: g, section })}>{g.name}</button><small>{g.ad_ids.length} ad · {g.accounts.join(', ')}</small></td>
                   {section.config.metrics.map(m => { const c = g.metrics.find(v => v.id === m.id)!; const main = section.mainMetric?.id === m.id; return <td key={m.id}><span style={main ? { fontWeight: 650 } : undefined}>{formatMetric(c.current, m.format, currency)}</span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}
@@ -198,12 +208,12 @@ export default function MetaBrandDetailPage() {
             </div>}
           </div>)}
           {world === 'website' && data.unassigned.length > 0 && <div className={styles.unassigned}>
-            <div className={styles.sectionTitle}><strong className={styles.warn}>Belum ditetapkan</strong><span>{data.unassigned.length} landing page · {formatCompactMoney(data.unassigned.reduce((s, u) => s + u.current.spend, 0), currency)} · belum masuk template mana pun</span></div>
+            <div className={styles.sectionTitle}><strong className={styles.warn}>Belum ditetapkan</strong><span>{data.unassigned.length} tujuan · {formatCompactMoney(data.unassigned.reduce((s, u) => s + u.current.spend, 0), currency)} · belum masuk template mana pun</span></div>
             {data.unassigned.slice(0, 8).map(u => <div key={u.key} className={styles.unassignedRow}>
               <span>{u.name} · {formatCompactMoney(u.current.spend, currency)} · <span className={styles.muted}>{u.reason === 'no_url' ? 'URL belum terbaca' : u.reason === 'multi_url' ? 'beberapa URL dalam satu creative' : u.suggestion.reason}</span></span>
-              {u.reason === 'no_rule' && canManage && u.suggestion.funnelId && <button type="button" className={styles.button} disabled={busy} onClick={() => void applySuggestion(u.landing_page_urls[0], u.suggestion.funnelId!)}>Terapkan saran</button>}
+              {u.reason === 'no_rule' && canManage && u.suggestion.funnelId && <button type="button" className={styles.button} disabled={busy} onClick={() => void applySuggestion(u, u.suggestion.funnelId!)}>Terapkan saran</button>}
             </div>)}
-            <Link href="/dashboard/meta-funnels/templates">Atur template dan aturan URL →</Link>
+            <Link href="/dashboard/meta-funnels/templates">Atur template dan tujuan →</Link>
           </div>}
           {world === 'cpas' && <p className={styles.muted}>Metrik CPAS memakai atribusi Meta per adset. Purchase shared items 1 hari dan 7 hari belum dipisahkan; ROAS dibaca sebagai indikasi arah.</p>}
         </section>
@@ -235,7 +245,7 @@ export default function MetaBrandDetailPage() {
             <div className={styles.actions}><button type="submit" className={styles.primary} disabled={busy}>Simpan URL terverifikasi</button><button type="button" className={styles.button} disabled={busy} onClick={() => setDestinationEditor(null)}>Batal</button></div>
           </form>}</div>}
         {data.objectiveUnknownAds > 0 && <div className={styles.card}><b className={styles.warn}>Objective belum terbaca</b><p className={styles.muted}>{data.objectiveUnknownAds} ad. Gunakan Sync pemetaan di <Link href="/dashboard/meta-funnels/mapping">Pemetaan Ads</Link> untuk melengkapinya.</p></div>}
-        {unassignedRules.length > 0 && <div className={styles.card}><b className={styles.warn}>Template belum ditetapkan</b><p className={styles.muted}>{unassignedRules.length} landing page. Atur di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</p></div>}
+        {unassignedRules.length > 0 && <div className={styles.card}><b className={styles.warn}>Template belum ditetapkan</b><p className={styles.muted}>{unassignedRules.length} tujuan. Atur di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</p></div>}
       </aside>
     </>}
   </div>;

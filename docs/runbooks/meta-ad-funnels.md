@@ -128,6 +128,32 @@ manual mapping overrides, partial coverage, cache revision and workspace scope.
 
 ## Automatic granular ad mapping
 
+Migration 212 stores structured contact identity in
+`meta_ad_destination_metadata.metadata.contact_identity`: Page ID, all observed
+Page ID sources, international WhatsApp numbers and their source fields. No Page
+name permission or Page access token is needed for these ad-level fields. Names,
+creative copy and prefilled WhatsApp message text are not retained as identity.
+The normal destination-sync batch collects these fields automatically. Missing
+country codes are never guessed, and `phone_number_id` is never treated as a
+phone number. Current nonempty phone observations replace older numbers.
+
+An older/opaque metadata refresh preserves the stored identity only for the same
+workspace, account, ad, creative and adset. A changed Page cannot inherit the old
+Page's phone. This protection runs in the database, including for older deployed
+workers. A missing number remains missing unless that same ad/version previously
+returned one. Page/phone storage does not itself change brand assignment or URL
+grouping; those still require a separate reporting change.
+
+Use `scripts/ops/backfill-meta-ad-contact-identities.ts` with an explicit workspace,
+environment file, expected API hostname and `--apply` to backfill existing WhatsApp
+destinations. It reads Meta in batches of at most 50 ads and patches contact fields
+through the service-only RPC with row locks and creative/adset checks. It never
+updates URLs, CPAS evidence, historical facts, brand mappings or template rules,
+and does not enqueue sync jobs. Optional backup/observation files contain business
+contact data: keep them private on the server. Summary output contains counts and
+missing ad IDs, not phone numbers. Run `npm run test:meta-contact-identity-db` on
+the isolated local clone after migration 212.
+
 The **Pemetaan Ads** page reads a persistent inventory keyed by workspace,
 account and ad ID. Ad names are descriptive and mutable; two ads with the same
 name remain separate identities. Mapping is independent of the report's date
@@ -491,3 +517,51 @@ yang ditahan sebagai konflik URL. Registry harus cocok workspace dan akun serta
 product set yang benar-benar ada di metadata; nama katalog/akun tidak cukup.
 Migration hanya memperbarui classification/evidence, mempertahankan URL asli,
 creative/adset, waktu observasi, serta semua metrik delivery.
+
+
+### CTWA grouping and templates (migration 213)
+
+CTWA destinations are grouped by workspace, the account's mapped brand, and the
+normalized international WhatsApp phone. The same brand/phone merges across ad
+accounts; different brands or phones never merge, even when their displayed URL
+is `https://api.whatsapp.com/send`. Page IDs are evidence, not an automatic brand
+assignment. Existing account-brand mapping remains authoritative.
+
+Only current creative/adset metadata can contribute a stored phone. Explicit
+WhatsApp send/wa.me destinations are also supported. Ordinary website pages
+containing a WhatsApp button remain website destinations. Strong CPAS evidence
+takes priority. One ad with multiple conflicting phone destinations stays in a
+single ad-scoped group rather than multiplying spend. Missing numbers are
+isolated by brand/account/Page, or by ad when Page is unavailable; no phone is
+inferred from another ad. Reporting uses the identity currently available for
+the matching creative/adset, not a historical audit of phone changes.
+
+The template matching screen displays `WhatsApp · Brand · +62…`, conversation
+count and cost per conversation for each destination, with a CTWA total per
+brand. Totals include unassigned and unresolved destinations. Costs and ratios
+are recalculated from summed raw counts, never averaged from row costs.
+Different currencies are not shown as one monetary total.
+
+A `ctwa` template rule stores the opaque destination key. Choosing a template
+on one CTWA row changes only that brand/destination. Many destinations can use
+the same saved template, while retaining separate metrics, trends, creatives,
+and alert groups. Existing global URL rules remain a fallback until a scoped
+CTWA rule is assigned; conflicting matches across URL variants do not pick an
+arbitrary template. If a missing number later becomes known, its new phone key
+needs its own assignment (or a matching shared URL rule).
+
+Deploy migration `213_meta_ctwa_destination_groups.sql` before the app release.
+It changes report grouping and extends rule validation; it does not update
+historical metric rows, brand mappings or existing template assignments. Report
+cache namespace is bumped with the application release.
+
+Validation:
+
+```sh
+npm run test:meta-funnels
+npm run test:meta-ctwa-db
+```
+
+The database test uses the fixed local Docker clone and rolls back all fixture
+writes. Before installing 213 locally, use `node tests/meta-ctwa-destinations-database.mjs --with-migration`
+to test the migration itself inside the rollback transaction.

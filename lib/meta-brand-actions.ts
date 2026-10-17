@@ -9,7 +9,8 @@ import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaR
 import { getCachedMetaAdReport } from './meta-ad-report-data';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
 import { metaCoverageGaps } from './meta-report-status';
-import { assignTemplateSections, compareMetrics, cpasSection, defaultLeadFunnel, matchTemplateRule, responseMetrics, suggestTemplate, templateKind, templateMainMetric, validateTemplateRule, WORLD_CHANNEL, type MetaBrandWorld, type MetricComparison, type ReportGroup, type TemplateRule, type TemplateSection, type UnassignedGroup } from './meta-funnel-templates';
+import { assignTemplateSections, compareMetrics, cpasSection, defaultLeadFunnel, matchDestinationTemplate, responseMetrics, suggestTemplate, templateKind, templateMainMetric, validateTemplateRule, WORLD_CHANNEL, type MetaBrandWorld, type MetricComparison, type ReportGroup, type TemplateRule } from './meta-funnel-templates';
+import { ctwaLabel } from './meta-ctwa-destinations';
 import { brandHealth, brandHighlights, type Highlight } from './meta-ad-highlights';
 import { manageAccess, reportContext, reportingAccess, uuid } from './meta-report-context';
 import { defaultFunnel } from './meta-funnel-domain';
@@ -29,8 +30,10 @@ function validateWorld(value: unknown): MetaBrandWorld {
   if (value !== 'website' && value !== 'cpas') throw new Error('Dunia iklan tidak valid.');
   return value;
 }
-function normalizeGroups(raw: RawMetaReport): ReportGroup[] {
-  return raw.groups.map(g => ({ ...g, name: g.name || g.ad_ids[0] || g.key, current: { ...emptyTotals(), ...g.current }, previous: { ...emptyTotals(), ...g.previous } }));
+function normalizeGroups(raw: RawMetaReport, brands?: Context['brands']): ReportGroup[] {
+  return raw.groups.map(g => ({ ...g, name: g.key.startsWith('ctwa:') && g.destination
+    ? ctwaLabel(g.destination, brands?.find(b => String(b.id) === g.destination!.brand_id)?.name || 'Brand belum dipetakan')
+    : g.name || g.ad_ids[0] || g.key, current: { ...emptyTotals(), ...g.current }, previous: { ...emptyTotals(), ...g.previous } }));
 }
 function compare(current: Totals, previous: Totals, m: FunnelMetric): MetricComparison {
   const a = metricValue(current, m), b = metricValue(previous, m);
@@ -51,13 +54,16 @@ function leadCostMetric(totals: Totals): FunnelMetric { return totals.leads > 0 
 function websiteWorld(ctx: Context, raw: RawMetaReport, brandAccounts: string[], rules: Awaited<ReturnType<typeof loadTemplateRules>>['rows']) {
   const reportingError = raw.currencies.length > 1 ? 'Brand mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama.' : null;
   const summary = reportingError ? emptyTotals() : raw.summary, previous = reportingError ? emptyTotals() : raw.previous;
-  const { sections, unassigned } = reportingError ? { sections: [] as TemplateSection[], unassigned: [] as UnassignedGroup[] } : assignTemplateSections(normalizeGroups(raw), ctx.funnels, rules);
+  const groups = reportingError ? [] : normalizeGroups(raw, ctx.brands);
+  const { sections, unassigned } = assignTemplateSections(groups, ctx.funnels, rules);
+  const ctwaGroups = groups.filter(g => g.destination);
+  const ctwa = { destinations: ctwaGroups.length, summary: sumTotals(ctwaGroups.map(g => g.current)), previous: sumTotals(ctwaGroups.map(g => g.previous)) };
   const coverageGaps = metaCoverageGaps(raw.coverage, brandAccounts, ctx.reportRange);
   const highlights = brandHighlights({ world: 'website', sections, summary, previous, currency: raw.currencies[0] || 'IDR', unassigned, coverageGaps, missingUrls: raw.destinations.missing_ads })
     .map(h => ({ ...h, world: 'website' as const }));
   const transaction = sumTotals(sections.filter(s => s.kind === 'transaction').map(s => s.summary)), transactionPrev = sumTotals(sections.filter(s => s.kind === 'transaction').map(s => s.previous));
   const lead = sumTotals(sections.filter(s => s.kind === 'lead').map(s => s.summary)), leadPrev = sumTotals(sections.filter(s => s.kind === 'lead').map(s => s.previous));
-  return { reportingError, summary, previous, sections, unassigned, coverageGaps, highlights,
+  return { reportingError, summary, previous, sections, unassigned, ctwa, coverageGaps, highlights,
     cpp: sections.some(s => s.kind === 'transaction') ? compare(transaction, transactionPrev, CPP) : null,
     cpl: sections.some(s => s.kind === 'lead') ? compare(lead, leadPrev, leadCostMetric(lead)) : null,
     cplLabel: leadCostMetric(lead).label, matchingAds: raw.matchingAds, currency: raw.currencies[0] || 'IDR' };
@@ -141,6 +147,7 @@ export async function getMetaBrandDetail(input: BrandInput & { brandId: string; 
     worlds: { website: { spend: web.summary.spend, ads: web.matchingAds }, cpas: { spend: cpas.summary.spend, ads: cpas.matchingAds } },
     accounts: ctx.accounts.filter(a => brandAccounts.includes(a.account_id)).map(a => ({ account_id: a.account_id, account_name: a.account_name })),
     summary: active.summary, previous: active.previous, response: compareMetrics(active.summary, active.previous, responseMetrics(world)), responseMetrics: responseMetrics(world),
+    ctwa: world === 'website' ? web.ctwa : null,
     sections: world === 'website' ? web.sections : [cpas.section], unassigned: world === 'website' ? web.unassigned : [],
     highlights: active.highlights.slice(0, 6), coverageGaps: active.coverageGaps, destinations: raw.destinations, objectiveUnknownAds: raw.objectiveUnknownAds,
     dimensionOptions: metaReportOptions(raw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true, rulesReady: rules.ready, verifiedDestinationsReady: true,
@@ -155,16 +162,25 @@ async function loadMetaTemplateSettings() {
   const [rules, raw] = await Promise.all([loadTemplateRules(svc, ctx.workspaceId), fetchWorld(ctx, 'website', undefined)]);
   const accountBrand = new Map(ctx.accounts.map(a => [a.account_name, ctx.brands.find(b => b.id === a.default_brand_id)?.name || 'Brand belum dipetakan']));
   const templates = ctx.funnels.map(f => ({ ...f, kind: templateKind(f), mainMetric: templateMainMetric(f), rules: rules.rows.filter(r => r.funnel_id === f.id).length }));
-  const landingPages = normalizeGroups(raw).filter(g => g.landing_page_urls.length === 1).map(g => {
-    const rule = matchTemplateRule(g.landing_page_urls[0], rules.rows);
+  const normalized = normalizeGroups(raw, ctx.brands);
+  const landingPages = normalized.filter(g => g.destination || g.landing_page_urls.length === 1).map(g => {
+    const rule = matchDestinationTemplate(g, rules.rows);
     const template = rule ? ctx.funnels.find(f => f.id === rule.funnel_id) : null;
-    return { key: g.key, url: g.landing_page_urls[0], spend: g.current.spend, ads: g.ad_ids.length, accounts: g.accounts,
-      brands: [...new Set(g.accounts.map(a => accountBrand.get(a) || a))], evidence: { purchases: g.current.purchases, leads: g.current.leads, conversations: g.current.conversations },
+    return { key: g.key, url: g.landing_page_urls[0] || '', label: g.name, landing_page_urls: g.landing_page_urls, destination: g.destination || null,
+      spend: g.current.spend, currency: (g.currencies || raw.currencies).length === 1 ? (g.currencies || raw.currencies)[0] : null, ads: g.ad_ids.length, accounts: g.accounts,
+      brands: g.destination ? [ctx.brands.find(b => String(b.id) === g.destination!.brand_id)?.name || 'Brand belum dipetakan'] : [...new Set(g.accounts.map(a => accountBrand.get(a) || a))],
+      evidence: { purchases: g.current.purchases, leads: g.current.leads, conversations: g.current.conversations },
       rule: rule ? { id: rule.id, match_kind: rule.match_kind, pattern: rule.pattern } : null, templateId: template?.id || null, templateName: template?.name || null,
       suggestion: suggestTemplate(g.current, ctx.funnels) };
   }).sort((a, b) => Number(!!a.templateId) - Number(!!b.templateId) || b.spend - a.spend);
+  const ctwaBrands = [...new Set(landingPages.flatMap(g => g.destination ? [g.destination.brand_id] : []))].map(id => {
+    const groups = raw.groups.filter(g => g.destination?.brand_id === id);
+    const currencies = [...new Set(groups.flatMap(g => g.currencies || raw.currencies))];
+    return { id, name: ctx.brands.find(b => String(b.id) === id)?.name || 'Brand belum dipetakan', summary: sumTotals(groups.map(g => g.current)),
+      currency: currencies.length === 1 ? currencies[0] : null };
+  });
   return { schemaReady: true as const, rulesReady: rules.ready, range: ctx.reportRange, currency: raw.currencies[0] || 'IDR', templates, accounts: ctx.accounts,
-    rules: rules.rows.map(r => ({ ...r, templateName: ctx.funnels.find(f => f.id === r.funnel_id)?.name || 'Template diarsipkan' })), landingPages, reportVersion: ctx.reportVersion };
+    rules: rules.rows.map(r => ({ ...r, templateName: ctx.funnels.find(f => f.id === r.funnel_id)?.name || 'Template diarsipkan' })), landingPages, ctwaBrands, reportVersion: ctx.reportVersion };
 }
 export async function getMetaTemplateSettings(): Promise<MetaTemplateResult<Awaited<ReturnType<typeof loadMetaTemplateSettings>>>> {
   try { return await loadMetaTemplateSettings(); }
@@ -192,6 +208,14 @@ export async function saveMetaTemplateRule(input: { id?: string; funnelId: strin
     const { workspaceId, profile } = await manageAccess();
     const rule = validateTemplateRule(input);
     const svc = createServiceSupabase();
+    if (rule.match_kind === 'ctwa') {
+      const brandId = rule.pattern.split(':')[1];
+      if (brandId !== '__unmapped__') {
+        const brand = await svc.from('brands').select('id').eq('workspace_id', workspaceId).eq('id', brandId).maybeSingle();
+        if (brand.error) throw new Error(brand.error.message);
+        if (!brand.data) throw new Error('Tujuan WhatsApp tidak valid. Brand tidak ditemukan.');
+      }
+    }
     const funnel = await svc.from('meta_ad_funnels').select('id').eq('workspace_id', workspaceId).eq('id', uuid(input.funnelId)).eq('archived', false).maybeSingle();
     if (funnel.error) throw new Error(funnel.error.message);
     if (!funnel.data) throw new Error('Template tidak ditemukan.');

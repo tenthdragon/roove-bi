@@ -3,12 +3,14 @@ import { normalizeLandingPages } from './meta-ad-destinations';
 import { classifyMetaCpas } from './meta-cpas-evidence';
 import { metaGraph } from './meta-ad-insights';
 import { enqueueNewMetaProductSets } from './meta-product-set-queue';
+import { normalizeMetaAdContactIdentity, type MetaAdContactIdentity } from './meta-ad-contact-identity';
 
 const BASE = 'https://graph.facebook.com/v21.0';
-export const META_DESTINATION_FIELDS = 'id,account_id,adset{id,destination_type,promoted_object},creative{id,call_to_action,object_story_spec,asset_feed_spec,link_url,object_url,product_set_id,omnichannel_link_spec,object_store_url,link_deep_link_url}';
+export const META_DESTINATION_FIELDS = 'id,account_id,adset{id,destination_type,promoted_object},creative{id,call_to_action,object_story_spec,asset_feed_spec,link_url,object_url,product_set_id,omnichannel_link_spec,object_store_url,link_deep_link_url,actor_id,effective_object_story_id,object_story_id}';
 export type MetaDestinationMetadata = {
   version: 1; urls: string[]; application_ids: string[]; android_packages: string[];
   ios_app_ids: string[]; product_set_ids: string[]; destination_type: string | null;
+  contact_identity?: MetaAdContactIdentity;
 };
 const unique = (values: string[]) => [...new Set(values)].sort();
 
@@ -40,8 +42,10 @@ export function normalizeMetaDestination(raw: Record<string, any>): MetaDestinat
       const id = url.pathname.match(/\/id(\d+)(?:\/|$)/)?.[1]; if (id) ios.push(id);
     }
   }
+  const contactIdentity = normalizeMetaAdContactIdentity(raw);
   return { version: 1, urls: normalizedUrls, application_ids: unique(apps), android_packages: unique(packages),
-    ios_app_ids: unique(ios), product_set_ids: unique(sets), destination_type: raw.adset?.destination_type || null };
+    ios_app_ids: unique(ios), product_set_ids: unique(sets), destination_type: raw.adset?.destination_type || null,
+    ...(contactIdentity ? { contact_identity: contactIdentity } : {}) };
 }
 
 export type DestinationRead = { ad_id: string; account_id: string; creative_id: string | null; adset_id: string | null; metadata: MetaDestinationMetadata };
