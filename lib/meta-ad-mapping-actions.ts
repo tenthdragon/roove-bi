@@ -7,6 +7,7 @@ import { enqueueMetaAdMapping } from './meta-ad-mapping-queue';
 import { loadVerifiedDestinations, loadAdDimensions } from './meta-funnel-store';
 import { mappingUnit, type AdMapping, type MappingUnit } from './meta-ad-mapping';
 import { dimensionOptions, validateDimensionFilters, type AdDimensionFilters } from './meta-ad-dimensions';
+import { validateMetaAdChannel, type MetaAdChannel } from './meta-ad-channels';
 
 async function access(manage = false) {
   const ctx = await requireDashboardTabAccess('marketing', 'Pemetaan Ads');
@@ -17,11 +18,14 @@ async function access(manage = false) {
   }
   return ctx;
 }
-export async function getMetaAdMappingData(input: { page?: number; search?: string; accountId?: string; filters?: AdDimensionFilters } = {}) {
+export async function getMetaAdMappingData(input: { page?: number; search?: string; accountId?: string; filters?: AdDimensionFilters; channel?: unknown } = {}) {
   const { workspaceId } = await access(); const svc = createServiceSupabase();
   const schema = await svc.from('meta_ad_mappings').select('ad_id').eq('workspace_id', workspaceId).limit(1);
   if (schema.error && ['42P01', 'PGRST205'].includes(schema.error.code)) return { ready: false as const };
   if (schema.error) throw new Error(schema.error.message);
+  const channelSchema = await svc.from('meta_ad_mapping_channels').select('ad_id').eq('workspace_id', workspaceId).limit(1);
+  if (channelSchema.error && ['42P01', 'PGRST205'].includes(channelSchema.error.code)) return { ready: false as const };
+  if (channelSchema.error) throw new Error(channelSchema.error.message);
   const accounts = await svc.from('meta_ad_accounts').select('account_id,account_name').eq('workspace_id', workspaceId).eq('is_active', true).order('account_name');
   if (accounts.error) throw new Error(accounts.error.message);
   const ids = (accounts.data || []).map(a => a.account_id);
@@ -31,18 +35,23 @@ export async function getMetaAdMappingData(input: { page?: number; search?: stri
   const filters = validateDimensionFilters(input.filters);
   if (!dimensions.ready && Object.keys(filters).length) throw new Error('Pemetaan dimensi membutuhkan migration 202_meta_ad_campaign_dimensions.sql.');
   const page = Math.max(1, Math.floor(input.page || 1)); const size = 50;
-  let query = svc.from('meta_ad_mappings').select(`account_id,ad_id,ad_name,creative_id,effective_status,landing_page_urls,auto_mapping,overrides,source,first_seen_at,last_seen_at,revision${dimensions.ready ? ',campaign_id,campaign_name,campaign_objective' : ''}`, { count: 'exact' }).eq('workspace_id', workspaceId).in('account_id', scope);
-  for (const dimension of ['cep','intention','objective'] as const) {
-    const value=filters[dimension]; if (!value) continue;
-    const field=dimension === 'objective' ? 'campaign_objective' : `${dimension}_key`;
-    query=value === '__unknown__' ? query.is(field,null) : query.eq(field,value);
-  }
-  if (input.search?.trim()) {
-    // Literal substring search; PostgREST syntax and LIKE wildcards are escaped.
-    const search = input.search.trim().slice(0, 200).replace(/[\\%_]/g, '\\$&');
-    query = query.ilike('ad_name', `%${search}%`);
-  }
-  const [rows, total, units, newUnits, state, jobs, pendingJobs, verified] = await Promise.all([
+  const channel: MetaAdChannel = validateMetaAdChannel(input.channel);
+  const search = input.search?.trim().slice(0, 200).replace(/[\\%_]/g, '\\$&') || '';
+  const applyScopedFilters = (query: any, selectedChannel: MetaAdChannel) => {
+    query = query.eq('workspace_id', workspaceId).in('account_id', scope).eq('ad_channel', selectedChannel);
+    for (const dimension of ['cep','intention','objective'] as const) {
+      const value=filters[dimension]; if (!value) continue;
+      const field=dimension === 'objective' ? 'campaign_objective' : `${dimension}_key`;
+      query=value === '__unknown__' ? query.is(field,null) : query.eq(field,value);
+    }
+    if (search) query = query.ilike('ad_name', `%${search}%`);
+    return query;
+  };
+  let query = applyScopedFilters(svc.from('meta_ad_mapping_channels').select(`account_id,ad_id,ad_name,creative_id,effective_status,landing_page_urls,auto_mapping,overrides,source,first_seen_at,last_seen_at,revision,ad_channel,ad_channel_reason${dimensions.ready ? ',campaign_id,campaign_name,campaign_objective' : ''}`, { count: 'exact' }), channel);
+  const channelCountQuery = (selectedChannel: MetaAdChannel) => applyScopedFilters(
+    svc.from('meta_ad_mapping_channels').select('ad_id', { count: 'exact', head: true }), selectedChannel,
+  );
+  const [rows, total, units, newUnits, state, jobs, pendingJobs, verified, nonCpasCount, cpasCount, unknownCount] = await Promise.all([
     query.order('account_id').order('ad_id').range((page - 1) * size, page * size - 1),
     svc.from('meta_ad_mappings').select('ad_id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).in('account_id', ids),
     svc.from('meta_ad_mapping_units').select('dimension,unit_key,label,review_status,first_seen_at,last_seen_at').eq('workspace_id', workspaceId).eq('review_status', 'new').neq('dimension', 'keyword').order('dimension').order('unit_key').limit(200),
@@ -51,12 +60,14 @@ export async function getMetaAdMappingData(input: { page?: number; search?: stri
     svc.from('sync_jobs').select('id,status,mode,error_message,created_at').eq('workspace_id', workspaceId).eq('job_name', 'meta_sync').contains('payload', { ad_mapping_only: true }).order('created_at', { ascending: false }).limit(10),
     svc.from('sync_jobs').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).eq('job_name', 'meta_sync').contains('payload', { ad_mapping_only: true }).in('status', ['queued', 'running']),
     loadVerifiedDestinations(svc, workspaceId),
+    channelCountQuery('non_cpas'), channelCountQuery('cpas'), channelCountQuery('unknown'),
   ]);
-  for (const result of [rows, total, units, newUnits, state, jobs, pendingJobs]) if (result.error) throw new Error(result.error.message);
+  for (const result of [rows, total, units, newUnits, state, jobs, pendingJobs, nonCpasCount, cpasCount, unknownCount]) if (result.error) throw new Error(result.error.message);
   return { ready: true as const, rows: (rows.data || []) as unknown as AdMapping[], units: (units.data || []) as unknown as MappingUnit[],
     dimensionsReady:dimensions.ready, dimensionOptions:dimensionOptions(dimensions.rows.filter(m=>scope.includes(m.account_id))),
     totalAds: total.count || 0, newUnitCount: newUnits.count || 0, count: rows.count || 0, page, pageSize: size,
-    accounts: accounts.data || [], state: state.data || [], jobs: jobs.data || [], pendingJobs: pendingJobs.count || 0, verified: verified.rows };
+    accounts: accounts.data || [], state: state.data || [], jobs: jobs.data || [], pendingJobs: pendingJobs.count || 0, verified: verified.rows,
+    channel, channelCounts: { non_cpas: nonCpasCount.count || 0, cpas: cpasCount.count || 0, unknown: unknownCount.count || 0 } };
 }
 export async function queueMetaAdMappingSync() {
   const { workspaceId, profile } = await access(true);

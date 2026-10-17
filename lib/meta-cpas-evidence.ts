@@ -4,7 +4,6 @@ const SHOPEE_APP_ID = '957549474255294';
 const SHOPEE_ANDROID_PACKAGE = 'com.shopee.id';
 const SHOPEE_IOS_APP_ID = '959841443';
 const SHOPEE_HOSTS = ['shopee.co.id', 'shp.ee'];
-const NON_WEBSITE_TRANSIT_HOSTS = ['facebook.com', 'fb.com', 'fb.me', 'instagram.com', 'play.google.com', 'itunes.apple.com', 'apps.apple.com'];
 
 export type MetaCpasMetadata = {
   urls: string[];
@@ -30,12 +29,8 @@ function isShopeeHost(hostname: string): boolean {
   return SHOPEE_HOSTS.some(domain => host === domain || host.endsWith(`.${domain}`));
 }
 
-function isNonWebsiteTransitHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/\.$/, '');
-  return NON_WEBSITE_TRANSIT_HOSTS.some(domain => host === domain || host.endsWith(`.${domain}`));
-}
-
-/** Classifies an ad as CPAS only when its supplied metadata contains explicit Shopee evidence. */
+/** Detects positive Shopee evidence. The final channel also uses cached source
+ * verification in meta_ad_channel_bucket; `unknown` here is not a third ad type. */
 export function classifyMetaCpas(
   metadata: MetaCpasMetadata,
   verifiedProductSetIds: string[] = [],
@@ -64,7 +59,6 @@ export function classifyMetaCpas(
   }
 
   let hasShopeeUrl = false;
-  const externalWebsites: string[] = [];
   if (Array.isArray(metadata?.urls)) {
     for (const input of [...new Set(metadata.urls)]) {
       const canonical = canonicalLandingPage(input);
@@ -74,14 +68,12 @@ export function classifyMetaCpas(
         if (isShopeeHost(host)) {
           evidence.push({ type: 'shopee_url', value: canonical });
           hasShopeeUrl = true;
-        } else if (!isNonWebsiteTransitHost(host)) externalWebsites.push(canonical);
+        }
       } catch { /* canonicalLandingPage already validates URLs; keep classification fail-closed. */ }
     }
   }
 
-  if (!strongShopeeIdentity && !hasShopeeUrl && hasVerifiedProductSet && externalWebsites.length) {
-    for (const url of [...new Set(externalWebsites)]) evidence.push({ type: 'conflicting_website_url', value: url });
-    return { classification: 'unknown', evidence };
-  }
+  // Workspace-verified Shopee catalogs are definitive CPAS evidence even when
+  // the creative also links to a brand website. Never infer this from a name.
   return { classification: strongShopeeIdentity || hasShopeeUrl || hasVerifiedProductSet ? 'cpas' : 'unknown', evidence };
 }

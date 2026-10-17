@@ -5,7 +5,7 @@ import { metaGraph } from './meta-ad-insights';
 import { enqueueNewMetaProductSets } from './meta-product-set-queue';
 
 const BASE = 'https://graph.facebook.com/v21.0';
-export const META_DESTINATION_FIELDS = 'id,account_id,adset{id,destination_type,promoted_object},creative{id,object_story_spec,asset_feed_spec,link_url,object_url,product_set_id,omnichannel_link_spec,object_store_url,link_deep_link_url}';
+export const META_DESTINATION_FIELDS = 'id,account_id,adset{id,destination_type,promoted_object},creative{id,call_to_action,object_story_spec,asset_feed_spec,link_url,object_url,product_set_id,omnichannel_link_spec,object_store_url,link_deep_link_url}';
 export type MetaDestinationMetadata = {
   version: 1; urls: string[]; application_ids: string[]; android_packages: string[];
   ios_app_ids: string[]; product_set_ids: string[]; destination_type: string | null;

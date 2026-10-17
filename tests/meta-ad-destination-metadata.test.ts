@@ -7,6 +7,13 @@ const raw = (patch: Record<string, any> = {}) => ({
   creative: { id: '20' }, ...patch,
 });
 
+test('existing-post and partnership destinations include the root creative CTA', () => {
+  assert.match(META_DESTINATION_FIELDS, /creative\{id,call_to_action,/);
+  assert.deepEqual(normalizeMetaDestination(raw({ creative: {
+    id: '20', call_to_action: { type: 'SHOP_NOW', value: { link: 'https://shopee.co.id/shop?utm_source=meta' } },
+  } })).urls, ['https://shopee.co.id/shop']);
+});
+
 test('normalizer extracts omnichannel app and promoted-object Shopee identities without web URLs', () => {
   const metadata = normalizeMetaDestination(raw({
     adset: { id: '30', destination_type: 'APP', promoted_object: { omnichannel_object: { application_id: '957549474255294', package_name: 'com.shopee.id', app_store_id: '959841443' } } },
@@ -184,7 +191,7 @@ test('destination sync persists new catalog observations then queues a unique un
     return batchResponse(['10', '11', '12'], [
       raw({ id: '10', creative: { id: '20', product_set_id: '456' } }),
       raw({ id: '11', creative: { id: '21', product_set_id: '456' } }),
-      raw({ id: '12', creative: { id: '22', product_set_id: '789' } }),
+      raw({ id: '12', creative: { id: '22', product_set_id: '789', link_url: 'https://roove.co.id/product' } }),
     ]);
   };
   try {
@@ -195,6 +202,8 @@ test('destination sync persists new catalog observations then queues a unique un
     assert.equal(requests, 1); assert.equal(result.product_set_jobs_queued, 1);
     assert.deepEqual(queued[0].ids, ['456']);
     assert.deepEqual(writes.map(r => [r.ad_id, r.classification]), [['10', 'unknown'], ['11', 'unknown'], ['12', 'cpas']]);
+    assert.deepEqual(writes[2].metadata.urls, ['https://roove.co.id/product']);
+    assert.deepEqual(writes[2].evidence, [{ type: 'verified_product_set_id', value: '789' }]);
     assert.ok(writes.every(r => r.workspace_id === queued[0].workspace && r.account_id === queued[0].account));
   } finally { globalThis.fetch = originalFetch; }
 });

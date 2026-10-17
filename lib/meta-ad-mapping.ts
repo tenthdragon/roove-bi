@@ -1,4 +1,5 @@
 import { CEP_KEYS, FUNNEL_KEYS } from './meta-ad-naming';
+import type { MetaAdChannel } from './meta-ad-channels';
 
 export const AD_MAPPING_PARSER_VERSION = 1;
 export type MappingToken = { dimension: string; key: string; raw: string; position: number; source: 'bracket' | 'keyword'; recognized: boolean; label: string };
@@ -7,6 +8,7 @@ export type AdMapping = {
   account_id: string; ad_id: string; ad_name: string; creative_id: string | null;
   effective_status: string | null; landing_page_urls: string[]; auto_mapping: AdNameMapping;
   campaign_id?: string | null; campaign_name?: string | null; campaign_objective?: string | null;
+  ad_channel?: MetaAdChannel; ad_channel_reason?: string | null;
   overrides: { cep?: string; intention?: string }; source: 'inventory' | 'cache';
   first_seen_at: string; last_seen_at: string; revision: number;
 };

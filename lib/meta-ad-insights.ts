@@ -94,7 +94,7 @@ export function normalizeAdInsight(raw: RawAdInsight): Totals {
 }
 
 export async function fetchCreativeBatch(ids: string[], token: string) {
-  const batch = ids.map(id => ({ method: 'GET', relative_url: `${id}?fields=id,name,creative{id,name,thumbnail_url,video_id,object_story_spec,asset_feed_spec,link_url,object_url}` }));
+  const batch = ids.map(id => ({ method: 'GET', relative_url: `${id}?fields=id,name,creative{id,name,thumbnail_url,video_id,call_to_action,object_story_spec,asset_feed_spec,link_url,object_url}` }));
   const response = await fetch(BASE, { method: 'POST', headers: { Authorization: `Bearer ${token}` },
     body: new URLSearchParams({ batch: JSON.stringify(batch) }), signal: AbortSignal.timeout(60000) });
   const data = await response.json();

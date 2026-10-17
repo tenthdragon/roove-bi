@@ -108,8 +108,10 @@ test('successful verification registers proof and reclassifies ads without overw
   assert.equal(state.attempt, null);
   const rpc = state.rpcs.find(x => x.name === 'apply_meta_product_set_classifications')!;
   assert.equal(rpc.args.p_workspace_id, workspaceId); assert.equal(rpc.args.p_account_id, accountId);
-  assert.deepEqual(rpc.args.p_rows.map((r: any) => [r.ad_id, r.classification]), [['10', 'cpas'], ['11', 'unknown']]);
+  assert.deepEqual(rpc.args.p_rows.map((r: any) => [r.ad_id, r.classification]), [['10', 'cpas'], ['11', 'cpas']]);
   assert.equal(rpc.args.p_rows[0].metadata, state.destinations[0].metadata);
+  assert.deepEqual(rpc.args.p_rows[1].evidence, [{ type: 'verified_product_set_id', value: productSetId }]);
+  assert.deepEqual(rpc.args.p_rows[1].metadata.urls, ['https://roove.co.id/product']);
   assert.equal('workspace_id' in rpc.args.p_rows[0], false); assert.equal('observed_at' in rpc.args.p_rows[0], false);
   assert.deepEqual(state.writes.find(w => w.method === 'delete')?.filters.map((f: any) => f.args), [
     ['workspace_id', workspaceId], ['account_id', accountId], ['product_set_id', productSetId],

@@ -29,12 +29,12 @@ test('only workspace-verified product sets count as evidence', () => {
   assert.deepEqual(result, { classification: 'cpas', evidence: [{ type: 'verified_product_set_id', value: 'set-2' }] });
 });
 
-test('verified catalog evidence conflicts with an explicit external website destination', () => {
+test('verified Shopee catalog is CPAS even with an explicit brand website destination', () => {
   const result = classifyMetaCpas({ ...empty, urls: ['https://roove.co.id/product'], product_set_ids: ['set-1'] }, ['set-1']);
-  assert.deepEqual(result, { classification: 'unknown', evidence: [
+  assert.deepEqual(result, { classification: 'cpas', evidence: [
     { type: 'verified_product_set_id', value: 'set-1' },
-    { type: 'conflicting_website_url', value: 'https://roove.co.id/product' },
   ] });
+  assert.equal(classifyMetaCpas({ ...empty, urls: ['https://roove.co.id/product'], product_set_ids: ['set-1'] }).classification, 'unknown');
 });
 
 test('an own website alone stays unknown without extra conflict evidence', () => {

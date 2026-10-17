@@ -13,6 +13,8 @@ import { defaultFunnel, MEASURES, metricValue, relativeChange, shiftDay, type Fu
 import { getTodayWIB } from '@/lib/sync-schedule';
 import styles from './page.module.css';
 import MetaAdCreative from '@/components/MetaAdCreative';
+import MetaAdChannelPicker from '@/components/MetaAdChannelPicker';
+import { metaAdChannelLabel, type MetaAdChannel } from '@/lib/meta-ad-channels';
 import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
 import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
 import type { MetaReportInput } from '@/lib/meta-ad-report';
@@ -64,6 +66,7 @@ export default function MetaFunnelsPage() {
   const [selectedId, setSelectedId] = useState('');
   const [groupKey, setGroupKey] = useState('');
   const [brandId, setBrandId] = useState('');
+  const [channel, setChannel] = useState<MetaAdChannel>('non_cpas');
   useEffect(() => { setBrandId(''); setGroupKey(''); }, [activeWorkspace.id]);
   const [dimensionFilters, setDimensionFilters] = useState<AdDimensionFilters>({});
   const [groupBy, setGroupBy] = useState<'ad'|'landing_page'>('landing_page');
@@ -91,12 +94,15 @@ export default function MetaFunnelsPage() {
   const [destinationEditor, setDestinationEditor] = useState<{ accountId: string; adId: string; name: string; url: string } | null>(null);
   const request = useRef(0);
   useEffect(() => {
-    const view = new URLSearchParams(window.location.search).get('view');
+    const params = new URLSearchParams(window.location.search);
+    const requestedChannel = params.get('channel');
+    if (requestedChannel === 'cpas' || requestedChannel === 'unknown' || requestedChannel === 'non_cpas') setChannel(requestedChannel);
+    const view = params.get('view');
     if (view === 'alerts') router.replace('/dashboard/meta-funnels/notifications');
     if (view === 'mapping') router.replace('/dashboard/meta-funnels/mapping');
   }, [router]);
-  const reportInput = useMemo<MetaReportInput>(() => ({ from: dateRange.from, to: dateRange.to, brandId: brandId || undefined, funnelId: selectedId || undefined, filters: dimensionFilters, groupBy }),
-    [dateRange.from, dateRange.to, brandId, selectedId, dimensionFilters, groupBy]);
+  const reportInput = useMemo<MetaReportInput>(() => ({ from: dateRange.from, to: dateRange.to, channel, brandId: brandId || undefined, funnelId: selectedId || undefined, filters: dimensionFilters, groupBy }),
+    [dateRange.from, dateRange.to, channel, brandId, selectedId, dimensionFilters, groupBy]);
   const overviewKey = JSON.stringify([activeWorkspace.id, reportInput]);
   const historyKey = JSON.stringify([overviewKey, data?.reportVersion, tab, tab === 'trends' ? period : 'daily', groupKey]);
   const load = useCallback(async () => {
@@ -140,7 +146,13 @@ export default function MetaFunnelsPage() {
     void poll();
     return () => { alive = false; clearTimeout(timer); };
   }, [syncRequest, activeWorkspace.id, schemaReady, syncRefresh, load]);
-  const overviewReady = dataKey === overviewKey && !!data && !data.reportingError;
+  const currentData = dataKey === overviewKey ? data : null;
+  const overviewReady = !!currentData && !currentData.reportingError;
+  function changeChannel(value: MetaAdChannel) {
+    setChannel(value); setGroupKey(''); setSearch(''); setDestinationEditor(null);
+    const url = new URL(window.location.href); url.searchParams.set('channel', value);
+    window.history.replaceState(null, '', url);
+  }
   useEffect(() => {
     if (tab === 'overview' || loading || !overviewReady) return;
     let alive = true;
@@ -188,6 +200,7 @@ export default function MetaFunnelsPage() {
       setDestinationEditor(null); setGroupKey(''); setNotice(`URL ad terverifikasi: ${saved.url}`); await load();
     } catch (e) { setError(message(e)); } finally { setBusy(false); }
   }
+  const brandSections = data?.brandSections.filter(section => section.groups.length > 0 || section.matchingAds > 0 || section.reportingError) || [];
   const config = data?.config || defaultFunnel();
   const monitoredAccounts = data?.accounts.filter(a => data.scopedAccountIds.includes(a.account_id)) || [];
   const metric = config.metrics.find(m => m.id === metricId) || config.metrics[0];
@@ -208,7 +221,7 @@ export default function MetaFunnelsPage() {
     return direction * (left - right) || byName;
   });
   const breakdown = (groups: Data['groups'], summary: Totals, previous: Totals, currency: string, sectionBrand?: string) => <div className={styles.tableWrap}>
-            <table className={styles.breakdownTable} aria-label={groupBy === 'ad' ? 'Breakdown per ad' : 'Breakdown per landing page'}>
+            <table className={styles.breakdownTable} aria-label={`${metaAdChannelLabel(channel)} · ${groupBy === 'ad' ? 'Breakdown per ad' : 'Breakdown per landing page'}`}>
               <thead><tr><SortableHeader label={groupBy === 'ad' ? 'Ad' : 'URL landing page'} metricId={null} sort={sort} onSort={setTableSort} />{config.metrics.map(m => <SortableHeader key={m.id} label={m.label} metricId={m.id} sort={sort} onSort={setTableSort} description={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}${m.multiplier ? ` × ${m.multiplier}` : ''}` : MEASURES[m.numerator]} />)}</tr></thead>
               <tbody>{visibleGroups(groups).map(g => <tr key={g.key}>
                 <td><button className={styles.nameButton} onClick={() => { if (sectionBrand) setBrandId(sectionBrand); setGroupKey(g.key); }}>{g.name}</button><small>{groupBy === 'ad' ? `Ad ${g.ad_ids.join(', ')}` : `${g.ad_ids.length} ad`} · {g.accounts.join(', ')}</small>
@@ -217,7 +230,7 @@ export default function MetaFunnelsPage() {
                 </td>
                 {config.metrics.map(m => { const c = g.metrics.find(v => v.id === m.id)!; return <td key={m.id}>{format(c.current, m.format, currency)}<small><Change value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}
               </tr>)}</tbody>
-              <tfoot><tr><th scope="row">{sectionBrand ? 'Total brand' : 'Total'}<small>Periode & filter aktif</small></th>{config.metrics.map(m => <td key={m.id}>{format(metricValue(summary, m), m.format, currency)}<small><Change value={relativeChange(metricValue(summary, m), metricValue(previous, m))} direction={m.direction} neutral={!m.monitor} /></small></td>)}</tr></tfoot>
+              <tfoot><tr><th scope="row">{sectionBrand ? 'Total brand' : 'Total'}<small>{metaAdChannelLabel(channel)} · Periode & filter aktif</small></th>{config.metrics.map(m => <td key={m.id}>{format(metricValue(summary, m), m.format, currency)}<small><Change value={relativeChange(metricValue(summary, m), metricValue(previous, m))} direction={m.direction} neutral={!m.monitor} /></small></td>)}</tr></tfoot>
             </table>
   </div>;
   const totals = group?.current || data?.summary;
@@ -227,9 +240,9 @@ export default function MetaFunnelsPage() {
   const chartData = history.map(p => ({ date: p.date, value: p.metrics[metric.id] === null ? null : p.metrics[metric.id]! * (metric.format === 'percent' ? 100 : 1) }));
   return <div className={styles.page} aria-busy={loading || (tab !== 'overview' && historyLoading)}>
     <div className={styles.header}>
-      <div><div className={styles.eyebrow}>MARKETING / AD PERFORMANCE</div><h1>Meta Ad Funnels</h1><p>Filter ads berdasarkan brand, CEP, intention, dan objective Meta.</p></div>
+      <div><div className={styles.eyebrow}>MARKETING / AD PERFORMANCE</div><h1>Meta Ad Funnels</h1><p>Pisahkan jenis iklan, lalu bandingkan performa per brand dan tujuan.</p></div>
       <div className={styles.actions}>
-        <Link className={styles.button} href="/dashboard/meta-funnels/mapping">Pemetaan Ads</Link>
+        <Link className={styles.button} href={`/dashboard/meta-funnels/mapping?channel=${channel}`}>Pemetaan Ads</Link>
         <button className={styles.button} onClick={() => { void load(); setSyncRefresh(value => value + 1); }} disabled={loading}>Muat ulang</button>
         {canManage && <><button className={styles.button} disabled={busy || hasPendingJobs || !schemaReady} onClick={() => void sync()}>{syncStarting ? 'Menyiapkan sync…' : hasPendingJobs ? 'Sync berlangsung…' : 'Sync'}</button>
           <button className={styles.primary} disabled={!schemaReady} onClick={() => setEditor({ config: defaultFunnel() })}>+ Funnel baru</button></>}
@@ -239,7 +252,7 @@ export default function MetaFunnelsPage() {
     {notice && <div role="status" className={styles.info}>{notice}</div>}
     <SyncProgress progress={syncProgress} preparing={syncStarting} checking={!!trackedSync && !currentSyncStatus} status={currentSyncStatus}
       accounts={data?.accounts || []} error={syncStatusError} onRefresh={() => setSyncRefresh(value => value + 1)} />
-    {!schemaReady ? <div className={styles.card}>Migration laporan Meta belum terpasang (203).</div> : <>
+    {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
       {editor && <FunnelEditor value={editor.config} onChange={config => setEditor({ ...editor, config })} accounts={data?.accounts || []} busy={busy}
         onSave={() => void save()} onClose={() => setEditor(null)} onArchive={editor.id ? () => void archive() : undefined} />}
       {destinationEditor && <form className={`${styles.card} ${styles.editor}`} onSubmit={e => { e.preventDefault(); void verifyDestination(); }}>
@@ -248,10 +261,20 @@ export default function MetaFunnelsPage() {
         <label>Website URL<input required type="url" maxLength={4096} value={destinationEditor.url} onChange={e => setDestinationEditor({ ...destinationEditor, url: e.target.value })} /></label>
         <div className={styles.actions}><button type="submit" className={styles.primary} disabled={busy}>Simpan URL terverifikasi</button><button type="button" className={styles.button} disabled={busy} onClick={() => setDestinationEditor(null)}>Batal</button></div>
       </form>}
+      <section aria-label="Pengelompokan iklan" className={styles.channelSection}>
+        <div className={styles.channelHeading}><h2>Jenis iklan</h2><span>Jumlah ad pada periode & filter aktif</span></div>
+        <MetaAdChannelPicker value={channel} counts={currentData?.channelCounts} onChange={changeChannel} />
+        <div className={styles.channelContext} role="note">
+          <span className={styles.channelBadge}>{metaAdChannelLabel(channel)}</span>
+          <p>{channel === 'cpas' ? 'Tujuan atau katalog terverifikasi Shopee, termasuk iklan tanpa URL. Metrik di bawah masih memakai atribusi Meta saat ini; purchase shared items 1 hari / 7 hari belum dipisahkan.'
+            : channel === 'unknown' ? 'Data sumber iklan belum terbaca lengkap. Iklan ini dipisahkan sampai sumbernya berhasil diverifikasi.'
+            : 'Iklan tanpa tujuan atau katalog Shopee, termasuk katalog non-Shopee. Total dan breakdown hanya mencakup kelompok ini.'}</p>
+        </div>
+      </section>
       <div className={styles.filterArea}><div className={styles.monitoringFilters}>
         <label>Brand<select aria-label="Brand" title="Brand mengikuti pemetaan akun di Admin Meta" value={brandId} onChange={e => { setBrandId(e.target.value); setGroupKey(''); }}>
-          <option value="">Semua brand ({data?.brandOptions.total || 0})</option>
-          {data?.brandOptions.choices.map(b => <option key={b.value} value={b.value}>{b.label} ({b.count})</option>)}
+          <option value="">Semua brand ({currentData?.brandOptions.total || 0})</option>
+          {currentData?.brandOptions.choices.map(b => <option key={b.value} value={b.value}>{b.label} ({b.count})</option>)}
         </select></label>
         <label>Monitoring<select value={selectedId || data?.selectedId || ''} onChange={e => { setSelectedId(e.target.value); setGroupKey(''); }}>
           {!data?.funnels.length && <option value="">Semua landing page</option>}
@@ -260,9 +283,9 @@ export default function MetaFunnelsPage() {
         <label>Breakdown<select aria-label="Breakdown" value={groupBy} onChange={e=>{setGroupBy(e.target.value as typeof groupBy);setGroupKey('');setSearch('');}}><option value="landing_page">Per URL landing page</option><option value="ad">Per ad</option></select></label>
         {canManage && data?.selectedId && <button className={styles.button} onClick={() => { const f = data.funnels.find(f => f.id === data.selectedId)!; setEditor({ id: f.id, version: f.version, config: f }); }}>Konfigurasi</button>}
       </div>
-      {data && <MetaAdDimensionFilters value={dimensionFilters} options={data.dimensionOptions} ready={data.dimensionsReady} onChange={filters=>{setDimensionFilters(filters);setGroupKey('');}} hasOtherFilters={!!brandId} onReset={()=>{setDimensionFilters({});setBrandId('');setGroupKey('');}} />}
+      {currentData && <MetaAdDimensionFilters value={dimensionFilters} options={currentData.dimensionOptions} ready={currentData.dimensionsReady} onChange={filters=>{setDimensionFilters(filters);setGroupKey('');}} hasOtherFilters={!!brandId} onReset={()=>{setDimensionFilters({});setBrandId('');setGroupKey('');}} />}
       </div>
-      {data && <>
+      {data && currentData && <>
         <div className={styles.contextBar}>
           {group && <button className={styles.selectedGroup} title={group.name} aria-label={`Hapus pilihan ${groupBy === 'ad' ? 'ad' : 'landing page'}: ${group.name}`} onClick={() => setGroupKey('')}><span>{group.name}</span><X size={12} aria-hidden="true" /></button>}
           <span role="status" className={styles.contextCount} title="Ad dengan data performa pada periode dan filter yang dipilih">{data.matchingAds} ad</span>
@@ -302,7 +325,7 @@ export default function MetaFunnelsPage() {
       </>}
       {loading && <p role="status" className={styles.muted}>Memuat performa…</p>}
       {data && <>
-        {data.reportingError && <div role="alert" className={styles.error}>{data.reportingError}</div>}
+        {currentData?.reportingError && <div role="alert" className={styles.error}>{currentData.reportingError}</div>}
         <div className={styles.tabs}>{([
           ['overview', 'Performa'], ['daily', 'Comparison harian'], ['trends', 'Tren'],
         ] as const).map(([id, label]) => <button key={id} className={tab === id ? styles.activeTab : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
@@ -311,18 +334,18 @@ export default function MetaFunnelsPage() {
           <div className={styles.cards}>{config.metrics.map(m => <div className={styles.card} key={m.id}><div className={styles.muted}>{m.label}</div><strong>{format(metricValue(totals, m), m.format, data.currency)}</strong><Change value={relativeChange(metricValue(totals, m), metricValue(prev, m))} direction={m.direction} neutral={!m.monitor} /></div>)}</div>
         </>}
         {tab === 'overview' && overviewReady && <>
-          <div className={styles.sectionHeader}><h2>{groupBy === 'ad' ? 'Breakdown per ad' : 'Breakdown per landing page'}</h2><input aria-label={groupBy === 'ad' ? 'Cari ad' : 'Cari landing page'} placeholder={groupBy === 'ad' ? 'Cari nama atau ID ad…' : 'Cari URL landing page…'} value={search} onChange={e => setSearch(e.target.value)} /></div>
-          {!brandId && data.brandSections.length > 0 ? data.brandSections.map(section => <section key={section.id} className={styles.brandSection} aria-label={`Brand ${section.name}`}>
-            <div className={styles.brandHeading}><h3>{section.name}</h3><span className={styles.muted}>{section.matchingAds} ad · {section.currency}</span></div>
+          <div className={styles.sectionHeader}><h2>{metaAdChannelLabel(channel)} · {groupBy === 'ad' ? 'Breakdown per ad' : 'Breakdown per landing page'}</h2><input aria-label={groupBy === 'ad' ? 'Cari ad' : 'Cari landing page'} placeholder={groupBy === 'ad' ? 'Cari nama atau ID ad…' : 'Cari URL landing page…'} value={search} onChange={e => setSearch(e.target.value)} /></div>
+          {!brandId && brandSections.length > 0 ? brandSections.map(section => <section key={section.id} className={styles.brandSection} aria-label={`Brand ${section.name}`}>
+            <div className={styles.brandHeading}><h3>{section.name} <span className={styles.channelBadge}>{metaAdChannelLabel(channel)}</span></h3><span className={styles.muted}>{section.matchingAds} ad · {section.currency}</span></div>
             {section.reportingError ? <p role="alert" className={styles.error}>{section.reportingError}</p>
               : <>{visibleGroups(section.groups).length === 0 && <p className={styles.muted}>{search ? 'Tidak ada baris yang sesuai pencarian.' : 'Belum ada data pada periode ini.'}</p>}
                 {breakdown(section.groups, section.summary, section.previous, section.currency, section.id)}</>}
-          </section>) : visibleGroups(data.groups).length === 0 ? <div className={styles.card}>{data.groups.length ? `Tidak ada ${groupBy === 'ad' ? 'ad' : 'URL'} yang sesuai pencarian.` : 'Belum ada data yang sesuai. Periksa akun yang dipantau atau jalankan Sync.'}</div>
+          </section>) : visibleGroups(data.groups).length === 0 ? <div className={styles.card}>{data.groups.length ? `Tidak ada ${groupBy === 'ad' ? 'ad' : 'URL'} yang sesuai pencarian.` : `Belum ada data ${metaAdChannelLabel(channel)} pada periode dan filter ini. Coba ubah periode atau filter.`}</div>
             : breakdown(data.groups, totals!, prev!, data.currency)}
 
-          <details className={styles.card}><summary>Definisi metrik & pengelompokan</summary><p>CTR outbound = outbound clicks ÷ impressions. LPV ratio = LPV ÷ outbound clicks. ATC ratio = ATC ÷ LPV. IC ratio = IC ÷ ATC. Purchase ratio = purchase ÷ IC. CPM = spent ÷ impressions × 1.000. CPIC = spent ÷ IC. CPP = spent ÷ purchase. Semua rasio memakai total event, bukan rata-rata rasio ad.</p><p className={styles.muted}>URL diambil dari destination creative yang terbaca saat sync. Parameter UTM/click ID dan fragment diabaikan; query lain tetap dibedakan. Riwayat tanpa URL memakai metadata creative terkini. Data menggunakan atribusi Meta per adset.</p></details>
+          <details className={styles.card}><summary>Definisi metrik & pengelompokan</summary><p>CTR outbound = outbound clicks ÷ impressions. LPV ratio = LPV ÷ outbound clicks. ATC ratio = ATC ÷ LPV. IC ratio = IC ÷ ATC. Purchase ratio = purchase ÷ IC. CPM = spent ÷ impressions × 1.000. CPIC = spent ÷ IC. CPP = spent ÷ purchase. Semua rasio memakai total event, bukan rata-rata rasio ad.</p><p className={styles.muted}>URL diambil dari destination creative yang terbaca saat sync. Parameter UTM/click ID dan fragment diabaikan; query lain tetap dibedakan. Riwayat tanpa URL memakai metadata creative terkini. Data menggunakan atribusi Meta per adset. Jenis iklan mengikuti bukti tujuan yang tersimpan; riwayat tanpa identitas creative mengikuti creative terkini. Identitas creative yang berbeda masuk Perlu verifikasi.</p></details>
         </>}
-        {(tab === 'daily' || tab === 'trends') && !data.reportingError && <>
+        {(tab === 'daily' || tab === 'trends') && overviewReady && <>
           <div className={styles.sectionHeader}><h2>{tab === 'daily' ? 'Hari dibanding hari sebelumnya' : 'Histori 90 hari'}</h2><div className={styles.actions}>
             {tab === 'trends' && <select aria-label="Periode tren" value={period} onChange={e => setPeriod(e.target.value as typeof period)}><option value="weekly">Mingguan</option><option value="monthly">Bulanan</option></select>}
             <select aria-label="Metrik grafik" value={metric.id} onChange={e => setMetricId(e.target.value)}>{config.metrics.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select>

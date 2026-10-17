@@ -16,6 +16,7 @@ test('URL normalization removes only tracking and keeps functional parameters, p
   for (const invalid of ['javascript:alert(1)', 'https://user:secret@roove.co.id', 'missing', '']) assert.equal(canonicalLandingPage(invalid), null);
 });
 test('destination extraction supports link, video CTA, carousel, template, and dynamic asset feeds', () => {
+  assert.deepEqual(creativeLandingPages({ object_url: 'https://facebook.com/existing-post', call_to_action: { type: 'LEARN_MORE', value: { link: 'https://roove.co.id/osteoporosis?utm_source=meta' } } }), ['https://roove.co.id/osteoporosis']);
   assert.deepEqual(creativeLandingPages({ object_story_spec: { link_data: { link: 'https://roove.co.id/LP?utm_source=a' } } }), ['https://roove.co.id/LP']);
   assert.deepEqual(creativeLandingPages({ object_story_spec: { video_data: { call_to_action: { value: { link: 'https://roove.co.id/Video' } } } } }), ['https://roove.co.id/Video']);
   assert.deepEqual(creativeLandingPages({ object_story_spec: { template_data: { link: 'https://roove.co.id/Template' } } }), ['https://roove.co.id/Template']);
