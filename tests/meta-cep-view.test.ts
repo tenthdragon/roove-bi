@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { adGroup, defaultFunnel, emptyTotals, metricValue, type AdFact } from '../lib/meta-funnel-domain';
 import { buildCepView, cepCostDiagnosis, cepFunnelMetric, cepHeat, cepHighlights, cepProgressMetrics, cepResultMetric, parseCepKey } from '../lib/meta-cep-view';
 import type { ReportGroup } from '../lib/meta-funnel-templates';
+import { cepGroupKey } from '../lib/meta-cep-key';
 
 const totals = (patch: Partial<ReturnType<typeof emptyTotals>>) => ({ ...emptyTotals(), ...patch });
 const cell = (cep: string, intention: string, current: Partial<ReturnType<typeof emptyTotals>>, previous: Partial<ReturnType<typeof emptyTotals>> = current, ads = 2): ReportGroup => ({
-  key: `cep:${cep}:${intention}`, name: `cep:${cep}:${intention}`, current: totals(current), previous: totals(previous), ad_ids: Array.from({ length: ads }, (_, i) => String(i)), accounts: ['A'], ad_names: [], landing_page_urls: [], verified_ad_ids: [],
+  key: cepGroupKey(cep, intention), name: cepGroupKey(cep, intention), current: totals(current), previous: totals(previous), ad_ids: Array.from({ length: ads }, (_, i) => String(i)), accounts: ['A'], ad_names: [], landing_page_urls: [], verified_ad_ids: [],
 });
 const groups = [
   cell('skin', 'disc', { spend: 3000, impressions: 150000, outbound_clicks: 3300, lpv: 2400, atc: 200, purchases: 20 }),
@@ -39,6 +40,19 @@ test('the matrix orders intentions discovery → consideration → conversion, p
   assert.equal(view.mapped, 4);
   assert.equal(view.resultMetric.id, 'cpp');
   assert.equal(view.medians.cpp, (100 + 7000 / 60) / 2, 'median of joint 312.5, skin 116.7, hair 100, nail 100');
+});
+test('free-form CEP and intention tags round-trip separators and percent signs without key collisions', () => {
+  for (const [cep, intention] of [['new:cep%', 'new:intention%'], ['kulit: sensitif', 'conv: test'], ['100%3A', '%invalid'], ['é : kulit', '❤ %']]) {
+    const key = cepGroupKey(cep, intention);
+    assert.deepEqual(parseCepKey(key), { cep, intention });
+    const view = buildCepView([cell(cep, intention, { spend: 100 })], 'website', totals({ spend: 100 }), totals({}));
+    assert.equal(view.rows[0].cep, cep);
+    assert.equal(view.columns[0].intention, intention);
+    assert.equal(view.rows[0].cells[intention]?.current.spend, 100);
+  }
+  assert.notEqual(cepGroupKey('a:b', 'c'), cepGroupKey('a', 'b:c'));
+  assert.notEqual(cepGroupKey('a%3Ab', 'c'), cepGroupKey('a:b', 'c'));
+  assert.equal(parseCepKey('cep:bad%:disc'), null);
 });
 test('the CEP lens lists response metrics plus the result cost, never a funnel ratio; CPL when leads dominate', () => {
   const cpp = cepResultMetric('website', totals({ purchases: 10, leads: 2 })), cpl = cepResultMetric('website', totals({ purchases: 1, leads: 20 }));

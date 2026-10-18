@@ -48,3 +48,10 @@ test('CEP spend shares combine only the two overview worlds and preserve brand a
   assert.deepEqual(seen.sort(), ['cpas', 'non_cpas']);
   assert.deepEqual(shares.map(s => [s.cep, s.share]), [['skin', 0.9], ['__unknown__', 0.1]]);
 });
+test('CEP spend shares decode free-form keys before constructing the original CEP filter value', async () => {
+  const shares = await metaReportCepShares({ from: '2026-10-01', to: '2026-10-02' }, defaultFunnel(), async query => ({
+    groups: query.channel === 'non_cpas' ? [{ key: 'cep:new%3Acep%25:disc', current: { spend: 100 } }] : [],
+  } as unknown as RawMetaReport));
+  assert.equal(shares[0].cep, 'new:cep%');
+  assert.equal(shares[0].share, 1);
+});

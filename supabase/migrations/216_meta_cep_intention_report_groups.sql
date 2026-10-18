@@ -5,6 +5,7 @@ BEGIN;
 -- visible instead of disappearing. CTWA destinations are not resolved in this
 -- mode because the cell, not the destination, is the unit. Everything else
 -- (filters, brand scope, facets, history, creatives) is unchanged from 213.
+-- Escape '%' before ':' in each key part so free-form tags cannot collide.
 CREATE OR REPLACE FUNCTION public.get_meta_ad_report(
  p_workspace_id uuid,p_from date,p_to date,p_config jsonb DEFAULT '{}'::jsonb,
  p_filters jsonb DEFAULT '{}'::jsonb,p_brand text DEFAULT NULL,p_group_by text DEFAULT 'landing_page',
@@ -67,7 +68,7 @@ BEGIN
    contact_metadata,urls,brand,account_id,ad_id) END AS destination FROM contact_scopes s
  ), enriched AS MATERIALIZED (
   SELECT f.*,d.destination,CASE WHEN p_group_by='ad' THEN 'ad:'||f.account_id||':'||f.ad_id
-   WHEN p_group_by='cep_intention' THEN 'cep:'||coalesce(f.cep,'__unknown__')||':'||coalesce(f.intention,'__unknown__')
+   WHEN p_group_by='cep_intention' THEN 'cep:'||replace(replace(coalesce(f.cep,'__unknown__'),'%','%25'),':','%3A')||':'||replace(replace(coalesce(f.intention,'__unknown__'),'%','%25'),':','%3A')
    WHEN destination IS NOT NULL THEN destination->>'key'
    WHEN jsonb_array_length(f.urls)=0 THEN 'landing:unknown'
    WHEN jsonb_array_length(f.urls)=1 THEN 'landing:'||(f.urls->>0)

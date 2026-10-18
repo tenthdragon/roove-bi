@@ -3,6 +3,8 @@
 // response and result metrics, medians across CEPs, and CEP-level highlights.
 import { metricValue, relativeChange, type FunnelMetric, type Totals } from './meta-funnel-domain';
 import { dimensionLabel } from './meta-ad-dimensions';
+import { parseCepKey } from './meta-cep-key';
+export { parseCepKey } from './meta-cep-key';
 import { median, responseMetrics, sumTotalsOf, type ReportGroup } from './meta-funnel-templates';
 import type { Highlight } from './meta-ad-highlights';
 
@@ -28,10 +30,6 @@ const LEAD_PER_LPV: FunnelMetric = { id: 'lead_per_lpv', label: 'CR (lead ÷ LPV
 const PURCHASE_PER_CLICK: FunnelMetric = { id: 'purchase_per_click', label: 'Purchase per klik', numerator: 'purchases', denominator: 'outbound_clicks', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 };
 const CONVERSATION_PER_CLICK: FunnelMetric = { ...PURCHASE_PER_CLICK, id: 'conversation_per_click', label: 'Conversation per klik', numerator: 'conversations' };
 
-export function parseCepKey(key: string): { cep: string; intention: string } | null {
-  const match = key.match(/^cep:([^:]*):(.*)$/);
-  return match ? { cep: match[1] || UNKNOWN_KEY, intention: match[2] || UNKNOWN_KEY } : null;
-}
 /** Match the brand's recorded result, including WhatsApp conversations without lead events. */
 export function cepResultMetric(world: 'website' | 'cpas', summary: Totals): FunnelMetric {
   if (world === 'cpas') return CPP;

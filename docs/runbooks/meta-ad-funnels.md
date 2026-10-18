@@ -85,6 +85,8 @@ per ad, as before) and **CEP**. The CEP view reads the same scoped ads cut by
 CEP × intention through a new report grouping, `p_group_by = 'cep_intention'`
 (migration 216). Group keys are `cep:<cep>:<intention>`, with `__unknown__`
 for a missing tag, so unmapped spend stays visible as its own row and column.
+Within each key part, `%` and `:` are escaped as `%25` and `%3A`; free-form
+tags remain distinct and decode back to the original filter value in drawers.
 CTWA destinations are not resolved in this mode; the cell is the unit.
 
 The view shows a matrix (rows = CEP, columns = intention in discovery →

@@ -4,6 +4,7 @@ import { dimensionLabel, objectiveLabel, type AdDimensionFilters } from './meta-
 import { metaBrandOptions, type MetaAccountBrand, type MetaBrand } from './meta-ad-brands';
 import { parseRooveAdName } from './meta-ad-naming';
 import type { CtwaDestination } from './meta-ctwa-destinations';
+import { parseCepKey } from './meta-cep-key';
 
 export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: ReportGroupBy };
 export type ReportGroupBy = 'ad' | 'landing_page' | 'cep_intention';
@@ -61,7 +62,9 @@ export async function metaReportCepShares(input: MetaReportInput, config: Funnel
     fetchReport(metaReportQuery({ ...input, channel, groupBy: 'cep_intention' }, config))));
   const byCep = new Map<string, number>();
   for (const raw of reports) for (const g of raw.groups) {
-    const cep = g.key.split(':')[1] || '__unknown__';
+    const parsed = parseCepKey(g.key);
+    if (!parsed) continue;
+    const cep = parsed.cep;
     byCep.set(cep, (byCep.get(cep) || 0) + (Number(g.current.spend) || 0));
   }
   const total = [...byCep.values()].reduce((a, b) => a + b, 0);
