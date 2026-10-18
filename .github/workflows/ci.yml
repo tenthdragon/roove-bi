@@ -27,6 +27,9 @@ jobs:
       - name: Check isolated local development helpers
         run: npm run test:local-supabase
 
+      - name: Check Shopee integration and reviewer isolation
+        run: npm run test:shopee
+
       - name: Check Meta ad performance reporting
         run: npm run test:meta-funnels
 

@@ -4,6 +4,7 @@ import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from 
 import { getRequestId, logRouteEvent } from '@/lib/structured-logger';
 import { runShopeeSync } from '@/lib/shopee-sync-runner';
 import { resolveScheduledWorkspaceIds } from '@/lib/workspace-scheduler';
+import { matchesCronBearer } from '@/lib/cron-auth';
 
 export const maxDuration = 60;
 
@@ -40,7 +41,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
   const startTime = Date.now();
   const requestId = getRequestId(req);
   const authHeader = req.headers.get('authorization');
-  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  const isCron = matchesCronBearer(authHeader, process.env.CRON_SECRET);
   const mode = isCron ? `cron_${method.toLowerCase()}` : `dashboard_${method.toLowerCase()}`;
   let requestedBy: string | null = null;
   let workspaceId: string | null = null;
@@ -71,7 +72,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
       if (rateLimitError) return rateLimitError;
 
       try {
-        const access = await requireDashboardPermissionAccess('admin:meta', 'Admin Meta');
+        const access = await requireDashboardPermissionAccess('admin:shopee', 'Admin Shopee');
         const { profile } = access;
         requestedBy = profile.id;
         workspaceId = access.workspaceId;
@@ -110,12 +111,14 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
         routeErrors.push(`${scheduledWorkspaceId}: ${error?.message || 'Shopee sync gagal'}`);
       }
     }
+    const hasSuccessfulResult = results.some((item) => item.success);
+    const hasFailedResult = results.some((item) => item.status === 'failed');
+    const hasPartialResult = results.some((item) => item.status === 'partial');
+    const hasFailure = routeErrors.length > 0 || hasFailedResult;
     const result = {
-      status: routeErrors.length === 0
-        ? 'success' as const
-        : results.length > 0
-          ? 'partial' as const
-          : 'failed' as const,
+      status: hasFailure
+        ? hasSuccessfulResult ? 'partial' as const : 'failed' as const
+        : hasPartialResult ? 'partial' as const : 'success' as const,
       shops_synced: results.reduce((sum, item) => sum + item.shops_synced, 0),
       shops_total: results.reduce((sum, item) => sum + item.shops_total, 0),
       rows_inserted: results.reduce((sum, item) => sum + item.rows_inserted, 0),
@@ -124,6 +127,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
       broad_gmv_total: results.reduce((sum, item) => sum + item.broad_gmv_total, 0),
       duration_ms: Date.now() - startTime,
       errors: [...results.flatMap((item) => item.errors || []), ...routeErrors],
+      notices: results.flatMap((item) => item.notices || []),
       message: workspaceIds.length === 0 ? 'Tidak ada workspace dengan toko Shopee aktif.' : undefined,
     };
 
@@ -161,6 +165,7 @@ async function queueShopeeSync(req: NextRequest, method: 'GET' | 'POST') {
       broad_gmv_total: result.broad_gmv_total,
       duration_ms: result.duration_ms,
       errors: result.errors,
+      notices: result.notices,
       message: result.message || (
         result.status === 'success'
           ? 'Sync Shopee selesai.'

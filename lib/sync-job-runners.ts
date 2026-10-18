@@ -1,5 +1,5 @@
 import { runDailyAdsSync } from './daily-ads-sync-runner';
-import { triggerFinancialSync } from './financial-actions';
+import { runFinancialSync } from './financial-sync-runner';
 import { runMetaSync } from './meta-sync-runner';
 import { runMetaAdSync } from './meta-ad-sync-runner';
 import { runMetaAdMappingSync } from './meta-ad-mapping-sync';
@@ -8,7 +8,7 @@ import { metaSpendRange } from './meta-incremental-sync';
 import { createServiceSupabase } from './service-supabase';
 import { runScalevSync, type ScalevSyncMode } from './scalev-sync-runner';
 import { type SyncJobRecord } from './sync-jobs';
-import { triggerWarehouseSync } from './warehouse-actions';
+import { runWarehouseSync } from './warehouse-sync-runner';
 
 export type SyncJobExecutionResult = {
   status: 'success' | 'partial' | 'failed';
@@ -77,10 +77,7 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
     }
 
     case 'financial_sync': {
-      const result = await triggerFinancialSync({
-        skipAuth: true,
-        workspaceId: job.workspace_id,
-      });
+      const result = await runFinancialSync(job.workspace_id);
       return {
         status: getAggregateStatus(result.synced, result.failed),
         rowsProcessed: Array.isArray(result.results) ? result.results.length : 0,
@@ -89,10 +86,7 @@ export async function executeSyncJob(job: SyncJobRecord): Promise<SyncJobExecuti
     }
 
     case 'warehouse_sync': {
-      const result = await triggerWarehouseSync({
-        skipAuth: true,
-        workspaceId: job.workspace_id,
-      });
+      const result = await runWarehouseSync(job.workspace_id);
       return {
         status: getAggregateStatus(result.synced, result.failed),
         rowsProcessed: Array.isArray(result.results) ? result.results.length : 0,

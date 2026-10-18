@@ -39,6 +39,8 @@ export interface MetaInsight {
   objective?: string;
   campaign_name?: string;
   account_name?: string;
+  action_values?: MetaActionMetric[];
+  purchase_roas?: MetaActionMetric[];
 }
 
 export interface MetaActionMetric {
@@ -58,6 +60,13 @@ export interface DailyAdSpendRow {
   brand_id: number | null;
   advertiser: string;
   data_source: string;
+  platform_attributed_revenue?: number | null;
+  platform_reported_roas?: number | null;
+  raw_attribution?: {
+    selected_action_type: string | null;
+    action_values: MetaActionMetric[];
+    purchase_roas: MetaActionMetric[];
+  };
 }
 
 export interface MetaSyncResult {
@@ -105,7 +114,7 @@ export async function fetchAccountInsights(
 ): Promise<MetaInsight[]> {
   const params = new URLSearchParams({
     access_token: accessToken,
-    fields: 'spend,impressions,cpm,objective,campaign_name,account_name',
+    fields: 'spend,impressions,cpm,objective,campaign_name,account_name,action_values,purchase_roas',
     level: 'account',
     time_increment: '1',
     time_range: JSON.stringify({
@@ -180,19 +189,33 @@ function mapInsightsToRows(
       const spend = parseFloat(insight.spend || '0');
       return spend > 0;
     })
-    .map((insight) => ({
-      date: insight.date_start,
-      ad_account: account.account_name,
-      spent: parseFloat(insight.spend),
-      impressions: parseInt(insight.impressions || '0', 10),
-      cpm: parseFloat(insight.cpm || '0'),
-      objective: insight.objective || 'Unknown',
-      source: account.default_source,
-      store: account.store,
-      brand_id: account.default_brand_id || null,
-      advertiser: account.default_advertiser,
-      data_source: 'meta_api',
-    }));
+    .map((insight) => {
+      const spend = parseFloat(insight.spend || '0');
+      const reportedRoas = selectPurchaseMetric(insight.purchase_roas);
+      const attributedRevenue = selectPurchaseMetric(insight.action_values);
+
+      return {
+        date: insight.date_start,
+        ad_account: account.account_name,
+        spent: spend,
+        impressions: parseInt(insight.impressions || '0', 10),
+        cpm: parseFloat(insight.cpm || '0'),
+        objective: insight.objective || 'Unknown',
+        source: account.default_source,
+        store: account.store,
+        brand_id: account.default_brand_id || null,
+        advertiser: account.default_advertiser,
+        data_source: 'meta_api',
+        platform_attributed_revenue: attributedRevenue?.value
+          ?? (reportedRoas ? spend * reportedRoas.value : null),
+        platform_reported_roas: reportedRoas?.value ?? null,
+        raw_attribution: {
+          selected_action_type: reportedRoas?.actionType || attributedRevenue?.actionType || null,
+          action_values: insight.action_values || [],
+          purchase_roas: insight.purchase_roas || [],
+        },
+      };
+    });
 }
 
 /**

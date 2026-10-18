@@ -9,7 +9,7 @@ import {
   requireDashboardTabAccess,
 } from './dashboard-access';
 import { sendTelegramToChat } from './telegram';
-import { recordWarehouseActivityLog } from './warehouse-activity-log-actions';
+import { recordWarehouseActivityLog } from './warehouse-activity-log-runner';
 import {
   areWarehouseActivityLogValuesEqual,
   getWarehouseActivityLogChangedFields,

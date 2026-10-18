@@ -8,6 +8,11 @@ import { shiftDay } from './meta-funnel-domain';
 import { useSupabase } from '@/lib/supabase-browser';
 import { getDatePartsInTimeZone } from '@/lib/utils';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import { usePermissions } from '@/lib/PermissionsContext';
+import {
+  LEGACY_MARKETING_API_REVIEWER_ROLE,
+  SHOPEE_REVIEWER_ROLE,
+} from '@/lib/role-access';
 
 interface DateRangeContextType {
   dateRange: { from: string; to: string };
@@ -33,6 +38,7 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
   const isMetaReport = metaPath === '/dashboard/meta-funnels' || metaPath.startsWith('/dashboard/meta-funnels/brand');
   const today = getTodayWIB();
   const { activeWorkspace } = useWorkspace();
+  const { role } = usePermissions();
   const [dateRange, setDateRangeState] = useState({ from: '', to: '' });
   const [hasCustomRange, setHasCustomRange] = useState(false);
   const [dateExtent, setDateExtent] = useState({ earliest: '', latest: '' });
@@ -43,6 +49,18 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
       setHasCustomRange(false);
       const { year, month, iso: todayStr } = getDatePartsInTimeZone('Asia/Jakarta');
       const monthStart = `${year}-${month}-01`;
+
+      // Shopee reviewers receive their page data through scoped server actions;
+      // they never need direct access to the workspace's product facts.
+      if (
+        role === SHOPEE_REVIEWER_ROLE
+        || role === LEGACY_MARKETING_API_REVIEWER_ROLE
+      ) {
+        setDateExtent({ earliest: '', latest: '' });
+        setDateRangeState({ from: monthStart, to: todayStr });
+        setLoading(false);
+        return;
+      }
 
       // Get data extent from all sources
       const [
@@ -87,7 +105,7 @@ export function DateRangeProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     }
     init();
-  }, [activeWorkspace.id, supabase]);
+  }, [activeWorkspace.id, role, supabase]);
 
   const setDateRange = (from: string, to: string) => {
     setHasCustomRange(true);

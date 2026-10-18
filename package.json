@@ -40,7 +40,8 @@
     "db:local:verify": "node scripts/local-supabase.mjs verify",
     "db:local:backup": "node scripts/local-supabase.mjs backup",
     "db:local:migration": "node scripts/local-supabase.mjs migration",
-    "test:local-supabase": "node --test tests/local-supabase.test.mjs"
+    "test:local-supabase": "node --test tests/local-supabase.test.mjs",
+    "test:shopee": "node --import tsx --test tests/shopee-reviewer-access.test.ts tests/shopee-open-platform.test.ts tests/shopee-sync-runner.test.ts tests/shopee-campaign-metrics.test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",

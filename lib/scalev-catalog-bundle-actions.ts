@@ -5,7 +5,7 @@ import {
   requireDashboardPermissionAccess,
   requireDashboardTabAccess,
 } from '@/lib/dashboard-access';
-import { recordWarehouseActivityLog } from '@/lib/warehouse-activity-log-actions';
+import { recordWarehouseActivityLog } from '@/lib/warehouse-activity-log-runner';
 import {
   buildCanonicalMappingLookupKey,
   buildVisibleDirectEntityLookup,
