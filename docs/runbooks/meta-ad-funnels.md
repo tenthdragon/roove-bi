@@ -78,6 +78,58 @@ Marketing access permits reporting and per-user notification acknowledgments;
 writes. All server reads and writes use the authenticated user's active
 workspace. Reporting tables and the snapshot RPC have no browser grants.
 
+## CEP × intention view (migration 216)
+
+Detail brand's **Hasil** section has a view switch: **Tujuan** (per template /
+per ad, as before) and **CEP**. The CEP view reads the same scoped ads cut by
+CEP × intention through a new report grouping, `p_group_by = 'cep_intention'`
+(migration 216). Group keys are `cep:<cep>:<intention>`, with `__unknown__`
+for a missing tag, so unmapped spend stays visible as its own row and column.
+Within each key part, `%` and `:` are escaped as `%25` and `%3A`; free-form
+tags remain distinct and decode back to the original filter value in drawers.
+CTWA destinations are not resolved in this mode; the cell is the unit.
+
+The view shows a matrix (rows = CEP, columns = intention in discovery →
+consideration → conversion order, unmapped last) and one row per CEP. The CEP
+lens judges **ad response**: CPM, CTR outbound, hook rate and LPV ratio
+(purchase per click on CPAS), with the world's result cost (CPP where purchases
+dominate, else CPL or cost per conversation when only WhatsApp results are recorded;
+always CPP on CPAS) as the shared end point. Funnel
+progression ratios (ATC, IC, purchase ratio) stay in the Tujuan view, where
+they belong to the destination. Every matrix cell shows one selectable response
+metric (default CTR outbound) above the result cost; cell and row colours
+compare against the median of mapped CEPs in that column or metric, never the
+brand total, with the signed log ratio capped at 2× either way. Clicking a CEP
+opens a drawer with its 90-day weekly trend, the destinations carrying it
+(Website only, with progression ratios matching the recorded result) and its top
+ads, read through the existing `cep` filter.
+
+A costly CEP is attributed before it is reported: its CTR outbound against the
+CEP median says whether the ad is the cause, and its progress after the click
+(purchases ÷ LPV, leads ÷ LPV for lead worlds, conversations ÷ outbound for
+conversation results, purchases ÷ outbound on CPAS)
+against the CEP median says whether the destination is. Either gap of 15% or
+more names the observed gap: response, funnel, both, or neither. Attribution
+stays undetermined if either side lacks a positive benchmark or enough
+observations; missing funnel data must never be described as normal.
+
+Highlights gain CEP rules: a costly CEP (≥ 15% of spend and result cost ≥ 1.5×
+the CEP median, ≥ 3 mapped CEPs, with the diagnosis above in its text), a promising CEP (CTR ≥ 1.25× median with
+spend share at or below the median and cost not above median), a CEP whose CTR
+fell ≥ 20% with ≥ 10% of spend, and a data note when ≥ 20% of spend has no CEP
+tag. Ringkasan brand shows a spend-share bar per CEP under each brand name,
+read across the same Website and CPAS channels as its spend total. Ads whose
+channel still needs verification do not dilute these shares.
+
+Validate migration 216 on a local clone with report migrations through 215 using
+`npm run test:meta-report-db -- --with-cep-migration`; migration 216 and fixtures
+run in the same transaction and roll back. Tests compare CEP groups, dimension
+filters, unknown tags, multiple accounts and focused history against the domain
+rules with `group_by = 'cep_intention'`. If 216 is already installed locally,
+the ordinary `npm run test:meta-report-db` also works. Before activating a new
+staging release, apply 216 to its database using the staging backup/migration
+procedure; a Git push alone does not migrate or deploy staging.
+
 ## Enable in production
 
 1. Apply `198_meta_ad_funnels.sql`, `199_meta_ad_landing_pages.sql`, and

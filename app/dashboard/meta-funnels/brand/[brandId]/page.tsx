@@ -18,6 +18,10 @@ import MetaAdsNav from '@/components/MetaAdsNav';
 import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
 import MetaSparkline from '@/components/MetaSparkline';
 import MetaGroupDrawer from '@/components/MetaGroupDrawer';
+import MetaTemplateSuggestionButton from '@/components/MetaTemplateSuggestionButton';
+import { META_TEMPLATE_SCHEMA_MESSAGE } from '@/lib/meta-template-settings';
+import MetaCepView from '@/components/MetaCepView';
+import MetaCepDrawer from '@/components/MetaCepDrawer';
 import styles from '../../page.module.css';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaBrandDetail>>, { schemaReady: true }>;
@@ -48,6 +52,7 @@ export default function MetaBrandDetailPage() {
   const canManage = can('admin:meta');
   const brandId = params.brandId;
   const world: MetaBrandWorld = search.get('world') === 'cpas' ? 'cpas' : 'website';
+  const view: 'destinations' | 'cep' = search.get('view') === 'cep' ? 'cep' : 'destinations';
   const [filters, setFilters] = useState<AdDimensionFilters>({});
   const [data, setData] = useState<Data | null>(null);
   const [schemaReady, setSchemaReady] = useState(true);
@@ -56,6 +61,7 @@ export default function MetaBrandDetailPage() {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [drawer, setDrawer] = useState<{ group: TemplateGroup; section: TemplateSection } | null>(null);
+  const [cepDrawer, setCepDrawer] = useState<string | null>(null);
   const [notesOpen, setNotesOpen] = useState(false);
   const [destinationEditor, setDestinationEditor] = useState<{ accountId: string; adId: string; name: string; url: string } | null>(null);
   const [history, setHistory] = useState<{ key: string; points: HistoryPoint[]; complete: boolean } | null>(null);
@@ -77,7 +83,7 @@ export default function MetaBrandDetailPage() {
   }, [input, world]);
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { const guard = request; return () => { guard.current++; }; }, []);
-  useEffect(() => { setDrawer(null); setNotesOpen(false); }, [world, brandId]);
+  useEffect(() => { setDrawer(null); setCepDrawer(null); setNotesOpen(false); }, [world, brandId]);
   const historyKey = JSON.stringify([input, world, data?.reportVersion]);
   useEffect(() => {
     if (!data || !input.from) return;
@@ -100,11 +106,22 @@ export default function MetaBrandDetailPage() {
     const query = new URLSearchParams(search.toString()); query.set('world', next);
     router.replace(`${pathname}?${query.toString()}`, { scroll: false });
   }
+  function setView(next: 'destinations' | 'cep') {
+    const query = new URLSearchParams(search.toString());
+    if (next === 'cep') query.set('view', 'cep'); else query.delete('view');
+    router.replace(`${pathname}?${query.toString()}`, { scroll: false });
+  }
   async function applySuggestion(group: Data['unassigned'][number], funnelId: string) {
+    if (!data?.rulesReady) { setError(META_TEMPLATE_SCHEMA_MESSAGE); return; }
+    if (busy) return;
     setBusy(true); setError('');
     try {
       const result = await saveMetaTemplateRule({ funnelId, ...templateDestinationRule(group) });
-      if ('error' in result) { setError(result.error); return; }
+      if ('error' in result) {
+        setError(result.error);
+        if (result.code === 'TEMPLATE_SCHEMA_NOT_READY') setData(current => current ? { ...current, rulesReady: false } : current);
+        return;
+      }
       setNotice(`Template ditetapkan untuk ${group.name}.`); await load();
     }
     catch (e) { setError(message(e)); } finally { setBusy(false); }
@@ -125,6 +142,7 @@ export default function MetaBrandDetailPage() {
   const noteCount = data ? data.coverageGaps.length + (data.destinations.missing_ads ? 1 : 0) + (data.destinations.multi_ads ? 1 : 0) + (data.objectiveUnknownAds ? 1 : 0) + (unassignedRules.length ? 1 : 0) : 0;
   const hasFilters = !!(filters.cep || filters.intention || filters.objective);
   const openHighlight = (h: Data['highlights'][number]) => {
+    if (h.kind === 'cep' && h.groupKey) { setCepDrawer(h.groupKey); return; }
     if (h.groupKey && data) {
       const section = data.sections.find(s => s.key === h.sectionKey) || data.sections[0];
       const group = section?.groups.find(g => g.key === h.groupKey);
@@ -159,6 +177,7 @@ export default function MetaBrandDetailPage() {
     {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
       {loading && !data && <p role="status" className={styles.muted}>Memuat detail brand…</p>}
       {data && <>
+        {world === 'website' && !data.rulesReady && error !== META_TEMPLATE_SCHEMA_MESSAGE && <div role="alert" className={styles.error}>{META_TEMPLATE_SCHEMA_MESSAGE}</div>}
         <p className={styles.period}>Periode {formatDate(data.reportRange.from)} – {formatDate(data.reportRange.to)} <span>vs {formatDate(data.prevFrom)} – {formatDate(data.prevTo)} · {currency}</span></p>
         {data.reportingError && <div role="alert" className={styles.error}>{data.reportingError}</div>}
         <section aria-label="Sorotan" style={{ display: 'grid', gap: 10 }}>
@@ -179,9 +198,15 @@ export default function MetaBrandDetailPage() {
           </div>; })}</div>
         </section>
         <section aria-label={`Hasil ${WORLD_LABELS[world]}`} style={{ display: 'grid', gap: 12 }}>
-          <div className={styles.sectionTitle}><h2>Hasil · {WORLD_LABELS[world]}</h2><span>{world === 'website' ? 'Per template · Website per URL, WhatsApp per brand dan nomor' : 'Per ad · purchase Shopee dengan atribusi Meta'}</span></div>
-          {world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
-          {data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <div key={section.key} className={styles.sectionCard}>
+          <div className={styles.sectionTitle}><h2>Hasil · {WORLD_LABELS[world]}</h2><div className={styles.actions}>
+            <span className={styles.muted}>{view === 'cep' ? 'Per CEP · nuansa antar pintu masuk pada ad yang sama' : world === 'website' ? 'Per template · Website per URL, WhatsApp per brand dan nomor' : 'Per ad · purchase Shopee dengan atribusi Meta'}</span>
+            <div className={styles.viewSwitch} role="group" aria-label="Tampilan hasil">
+              <button type="button" className={view === 'destinations' ? styles.viewActive : ''} aria-pressed={view === 'destinations'} onClick={() => setView('destinations')}>{world === 'website' ? 'Tujuan' : 'Ad'}</button>
+              <button type="button" className={view === 'cep' ? styles.viewActive : ''} aria-pressed={view === 'cep'} onClick={() => setView('cep')}>CEP</button>
+            </div></div></div>
+          {view === 'cep' && <MetaCepView view={data.cep} currency={currency} onOpenCep={setCepDrawer} />}
+          {view === 'destinations' && world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
+          {view === 'destinations' && data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <div key={section.key} className={styles.sectionCard}>
             <div className={styles.sectionHead}>
               <div><span className={`${styles.templateTag} ${world === 'cpas' ? styles.templateTagCpas : ''}`}>{world === 'cpas' ? 'CPAS' : 'TEMPLATE'}</span><strong>{section.name}</strong><span>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')} · {section.groups.length} {world === 'website' ? 'tujuan' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span></div>
               <span>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric.format, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
@@ -198,15 +223,15 @@ export default function MetaBrandDetailPage() {
               </table>
             </div>}
           </div>)}
-          {world === 'website' && data.unassigned.length > 0 && <div className={styles.unassigned}>
+          {view === 'destinations' && world === 'website' && data.unassigned.length > 0 && <div className={styles.unassigned}>
             <div className={styles.sectionTitle}><strong className={styles.warn}>Belum ditetapkan</strong><span>{data.unassigned.length} tujuan · {formatCompactMoney(data.unassigned.reduce((s, u) => s + u.current.spend, 0), currency)} · belum masuk template mana pun</span></div>
             {data.unassigned.slice(0, 8).map(u => <div key={u.key} className={styles.unassignedRow}>
               <span>{u.name} · {formatCompactMoney(u.current.spend, currency)} · <span className={styles.muted}>{u.reason === 'no_url' ? 'URL belum terbaca' : u.reason === 'multi_url' ? 'beberapa URL dalam satu creative' : u.suggestion.reason}</span></span>
-              {u.reason === 'no_rule' && canManage && u.suggestion.funnelId && <button type="button" className={styles.button} disabled={busy} onClick={() => void applySuggestion(u, u.suggestion.funnelId!)}>Terapkan saran</button>}
+              {u.reason === 'no_rule' && canManage && u.suggestion.funnelId && <MetaTemplateSuggestionButton className={styles.button} rulesReady={data.rulesReady} busy={busy} onApply={() => void applySuggestion(u, u.suggestion.funnelId!)} />}
             </div>)}
             <Link href="/dashboard/meta-funnels/templates">Atur template dan tujuan →</Link>
           </div>}
-          {world === 'cpas' && <p className={styles.muted}>Metrik CPAS memakai atribusi Meta per adset. Purchase shared items 1 hari dan 7 hari belum dipisahkan; ROAS dibaca sebagai indikasi arah.</p>}
+          {view === 'destinations' && world === 'cpas' && <p className={styles.muted}>Metrik CPAS memakai atribusi Meta per adset. Purchase shared items 1 hari dan 7 hari belum dipisahkan; ROAS dibaca sebagai indikasi arah.</p>}
         </section>
         <section aria-label="Tren" style={{ display: 'grid', gap: 10 }}>
           <div className={styles.sectionTitle}><h2>Tren 90 hari</h2><div className={styles.actions}><span className={styles.muted}>Mingguan · {WORLD_LABELS[world]}</span>
@@ -217,6 +242,7 @@ export default function MetaBrandDetailPage() {
         </section>
       </>}
     </>}
+    {cepDrawer && data && <MetaCepDrawer key={JSON.stringify([cepDrawer, world, brandId, data.reportRange, filters])} cep={cepDrawer} label={data.cep.rows.find(r => r.cep === cepDrawer)?.label || cepDrawer} world={world} input={{ from: data.reportRange.from, to: data.reportRange.to, brandId, filters }} metrics={data.cep.metrics} resultMetric={data.cep.resultMetric} currency={currency} onClose={() => setCepDrawer(null)} />}
     {drawer && data && <MetaGroupDrawer group={drawer.group} section={drawer.section} world={world} input={{ from: data.reportRange.from, to: data.reportRange.to, brandId, filters }} currency={currency} onClose={() => setDrawer(null)} />}
     {notesOpen && data && <>
       <div className={styles.drawerBackdrop} onClick={() => setNotesOpen(false)} aria-hidden="true" />

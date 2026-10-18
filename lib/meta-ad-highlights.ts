@@ -3,7 +3,7 @@
 import { MEASURES, metricValue, relativeChange, type FunnelMetric, type Measure, type Totals } from './meta-funnel-domain';
 import { median, responseMetrics, type TemplateSection, type UnassignedGroup } from './meta-funnel-templates';
 
-export type HighlightKind = 'leak' | 'outlier' | 'winner' | 'weak_response' | 'data' | 'stable';
+export type HighlightKind = 'leak' | 'outlier' | 'winner' | 'weak_response' | 'cep' | 'data' | 'stable';
 export type HighlightSeverity = 'bad' | 'warn' | 'good' | 'info';
 export type Highlight = {
   kind: HighlightKind; severity: HighlightSeverity; title: string; text: string;

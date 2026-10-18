@@ -1,5 +1,5 @@
 // Only the fixed local Docker clone is accessible; no remote connection option.
-// Install migration 203 before running; the fixture transaction always rolls back.
+// Install the report migrations before running; the fixture transaction always rolls back.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -12,6 +12,10 @@ if (process.argv.includes('--with-migration')) {
   const migration = (await readFile(new URL('../supabase/migrations/203_meta_ad_report_performance.sql', import.meta.url), 'utf8')).replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
   sql = sql.replace('CREATE TEMP TABLE report_test_scope', () => `${migration}\nCREATE TEMP TABLE report_test_scope`);
 }
+if (process.argv.includes('--with-cep-migration')) {
+  const migration = (await readFile(new URL('../supabase/migrations/216_meta_cep_intention_report_groups.sql', import.meta.url), 'utf8')).replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
+  sql = sql.replace('CREATE TEMP TABLE report_test_scope', () => `${migration}\nCREATE TEMP TABLE report_test_scope`);
+}
 const output = execFileSync('docker', ['exec', '-i', 'supabase_db_roove-bi-local', 'sh', '-c',
   'export PGPASSWORD="$POSTGRES_PASSWORD"; exec "$@"', 'roove-meta-report-test',
   'psql', '-U', 'supabase_admin', '-X', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-Atq'],
@@ -21,7 +25,7 @@ const enriched = withAdDimensions(withLandingPages(data.facts, data.creatives ||
 const sortedGroups = rows => rows.map(g => ({ ...g, creatives: [], ad_names: [...g.ad_names].sort(), ad_ids: [...g.ad_ids].sort(),
   accounts: [...g.accounts].sort(), verified_ad_ids: [...g.verified_ad_ids].sort(), categories: g.categories.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) })).sort((a, b) => a.key.localeCompare(b.key));
 for (const { name, params: p, raw } of data.cases) {
-  const config = { ...defaultFunnel(), ...p.config, group_by: p.groupBy === 'ad' ? 'ad_id' : 'landing_page' };
+  const config = { ...defaultFunnel(), ...p.config, group_by: p.groupBy === 'ad' ? 'ad_id' : p.groupBy === 'cep_intention' ? 'cep_intention' : 'landing_page' };
   const configured = data.accounts.filter(a => config.account_ids.includes(a.account_id));
   const ids = metaBrandAccountIds(configured, data.brands, p.brandId);
   const start = p.view === 'trends' ? shiftDay(p.to, -89) : p.view === 'daily' ? shiftDay(p.from, -1) : shiftDay(p.from, -daysBetween(p.from, p.to));

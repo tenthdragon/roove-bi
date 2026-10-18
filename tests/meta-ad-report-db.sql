@@ -35,7 +35,7 @@ DO $$ DECLARE w uuid; a text; b text; uid uuid; v bigint; report jsonb; BEGIN
  {"ad_id":"999999990002","ad_name":"[skin][conv] Cached","creative_id":"2","metric_date":"2000-01-02","metrics":{"spend":20,"impressions":10,"outbound_clicks":5,"lpv":3},"raw_insights":{"campaign_id":"111"},"landing_page_urls":[]},
  {"ad_id":"999999990003","ad_name":"[ tulang ] [ consideration ] Verified","creative_id":"3","metric_date":"2000-01-02","metrics":{"spend":30,"impressions":200,"outbound_clicks":6,"lpv":4},"raw_insights":{"objective":"OUTCOME_SALES"},"landing_page_urls":[]},
  {"ad_id":"999999990004","ad_name":"No tags","creative_id":"44","metric_date":"2000-01-03","metrics":{"spend":40,"impressions":400,"outbound_clicks":8,"lpv":4},"raw_insights":{},"landing_page_urls":[]},
- {"ad_id":"999999990005","ad_name":"[new cep][new intention] Multi","metric_date":"2000-01-03","metrics":{"spend":60,"impressions":600},"raw_insights":{},"landing_page_urls":["https://example.com/a","https://example.com/b"]}
+ {"ad_id":"999999990005","ad_name":"[new:cep%][new:intention%] Multi","metric_date":"2000-01-03","metrics":{"spend":60,"impressions":600},"raw_insights":{},"landing_page_urls":["https://example.com/a","https://example.com/b"]}
  ]');
  PERFORM replace_meta_ad_snapshot(w,b,'Test B','1999-12-31','2000-01-03','IDR','Asia/Jakarta','[
  {"ad_id":"999999990001","ad_name":"[sendi][cons] Same","metric_date":"2000-01-02","metrics":{"spend":999,"impressions":9990,"outbound_clicks":999},"raw_insights":{"objective":"OUTCOME_SALES"},"landing_page_urls":["https://example.com/shared"]}
@@ -83,6 +83,13 @@ SELECT x.name,jsonb_build_object('from',x.f,'to',x.t,'config',jsonb_build_object
 FROM scope CROSS JOIN brand CROSS JOIN (VALUES
  ('landing pages','landing_page','overview','week',false,'{}'::jsonb,'','contains',NULL::text,'2000-01-02','2000-01-03'),
  ('per ad','ad','overview','week',false,'{}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
+ ('CEP by intention','cep_intention','overview','week',true,'{}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
+ ('CEP across accounts','cep_intention','overview','week',false,'{}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
+ ('CEP dimension filter','cep_intention','overview','week',true,'{"cep":"bone","intention":"cons","objective":"OUTCOME_SALES"}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
+ ('CEP unknown group','cep_intention','overview','week',false,'{"cep":"__unknown__"}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
+ ('CEP focused daily','cep_intention','daily','week',true,'{}'::jsonb,'','contains','cep:bone:cons','2000-01-02','2000-01-03'),
+ ('CEP weekly history','cep_intention','trends','week',true,'{}'::jsonb,'','contains','cep:bone:cons','2000-01-02','2000-01-03'),
+ ('CEP free-form tags','cep_intention','daily','week',false,'{"cep":"new:cep%","intention":"new:intention%"}'::jsonb,'','contains','cep:new%3Acep%25:new%3Aintention%25','2000-01-02','2000-01-03'),
  ('brand and dimensions','landing_page','overview','week',true,'{"cep":"bone","intention":"cons","objective":"OUTCOME_SALES"}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
  ('unknown CEP','ad','overview','week',false,'{"cep":"__unknown__"}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
  ('literal name','ad','overview','week',false,'{}'::jsonb,'[sendi][cons] Same','exact',NULL,'2000-01-02','2000-01-03'),

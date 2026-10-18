@@ -128,6 +128,7 @@ function compare(current: Totals, previous: Totals, metrics: FunnelMetric[]): Me
   return metrics.map(m => { const a = metricValue(current, m), b = metricValue(previous, m); return { id: m.id, current: a, previous: b, change: relativeChange(a, b) }; });
 }
 function sum(groups: ReportGroup[], field: 'current' | 'previous'): Totals { return sumMetricTotals(groups.map(g => g[field])); }
+export function sumTotalsOf(items: Totals[]): Totals { return sumMetricTotals(items); }
 export function median(values: number[]): number | null {
   const sorted = values.filter(v => Number.isFinite(v)).sort((a, b) => a - b);
   if (!sorted.length) return null;

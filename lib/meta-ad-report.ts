@@ -4,11 +4,13 @@ import { dimensionLabel, objectiveLabel, type AdDimensionFilters } from './meta-
 import { metaBrandOptions, type MetaAccountBrand, type MetaBrand } from './meta-ad-brands';
 import { parseRooveAdName } from './meta-ad-naming';
 import type { CtwaDestination } from './meta-ctwa-destinations';
+import { parseCepKey } from './meta-cep-key';
 
-export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: 'ad' | 'landing_page' };
+export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: ReportGroupBy };
+export type ReportGroupBy = 'ad' | 'landing_page' | 'cep_intention';
 export type ReportQuery = {
   from: string; to: string; config: Pick<FunnelConfig, 'account_ids' | 'name_filter' | 'match'>;
-  filters: AdDimensionFilters; channel: MetaAdChannel | null; brand: string | null; groupBy: 'ad' | 'landing_page';
+  filters: AdDimensionFilters; channel: MetaAdChannel | null; brand: string | null; groupBy: ReportGroupBy;
   view: 'overview' | 'daily' | 'trends' | 'creatives'; period: 'week' | 'month'; groupKey: string | null;
 };
 export type ReportBucket = { date: string; totals: Totals; complete: boolean; partial: boolean };
@@ -51,6 +53,23 @@ export function metaReportHistory(raw: RawMetaReport, config: FunnelConfig, view
   const points = raw.history.map(p => ({ ...p, complete: valid && p.complete,
     metrics: Object.fromEntries(config.metrics.map(m => [m.id, valid && p.complete ? metricValue(p.totals, m) : null])) as Record<string, number | null> }));
   return view === 'daily' ? points.slice(1).map((p, i) => ({ ...p, previousMetrics: points[i].metrics })) : points;
+}
+
+// Match the brand overview's Website + CPAS spend. Unverified-channel ads are
+// outside both worlds and must not dilute their CEP shares.
+export async function metaReportCepShares(input: MetaReportInput, config: FunnelConfig, fetchReport: (query: ReportQuery) => Promise<RawMetaReport>) {
+  const reports = await Promise.all((['non_cpas', 'cpas'] as const).map(channel =>
+    fetchReport(metaReportQuery({ ...input, channel, groupBy: 'cep_intention' }, config))));
+  const byCep = new Map<string, number>();
+  for (const raw of reports) for (const g of raw.groups) {
+    const parsed = parseCepKey(g.key);
+    if (!parsed) continue;
+    const cep = parsed.cep;
+    byCep.set(cep, (byCep.get(cep) || 0) + (Number(g.current.spend) || 0));
+  }
+  const total = [...byCep.values()].reduce((a, b) => a + b, 0);
+  return [...byCep].map(([cep, spend]) => ({ cep, label: cep === '__unknown__' ? 'Belum terpetakan' : dimensionLabel('cep', cep), share: total > 0 ? spend / total : 0 }))
+    .sort((a, b) => Number(a.cep === '__unknown__') - Number(b.cep === '__unknown__') || b.share - a.share);
 }
 
 // Fetch each brand before aggregation: a landing page or ad name can be shared

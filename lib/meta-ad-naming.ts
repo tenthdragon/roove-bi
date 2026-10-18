@@ -1,7 +1,7 @@
 // Roove Naming Convention v1.0 (February 2026). Classify only explicit Ad Name tags.
 export const CEP_KEYS = { skin: 'Kesehatan Kulit', joint: 'Kesehatan Sendi', bone: 'Kesehatan Tulang', hair: 'Kesehatan Rambut', nail: 'Kesehatan Kuku' } as const;
 export const FUNNEL_KEYS = { disc: 'Discovery', cons: 'Consideration', conv: 'Conversion' } as const;
-export const GROUPING_OPTIONS = { landing_page: 'URL landing page', ad_id: 'Ad', ad_name: 'Ad name / creative', cep: 'CEP', funnel_stage: 'Tahap funnel', cep_funnel: 'CEP × tahap funnel' } as const;
+export const GROUPING_OPTIONS = { landing_page: 'URL landing page', ad_id: 'Ad', ad_name: 'Ad name / creative', cep: 'CEP', funnel_stage: 'Tahap funnel', cep_funnel: 'CEP × tahap funnel', cep_intention: 'CEP × intention' } as const;
 export type CepKey = keyof typeof CEP_KEYS;
 export type NamingFunnelKey = keyof typeof FUNNEL_KEYS;
 export type AdGrouping = keyof typeof GROUPING_OPTIONS;

@@ -2,6 +2,7 @@
 import { CEP_KEYS, FUNNEL_KEYS, GROUPING_OPTIONS, parseRooveAdName, type AdGrouping, type CepKey, type NamingFunnelKey } from './meta-ad-naming';
 import { landingPageGroup, normalizeLandingPages } from './meta-ad-destinations';
 import { ctwaLabel, type CtwaDestination } from './meta-ctwa-destinations';
+import { cepGroupKey } from './meta-cep-key';
 export const MEASURES = {
   spend: 'Spent', impressions: 'Impressions', clicks: 'All clicks', link_clicks: 'Link clicks',
   outbound_clicks: 'Outbound clicks', lpv: 'Landing page views', view_content: 'View content',
@@ -133,7 +134,7 @@ export function validateRange(from: string, to: string, maxDays = 93) {
 export function normalizedName(name: string) { return name.trim().replace(/\s+/g, ' ').toLocaleLowerCase('id-ID'); }
 export function matchesFunnel(row: AdFact, config: FunnelConfig) {
   if (!matchesNameAndAccount(row, config)) return false;
-  if (config.group_by === 'landing_page' || config.group_by === 'ad_id') return true;
+  if (config.group_by === 'landing_page' || config.group_by === 'ad_id' || config.group_by === 'cep_intention') return true;
   const parsed = parseRooveAdName(row.ad_name);
   if (config.naming_status === 'tagged' && !parsed.valid || config.naming_status === 'untagged' && parsed.valid) return false;
   if (config.cep_keys?.length && (!parsed.cep || !config.cep_keys.includes(parsed.cep))) return false;
@@ -148,6 +149,8 @@ function matchesNameAndAccount(row: AdFact, config: FunnelConfig) {
 export function adGroup(row: AdFact, config: FunnelConfig) {
   if (config.group_by === 'ad_id') return { key: `ad:${row.account_id}:${row.ad_id}`, name: row.ad_name || row.ad_id };
   if (config.group_by === 'landing_page') return row.destination ? { key: row.destination.key, name: ctwaLabel(row.destination) } : landingPageGroup(row.landing_page_urls);
+  // Mirrors migration 216: mapped CEP/intention keys, '__unknown__' when absent.
+  if (config.group_by === 'cep_intention') { const key = cepGroupKey(row.cep_key, row.intention_key); return { key, name: key }; }
   const parsed = parseRooveAdName(row.ad_name);
   const nameKey = normalizedName(row.ad_name) || `(unnamed:${row.ad_id})`;
   if (!config.group_by || config.group_by === 'ad_name') return { key: nameKey, name: row.ad_name || row.ad_id };

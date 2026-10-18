@@ -31,7 +31,7 @@ export function reportJobs(svc: ReturnType<typeof createServiceSupabase>, worksp
 export async function reportContext(input: MetaReportInput, includeJobs = false) {
   const { workspaceId } = await reportingAccess();
   validateRange(input.from, input.to);
-  if (input.groupBy !== undefined && !['ad', 'landing_page'].includes(input.groupBy)) throw new Error('Tampilan agregasi tidak valid.');
+  if (input.groupBy !== undefined && !['ad', 'landing_page', 'cep_intention'].includes(input.groupBy)) throw new Error('Tampilan agregasi tidak valid.');
   if (input.groupKey !== undefined && (typeof input.groupKey !== 'string' || input.groupKey.length > 50000)) throw new Error('Pilihan breakdown tidak valid.');
   if (input.funnelId !== undefined && input.funnelId !== '') uuid(input.funnelId);
   const channel = validateMetaAdChannel(input.channel);
@@ -54,7 +54,7 @@ export async function reportContext(input: MetaReportInput, includeJobs = false)
   // then drive the report. Without one, the report covers every active account
   // with the standard performance columns.
   const selected = input.funnelId ? funnels.find(f => f.id === input.funnelId) || null : null;
-  const config: FunnelConfig = { ...(selected || { ...defaultFunnel(), metrics: metaPerformanceMetrics() }), group_by: input.groupBy === 'ad' ? 'ad_id' : 'landing_page' };
+  const config: FunnelConfig = { ...(selected || { ...defaultFunnel(), metrics: metaPerformanceMetrics() }), group_by: input.groupBy === 'ad' ? 'ad_id' : input.groupBy === 'cep_intention' ? 'cep_intention' : 'landing_page' };
   const configuredAccounts = accounts.filter(a => !config.account_ids.length || config.account_ids.includes(a.account_id));
   return { schemaReady: true as const, workspaceId, reportVersion: String(version.data?.revision || 0), reportRange, filters, brandId, channel,
     funnels, selectedId: selected?.id || null, config, accounts, configuredAccounts, brands,
