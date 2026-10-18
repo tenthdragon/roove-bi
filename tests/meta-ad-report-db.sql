@@ -83,6 +83,7 @@ SELECT x.name,jsonb_build_object('from',x.f,'to',x.t,'config',jsonb_build_object
 FROM scope CROSS JOIN brand CROSS JOIN (VALUES
  ('landing pages','landing_page','overview','week',false,'{}'::jsonb,'','contains',NULL::text,'2000-01-02','2000-01-03'),
  ('per ad','ad','overview','week',false,'{}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
+ ('CEP by intention','cep_intention','overview','week',true,'{}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
  ('brand and dimensions','landing_page','overview','week',true,'{"cep":"bone","intention":"cons","objective":"OUTCOME_SALES"}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
  ('unknown CEP','ad','overview','week',false,'{"cep":"__unknown__"}'::jsonb,'','contains',NULL,'2000-01-02','2000-01-03'),
  ('literal name','ad','overview','week',false,'{}'::jsonb,'[sendi][cons] Same','exact',NULL,'2000-01-02','2000-01-03'),

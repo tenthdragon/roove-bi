@@ -78,6 +78,38 @@ Marketing access permits reporting and per-user notification acknowledgments;
 writes. All server reads and writes use the authenticated user's active
 workspace. Reporting tables and the snapshot RPC have no browser grants.
 
+## CEP × intention view (migration 216)
+
+Detail brand's **Hasil** section has a view switch: **Tujuan** (per template /
+per ad, as before) and **CEP**. The CEP view reads the same scoped ads cut by
+CEP × intention through a new report grouping, `p_group_by = 'cep_intention'`
+(migration 216). Group keys are `cep:<cep>:<intention>`, with `__unknown__`
+for a missing tag, so unmapped spend stays visible as its own row and column.
+CTWA destinations are not resolved in this mode; the cell is the unit.
+
+The view shows a matrix (rows = CEP, columns = intention in discovery →
+consideration → conversion order, unmapped last) and one row per CEP with the
+shared response metrics, ATC ratio on Website, and the world's result cost (CPP
+where purchases dominate, else CPL; always CPP on CPAS). Each intention column
+defaults to its own success metric: discovery by CTR outbound, consideration by
+ATC ratio (purchase per click on CPAS), conversion by the result cost; a
+selector forces one metric across all cells. Cell and row colours compare
+against the median of mapped CEPs in that column or metric, never the brand
+total; the signed log ratio is capped at 2× either way. Clicking a CEP opens a
+drawer with its 90-day weekly trend, the destinations carrying it (Website
+only) and its top ads, read through the existing `cep` filter.
+
+Highlights gain CEP rules: a costly CEP (≥ 15% of spend and result cost ≥ 1.5×
+the CEP median, ≥ 3 mapped CEPs), a promising CEP (CTR ≥ 1.25× median with
+spend share at or below the median and cost not above median), a CEP whose CTR
+fell ≥ 20% with ≥ 10% of spend, and a data note when ≥ 20% of spend has no CEP
+tag. Ringkasan brand shows a spend-share bar per CEP under each brand name,
+read across both worlds.
+
+Validate migration 216 on the local clone with `npm run test:meta-report-db`;
+the fixture gains a `CEP by intention` case compared against `compareGroups`
+with `group_by = 'cep_intention'`.
+
 ## Enable in production
 
 1. Apply `198_meta_ad_funnels.sql`, `199_meta_ad_landing_pages.sql`, and

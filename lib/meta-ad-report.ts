@@ -5,10 +5,11 @@ import { metaBrandOptions, type MetaAccountBrand, type MetaBrand } from './meta-
 import { parseRooveAdName } from './meta-ad-naming';
 import type { CtwaDestination } from './meta-ctwa-destinations';
 
-export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: 'ad' | 'landing_page' };
+export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: ReportGroupBy };
+export type ReportGroupBy = 'ad' | 'landing_page' | 'cep_intention';
 export type ReportQuery = {
   from: string; to: string; config: Pick<FunnelConfig, 'account_ids' | 'name_filter' | 'match'>;
-  filters: AdDimensionFilters; channel: MetaAdChannel | null; brand: string | null; groupBy: 'ad' | 'landing_page';
+  filters: AdDimensionFilters; channel: MetaAdChannel | null; brand: string | null; groupBy: ReportGroupBy;
   view: 'overview' | 'daily' | 'trends' | 'creatives'; period: 'week' | 'month'; groupKey: string | null;
 };
 export type ReportBucket = { date: string; totals: Totals; complete: boolean; partial: boolean };

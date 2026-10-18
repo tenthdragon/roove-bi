@@ -15,6 +15,7 @@ import { formatChange, formatCompactMoney, formatDate, formatMetric } from '@/li
 import MetaAdsNav from '@/components/MetaAdsNav';
 import MetaSyncProgress from '@/components/MetaSyncProgress';
 import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
+import { cepColor } from '@/components/MetaCepView';
 import styles from './page.module.css';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaBrandOverview>>, { schemaReady: true }>;
@@ -155,7 +156,9 @@ export default function MetaBrandOverviewPage() {
             </tr></thead>
             <tbody>{data.brands.map(b => <tr key={b.id}>
               <td><Link className={styles.brandName} href={`/dashboard/meta-funnels/brand/${b.id}`}><span className={`${styles.healthDot} ${b.health === 'good' ? styles.healthGood : b.health === 'warn' ? styles.healthWarn : styles.healthBad}`} aria-hidden="true" />{b.name}</Link>
-                <small>{healthLabel[b.health]} · {b.adCount} ad{b.reportingError ? ` · ${b.reportingError}` : ''}</small></td>
+                <small>{healthLabel[b.health]} · {b.adCount} ad{b.reportingError ? ` · ${b.reportingError}` : ''}</small>
+                {b.cepShares.length > 0 && <><div className={styles.shareBar} title="Porsi spend per CEP" aria-hidden="true">{b.cepShares.map((c, i) => <i key={c.cep} style={{ width: `${c.share * 100}%`, background: cepColor(i, c.cep === '__unknown__') }} />)}</div>
+                  <div className={styles.shareLegend}>{b.cepShares.slice(0, 4).map((c, i) => <span key={c.cep}><i style={{ background: cepColor(i, c.cep === '__unknown__') }} />{c.label} {Math.round(c.share * 100)}%</span>)}</div></>}</td>
               <td className={styles.num}><strong>{formatCompactMoney(b.spend.total, b.currency)}</strong><small>Web {formatCompactMoney(b.spend.website, b.currency)} · CPAS {formatCompactMoney(b.spend.cpas, b.currency)}</small></td>
               <td className={styles.num}><strong>{formatMetric(b.ctr.current, 'percent', b.currency)}</strong><small><Delta value={b.ctr.change} /></small></td>
               <td className={`${styles.num} ${styles.worldCol}`}>{b.website.cpp ? <><strong>{formatMetric(b.website.cpp.current, 'money', b.currency)}</strong><small><Delta value={b.website.cpp.change} direction="lower" /></small></> : <><span className={styles.neutral}>—</span><small>tidak ada template Transaksi</small></>}</td>

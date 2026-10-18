@@ -5,13 +5,15 @@
 import { createServiceSupabase } from './service-supabase';
 import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, sumMetricTotals, type FunnelMetric, type Totals } from './meta-funnel-domain';
 import { loadFunnels, loadTemplateRules } from './meta-funnel-store';
-import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaReport } from './meta-ad-report';
+import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaReport, type ReportGroupBy } from './meta-ad-report';
 import { getCachedMetaAdReport } from './meta-ad-report-data';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
 import { metaCoverageGaps } from './meta-report-status';
 import { assignTemplateSections, compareMetrics, cpasSection, defaultLeadFunnel, matchDestinationTemplate, responseMetrics, suggestTemplate, templateKind, templateMainMetric, validateTemplateRule, WORLD_CHANNEL, type MetaBrandWorld, type MetricComparison, type ReportGroup, type TemplateRule } from './meta-funnel-templates';
 import { ctwaLabel } from './meta-ctwa-destinations';
 import { brandHealth, brandHighlights, type Highlight } from './meta-ad-highlights';
+import { buildCepView, cepHighlights, UNKNOWN_KEY } from './meta-cep-view';
+import { dimensionLabel } from './meta-ad-dimensions';
 import { manageAccess, reportContext, reportingAccess, uuid } from './meta-report-context';
 import { defaultFunnel } from './meta-funnel-domain';
 import { saveMetaFunnel } from './meta-funnel-actions';
@@ -40,9 +42,20 @@ function compare(current: Totals, previous: Totals, m: FunnelMetric): MetricComp
   return { id: m.id, current: a, previous: b, change: relativeChange(a, b) };
 }
 const sumTotals = sumMetricTotals;
-function fetchWorld(ctx: Context, world: MetaBrandWorld, brandId: string | undefined, view: 'overview' = 'overview') {
-  const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: world === 'website' ? 'landing_page' : 'ad' }, ctx.config, view);
+function fetchWorld(ctx: Context, world: MetaBrandWorld, brandId: string | undefined, view: 'overview' = 'overview', groupBy?: ReportGroupBy) {
+  const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: groupBy || (world === 'website' ? 'landing_page' : 'ad') }, ctx.config, view);
   return getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query);
+}
+/** CEP × intention cells for every ad of a brand, across both worlds, for the overview share bar. */
+function fetchCepShares(ctx: Context, brandId: string) {
+  const query = metaReportQuery({ ...ctx.input, brandId, channel: undefined, groupBy: 'cep_intention' }, ctx.config);
+  return getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query).then(raw => {
+    const byCep = new Map<string, number>();
+    for (const g of raw.groups) { const cep = g.key.split(':')[1] || UNKNOWN_KEY; byCep.set(cep, (byCep.get(cep) || 0) + (Number(g.current.spend) || 0)); }
+    const total = [...byCep.values()].reduce((a, b) => a + b, 0);
+    return [...byCep].map(([cep, spend]) => ({ cep, label: cep === UNKNOWN_KEY ? 'Belum terpetakan' : dimensionLabel('cep', cep), share: total > 0 ? spend / total : 0 }))
+      .sort((a, b) => Number(a.cep === UNKNOWN_KEY) - Number(b.cep === UNKNOWN_KEY) || b.share - a.share);
+  });
 }
 /** The lead cost metric follows whichever lead-type event the brand actually records. */
 function leadCostMetric(totals: Totals): FunnelMetric { return totals.leads > 0 || totals.conversations === 0 ? CPL : CPC_CONVERSATION; }
@@ -88,17 +101,18 @@ export async function getMetaBrandOverview(input: BrandInput) {
     website: { cpp: MetricComparison | null; cpl: MetricComparison | null; cplLabel: string; templates: number; unassigned: number };
     cpas: { cpp: MetricComparison; roas: MetricComparison; ads: number } | null;
     highlights: (Highlight & { world: MetaBrandWorld })[]; dataNotes: number; summary: Totals; previous: Totals;
+    cepShares: { cep: string; label: string; share: number }[];
   }[] = [];
   // Two brands at a time bounds concurrent database work; each brand reads both worlds.
   for (let offset = 0; offset < choices.length; offset += 2) {
     const batch = await Promise.all(choices.slice(offset, offset + 2).map(async brand => {
       const brandAccounts = metaBrandAccountIds(ctx.accounts, ctx.brands, brand.value);
-      const [rawWeb, rawCpas] = await Promise.all([fetchWorld(ctx, 'website', brand.value), fetchWorld(ctx, 'cpas', brand.value)]);
+      const [rawWeb, rawCpas, cepShares] = await Promise.all([fetchWorld(ctx, 'website', brand.value), fetchWorld(ctx, 'cpas', brand.value), fetchCepShares(ctx, brand.value)]);
       const web = websiteWorld(ctx, rawWeb, brandAccounts, rules.rows), cpas = cpasWorld(ctx, rawCpas, brandAccounts);
       const summary = sumTotals([web.summary, cpas.summary]), previous = sumTotals([web.previous, cpas.previous]);
       const highlights = mergeHighlights(web.highlights, cpas.matchingAds ? cpas.highlights : []);
       const dataNotes = highlights.filter(h => h.kind === 'data').length;
-      return { id: brand.value, name: brand.label, currency: web.currency, adCount: web.matchingAds + cpas.matchingAds, health: brandHealth(highlights), summary, previous,
+      return { id: brand.value, name: brand.label, currency: web.currency, adCount: web.matchingAds + cpas.matchingAds, health: brandHealth(highlights), summary, previous, cepShares,
         reportingError: web.reportingError || cpas.reportingError,
         spend: { total: summary.spend, website: web.summary.spend, cpas: cpas.summary.spend, change: relativeChange(summary.spend, previous.spend) },
         ctr: compare(summary, previous, CTR),
@@ -129,10 +143,14 @@ export async function getMetaBrandDetail(input: BrandInput & { brandId: string; 
   if (!ctx.schemaReady) return ctx;
   const rules = await loadTemplateRules(createServiceSupabase(), ctx.workspaceId);
   const brandAccounts = metaBrandAccountIds(ctx.accounts, ctx.brands, brandId);
-  const [rawWeb, rawCpas] = await Promise.all([fetchWorld(ctx, 'website', brandId), fetchWorld(ctx, 'cpas', brandId)]);
+  const [rawWeb, rawCpas, rawCep] = await Promise.all([fetchWorld(ctx, 'website', brandId), fetchWorld(ctx, 'cpas', brandId), fetchWorld(ctx, world, brandId, 'overview', 'cep_intention')]);
   const web = websiteWorld(ctx, rawWeb, brandAccounts, rules.rows), cpas = cpasWorld(ctx, rawCpas, brandAccounts);
   const active = world === 'website' ? web : cpas;
   const raw = world === 'website' ? rawWeb : rawCpas;
+  // The CEP lens reads the same scoped ads as the destination view, cut by CEP × intention.
+  const cep = buildCepView(active.reportingError ? [] : normalizeGroups(rawCep), world, active.summary, active.previous);
+  const highlights = mergeHighlights(active.highlights, cepHighlights(cep, active.currency).map(h => ({ ...h, world })));
+  if (!highlights.some(h => h.severity === 'bad' || (h.severity === 'warn' && h.kind !== 'data'))) highlights.unshift({ kind: 'stable', severity: 'info', title: 'Stabil', weight: 0, world, text: 'Tidak ada sinyal penurunan atau pencilan biaya pada periode ini.' });
   const { from, to } = ctx.reportRange;
   const brandOptions = metaBrandOptions(ctx.accounts, ctx.brands, []).choices.map(b => ({ value: b.value, label: b.label }));
   return { schemaReady: true as const, world, brand: { id: brandId, name: brandOptions.find(b => b.value === brandId)?.label || brandId }, brandOptions,
@@ -142,7 +160,7 @@ export async function getMetaBrandDetail(input: BrandInput & { brandId: string; 
     accounts: ctx.accounts.filter(a => brandAccounts.includes(a.account_id)).map(a => ({ account_id: a.account_id, account_name: a.account_name })),
     summary: active.summary, previous: active.previous, response: compareMetrics(active.summary, active.previous, responseMetrics(world)), responseMetrics: responseMetrics(world),
     sections: world === 'website' ? web.sections : [cpas.section], unassigned: world === 'website' ? web.unassigned : [],
-    highlights: active.highlights.slice(0, 6), coverageGaps: active.coverageGaps, destinations: raw.destinations, objectiveUnknownAds: raw.objectiveUnknownAds,
+    highlights: highlights.slice(0, 6), cep, coverageGaps: active.coverageGaps, destinations: raw.destinations, objectiveUnknownAds: raw.objectiveUnknownAds,
     dimensionOptions: metaReportOptions(raw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true, rulesReady: rules.ready, verifiedDestinationsReady: true,
     templates: ctx.funnels.map(f => ({ id: f.id, name: f.name, kind: templateKind(f) })) };
 }
@@ -250,4 +268,22 @@ export async function getMetaGroupAds(input: BrandInput & { brandId: string; wor
   return { schemaReady: true as const, currency: raw.currencies[0] || 'IDR',
     ads: normalizeGroups(raw).filter(g => g.ad_ids.some(id => wanted.has(id))).sort((a, b) => b.current.spend - a.current.spend)
       .map(g => ({ key: g.key, ad_id: g.ad_ids[0], name: g.name, account: g.accounts[0] || '', current: g.current, previous: g.previous })) };
+}
+
+/** Behind one CEP: the destinations and ads carrying it, for the CEP drawer. */
+export async function getMetaCepDetail(input: BrandInput & { brandId: string; world: MetaBrandWorld; cep: string }) {
+  const world = validateWorld(input.world);
+  const brandId = validateMetaBrandFilter(input.brandId);
+  if (!brandId) throw new Error('Pilih brand terlebih dahulu.');
+  if (typeof input.cep !== 'string' || !input.cep || input.cep.length > 500) throw new Error('CEP tidak valid.');
+  const ctx = await reportContext({ from: input.from, to: input.to, filters: { ...input.filters, cep: input.cep }, brandId });
+  if (!ctx.schemaReady) return ctx;
+  const [destinations, ads] = await Promise.all([
+    world === 'website' ? fetchWorld(ctx, 'website', brandId) : Promise.resolve(null),
+    fetchWorld(ctx, world, brandId, 'overview', 'ad'),
+  ]);
+  const pick = (raw: RawMetaReport | null, limit: number) => raw ? normalizeGroups(raw, ctx.brands).sort((a, b) => b.current.spend - a.current.spend).slice(0, limit)
+    .map(g => ({ key: g.key, name: g.name, ad_id: g.ad_ids[0], ads: g.ad_ids.length, accounts: g.accounts, current: g.current, previous: g.previous })) : [];
+  return { schemaReady: true as const, cep: ctx.filters.cep || input.cep, currency: ads.currencies[0] || 'IDR', summary: ads.summary, previous: ads.previous,
+    destinations: pick(destinations, 10), ads: pick(ads, 10), matchingAds: ads.matchingAds };
 }

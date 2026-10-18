@@ -21,7 +21,7 @@ const enriched = withAdDimensions(withLandingPages(data.facts, data.creatives ||
 const sortedGroups = rows => rows.map(g => ({ ...g, creatives: [], ad_names: [...g.ad_names].sort(), ad_ids: [...g.ad_ids].sort(),
   accounts: [...g.accounts].sort(), verified_ad_ids: [...g.verified_ad_ids].sort(), categories: g.categories.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) })).sort((a, b) => a.key.localeCompare(b.key));
 for (const { name, params: p, raw } of data.cases) {
-  const config = { ...defaultFunnel(), ...p.config, group_by: p.groupBy === 'ad' ? 'ad_id' : 'landing_page' };
+  const config = { ...defaultFunnel(), ...p.config, group_by: p.groupBy === 'ad' ? 'ad_id' : p.groupBy === 'cep_intention' ? 'cep_intention' : 'landing_page' };
   const configured = data.accounts.filter(a => config.account_ids.includes(a.account_id));
   const ids = metaBrandAccountIds(configured, data.brands, p.brandId);
   const start = p.view === 'trends' ? shiftDay(p.to, -89) : p.view === 'daily' ? shiftDay(p.from, -1) : shiftDay(p.from, -daysBetween(p.from, p.to));
