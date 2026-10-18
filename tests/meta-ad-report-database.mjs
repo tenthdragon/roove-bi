@@ -1,6 +1,8 @@
 // Only the fixed local Docker clone is accessible; no remote connection option.
 // Install the report migrations before running; the fixture transaction always rolls back.
 import assert from 'node:assert/strict';
+import { resolveTaxonomy } from '../lib/meta-ad-taxonomy.ts';
+import { parseAdMapping } from '../lib/meta-ad-mapping.ts';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { compareGroups, defaultFunnel, totalFacts, withLandingPages, destinationQuality, trend, hasCoverage, shiftDay, daysBetween } from '../lib/meta-funnel-domain.ts';
@@ -16,12 +18,19 @@ if (process.argv.includes('--with-cep-migration')) {
   const migration = (await readFile(new URL('../supabase/migrations/216_meta_cep_intention_report_groups.sql', import.meta.url), 'utf8')).replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
   sql = sql.replace('CREATE TEMP TABLE report_test_scope', () => `${migration}\nCREATE TEMP TABLE report_test_scope`);
 }
+if (process.argv.includes('--with-taxonomy-migration')) {
+ const migration = (await readFile(new URL('../supabase/migrations/218_meta_brand_taxonomy.sql', import.meta.url), 'utf8')).replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
+ sql = sql.replace('CREATE TEMP TABLE report_test_scope', () => `${migration}\nCREATE TEMP TABLE report_test_scope`);
+}
 const output = execFileSync('docker', ['exec', '-i', 'supabase_db_roove-bi-local', 'sh', '-c',
   'export PGPASSWORD="$POSTGRES_PASSWORD"; exec "$@"', 'roove-meta-report-test',
   'psql', '-U', 'supabase_admin', '-X', '-d', 'postgres', '-v', 'ON_ERROR_STOP=1', '-Atq'],
   { input: sql, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 const data = JSON.parse(output);
-const enriched = withAdDimensions(withLandingPages(data.facts, data.creatives || [], data.verified || []), data.mappings || []);
+const brandOf = account => data.accounts.find(a => a.account_id === account)?.default_brand_id ?? null;
+const normalized = (data.mappings || []).map(m => ({ ...m, ...resolveTaxonomy(brandOf(m.account_id), m.auto_mapping, m.overrides, data.catalog) }));
+const missing = data.facts.filter(f => !normalized.some(m => m.account_id === f.account_id && m.ad_id === f.ad_id)).map(f => ({ account_id: f.account_id, ad_id: f.ad_id, campaign_id: null, campaign_objective: null, ...resolveTaxonomy(brandOf(f.account_id), parseAdMapping(f.ad_name), {}, data.catalog) }));
+const enriched = withAdDimensions(withLandingPages(data.facts, data.creatives || [], data.verified || []), [...normalized, ...missing]);
 const sortedGroups = rows => rows.map(g => ({ ...g, creatives: [], ad_names: [...g.ad_names].sort(), ad_ids: [...g.ad_ids].sort(),
   accounts: [...g.accounts].sort(), verified_ad_ids: [...g.verified_ad_ids].sort(), categories: g.categories.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b))) })).sort((a, b) => a.key.localeCompare(b.key));
 for (const { name, params: p, raw } of data.cases) {
@@ -39,7 +48,7 @@ for (const { name, params: p, raw } of data.cases) {
     assert.deepEqual(sortedGroups(metaReportGroups(raw, config)), sortedGroups(compareGroups(rows, config, p.from, p.to)), `${name}: groups`);
     assert.deepEqual(raw.summary, totalFacts(rows.filter(r => r.metric_date >= p.from)), `${name}: summary`);
     assert.deepEqual(raw.previous, totalFacts(rows.filter(r => r.metric_date < p.from)), `${name}: previous`);
-    const expectedOptions = dimensionOptions((data.mappings || []).filter(m => ids.includes(m.account_id)), branded.filter(r => r.metric_date >= p.from), p.filters);
+    const expectedOptions = dimensionOptions(normalized.filter(m => ids.includes(m.account_id)), branded.filter(r => r.metric_date >= p.from), p.filters, data.catalog.filter(c => data.accounts.some(a => ids.includes(a.account_id) && a.default_brand_id === c.brand_id)));
     const options = metaReportOptions(raw, data.accounts, data.brands);
     assert.deepEqual(options.dimensionOptions, expectedOptions, `${name}: facet counts and zero-count choices`);
     assert.deepEqual(options.brandOptions, metaBrandOptions(data.accounts, data.brands, named.filter(r => r.metric_date >= p.from && matchesAdDimensions(r, p.filters))), `${name}: brand counts`);

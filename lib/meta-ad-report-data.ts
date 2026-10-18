@@ -25,6 +25,6 @@ export const getCachedMetaAdReport = unstable_cache(
       }
       return result.data as RawMetaReport;
   }),
-  ['meta-ad-report-v4-active-ads'],
+  ['meta-ad-report-v5-brand-taxonomy'],
   { revalidate: 300 },
 );

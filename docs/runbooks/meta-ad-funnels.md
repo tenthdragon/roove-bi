@@ -2,7 +2,7 @@
 
 Available in Marketing Channel → Meta Ads (`/dashboard/meta-funnels`). Every
 Meta Ads page shares one sub-navigation: Ringkasan brand, Pemetaan Ads,
-Notifikasi, Template funnel.
+Notifikasi, Template funnel, Kategori iklan.
 
 ## Pages
 
@@ -202,6 +202,71 @@ The fixture transaction rolls back and compares SQL output with the existing
 reporting rules, including facet counts, historical objectives, URL precedence,
 manual mapping overrides, partial coverage, cache revision and workspace scope.
 
+## Brand-owned CEP and intention (migration 218)
+
+`218_meta_brand_taxonomy.sql` supersedes open-vocabulary classification in reports.
+The raw provider name, parsed bracket terms and observation history remain intact.
+
+- `meta_ad_cep_catalog` owns the official CEP definitions by workspace/brand. Only
+  brands named Roove are seeded with Kulit (`skin`), Sendi (`joint`), Tulang
+  (`bone`), Rambut (`hair`), and Kuku (`nail`). Other brands start without CEPs;
+  admins create their definitions in **Kategori iklan**. Their keys include the
+  brand ID so global filtering cannot merge unrelated brand categories.
+- Intention is fixed to Discovery (`disc`), Consideration (`cons`), and Conversion
+  (`conv`). Unknown is a review state, never an additional intention or CEP category.
+- An ad may have several CEPs and one intention. Inline checkboxes and bulk edits
+  save `overrides.ceps`; legacy valid `overrides.cep` remains readable. Manual
+  selections (including an explicit empty CEP list) survive inventory refreshes.
+- Resolution is manual selection, then an approved brand/dimension naming rule,
+  then an exact recognized catalog/naming alias, then unmapped. Arbitrary bracket
+  terms stay raw evidence and never create report categories. There is no
+  semantic guess that `sport`, for example, means Sendi or Tulang.
+- **Kategori iklan** previews matched ads, protected manual selections, example
+  names and spend grouped by currency for the selected dates before saving a
+  rule. Rules are persistent and apply to existing and future inventory, including
+  paused ads. Choosing **Gunakan aturan** removes that dimension's manual value.
+- `meta_ad_classifications` resolves the current inventory without overwriting
+  provider names or historical performance rows. `meta_ad_taxonomy_audit` records
+  definition, rule and manual-classification changes. Optimistic revisions reject
+  stale saves. Catalog/rule writes invalidate the report revision.
+
+CEP reports are overlapping cohorts, not an attribution model. An ad spending
+100 with Skin and Joint contributes 100 to each CEP, but 100 once to the brand,
+world, intention total, daily/trend summary, and distinct-ad counts. Group rows
+and CEP participation percentages may sum above the unique brand total/100%.
+The overview shows independent participation labels rather than a stacked share
+bar; the matrix explains the overlap. Selecting one CEP keeps each matching ad
+once and focuses CEP group rows on that selection. Focused history/creatives
+honor any of the ad's CEP memberships. Costs/ratios derive from event sums.
+
+Reports use the current classification, including for past reporting dates.
+Remapping changes historical cohort membership, not recorded spend or outcomes.
+Cross-workspace and cross-brand keys are rejected on writes. New definitions,
+views and helpers are service-only; every Server Action checks workspace module
+and dashboard permissions, with `admin:meta` required for changes.
+
+Validation on the isolated sample:
+
+```sh
+npm run db:local:verify
+npm run test:meta-taxonomy-db
+npm run test:meta-report-db -- --with-taxonomy-migration
+npm run test:meta-funnels
+npm run typecheck:app
+npm run lint
+npm run build
+```
+
+The taxonomy database test uses an enclosing transaction and rolls back both
+migration and fixture while 218 is absent. After installing that exact reviewed
+file using `npm run db:local:migration -- 218_meta_brand_taxonomy.sql`, run the
+report parity test without `--with-taxonomy-migration`; never reapply historical
+migrations. Apply 218 and then 219 before releasing this app. Keep production raw metrics and
+manual overrides; do not copy sample fixtures. On app rollback, 217's older report
+function/grants can be restored deliberately, while retaining the new catalog,
+rules and audit data. An app rollback alone does not undo 218's report semantics.
+Production migration/release requires its own authorization.
+
 ## Automatic granular ad mapping
 
 Migration 212 stores structured contact identity in
@@ -236,7 +301,41 @@ The inventory itself is independent of the report's date range and of whether
 the ad has spent or delivered; the **Pemetaan Ads** page only narrows what it
 shows (see "Pemetaan Ads worklist").
 
-### Pemetaan Ads worklist
+### Flexible CEP catalog (migration 219)
+
+**Meta Ads → Kategori iklan** lets admins add, rename, define, deactivate and
+reactivate CEPs for every brand, including Roove. The original five Roove CEPs
+are initial definitions rather than a permanent limit. New keys are generated
+from the name with a brand prefix; a rename preserves the stable key. Duplicate
+names within a brand are rejected. Intention remains fixed to three choices.
+
+Deactivation retires a choice from new manual assignments and new rules, without
+deleting its catalog row, manual mappings, approved naming rules or report
+memberships. Existing naming recognition and approved rules continue to resolve,
+including future matching inventory; the confirmation lists affected rules and
+explains that rules must be edited to stop automatic matching. Existing inactive
+memberships may be retained or removed while repairing another dimension. They
+cannot be added to a different ad or rule until reactivated. Historical report
+filters retain the category. Hard deletes and changes to identity are blocked.
+
+Catalog edits/status changes require `admin:meta`, reject stale revisions, record
+before/after audit values and invalidate report revisions. An inactive category
+can be renamed without reactivating it. All writes remain workspace/brand scoped.
+
+Install only the reviewed new migration:
+
+```sh
+npm run db:local:migration -- 219_meta_cep_catalog_lifecycle.sql
+npm run test:meta-taxonomy-db
+npm run test:meta-report-db
+```
+
+The taxonomy test can apply missing 218/219 inside its rollback transaction. If
+a migration is already installed, its checksum must match. Migration 218 is
+unchanged after local installation. Deployments must apply both 218 then 219
+before this app release; no production migration is implied by local preview.
+
+## Pemetaan Ads worklist
 
 The page answers one question: which ads that are spending money right now
 can the brand report not read? `lib/meta-ad-worklist.ts` holds the rules;
@@ -255,18 +354,14 @@ can the brand report not read? `lib/meta-ad-worklist.ts` holds the rules;
   URL for the same creative, a WhatsApp destination or a CPAS ad; only ads
   with none of these are flagged.
 - CEP and intention are edited inline with selects: "Otomatis" restores the
-  value parsed from the ad name, known keys come first, then terms already in
-  use, then "Lainnya…" for free text. Saves use the per-ad revision.
+  value parsed from the ad name, only official brand CEPs and the three intentions are offered. CEP supports multiple selections; arbitrary text stays in the evidence drawer. Saves use the per-ad revision.
 - Checkboxes plus the sticky bulk bar set or clear one label on up to 300 ads
   (`saveMetaAdMappingOverridesBulk`, one RPC per ad with a fresh revision;
   partial failures are reported per ad).
-- New bracket terms outside the naming guide are listed with how many ads and
-  how much spend still rely on them. "Petakan" writes a manual override to
-  up to 300 ads that rely on the term per request and marks it reviewed only
-  after the entire matching set succeeds (`applyMetaAdMappingUnit`). An
-  unfinished batch remains visible; repeat Petakan to continue. Partial failures
-  are shown and the rows reload with their latest revisions; "Abaikan" only marks it reviewed. There is no
-  alias table yet: a later ad using the same term needs the same action again.
+- Since migration 218, **Kategori iklan** maintains persistent brand-specific
+  aliases with a preview. Earlier unit-to-manual mappings remain compatible;
+  their valid manual selections are preserved. Raw units continue to be recorded
+  as evidence and do not enter report filters or label pickers.
 - The row drawer shows the parsed brackets, keywords, review notes, the
   destination evidence and channel reason, the verified-URL form (needs a
   creative ID) and the mapping revision history.
@@ -346,8 +441,7 @@ temporary report choices; they do not rewrite saved monitoring or its alerts.
 Objective comes from the ad's actual Meta campaign (`OUTCOME_SALES` for Sales),
 not the naming intention `[conv]`. A `[cons]` ad in a Sales campaign qualifies.
 Legacy `CONVERSIONS` remains a separate objective, and unreadable objectives
-remain unknown. The first naming bracket supplies CEP according to the mapping
-rules above; `sendi` and `joint` share the Sendi key. Manual corrections take
+remain unknown. The official brand catalog and approved rules resolve the first naming bracket; `sendi` and `joint` share the Sendi key. Manual corrections take
 precedence through stored generated dimension columns.
 
 Reports follow the accounts in the selected monitoring and the global date

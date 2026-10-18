@@ -33,7 +33,7 @@ export type AdFact = {
   metric_date: string; currency: string; metrics: Totals; creative_id?: string | null;
   landing_page_urls?: string[];
   campaign_id?: string | null; campaign_objective?: string | null;
-  cep_key?: string | null; intention_key?: string | null;
+  cep_keys?: string[]; cep_key?: string | null; intention_key?: string | null;
   landing_page_source?: 'meta' | 'cache' | 'verified' | 'unknown';
   destination?: CtwaDestination | null;
   raw_insights?: { adset_id?: string };
@@ -226,9 +226,8 @@ export function compareGroups(rows: AdFact[], config: FunnelConfig, from: string
   const groups = new Map<string, AdFact[]>();
   for (const row of rows) {
     if (!matchesFunnel(row, config) || row.metric_date < prevFrom || row.metric_date > to) continue;
-    const key = adGroup(row, config).key;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key)!.push(row);
+    const members = config.group_by === 'cep_intention' && row.cep_keys ? (row.cep_keys.length ? row.cep_keys : [null]).map(cep_key => ({ ...row, cep_key })) : [row];
+    for (const member of members) { const key = adGroup(member, config).key; if (!groups.has(key)) groups.set(key, []); groups.get(key)!.push(member); }
   }
   return [...groups].map(([key, facts]) => {
     const current = totalFacts(facts.filter(r => r.metric_date >= from));
@@ -262,7 +261,7 @@ export function trend(rows: AdFact[], config: FunnelConfig, from: string, to: st
   for (let date = from; date <= to; date = shiftDay(date, 1)) buckets.set(bucket(date), []);
   for (const r of rows) {
     if (r.metric_date < from || r.metric_date > to || !matchesFunnel(r, config)
-      || (groupKey && adGroup(r, config).key !== groupKey)) continue;
+      || (groupKey && !(config.group_by === 'cep_intention' && r.cep_keys ? (r.cep_keys.length ? r.cep_keys : [null]).some(cep => cepGroupKey(cep, r.intention_key) === groupKey) : adGroup(r, config).key === groupKey))) continue;
     buckets.get(bucket(r.metric_date))?.push(r);
   }
   return [...buckets].map(([date, facts]) => {

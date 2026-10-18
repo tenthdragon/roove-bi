@@ -13,7 +13,9 @@ export async function readAll<T>(svc: SupabaseClient, table: string, fields: str
     if (from) query = query.gte('metric_date', from);
     if (to) query = query.lte('metric_date', to);
     // Stable order for PostgREST pagination, including multiple ads on the same date.
-    query = ['meta_ad_creatives', 'meta_ad_verified_destinations', 'meta_ad_mappings', 'meta_ad_mapping_channels', 'meta_ad_destination_metadata'].includes(table) ? query.order('account_id').order('ad_id')
+    query = ['meta_ad_creatives', 'meta_ad_verified_destinations', 'meta_ad_mappings', 'meta_ad_mapping_channels', 'meta_ad_destination_metadata', 'meta_ad_classifications'].includes(table) ? query.order('account_id').order('ad_id')
+      : table === 'meta_ad_cep_catalog' ? query.order('brand_id').order('key')
+      : table === 'meta_ad_taxonomy_rules' ? query.order('brand_id').order('dimension').order('raw_key')
       : query.order('metric_date').order('account_id');
     if (table === 'meta_ad_daily_metrics') query = query.order('ad_id');
     const result = await query.range(offset, offset + 999);
@@ -27,7 +29,7 @@ export async function loadAdDimensions(svc: SupabaseClient, workspaceId: string)
   const schema = await svc.from('meta_ad_mappings').select('campaign_objective').eq('workspace_id',workspaceId).limit(1);
   if (schema.error && ['42P01','PGRST205','42703','PGRST204'].includes(schema.error.code)) return { ready:false, rows:[] as AdDimensions[] };
   if (schema.error) throw new Error(schema.error.message);
-  return { ready:true, rows:await readAll<AdDimensions>(svc,'meta_ad_mappings','account_id,ad_id,cep_key,intention_key,campaign_id,campaign_name,campaign_objective',workspaceId) };
+  return { ready:true, rows:await readAll<AdDimensions>(svc,'meta_ad_classifications','account_id,ad_id,brand_id,cep_keys,cep_key,intention_key,campaign_id,campaign_name,campaign_objective',workspaceId) };
 }
 export async function loadVerifiedDestinations(svc: SupabaseClient, workspaceId: string) {
   const schema = await svc.from('meta_ad_verified_destinations').select('ad_id').eq('workspace_id', workspaceId).limit(1);

@@ -37,7 +37,7 @@ export default function MetaCepView({ view, currency, onOpenCep }: { view: CepVi
   return <div style={{ display: 'grid', gap: 12 }}>
     <div className={styles.sectionCard}>
       <div className={styles.sectionHead}>
-        <div><span className={styles.templateTag}>MATRIKS</span><strong>CEP × intention</strong><span>Respon iklan per sel, {result.label} sebagai ujungnya · {view.mapped} CEP terpetakan · {Math.round(view.unknownShare * 100)}% spend tanpa CEP</span></div>
+        <div><span className={styles.templateTag}>MATRIKS</span><strong>CEP × intention</strong>{view.overlapAds > 0 && <span>{view.overlapAds} ad masuk beberapa CEP</span>}<span>Respon iklan per sel, {result.label} sebagai ujungnya · {view.mapped} CEP terpetakan · {Math.round(view.unknownShare * 100)}% spend tanpa CEP</span></div>
         <div className={styles.actions}>
           <span className={styles.heatLegend}>lebih buruk <i aria-hidden="true" /> lebih baik dari median CEP</span>
           <select aria-label="Metrik respon" value={response.id} onChange={e => setMetricId(e.target.value)}>
@@ -84,6 +84,6 @@ export default function MetaCepView({ view, currency, onOpenCep }: { view: CepVi
         </table>
       </div>
     </div>
-    <p className={styles.muted}>CEP dan intention dibaca dari dua bracket pertama nama ad, atau koreksi manual di Pemetaan Ads. Kacamata CEP menilai respon terhadap iklan; kualitas landing page dinilai di tampilan Tujuan; {result.label} adalah ujung keduanya. Warna membandingkan dengan median CEP di kolom yang sama, bukan dengan total brand. Baris "Belum terpetakan" tetap ditampilkan agar porsi spend tanpa tag tidak tersembunyi.</p>
+    <p className={styles.muted}>CEP memakai daftar resmi per brand; intention hanya Discovery, Consideration, dan Conversion. Nama ad menjadi petunjuk melalui aturan yang disetujui. Iklan bisa masuk beberapa CEP: nilai per CEP dihitung penuh, sementara total brand dihitung sekali. Persentase antar-CEP dapat berjumlah lebih dari 100%. Kacamata CEP menilai respon terhadap iklan; kualitas landing page dinilai di tampilan Tujuan; {result.label} adalah ujung keduanya. Warna membandingkan dengan median CEP di kolom yang sama, bukan dengan total brand. Baris "Belum terpetakan" tetap ditampilkan agar porsi spend tanpa tag tidak tersembunyi.</p>
   </div>;
 }

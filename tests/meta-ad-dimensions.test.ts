@@ -26,11 +26,11 @@ test('filtered per-ad report keeps identical names separate and uses totals for 
  assert.equal(metricValue(totalFacts(rows),config.metrics.find(m=>m.id==='lpv_rate')!),25/40);
  assert.equal(trend(rows,config,'2026-10-01','2026-10-01','day')[0].metrics.spent,300);
 });
-test('options preserve new values and unknowns without conflating objective with intention',()=>{
+test('options exclude unapproved vocabulary and preserve unknowns without conflating objective with intention',()=>{
  const options=dimensionOptions([map('1','joint','10','OUTCOME_SALES','cons'),map('2','new-cep','20',null,'new-intention')]);
  assert.ok(options.ceps.some(o=>o.label==='Sendi' && o.value==='joint'));
  assert.ok(options.objectives.some(o=>o.label==='Sales' && o.value==='OUTCOME_SALES'));
- assert.ok(options.objectives.some(o=>o.value==='__unknown__')); assert.ok(options.intentions.some(o=>o.value==='new-intention'));
+ assert.ok(options.objectives.some(o=>o.value==='__unknown__')); assert.ok(!options.intentions.some(o=>o.value==='new-intention')); assert.ok(!options.ceps.some(o=>o.value==='new-cep'));
 });
 test('dimension counts deduplicate daily rows by account and ad, including unknowns and zero-count inventory choices',()=>{
  const mappings=[map('1','joint','10','OUTCOME_SALES'),map('2','joint','10','OUTCOME_SALES'),map('1','joint','10','OUTCOME_SALES','cons','act_2'),map('3','skin','10','OUTCOME_SALES')];
@@ -38,8 +38,8 @@ test('dimension counts deduplicate daily rows by account and ad, including unkno
  const options=dimensionOptions(mappings,rows);
  assert.equal(options.ceps.find(o=>o.value==='joint')?.count,3);
  assert.equal(options.ceps.find(o=>o.value==='skin')?.count,0);
- assert.equal(options.ceps.find(o=>o.value==='__unknown__')?.count,1);
- assert.equal(options.ceps.find(o=>o.value==='new-cep')?.count,1);
+ assert.equal(options.ceps.find(o=>o.value==='__unknown__')?.count,2);
+ assert.equal(options.ceps.find(o=>o.value==='new-cep')?.count,undefined);
  assert.equal(options.cepTotal,5);
  assert.equal(options.intentions.find(o=>o.value==='cons')?.count,4);
  assert.equal(options.intentions.find(o=>o.value==='__unknown__')?.count,1);
@@ -66,7 +66,7 @@ test('all dimension choices sort by descending ad count, with alphabetical ties 
  const mappings=[map('1','skin','20','OUTCOME_TRAFFIC','conv'),map('2','joint','10','OUTCOME_SALES'),map('3','joint','10','OUTCOME_SALES'),map('4','joint','10','OUTCOME_SALES','disc'),map('5','skin','10','OUTCOME_SALES','conv'),map('6','bone','30','OUTCOME_AWARENESS','disc')];
  const rows=withAdDimensions([fact('1','A','20'),fact('2','B','10'),fact('3','C','10'),fact('4','D','10'),fact('5','E','10')],mappings);
  const options=dimensionOptions(mappings,rows);
- assert.deepEqual(options.ceps.map(o=>[o.value,o.count]),[['joint',3],['skin',2],['bone',0]]);
- assert.deepEqual(options.intentions.map(o=>[o.value,o.count]),[['cons',2],['conv',2],['disc',1]]);
+ assert.deepEqual(options.ceps.filter(o=>['joint','skin','bone'].includes(o.value)).map(o=>[o.value,o.count]),[['joint',3],['skin',2],['bone',0]]);
+ assert.deepEqual(options.intentions.map(o=>[o.value,o.count]),[['cons',2],['conv',2],['disc',1],['__unknown__',0]]);
  assert.deepEqual(options.objectives.map(o=>[o.value,o.count]),[['OUTCOME_SALES',4],['OUTCOME_TRAFFIC',1],['OUTCOME_AWARENESS',0]]);
 });

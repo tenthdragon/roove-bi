@@ -3,6 +3,7 @@
 // supplies mapping rows, per-ad delivery, verified URLs and destination metadata.
 import { CEP_KEYS, FUNNEL_KEYS } from './meta-ad-naming';
 import { effectiveMappingValue, mappingUnit, type AdMapping, type MappingUnit } from './meta-ad-mapping';
+import type { CepCategory } from './meta-ad-taxonomy';
 import type { MetaAdChannel } from './meta-ad-channels';
 import type { AdDimensionFilters } from './meta-ad-dimensions';
 import type { VerifiedDestination } from './meta-funnel-domain';
@@ -18,7 +19,7 @@ export type WorklistLabel = { key: string | null; label: string; manual: boolean
 export type WorklistRow = {
   account_id: string; ad_id: string; ad_name: string; account_name: string; effective_status: string | null;
   ad_channel: MetaAdChannel; ad_channel_reason: string | null; campaign_name: string | null; campaign_objective: string | null;
-  cep: WorklistLabel; intention: WorklistLabel; urls: string[]; urlSource: 'meta' | 'verified' | 'whatsapp' | 'shopee' | null;
+  ceps: WorklistLabel[]; brandId: number | null; cep: WorklistLabel; intention: WorklistLabel; urls: string[]; urlSource: 'meta' | 'verified' | 'whatsapp' | 'shopee' | null;
   spend: number; impressions: number; lastActive: string | null; active: boolean; issues: WorklistIssue[];
   revision: number; creative_id: string | null; overrides: AdMapping['overrides']; auto_mapping: AdMapping['auto_mapping'];
   source: AdMapping['source']; first_seen_at: string; last_seen_at: string;
@@ -29,7 +30,7 @@ export type WorklistQuery = {
 };
 export type WorklistInput = WorklistQuery & {
   mappings: AdMapping[]; activity: AdActivity[]; verified: VerifiedDestination[]; destinations?: DestinationHint[];
-  accounts: { account_id: string; account_name: string }[]; units?: MappingUnit[];
+  accounts: { account_id: string; account_name: string }[]; units?: MappingUnit[]; catalog?: CepCategory[];
 };
 export type WorklistTile = { issue: WorklistIssue; label: string; ads: number; spend: number };
 export type UnitUsage = { dimension: string; unit_key: string; label: string; ads: number; spend: number };
@@ -37,13 +38,13 @@ export type UnitUsage = { dimension: string; unit_key: string; label: string; ad
 const known = { cep: CEP_KEYS as Record<string, string>, intention: FUNNEL_KEYS as Record<string, string> };
 function label(ad: AdMapping, dimension: 'cep' | 'intention'): WorklistLabel {
   const key = effectiveMappingValue(ad, dimension);
-  if (!key) return { key: null, label: 'Belum terpetakan', manual: false, recognized: false };
+  if (!key || (dimension === 'intention' && !Object.hasOwn(known.intention, key)) || (dimension === 'cep' && ad.cep_keys === undefined && !Object.hasOwn(known.cep, key))) return { key: null, label: 'Belum terpetakan', manual: dimension === 'cep' ? ad.overrides.ceps !== undefined || ad.overrides.cep !== undefined : ad.overrides.intention !== undefined, recognized: false };
   const unit = mappingUnit(dimension, key);
   return { key: unit.key, label: unit.label.replace(/^Kesehatan /u, ''), manual: ad.overrides[dimension] !== undefined, recognized: Object.hasOwn(known[dimension], unit.key) };
 }
 
 /** Rows ranked by spend; issues are what the brand report cannot read for the ad. */
-export function buildWorklistRows(input: Pick<WorklistInput, 'mappings' | 'activity' | 'verified' | 'destinations' | 'accounts'>): WorklistRow[] {
+export function buildWorklistRows(input: Pick<WorklistInput, 'mappings' | 'activity' | 'verified' | 'destinations' | 'accounts' | 'catalog'>): WorklistRow[] {
   const activity = new Map(input.activity.map(a => [`${a.account_id}:${a.ad_id}`, a]));
   const verified = new Map(input.verified.map(v => [`${v.account_id}:${v.ad_id}`, v]));
   const hints = new Map((input.destinations || []).map(d => [`${d.account_id}:${d.ad_id}`, d]));
@@ -58,7 +59,9 @@ export function buildWorklistRows(input: Pick<WorklistInput, 'mappings' | 'activ
     if (!urls.length && verifiedUrl && verifiedUrl.creative_id === ad.creative_id) { urls = [verifiedUrl.landing_page_url]; urlSource = 'verified'; }
     if (!urls.length && hint?.metadata?.destination_type === 'WHATSAPP') urlSource = 'whatsapp';
     if (!urls.length && channel === 'cpas') urlSource = 'shopee';
-    const cep = label(ad, 'cep'), intention = label(ad, 'intention');
+    const ceps = (ad.cep_keys ?? (label(ad, 'cep').key ? [label(ad, 'cep').key!] : [])).map(key => ({ key, label: input.catalog?.find(c => c.brand_id === ad.brand_id && c.key === key)?.label || mappingUnit('cep', key).label.replace(/^Kesehatan /u, ''), manual: ad.cep_source === 'manual' || ad.overrides.ceps !== undefined || ad.overrides.cep !== undefined, recognized: true }));
+    const cep = ceps.length ? { ...ceps[0], label: ceps.map(c => c.label).join(' · ') } : label({ ...ad, cep_keys: [] }, 'cep');
+    const intention = label(ad, 'intention');
     const issues: WorklistIssue[] = [];
     if (!cep.key) issues.push('cep');
     if (!intention.key) issues.push('intention');
@@ -66,7 +69,7 @@ export function buildWorklistRows(input: Pick<WorklistInput, 'mappings' | 'activ
     if (channel === 'unknown') issues.push('channel');
     return { account_id: ad.account_id, ad_id: ad.ad_id, ad_name: ad.ad_name || `(Tanpa nama) ${ad.ad_id}`, account_name: names.get(ad.account_id) || ad.account_id,
       effective_status: ad.effective_status, ad_channel: channel, ad_channel_reason: ad.ad_channel_reason || null,
-      campaign_name: ad.campaign_name || null, campaign_objective: ad.campaign_objective || null, cep, intention, urls, urlSource,
+      campaign_name: ad.campaign_name || null, campaign_objective: ad.campaign_objective || null, ceps, brandId: ad.brand_id ?? null, cep, intention, urls, urlSource,
       spend: delivery?.spend || 0, impressions: delivery?.impressions || 0, lastActive: delivery?.last_active || null, active: !!delivery && delivery.impressions > 0, issues,
       revision: ad.revision, creative_id: ad.creative_id, overrides: ad.overrides, auto_mapping: ad.auto_mapping, source: ad.source, first_seen_at: ad.first_seen_at, last_seen_at: ad.last_seen_at };
   }).sort((a, b) => Number(b.active) - Number(a.active) || b.spend - a.spend || b.impressions - a.impressions || b.last_seen_at.localeCompare(a.last_seen_at) || a.ad_id.localeCompare(b.ad_id));
@@ -76,7 +79,7 @@ export function matchesWorklistQuery(row: WorklistRow, query: WorklistQuery): bo
   if (query.accountId && row.account_id !== query.accountId) return false;
   if (query.channel && row.ad_channel !== query.channel) return false;
   const filters = query.filters || {};
-  if (filters.cep && (row.cep.key || '__unknown__') !== filters.cep) return false;
+  if (filters.cep && !(row.ceps.length ? row.ceps.map(c => c.key!) : ['__unknown__']).includes(filters.cep)) return false;
   if (filters.intention && (row.intention.key || '__unknown__') !== filters.intention) return false;
   if (filters.objective && (row.campaign_objective || '__unknown__') !== filters.objective) return false;
   return true;
@@ -98,7 +101,7 @@ export function buildWorklist(input: WorklistInput) {
   const filtered = scope.filter(r => (!input.issue || r.issues.includes(input.issue)) && matchesSearch(r, input.search || ''));
   const pageSize = Math.max(1, Math.min(200, input.pageSize || 50)), page = Math.max(1, input.page || 1);
   const units: UnitUsage[] = (input.units || []).filter(u => u.dimension === 'cep' || u.dimension === 'intention').map(u => {
-    const users = all.filter(r => r.overrides[u.dimension as 'cep' | 'intention'] === undefined && r.auto_mapping.tags.some(t => t.dimension === u.dimension && t.key === u.unit_key));
+    const users = all.filter(r => r.overrides[u.dimension as 'cep' | 'intention'] === undefined && (u.dimension !== 'cep' || r.overrides.ceps === undefined) && r.auto_mapping.tags.some(t => t.dimension === u.dimension && t.key === u.unit_key));
     return { dimension: u.dimension, unit_key: u.unit_key, label: u.label, ads: users.length, spend: users.reduce((s, r) => s + r.spend, 0) };
   }).sort((a, b) => b.spend - a.spend || b.ads - a.ads);
   const activeSpend = all.filter(r => r.active).reduce((s, r) => s + r.spend, 0);
@@ -107,12 +110,10 @@ export function buildWorklist(input: WorklistInput) {
     inactiveAds: all.filter(r => !r.active).length, clean: scope.every(r => !r.issues.length), units };
 }
 
-/** Options for the inline label pickers: known keys first, then every other key in use. */
-export function labelOptions(dimension: 'cep' | 'intention', rows: Pick<WorklistRow, 'cep' | 'intention'>[], units: Pick<MappingUnit, 'dimension' | 'unit_key' | 'label'>[] = []) {
-  const options = new Map<string, string>(Object.entries(known[dimension]).map(([k, v]) => [k, v.replace(/^Kesehatan /u, '')]));
-  for (const u of units) if (u.dimension === dimension && !options.has(u.unit_key)) options.set(u.unit_key, u.label);
-  for (const r of rows) { const l = r[dimension]; if (l.key && !options.has(l.key)) options.set(l.key, l.label); }
-  return [...options].map(([value, text]) => ({ value, label: text }));
+/** Inline pickers expose only the brand catalog and the three official intentions. */
+export function labelOptions(dimension: 'cep' | 'intention', _rows: Pick<WorklistRow, 'cep' | 'intention'>[] = [], _units: Pick<MappingUnit, 'dimension' | 'unit_key' | 'label'>[] = [], catalog?: CepCategory[]) {
+  const entries = dimension === 'cep' && catalog ? catalog.map(c => [c.key, c.label]) : Object.entries(known[dimension]);
+  return entries.map(([value, text]) => ({ value, label: text.replace(/^Kesehatan /u, '') }));
 }
 
 /** Leave an unfinished term in the worklist so the next batch can finish it. */
