@@ -452,7 +452,7 @@ export default function AdminPage() {
       case 'staf_ops':           return { text: 'Staf Ops',          bg: 'var(--accent-subtle)',    color: 'var(--tone-sky)' };
       case 'direktur_finance':   return { text: 'Direktur Finance',  bg: 'var(--accent-subtle)',    color: 'var(--tone-blue)' };
       case 'staf_finance':       return { text: 'Staf Finance',      bg: 'var(--accent-subtle)',    color: 'var(--tone-blue)' };
-      case 'brand_manager':      return { text: 'Growth Lead',       bg: 'var(--badge-yellow-bg)',  color: 'var(--yellow)' };
+      case 'brand_manager':      return { text: 'Brand Manager',       bg: 'var(--badge-yellow-bg)',  color: 'var(--yellow)' };
       case 'sales_manager':      return { text: 'Sales Manager',     bg: 'var(--accent-subtle)',    color: 'var(--tone-purple)' };
       case 'warehouse_manager':  return { text: 'WH Manager',        bg: 'var(--accent-subtle)',    color: 'var(--tone-cyan)' };
       case 'ppic_manager':       return { text: 'PPIC Manager',      bg: 'var(--badge-yellow-bg)',  color: 'var(--tone-amber)' };
