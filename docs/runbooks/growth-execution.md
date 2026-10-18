@@ -48,7 +48,7 @@ with the target environment. `tests/growth-case-access.sql` verifies history,
 conflicts, state changes, owner/workspace isolation and image RLS inside a
 rolled-back transaction; it refuses databases without a nonproduction marker.
 Validate browser creation/save/reload, table and image round trips,
-retry/solve/reopen and search/filter in staging before promotion.
+retry/solve/reopen and search/filter locally before promotion. Use an optional public preview only when remote acceptance requires it.
 
 Development branch: `codex/growth-execution`, based on current production main. Staging is suspended; use local verification. Module ID: `growth-work`.
 
@@ -211,9 +211,9 @@ keyboard/mobile, navigation, search/filter/board, detail and form QA.
 
 Growth uses the existing application's `--card`, `--text`, `--input-bg` and
 `--accent` theme tokens, Warehouse-style tabs and Marketing-style KPI cards.
-Both the application layout and local fixture now import the same DashboardFrame,
-DashboardNavigation and WorkspaceSwitcher components extracted from the existing
-layout. Marketing and Growth both render DashboardMetricCard. The fixture also
+The local fixture retains DashboardFrame, DashboardNavigation and WorkspaceSwitcher
+components from the archived shared shell. The application uses the current main
+dashboard layout with the Growth navigation entry. Marketing and Growth both render DashboardMetricCard. The fixture also
 compiles the actual global stylesheet through the same Tailwind/PostCSS reset,
 and imports ThemeProvider, ThemeToggle and ALL_TABS. No independent dashboard
 shell remains. Production Growth stays inside the authenticated dashboard layout.
@@ -225,12 +225,12 @@ It never POSTs to the real workspace API. Other modules and logout remain
 unavailable in the isolated fixture. This is visual/component verification,
 not a staging deployment with real login or workspace memberships.
 
-Before pilot activation, repeat PRD AC01–AC38 against the full migrated staging
-schema and real user JWTs. Use independent connections for competing priority
+Before pilot activation, repeat PRD AC01–AC38 against the full migrated isolated
+local schema and real local user JWTs. A public preview is optional when needed. Use independent connections for competing priority
 activations and duplicate decision responses; validate actual Supabase grants,
 workspace switches, source freshness, target effective versions and metric
 parity for company/brand/date scopes. Embedded fixture tests and client fixture
-QA do not replace those staging checks. Run two real weekly cycles to evaluate
+QA do not replace those authenticated database/application checks. Run two real weekly cycles to evaluate
 coordination quality and manual status-request reduction.
 
 ## Rollback
