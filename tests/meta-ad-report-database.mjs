@@ -29,7 +29,9 @@ for (const { name, params: p, raw } of data.cases) {
   const configured = data.accounts.filter(a => config.account_ids.includes(a.account_id));
   const ids = metaBrandAccountIds(configured, data.brands, p.brandId);
   const start = p.view === 'trends' ? shiftDay(p.to, -89) : p.view === 'daily' ? shiftDay(p.from, -1) : shiftDay(p.from, -daysBetween(p.from, p.to));
-  const named = enriched.filter(r => config.account_ids.includes(r.account_id) && r.metric_date >= start && r.metric_date <= p.to
+  // Migration 217: only ads with impressions inside the selected range exist for the report.
+  const activeIds = new Set(enriched.filter(r => config.account_ids.includes(r.account_id) && r.metric_date >= p.from && r.metric_date <= p.to && (Number(r.metrics.impressions) || 0) > 0).map(r => `${r.account_id}:${r.ad_id}`));
+  const named = enriched.filter(r => config.account_ids.includes(r.account_id) && activeIds.has(`${r.account_id}:${r.ad_id}`) && r.metric_date >= start && r.metric_date <= p.to
     && (!config.name_filter || (config.match === 'exact' ? r.ad_name === config.name_filter : r.ad_name.includes(config.name_filter))));
   const branded = named.filter(r => ids.includes(r.account_id));
   const rows = branded.filter(r => matchesAdDimensions(r, p.filters));

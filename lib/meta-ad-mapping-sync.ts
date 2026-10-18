@@ -8,6 +8,17 @@ import { requireExplicitWorkspaceId } from './workspace-scope';
 import { enqueueMetaAdMappingCreatives } from './meta-ad-mapping-queue';
 import { enqueueNewMetaProductSets } from './meta-product-set-queue';
 import { refreshMetaAdDestinations } from './meta-ad-destination-metadata';
+import { shiftDay } from './meta-funnel-domain';
+import { getTodayWIB } from './sync-schedule';
+
+const RECENT_DELIVERY_DAYS = 30;
+/** Ads with impressions in the last 30 days; null until migration 217 is installed (then every ad counts as recent). */
+async function recentlyDeliveredAds(svc: ReturnType<typeof createServiceSupabase>, workspaceId: string, accountId: string): Promise<Set<string> | null> {
+  const today = getTodayWIB();
+  const result = await svc.rpc('get_meta_ad_activity', { p_workspace_id: workspaceId, p_from: shiftDay(today, -(RECENT_DELIVERY_DAYS - 1)), p_to: today, p_account_id: accountId });
+  if (result.error) { if (['42P01', 'PGRST205', '42883', 'PGRST202'].includes(result.error.code)) return null; throw new Error(result.error.message); }
+  return new Set((Array.isArray(result.data) ? result.data : []).map((r: any) => String(r.ad_id)));
+}
 
 const defaultDependencies = { createServiceSupabase, resolveWorkspaceCredential, fetchAdInventory, fetchCreativeBatch, enqueueMetaAdMappingCreatives, refreshMetaAdDestinations, enqueueNewMetaProductSets };
 export async function runMetaAdMappingSync(options: { workspaceId: string; accountId?: string; creativeAdIds?: string[]; parentJobId?: string }, dependencies = defaultDependencies) {
@@ -25,7 +36,7 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
   if (accounts.error) throw new Error(accounts.error.message);
   if (options.accountId && !accounts.data?.length) throw new Error('Akun Meta tidak aktif atau tidak tersedia dalam workspace.');
   const token = await dependencies.resolveWorkspaceCredential({ supabase: svc, workspaceId, provider: 'meta', fallbackEnvKeys: ['META_ACCESS_TOKEN'] });
-  const errors: string[] = []; const warnings: string[] = []; let count = 0; let synced = 0; let creativeJobs = 0; let productSetJobs = 0; let metadataSkipped = 0; const childJobIds: string[] = [];
+  const errors: string[] = []; const warnings: string[] = []; let count = 0; let synced = 0; let creativeJobs = 0; let productSetJobs = 0; let metadataSkipped = 0; let metadataDeferred = 0; const childJobIds: string[] = [];
   for (const account of accounts.data || []) {
     const observedAt = new Date().toISOString();
     try {
@@ -66,6 +77,10 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
       // Finish every inventory page before touching mapping state. No delivery or
       // spend filter: new and paused ads can exist before they have insights.
       const inventory = await dependencies.fetchAdInventory(account.account_id, token);
+      // Rich destination reads are the expensive part. Limit them to ads that
+      // delivered recently or are still active; long-paused ads keep the
+      // metadata they already have until they deliver again.
+      const recent = inventory.length ? await recentlyDeliveredAds(svc, workspaceId, account.account_id) : null;
       const dimensionSchema = await svc.from('meta_ad_mappings').select('campaign_objective').eq('workspace_id', workspaceId).limit(1);
       const dimensionsReady = !dimensionSchema.error;
       const refreshIds: string[] = []; const cachedProductSets = new Set<string>();
@@ -87,7 +102,10 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
         for (const ad of ads) {
           const source = metaMetadataSource(ad);
           const decision = metadataRefreshDecision(source, savedStates.get(ad.id), cached.get(ad.id), savedDestinations.get(ad.id));
-          if (decision === 'refresh') { refreshIds.push(ad.id); invalidated.push(ad.id); }
+          if (decision === 'refresh' && recent && !recent.has(ad.id) && ad.effective_status !== 'ACTIVE') {
+            metadataDeferred++;
+            for (const id of savedDestinations.get(ad.id)?.metadata?.product_set_ids || []) cachedProductSets.add(id);
+          } else if (decision === 'refresh') { refreshIds.push(ad.id); invalidated.push(ad.id); }
           else {
             metadataSkipped++; if (decision === 'adopt') adopted.push({ ad_id: ad.id, ...source });
             for (const id of savedDestinations.get(ad.id)?.metadata?.product_set_ids || []) cachedProductSets.add(id);
@@ -129,5 +147,5 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
       synced++;
     } catch (e) { errors.push(`${account.account_name}: ${e instanceof Error ? e.message : 'Pemetaan ad gagal'}`); }
   }
-  return { status: errors.length ? synced ? 'partial' as const : 'failed' as const : 'success' as const, rows_inserted: count, accounts_synced: synced, accounts_total: accounts.data?.length || 0, creative_jobs_queued: creativeJobs, product_set_jobs_queued: productSetJobs, child_job_ids: childJobIds, metadata_ads_skipped: metadataSkipped, errors, warnings };
+  return { status: errors.length ? synced ? 'partial' as const : 'failed' as const : 'success' as const, rows_inserted: count, accounts_synced: synced, accounts_total: accounts.data?.length || 0, creative_jobs_queued: creativeJobs, product_set_jobs_queued: productSetJobs, child_job_ids: childJobIds, metadata_ads_skipped: metadataSkipped, metadata_ads_deferred: metadataDeferred, errors, warnings };
 }
