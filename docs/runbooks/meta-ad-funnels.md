@@ -42,7 +42,8 @@ rows only carry zero-delivery coverage and ads that only exist in the mapping
 inventory no longer appear in brand totals, facet counts, CEP rows or the
 "Belum ditetapkan" blocks. Spend without impressions on the same day (rare
 Meta corrections) still counts as long as the ad delivered somewhere in the
-range. The comparison period applies the same rule to its own dates.
+range. The comparison period and 90-day history retain the same ad cohort that
+delivered inside the selected range.
 
 Migration 217 also adds `get_meta_ad_activity(workspace, from, to, account)`
 (service role only): per-ad spend, impressions and last delivery date for ads
@@ -261,8 +262,10 @@ can the brand report not read? `lib/meta-ad-worklist.ts` holds the rules;
   partial failures are reported per ad).
 - New bracket terms outside the naming guide are listed with how many ads and
   how much spend still rely on them. "Petakan" writes a manual override to
-  every ad that relies on the term and marks it reviewed
-  (`applyMetaAdMappingUnit`); "Abaikan" only marks it reviewed. There is no
+  up to 300 ads that rely on the term per request and marks it reviewed only
+  after the entire matching set succeeds (`applyMetaAdMappingUnit`). An
+  unfinished batch remains visible; repeat Petakan to continue. Partial failures
+  are shown and the rows reload with their latest revisions; "Abaikan" only marks it reviewed. There is no
   alias table yet: a later ad using the same term needs the same action again.
 - The row drawer shows the parsed brackets, keywords, review notes, the
   destination evidence and channel reason, the verified-URL form (needs a

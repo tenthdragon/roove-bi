@@ -185,3 +185,20 @@ test('rich metadata refresh is limited to ads that delivered in the last 30 days
   const legacyResult = await runMetaAdMappingSync(options, legacy.deps);
   assert.equal(legacyResult.status, 'success'); assert.deepEqual(legacy.queued, [['10']], 'without migration 217 every ad still counts as recent');
 });
+
+test('deferred ads preserve their certification and still enqueue cached product-set verification', async () => {
+  const h = versionedHarness(true); const rpc = h.svc.rpc; const reads: any[] = []; const calls: any[] = []; let deleted = false;
+  const from = h.svc.from; h.svc.from = (table: string) => { const q = from(table); if (table === 'meta_ad_metadata_sync_state') q.delete = () => { deleted = true; return q; }; return q; };
+  h.svc.rpc = async (name: string, args: any) => {
+    if (name === 'get_meta_ad_activity') { reads.push(args); return { data: [], error: null }; }
+    return rpc(name, args);
+  };
+  h.deps.fetchAdInventory = async () => [{ ...versionedAd, effective_status: 'PAUSED', adset: { ...versionedAd.adset, promoted_object: { page_id: 'changed' } } }];
+  h.deps.enqueueNewMetaProductSets = async (...args: any[]) => { calls.push(args); return ['catalog-job']; };
+  const result = await runMetaAdMappingSync(options, h.deps);
+  assert.equal(result.metadata_ads_deferred, 1); assert.deepEqual(h.queued, []);
+  assert.equal(h.filters.some(f => f.table === 'meta_ad_metadata_sync_state'), true);
+  assert.equal(h.writes.some(w => w.table === 'save_meta_ad_metadata_state'), false); assert.equal(deleted, false);
+  assert.deepEqual(calls[0].slice(1, 4), [options.workspaceId, options.accountId, ['500']]);
+  assert.equal((Date.parse(reads[0].p_to) - Date.parse(reads[0].p_from)) / 86400000, 29, 'the inclusive lookback is exactly 30 days');
+});

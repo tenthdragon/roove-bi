@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildWorklist, buildWorklistRows, labelOptions } from '../lib/meta-ad-worklist';
+import { applyMappingUnitBatch, buildWorklist, buildWorklistRows, labelOptions } from '../lib/meta-ad-worklist';
 import { parseAdMapping, type AdMapping } from '../lib/meta-ad-mapping';
 
 const ad = (id: string, name: string, patch: Partial<AdMapping> = {}): AdMapping => ({
@@ -24,7 +24,7 @@ const activity = [
   { account_id: 'act_1', ad_id: '6', spend: 300, impressions: 3000, last_active: '2026-10-14' },
 ];
 const verified = [{ account_id: 'act_1', ad_id: '2', creative_id: 'c2', landing_page_url: 'https://purvu.id/lutut' }];
-const destinations = [{ account_id: 'act_1', ad_id: '6', classification: null, metadata: { destination_type: 'WHATSAPP', urls: [] } }];
+const destinations = [{ account_id: 'act_1', ad_id: '6', creative_id: 'c6', classification: null, metadata: { destination_type: 'WHATSAPP', urls: [] } }];
 
 test('rows rank active ads by spend, read verified, WhatsApp and Shopee destinations, and flag only what the report cannot read', () => {
   const rows = buildWorklistRows({ mappings, activity, verified, destinations, accounts });
@@ -65,4 +65,28 @@ test('new units report how many ads and how much spend still rely on them, and l
   assert.deepEqual(options.slice(0, 5).map(o => o.value), ['skin', 'joint', 'bone', 'hair', 'nail']);
   assert.ok(options.some(o => o.value === 'lupa+rawat+sendi'));
   assert.deepEqual(labelOptions('intention', []).map(o => o.label), ['Discovery', 'Consideration', 'Conversion']);
+});
+
+test('a term with more than 300 ads remains open until the final batch succeeds', async () => {
+  const remaining = Array.from({ length: 301 }, (_, i) => String(i)); let confirmations = 0;
+  const save = async (ids: string[]) => { assert.ok(ids.length <= 300); for (const id of ids) remaining.splice(remaining.indexOf(id), 1); return { saved: ids.length, failed: [] }; };
+  const confirm = async () => { confirmations++; };
+  const first = await applyMappingUnitBatch([...remaining], save, confirm);
+  assert.equal(first.saved, 300); assert.equal(first.truncated, true); assert.equal(confirmations, 0); assert.equal(remaining.length, 1);
+  const last = await applyMappingUnitBatch([...remaining], save, confirm);
+  assert.equal(last.saved, 1); assert.equal(last.truncated, false); assert.equal(confirmations, 1); assert.equal(remaining.length, 0);
+});
+test('partial mapping failures keep the term open and preserve failed ad diagnostics', async () => {
+  let confirmed = false;
+  const result = await applyMappingUnitBatch(['1', '2'], async () => ({ saved: 1, failed: [{ adId: '2', error: 'Revision changed' }] }), async () => { confirmed = true; });
+  assert.equal(confirmed, false); assert.equal(result.saved, 1); assert.deepEqual(result.failed, [{ adId: '2', error: 'Revision changed' }]);
+});
+test('destination evidence from an older creative cannot clear a worklist issue', () => {
+  const changed = ad('7', '[kulit][conv] Changed', { landing_page_urls: [] });
+  for (const metadata of [{ urls: ['https://old.example/'], destination_type: 'WEBSITE' }, { urls: [], destination_type: 'WHATSAPP' }]) {
+    const hint = { account_id: 'act_1', ad_id: '7', creative_id: 'older', classification: null, metadata };
+    const input = { mappings: [changed], activity: [], verified: [], destinations: [hint], accounts };
+    const stale = buildWorklistRows(input)[0]; assert.ok(stale.issues.includes('destination')); assert.deepEqual(stale.urls, []);
+    const current = buildWorklistRows({ ...input, destinations: [{ ...hint, creative_id: 'c7' }] })[0]; assert.ok(!current.issues.includes('destination'));
+  }
 });

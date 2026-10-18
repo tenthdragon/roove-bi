@@ -15,7 +15,7 @@ const RECENT_DELIVERY_DAYS = 30;
 /** Ads with impressions in the last 30 days; null until migration 217 is installed (then every ad counts as recent). */
 async function recentlyDeliveredAds(svc: ReturnType<typeof createServiceSupabase>, workspaceId: string, accountId: string): Promise<Set<string> | null> {
   const today = getTodayWIB();
-  const result = await svc.rpc('get_meta_ad_activity', { p_workspace_id: workspaceId, p_from: shiftDay(today, -RECENT_DELIVERY_DAYS), p_to: today, p_account_id: accountId });
+  const result = await svc.rpc('get_meta_ad_activity', { p_workspace_id: workspaceId, p_from: shiftDay(today, -(RECENT_DELIVERY_DAYS - 1)), p_to: today, p_account_id: accountId });
   if (result.error) { if (['42P01', 'PGRST205', '42883', 'PGRST202'].includes(result.error.code)) return null; throw new Error(result.error.message); }
   return new Set((Array.isArray(result.data) ? result.data : []).map((r: any) => String(r.ad_id)));
 }

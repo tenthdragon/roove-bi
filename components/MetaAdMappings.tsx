@@ -66,7 +66,9 @@ export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId
 
   async function run(work: () => Promise<unknown>, done?: string) {
     setBusy(true); setError(''); setNotice('');
-    try { await work(); if (done) setNotice(done); await load(true); } catch (e) { setError(message(e)); } finally { setBusy(false); }
+    let failure = '';
+    try { await work(); if (done) setNotice(done); } catch (e) { failure = message(e); }
+    finally { await load(true); if (failure) setError(failure); setBusy(false); }
   }
   const cepOptions = useMemo(() => data ? labelOptions('cep', data.rows, data.newUnits) : [], [data]);
   const intentionOptions = useMemo(() => data ? labelOptions('intention', data.rows, data.newUnits) : [], [data]);
@@ -138,7 +140,11 @@ export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId
         <b>{data.units.length} istilah baru pada nama ad</b>
         <p className={styles.muted}>Istilah di luar panduan penamaan. Petakan ke CEP atau intention yang dikenal agar laporan membacanya, atau abaikan jika istilah itu memang disengaja.</p>
         {data.units.map(unit => <UnitRow key={`${unit.dimension}:${unit.unit_key}`} unit={unit} options={options[unit.dimension as 'cep' | 'intention']} busy={busy} canManage={canManage}
-          onApply={target => void run(() => applyMetaAdMappingUnit({ dimension: unit.dimension, unitKey: unit.unit_key, targetKey: target }), `Istilah "${unit.label}" dipetakan ke ${target}.`)}
+          onApply={target => void run(async () => {
+            const result = await applyMetaAdMappingUnit({ dimension: unit.dimension, unitKey: unit.unit_key, targetKey: target });
+            if (result.failed.length) throw new Error(`${result.saved} ad tersimpan, ${result.failed.length} gagal: ${result.failed.slice(0, 3).map(f => `${f.adId} (${f.error})`).join('; ')}`);
+            if (result.truncated) throw new Error(`${result.saved} ad tersimpan. Masih ada ${result.matched - result.saved} ad; ulangi Petakan untuk melanjutkan.`);
+          }, `Istilah "${unit.label}" dipetakan ke ${target}.`)}
           onIgnore={() => void run(() => confirmMetaAdMappingUnit({ dimension: unit.dimension, key: unit.unit_key }), `Istilah "${unit.label}" ditandai sudah diperiksa.`)} />)}
       </div>}
       <div className={styles.toolbar}>

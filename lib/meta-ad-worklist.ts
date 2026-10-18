@@ -13,7 +13,7 @@ export const WORKLIST_ISSUE_LABELS: Record<WorklistIssue, string> = {
   cep: 'CEP belum terpetakan', intention: 'Intention belum terpetakan', destination: 'Tujuan belum terbaca', channel: 'Jenis iklan perlu verifikasi',
 };
 export type AdActivity = { account_id: string; ad_id: string; spend: number; impressions: number; last_active: string | null };
-export type DestinationHint = { account_id: string; ad_id: string; classification: string | null; metadata: { destination_type?: string | null; urls?: string[] } | null };
+export type DestinationHint = { account_id: string; ad_id: string; creative_id: string | null; classification: string | null; metadata: { destination_type?: string | null; urls?: string[] } | null };
 export type WorklistLabel = { key: string | null; label: string; manual: boolean; recognized: boolean };
 export type WorklistRow = {
   account_id: string; ad_id: string; ad_name: string; account_name: string; effective_status: string | null;
@@ -50,7 +50,8 @@ export function buildWorklistRows(input: Pick<WorklistInput, 'mappings' | 'activ
   const names = new Map(input.accounts.map(a => [a.account_id, a.account_name]));
   return input.mappings.map(ad => {
     const key = `${ad.account_id}:${ad.ad_id}`;
-    const delivery = activity.get(key), hint = hints.get(key), verifiedUrl = verified.get(key);
+    const delivery = activity.get(key), candidate = hints.get(key), verifiedUrl = verified.get(key);
+    const hint = ad.creative_id && candidate?.creative_id === ad.creative_id ? candidate : undefined;
     const channel: MetaAdChannel = ad.ad_channel || 'unknown';
     let urls = ad.landing_page_urls, urlSource: WorklistRow['urlSource'] = ad.landing_page_urls.length ? 'meta' : null;
     if (!urls.length && hint?.metadata?.urls?.length) { urls = hint.metadata.urls; urlSource = 'meta'; }
@@ -112,4 +113,13 @@ export function labelOptions(dimension: 'cep' | 'intention', rows: Pick<Worklist
   for (const u of units) if (u.dimension === dimension && !options.has(u.unit_key)) options.set(u.unit_key, u.label);
   for (const r of rows) { const l = r[dimension]; if (l.key && !options.has(l.key)) options.set(l.key, l.label); }
   return [...options].map(([value, text]) => ({ value, label: text }));
+}
+
+/** Leave an unfinished term in the worklist so the next batch can finish it. */
+export async function applyMappingUnitBatch<T>(targets: T[], save: (ads: T[]) => Promise<{ saved: number; failed: { adId: string; error: string }[] }>, confirm: () => Promise<void>) {
+  const batch = targets.slice(0, 300);
+  const result = batch.length ? await save(batch) : { saved: 0, failed: [] };
+  const truncated = targets.length > batch.length;
+  if (!result.failed.length && !truncated) await confirm();
+  return { ...result, matched: targets.length, truncated };
 }

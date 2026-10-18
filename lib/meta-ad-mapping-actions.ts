@@ -11,7 +11,7 @@ import { validateMetaAdChannel, type MetaAdChannel } from './meta-ad-channels';
 import { validateRange } from './meta-funnel-domain';
 import { completedMetaRange } from './meta-report-status';
 import { getTodayWIB } from './sync-schedule';
-import { buildWorklist, WORKLIST_ISSUES, type AdActivity, type DestinationHint, type WorklistIssue } from './meta-ad-worklist';
+import { applyMappingUnitBatch, buildWorklist, WORKLIST_ISSUES, type AdActivity, type DestinationHint, type WorklistIssue } from './meta-ad-worklist';
 
 const MISSING_SCHEMA = ['42P01', 'PGRST205', '42883', 'PGRST202'];
 async function access(manage = false) {
@@ -58,7 +58,7 @@ export async function getMetaAdWorklist(input: { from: string; to: string; page?
     loadAdDimensions(svc, workspaceId),
     loadActivity(svc, workspaceId, range.from, range.to),
     loadVerifiedDestinations(svc, workspaceId),
-    readAll<{ account_id: string; ad_id: string; classification: string | null; destination_type: string | null; urls: string[] | null }>(svc, 'meta_ad_destination_metadata', 'account_id,ad_id,classification,destination_type:metadata->>destination_type,urls:metadata->urls', workspaceId)
+    readAll<{ account_id: string; ad_id: string; creative_id: string | null; classification: string | null; destination_type: string | null; urls: string[] | null }>(svc, 'meta_ad_destination_metadata', 'account_id,ad_id,creative_id,classification,destination_type:metadata->>destination_type,urls:metadata->urls', workspaceId)
       .catch(e => { if (MISSING_SCHEMA.includes(e?.code) || /meta_ad_destination_metadata/.test(String(e?.message))) return []; throw e; }),
     svc.from('meta_ad_mapping_units').select('dimension,unit_key,label,review_status,first_seen_at,last_seen_at').eq('workspace_id', workspaceId).eq('review_status', 'new').neq('dimension', 'keyword').order('dimension').order('unit_key').limit(200),
     svc.from('meta_ad_mapping_sync_state').select('account_id,last_inventory_at,ads_count').eq('workspace_id', workspaceId).in('account_id', ids),
@@ -67,7 +67,7 @@ export async function getMetaAdWorklist(input: { from: string; to: string; page?
   ]);
   for (const result of [units, state, jobs, pendingJobs]) if (result.error) throw new Error(result.error.message);
   const scopedMappings = mappings.filter(m => ids.includes(m.account_id));
-  const destinations: DestinationHint[] = hints.map(h => ({ account_id: h.account_id, ad_id: h.ad_id, classification: h.classification, metadata: { destination_type: h.destination_type, urls: Array.isArray(h.urls) ? h.urls : [] } }));
+  const destinations: DestinationHint[] = hints.map(h => ({ account_id: h.account_id, ad_id: h.ad_id, creative_id: h.creative_id, classification: h.classification, metadata: { destination_type: h.destination_type, urls: Array.isArray(h.urls) ? h.urls : [] } }));
   const list = buildWorklist({ mappings: scopedMappings, activity: activity.rows, verified: verified.rows, destinations, accounts: accounts.data || [], units: (units.data || []) as MappingUnit[],
     includeInactive: !activity.ready || !!input.includeInactive, issue, search: input.search?.slice(0, 200), accountId: input.accountId || null, channel, filters, page: input.page, pageSize: 50 });
   const scope = input.accountId ? [input.accountId] : ids;
@@ -138,7 +138,7 @@ export async function applyMetaAdMappingUnit(input: { dimension: string; unitKey
   const rows = await readAll<Pick<AdMapping, 'account_id' | 'ad_id' | 'auto_mapping' | 'overrides'>>(svc, 'meta_ad_mappings', 'account_id,ad_id,auto_mapping,overrides', workspaceId);
   const targets = rows.filter(r => ids.has(r.account_id) && r.overrides?.[dimension] === undefined && r.auto_mapping?.tags?.some(t => t.dimension === dimension && t.key === input.unitKey))
     .map(r => ({ accountId: r.account_id, adId: r.ad_id }));
-  const result = targets.length ? await saveMetaAdMappingOverridesBulk({ ads: targets.slice(0, 300), [dimension]: input.targetKey }) : { saved: 0, failed: [] as { adId: string; error: string }[] };
-  if (!result.failed.length) await confirmMetaAdMappingUnit({ dimension, key: input.unitKey });
-  return { ...result, matched: targets.length, truncated: targets.length > 300 };
+  return applyMappingUnitBatch(targets,
+    ads => saveMetaAdMappingOverridesBulk({ ads, [dimension]: input.targetKey }),
+    () => confirmMetaAdMappingUnit({ dimension, key: input.unitKey }));
 }
