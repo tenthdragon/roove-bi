@@ -24,17 +24,21 @@ export default function MetaCepDrawer({ cep, label, world, input, metrics, resul
   const [history, setHistory] = useState<{ date: string; totals: Totals; complete: boolean }[]>([]);
   const [metricId, setMetricId] = useState(resultMetric.id);
   const [loading, setLoading] = useState(true); const [error, setError] = useState('');
+  const [historyError, setHistoryError] = useState('');
   const metric = metrics.find(m => m.id === metricId) || resultMetric;
   useEffect(() => {
-    let alive = true; setLoading(true); setError('');
+    let alive = true; setLoading(true); setError(''); setDetail(null); setHistory([]); setHistoryError('');
     const filters = { ...input.filters, cep };
     Promise.all([
       getMetaCepDetail({ from: input.from, to: input.to, brandId: input.brandId, filters: input.filters, world, cep }),
-      getMetaFunnelHistory({ from: input.from, to: input.to, brandId: input.brandId, filters, channel: WORLD_CHANNEL[world], groupBy: 'ad', view: 'trends', period: 'weekly' }).catch(() => null),
+      getMetaFunnelHistory({ from: input.from, to: input.to, brandId: input.brandId, filters, channel: WORLD_CHANNEL[world], groupBy: 'ad', view: 'trends', period: 'weekly' })
+        .catch(() => { if (alive) setHistoryError('Tren CEP belum berhasil dimuat.'); return null; }),
     ]).then(([result, trend]) => {
       if (!alive) return;
-      if (result.schemaReady) setDetail(result);
+      if (!result.schemaReady) throw new Error('Laporan Meta belum siap. Hubungi admin.');
+      setDetail(result);
       if (trend?.schemaReady) setHistory(trend.history);
+      else if (trend) setHistoryError('Tren CEP belum tersedia. Hubungi admin.');
     }).catch(e => { if (alive) setError(message(e)); }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [cep, world, input.from, input.to, input.brandId, input.filters]);
@@ -56,7 +60,7 @@ export default function MetaCepDrawer({ cep, label, world, input, metrics, resul
     <div className={styles.drawerBackdrop} onClick={onClose} aria-hidden="true" />
     <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label={`Detail CEP ${label}`}>
       <div className={styles.drawerHead}>
-        <div><div className={styles.muted}>CEP · {WORLD_LABELS[world]}</div><h2>{label}</h2><div className={styles.muted}>{detail ? `${detail.matchingAds} ad pada periode ini` : 'Memuat…'}</div></div>
+        <div><div className={styles.muted}>CEP · {WORLD_LABELS[world]}</div><h2>{label}</h2><div className={styles.muted}>{detail ? `${detail.matchingAds} ad pada periode ini` : loading ? 'Memuat…' : 'Data belum tersedia'}</div></div>
         <button type="button" className={styles.drawerClose} aria-label="Tutup detail" onClick={onClose}><X size={16} aria-hidden="true" /></button>
       </div>
       {error && <p role="alert" className={styles.error}>{error}</p>}
@@ -69,6 +73,7 @@ export default function MetaCepDrawer({ cep, label, world, input, metrics, resul
         <div className={styles.sectionTitle}><h3 style={{ margin: 0, fontSize: 13 }}>Tren 90 hari</h3>
           <select aria-label="Metrik tren CEP" value={metric.id} onChange={e => setMetricId(e.target.value)} style={{ minHeight: 32, padding: '4px 8px' }}>{metrics.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div>
         <div style={{ marginTop: 8 }}><MetaSparkline values={history.map(p => p.complete ? metricValue(p.totals, metric) : null)} label={`Tren ${metric.label} CEP ${label}`} /></div>
+        {historyError && <p role="status" className={styles.muted}>{historyError}</p>}
         <div className={styles.muted} style={{ fontSize: 11 }}>Mingguan · {history.filter(p => p.complete).length} minggu lengkap</div>
       </div>
       {world === 'website' && <div>

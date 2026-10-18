@@ -1,5 +1,5 @@
 // Only the fixed local Docker clone is accessible; no remote connection option.
-// Install migration 203 before running; the fixture transaction always rolls back.
+// Install the report migrations before running; the fixture transaction always rolls back.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -10,6 +10,10 @@ import { metaReportGroups, metaReportOptions, metaReportHistory } from '../lib/m
 let sql = await readFile(new URL('meta-ad-report-db.sql', import.meta.url), 'utf8');
 if (process.argv.includes('--with-migration')) {
   const migration = (await readFile(new URL('../supabase/migrations/203_meta_ad_report_performance.sql', import.meta.url), 'utf8')).replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
+  sql = sql.replace('CREATE TEMP TABLE report_test_scope', () => `${migration}\nCREATE TEMP TABLE report_test_scope`);
+}
+if (process.argv.includes('--with-cep-migration')) {
+  const migration = (await readFile(new URL('../supabase/migrations/216_meta_cep_intention_report_groups.sql', import.meta.url), 'utf8')).replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
   sql = sql.replace('CREATE TEMP TABLE report_test_scope', () => `${migration}\nCREATE TEMP TABLE report_test_scope`);
 }
 const output = execFileSync('docker', ['exec', '-i', 'supabase_db_roove-bi-local', 'sh', '-c',

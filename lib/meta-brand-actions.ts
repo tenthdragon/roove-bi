@@ -5,15 +5,14 @@
 import { createServiceSupabase } from './service-supabase';
 import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, sumMetricTotals, type FunnelMetric, type Totals } from './meta-funnel-domain';
 import { loadFunnels, loadTemplateRules } from './meta-funnel-store';
-import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaReport, type ReportGroupBy } from './meta-ad-report';
+import { metaReportQuery, metaReportOptions, metaReportCepShares, type MetaReportInput, type RawMetaReport, type ReportGroupBy } from './meta-ad-report';
 import { getCachedMetaAdReport } from './meta-ad-report-data';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
 import { metaCoverageGaps } from './meta-report-status';
 import { assignTemplateSections, compareMetrics, cpasSection, defaultLeadFunnel, matchDestinationTemplate, responseMetrics, suggestTemplate, templateKind, templateMainMetric, validateTemplateRule, WORLD_CHANNEL, type MetaBrandWorld, type MetricComparison, type ReportGroup, type TemplateRule } from './meta-funnel-templates';
 import { ctwaLabel } from './meta-ctwa-destinations';
 import { brandHealth, brandHighlights, type Highlight } from './meta-ad-highlights';
-import { buildCepView, cepHighlights, UNKNOWN_KEY } from './meta-cep-view';
-import { dimensionLabel } from './meta-ad-dimensions';
+import { buildCepView, cepHighlights } from './meta-cep-view';
 import { manageAccess, reportContext, reportingAccess, uuid } from './meta-report-context';
 import { defaultFunnel } from './meta-funnel-domain';
 import { saveMetaFunnel } from './meta-funnel-actions';
@@ -46,16 +45,9 @@ function fetchWorld(ctx: Context, world: MetaBrandWorld, brandId: string | undef
   const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: groupBy || (world === 'website' ? 'landing_page' : 'ad') }, ctx.config, view);
   return getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query);
 }
-/** CEP × intention cells for every ad of a brand, across both worlds, for the overview share bar. */
+/** Use the same two channel scopes as the brand overview totals. */
 function fetchCepShares(ctx: Context, brandId: string) {
-  const query = metaReportQuery({ ...ctx.input, brandId, channel: undefined, groupBy: 'cep_intention' }, ctx.config);
-  return getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query).then(raw => {
-    const byCep = new Map<string, number>();
-    for (const g of raw.groups) { const cep = g.key.split(':')[1] || UNKNOWN_KEY; byCep.set(cep, (byCep.get(cep) || 0) + (Number(g.current.spend) || 0)); }
-    const total = [...byCep.values()].reduce((a, b) => a + b, 0);
-    return [...byCep].map(([cep, spend]) => ({ cep, label: cep === UNKNOWN_KEY ? 'Belum terpetakan' : dimensionLabel('cep', cep), share: total > 0 ? spend / total : 0 }))
-      .sort((a, b) => Number(a.cep === UNKNOWN_KEY) - Number(b.cep === UNKNOWN_KEY) || b.share - a.share);
-  });
+  return metaReportCepShares({ ...ctx.input, brandId }, ctx.config, query => getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query));
 }
 /** The lead cost metric follows whichever lead-type event the brand actually records. */
 function leadCostMetric(totals: Totals): FunnelMetric { return totals.leads > 0 || totals.conversations === 0 ? CPL : CPC_CONVERSATION; }

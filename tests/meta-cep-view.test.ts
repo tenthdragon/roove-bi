@@ -75,6 +75,44 @@ test('heat is a capped signed log ratio against the CEP median with direction ap
   assert.ok(Math.abs(cepHeat(1.5, 1, 'higher')! - Math.log2(1.5)) < 1e-9);
   assert.equal(cepHeat(8, 1, 'higher'), 1); assert.equal(cepHeat(null, 1, 'higher'), null); assert.equal(cepHeat(1, 0, 'higher'), null);
 });
+test('WhatsApp conversation results use conversation cost and progress without requiring LPV', () => {
+  const summary = totals({ spend: 3000, conversations: 60 });
+  const result = cepResultMetric('website', summary);
+  assert.equal(result.id, 'cost_per_conversation');
+  assert.equal(metricValue(summary, result), 50);
+  assert.equal(cepResultMetric('website', totals({ purchases: 70, conversations: 60 })).id, 'cpp');
+  assert.equal(cepResultMetric('website', totals({ leads: 80, conversations: 60 })).id, 'cpl');
+  assert.equal(cepFunnelMetric('website', result).id, 'conversation_per_click');
+  assert.deepEqual(cepProgressMetrics('website', result).map(m => m.id), ['conversation_per_click']);
+  const view = buildCepView([
+    cell('a', 'disc', { spend: 1000, impressions: 10000, outbound_clicks: 200, conversations: 10 }),
+    cell('b', 'disc', { spend: 1000, impressions: 10000, outbound_clicks: 200, conversations: 30 }),
+    cell('c', 'disc', { spend: 1000, impressions: 10000, outbound_clicks: 200, conversations: 30 }),
+  ], 'website', summary, totals({}));
+  assert.equal(cepCostDiagnosis(view, view.rows.find(r => r.cep === 'a')!).cause, 'funnel');
+});
+test('missing or insufficient funnel observations cannot be called normal or used to rule out a destination problem', () => {
+  for (const lpv of [0, 5]) {
+    const view = buildCepView([
+      cell('a', 'disc', { spend: 1000, impressions: 100000, outbound_clicks: 500, lpv, purchases: 10 }),
+      cell('b', 'disc', { spend: 1000, impressions: 100000, outbound_clicks: 2000, lpv: 1600, purchases: 80 }),
+      cell('c', 'disc', { spend: 1000, impressions: 100000, outbound_clicks: 2000, lpv: 1600, purchases: 80 }),
+    ], 'website', totals({ spend: 3000, purchases: 170 }), totals({}));
+    const diagnosis = cepCostDiagnosis(view, view.rows.find(r => r.cep === 'a')!);
+    assert.equal(diagnosis.cause, 'unknown'); assert.equal(diagnosis.funnelGap, null);
+    assert.equal(view.medians.purchase_per_lpv, 0.05, 'low-sample CEPs do not distort the benchmark');
+    assert.match(diagnosis.text, /belum cukup/);
+    assert.doesNotMatch(diagnosis.text, /normal|bukan landing page|lebih mungkin dari CPM/);
+  }
+});
+test('missing response observations or a zero benchmark leave cost attribution undetermined', () => {
+  const view = buildCepView(groups, 'website', summary, summary);
+  const row = view.rows[0];
+  const withoutResponse = { ...row, current: { ...row.current, impressions: 0 } };
+  assert.equal(cepCostDiagnosis(view, withoutResponse).cause, 'unknown');
+  assert.equal(cepCostDiagnosis(view, withoutResponse).responseGap, null);
+  assert.match(cepCostDiagnosis({ ...view, medians: { ...view.medians, purchase_per_lpv: 0 } }, row).text, /belum cukup/);
+});
 test('CEP highlights flag the costly CEP, the promising CEP, a weakening CEP, and unmapped spend', () => {
   const view = buildCepView(groups, 'website', summary, summary);
   const highlights = cepHighlights(view, 'IDR');

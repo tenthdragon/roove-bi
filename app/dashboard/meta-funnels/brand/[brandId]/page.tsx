@@ -242,7 +242,7 @@ export default function MetaBrandDetailPage() {
         </section>
       </>}
     </>}
-    {cepDrawer && data && <MetaCepDrawer cep={cepDrawer} label={data.cep.rows.find(r => r.cep === cepDrawer)?.label || cepDrawer} world={world} input={{ from: data.reportRange.from, to: data.reportRange.to, brandId, filters }} metrics={data.cep.metrics} resultMetric={data.cep.resultMetric} currency={currency} onClose={() => setCepDrawer(null)} />}
+    {cepDrawer && data && <MetaCepDrawer key={JSON.stringify([cepDrawer, world, brandId, data.reportRange, filters])} cep={cepDrawer} label={data.cep.rows.find(r => r.cep === cepDrawer)?.label || cepDrawer} world={world} input={{ from: data.reportRange.from, to: data.reportRange.to, brandId, filters }} metrics={data.cep.metrics} resultMetric={data.cep.resultMetric} currency={currency} onClose={() => setCepDrawer(null)} />}
     {drawer && data && <MetaGroupDrawer group={drawer.group} section={drawer.section} world={world} input={{ from: data.reportRange.from, to: data.reportRange.to, brandId, filters }} currency={currency} onClose={() => setDrawer(null)} />}
     {notesOpen && data && <>
       <div className={styles.drawerBackdrop} onClick={() => setNotesOpen(false)} aria-hidden="true" />

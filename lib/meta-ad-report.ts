@@ -54,6 +54,21 @@ export function metaReportHistory(raw: RawMetaReport, config: FunnelConfig, view
   return view === 'daily' ? points.slice(1).map((p, i) => ({ ...p, previousMetrics: points[i].metrics })) : points;
 }
 
+// Match the brand overview's Website + CPAS spend. Unverified-channel ads are
+// outside both worlds and must not dilute their CEP shares.
+export async function metaReportCepShares(input: MetaReportInput, config: FunnelConfig, fetchReport: (query: ReportQuery) => Promise<RawMetaReport>) {
+  const reports = await Promise.all((['non_cpas', 'cpas'] as const).map(channel =>
+    fetchReport(metaReportQuery({ ...input, channel, groupBy: 'cep_intention' }, config))));
+  const byCep = new Map<string, number>();
+  for (const raw of reports) for (const g of raw.groups) {
+    const cep = g.key.split(':')[1] || '__unknown__';
+    byCep.set(cep, (byCep.get(cep) || 0) + (Number(g.current.spend) || 0));
+  }
+  const total = [...byCep.values()].reduce((a, b) => a + b, 0);
+  return [...byCep].map(([cep, spend]) => ({ cep, label: cep === '__unknown__' ? 'Belum terpetakan' : dimensionLabel('cep', cep), share: total > 0 ? spend / total : 0 }))
+    .sort((a, b) => Number(a.cep === '__unknown__') - Number(b.cep === '__unknown__') || b.share - a.share);
+}
+
 // Fetch each brand before aggregation: a landing page or ad name can be shared
 // across brands, and its global totals cannot be split safely in the browser.
 export async function metaReportBrandSections(
