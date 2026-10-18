@@ -1,6 +1,6 @@
 # Isolated local development
 
-Use `npm run dev:local`, not plain `npm run dev`, when developing against the
+Both `npm run dev` and `npm run dev:local` use the isolated
 local copy of Roove BI. It binds the app to `127.0.0.1:3130`, uses local Supabase
 at `127.0.0.1:54321`, masks dotenv integration secrets and blocks external
 fetch/HTTP calls. No production sync worker or webhook forwarding is started.

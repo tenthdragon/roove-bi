@@ -26,7 +26,7 @@ in `main`; the Shopee branch contains the additional unfinished work.
 
 ## Local development
 
-Use `npm run dev:local` with isolated Supabase. See [local-development.md](local-development.md).
+Both `npm run dev` and `npm run dev:local` use isolated Supabase. See [local-development.md](local-development.md).
 It masks production dotenv keys and blocks external integrations. Do not run a
 sync worker or forward production webhooks into the local snapshot.
 

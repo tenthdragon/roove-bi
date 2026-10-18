@@ -9,8 +9,8 @@ requested production release. Read `docs/runbooks/development-staging-production
 - Unfinished Growth and Shopee enhancements live on `codex/growth-execution` and
   `codex/shopee-development`. Do not merge the archived combined staging branch
   wholesale into `main`. Shared dependencies must be reviewed explicitly.
-- Use `npm run dev:local` for development. Plain `npm run dev` may read production
-  dotenv settings. Local Supabase is a separate database; code branches/worktrees
+- Both `npm run dev` and `npm run dev:local` launch isolated local development
+  and mask production dotenv settings. Local Supabase is a separate database; code branches/worktrees
   do not isolate a shared database. Coordinate schema writes and never reset an
   existing snapshot to switch features.
 - Keep `.local/`, credentials, database copies and test sessions out of Git.
