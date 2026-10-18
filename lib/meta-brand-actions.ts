@@ -3,6 +3,7 @@
 // Brand-first Meta Ads reporting: one summary per brand, one detail per brand
 // and world (website or CPAS), and template rule management.
 import { createServiceSupabase } from './service-supabase';
+import { metaReportResponse } from './meta-report-requests';
 import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, sumMetricTotals, type FunnelMetric, type Totals } from './meta-funnel-domain';
 import { loadFunnels, loadTemplateRules } from './meta-funnel-store';
 import { metaReportQuery, metaReportOptions, metaReportCepShares, type MetaReportInput, type RawMetaReport, type ReportGroupBy } from './meta-ad-report';
@@ -83,6 +84,9 @@ function mergeHighlights(...lists: (Highlight & { world: MetaBrandWorld })[][]) 
 }
 
 export async function getMetaBrandOverview(input: BrandInput) {
+  return metaReportResponse(() => loadMetaBrandOverview(input));
+}
+async function loadMetaBrandOverview(input: BrandInput) {
   const ctx = await reportContext({ from: input.from, to: input.to, filters: input.filters }, true);
   if (!ctx.schemaReady) return ctx;
   const rules = await loadTemplateRules(createServiceSupabase(), ctx.workspaceId);
@@ -95,7 +99,8 @@ export async function getMetaBrandOverview(input: BrandInput) {
     highlights: (Highlight & { world: MetaBrandWorld })[]; dataNotes: number; summary: Totals; previous: Totals;
     cepShares: { cep: string; label: string; share: number }[];
   }[] = [];
-  // Two brands at a time bounds concurrent database work; each brand reads both worlds.
+  // Each brand reads both worlds and CEP shares. The cache loader separately
+  // limits actual RPC concurrency across brands, routes and repeated requests.
   for (let offset = 0; offset < choices.length; offset += 2) {
     const batch = await Promise.all(choices.slice(offset, offset + 2).map(async brand => {
       const brandAccounts = metaBrandAccountIds(ctx.accounts, ctx.brands, brand.value);
@@ -128,6 +133,9 @@ export async function getMetaBrandOverview(input: BrandInput) {
 }
 
 export async function getMetaBrandDetail(input: BrandInput & { brandId: string; world: MetaBrandWorld }) {
+  return metaReportResponse(() => loadMetaBrandDetail(input));
+}
+async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world: MetaBrandWorld }) {
   const world = validateWorld(input.world);
   const brandId = validateMetaBrandFilter(input.brandId);
   if (!brandId) throw new Error('Pilih brand terlebih dahulu.');

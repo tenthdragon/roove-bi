@@ -703,3 +703,18 @@ The light `/ads` inventory still discovers all ads, including paused/no-spend ad
 The worker drains sequentially up to 100 jobs or 240 seconds per invocation, then resumes on the existing minute timer. The time budget is checked between jobs and never interrupts an in-flight provider request. Meta remains scheduled once at 17:00 WIB; deployment and page reads never enqueue a sync. Deploy the new worker override only after the previous sync and worker have completed, with the previous override backed up for rollback.
 
 Validate migration 215 on a local clone with `npm run test:meta-incremental-db` (or add `-- --with-migration` before it is installed). The fixture transaction rolls back and checks descendant counts, legacy compatibility, workspace/provider isolation, cache certification and deferred URL resolution without changing metric facts.
+
+### Report database load
+
+The application permits at most two report RPC cache misses at once per process,
+including requests from different brands/routes. Identical workspace, revision
+and query scopes share an in-flight request; different scopes never share a result.
+The five-minute cache and database revision invalidation still apply. This avoids
+the overview's two-brand batch launching eight expensive queries simultaneously.
+Expected database failures return a safe retry message in overview/detail.
+
+For release verification, test authenticated overview and both brand worlds with
+an uncached month-to-date range as well as seven days. The 1–17 October incident
+passed isolated RPC checks but exceeded the database's eight-second limit when
+the page launched its reports together. No database timeout increase or additional
+migration is required for this application concurrency fix.

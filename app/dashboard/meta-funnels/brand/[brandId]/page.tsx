@@ -76,6 +76,7 @@ export default function MetaBrandDetailPage() {
     try {
       const result = await getMetaBrandDetail({ ...input, world });
       if (current !== request.current) return;
+      if ('reportError' in result) { setError(result.reportError); return; }
       setSchemaReady(result.schemaReady);
       if (result.schemaReady) setData(result);
     } catch (e) { if (current === request.current) setError(message(e)); }
