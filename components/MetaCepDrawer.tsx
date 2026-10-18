@@ -8,6 +8,7 @@ import { metricValue, relativeChange, type FunnelMetric, type Totals } from '@/l
 import { WORLD_CHANNEL, WORLD_LABELS, type MetaBrandWorld } from '@/lib/meta-funnel-templates';
 import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
 import { formatChange, formatCompactMoney, formatMetric } from '@/lib/meta-format';
+import { cepProgressMetrics } from '@/lib/meta-cep-view';
 import MetaSparkline from './MetaSparkline';
 import styles from '@/app/dashboard/meta-funnels/page.module.css';
 
@@ -44,9 +45,11 @@ export default function MetaCepDrawer({ cep, label, world, input, metrics, resul
   const now = detail ? metricValue(detail.summary, resultMetric) : null, before = detail ? metricValue(detail.previous, resultMetric) : null;
   const change = relativeChange(now, before);
   const good = change === null ? null : resultMetric.direction === 'higher' ? change >= 0 : change <= 0;
-  const Row = ({ name, sub, current, previous }: { name: string; sub: string; current: Totals; previous: Totals }) => {
+  const progress = cepProgressMetrics(world, resultMetric);
+  const Row = ({ name, sub, current, previous, funnel }: { name: string; sub: string; current: Totals; previous: Totals; funnel?: boolean }) => {
     const a = metricValue(current, resultMetric), b = metricValue(previous, resultMetric), d = relativeChange(a, b);
-    return <div className={styles.adRow}><div><b title={name}>{name}</b><small>{sub} · {formatCompactMoney(current.spend, currency)}</small></div>
+    return <div className={styles.adRow}><div><b title={name}>{name}</b><small>{sub} · {formatCompactMoney(current.spend, currency)}</small>
+      {funnel && <small>{progress.map(m => `${m.label} ${formatMetric(metricValue(current, m), m.format, currency)}`).join(' · ')}</small>}</div>
       <div className={styles.adResult}>{resultMetric.label} {formatMetric(a, resultMetric.format, currency)}<br /><small className={d === null ? styles.neutral : (resultMetric.direction === 'higher' ? d >= 0 : d <= 0) ? styles.good : styles.bad}>{formatChange(d)}</small></div></div>;
   };
   return <>
@@ -69,9 +72,9 @@ export default function MetaCepDrawer({ cep, label, world, input, metrics, resul
         <div className={styles.muted} style={{ fontSize: 11 }}>Mingguan · {history.filter(p => p.complete).length} minggu lengkap</div>
       </div>
       {world === 'website' && <div>
-        <div className={styles.sectionTitle}><h3 style={{ margin: 0, fontSize: 13 }}>Tujuan yang dipakai CEP ini</h3><span>{detail?.destinations.length || 0} tujuan · urut spend</span></div>
+        <div className={styles.sectionTitle}><h3 style={{ margin: 0, fontSize: 13 }}>Tujuan yang dipakai CEP ini</h3><span>{detail?.destinations.length || 0} tujuan · progres funnel per tujuan</span></div>
         {loading && <p role="status" className={styles.muted}>Memuat…</p>}
-        <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>{detail?.destinations.map(d => <Row key={d.key} name={d.name} sub={`${d.ads} ad · ${d.accounts.join(', ')}`} current={d.current} previous={d.previous} />)}</div>
+        <div style={{ display: 'grid', gap: 6, marginTop: 8 }}>{detail?.destinations.map(d => <Row key={d.key} name={d.name} sub={`${d.ads} ad · ${d.accounts.join(', ')}`} current={d.current} previous={d.previous} funnel />)}</div>
       </div>}
       <div>
         <div className={styles.sectionTitle}><h3 style={{ margin: 0, fontSize: 13 }}>Ad teratas</h3><span>{detail?.ads.length || 0} ad · urut spend</span></div>

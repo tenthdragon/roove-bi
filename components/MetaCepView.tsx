@@ -24,8 +24,9 @@ function Delta({ value, direction }: { value: number | null; direction: FunnelMe
 
 /** CEP × intention matrix plus one row per CEP; the matrix compares against the CEP median, never the brand total. */
 export default function MetaCepView({ view, currency, onOpenCep }: { view: CepView; currency: string; onOpenCep: (cep: string) => void }) {
-  const [metricId, setMetricId] = useState('');
-  const forced = view.metrics.find(m => m.id === metricId) || null;
+  const [metricId, setMetricId] = useState('outbound_ctr');
+  const response = view.responseMetrics.find(m => m.id === metricId) || view.responseMetrics[1] || view.responseMetrics[0];
+  const result = view.resultMetric;
   if (!view.rows.length) return <div className={styles.card}>Belum ada ad dengan data pada periode dan filter ini.</div>;
   const columnMedian = (columnMetric: FunnelMetric, intention: string) => {
     const values = view.rows.filter(r => !r.unknown).map(r => { const c = r.cells[intention]; return c ? metricValue(c.current, columnMetric) : null; }).filter((v): v is number => v !== null).sort((a, b) => a - b);
@@ -36,28 +37,28 @@ export default function MetaCepView({ view, currency, onOpenCep }: { view: CepVi
   return <div style={{ display: 'grid', gap: 12 }}>
     <div className={styles.sectionCard}>
       <div className={styles.sectionHead}>
-        <div><span className={styles.templateTag}>MATRIKS</span><strong>CEP × intention</strong><span>{view.mapped} CEP terpetakan · {Math.round(view.unknownShare * 100)}% spend tanpa CEP</span></div>
+        <div><span className={styles.templateTag}>MATRIKS</span><strong>CEP × intention</strong><span>Respon iklan per sel, {result.label} sebagai ujungnya · {view.mapped} CEP terpetakan · {Math.round(view.unknownShare * 100)}% spend tanpa CEP</span></div>
         <div className={styles.actions}>
           <span className={styles.heatLegend}>lebih buruk <i aria-hidden="true" /> lebih baik dari median CEP</span>
-          <select aria-label="Metrik sel" value={forced?.id || ''} onChange={e => setMetricId(e.target.value)}>
-            <option value="">Metrik per intention (default)</option>
-            {view.metrics.map(m => <option key={m.id} value={m.id}>Semua sel: {m.label}</option>)}
+          <select aria-label="Metrik respon" value={response.id} onChange={e => setMetricId(e.target.value)}>
+            {view.responseMetrics.map(m => <option key={m.id} value={m.id}>Respon: {m.label}</option>)}
           </select>
         </div>
       </div>
       <div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}>
         <table className={styles.cepMatrix}>
-          <thead><tr><th scope="col">CEP</th>{view.columns.map(col => { const m = forced || col.metric; return <th key={col.intention} scope="col" title={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}` : MEASURES[m.numerator]}>{col.label}<small>{m.label} · {Math.round(col.spendShare * 100)}% spend</small></th>; })}</tr></thead>
+          <thead><tr><th scope="col">CEP</th>{view.columns.map(col => <th key={col.intention} scope="col" title={response.denominator ? `${MEASURES[response.numerator]} ÷ ${MEASURES[response.denominator]}` : MEASURES[response.numerator]}>{col.label}<small>{response.label} · {result.label} · {Math.round(col.spendShare * 100)}% spend</small></th>)}</tr></thead>
           <tbody>{view.rows.map(row => <tr key={row.cep}>
             <td>{row.unknown ? <span className={styles.cepUnknown}>{row.label}</span> : <button type="button" className={styles.cepName} onClick={() => onOpenCep(row.cep)}>{row.label}</button>}
               <small>{formatCompactMoney(row.current.spend, currency)} · {Math.round(row.spendShare * 100)}% · {row.ads} ad</small></td>
             {view.columns.map(col => {
-              const cell = row.cells[col.intention]; const m = forced || col.metric;
+              const cell = row.cells[col.intention];
               if (!cell) return <td key={col.intention}><span className={styles.cepCellEmpty}>—</span></td>;
-              const value = metricValue(cell.current, m);
-              const heat = row.unknown ? null : cepHeat(value, columnMedian(m, col.intention), m.direction);
+              const value = metricValue(cell.current, response), cost = metricValue(cell.current, result);
+              const heat = row.unknown ? null : cepHeat(value, columnMedian(response, col.intention), response.direction);
               return <td key={col.intention}><div className={styles.cepCell} style={heatStyle(heat)}>
-                <strong>{formatMetric(value, m.format, currency)}</strong>
+                <strong>{formatMetric(value, response.format, currency)}</strong>
+                <small>{result.label} {formatMetric(cost, result.format, currency)}</small>
                 <small>{formatCompactMoney(cell.current.spend, currency)} · {cell.ads} ad</small>
               </div></td>;
             })}
@@ -66,7 +67,7 @@ export default function MetaCepView({ view, currency, onOpenCep }: { view: CepVi
       </div>
     </div>
     <div className={styles.sectionCard}>
-      <div className={styles.sectionHead}><div><span className={styles.templateTag}>PER CEP</span><strong>Respon dan hasil per CEP</strong><span>Perubahan dibanding periode lalu · diurutkan menurut spend</span></div>
+      <div className={styles.sectionHead}><div><span className={styles.templateTag}>PER CEP</span><strong>Respon iklan per CEP, dengan {result.label} sebagai ujungnya</strong><span>Rasio progres funnel ada di tampilan Tujuan · diurutkan menurut spend</span></div>
         <span>Median CEP · {view.resultMetric.label} {formatMetric(view.medians[view.resultMetric.id] ?? null, view.resultMetric.format, currency)}</span></div>
       <div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}>
         <table className={styles.cepTable}>
@@ -83,6 +84,6 @@ export default function MetaCepView({ view, currency, onOpenCep }: { view: CepVi
         </table>
       </div>
     </div>
-    <p className={styles.muted}>CEP dan intention dibaca dari dua bracket pertama nama ad, atau koreksi manual di Pemetaan Ads. Warna membandingkan dengan median CEP di kolom yang sama, bukan dengan total brand. Baris "Belum terpetakan" tetap ditampilkan agar porsi spend tanpa tag tidak tersembunyi.</p>
+    <p className={styles.muted}>CEP dan intention dibaca dari dua bracket pertama nama ad, atau koreksi manual di Pemetaan Ads. Kacamata CEP menilai respon terhadap iklan; kualitas landing page dinilai di tampilan Tujuan; {result.label} adalah ujung keduanya. Warna membandingkan dengan median CEP di kolom yang sama, bukan dengan total brand. Baris "Belum terpetakan" tetap ditampilkan agar porsi spend tanpa tag tidak tersembunyi.</p>
   </div>;
 }

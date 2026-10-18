@@ -88,19 +88,27 @@ for a missing tag, so unmapped spend stays visible as its own row and column.
 CTWA destinations are not resolved in this mode; the cell is the unit.
 
 The view shows a matrix (rows = CEP, columns = intention in discovery →
-consideration → conversion order, unmapped last) and one row per CEP with the
-shared response metrics, ATC ratio on Website, and the world's result cost (CPP
-where purchases dominate, else CPL; always CPP on CPAS). Each intention column
-defaults to its own success metric: discovery by CTR outbound, consideration by
-ATC ratio (purchase per click on CPAS), conversion by the result cost; a
-selector forces one metric across all cells. Cell and row colours compare
-against the median of mapped CEPs in that column or metric, never the brand
-total; the signed log ratio is capped at 2× either way. Clicking a CEP opens a
-drawer with its 90-day weekly trend, the destinations carrying it (Website
-only) and its top ads, read through the existing `cep` filter.
+consideration → conversion order, unmapped last) and one row per CEP. The CEP
+lens judges **ad response**: CPM, CTR outbound, hook rate and LPV ratio
+(purchase per click on CPAS), with the world's result cost (CPP where purchases
+dominate, else CPL; always CPP on CPAS) as the shared end point. Funnel
+progression ratios (ATC, IC, purchase ratio) stay in the Tujuan view, where
+they belong to the destination. Every matrix cell shows one selectable response
+metric (default CTR outbound) above the result cost; cell and row colours
+compare against the median of mapped CEPs in that column or metric, never the
+brand total, with the signed log ratio capped at 2× either way. Clicking a CEP
+opens a drawer with its 90-day weekly trend, the destinations carrying it
+(Website only, each with ATC ratio and CR against the result cost) and its top
+ads, read through the existing `cep` filter.
+
+A costly CEP is attributed before it is reported: its CTR outbound against the
+CEP median says whether the ad is the cause, and its progress after the click
+(purchases ÷ LPV, leads ÷ LPV for lead worlds, purchases ÷ outbound on CPAS)
+against the CEP median says whether the destination is. Either gap of 15% or
+more names the cause: response, funnel, both, or neither.
 
 Highlights gain CEP rules: a costly CEP (≥ 15% of spend and result cost ≥ 1.5×
-the CEP median, ≥ 3 mapped CEPs), a promising CEP (CTR ≥ 1.25× median with
+the CEP median, ≥ 3 mapped CEPs, with the diagnosis above in its text), a promising CEP (CTR ≥ 1.25× median with
 spend share at or below the median and cost not above median), a CEP whose CTR
 fell ≥ 20% with ≥ 10% of spend, and a data note when ≥ 20% of spend has no CEP
 tag. Ringkasan brand shows a spend-share bar per CEP under each brand name,

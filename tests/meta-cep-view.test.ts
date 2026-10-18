@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { adGroup, defaultFunnel, emptyTotals, metricValue, type AdFact } from '../lib/meta-funnel-domain';
-import { buildCepView, cepHeat, cepHighlights, cepResultMetric, intentionMetric, parseCepKey } from '../lib/meta-cep-view';
+import { buildCepView, cepCostDiagnosis, cepFunnelMetric, cepHeat, cepHighlights, cepProgressMetrics, cepResultMetric, parseCepKey } from '../lib/meta-cep-view';
 import type { ReportGroup } from '../lib/meta-funnel-templates';
 
 const totals = (patch: Partial<ReturnType<typeof emptyTotals>>) => ({ ...emptyTotals(), ...patch });
@@ -40,13 +40,35 @@ test('the matrix orders intentions discovery → consideration → conversion, p
   assert.equal(view.resultMetric.id, 'cpp');
   assert.equal(view.medians.cpp, (100 + 7000 / 60) / 2, 'median of joint 312.5, skin 116.7, hair 100, nail 100');
 });
-test('intention metrics judge discovery by response, consideration by ATC, conversion by result cost; CPL when leads dominate', () => {
+test('the CEP lens lists response metrics plus the result cost, never a funnel ratio; CPL when leads dominate', () => {
   const cpp = cepResultMetric('website', totals({ purchases: 10, leads: 2 })), cpl = cepResultMetric('website', totals({ purchases: 1, leads: 20 }));
   assert.equal(cpp.id, 'cpp'); assert.equal(cpl.id, 'cpl'); assert.equal(cepResultMetric('cpas', totals({ leads: 99 })).id, 'cpp');
-  assert.equal(intentionMetric('disc', 'website', cpp).id, 'outbound_ctr');
-  assert.equal(intentionMetric('cons', 'website', cpp).id, 'atc_rate');
-  assert.equal(intentionMetric('cons', 'cpas', cpp).id, 'purchase_per_click');
-  assert.equal(intentionMetric('conv', 'website', cpl).id, 'cpl');
+  const view = buildCepView(groups, 'website', summary, summary);
+  assert.deepEqual(view.metrics.map(m => m.id), ['cpm', 'outbound_ctr', 'hook_rate', 'lpv_rate', 'cpp']);
+  assert.equal(view.funnelMetric.id, 'purchase_per_lpv'); assert.ok('purchase_per_lpv' in view.medians);
+  assert.equal(cepFunnelMetric('website', cpl).id, 'lead_per_lpv'); assert.equal(cepFunnelMetric('cpas', cpp).id, 'purchase_per_click');
+  assert.deepEqual(cepProgressMetrics('website', cpp).map(m => m.id), ['atc_rate', 'purchase_per_lpv']);
+  assert.deepEqual(cepProgressMetrics('cpas', cpp).map(m => m.id), ['purchase_per_click']);
+});
+test('a costly CEP is attributed to ad response, the funnel, both, or neither', () => {
+  const view = buildCepView(groups, 'website', summary, summary);
+  const joint = view.rows.find(r => r.cep === 'joint')!;
+  const diagnosis = cepCostDiagnosis(view, joint);
+  assert.equal(diagnosis.cause, 'both', JSON.stringify(diagnosis));
+  assert.match(diagnosis.text, /karena keduanya/);
+  const responseOnly = buildCepView([
+    cell('a', 'disc', { spend: 1000, impressions: 100000, outbound_clicks: 500, lpv: 400, purchases: 20 }),
+    cell('b', 'disc', { spend: 1000, impressions: 100000, outbound_clicks: 2000, lpv: 1600, purchases: 80 }),
+    cell('c', 'disc', { spend: 1000, impressions: 100000, outbound_clicks: 2000, lpv: 1600, purchases: 80 }),
+  ], 'website', totals({ spend: 3000, purchases: 180 }), totals({}));
+  assert.equal(cepCostDiagnosis(responseOnly, responseOnly.rows.find(r => r.cep === 'a')!).cause, 'response');
+  const funnelOnly = buildCepView([
+    cell('a', 'disc', { spend: 1000, impressions: 100000, outbound_clicks: 2000, lpv: 1600, purchases: 20 }),
+    cell('b', 'disc', { spend: 1000, impressions: 100000, outbound_clicks: 2000, lpv: 1600, purchases: 80 }),
+    cell('c', 'disc', { spend: 1000, impressions: 100000, outbound_clicks: 2000, lpv: 1600, purchases: 80 }),
+  ], 'website', totals({ spend: 3000, purchases: 180 }), totals({}));
+  assert.equal(cepCostDiagnosis(funnelOnly, funnelOnly.rows.find(r => r.cep === 'a')!).cause, 'funnel');
+  assert.equal(cepCostDiagnosis(funnelOnly, funnelOnly.rows.find(r => r.cep === 'b')!).cause, 'unknown');
 });
 test('heat is a capped signed log ratio against the CEP median with direction applied', () => {
   assert.equal(cepHeat(2, 1, 'higher'), 1); assert.equal(cepHeat(2, 1, 'lower'), -1);
@@ -59,6 +81,7 @@ test('CEP highlights flag the costly CEP, the promising CEP, a weakening CEP, an
   const byTitle = Object.fromEntries(highlights.map(h => [h.title, h]));
   assert.equal(byTitle['CEP mahal']?.groupKey, 'joint');
   assert.match(byTitle['CEP mahal'].text, /Sendi menyerap 36% spend/);
+  assert.match(byTitle['CEP mahal'].text, /karena keduanya|karena respon iklan|karena funnel/);
   assert.equal(byTitle['CEP berpotensi']?.groupKey, 'nail');
   assert.equal(byTitle['Respon CEP melemah']?.groupKey, 'joint');
   assert.equal(byTitle['CEP belum terpetakan']?.severity, 'warn');

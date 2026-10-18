@@ -13,15 +13,17 @@ export type CepRow = {
   cep: string; label: string; unknown: boolean; current: Totals; previous: Totals; ads: number; spendShare: number;
   cells: Record<string, CepCell | undefined>;
 };
-export type CepColumn = { intention: string; label: string; unknown: boolean; metric: FunnelMetric; current: Totals; spendShare: number };
+export type CepColumn = { intention: string; label: string; unknown: boolean; current: Totals; spendShare: number };
 export type CepView = {
-  rows: CepRow[]; columns: CepColumn[]; metrics: FunnelMetric[]; resultMetric: FunnelMetric;
+  rows: CepRow[]; columns: CepColumn[]; metrics: FunnelMetric[]; responseMetrics: FunnelMetric[]; resultMetric: FunnelMetric; funnelMetric: FunnelMetric;
   medians: Record<string, number | null>; unknownShare: number; totalSpend: number; mapped: number;
 };
 
 const CPP: FunnelMetric = { id: 'cpp', label: 'CPP', numerator: 'spend', denominator: 'purchases', format: 'money', direction: 'lower', monitor: true, min_denominator: 5 };
 const CPL: FunnelMetric = { id: 'cpl', label: 'CPL', numerator: 'spend', denominator: 'leads', format: 'money', direction: 'lower', monitor: true, min_denominator: 5 };
-const ATC_RATE: FunnelMetric = { id: 'atc_rate', label: 'ATC ratio', numerator: 'atc', denominator: 'lpv', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 };
+export const ATC_RATE: FunnelMetric = { id: 'atc_rate', label: 'ATC ratio', numerator: 'atc', denominator: 'lpv', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 };
+const PURCHASE_PER_LPV: FunnelMetric = { id: 'purchase_per_lpv', label: 'CR (purchase ÷ LPV)', numerator: 'purchases', denominator: 'lpv', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 };
+const LEAD_PER_LPV: FunnelMetric = { id: 'lead_per_lpv', label: 'CR (lead ÷ LPV)', numerator: 'leads', denominator: 'lpv', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 };
 const PURCHASE_PER_CLICK: FunnelMetric = { id: 'purchase_per_click', label: 'Purchase per klik', numerator: 'purchases', denominator: 'outbound_clicks', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 };
 
 export function parseCepKey(key: string): { cep: string; intention: string } | null {
@@ -33,13 +35,14 @@ export function cepResultMetric(world: 'website' | 'cpas', summary: Totals): Fun
   if (world === 'cpas') return CPP;
   return summary.purchases >= summary.leads ? CPP : CPL;
 }
-/** Each intention has its own success measure: discovery is judged by response, conversion by cost. */
-export function intentionMetric(intention: string, world: 'website' | 'cpas', result: FunnelMetric): FunnelMetric {
-  const response = responseMetrics(world);
-  if (intention === 'disc') return response.find(m => m.id === 'outbound_ctr')!;
-  if (intention === 'cons') return world === 'website' ? ATC_RATE : PURCHASE_PER_CLICK;
-  if (intention === 'conv') return result;
-  return response.find(m => m.id === 'outbound_ctr')!;
+/** Progress after the click: the funnel side of a CEP's cost, judged by what happens on the destination. */
+export function cepFunnelMetric(world: 'website' | 'cpas', result: FunnelMetric): FunnelMetric {
+  if (world === 'cpas') return PURCHASE_PER_CLICK;
+  return result.id === 'cpl' ? LEAD_PER_LPV : PURCHASE_PER_LPV;
+}
+/** Destination rows inside the CEP drawer show how the page progresses, not how the ad responds. */
+export function cepProgressMetrics(world: 'website' | 'cpas', result: FunnelMetric): FunnelMetric[] {
+  return world === 'cpas' ? [PURCHASE_PER_CLICK] : [ATC_RATE, cepFunnelMetric(world, result)];
 }
 function intentionLabel(intention: string) {
   return intention === UNKNOWN_KEY ? 'Tanpa intention' : dimensionLabel('intention', intention);
@@ -64,7 +67,7 @@ export function buildCepView(groups: ReportGroup[], world: 'website' | 'cpas', s
   });
   const columns: CepColumn[] = intentions.map(intention => {
     const current = sumTotalsOf(cells.filter(c => c.intention === intention).map(c => c.current));
-    return { intention, label: intentionLabel(intention), unknown: intention === UNKNOWN_KEY, metric: intentionMetric(intention, world, resultMetric), current, spendShare: totalSpend > 0 ? current.spend / totalSpend : 0 };
+    return { intention, label: intentionLabel(intention), unknown: intention === UNKNOWN_KEY, current, spendShare: totalSpend > 0 ? current.spend / totalSpend : 0 };
   });
   const rows: CepRow[] = [...new Set(cells.map(c => c.cep))].map(cep => {
     const own = cells.filter(c => c.cep === cep);
@@ -72,11 +75,14 @@ export function buildCepView(groups: ReportGroup[], world: 'website' | 'cpas', s
     return { cep, label: cepLabel(cep), unknown: cep === UNKNOWN_KEY, current, previous: prev, ads: own.reduce((s, c) => s + c.ads, 0),
       spendShare: totalSpend > 0 ? current.spend / totalSpend : 0, cells: Object.fromEntries(own.map(c => [c.intention, c])) };
   }).sort((a, b) => Number(a.unknown) - Number(b.unknown) || b.current.spend - a.current.spend || a.label.localeCompare(b.label, 'id'));
+  // The CEP lens judges ad response; the funnel metric is kept only to attribute a cost gap, never as a column.
   const response = responseMetrics(world);
-  const metrics = [...response, ...(world === 'website' ? [ATC_RATE] : []), resultMetric].filter((m, i, all) => all.findIndex(o => o.id === m.id) === i);
-  const medians = Object.fromEntries(metrics.map(m => [m.id, median(rows.filter(r => !r.unknown).map(r => metricValue(r.current, m)).filter((v): v is number => v !== null))]));
+  const funnelMetric = cepFunnelMetric(world, resultMetric);
+  const metrics = [...response, resultMetric].filter((m, i, all) => all.findIndex(o => o.id === m.id) === i);
+  const medianOf = (m: FunnelMetric) => median(rows.filter(r => !r.unknown).map(r => metricValue(r.current, m)).filter((v): v is number => v !== null));
+  const medians = Object.fromEntries([...metrics, funnelMetric].map(m => [m.id, medianOf(m)]));
   const unknownRow = rows.find(r => r.unknown);
-  return { rows, columns, metrics, resultMetric, medians, totalSpend, unknownShare: totalSpend > 0 && unknownRow ? unknownRow.current.spend / totalSpend : 0,
+  return { rows, columns, metrics, responseMetrics: response, resultMetric, funnelMetric, medians, totalSpend, unknownShare: totalSpend > 0 && unknownRow ? unknownRow.current.spend / totalSpend : 0,
     mapped: rows.filter(r => !r.unknown).length };
 }
 
@@ -91,18 +97,32 @@ export function cepHeat(value: number | null, medianValue: number | null | undef
 const percent = (v: number) => `${(v * 100).toFixed(1)}%`;
 function money(value: number, currency: string) { return new Intl.NumberFormat('id-ID', { style: 'currency', currency, maximumFractionDigits: 0 }).format(value); }
 
-/** CEP-level highlights: a costly CEP, a promising CEP, a CEP losing response, and unmapped spend. */
+/** Where a CEP's cost gap comes from: the ad (response below the CEP median) or the destination (progress after the click below it). */
+export function cepCostDiagnosis(view: CepView, row: CepRow): { cause: 'response' | 'funnel' | 'both' | 'unknown'; responseGap: number | null; funnelGap: number | null; text: string } {
+  const ctr = view.responseMetrics.find(m => m.id === 'outbound_ctr')!;
+  const gap = (m: FunnelMetric) => { const value = metricValue(row.current, m), med = view.medians[m.id]; return value !== null && med ? value / med - 1 : null; };
+  const responseGap = gap(ctr), funnelGap = gap(view.funnelMetric);
+  const weakResponse = responseGap !== null && responseGap <= -0.15, weakFunnel = funnelGap !== null && funnelGap <= -0.15;
+  const pct = (v: number) => `${Math.round(Math.abs(v) * 100)}%`;
+  if (weakResponse && weakFunnel) return { cause: 'both', responseGap, funnelGap, text: `karena keduanya: CTR outbound ${pct(responseGap!)} di bawah median CEP dan ${view.funnelMetric.label} ${pct(funnelGap!)} di bawah median. Benahi creative dan landing page sekaligus.` };
+  if (weakResponse) return { cause: 'response', responseGap, funnelGap, text: `karena respon iklan: CTR outbound ${pct(responseGap!)} di bawah median CEP, sementara ${view.funnelMetric.label} normal. Uji creative dan audiens, bukan landing page.` };
+  if (weakFunnel) return { cause: 'funnel', responseGap, funnelGap, text: `karena funnel: ${view.funnelMetric.label} ${pct(funnelGap!)} di bawah median CEP, sementara respon iklannya normal. Periksa landing page yang dipakai CEP ini.` };
+  return { cause: 'unknown', responseGap, funnelGap, text: 'tetapi respon iklan dan funnel-nya tidak jauh dari median; selisihnya lebih mungkin dari CPM atau komposisi intention.' };
+}
+
+/** CEP-level highlights: a costly CEP (with its cause), a promising CEP, a CEP losing response, and unmapped spend. */
 export function cepHighlights(view: CepView, currency: string): Highlight[] {
   const out: Highlight[] = [];
   const mapped = view.rows.filter(r => !r.unknown);
-  const result = view.resultMetric, ctr = view.metrics.find(m => m.id === 'outbound_ctr')!;
+  const result = view.resultMetric, ctr = view.responseMetrics.find(m => m.id === 'outbound_ctr')!;
   const resultMedian = view.medians[result.id], ctrMedian = view.medians[ctr.id];
   const shareMedian = median(mapped.map(r => r.spendShare)) ?? 0;
   if (mapped.length >= 3) for (const r of mapped) {
     const cost = metricValue(r.current, result);
     if (cost !== null && resultMedian && (r.current[result.denominator!] ?? 0) >= result.min_denominator && r.spendShare >= 0.15 && cost >= resultMedian * 1.5) {
+      const diagnosis = cepCostDiagnosis(view, r);
       out.push({ kind: 'cep', severity: 'bad', title: 'CEP mahal', groupKey: r.cep, weight: r.current.spend,
-        text: `${r.label} menyerap ${Math.round(r.spendShare * 100)}% spend dengan ${result.label} ${money(cost, currency)}, ${(cost / resultMedian).toFixed(2)}× median CEP. Pertimbangkan geser budget.` });
+        text: `${r.label} menyerap ${Math.round(r.spendShare * 100)}% spend dengan ${result.label} ${money(cost, currency)}, ${(cost / resultMedian).toFixed(2)}× median CEP, ${diagnosis.text}` });
     }
     const response = metricValue(r.current, ctr);
     if (response !== null && ctrMedian && r.current.impressions >= 1000 && response >= ctrMedian * 1.25 && r.spendShare <= shareMedian && (cost === null || !resultMedian || cost <= resultMedian)) {
