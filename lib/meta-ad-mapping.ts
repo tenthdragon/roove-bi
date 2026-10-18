@@ -9,7 +9,8 @@ export type AdMapping = {
   effective_status: string | null; landing_page_urls: string[]; auto_mapping: AdNameMapping;
   campaign_id?: string | null; campaign_name?: string | null; campaign_objective?: string | null;
   ad_channel?: MetaAdChannel; ad_channel_reason?: string | null;
-  overrides: { cep?: string; intention?: string }; source: 'inventory' | 'cache';
+  cep_keys?: string[]; intention_key?: string | null; brand_id?: number | null; cep_source?: string; intention_source?: string;
+  overrides: { cep?: string; ceps?: string[]; intention?: string }; source: 'inventory' | 'cache';
   first_seen_at: string; last_seen_at: string; revision: number;
 };
 export type MappingUnit = { dimension: string; unit_key: string; label: string; review_status: 'recognized' | 'new' | 'confirmed'; first_seen_at: string; last_seen_at: string };
@@ -45,6 +46,9 @@ export function parseAdMapping(name: string): AdNameMapping {
   return { parser_version: AD_MAPPING_PARSER_VERSION, tags, keywords, free_text: freeText, issues };
 }
 export function effectiveMappingValue(ad: AdMapping, dimension: 'cep' | 'intention') {
+  if (dimension === 'cep' && ad.cep_keys !== undefined) return ad.cep_keys[0] || null;
+  if (dimension === 'intention' && ad.intention_key !== undefined) return ad.intention_key;
+  if (dimension === 'cep' && ad.overrides.ceps !== undefined) return ad.overrides.ceps[0] || null;
   return ad.overrides[dimension] ?? ad.auto_mapping.tags.find(t => t.dimension === dimension)?.key ?? null;
 }
 export function mappingDimensionLabel(dimension: string) {

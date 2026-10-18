@@ -47,8 +47,8 @@ test('free-form CEP and intention tags round-trip separators and percent signs w
     assert.deepEqual(parseCepKey(key), { cep, intention });
     const view = buildCepView([cell(cep, intention, { spend: 100 })], 'website', totals({ spend: 100 }), totals({}));
     assert.equal(view.rows[0].cep, cep);
-    assert.equal(view.columns[0].intention, intention);
-    assert.equal(view.rows[0].cells[intention]?.current.spend, 100);
+    assert.ok(view.columns.every(c => ['disc', 'cons', 'conv', '__unknown__'].includes(c.intention)));
+    assert.equal(view.rows[0].cells.__unknown__?.current.spend, 100);
   }
   assert.notEqual(cepGroupKey('a:b', 'c'), cepGroupKey('a', 'b:c'));
   assert.notEqual(cepGroupKey('a%3Ab', 'c'), cepGroupKey('a:b', 'c'));

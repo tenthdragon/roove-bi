@@ -15,6 +15,7 @@ export type ReportQuery = {
 };
 export type ReportBucket = { date: string; totals: Totals; complete: boolean; partial: boolean };
 export type RawMetaReport = {
+  cepLabels?: Record<string, string>; intentionTotals?: { intention: string; current: Totals }[]; multiCepAds?: number;
   currencies: string[]; summary: Totals; previous: Totals;
   groups: (Omit<GroupComparison, 'metrics' | 'creatives' | 'categories' | 'classified' | 'destination'> & { destination?: CtwaDestination | null; currencies?: string[] })[];
   coverage: Coverage[]; facets: { dimension: keyof AdDimensionFilters; value: string; count: number }[];
@@ -40,7 +41,7 @@ export function metaReportGroups(raw: RawMetaReport, config: FunnelConfig): Grou
 }
 export function metaReportOptions(raw: RawMetaReport, accounts: MetaAccountBrand[], brands: MetaBrand[]) {
   const choices = (dimension: keyof AdDimensionFilters) => raw.facets.filter(f => f.dimension === dimension).map(f => ({ value: f.value, count: f.count,
-    label: dimension === 'objective' ? objectiveLabel(f.value) : dimensionLabel(dimension, f.value) }))
+    label: dimension === 'objective' ? objectiveLabel(f.value) : dimension === 'cep' ? raw.cepLabels?.[f.value] || dimensionLabel(dimension, f.value) : dimensionLabel(dimension, f.value) }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'id'));
   const brandOptions = metaBrandOptions(accounts, brands, []);
   brandOptions.choices = brandOptions.choices.map(b => ({ ...b, count: raw.brandCounts[b.value] || 0 })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'id'));
@@ -67,8 +68,9 @@ export async function metaReportCepShares(input: MetaReportInput, config: Funnel
     const cep = parsed.cep;
     byCep.set(cep, (byCep.get(cep) || 0) + (Number(g.current.spend) || 0));
   }
-  const total = [...byCep.values()].reduce((a, b) => a + b, 0);
-  return [...byCep].map(([cep, spend]) => ({ cep, label: cep === '__unknown__' ? 'Belum terpetakan' : dimensionLabel('cep', cep), share: total > 0 ? spend / total : 0 }))
+  const total = reports.reduce((sum, r) => sum + r.summary.spend, 0);
+  const labels = Object.assign({}, ...reports.map(r => r.cepLabels || {})) as Record<string, string>;
+  return [...byCep].map(([cep, spend]) => ({ cep, label: cep === '__unknown__' ? 'Belum terpetakan' : labels[cep] || dimensionLabel('cep', cep), share: total > 0 ? spend / total : 0 }))
     .sort((a, b) => Number(a.cep === '__unknown__') - Number(b.cep === '__unknown__') || b.share - a.share);
 }
 

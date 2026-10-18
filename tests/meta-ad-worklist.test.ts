@@ -31,7 +31,7 @@ test('rows rank active ads by spend, read verified, WhatsApp and Shopee destinat
   assert.deepEqual(rows.map(r => r.ad_id), ['2', '1', '5', '3', '6', '4']);
   const byId = Object.fromEntries(rows.map(r => [r.ad_id, r]));
   assert.deepEqual(byId['1'].issues, []); assert.equal(byId['1'].cep.label, 'Kulit'); assert.equal(byId['1'].cep.recognized, true);
-  assert.deepEqual(byId['2'].issues, []); assert.equal(byId['2'].urlSource, 'verified'); assert.equal(byId['2'].cep.recognized, false); assert.equal(byId['2'].cep.label, 'lupa+rawat+sendi');
+  assert.deepEqual(byId['2'].issues, ['cep']); assert.equal(byId['2'].urlSource, 'verified'); assert.equal(byId['2'].cep.recognized, false); assert.equal(byId['2'].cep.label, 'Belum terpetakan');
   assert.deepEqual(byId['3'].issues, ['cep', 'intention', 'channel']);
   assert.equal(byId['4'].active, false); assert.equal(byId['4'].spend, 0);
   assert.equal(byId['5'].urlSource, 'shopee'); assert.deepEqual(byId['5'].issues, []);
@@ -41,12 +41,12 @@ test('the worklist scopes to active ads by default, counts tiles over the scope,
   const base = { mappings, activity, verified, destinations, accounts };
   const list = buildWorklist({ ...base });
   assert.equal(list.activeAds, 5); assert.equal(list.inactiveAds, 1); assert.equal(list.scopeAds, 5); assert.equal(list.total, 5);
-  assert.deepEqual(list.tiles.map(t => [t.issue, t.ads, t.spend]), [['cep', 1, 1000], ['intention', 1, 1000], ['destination', 0, 0], ['channel', 1, 1000]]);
+  assert.deepEqual(list.tiles.map(t => [t.issue, t.ads, t.spend]), [['cep', 2, 10000], ['intention', 1, 1000], ['destination', 0, 0], ['channel', 1, 1000]]);
   assert.equal(list.clean, false);
   const withInactive = buildWorklist({ ...base, includeInactive: true });
   assert.equal(withInactive.total, 6); assert.equal(withInactive.rows.at(-1)?.ad_id, '4');
   const cepOnly = buildWorklist({ ...base, issue: 'cep' });
-  assert.deepEqual(cepOnly.rows.map(r => r.ad_id), ['3']); assert.equal(cepOnly.tiles[0].ads, 1, 'tiles ignore the issue filter');
+  assert.deepEqual(cepOnly.rows.map(r => r.ad_id), ['2', '3']); assert.equal(cepOnly.tiles[0].ads, 2, 'tiles ignore the issue filter');
   const searched = buildWorklist({ ...base, search: 'lutut' });
   assert.deepEqual(searched.rows.map(r => r.ad_id), ['2'], 'search covers verified URLs');
   const paged = buildWorklist({ ...base, page: 2, pageSize: 2 });
@@ -54,7 +54,7 @@ test('the worklist scopes to active ads by default, counts tiles over the scope,
   const cpas = buildWorklist({ ...base, channel: 'cpas' });
   assert.deepEqual(cpas.rows.map(r => r.ad_id), ['5']);
   const filtered = buildWorklist({ ...base, filters: { cep: '__unknown__' } });
-  assert.deepEqual(filtered.rows.map(r => r.ad_id), ['3']);
+  assert.deepEqual(filtered.rows.map(r => r.ad_id), ['2', '3']);
   assert.equal(buildWorklist({ ...base, mappings: [mappings[0]], activity: activity.slice(0, 1) }).clean, true);
 });
 test('new units report how many ads and how much spend still rely on them, and label pickers list known keys first', () => {
@@ -63,7 +63,7 @@ test('new units report how many ads and how much spend still rely on them, and l
   assert.deepEqual(list.units, [{ dimension: 'cep', unit_key: 'lupa+rawat+sendi', label: 'lupa+rawat+sendi', ads: 1, spend: 9000 }]);
   const options = labelOptions('cep', list.rows, units);
   assert.deepEqual(options.slice(0, 5).map(o => o.value), ['skin', 'joint', 'bone', 'hair', 'nail']);
-  assert.ok(options.some(o => o.value === 'lupa+rawat+sendi'));
+  assert.ok(!options.some(o => o.value === 'lupa+rawat+sendi'));
   assert.deepEqual(labelOptions('intention', []).map(o => o.label), ['Discovery', 'Consideration', 'Conversion']);
 });
 

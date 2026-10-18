@@ -44,7 +44,7 @@ export async function reportContext(input: MetaReportInput, includeJobs = false)
     svc.from('meta_ad_accounts').select('account_id,account_name,default_brand_id').eq('workspace_id', workspaceId).eq('is_active', true).order('account_name'),
     svc.from('brands').select('id,name').eq('workspace_id', workspaceId).order('name'),
     includeJobs ? reportJobs(svc, workspaceId) : Promise.resolve({ data: [], error: null }),
-    svc.from('meta_ad_mapping_channels').select('ad_channel').eq('workspace_id', workspaceId).limit(1),
+    svc.from('meta_ad_classifications').select('ad_channel').eq('workspace_id', workspaceId).limit(1),
   ]);
   if ([version, channelSchema].some(r => r.error && ['42P01', 'PGRST205'].includes(r.error.code))) return { schemaReady: false as const };
   for (const result of [version, accountsResult, brandsResult, jobsResult, channelSchema]) if (result.error) throw new Error(result.error.message);

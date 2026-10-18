@@ -148,7 +148,7 @@ async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world:
   const active = world === 'website' ? web : cpas;
   const raw = world === 'website' ? rawWeb : rawCpas;
   // The CEP lens reads the same scoped ads as the destination view, cut by CEP × intention.
-  const cep = buildCepView(active.reportingError ? [] : normalizeGroups(rawCep), world, active.summary, active.previous);
+  const cep = buildCepView(active.reportingError ? [] : normalizeGroups(rawCep), world, active.summary, active.previous, rawCep);
   const highlights = mergeHighlights(active.highlights, cepHighlights(cep, active.currency).map(h => ({ ...h, world })));
   if (!highlights.some(h => h.severity === 'bad' || (h.severity === 'warn' && h.kind !== 'data'))) highlights.unshift({ kind: 'stable', severity: 'info', title: 'Stabil', weight: 0, world, text: 'Tidak ada sinyal penurunan atau pencilan biaya pada periode ini.' });
   const { from, to } = ctx.reportRange;

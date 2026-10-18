@@ -17,7 +17,7 @@ export type CepRow = {
 };
 export type CepColumn = { intention: string; label: string; unknown: boolean; current: Totals; spendShare: number };
 export type CepView = {
-  rows: CepRow[]; columns: CepColumn[]; metrics: FunnelMetric[]; responseMetrics: FunnelMetric[]; resultMetric: FunnelMetric; funnelMetric: FunnelMetric;
+  overlapAds: number; rows: CepRow[]; columns: CepColumn[]; metrics: FunnelMetric[]; responseMetrics: FunnelMetric[]; resultMetric: FunnelMetric; funnelMetric: FunnelMetric;
   medians: Record<string, number | null>; unknownShare: number; totalSpend: number; mapped: number;
 };
 
@@ -54,28 +54,28 @@ function cepLabel(cep: string) {
   return cep === UNKNOWN_KEY ? 'Belum terpetakan' : dimensionLabel('cep', cep);
 }
 
-export function buildCepView(groups: ReportGroup[], world: 'website' | 'cpas', summary: Totals, previous: Totals): CepView {
+export function buildCepView(groups: ReportGroup[], world: 'website' | 'cpas', summary: Totals, previous: Totals, classification?: { cepLabels?: Record<string, string>; intentionTotals?: { intention: string; current: Totals }[]; multiCepAds?: number }): CepView {
   const cells: CepCell[] = [];
   for (const g of groups) {
     const parsed = parseCepKey(g.key);
     if (!parsed) continue;
-    cells.push({ key: g.key, cep: parsed.cep, intention: parsed.intention, current: g.current, previous: g.previous, ads: g.ad_ids.length });
+    cells.push({ key: g.key, cep: parsed.cep, intention: INTENTION_ORDER.includes(parsed.intention as typeof INTENTION_ORDER[number]) ? parsed.intention : UNKNOWN_KEY, current: g.current, previous: g.previous, ads: g.ad_ids.length });
   }
   const totalSpend = summary.spend;
   const resultMetric = cepResultMetric(world, summary);
-  const intentions = [...new Set(cells.map(c => c.intention))].sort((a, b) => {
+  const intentions = [...new Set([...INTENTION_ORDER, ...cells.map(c => c.intention)])].sort((a, b) => {
     const ia = INTENTION_ORDER.indexOf(a as typeof INTENTION_ORDER[number]), ib = INTENTION_ORDER.indexOf(b as typeof INTENTION_ORDER[number]);
     if (a === UNKNOWN_KEY) return 1; if (b === UNKNOWN_KEY) return -1;
     return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b);
   });
   const columns: CepColumn[] = intentions.map(intention => {
-    const current = sumTotalsOf(cells.filter(c => c.intention === intention).map(c => c.current));
+    const current = classification?.intentionTotals?.find(c => c.intention === intention)?.current || sumTotalsOf(cells.filter(c => c.intention === intention).map(c => c.current));
     return { intention, label: intentionLabel(intention), unknown: intention === UNKNOWN_KEY, current, spendShare: totalSpend > 0 ? current.spend / totalSpend : 0 };
   });
-  const rows: CepRow[] = [...new Set(cells.map(c => c.cep))].map(cep => {
+  const rows: CepRow[] = [...new Set([...Object.keys(classification?.cepLabels || {}), ...cells.map(c => c.cep)])].map(cep => {
     const own = cells.filter(c => c.cep === cep);
     const current = sumTotalsOf(own.map(c => c.current)), prev = sumTotalsOf(own.map(c => c.previous));
-    return { cep, label: cepLabel(cep), unknown: cep === UNKNOWN_KEY, current, previous: prev, ads: own.reduce((s, c) => s + c.ads, 0),
+    return { cep, label: classification?.cepLabels?.[cep] || cepLabel(cep), unknown: cep === UNKNOWN_KEY, current, previous: prev, ads: own.reduce((s, c) => s + c.ads, 0),
       spendShare: totalSpend > 0 ? current.spend / totalSpend : 0, cells: Object.fromEntries(own.map(c => [c.intention, c])) };
   }).sort((a, b) => Number(a.unknown) - Number(b.unknown) || b.current.spend - a.current.spend || a.label.localeCompare(b.label, 'id'));
   // The CEP lens judges ad response; the funnel metric is kept only to attribute a cost gap, never as a column.
@@ -86,8 +86,8 @@ export function buildCepView(groups: ReportGroup[], world: 'website' | 'cpas', s
     .map(r => metricValue(r.current, m)).filter((v): v is number => v !== null));
   const medians = Object.fromEntries([...metrics, funnelMetric].map(m => [m.id, medianOf(m)]));
   const unknownRow = rows.find(r => r.unknown);
-  return { rows, columns, metrics, responseMetrics: response, resultMetric, funnelMetric, medians, totalSpend, unknownShare: totalSpend > 0 && unknownRow ? unknownRow.current.spend / totalSpend : 0,
-    mapped: rows.filter(r => !r.unknown).length };
+  return { overlapAds: classification?.multiCepAds || 0, rows, columns, metrics, responseMetrics: response, resultMetric, funnelMetric, medians, totalSpend, unknownShare: totalSpend > 0 && unknownRow ? unknownRow.current.spend / totalSpend : 0,
+    mapped: rows.filter(r => !r.unknown && r.ads > 0).length };
 }
 
 /** How far a value sits from the CEP median, signed so that positive is better: +1 = twice as good, -1 = twice as bad. */
@@ -126,7 +126,7 @@ export function cepCostDiagnosis(view: CepView, row: CepRow): { cause: 'response
 /** CEP-level highlights: a costly CEP (with its cause), a promising CEP, a CEP losing response, and unmapped spend. */
 export function cepHighlights(view: CepView, currency: string): Highlight[] {
   const out: Highlight[] = [];
-  const mapped = view.rows.filter(r => !r.unknown);
+  const mapped = view.rows.filter(r => !r.unknown && r.ads > 0);
   const result = view.resultMetric, ctr = view.responseMetrics.find(m => m.id === 'outbound_ctr')!;
   const resultMedian = view.medians[result.id], ctrMedian = view.medians[ctr.id];
   const shareMedian = median(mapped.map(r => r.spendShare)) ?? 0;

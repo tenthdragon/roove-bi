@@ -107,9 +107,10 @@ FROM scope CROSS JOIN brand CROSS JOIN (VALUES
 
 SELECT jsonb_build_object(
  'accounts',(SELECT jsonb_agg(to_jsonb(a)) FROM (SELECT a.account_id,a.account_name,a.default_brand_id FROM meta_ad_accounts a JOIN report_test_scope s USING(workspace_id,account_id) ORDER BY a.account_id) a),
+ 'catalog',(SELECT coalesce(jsonb_agg(to_jsonb(c)),'[]') FROM meta_ad_cep_catalog c WHERE c.workspace_id=(SELECT workspace_id FROM report_test_scope LIMIT 1)),
  'brands',(SELECT jsonb_agg(jsonb_build_object('id',id,'name',name)) FROM brands WHERE workspace_id=(SELECT workspace_id FROM report_test_scope LIMIT 1)),
  'facts',(SELECT jsonb_agg(to_jsonb(f) ORDER BY metric_date,account_id,ad_id) FROM (SELECT f.account_id,f.account_name,f.ad_id,f.ad_name,f.creative_id,f.metric_date,f.currency,f.metrics,f.landing_page_urls,f.campaign_id,f.campaign_objective FROM meta_ad_daily_metrics f JOIN report_test_scope s USING(workspace_id,account_id) WHERE f.metric_date BETWEEN '1999-10-01' AND '2000-01-04') f),
- 'mappings',(SELECT jsonb_agg(to_jsonb(m) ORDER BY account_id,ad_id) FROM (SELECT m.account_id,m.ad_id,m.cep_key,m.intention_key,m.campaign_id,m.campaign_objective FROM meta_ad_mappings m JOIN report_test_scope s USING(workspace_id,account_id)) m),
+ 'mappings',(SELECT jsonb_agg(to_jsonb(m) ORDER BY account_id,ad_id) FROM (SELECT m.account_id,m.ad_id,m.cep_key,m.intention_key,m.campaign_id,m.campaign_objective,m.auto_mapping,m.overrides FROM meta_ad_mappings m JOIN report_test_scope s USING(workspace_id,account_id)) m),
  'creatives',(SELECT jsonb_agg(to_jsonb(c) ORDER BY account_id,ad_id) FROM (SELECT c.account_id,c.ad_id,c.creative_id,c.name,c.thumbnail_url,c.video_id,c.body,c.landing_page_urls FROM meta_ad_creatives c JOIN report_test_scope s USING(workspace_id,account_id)) c),
  'verified',(SELECT jsonb_agg(to_jsonb(v)) FROM (SELECT v.account_id,v.ad_id,v.creative_id,v.landing_page_url FROM meta_ad_verified_destinations v JOIN report_test_scope s USING(workspace_id,account_id)) v),
  'coverage',(SELECT jsonb_agg(to_jsonb(c)) FROM (SELECT c.account_id,c.metric_date FROM meta_ad_sync_coverage c JOIN report_test_scope s USING(workspace_id,account_id) WHERE c.metric_date BETWEEN '1999-10-01' AND '2000-01-04') c),

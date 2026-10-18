@@ -10,6 +10,7 @@ import styles from '@/app/dashboard/meta-funnels/page.module.css';
 const items = [
   { href: '/dashboard/meta-funnels', label: 'Ringkasan brand', match: (p: string) => p === '/dashboard/meta-funnels' || p.startsWith('/dashboard/meta-funnels/brand') },
   { href: '/dashboard/meta-funnels/mapping', label: 'Pemetaan Ads', match: (p: string) => p.startsWith('/dashboard/meta-funnels/mapping') },
+  { href: '/dashboard/meta-funnels/categories', label: 'Kategori iklan', match: (p: string) => p.startsWith('/dashboard/meta-funnels/categories') },
   { href: '/dashboard/meta-funnels/notifications', label: 'Notifikasi', match: (p: string) => p.startsWith('/dashboard/meta-funnels/notifications') },
   { href: '/dashboard/meta-funnels/templates', label: 'Template funnel', match: (p: string) => p.startsWith('/dashboard/meta-funnels/templates') },
 ];
