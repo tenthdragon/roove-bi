@@ -70,6 +70,7 @@ export default function MetaBrandOverviewPage() {
     try {
       const result = await getMetaBrandOverview(input);
       if (current !== request.current) return;
+      if ('reportError' in result) { setError(result.reportError); return; }
       setSchemaReady(result.schemaReady);
       if (result.schemaReady) { setData(result); reportVersion.current = result.reportVersion; }
     } catch (e) { if (current === request.current) setError(message(e)); }
