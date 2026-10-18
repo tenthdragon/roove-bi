@@ -18,6 +18,8 @@ import MetaAdsNav from '@/components/MetaAdsNav';
 import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
 import MetaSparkline from '@/components/MetaSparkline';
 import MetaGroupDrawer from '@/components/MetaGroupDrawer';
+import MetaTemplateSuggestionButton from '@/components/MetaTemplateSuggestionButton';
+import { META_TEMPLATE_SCHEMA_MESSAGE } from '@/lib/meta-template-settings';
 import styles from '../../page.module.css';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaBrandDetail>>, { schemaReady: true }>;
@@ -101,10 +103,16 @@ export default function MetaBrandDetailPage() {
     router.replace(`${pathname}?${query.toString()}`, { scroll: false });
   }
   async function applySuggestion(group: Data['unassigned'][number], funnelId: string) {
+    if (!data?.rulesReady) { setError(META_TEMPLATE_SCHEMA_MESSAGE); return; }
+    if (busy) return;
     setBusy(true); setError('');
     try {
       const result = await saveMetaTemplateRule({ funnelId, ...templateDestinationRule(group) });
-      if ('error' in result) { setError(result.error); return; }
+      if ('error' in result) {
+        setError(result.error);
+        if (result.code === 'TEMPLATE_SCHEMA_NOT_READY') setData(current => current ? { ...current, rulesReady: false } : current);
+        return;
+      }
       setNotice(`Template ditetapkan untuk ${group.name}.`); await load();
     }
     catch (e) { setError(message(e)); } finally { setBusy(false); }
@@ -159,6 +167,7 @@ export default function MetaBrandDetailPage() {
     {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
       {loading && !data && <p role="status" className={styles.muted}>Memuat detail brand…</p>}
       {data && <>
+        {world === 'website' && !data.rulesReady && error !== META_TEMPLATE_SCHEMA_MESSAGE && <div role="alert" className={styles.error}>{META_TEMPLATE_SCHEMA_MESSAGE}</div>}
         <p className={styles.period}>Periode {formatDate(data.reportRange.from)} – {formatDate(data.reportRange.to)} <span>vs {formatDate(data.prevFrom)} – {formatDate(data.prevTo)} · {currency}</span></p>
         {data.reportingError && <div role="alert" className={styles.error}>{data.reportingError}</div>}
         <section aria-label="Sorotan" style={{ display: 'grid', gap: 10 }}>
@@ -202,7 +211,7 @@ export default function MetaBrandDetailPage() {
             <div className={styles.sectionTitle}><strong className={styles.warn}>Belum ditetapkan</strong><span>{data.unassigned.length} tujuan · {formatCompactMoney(data.unassigned.reduce((s, u) => s + u.current.spend, 0), currency)} · belum masuk template mana pun</span></div>
             {data.unassigned.slice(0, 8).map(u => <div key={u.key} className={styles.unassignedRow}>
               <span>{u.name} · {formatCompactMoney(u.current.spend, currency)} · <span className={styles.muted}>{u.reason === 'no_url' ? 'URL belum terbaca' : u.reason === 'multi_url' ? 'beberapa URL dalam satu creative' : u.suggestion.reason}</span></span>
-              {u.reason === 'no_rule' && canManage && u.suggestion.funnelId && <button type="button" className={styles.button} disabled={busy} onClick={() => void applySuggestion(u, u.suggestion.funnelId!)}>Terapkan saran</button>}
+              {u.reason === 'no_rule' && canManage && u.suggestion.funnelId && <MetaTemplateSuggestionButton className={styles.button} rulesReady={data.rulesReady} busy={busy} onApply={() => void applySuggestion(u, u.suggestion.funnelId!)} />}
             </div>)}
             <Link href="/dashboard/meta-funnels/templates">Atur template dan tujuan →</Link>
           </div>}

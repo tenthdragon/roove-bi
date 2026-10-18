@@ -7,7 +7,8 @@ import { archiveMetaFunnel, saveMetaFunnel } from '@/lib/meta-funnel-actions';
 import { createMetaTemplatePreset, deleteMetaTemplateRule, getMetaTemplateConfiguration, getMetaTemplateSettings, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
 import { MEASURES, type FunnelConfig } from '@/lib/meta-funnel-domain';
 import { TEMPLATE_KIND_LABELS, validateTemplateRule, type TemplateMatchKind } from '@/lib/meta-funnel-templates';
-import { applyMetaTemplateRules, metaTemplateError } from '@/lib/meta-template-settings';
+import { applyMetaTemplateRules, metaTemplateError, META_TEMPLATE_SCHEMA_MESSAGE } from '@/lib/meta-template-settings';
+import MetaTemplateSuggestionButton from '@/components/MetaTemplateSuggestionButton';
 import { templateDestinationRule } from '@/lib/meta-ctwa-destinations';
 import { formatCompactMoney, formatDate } from '@/lib/meta-format';
 import MetaAdsNav from '@/components/MetaAdsNav';
@@ -72,6 +73,7 @@ export default function MetaTemplatesPage() {
   }
   async function changeRule(change: { save: Parameters<typeof saveMetaTemplateRule>[0] } | { remove: string }, done: string) {
     if (!data || mutation.current) return false;
+    if (!data.rulesReady) { setError(META_TEMPLATE_SCHEMA_MESSAGE); return false; }
     const before = data, current = request.current;
     try {
       const rule = 'save' in change ? validateTemplateRule(change.save) : null;
@@ -85,7 +87,10 @@ export default function MetaTemplatesPage() {
       setData(optimistic);
       const result = 'save' in change ? await saveMetaTemplateRule(change.save) : await deleteMetaTemplateRule(change.remove);
       if (current !== request.current) return false;
-      if ('error' in result) { setData(before); setError(result.error); return false; }
+      if ('error' in result) {
+        setData(result.code === 'TEMPLATE_SCHEMA_NOT_READY' ? { ...before, rulesReady: false } : before);
+        setError(result.error); return false;
+      }
       const rules = 'deletedId' in result
         ? before.rules.filter(r => r.id !== result.deletedId)
         : [...before.rules.filter(r => !(r.id === result.id || (r.match_kind === result.match_kind && r.pattern === result.pattern))), result];
@@ -128,7 +133,7 @@ export default function MetaTemplatesPage() {
             <option value="">{lp.suggestion.funnelId ? `Saran: ${data?.templates.find(t => t.id === lp.suggestion.funnelId)?.name}` : 'Tanpa template'}</option>
             {data?.templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select></td>
-          <td><span role={pending ? 'status' : undefined} className={`${styles.statusTag} ${pending ? styles.statusWarn : status.cls}`}>{pending ? 'Menyimpan…' : status.label}</span>{canManage && !lp.templateId && lp.suggestion.funnelId && data?.rulesReady && <small><button type="button" className={styles.nameButton} disabled={busy} onClick={() => void assign(lp, lp.suggestion.funnelId!)}>Konfirmasi saran</button></small>}</td>
+          <td><span role={pending ? 'status' : undefined} className={`${styles.statusTag} ${pending ? styles.statusWarn : status.cls}`}>{pending ? 'Menyimpan…' : status.label}</span>{canManage && !lp.templateId && lp.suggestion.funnelId && <small><MetaTemplateSuggestionButton className={styles.nameButton} rulesReady={!!data?.rulesReady} busy={busy} onApply={() => void assign(lp, lp.suggestion.funnelId!)}>Konfirmasi saran</MetaTemplateSuggestionButton></small>}</td>
         </tr>;
       })}</tbody>
     </table>{!rows.length && <p className={styles.muted} style={{ padding: 16 }}>Belum ada tujuan pada 30 hari terakhir.</p>}</div></div>;
@@ -143,7 +148,7 @@ export default function MetaTemplatesPage() {
     {notice && <div role="status" className={styles.info}>{notice}</div>}
     {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
       {loading && !data && <p role="status" className={styles.muted}>Memuat template…</p>}
-      {data && !data.rulesReady && <div className={styles.error} role="alert">Pasang migration 211_meta_landing_page_templates.sql agar aturan URL dapat disimpan. Template tetap bisa disunting.</div>}
+      {data && !data.rulesReady && error !== META_TEMPLATE_SCHEMA_MESSAGE && <div className={styles.error} role="alert">{META_TEMPLATE_SCHEMA_MESSAGE} Template tetap bisa disunting.</div>}
       {data && <div className={styles.templateLayout}>
         <section aria-label="Daftar template" className={styles.templateList}>
           {!data.templates.length && <div className={styles.card}>Belum ada template. Mulai dari template Transaksi atau Lead di atas, lalu sesuaikan tahapannya.</div>}

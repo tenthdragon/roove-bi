@@ -16,7 +16,7 @@ import { manageAccess, reportContext, reportingAccess, uuid } from './meta-repor
 import { defaultFunnel } from './meta-funnel-domain';
 import { saveMetaFunnel } from './meta-funnel-actions';
 import { getTodayWIB } from './sync-schedule';
-import { metaTemplateError, type MetaTemplateConfiguration, type MetaTemplateResult } from './meta-template-settings';
+import { assertMetaTemplateMutation, metaTemplateError, metaTemplateFailure, type MetaTemplateConfiguration, type MetaTemplateResult } from './meta-template-settings';
 
 const CPP: FunnelMetric = { id: 'cpp', label: 'CPP', numerator: 'spend', denominator: 'purchases', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
 const CPL: FunnelMetric = { id: 'cpl', label: 'CPL', numerator: 'spend', denominator: 'leads', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
@@ -210,26 +210,23 @@ export async function saveMetaTemplateRule(input: { id?: string; funnelId: strin
     const result = input.id
       ? await svc.from('meta_landing_page_templates').update(row).eq('workspace_id', workspaceId).eq('id', uuid(input.id)).select('id').maybeSingle()
       : await svc.from('meta_landing_page_templates').upsert({ ...row, created_by: profile.id }, { onConflict: 'workspace_id,match_kind,pattern' }).select('id').maybeSingle();
-    if (result.error) {
-      if (['42P01', 'PGRST205'].includes(result.error.code)) throw new Error('Pasang migration 211_meta_landing_page_templates.sql untuk menyimpan aturan template.');
-      throw new Error(result.error.message);
-    }
+    assertMetaTemplateMutation(result.error);
     if (!result.data) throw new Error('Aturan tidak ditemukan.');
     return { id: result.data.id as string, funnel_id: input.funnelId, ...rule };
   } catch (error) {
     console.error('[meta-template-settings] Rule save failed', error);
-    return { error: metaTemplateError(error, 'Penetapan template belum dapat dikonfirmasi. Muat ulang halaman sebelum mencoba lagi.') };
+    return metaTemplateFailure(error, 'Penetapan template belum dapat dikonfirmasi. Muat ulang halaman sebelum mencoba lagi.');
   }
 }
 export async function deleteMetaTemplateRule(id: string): Promise<MetaTemplateResult<{ deletedId: string }>> {
   try {
     const { workspaceId } = await manageAccess();
     const result = await createServiceSupabase().from('meta_landing_page_templates').delete().eq('workspace_id', workspaceId).eq('id', uuid(id));
-    if (result.error) throw new Error(result.error.message);
+    assertMetaTemplateMutation(result.error);
     return { deletedId: id };
   } catch (error) {
     console.error('[meta-template-settings] Rule delete failed', error);
-    return { error: metaTemplateError(error, 'Penghapusan aturan belum dapat dikonfirmasi. Muat ulang halaman sebelum mencoba lagi.') };
+    return metaTemplateFailure(error, 'Penghapusan aturan belum dapat dikonfirmasi. Muat ulang halaman sebelum mencoba lagi.');
   }
 }
 /** Creates a standard template so a workspace can start without designing one. */

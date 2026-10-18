@@ -11,7 +11,7 @@ WorkingDirectory=/var/www/releases/roove-bi-staging/current
 Environment=NODE_ENV=production
 Environment=NEXT_TELEMETRY_DISABLED=1
 Environment=ROOVE_ENVIRONMENT=staging
-Environment=NODE_OPTIONS=--max-old-space-size=768 --import=/etc/roove-staging/network-guard.mjs
+Environment="NODE_OPTIONS=--max-old-space-size=768 --import=/etc/roove-staging/network-guard.mjs"
 EnvironmentFile=/etc/roove-staging/app.env
 ExecStart=/usr/bin/node /var/www/releases/roove-bi-staging/current/node_modules/next/dist/bin/next start -H 127.0.0.1 -p 3001
 Restart=always

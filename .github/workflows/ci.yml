@@ -25,7 +25,7 @@ jobs:
         run: npm ci
 
       - name: Check staging isolation
-        run: node --test tests/staging-isolation.test.mjs
+        run: npm run test:staging
 
       - name: Check Growth case log validation
         run: npm run test:growth

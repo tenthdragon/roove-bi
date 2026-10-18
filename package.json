@@ -12,6 +12,7 @@
     "db:local:verify": "node scripts/local-supabase.mjs verify",
     "db:local:backup": "node scripts/local-supabase.mjs backup",
     "test:local-supabase": "node --test tests/local-supabase.test.mjs",
+    "test:staging": "node --test tests/staging-isolation.test.mjs && python3 -B tests/staging-preflight.test.py && python3 -B tests/staging-cleanup.test.py && node --import tsx --test tests/environment.test.ts tests/meta-template-schema.test.tsx",
     "db:local:migration": "node scripts/local-supabase.mjs migration",
     "build": "next build",
     "start": "next start",

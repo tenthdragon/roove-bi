@@ -26,6 +26,7 @@ for folder in ['.next/static','.next/server']:
   assert b'hpsenndhoyzgnnkrhtly.supabase.co' not in p.read_bytes(), 'Production database in build'
 assert any(expected.encode() in p.read_bytes() for p in (release/'.next/static').rglob('*.js')), 'Staging API missing from browser build'
 PY
+python3 "$release/deploy/staging/preflight.py" "$release"
 curl -fsS --max-time 10 https://staging-app.rti-hq.com/supabase/auth/v1/health >/dev/null
 base=/var/www/releases/roove-bi-staging
 old=$(readlink -f "$base/current")
@@ -50,7 +51,7 @@ mv -Tf "$base/current.next" "$base/current"
 systemctl restart roove-bi-staging
 healthy=0
 for attempt in $(seq 1 20); do
-  if curl -fsS --max-time 5 http://127.0.0.1:3001/api/environment | python3 -c 'import sys,json; result=json.load(sys.stdin); assert result["environment"]=="staging" and result["branch"]=="staging"'; then healthy=1; break; fi
+  if python3 "$release/deploy/staging/preflight.py" "$release" --check-health; then healthy=1; break; fi
   sleep 2
 done
 [ "$healthy" -eq 1 ]

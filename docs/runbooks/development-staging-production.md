@@ -54,15 +54,27 @@ approval and an explicit release to `main` are required before production deploy
    dependencies and `.next` build. Set `ROOVE_SOURCE_BRANCH=staging` and
    `ROOVE_RELEASE=<first-12-commit-characters>-staging` in the release environment.
    Include `.release-source.json` containing `{"branch":"staging","commit":"<full-40-character-commit>"}`.
+   After building, optionally record `build_id` from `.next/BUILD_ID` in that manifest;
+   if present, the helper requires it to match the build on disk.
    The deployment helper verifies this commit against the current GitHub
    `staging` head before switching the release. On the host, run
    `bash deploy/staging/deploy.sh /var/www/releases/roove-bi-staging/<release>`.
-   The script checks the endpoint and browser bundle, switches only the staging
-   release, and rolls back that release if its environment health check fails.
+   Before switching, the script checks the endpoint and browser bundle and runs
+   `preflight.py` against only `roove-staging-db-1` / `roove_staging` in a read-only
+   transaction. All release migrations above the snapshot baseline (195) must
+   match the recorded filenames and checksums; missing, changed, or untracked
+   migrations block activation. The required template, contact identity, CTWA,
+   Instagram, metadata-state and job-lineage table/column and RPC contracts must
+   also exist. Preflight does not apply migrations or replay the snapshot.
+   The script switches only the staging release and rolls it back unless the
+   running environment, branch, release, full commit, Next build ID and disabled
+   integrations all match the target. It does not start staging sync workers.
 5. Validate real login, permissions, workspace switching, numbers, persistence,
    image uploads and feature workflows at the staging domain. Record the tested
    commit/build and migration set. The app environment endpoint identifies the
-   deployed branch, release and snapshot date: `/api/environment`.
+   deployed branch, release, full commit, Next build ID and snapshot date:
+   `/api/environment`. Commit and build identity come from the running release's
+   `.release-source.json` and `.next/BUILD_ID`, not caller-provided metadata.
 6. After explicit product approval, release that exact code and migration set
    through the established production deployment process. Preserve production
    data. Never restore a staging dump or test records into production.
@@ -100,7 +112,7 @@ staging deployment and production promotion gates can be added separately.
 ## Verification
 
 ```sh
-node --test tests/staging-isolation.test.mjs
+npm run test:staging
 npm run test:dashboard-components
 npm run typecheck:app
 npm run build
