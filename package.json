@@ -31,7 +31,16 @@
     "test:meta-contact-identity-db": "node tests/meta-ad-contact-identity-database.mjs",
     "test:meta-ctwa-db": "node tests/meta-ctwa-destinations-database.mjs",
     "test:meta-instagram-db": "node tests/meta-instagram-profile-visits-database.mjs",
-    "test:meta-incremental-db": "node tests/meta-sync-incremental-database.mjs"
+    "test:meta-incremental-db": "node tests/meta-sync-incremental-database.mjs",
+    "dev:local": "node scripts/local-supabase.mjs dev",
+    "db:local:setup": "node scripts/local-supabase.mjs setup",
+    "db:local:start": "node scripts/local-supabase.mjs start",
+    "db:local:stop": "node scripts/local-supabase.mjs stop",
+    "db:local:status": "node scripts/local-supabase.mjs status",
+    "db:local:verify": "node scripts/local-supabase.mjs verify",
+    "db:local:backup": "node scripts/local-supabase.mjs backup",
+    "db:local:migration": "node scripts/local-supabase.mjs migration",
+    "test:local-supabase": "node --test tests/local-supabase.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",

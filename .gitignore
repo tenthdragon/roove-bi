@@ -65,3 +65,12 @@ supabase/.temp/
 # local generated artifacts
 /output/
 /tmp/
+
+# Isolated local development and private database state
+/.local/
+supabase/.branches/
+!scripts/local-*.mjs
+!docs/runbooks/development-staging-production.md
+!docs/runbooks/local-development.md
+!docs/runbooks/feature-branches.md
+!deploy/staging/README.md
