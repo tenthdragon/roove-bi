@@ -4,7 +4,7 @@ import { runMetaAdMappingSync } from '../lib/meta-ad-mapping-sync';
 import { fetchAdInventory } from '../lib/meta-ad-insights';
 import { enqueueScheduledMetaAdMapping, enqueueMetaAdMappingCreatives } from '../lib/meta-ad-mapping-queue';
 
-function harness(cachedCreative?: { ad_id: string; creative_id: string; landing_page_urls: string[] }) {
+function harness(cachedCreative?: { ad_id: string; creative_id: string; landing_page_urls: string[] }, activity: { ad_id: string }[] | { error: { code: string; message: string } } = [{ ad_id: '10' }]) {
   const writes: { table: string; data: any }[] = []; const filters: any[] = []; const queued: string[][] = [];
   const svc: any = { from(table: string) {
     const q: any = { select: () => q, limit: () => q, in: () => q, delete: () => q, lte: () => q,
@@ -12,7 +12,7 @@ function harness(cachedCreative?: { ad_id: string; creative_id: string; landing_
       upsert: async (data: any) => { writes.push({ table, data }); return { error: null }; },
       then: (resolve: any) => resolve({ error: null, data: table === 'meta_ad_accounts' ? [{ account_id: 'act_1', account_name: 'Test' }] : table === 'meta_ad_mappings' ? [{ ad_id: '10', ad_name: '[new-cep][new-stage][video]', effective_status: 'PAUSED' }] : table === 'meta_ad_creatives' && cachedCreative ? [cachedCreative] : [] }) };
     return q;
-  }, rpc: async (table: string, data: any) => { writes.push({ table, data }); return { error: null, data: data.p_rows.length }; } };
+  }, rpc: async (table: string, data: any) => { if (table === 'get_meta_ad_activity') return Array.isArray(activity) ? { error: null, data: activity.map(a => ({ account_id: 'act_1', ...a })) } : { error: activity.error, data: null }; writes.push({ table, data }); return { error: null, data: data.p_rows.length }; } };
   const deps: any = { createServiceSupabase: () => svc, resolveWorkspaceCredential: async () => 'secret',
     fetchAdInventory: async () => [{ id: '10', name: '[new-cep][new-stage][video]', effective_status: 'PAUSED', creative: { id: '20' } }],
     fetchCreativeBatch: async () => [{ ad_id: '10', creative_id: '20', name: '[new-cep][new-stage][video]', thumbnail_url: null, video_id: null, body: null, landing_page_urls: ['https://roove.co.id/new?utm_source=meta'] }],
@@ -168,4 +168,20 @@ test('only complete matching creative and destination reads certify the next cac
     assert.equal(result.status, 'success'); assert.equal(h.writes.filter(w => w.table === 'save_meta_ad_metadata_state').length, fail ? 0 : 1);
     if (fail) assert.ok(result.warnings.length>0);
   }
+});
+test('rich metadata refresh is limited to ads that delivered in the last 30 days or are still active', async () => {
+  const paused = harness(undefined, []);
+  const pausedResult = await runMetaAdMappingSync(options, paused.deps);
+  assert.equal(pausedResult.status, 'success'); assert.equal(pausedResult.rows_inserted, 1, 'the name mapping is still saved');
+  assert.deepEqual(paused.queued, [], 'no creative batch for a long-paused ad'); assert.equal(pausedResult.metadata_ads_deferred, 1);
+  const active = harness(undefined, []);
+  active.deps.fetchAdInventory = async () => [{ id: '10', name: '[new-cep][new-stage][video]', effective_status: 'ACTIVE', creative: { id: '20' } }];
+  await runMetaAdMappingSync(options, active.deps);
+  assert.deepEqual(active.queued, [['10']], 'an active ad without impressions yet is still enriched');
+  const delivered = harness(undefined, [{ ad_id: '10' }]);
+  await runMetaAdMappingSync(options, delivered.deps);
+  assert.deepEqual(delivered.queued, [['10']], 'a paused ad that delivered recently is enriched');
+  const legacy = harness(undefined, { error: { code: '42883', message: 'function get_meta_ad_activity does not exist' } });
+  const legacyResult = await runMetaAdMappingSync(options, legacy.deps);
+  assert.equal(legacyResult.status, 'success'); assert.deepEqual(legacy.queued, [['10']], 'without migration 217 every ad still counts as recent');
 });

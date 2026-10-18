@@ -13,7 +13,7 @@ export async function readAll<T>(svc: SupabaseClient, table: string, fields: str
     if (from) query = query.gte('metric_date', from);
     if (to) query = query.lte('metric_date', to);
     // Stable order for PostgREST pagination, including multiple ads on the same date.
-    query = ['meta_ad_creatives', 'meta_ad_verified_destinations', 'meta_ad_mappings', 'meta_ad_destination_metadata'].includes(table) ? query.order('account_id').order('ad_id')
+    query = ['meta_ad_creatives', 'meta_ad_verified_destinations', 'meta_ad_mappings', 'meta_ad_mapping_channels', 'meta_ad_destination_metadata'].includes(table) ? query.order('account_id').order('ad_id')
       : query.order('metric_date').order('account_id');
     if (table === 'meta_ad_daily_metrics') query = query.order('ad_id');
     const result = await query.range(offset, offset + 999);

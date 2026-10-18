@@ -26,10 +26,33 @@ Notifikasi, Template funnel.
   used by the report again. The page also holds URL matching (landing pages
   with spend in the last 30 days, evidence, suggestion, template select) and
   the rule list. Presets create a Transaksi or Lead template.
+- **Pemetaan Ads** (`/dashboard/meta-funnels/mapping`): a worklist of the ads
+  that delivered in the selected date range, ranked by spend. See
+  "Pemetaan Ads worklist" below.
 - Legacy `?view=alerts` and `?view=mapping` links still redirect.
 
-Only Ringkasan brand and Detail brand show the global completed-days date
-picker; the other pages have their own context.
+Ringkasan brand, Detail brand and Pemetaan Ads show the global completed-days
+date picker; Template funnel and Notifikasi have their own context.
+
+## Active-ad scope (migration 217)
+
+Every report read (`get_meta_ad_report`) only counts ads with at least one
+impression inside the requested date range. Ads paused long ago, ads whose
+rows only carry zero-delivery coverage and ads that only exist in the mapping
+inventory no longer appear in brand totals, facet counts, CEP rows or the
+"Belum ditetapkan" blocks. Spend without impressions on the same day (rare
+Meta corrections) still counts as long as the ad delivered somewhere in the
+range. The comparison period applies the same rule to its own dates.
+
+Migration 217 also adds `get_meta_ad_activity(workspace, from, to, account)`
+(service role only): per-ad spend, impressions and last delivery date for ads
+with impressions in a range of at most 92 days. Pemetaan Ads and the mapping
+worker use it. Until the migration is installed both fall back to the whole
+inventory and the page shows a notice.
+
+`tests/meta-ad-report-db.sql` contains a paused fixture ad with impressions
+only before the fixture range; `npm run test:meta-report-db` checks that the
+SQL output and the TypeScript reference rules both exclude it.
 
 ## Funnel templates and URL rules
 
@@ -206,10 +229,44 @@ contact data: keep them private on the server. Summary output contains counts an
 missing ad IDs, not phone numbers. Run `npm run test:meta-contact-identity-db` on
 the isolated local clone after migration 212.
 
-The **Pemetaan Ads** page reads a persistent inventory keyed by workspace,
-account and ad ID. Ad names are descriptive and mutable; two ads with the same
-name remain separate identities. Mapping is independent of the report's date
-range and of whether the ad has spent or delivered.
+The mapping inventory is keyed by workspace, account and ad ID. Ad names are
+descriptive and mutable; two ads with the same name remain separate identities.
+The inventory itself is independent of the report's date range and of whether
+the ad has spent or delivered; the **Pemetaan Ads** page only narrows what it
+shows (see "Pemetaan Ads worklist").
+
+### Pemetaan Ads worklist
+
+The page answers one question: which ads that are spending money right now
+can the brand report not read? `lib/meta-ad-worklist.ts` holds the rules;
+`getMetaAdWorklist` in `lib/meta-ad-mapping-actions.ts` loads the inputs.
+
+- Scope: ads with impressions in the global date range (via
+  `get_meta_ad_activity`), ranked by spend. "Tampilkan juga ad tanpa impresi"
+  appends the rest of the inventory. Without migration 217 the whole inventory
+  is shown and the toggle is disabled.
+- Four issue tiles count ads and spend in scope: CEP belum terpetakan,
+  Intention belum terpetakan, Tujuan belum terbaca, Jenis iklan perlu
+  verifikasi. Clicking a tile filters the table (`?issue=`); a green card
+  appears when nothing is left. Deep links also accept `?account=`,
+  `?channel=` and `?q=`.
+- "Tujuan" is satisfied by Meta URLs, destination metadata URLs, a verified
+  URL for the same creative, a WhatsApp destination or a CPAS ad; only ads
+  with none of these are flagged.
+- CEP and intention are edited inline with selects: "Otomatis" restores the
+  value parsed from the ad name, known keys come first, then terms already in
+  use, then "Lainnya…" for free text. Saves use the per-ad revision.
+- Checkboxes plus the sticky bulk bar set or clear one label on up to 300 ads
+  (`saveMetaAdMappingOverridesBulk`, one RPC per ad with a fresh revision;
+  partial failures are reported per ad).
+- New bracket terms outside the naming guide are listed with how many ads and
+  how much spend still rely on them. "Petakan" writes a manual override to
+  every ad that relies on the term and marks it reviewed
+  (`applyMetaAdMappingUnit`); "Abaikan" only marks it reviewed. There is no
+  alias table yet: a later ad using the same term needs the same action again.
+- The row drawer shows the parsed brackets, keywords, review notes, the
+  destination evidence and channel reason, the verified-URL form (needs a
+  creative ID) and the mapping revision history.
 
 After each successful scheduled Meta account sync, accounts without an inventory
 refresh today receive one mapping job each. No saved funnel is required. The
@@ -219,6 +276,10 @@ Creative destinations are refreshed in follow-up jobs with at most 100 ads
 single large account exceeding the HTTP worker's 60-second execution window.
 Inventory mapping completes before these jobs run; URLs can fill in afterward.
 Missing creative data preserves mapping and previously cached metadata.
+Creative follow-ups are only queued for ads that delivered in the last 30 days
+(`get_meta_ad_activity`) or whose effective status is still `ACTIVE`; other
+ads keep their cached metadata and are counted as `metadata_ads_deferred` in
+the job summary. Without migration 217 every ad is treated as recent.
 **Sync pemetaan** can request another refresh sooner. This is polling, not an
 instant webhook. Ads omitted by Meta are retained rather than marked deleted.
 

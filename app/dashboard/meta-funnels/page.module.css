@@ -306,3 +306,33 @@
 .page .cepTable th:first-child, .page .cepTable td:first-child { text-align: left; min-width: 200px; white-space: normal; }
 .heatLegend { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--dim); }
 .heatLegend i { display: inline-block; width: 36px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, color-mix(in srgb, var(--red) 45%, transparent), transparent 50%, color-mix(in srgb, var(--green) 45%, transparent)); }
+
+/* Pemetaan Ads worklist */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+.tile { display: grid; align-content: start; gap: 4px; text-align: left; padding: 12px 14px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; cursor: pointer; color: var(--text); font: inherit; }
+.tile:hover { border-color: var(--accent); }
+.tileActive { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-subtle); }
+.tile .muted { font-size: 11px; }
+.tileValue { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.tileClean { color: var(--green); }
+.tileWarn { color: var(--yellow); }
+.issueChip { display: inline-flex; align-items: center; font-size: 10px; font-weight: 650; padding: 2px 7px; border-radius: 5px; margin: 0 4px 4px 0; color: var(--yellow); background: color-mix(in srgb, var(--yellow) 14%, transparent); white-space: nowrap; }
+.okChip { color: var(--green); background: color-mix(in srgb, var(--green) 14%, transparent); }
+.worklistTable { min-width: 1080px; }
+.page .worklistTable th, .page .worklistTable td { padding: 10px 10px; vertical-align: top; }
+.page .worklistTable td { white-space: normal; }
+.page .worklistTable td:first-child { min-width: 0; width: 28px; }
+.worklistTable .adCell { min-width: 260px; max-width: 420px; }
+.worklistTable .adCell b { display: block; overflow-wrap: anywhere; }
+.worklistTable select { width: 100%; min-width: 150px; padding: 6px 8px; font-size: 12px; }
+.worklistTable .nameButton { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: var(--accent); cursor: pointer; line-height: 1.4; overflow-wrap: anywhere; }
+.worklistTable .nameButton:hover { text-decoration: underline; }
+.cellHint { display: block; font-size: 11px; color: var(--yellow); }
+.worklistTable a { color: var(--accent); overflow-wrap: anywhere; }
+.manualMark { font-size: 10px; color: var(--accent); }
+.bulkBar { position: sticky; bottom: 12px; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 14px; background: var(--card); border: 1px solid var(--accent); border-radius: 10px; box-shadow: 0 8px 24px rgb(0 0 0 / 12%); }
+.bulkBar select { min-width: 160px; }
+.unitRow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; padding: 8px 0; border-top: 1px solid var(--border); }
+.unitRow:first-of-type { border-top: 0; }
+.unitRow select { min-width: 150px; }
+.checkCell input { width: 16px; height: 16px; }

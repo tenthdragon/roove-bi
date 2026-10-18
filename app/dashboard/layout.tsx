@@ -18,7 +18,7 @@ import { isWorkspaceModuleEnabled } from '@/lib/workspaces';
 import { profileThemePreference } from '@/lib/theme-preference';
 
 function isMetaReportPath(path) {
-  return path === '/dashboard/meta-funnels' || path.startsWith('/dashboard/meta-funnels/brand');
+  return path === '/dashboard/meta-funnels' || path.startsWith('/dashboard/meta-funnels/brand') || path.startsWith('/dashboard/meta-funnels/mapping');
 }
 
 function getCurrentTab(path) {
