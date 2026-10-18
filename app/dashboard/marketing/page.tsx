@@ -6,9 +6,11 @@ import { fmtCompact, fmtRupiah } from '@/lib/utils';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { getCached, setCache } from '@/lib/dashboard-cache';
 import { getMarketingPageData } from '@/lib/marketing-actions';
+import { calculateCm3, resolveMarketingAdBrand } from '@/lib/marketing-metrics';
 import { useActiveBrands } from '@/lib/ActiveBrandsContext';
 import { buildBrandColorMap } from '@/lib/utils';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import DashboardMetricCard from '@/components/DashboardMetricCard';
 import {
   Bar,
   CartesianGrid,
@@ -50,15 +52,6 @@ function getHistoryRange(to: string, monthCount = 12) {
     historyTo: to,
   };
 }
-
-function calculateCm3(grossProfit: number, mpFee: number, shipping: number, marketingFee: number): number {
-  return grossProfit - mpFee - shipping - marketingFee;
-}
-
-const LEGACY_STORE_BRAND_FALLBACKS: Record<string, string> = {
-  'purvu store': 'Purvu',
-  plume: 'Pluve',
-};
 
 // Ads source -> marketing platform.
 function normPlatform(source: string): string {
@@ -196,10 +189,7 @@ export default function MarketingPage() {
   }, [activeBrands]);
 
   const getAdBrand = (store: string, brandId?: number | null) => {
-    if (brandId && brandIdMap[Number(brandId)]) return brandIdMap[Number(brandId)];
-    if (!store) return null;
-    const key = store.trim().toLowerCase();
-    return storeBrandMap[key] || activeBrandMap[key] || LEGACY_STORE_BRAND_FALLBACKS[key] || null;
+    return resolveMarketingAdBrand(store, brandId, brandIdMap, storeBrandMap, activeBrandMap);
   };
 
   const prodData = useMemo(
@@ -1018,14 +1008,10 @@ export default function MarketingPage() {
     </div>
   );
   const KPI = ({ label, val, sub, color = 'var(--accent)', delta, delta2 }: any) => (
-    <div style={{ background: C.card, border: `1px solid ${C.bdr}`, borderRadius: 12, padding: '16px 18px', flex: '1 1 160px', minWidth: 150, position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: color }} />
-      <div style={{ fontSize: 11, color: C.dim, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6, fontWeight: 600 }}>{label}</div>
-      <div style={{ fontSize: 20, fontWeight: 700, fontFamily: 'monospace', lineHeight: 1.1 }}>{val}</div>
-      {sub && <div style={{ fontSize: 11, color: C.dim, marginTop: 4 }}>{sub}</div>}
+    <DashboardMetricCard label={label} value={val} sub={sub} color={color}>
       {delta && <DeltaLine {...delta} />}
       {delta2 && <DeltaLine {...delta2} />}
-    </div>
+    </DashboardMetricCard>
   );
 
   const RoasHistoryTooltip = ({ active, payload }: any) => {

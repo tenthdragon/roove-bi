@@ -27,6 +27,9 @@ jobs:
       - name: Check isolated local development helpers
         run: npm run test:local-supabase
 
+      - name: Check Growth and shared components
+        run: npm run test:growth && npm run test:dashboard-components
+
       - name: Check Meta ad performance reporting
         run: npm run test:meta-funnels
 

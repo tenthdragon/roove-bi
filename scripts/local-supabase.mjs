@@ -132,7 +132,10 @@ async function seed() {
   const credentials = await exists(credentialsFile) ? JSON.parse(await readFile(credentialsFile, 'utf8')) : {
     password: `RooveLocal-${randomBytes(18).toString('base64url')}`,
     accounts: [
-      { email: 'owner@roove.test', name: 'Owner Lokal', role: 'owner' }
+      { email: 'owner@roove.test', name: 'Owner Lokal', role: 'owner' },
+      { email: 'growth@roove.test', name: 'Growth Lead Lokal', role: 'brand_manager' },
+      { email: 'creative@roove.test', name: 'Creative Lokal', role: 'manager' },
+      { email: 'reviewer@roove.test', name: 'Reviewer Lokal', role: 'manager' }
     ]
   };
   await writeFile(credentialsFile, JSON.stringify(credentials, null, 2) + '\n', { mode: 0o600 });
@@ -151,7 +154,7 @@ async function seed() {
     if (!/^[0-9a-f-]{36}$/.test(account.id)) throw new Error('Invalid local auth user ID');
     sql = sql.replaceAll(`{{${account.email.split('@')[0]}_id}}`, account.id);
   }
-  try { psql(`BEGIN;\n${sql}\nINSERT INTO roove_local.seed_history(name) VALUES('roove-local-v1');\nCOMMIT;`); }
+  try { psql(`BEGIN;\n${sql}\nINSERT INTO roove_local.seed_history(name) VALUES('growth-local-v1');\nCOMMIT;`); }
   catch (error) { throw new Error(`Local seed: ${redact(error.stderr?.toString() || error.message)}`); }
   await writeFile(path.join(local, 'app.env'), `NEXT_PUBLIC_SUPABASE_URL=${info.API_URL}\nNEXT_PUBLIC_SUPABASE_ANON_KEY=${info.ANON_KEY}\nSUPABASE_SERVICE_ROLE_KEY=${info.SERVICE_ROLE_KEY}\nNEXT_PUBLIC_SITE_URL=http://127.0.0.1:${APP_PORT}\nNEXT_PUBLIC_ALLOWED_EMAIL_DOMAINS=roove.test\n`, { mode: 0o600 });
   console.log('Local owner/workspaces seeded; no unfinished feature fixtures. Credentials: .local/login.json');

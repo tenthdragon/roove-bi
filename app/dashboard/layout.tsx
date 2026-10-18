@@ -651,7 +651,7 @@ export default function DashboardLayout({ children }) {
       }));
   }
 
-  const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake'].includes(currentTab)
+  const showDatePicker = !['admin', 'finance', 'customers', 'brand-analysis', 'warehouse', 'warehouse-settings', 'financial-report', 'cashflow', 'financial-settings', 'fixed-costs', 'marketplace-intake', 'growth-work'].includes(currentTab)
     && !(pathname.startsWith('/dashboard/meta-funnels') && !isMetaReportPath(pathname));
   const canSyncSheets = accessRole === 'owner' || permissions.has('admin:daily');
   const canSyncMeta = accessRole === 'owner' || permissions.has('admin:meta');

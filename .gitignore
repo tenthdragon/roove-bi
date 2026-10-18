@@ -74,3 +74,6 @@ supabase/.branches/
 !docs/runbooks/local-development.md
 !docs/runbooks/feature-branches.md
 !deploy/staging/README.md
+
+!scripts/growth-ui-preview.mjs
+!docs/runbooks/growth-execution.md
