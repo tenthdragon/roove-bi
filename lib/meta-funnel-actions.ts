@@ -33,11 +33,13 @@ export async function getMetaFunnelData(input: MetaReportInput) {
     baselineComplete: hasCoverage(raw.coverage, ctx.scopedAccountIds, prevFrom, shiftDay(from, -1)),
     prevFrom, prevTo: shiftDay(from, -1), jobs: ctx.jobs };
 }
-export async function getMetaFunnelHistory(input: MetaReportInput & { view: 'daily' | 'trends'; period?: 'weekly' | 'monthly' }) {
+export async function getMetaFunnelHistory(input: MetaReportInput & { view: 'daily' | 'trends'; period?: 'weekly' | 'monthly'; workspaceId?: string }) {
   if (!['daily', 'trends'].includes(input.view) || input.period !== undefined && !['weekly', 'monthly'].includes(input.period)) throw new Error('Periode histori tidak valid.');
   const ctx = await reportContext(input);
   if (!ctx.schemaReady) return ctx;
-  const raw = await getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, metaReportQuery(ctx.input, ctx.config, input.view, input.period === 'monthly' ? 'month' : 'week'));
+  if (input.workspaceId && input.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
+  const config = ctx.brandId && ctx.scopedAccountIds.length ? { ...ctx.config, account_ids: ctx.scopedAccountIds } : ctx.config;
+  const raw = await getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, metaReportQuery(ctx.input, config, input.view, input.period === 'monthly' ? 'month' : 'week'));
   return { schemaReady: true as const, history: metaReportHistory(raw, ctx.config, input.view), complete: raw.historyComplete,
     reportVersion: ctx.reportVersion, reportingError: raw.currencies.length > 1 ? currencyError : null };
 }
@@ -60,6 +62,13 @@ export async function getMetaFunnelSyncStatus(jobIds?: string[]) {
   if (version.error || active.error) throw new Error(version.error?.message || active.error?.message);
   return { workspaceId, reportVersion: String(version.data?.revision || 0), jobs, trackedJobs,
     pending: active.count || 0, running: active.data?.[0]?.status === 'running' };
+}
+/** Cheap freshness check for cached detail/navigation reads. */
+export async function getMetaReportRevision() {
+  const { workspaceId } = await reportingAccess();
+  const r = await createServiceSupabase().from('meta_ad_report_versions').select('revision').eq('workspace_id', workspaceId).maybeSingle();
+  if (r.error) throw new Error(r.error.message);
+  return { workspaceId, reportVersion: String(r.data?.revision || 0) };
 }
 export async function getMetaFunnelNotifications() {
   const { workspaceId, profile } = await reportingAccess();

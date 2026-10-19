@@ -6,16 +6,17 @@ import { createServiceSupabase } from './service-supabase';
 import { loadTaxonomy } from './meta-taxonomy-store';
 import { validateCepSelection, validateIntention, type MappingOverrides } from './meta-ad-taxonomy';
 import { enqueueMetaAdMapping } from './meta-ad-mapping-queue';
-import { loadVerifiedDestinations, loadAdDimensions, readAll } from './meta-funnel-store';
+import { readAll } from './meta-funnel-store';
 import { mappingUnit, type AdMapping, type MappingUnit } from './meta-ad-mapping';
-import { dimensionOptions, validateDimensionFilters, type AdDimensionFilters } from './meta-ad-dimensions';
+import { dimensionOptions, validateDimensionFilters, type AdDimensionFilters, type AdDimensions } from './meta-ad-dimensions';
 import { validateMetaAdChannel, type MetaAdChannel } from './meta-ad-channels';
 import { validateRange } from './meta-funnel-domain';
 import { completedMetaRange } from './meta-report-status';
 import { getTodayWIB } from './sync-schedule';
-import { applyMappingUnitBatch, buildWorklist, WORKLIST_ISSUES, type AdActivity, type DestinationHint, type WorklistIssue } from './meta-ad-worklist';
+import { getMetaWorklistInventory, getMetaWorklistActivity } from './meta-worklist-data';
+import { metaReportResponse } from './meta-report-requests';
+import { applyMappingUnitBatch, buildWorklist, WORKLIST_ISSUES, type WorklistIssue } from './meta-ad-worklist';
 
-const MISSING_SCHEMA = ['42P01', 'PGRST205', '42883', 'PGRST202'];
 async function access(manage = false) {
   const ctx = await reportingAccess();
   if (manage) {
@@ -24,60 +25,67 @@ async function access(manage = false) {
   }
   return ctx;
 }
-const MAPPING_FIELDS = 'brand_id,cep_keys,intention_key,cep_source,intention_source,account_id,ad_id,ad_name,creative_id,effective_status,landing_page_urls,auto_mapping,overrides,source,first_seen_at,last_seen_at,revision,ad_channel,ad_channel_reason';
-
-/** Per-ad delivery in the range; absent until migration 217 is installed. */
-async function loadActivity(svc: ReturnType<typeof createServiceSupabase>, workspaceId: string, from: string, to: string) {
-  const result = await svc.rpc('get_meta_ad_activity', { p_workspace_id: workspaceId, p_from: from, p_to: to, p_account_id: null });
-  if (result.error && MISSING_SCHEMA.includes(result.error.code)) return { ready: false, rows: [] as AdActivity[] };
-  if (result.error) throw new Error(result.error.message);
-  return { ready: true, rows: (Array.isArray(result.data) ? result.data : []).map((r: any) => ({ account_id: String(r.account_id), ad_id: String(r.ad_id), spend: Number(r.spend) || 0, impressions: Number(r.impressions) || 0, last_active: r.last_active || null })) };
+async function mappingStatus(workspaceId: string) {
+  const svc = createServiceSupabase();
+  const [accounts, state, jobs, pending] = await Promise.all([
+    svc.from('meta_ad_accounts').select('account_id').eq('workspace_id', workspaceId).eq('is_active', true),
+    svc.from('meta_ad_mapping_sync_state').select('account_id,last_inventory_at,ads_count').eq('workspace_id', workspaceId),
+    svc.from('sync_jobs').select('id,status,mode,error_message,created_at').eq('workspace_id', workspaceId).eq('job_name', 'meta_sync').contains('payload', { ad_mapping_only: true }).order('created_at', { ascending: false }).limit(10),
+    svc.from('sync_jobs').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).eq('job_name', 'meta_sync').contains('payload', { ad_mapping_only: true }).in('status', ['queued', 'running']),
+  ]);
+  for (const r of [accounts, state, jobs, pending]) if (r.error) throw new Error(r.error.message);
+  const ids = new Set((accounts.data || []).map(a => a.account_id));
+  return { state: (state.data || []).filter(s => ids.has(s.account_id)), jobs: jobs.data || [], pendingJobs: pending.count || 0 };
 }
-
-export async function getMetaAdWorklist(input: { from: string; to: string; page?: number; search?: string; accountId?: string; filters?: AdDimensionFilters; channel?: unknown; issue?: unknown; includeInactive?: boolean } = { from: '', to: '' }) {
-  const { workspaceId } = await access(); const svc = createServiceSupabase();
-  const schema = await svc.from('meta_ad_classifications').select('ad_id').eq('workspace_id', workspaceId).limit(1);
-  if (schema.error && MISSING_SCHEMA.includes(schema.error.code)) return { ready: false as const };
-  if (schema.error) throw new Error(schema.error.message);
+async function mappingRevision(workspaceId: string) {
+  const result = await createServiceSupabase().from('meta_ad_report_versions').select('revision').eq('workspace_id', workspaceId).maybeSingle();
+  if (result.error) throw new Error(result.error.message);
+  return String(result.data?.revision || 0);
+}
+/** Poll status/revision without rereading or rebuilding the entire worklist. */
+export async function getMetaAdMappingStatus() {
+  const { workspaceId } = await access();
+  const [reportVersion, status] = await Promise.all([mappingRevision(workspaceId), mappingStatus(workspaceId)]);
+  return { workspaceId, reportVersion, ...status };
+}
+export type MetaWorklistInput = { from: string; to: string; workspaceId?: string; page?: number; search?: string; accountId?: string; filters?: AdDimensionFilters; channel?: unknown; issue?: unknown; includeInactive?: boolean };
+export async function getMetaAdWorklist(input: MetaWorklistInput = { from: '', to: '' }) {
+  return metaReportResponse(() => loadMetaAdWorklist(input));
+}
+async function loadMetaAdWorklist(input: MetaWorklistInput) {
+  const { workspaceId } = await access();
+  if (input.workspaceId && input.workspaceId !== workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
   const today = getTodayWIB();
   const range = completedMetaRange(input.from && input.to ? { from: input.from, to: input.to } : { from: `${today.slice(0, 7)}-01`, to: today }, today);
   validateRange(range.from, range.to);
-  const accounts = await svc.from('meta_ad_accounts').select('account_id,account_name,default_brand_id').eq('workspace_id', workspaceId).eq('is_active', true).order('account_name');
-  if (accounts.error) throw new Error(accounts.error.message);
-  const ids = (accounts.data || []).map(a => a.account_id);
-  if (input.accountId && !ids.includes(input.accountId)) throw new Error('Akun tidak tersedia di workspace ini.');
   const issue = input.issue === undefined || input.issue === null || input.issue === '' ? null : (WORKLIST_ISSUES as readonly string[]).includes(String(input.issue)) ? input.issue as WorklistIssue : null;
   if (input.issue && !issue) throw new Error('Jenis masalah tidak valid.');
   const channel: MetaAdChannel | null = input.channel ? validateMetaAdChannel(input.channel) : null;
   const filters = validateDimensionFilters(input.filters);
-  const [mappings, dimensions, activity, verified, hints, units, state, jobs, pendingJobs] = await Promise.all([
-    readAll<AdMapping>(svc, 'meta_ad_classifications', `${MAPPING_FIELDS},campaign_id,campaign_name,campaign_objective`, workspaceId).catch(async e => {
-      // Older schemas lack campaign columns on the view; fall back without them.
-      if (/campaign/.test(String(e?.message))) return readAll<AdMapping>(svc, 'meta_ad_classifications', MAPPING_FIELDS, workspaceId);
-      throw e;
-    }),
-    loadAdDimensions(svc, workspaceId),
-    loadActivity(svc, workspaceId, range.from, range.to),
-    loadVerifiedDestinations(svc, workspaceId),
-    readAll<{ account_id: string; ad_id: string; creative_id: string | null; classification: string | null; destination_type: string | null; urls: string[] | null }>(svc, 'meta_ad_destination_metadata', 'account_id,ad_id,creative_id,classification,destination_type:metadata->>destination_type,urls:metadata->urls', workspaceId)
-      .catch(e => { if (MISSING_SCHEMA.includes(e?.code) || /meta_ad_destination_metadata/.test(String(e?.message))) return []; throw e; }),
+  const reportVersion = await mappingRevision(workspaceId);
+  const svc = createServiceSupabase();
+  const [inventory, activity, status, units] = await Promise.all([
+    getMetaWorklistInventory(workspaceId, reportVersion), getMetaWorklistActivity(workspaceId, reportVersion, range.from, range.to),
+    mappingStatus(workspaceId),
     svc.from('meta_ad_mapping_units').select('dimension,unit_key,label,review_status,first_seen_at,last_seen_at').eq('workspace_id', workspaceId).eq('review_status', 'new').neq('dimension', 'keyword').order('dimension').order('unit_key').limit(200),
-    svc.from('meta_ad_mapping_sync_state').select('account_id,last_inventory_at,ads_count').eq('workspace_id', workspaceId).in('account_id', ids),
-    svc.from('sync_jobs').select('id,status,mode,error_message,created_at').eq('workspace_id', workspaceId).eq('job_name', 'meta_sync').contains('payload', { ad_mapping_only: true }).order('created_at', { ascending: false }).limit(10),
-    svc.from('sync_jobs').select('id', { count: 'exact', head: true }).eq('workspace_id', workspaceId).eq('job_name', 'meta_sync').contains('payload', { ad_mapping_only: true }).in('status', ['queued', 'running']),
   ]);
-  for (const result of [units, state, jobs, pendingJobs]) if (result.error) throw new Error(result.error.message);
-  const taxonomy = await loadTaxonomy(workspaceId, false);
-  const scopedMappings = mappings.filter(m => ids.includes(m.account_id));
-  const destinations: DestinationHint[] = hints.map(h => ({ account_id: h.account_id, ad_id: h.ad_id, creative_id: h.creative_id, classification: h.classification, metadata: { destination_type: h.destination_type, urls: Array.isArray(h.urls) ? h.urls : [] } }));
-  const list = buildWorklist({ mappings: scopedMappings, activity: activity.rows, verified: verified.rows, destinations, catalog: taxonomy.catalog, accounts: accounts.data || [], units: (units.data || []) as MappingUnit[],
+  if (!inventory.ready) return { ready: false as const };
+  if (units.error) throw new Error(units.error.message);
+  const { mappings, accounts, taxonomy } = inventory;
+  const ids = accounts.map(a => a.account_id);
+  if (input.accountId && !ids.includes(input.accountId)) throw new Error('Akun tidak tersedia di workspace ini.');
+  // The classification rows already contain every dimension. Reading the same
+  // view again used to resolve taxonomy and paginate the inventory twice.
+  const dimensions: AdDimensions[] = mappings.map(m => ({ account_id: m.account_id, ad_id: m.ad_id, brand_id: m.brand_id, cep_keys: m.cep_keys,
+    cep_key: m.cep_keys?.[0] || null, intention_key: m.intention_key || null, campaign_id: m.campaign_id || null, campaign_name: m.campaign_name || null, campaign_objective: m.campaign_objective || null }));
+  const list = buildWorklist({ mappings, activity: activity.rows, verified: inventory.verified, destinations: inventory.destinations, catalog: taxonomy.catalog, accounts, units: (units.data || []) as MappingUnit[],
     includeInactive: !activity.ready || !!input.includeInactive, issue, search: input.search?.slice(0, 200), accountId: input.accountId || null, channel, filters, page: input.page, pageSize: 50 });
-  const scope = input.accountId ? [input.accountId] : ids;
+  const scope = new Set(input.accountId ? [input.accountId] : ids);
   const delivered = new Set(activity.rows.filter(a => a.impressions > 0).map(a => `${a.account_id}:${a.ad_id}`));
-  const candidates = new Set(scopedMappings.filter(m => scope.includes(m.account_id) && (!channel || m.ad_channel === channel) && (input.includeInactive || delivered.has(`${m.account_id}:${m.ad_id}`))).map(m => `${m.account_id}:${m.ad_id}`));
-  return { ready: true as const, ...list, catalog: taxonomy.catalog, brands: taxonomy.brands, range, activityReady: activity.ready, issue, channel, filters,
-    dimensionsReady: dimensions.ready, dimensionOptions: dimensionOptions(dimensions.rows.filter(m => scope.includes(m.account_id)), dimensions.rows.filter(m => candidates.has(`${m.account_id}:${m.ad_id}`)), filters, taxonomy.catalog.filter(c => (accounts.data || []).some(a => scope.includes(a.account_id) && a.default_brand_id === c.brand_id))),
-    newUnits: (units.data || []) as MappingUnit[], accounts: accounts.data || [], state: state.data || [], jobs: jobs.data || [], pendingJobs: pendingJobs.count || 0, totalAds: scopedMappings.length };
+  const candidates = new Set(mappings.filter(m => scope.has(m.account_id) && (!channel || m.ad_channel === channel) && (input.includeInactive || delivered.has(`${m.account_id}:${m.ad_id}`))).map(m => `${m.account_id}:${m.ad_id}`));
+  return { ready: true as const, workspaceId, reportVersion, ...list, catalog: taxonomy.catalog, brands: taxonomy.brands, range, activityReady: activity.ready, issue, channel, filters,
+    dimensionsReady: mappings.every(m => 'campaign_id' in m), dimensionOptions: dimensionOptions(dimensions.filter(m => scope.has(m.account_id)), dimensions.filter(m => candidates.has(`${m.account_id}:${m.ad_id}`)), filters, taxonomy.catalog.filter(c => accounts.some(a => scope.has(a.account_id) && a.default_brand_id === c.brand_id))),
+    newUnits: (units.data || []) as MappingUnit[], accounts, ...status, totalAds: mappings.length };
 }
 export async function queueMetaAdMappingSync() {
   const { workspaceId, profile } = await access(true);

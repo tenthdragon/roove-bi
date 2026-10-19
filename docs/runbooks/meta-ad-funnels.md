@@ -200,7 +200,8 @@ and scheduled Meta sync enabled; no additional scheduler is required.
 ### Incremental brand overview (migration 222)
 
 Ringkasan brand uses one `get_meta_brand_overview_report` RPC for all brands,
-both worlds, CEP spend and dimension choices. Detail/history RPCs are unchanged.
+both worlds, CEP spend and dimension choices. Migration 223 extends the same
+projection to detail/history reads, as described below.
 The new RPC preserves active-ad scope, current brand taxonomy (including
 overlapping CEP memberships), historical objectives, CTWA identity, distinct-ad
 counts and unavailable metrics. Ratios still come from event sums. Global
@@ -873,17 +874,80 @@ The worker drains sequentially up to 100 jobs or 240 seconds per invocation, the
 
 Validate migration 215 on a local clone with `npm run test:meta-incremental-db` (or add `-- --with-migration` before it is installed). The fixture transaction rolls back and checks descendant counts, legacy compatibility, workspace/provider isolation, cache certification and deferred URL resolution without changing metric facts.
 
+### Incremental detail and mapping reads (migration 223)
+
+Detail Brand uses one `get_meta_brand_detail_report` RPC instead of three
+application RPCs. It scopes active accounts to the selected brand first, then
+returns Website, CPAS and the active CEP view. The three views still aggregate
+separately inside the database. Detail, focused history and creative drawers use
+`get_meta_ad_report_incremental`, sharing migration 222's certified daily
+projections; current taxonomy, coverage and template rules remain live. The
+original `get_meta_ad_report` is retained for parity checks and recovery.
+
+The browser retains bounded five-minute detail/history caches by authenticated
+user, permissions, workspace, dates, brand, world and filters. Revision checks
+refresh changed data on revisit. Repeated pending requests share a result; a
+forced refresh after a mutation waits for an older read and then rereads.
+Responses from a previous scope cannot replace the current page. Trends load
+after the main content, with charts and drawers split out of the initial bundle.
+
+Pemetaan Ads reads classifications once instead of twice, deriving dimension
+choices from the same inventory. A bounded process-local cache retains inventory
+independent of paging, search, dates and filters; activity is cached separately
+by date range. Both use workspace/revision keys and five-minute expiry. A
+process-local cache avoids Next's 2 MiB serialized-entry limit on large
+inventories. It is not shared between server processes. Failed/incomplete reads
+are not cached. Every server action checks access before reading these caches.
+Sync polling reads only job/status/revision data and reloads the worklist when
+its revision changes. Mutation actions remain live and force a client refresh.
+
+Apply only reviewed `223_meta_detail_incremental_reports.sql` after 222, before
+activating this application version. It adds service-only RPCs and extends the
+projection with creative identity. It clears only the derived daily cache once;
+source facts, mapping overrides and template assignments are unchanged. First
+use rebuilds requested dates. The previous application remains compatible with
+the additive schema, so app rollback can retain this migration. Snapshot the
+replaced `refresh_meta_brand_report_days` definition/grants for recovery; do not
+replay older migrations or reset the local snapshot.
+
+Validation:
+
+```sh
+npm run test:meta-funnels
+npm run test:meta-detail-mapping-db
+npm run test:meta-detail-mapping-db -- --benchmark
+npm run typecheck:app
+npm run lint
+npm run build
+```
+
+The database runner installs 222/223 and fixtures in one rollback-only transaction
+on the fixed local database. It compares all raw report fields across 288
+grouping/view/filter combinations, both detail worlds, an empty brand, cache
+reuse, permissions and the existing overview/invalidation regression cases.
+React tests cover shared pending loads, remount reuse, scope changes, forced
+mutation refreshes and retry after failures.
+
+On the reduced local sample, three old detail RPCs took 427 ms of serial database
+time; the batch took 399 ms cold and 346 ms with projections populated. A 90-day
+history read changed from 93 ms to 53 ms cold / 52 ms warm. These are sample query
+measurements, not production page-load times or a concurrent-load test. The
+production build's Detail Brand first-load JavaScript is 177 kB (previously
+277 kB); the deferred chart/drawer code downloads when used.
+
 ### Report database load
 
 The application permits at most two report RPC cache misses at once per process,
 including requests from different brands/routes. Identical workspace, revision
 and query scopes share an in-flight request; different scopes never share a result.
-The five-minute cache and database revision invalidation still apply. This avoids
-the overview's two-brand batch launching eight expensive queries simultaneously.
+The five-minute cache and database revision invalidation still apply. Batched
+overview/detail RPCs use the same limit. Mapping inventory/activity cache misses
+have a separate sequential loader.
 Expected database failures return a safe retry message in overview/detail.
 
 For release verification, test authenticated overview and both brand worlds with
 an uncached month-to-date range as well as seven days. The 1–17 October incident
 passed isolated RPC checks but exceeded the database's eight-second limit when
 the page launched its reports together. No database timeout increase or additional
-migration is required for this application concurrency fix.
+migration was required for that earlier application concurrency fix. The current
+batched reporting implementation requires migrations 222 and 223.
