@@ -1,7 +1,7 @@
 // @ts-nocheck
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { uploadExcelData, fetchAllUsers, rejectUserAccessRequest, updateUserRole } from '@/lib/actions';
 import {
@@ -19,6 +19,7 @@ import {
   getRolePermissionsMatrix,
 } from '@/lib/admin-actions';
 import { MATRIX_ROLES, PERMISSION_GROUPS } from '@/lib/utils';
+import { toneText } from '@/lib/theme-tones';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { invalidateAll } from '@/lib/dashboard-cache';
 import SheetManager from '@/components/SheetManager';
@@ -29,6 +30,7 @@ import MetaManager from '@/components/MetaManager';
 import ShopeeManager from '@/components/ShopeeManager';
 import WarehouseSheetManager from '@/components/WarehouseSheetManager';
 import { useWorkspace } from '@/lib/WorkspaceContext';
+import CopyAccessApproval from '@/components/CopyAccessApproval';
 
 const TABS = [
   { id: 'workspaces', label: 'Workspaces' },
@@ -370,8 +372,8 @@ export default function AdminPage() {
     try {
       const tabs = newRole === 'brand_manager' ? ['marketing'] : newRole === 'sales_manager' ? ['channels'] : [];
       const result = await updateUserRole(userId, newRole, tabs, []);
-      setUserMessage({ type: result.approved ? 'warning' : 'success', text: result.approved
-        ? 'Akses user berhasil disetujui. Email pemberitahuan persetujuan belum tersedia; beri tahu user untuk login.'
+      setUserMessage({ type: 'success', text: result.approved
+        ? 'Akses user berhasil disetujui. Klik “Salin pesan persetujuan” pada user terkait untuk mengirim pemberitahuan secara manual.'
         : 'Role user berhasil diperbarui.' });
       await refreshUsers();
     } catch (err) {
@@ -1507,6 +1509,15 @@ export default function AdminPage() {
                         />
                       )}
                     </div>
+                  )}
+                  {u.role !== 'pending' && u.id !== profile?.id && (
+                    <CopyAccessApproval
+                      key={`${activeWorkspace.id}:${u.id}:${u.role}`}
+                      email={u.email}
+                      fullName={u.full_name}
+                      roleLabel={rl.text}
+                      workspaceName={activeWorkspace.name}
+                    />
                   )}
                 </div>
               );
