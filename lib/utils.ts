@@ -1,3 +1,5 @@
+import { dashboardTabPermissionKeys } from './dashboard-permissions';
+
 // ============================================================
 // Types
 // ============================================================
@@ -6,6 +8,7 @@ export type UserRole =
   | 'owner'
   | 'admin'
   | 'marketing_api_reviewer'
+  | 'advertiser'
   | 'direktur_ops'
   | 'staf_ops'
   | 'direktur_finance'
@@ -25,6 +28,7 @@ export type UserRole =
 export const MATRIX_ROLES: { id: string; label: string }[] = [
   { id: 'admin',             label: 'Admin' },
   { id: 'marketing_api_reviewer', label: 'Marketing API Reviewer' },
+  { id: 'advertiser',        label: 'Advertiser' },
   { id: 'direktur_ops',      label: 'Direktur Ops' },
   { id: 'staf_ops',          label: 'Staf Ops' },
   { id: 'direktur_finance',  label: 'Direktur Finance' },
@@ -42,6 +46,7 @@ export const PERMISSION_GROUPS = [
     keys: [
       { key: 'tab:overview',           label: 'Dashboard' },
       { key: 'tab:marketing',          label: 'Marketing Channel' },
+      { key: 'tab:meta-funnels',       label: '↳ Meta Ads Funnel' },
       { key: 'tab:channels',           label: 'Sales Channel' },
       { key: 'tab:waba-management',    label: '↳ WABA Management' },
       { key: 'tab:ppic',               label: 'PPIC' },
@@ -326,7 +331,7 @@ export type TabId = string;
 export function canAccessTab(role: string, tabId: string, permissions: Set<string>): boolean {
   if (role === 'pending') return false;
   if (role === 'owner') return true;
-  return permissions.has(`tab:${tabId}`);
+  return dashboardTabPermissionKeys(tabId).some(key => permissions.has(key));
 }
 
 // Check if user can access a product

@@ -4,6 +4,22 @@ Available in Marketing Channel → Meta Ads (`/dashboard/meta-funnels`). Every
 Meta Ads page shares one sub-navigation: Ringkasan brand, Pemetaan Ads,
 Notifikasi, Template funnel, Kategori iklan.
 
+## Advertiser access (migration 220)
+
+The `advertiser` role is available in Admin Users (invite, approval and role
+changes) and the workspace permission matrix. Its initial permission is only
+`tab:meta-funnels`: login opens Meta Ads directly. Marketing Channel remains a
+sidebar group, without access to its main report or any other dashboard page.
+Meta Ads reports, mappings, categories, templates and notifications are readable;
+editing, sync and integration configuration still require `admin:meta`.
+
+Apply only `220_advertiser_role.sql` before inviting a new advertiser. It adds
+the compatibility profile enum and seeds the global role template plus every
+existing workspace. `provision_workspace` copies the global role template for
+future workspaces, including `advertiser` → `tab:meta-funnels`.
+Existing `tab:marketing` users retain their Meta Ads access. Both workspace
+modules (`marketing` and `meta-funnels`) must remain enabled for Meta Ads.
+
 ## Pages
 
 - **Ringkasan brand** (`/dashboard/meta-funnels`): one row per brand with

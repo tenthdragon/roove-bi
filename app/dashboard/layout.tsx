@@ -5,7 +5,8 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { useSupabase } from '@/lib/supabase-browser';
-import { ALL_TABS, canAccessTab } from '@/lib/utils';
+import { canAccessTab } from '@/lib/utils';
+import { buildVisibleTabs, canAccessLayoutTab, getCurrentTab, getOrderedAccessibleTabIds, getTabPath } from '@/lib/dashboard-navigation';
 import { PermissionsProvider, usePermissions } from '@/lib/PermissionsContext';
 import { DateRangeProvider, useDateRange } from '@/lib/DateRangeContext';
 import DateRangePicker from '@/components/DateRangePicker';
@@ -19,65 +20,6 @@ import { profileThemePreference } from '@/lib/theme-preference';
 
 function isMetaReportPath(path) {
   return path === '/dashboard/meta-funnels' || path.startsWith('/dashboard/meta-funnels/brand') || path.startsWith('/dashboard/meta-funnels/mapping');
-}
-
-function getCurrentTab(path) {
-  const seg = path.replace('/dashboard', '').replace(/^\//, '');
-  return seg.startsWith('meta-funnels/') ? 'meta-funnels' : seg || 'overview';
-}
-
-function getTabPath(tabId) {
-  return tabId === 'overview' ? '/dashboard' : '/dashboard/' + tabId;
-}
-
-function hasAdminAreaAccess(role, permissions) {
-  if (role === 'owner') return true;
-  if (permissions.has('tab:admin')) return true;
-
-  for (const permission of permissions) {
-    if (permission.startsWith('admin:')) return true;
-  }
-
-  return false;
-}
-
-function canAccessLayoutTab(role, tab, permissions) {
-  // Sales Channel Analysis inherits its parent Sales Channel permission.
-  if (tab.id === 'sales-channel-analysis') return canAccessTab(role, 'channels', permissions);
-  if (tab.id === 'meta-funnels') return canAccessTab(role, 'marketing', permissions);
-  if (tab.id === 'admin') return hasAdminAreaAccess(role, permissions);
-  if (tab.ownerOnly && role !== 'owner') return false;
-  return canAccessTab(role, tab.id, permissions);
-}
-
-function getOrderedAccessibleTabIds(role, permissions) {
-  const ids: string[] = [];
-
-  for (const tab of ALL_TABS) {
-    if (canAccessLayoutTab(role, tab, permissions)) ids.push(tab.id);
-    if (tab.children) {
-      for (const child of tab.children) {
-        if (canAccessLayoutTab(role, child, permissions)) ids.push(child.id);
-      }
-    }
-  }
-
-  return ids;
-}
-
-function buildVisibleTabs(role, permissions) {
-  return ALL_TABS.map(tab => {
-    const parentVisible = canAccessLayoutTab(role, tab, permissions);
-    const visibleChildren = tab.children?.filter(child => canAccessLayoutTab(role, child, permissions)) ?? [];
-
-    if (tab.children) {
-      if (!parentVisible && visibleChildren.length === 0) return null;
-      return { ...tab, children: visibleChildren };
-    }
-
-    if (!parentVisible) return null;
-    return tab;
-  }).filter(Boolean);
 }
 
 function findTabLabel(tabs, targetId) {
@@ -593,7 +535,7 @@ export default function DashboardLayout({ children }) {
     const ids = getOrderedAccessibleTabIds(accessRole, permissions);
     const workspace = workspaceBootstrap?.activeWorkspace;
     return workspace
-      ? ids.filter((tabId) => isWorkspaceModuleEnabled(workspace, tabId))
+      ? ids.filter((tabId) => isWorkspaceModuleEnabled(workspace, tabId) && (tabId !== 'meta-funnels' || isWorkspaceModuleEnabled(workspace, 'marketing')))
       : ids;
   }, [profile, accessRole, permissions, workspaceBootstrap]);
 
@@ -1071,7 +1013,7 @@ export default function DashboardLayout({ children }) {
             </div>
             <div style={{ display:'flex', alignItems:'center', gap:8, flexShrink:0 }}>
               <WorkspaceSwitcher />
-              {canAccessTab(accessRole, 'marketing', permissions) && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'marketing') && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'meta-funnels') && <MetaFunnelNotifications />}
+              {canAccessTab(accessRole, 'meta-funnels', permissions) && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'marketing') && isWorkspaceModuleEnabled(workspaceBootstrap.activeWorkspace, 'meta-funnels') && <MetaFunnelNotifications />}
               {showRefreshButton && (
                 <RefreshViewsButton canSyncSheets={canSyncSheets} canSyncMeta={canSyncMeta} />
               )}
@@ -1088,7 +1030,9 @@ export default function DashboardLayout({ children }) {
 
           {/* Content */}
           <main className="dashboard-content" style={{ padding:'16px 20px', maxWidth:1400, width:'100%', overflowX:'hidden', margin:'0 auto' }}>
-            {children}
+            {accessRole === 'owner' || accessibleTabIds.includes(currentTab)
+              ? children
+              : <p role="status">{accessibleTabIds.length ? 'Mengalihkan ke halaman yang dapat diakses…' : 'Belum ada halaman yang dapat diakses. Silakan hubungi owner.'}</p>}
           </main>
         </div>
       </div>

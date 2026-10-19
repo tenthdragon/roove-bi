@@ -1,11 +1,10 @@
-import { requireDashboardPermissionAccess, requireDashboardTabAccess } from './dashboard-access';
-import { isWorkspaceModuleEnabled } from './workspaces';
+import { requireDashboardPermissionAccess } from './dashboard-access';
+import { reportingAccess } from './meta-report-context';
 import { createServiceSupabase } from './service-supabase';
 import { readAll } from './meta-funnel-store';
 import type { CepCategory, TaxonomyRule } from './meta-ad-taxonomy';
 export async function taxonomyAccess(manage = false) {
-  const ctx = await requireDashboardTabAccess('marketing', 'Kategori iklan');
-  if (!isWorkspaceModuleEnabled(ctx.workspace, 'meta-funnels')) throw new Error('Meta Ads tidak aktif.');
+  const ctx = await reportingAccess();
   if (manage) { const admin = await requireDashboardPermissionAccess('admin:meta', 'Kelola kategori iklan'); if (admin.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah.'); }
   return ctx;
 }

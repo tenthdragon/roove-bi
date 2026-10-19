@@ -1,10 +1,10 @@
 'use server';
 
-import { requireDashboardPermissionAccess, requireDashboardTabAccess } from './dashboard-access';
+import { requireDashboardPermissionAccess } from './dashboard-access';
+import { reportingAccess } from './meta-report-context';
 import { createServiceSupabase } from './service-supabase';
 import { loadTaxonomy } from './meta-taxonomy-store';
 import { validateCepSelection, validateIntention, type MappingOverrides } from './meta-ad-taxonomy';
-import { isWorkspaceModuleEnabled } from './workspaces';
 import { enqueueMetaAdMapping } from './meta-ad-mapping-queue';
 import { loadVerifiedDestinations, loadAdDimensions, readAll } from './meta-funnel-store';
 import { mappingUnit, type AdMapping, type MappingUnit } from './meta-ad-mapping';
@@ -17,8 +17,7 @@ import { applyMappingUnitBatch, buildWorklist, WORKLIST_ISSUES, type AdActivity,
 
 const MISSING_SCHEMA = ['42P01', 'PGRST205', '42883', 'PGRST202'];
 async function access(manage = false) {
-  const ctx = await requireDashboardTabAccess('marketing', 'Pemetaan Ads');
-  if (!isWorkspaceModuleEnabled(ctx.workspace, 'meta-funnels')) throw new Error('Meta Ad Funnels tidak diaktifkan untuk workspace ini.');
+  const ctx = await reportingAccess();
   if (manage) {
     const admin = await requireDashboardPermissionAccess('admin:meta', 'Kelola pemetaan Meta');
     if (admin.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');

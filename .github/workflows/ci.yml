@@ -30,6 +30,9 @@ jobs:
       - name: Check Meta ad performance reporting
         run: npm run test:meta-funnels
 
+      - name: Check advertiser access boundaries
+        run: npm run test:advertiser
+
       - name: Typecheck app
         run: npm run typecheck:app
 
