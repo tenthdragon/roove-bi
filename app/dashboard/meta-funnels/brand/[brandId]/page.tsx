@@ -1,13 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { Line, LineChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import dynamic from 'next/dynamic';
 import { X } from 'lucide-react';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { usePermissions } from '@/lib/PermissionsContext';
-import { getMetaFunnelHistory, queueMetaFunnelSync, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
+import { useMetaCachedLoad, useMetaReportSession } from '@/lib/useMetaCachedLoad';
+import { createMetaOverviewCache } from '@/lib/meta-overview-cache';
+import { defaultMetaRange } from '@/lib/meta-report-status';
+import { getTodayWIB } from '@/lib/sync-schedule';
+import { getMetaFunnelHistory, getMetaReportRevision, queueMetaFunnelSync, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
 import { getMetaBrandDetail, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
 import { MEASURES, metricValue, type FunnelMetric, type Measure, type Totals } from '@/lib/meta-funnel-domain';
 import { templateDestinationRule } from '@/lib/meta-ctwa-destinations';
@@ -17,15 +21,18 @@ import { formatChange, formatCompactMoney, formatCount, formatDate, formatMetric
 import MetaAdsNav from '@/components/MetaAdsNav';
 import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
 import MetaSparkline from '@/components/MetaSparkline';
-import MetaGroupDrawer from '@/components/MetaGroupDrawer';
+const MetaGroupDrawer = dynamic(() => import('@/components/MetaGroupDrawer'), { ssr: false });
 import MetaTemplateSuggestionButton from '@/components/MetaTemplateSuggestionButton';
 import { META_TEMPLATE_SCHEMA_MESSAGE } from '@/lib/meta-template-settings';
 import MetaCepView from '@/components/MetaCepView';
-import MetaCepDrawer from '@/components/MetaCepDrawer';
+const MetaCepDrawer = dynamic(() => import('@/components/MetaCepDrawer'), { ssr: false });
+const MetaBrandTrend = dynamic(() => import('@/components/MetaBrandTrend'), { ssr: false });
 import styles from '../../page.module.css';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaBrandDetail>>, { schemaReady: true }>;
 type HistoryPoint = { date: string; totals: Totals; complete: boolean; partial: boolean };
+const detailCache = createMetaOverviewCache<Data>();
+const historyCache = createMetaOverviewCache<{ points: HistoryPoint[]; complete: boolean }>();
 const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
 const severityClass = { bad: styles.bad, warn: styles.warn, good: styles.good, info: styles.neutral } as const;
 
@@ -48,16 +55,15 @@ export default function MetaBrandDetailPage() {
   const router = useRouter();
   const pathname = usePathname();
   const { dateRange } = useDateRange();
+  const session = useMetaReportSession();
+  const reportRange = dateRange.from && dateRange.to ? dateRange : defaultMetaRange(getTodayWIB());
   const { can } = usePermissions();
   const canManage = can('admin:meta');
   const brandId = params.brandId;
   const world: MetaBrandWorld = search.get('world') === 'cpas' ? 'cpas' : 'website';
   const view: 'destinations' | 'cep' = search.get('view') === 'cep' ? 'cep' : 'destinations';
   const [filters, setFilters] = useState<AdDimensionFilters>({});
-  const [data, setData] = useState<Data | null>(null);
   const [schemaReady, setSchemaReady] = useState(true);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [drawer, setDrawer] = useState<{ group: TemplateGroup; section: TemplateSection } | null>(null);
@@ -67,33 +73,44 @@ export default function MetaBrandDetailPage() {
   const [history, setHistory] = useState<{ key: string; points: HistoryPoint[]; complete: boolean } | null>(null);
   const [historyError, setHistoryError] = useState('');
   const [trendMetricId, setTrendMetricId] = useState('');
-  const request = useRef(0);
-  const input = useMemo(() => ({ from: dateRange.from, to: dateRange.to, brandId, filters }), [dateRange.from, dateRange.to, brandId, filters]);
-  const load = useCallback(async () => {
-    if (!input.from || !input.to) return;
-    const current = ++request.current;
-    setLoading(true); setError('');
-    try {
-      const result = await getMetaBrandDetail({ ...input, world });
-      if (current !== request.current) return;
-      if ('reportError' in result) { setError(result.reportError); return; }
-      setSchemaReady(result.schemaReady);
-      if (result.schemaReady) setData(result);
-    } catch (e) { if (current === request.current) setError(message(e)); }
-    finally { if (current === request.current) setLoading(false); }
-  }, [input, world]);
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => { const guard = request; return () => { guard.current++; }; }, []);
-  useEffect(() => { setDrawer(null); setCepDrawer(null); setNotesOpen(false); }, [world, brandId]);
-  const historyKey = JSON.stringify([input, world, data?.reportVersion]);
+  const input = useMemo(() => ({ from: reportRange.from, to: reportRange.to, brandId, filters }), [reportRange.from, reportRange.to, brandId, filters]);
+  const cacheKey = session.key ? JSON.stringify([session.key, input, world]) : null;
+  const fetchDetail = useCallback(async () => {
+    const result = await getMetaBrandDetail({ ...input, world, workspaceId: session.workspaceId });
+    if ('reportError' in result) throw new Error(result.reportError);
+    setSchemaReady(result.schemaReady);
+    return result.schemaReady && result.workspaceId === session.workspaceId ? result : null;
+  }, [input, world, session.workspaceId]);
+  const { data, setData, loading, error, setError, load } = useMetaCachedLoad(cacheKey, detailCache, fetchDetail);
   useEffect(() => {
-    if (!data || !input.from) return;
-    let alive = true; setHistoryError('');
-    void getMetaFunnelHistory({ from: input.from, to: input.to, brandId, filters, channel: WORLD_CHANNEL[world], groupBy: world === 'website' ? 'landing_page' : 'ad', view: 'trends', period: 'weekly' })
-      .then(result => { if (!alive) return; if (!result.schemaReady) throw new Error('Migration laporan Meta belum tersedia.'); setHistory({ key: historyKey, points: result.history, complete: result.complete }); })
-      .catch(e => { if (alive) setHistoryError(message(e)); });
+    if (!data || !cacheKey) return;
+    let alive = true;
+    void getMetaReportRevision().then(status => {
+      if (alive && status.workspaceId === session.workspaceId && status.reportVersion !== data.reportVersion) void load(true);
+    }).catch(e => { if (alive) setError(message(e)); });
     return () => { alive = false; };
-  }, [data, input, brandId, filters, world, historyKey]);
+  }, [cacheKey, data?.reportVersion, session.workspaceId, load, setError]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setDrawer(null); setCepDrawer(null); setNotesOpen(false); setDestinationEditor(null); }, [world, brandId, cacheKey]);
+  const historyKey = JSON.stringify([cacheKey, data?.reportVersion]);
+  useEffect(() => {
+    if (!data || !cacheKey) return;
+    let alive = true; setHistoryError('');
+    const cached = historyCache.get(historyKey);
+    if (cached) { setHistory({ key: historyKey, ...cached }); return; }
+    const read = () => {
+      void historyCache.request(historyKey, async () => {
+        const result = await getMetaFunnelHistory({ from: input.from, to: input.to, workspaceId: session.workspaceId, brandId, filters, channel: WORLD_CHANNEL[world], groupBy: world === 'website' ? 'landing_page' : 'ad', view: 'trends', period: 'weekly' });
+        if (!result.schemaReady) throw new Error('Histori laporan belum tersedia.');
+        return { points: result.history, complete: result.complete };
+      }).then(result => {
+        if (!alive) return;
+        historyCache.set(historyKey, result); setHistory({ key: historyKey, ...result });
+      }).catch(e => { if (alive) setHistoryError(message(e)); });
+    };
+    const idle = 'requestIdleCallback' in window;
+    const timer = idle ? window.requestIdleCallback(read, { timeout: 1500 }) : window.setTimeout(read, 0);
+    return () => { alive = false; if (idle) window.cancelIdleCallback(timer); else clearTimeout(timer); };
+  }, [input, brandId, filters, world, historyKey, cacheKey, session.workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
   const points = history?.key === historyKey ? history.points : [];
   const trendMetrics = useMemo<FunnelMetric[]>(() => {
     if (!data) return [];
@@ -123,14 +140,14 @@ export default function MetaBrandDetailPage() {
         if (result.code === 'TEMPLATE_SCHEMA_NOT_READY') setData(current => current ? { ...current, rulesReady: false } : current);
         return;
       }
-      setNotice(`Template ditetapkan untuk ${group.name}.`); await load();
+      setNotice(`Template ditetapkan untuk ${group.name}.`); await load(true);
     }
     catch (e) { setError(message(e)); } finally { setBusy(false); }
   }
   async function verifyDestination() {
     if (!destinationEditor) return;
     setBusy(true); setError('');
-    try { const saved = await verifyMetaAdDestination(destinationEditor); setDestinationEditor(null); setNotice(`URL ad terverifikasi: ${saved.url}`); await load(); }
+    try { const saved = await verifyMetaAdDestination(destinationEditor); setDestinationEditor(null); setNotice(`URL ad terverifikasi: ${saved.url}`); await load(true); }
     catch (e) { setError(message(e)); } finally { setBusy(false); }
   }
   async function sync() {
@@ -238,8 +255,9 @@ export default function MetaBrandDetailPage() {
           <div className={styles.sectionTitle}><h2>Tren 90 hari</h2><div className={styles.actions}><span className={styles.muted}>Mingguan · {WORLD_LABELS[world]}</span>
             <select aria-label="Metrik tren" value={trendMetric?.id || ''} onChange={e => setTrendMetricId(e.target.value)}>{trendMetrics.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div></div>
           {historyError && <p role="alert" className={styles.error}>{historyError}</p>}
-          {trendMetric && <div className={styles.chartCard}><ResponsiveContainer width="100%" height={240}><LineChart data={points.map(p => ({ date: p.date, value: p.complete ? (metricValue(p.totals, trendMetric) ?? null) : null }))}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" /><XAxis dataKey="date" tick={{ fill: 'var(--dim)', fontSize: 11 }} /><YAxis tick={{ fill: 'var(--dim)', fontSize: 11 }} tickFormatter={(v: number) => trendMetric.format === 'percent' ? `${(v * 100).toFixed(1)}%` : formatCompactMoney(v, currency).replace('Rp ', '')} width={70} /><Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }} formatter={(value: number) => [formatMetric(value, trendMetric.format, currency), trendMetric.label]} /><Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2} dot={false} connectNulls={false} /></LineChart></ResponsiveContainer>
-            <p className={styles.muted}>Minggu dimulai Senin. Minggu pertama dan terakhir dapat parsial. {history && !history.complete && 'Histori belum lengkap; titik tanpa data bukan bukti performa nol.'}</p></div>}
+          {trendMetric && (history?.key === historyKey ? <MetaBrandTrend metric={trendMetric} currency={currency} complete={history.complete}
+            points={points.map(p => ({ date: p.date, value: p.complete ? metricValue(p.totals, trendMetric) : null }))} />
+            : <div className={styles.chartCard} style={{ minHeight: 240 }}><p role="status" className={styles.muted}>{historyError ? 'Tren belum berhasil dimuat.' : 'Memuat tren…'}</p></div>)}
         </section>
       </>}
     </>}

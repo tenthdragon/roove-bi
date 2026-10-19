@@ -7,7 +7,7 @@ import { metaReportResponse } from './meta-report-requests';
 import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, sumMetricTotals, type FunnelMetric, type Totals } from './meta-funnel-domain';
 import { loadFunnels, loadTemplateRules } from './meta-funnel-store';
 import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaReport, type ReportGroupBy } from './meta-ad-report';
-import { getCachedMetaAdReport, getCachedMetaBrandOverviewReport } from './meta-ad-report-data';
+import { getCachedMetaAdReport, getCachedMetaBrandOverviewReport, getCachedMetaBrandDetailReport } from './meta-ad-report-data';
 import { emptyMetaBrandReport } from './meta-brand-report';
 import { dimensionLabel } from './meta-ad-dimensions';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
@@ -45,7 +45,9 @@ function compare(current: Totals, previous: Totals, m: FunnelMetric): MetricComp
 }
 const sumTotals = sumMetricTotals;
 function fetchWorld(ctx: Context, world: MetaBrandWorld, brandId: string | undefined, view: 'overview' = 'overview', groupBy?: ReportGroupBy) {
-  const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: groupBy || (world === 'website' ? 'landing_page' : 'ad') }, ctx.config, view);
+  const accountIds = brandId ? metaBrandAccountIds(ctx.configuredAccounts, ctx.brands, brandId) : [];
+  const config = accountIds.length ? { ...ctx.config, account_ids: accountIds } : ctx.config;
+  const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: groupBy || (world === 'website' ? 'landing_page' : 'ad') }, config, view);
   return getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query);
 }
 /** The lead cost metric follows whichever lead-type event the brand actually records. */
@@ -138,36 +140,40 @@ async function loadMetaBrandOverview(input: BrandInput & { workspaceId?: string 
     dataNotes: brands.reduce((s, b) => s + b.dataNotes, 0), currency: brands[0]?.currency || allRaw.currencies[0] || 'IDR' };
 }
 
-export async function getMetaBrandDetail(input: BrandInput & { brandId: string; world: MetaBrandWorld }) {
+export async function getMetaBrandDetail(input: BrandInput & { brandId: string; world: MetaBrandWorld; workspaceId?: string }) {
   return metaReportResponse(() => loadMetaBrandDetail(input));
 }
-async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world: MetaBrandWorld }) {
+async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world: MetaBrandWorld; workspaceId?: string }) {
   const world = validateWorld(input.world);
   const brandId = validateMetaBrandFilter(input.brandId);
   if (!brandId) throw new Error('Pilih brand terlebih dahulu.');
   const ctx = await reportContext({ from: input.from, to: input.to, filters: input.filters, brandId });
   if (!ctx.schemaReady) return ctx;
-  const rules = await loadTemplateRules(createServiceSupabase(), ctx.workspaceId);
+  if (input.workspaceId && input.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
+  const [rules, raw] = await Promise.all([
+    loadTemplateRules(createServiceSupabase(), ctx.workspaceId),
+    getCachedMetaBrandDetailReport(ctx.workspaceId, ctx.reportVersion, ctx.reportRange.from, ctx.reportRange.to, brandId, WORLD_CHANNEL[world], ctx.filters),
+  ]);
   const brandAccounts = metaBrandAccountIds(ctx.accounts, ctx.brands, brandId);
-  const [rawWeb, rawCpas, rawCep] = await Promise.all([fetchWorld(ctx, 'website', brandId), fetchWorld(ctx, 'cpas', brandId), fetchWorld(ctx, world, brandId, 'overview', 'cep_intention')]);
+  const { website: rawWeb, cpas: rawCpas, cep: rawCep } = raw;
   const web = websiteWorld(ctx, rawWeb, brandAccounts, rules.rows), cpas = cpasWorld(ctx, rawCpas, brandAccounts);
   const active = world === 'website' ? web : cpas;
-  const raw = world === 'website' ? rawWeb : rawCpas;
+  const activeRaw = world === 'website' ? rawWeb : rawCpas;
   // The CEP lens reads the same scoped ads as the destination view, cut by CEP × intention.
   const cep = buildCepView(active.reportingError ? [] : normalizeGroups(rawCep), world, active.summary, active.previous, rawCep);
   const highlights = mergeHighlights(active.highlights, cepHighlights(cep, active.currency).map(h => ({ ...h, world })));
   if (!highlights.some(h => h.severity === 'bad' || (h.severity === 'warn' && h.kind !== 'data'))) highlights.unshift({ kind: 'stable', severity: 'info', title: 'Stabil', weight: 0, world, text: 'Tidak ada sinyal penurunan atau pencilan biaya pada periode ini.' });
   const { from, to } = ctx.reportRange;
   const brandOptions = metaBrandOptions(ctx.accounts, ctx.brands, []).choices.map(b => ({ value: b.value, label: b.label }));
-  return { schemaReady: true as const, world, brand: { id: brandId, name: brandOptions.find(b => b.value === brandId)?.label || brandId }, brandOptions,
+  return { schemaReady: true as const, workspaceId: ctx.workspaceId, world, brand: { id: brandId, name: brandOptions.find(b => b.value === brandId)?.label || brandId }, brandOptions,
     reportRange: ctx.reportRange, prevFrom: shiftDay(from, -daysBetween(from, to)), prevTo: shiftDay(from, -1), reportVersion: ctx.reportVersion,
     currency: active.currency, reportingError: active.reportingError, matchingAds: active.matchingAds,
     worlds: { website: { spend: web.summary.spend, ads: web.matchingAds }, cpas: { spend: cpas.summary.spend, ads: cpas.matchingAds } },
     accounts: ctx.accounts.filter(a => brandAccounts.includes(a.account_id)).map(a => ({ account_id: a.account_id, account_name: a.account_name })),
     summary: active.summary, previous: active.previous, response: compareMetrics(active.summary, active.previous, responseMetrics(world)), responseMetrics: responseMetrics(world),
     sections: world === 'website' ? web.sections : [cpas.section], unassigned: world === 'website' ? web.unassigned : [],
-    highlights: highlights.slice(0, 6), cep, coverageGaps: active.coverageGaps, destinations: raw.destinations, objectiveUnknownAds: raw.objectiveUnknownAds,
-    dimensionOptions: metaReportOptions(raw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true, rulesReady: rules.ready, verifiedDestinationsReady: true,
+    highlights: highlights.slice(0, 6), cep, coverageGaps: active.coverageGaps, destinations: activeRaw.destinations, objectiveUnknownAds: activeRaw.objectiveUnknownAds,
+    dimensionOptions: metaReportOptions(activeRaw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true, rulesReady: rules.ready, verifiedDestinationsReady: true,
     templates: ctx.funnels.map(f => ({ id: f.id, name: f.name, kind: templateKind(f) })) };
 }
 
@@ -268,7 +274,8 @@ export async function getMetaGroupAds(input: BrandInput & { brandId: string; wor
   if (!Array.isArray(input.adIds) || input.adIds.length > 5000 || input.adIds.some(id => typeof id !== 'string' || !/^\d+$/.test(id))) throw new Error('Daftar ad tidak valid.');
   const ctx = await reportContext({ from: input.from, to: input.to, filters: input.filters, brandId });
   if (!ctx.schemaReady) return ctx;
-  const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: 'ad' }, ctx.config);
+  const config = ctx.scopedAccountIds.length ? { ...ctx.config, account_ids: ctx.scopedAccountIds } : ctx.config;
+  const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: 'ad' }, config);
   const raw = await getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query);
   const wanted = new Set(input.adIds);
   return { schemaReady: true as const, currency: raw.currencies[0] || 'IDR',

@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { X } from 'lucide-react';
-import { getMetaAdWorklist, queueMetaAdMappingSync, saveMetaAdMappingOverrides, saveMetaAdMappingOverridesBulk } from '@/lib/meta-ad-mapping-actions';
+import { getMetaAdWorklist, getMetaAdMappingStatus, queueMetaAdMappingSync, saveMetaAdMappingOverrides, saveMetaAdMappingOverridesBulk } from '@/lib/meta-ad-mapping-actions';
 import { verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
 import { mappingDimensionLabel } from '@/lib/meta-ad-mapping';
 import { labelOptions, WORKLIST_ISSUE_LABELS, WORKLIST_ISSUES, type WorklistIssue, type WorklistRow } from '@/lib/meta-ad-worklist';
@@ -12,12 +12,17 @@ import { objectiveLabel, type AdDimensionFilters } from '@/lib/meta-ad-dimension
 import { metaAdChannelLabel, META_AD_CHANNELS, type MetaAdChannel } from '@/lib/meta-ad-channels';
 import { formatCompactMoney, formatDate } from '@/lib/meta-format';
 import { useDateRange } from '@/lib/DateRangeContext';
+import { useMetaCachedLoad, useMetaReportSession } from '@/lib/useMetaCachedLoad';
+import { createMetaOverviewCache } from '@/lib/meta-overview-cache';
+import { defaultMetaRange } from '@/lib/meta-report-status';
+import { getTodayWIB } from '@/lib/sync-schedule';
 import MetaCepPicker from './MetaCepPicker';
 import MetaAdDimensionFilters from './MetaAdDimensionFilters';
 import MetaAdsNav from './MetaAdsNav';
 import styles from '@/app/dashboard/meta-funnels/page.module.css';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaAdWorklist>>, { ready: true }>;
+const mappingCache = createMetaOverviewCache<Data>();
 const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
 const stamp = (value: string | null) => value ? new Date(value).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' }) : '—';
 const rowKey = (row: Pick<WorklistRow, 'account_id' | 'ad_id'>) => `${row.account_id}:${row.ad_id}`;
@@ -29,17 +34,23 @@ function parseChannel(value: string | null): MetaAdChannel | null { return value
 /** Pemetaan Ads as a worklist: what the brand report cannot read yet, ranked by spend in the selected range. */
 export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId: string; canManage: boolean }) {
   const router = useRouter(); const pathname = usePathname(); const searchParams = useSearchParams();
-  const { dateRange, loading: rangeLoading } = useDateRange();
+  const { dateRange } = useDateRange();
+  const session = useMetaReportSession();
+  const reportRange = dateRange.from && dateRange.to ? dateRange : defaultMetaRange(getTodayWIB());
   const issue = parseIssue(searchParams.get('issue')); const channel = parseChannel(searchParams.get('channel'));
   const account = searchParams.get('account') || ''; const urlQuery = searchParams.get('q') || '';
-  const [search, setSearch] = useState(urlQuery); const [page, setPage] = useState(1);
+  const [search, setSearch] = useState(urlQuery);
+  const [pagination, setPagination] = useState({ scope: '', page: 1 });
   const [filters, setFilters] = useState<AdDimensionFilters>({}); const [includeInactive, setIncludeInactive] = useState(false);
-  const [data, setData] = useState<Data | null>(null); const [ready, setReady] = useState(true);
-  const [loading, setLoading] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [notice, setNotice] = useState('');
+  const [ready, setReady] = useState(true);
+  const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
+  const [pollRefresh, setPollRefresh] = useState(0);
   const [selected, setSelected] = useState<Set<string>>(new Set()); const [detail, setDetail] = useState<WorklistRow | null>(null);
   const [bulkCeps, setBulkCeps] = useState<string[] | null | undefined>(undefined);
   const [bulkIntention, setBulkIntention] = useState('');
-  const request = useRef(0);
+  const filterKey = JSON.stringify([workspaceId, reportRange.from, reportRange.to, urlQuery, account, filters, channel, issue, includeInactive]);
+  const page = pagination.scope === filterKey ? pagination.page : 1;
+  const setPage = (page: number) => setPagination({ scope: filterKey, page });
 
   function setParam(key: string, value: string | null) {
     const params = new URLSearchParams(searchParams.toString());
@@ -50,25 +61,45 @@ export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId
   }
   useEffect(() => { const timer = setTimeout(() => { if (search !== urlQuery) setParam('q', search.trim() || null); }, 300); return () => clearTimeout(timer); }, [search]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const load = useCallback(async (quiet = false) => {
-    if (rangeLoading || !dateRange.from) return;
-    const current = ++request.current; if (!quiet) setLoading(true); setError('');
-    try {
-      const result = await getMetaAdWorklist({ from: dateRange.from, to: dateRange.to, page, search: urlQuery, accountId: account || undefined, filters, channel: channel || undefined, issue: issue || undefined, includeInactive });
-      if (current !== request.current) return;
-      setReady(result.ready); if (result.ready) setData(result);
-    } catch (e) { if (current === request.current) setError(message(e)); }
-    finally { if (current === request.current) setLoading(false); }
-  }, [rangeLoading, dateRange.from, dateRange.to, page, urlQuery, account, filters, channel, issue, includeInactive]);
-  useEffect(() => { const guard = request; void load(); return () => { guard.current++; }; }, [load]);
+  useEffect(() => { setSearch(urlQuery); }, [urlQuery]);
+  const input = useMemo(() => ({ from: reportRange.from, to: reportRange.to, workspaceId, page, search: urlQuery, accountId: account || undefined, filters, channel: channel || undefined, issue: issue || undefined, includeInactive }),
+    [reportRange.from, reportRange.to, workspaceId, page, urlQuery, account, filters, channel, issue, includeInactive]);
+  const cacheKey = session.key ? JSON.stringify([session.key, input]) : null;
+  useEffect(() => { setDetail(null); setSelected(new Set()); }, [cacheKey]);
+  const fetchWorklist = useCallback(async () => {
+    const result = await getMetaAdWorklist(input);
+    if ('reportError' in result) throw new Error(result.reportError);
+    setReady(result.ready);
+    return result.ready && result.workspaceId === workspaceId ? result : null;
+  }, [input, workspaceId]);
+  const { data, setData, loading, error, setError, load } = useMetaCachedLoad(cacheKey, mappingCache, fetchWorklist);
   const pending = (data?.pendingJobs || 0) > 0;
-  useEffect(() => { if (!pending) return; const timer = setInterval(() => { void load(true); }, 15000); return () => clearInterval(timer); }, [pending, load]);
+  useEffect(() => {
+    if (!cacheKey) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function poll() {
+      let again = false;
+      try {
+        const report = await load();
+        if (!alive || !report) return;
+        const status = await getMetaAdMappingStatus();
+        if (!alive || status.workspaceId !== workspaceId) return;
+        setData(current => current ? { ...current, state: status.state, jobs: status.jobs, pendingJobs: status.pendingJobs } : current);
+        again = status.pendingJobs > 0;
+        if (status.reportVersion !== report.reportVersion) await load(true);
+      } catch (e) { if (alive) { setError(message(e)); again = true; } }
+      finally { if (alive && again) timer = setTimeout(() => void poll(), 15000); }
+    }
+    void poll();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [cacheKey, load, setData, setError, workspaceId, pollRefresh]);
 
   async function run(work: () => Promise<unknown>, done?: string) {
     setBusy(true); setError(''); setNotice('');
     let failure = '';
     try { await work(); if (done) setNotice(done); } catch (e) { failure = message(e); }
-    finally { await load(true); if (failure) setError(failure); setBusy(false); }
+    finally { await load(true); setPollRefresh(v => v + 1); if (failure) setError(failure); setBusy(false); }
   }
   const intentionOptions = useMemo(() => labelOptions('intention'), []);
   const picker = (row: WorklistRow, dimension: 'cep' | 'intention') => {
@@ -99,7 +130,7 @@ export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId
   return <>
     <MetaAdsNav title="Pemetaan Ads" subtitle={data ? `${sub} · inventori ${lastSync ? stamp(lastSync) : 'belum disinkronkan'}` : 'Ad yang tayang pada periode terpilih, diurutkan dari spend terbesar.'}
       actions={<><Link className={styles.button} href="/dashboard/meta-funnels/categories">Kategori & aturan</Link>
-        <button className={styles.button} disabled={loading} onClick={() => void load()}>Muat ulang</button>
+        <button className={styles.button} disabled={loading} onClick={() => void load(true)}>Muat ulang</button>
         {canManage && <button className={styles.primary} disabled={busy || !ready} onClick={() => void run(queueMetaAdMappingSync, 'Sync pemetaan masuk antrean. Nama ad dibaca lebih dulu; URL dan creative menyusul dalam batch kecil.')}>Sync pemetaan</button>}
       </>} />
     {error && <div role="alert" className={styles.error}>{error}</div>}{notice && <div role="status" className={styles.info}>{notice}</div>}
