@@ -84,6 +84,41 @@ Untuk memastikan akun CEO hanya melihat Apurva, gunakan alamat email yang belum
 menjadi user Roove. User baru tersebut hanya mendapat satu membership:
 Apurva Workspace.
 
+## Permintaan akses user (migration 221)
+
+Admin → Users menampilkan membership workspace aktif serta permintaan yang
+menunggu persetujuan. Platform owner juga melihat profil pendaftaran baru yang
+belum mempunyai membership; menerima permintaan tersebut memberi akses ke
+workspace yang sedang dipilih. Owner workspace lain tidak dapat melihat atau
+memproses pendaftaran global tersebut.
+
+Tombol **Tolak permintaan** mengarsipkan request sebagai membership `suspended`
+dan menghapusnya dari daftar pending. Identitas login dan akses di workspace
+lain tetap tersimpan. Undangan baru melalui form Invite bisa membuka kembali
+request yang ditolak. Approval lama dari halaman yang belum dimuat ulang tidak
+dapat mengaktifkan request yang sudah ditolak.
+
+Approval, penolakan, dan undangan ulang berjalan dalam transaksi database yang
+mengunci profil tujuan. Approval juga mengubah compatibility profile `pending`
+agar user bisa login; role `workspace_owner` dipetakan ke global `admin`, bukan
+platform owner. Revoke Access menghasilkan membership `pending`/`invited`,
+sehingga owner masih bisa memprosesnya tetapi membership tersebut tidak aktif.
+
+Terapkan hanya `221_workspace_access_requests.sql` sebelum rilis perubahan ini.
+Uji database menggunakan `npm run test:access-requests-db` pada database
+sementara terpisah; tidak memodifikasi snapshot lokal bersama. CI menggunakan
+container PostgreSQL sementara untuk skenario yang sama.
+
+Email pemberitahuan setelah approval belum diimplementasikan. Pemeriksaan
+production 19 Oktober 2026 menemukan custom SMTP Supabase dan konfigurasi
+pengirim aplikasi belum tersedia. UI menyatakan akses sudah diberikan tetapi
+email belum dikirim. Pengirim bawaan Supabase hanya untuk email Auth dan
+memiliki batas alamat/tarif yang dijelaskan di
+[dokumentasi SMTP](https://supabase.com/docs/guides/auth/auth-smtp); daftar
+[template Auth](https://supabase.com/docs/guides/auth/auth-email-templates)
+tidak mencakup persetujuan role workspace. Integrasi pengirim email approval
+perlu dipilih dan dikonfigurasi tersendiri.
+
 ## Fixed cost
 
 Halaman **Fixed & Recurring Costs** menyediakan dua mode per workspace:

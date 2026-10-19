@@ -3,6 +3,7 @@
 import { createServerSupabase, createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardRoles, requireDashboardTabAccess } from './dashboard-access';
 import { parseRooveExcel } from './excel-parser';
+import { listWorkspaceUsers } from './workspace-user-access';
 import type { Profile, DailyProductSummary, MonthlyProductSummary } from './utils';
 
 // ── Auth & Profile ──
@@ -295,39 +296,7 @@ export async function fetchAllUsers() {
     'Hanya owner yang bisa mengakses daftar user.',
   );
 
-  const svc = createServiceSupabase();
-  const { data: memberships, error: membershipsError } = await svc
-    .from('workspace_memberships')
-    .select('user_id, role, created_at')
-    .eq('workspace_id', workspaceId)
-    .eq('status', 'active')
-    .order('created_at', { ascending: true });
-  if (membershipsError) throw membershipsError;
-
-  const memberIds = (memberships || []).map((membership) => membership.user_id);
-  if (memberIds.length === 0) return [];
-
-  const { data, error } = await svc
-    .from('profiles')
-    .select('*')
-    .in('id', memberIds);
-  if (error) throw error;
-
-  const roleByUser = new Map(
-    (memberships || []).map((membership) => [
-      membership.user_id,
-      membership.role === 'workspace_owner' ? 'owner' : membership.role,
-    ]),
-  );
-  return (data || [])
-    .map((profile) => ({
-      ...profile,
-      role: roleByUser.get(profile.id) || profile.role,
-    }))
-    .sort(
-      (a, b) =>
-        memberIds.indexOf(a.id) - memberIds.indexOf(b.id),
-    ) as Profile[];
+  return listWorkspaceUsers(workspaceId);
 }
 
 export async function updateUserRole(userId: string, role: string, allowedTabs: string[], allowedProducts: string[]) {
@@ -335,21 +304,28 @@ export async function updateUserRole(userId: string, role: string, allowedTabs: 
     ['owner'],
     'Hanya owner workspace yang bisa mengubah role user.',
   );
-  const membershipRole = role === 'owner' ? 'workspace_owner' : role;
-
-  const svc = createServiceSupabase();
-  const { error } = await svc
-    .from('workspace_memberships')
-    .update({
-      role: membershipRole,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('workspace_id', workspaceId)
-    .eq('user_id', userId)
-    .eq('status', 'active');
-
-  if (error) throw error;
+  const { data, error } = await createServerSupabase().rpc('manage_workspace_user_access', {
+    p_workspace_id: workspaceId,
+    p_user_id: userId,
+    p_action: 'set_role',
+    p_role: role === 'owner' ? 'workspace_owner' : role,
+  });
+  if (error) throw new Error(error.message);
   void allowedTabs;
   void allowedProducts;
+  return data as { success: boolean; approved: boolean };
+}
+
+export async function rejectUserAccessRequest(userId: string) {
+  const { workspaceId } = await requireDashboardRoles(
+    ['owner'],
+    'Hanya owner workspace yang bisa menolak permintaan akses.',
+  );
+  const { error } = await createServerSupabase().rpc('manage_workspace_user_access', {
+    p_workspace_id: workspaceId,
+    p_user_id: userId,
+    p_action: 'reject',
+  });
+  if (error) throw new Error(error.message);
   return { success: true };
 }

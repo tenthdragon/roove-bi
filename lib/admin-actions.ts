@@ -3,6 +3,7 @@
 import { createServerSupabase, createServiceSupabase } from './supabase-server';
 import { requireDashboardPermissionAccess, requireDashboardRoles } from './dashboard-access';
 import { MATRIX_ROLES, PERMISSION_GROUPS } from './utils';
+import { listWorkspaceUsers } from './workspace-user-access';
 import { getShopeeSetupInfo } from './shopee-open-platform';
 import { resolveWorkspaceMarketplaceIntakeSourceConfig } from './marketplace-intake-workspace-sources';
 import {
@@ -86,43 +87,7 @@ export async function getAdminBootstrap() {
     return { profile, users: [] };
   }
 
-  const svc = createServiceSupabase();
-  const { data: memberships, error: membershipsError } = await svc
-    .from('workspace_memberships')
-    .select('user_id, role, status, created_at')
-    .eq('workspace_id', access.workspaceId)
-    .eq('status', 'active')
-    .order('created_at', { ascending: true });
-
-  if (membershipsError) throw membershipsError;
-
-  const memberIds = (memberships || []).map((membership) => membership.user_id);
-  if (memberIds.length === 0) {
-    return { profile: { ...profile, role: 'owner' }, users: [] };
-  }
-
-  const { data: profiles, error: usersError } = await svc
-    .from('profiles')
-    .select('*')
-    .in('id', memberIds);
-
-  if (usersError) throw usersError;
-
-  const roleByUser = new Map(
-    (memberships || []).map((membership) => [
-      membership.user_id,
-      membership.role === 'workspace_owner' ? 'owner' : membership.role,
-    ]),
-  );
-  const users = (profiles || [])
-    .map((memberProfile) => ({
-      ...memberProfile,
-      role: roleByUser.get(memberProfile.id) || memberProfile.role,
-    }))
-    .sort(
-      (a, b) =>
-        memberIds.indexOf(a.id) - memberIds.indexOf(b.id),
-    );
+  const users = await listWorkspaceUsers(access.workspaceId);
 
   return { profile: { ...profile, role: 'owner' }, users };
 }
