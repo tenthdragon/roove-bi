@@ -57,8 +57,8 @@ export default function MetaBrandDetailPage() {
   const { dateRange } = useDateRange();
   const session = useMetaReportSession();
   const reportRange = dateRange.from && dateRange.to ? dateRange : defaultMetaRange(getTodayWIB());
-  const { can } = usePermissions();
-  const canManage = can('admin:meta');
+  const { can, role } = usePermissions();
+  const canManage = role !== 'advertiser' && can('admin:meta');
   const brandId = params.brandId;
   const world: MetaBrandWorld = search.get('world') === 'cpas' ? 'cpas' : 'website';
   const view: 'destinations' | 'cep' = search.get('view') === 'cep' ? 'cep' : 'destinations';
@@ -190,10 +190,10 @@ export default function MetaBrandDetailPage() {
         <button type="button" className={`${styles.button} ${noteCount ? styles.notesButton : ''}`} onClick={() => setNotesOpen(true)} disabled={!data}>{noteCount ? `${noteCount} catatan data` : 'Catatan data'}</button>
       </div>
     </div>
-    {error && <div role="alert" className={styles.error}>{error}</div>}
+    {(session.error || error) && <div role="alert" className={styles.error}>{session.error || error}</div>}
     {notice && <div role="status" className={styles.info}>{notice}</div>}
     {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
-      {loading && !data && <p role="status" className={styles.muted}>Memuat detail brand…</p>}
+      {loading && !session.error && !data && <p role="status" className={styles.muted}>Memuat detail brand…</p>}
       {data && <>
         {world === 'website' && !data.rulesReady && error !== META_TEMPLATE_SCHEMA_MESSAGE && <div role="alert" className={styles.error}>{META_TEMPLATE_SCHEMA_MESSAGE}</div>}
         <p className={styles.period}>Periode {formatDate(data.reportRange.from)} – {formatDate(data.reportRange.to)} <span>vs {formatDate(data.prevFrom)} – {formatDate(data.prevTo)} · {currency}</span></p>

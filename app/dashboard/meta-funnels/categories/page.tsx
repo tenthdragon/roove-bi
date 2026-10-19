@@ -17,8 +17,8 @@ const emptyCategory = (): CategoryDraft => ({ key: '', label: '', description: '
 
 export default function CategoriesPage() {
   const { activeWorkspace } = useWorkspace();
-  const { can } = usePermissions();
-  return <ClassificationEditor key={activeWorkspace.id} canManage={can('admin:meta')} />;
+  const { can, role } = usePermissions();
+  return <ClassificationEditor key={activeWorkspace.id} canManage={role !== 'advertiser' && can('admin:meta')} />;
 }
 function ClassificationEditor({ canManage }: { canManage: boolean }) {
   const { dateRange } = useDateRange();

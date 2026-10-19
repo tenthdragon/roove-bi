@@ -21,8 +21,8 @@ const kindLabels: Record<TemplateMatchKind, string> = { exact: 'URL persis', pre
 
 export default function MetaTemplatesPage() {
   const { activeWorkspace } = useWorkspace();
-  const { can } = usePermissions();
-  const canManage = can('admin:meta');
+  const { can, role } = usePermissions();
+  const canManage = role !== 'advertiser' && can('admin:meta');
   const [data, setData] = useState<Data | null>(null);
   const [schemaReady, setSchemaReady] = useState(true);
   const [loading, setLoading] = useState(true);

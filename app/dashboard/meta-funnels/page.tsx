@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
-import { useSupabase } from '@/lib/supabase-browser';
+import { useMetaReportSession } from '@/lib/useMetaCachedLoad';
 import { createMetaOverviewCache } from '@/lib/meta-overview-cache';
 import { defaultMetaRange } from '@/lib/meta-report-status';
 import { getTodayWIB } from '@/lib/sync-schedule';
@@ -41,10 +41,10 @@ export default function MetaBrandOverviewPage() {
   // Meta's default is known without waiting for the sales-data date extent.
   const reportRange = dateRange.from && dateRange.to ? dateRange : defaultMetaRange(getTodayWIB());
   const { activeWorkspace, switching } = useWorkspace();
-  const { can, role, permissions } = usePermissions();
-  const supabase = useSupabase();
-  const [userId, setUserId] = useState('');
-  const canManage = can('admin:meta');
+  const { can, role } = usePermissions();
+  const session = useMetaReportSession();
+  const userId = session.key || '';
+  const canManage = role !== 'advertiser' && can('admin:meta');
   const [resultState, setResultState] = useState<{ key: string; data: Data } | null>(null);
   const [schemaReady, setSchemaReady] = useState(true);
   const [filterState, setFilterState] = useState<{ workspaceId: string; value: AdDimensionFilters }>({ workspaceId: activeWorkspace.id, value: {} });
@@ -63,14 +63,6 @@ export default function MetaBrandOverviewPage() {
   const reportVersion = useRef('');
   const pending = useRef<{ key: string; promise: Promise<void> } | null>(null);
   useEffect(() => {
-    let alive = true;
-    void supabase.auth.getSession().then(({ data: { session } }) => { if (alive) setUserId(session?.user.id || ''); });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (alive) setUserId(session?.user.id || '');
-    });
-    return () => { alive = false; subscription.unsubscribe(); };
-  }, [supabase]);
-  useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const view = params.get('view');
     if (view === 'alerts') router.replace('/dashboard/meta-funnels/notifications');
@@ -83,9 +75,8 @@ export default function MetaBrandOverviewPage() {
     setSyncStatus(null); setSyncStatusError('');
   }, [activeWorkspace.id]);
   const input = useMemo(() => ({ from: reportRange.from, to: reportRange.to, filters }), [reportRange.from, reportRange.to, filters]);
-  const accessKey = JSON.stringify([role, [...permissions].sort()]);
-  const cacheKey = JSON.stringify([userId, activeWorkspace.id, accessKey, input]);
-  const data = resultState?.key === cacheKey ? resultState.data : overviewCache.get(cacheKey) || null;
+  const cacheKey = JSON.stringify([userId, activeWorkspace.id, input]);
+  const data = !session.key ? null : resultState?.key === cacheKey ? resultState.data : overviewCache.get(cacheKey) || null;
   const load = useCallback((force = false): Promise<void> => {
     if (!userId || switching || !input.from || !input.to) return Promise.resolve();
     if (pending.current?.key === cacheKey) return pending.current.promise;
@@ -171,7 +162,7 @@ export default function MetaBrandOverviewPage() {
       <button className={styles.button} onClick={() => { void load(true); setSyncRefresh(v => v + 1); }} disabled={loading}>Muat ulang</button>
       {canManage && <button className={styles.primary} disabled={busy || hasPendingJobs || !schemaReady} onClick={() => void sync()}>{syncStarting ? 'Menyiapkan sync…' : hasPendingJobs ? 'Sync berlangsung…' : 'Sync'}</button>}
     </>} />
-    {error && <div role="alert" className={styles.error}>{error}</div>}
+    {(session.error || error) && <div role="alert" className={styles.error}>{session.error || error}</div>}
     {notice && <div role="status" className={styles.info}>{notice}</div>}
     <MetaSyncProgress progress={syncProgress} preparing={syncStarting} checking={!!trackedSync && !currentSyncStatus} status={currentSyncStatus}
       accounts={data?.accounts || []} error={syncStatusError} onRefresh={() => setSyncRefresh(v => v + 1)} />
@@ -188,7 +179,7 @@ export default function MetaBrandOverviewPage() {
       <details className={styles.filterDetails}><summary>Filter{hasFilters ? ' · aktif' : ''}</summary>
         <div className={styles.filterPanel}>{data && <MetaAdDimensionFilters value={filters} options={data.dimensionOptions} ready={data.dimensionsReady} onChange={setFilters} onReset={() => setFilters({})} />}</div>
       </details>
-      {loading && !data && <p role="status" className={styles.muted}>Memuat ringkasan brand…</p>}
+      {loading && !session.error && !data && <p role="status" className={styles.muted}>Memuat ringkasan brand…</p>}
       {data && <div className={styles.sectionCard}>
         <div className={styles.sectionHead}><div><strong>Kualitas iklan per brand</strong><span>Klik brand untuk melihat tahap mana yang bocor dan landing page mana penyebabnya.</span></div></div>
         {!data.brands.length ? <p className={styles.card} style={{ border: 0 }}>Belum ada akun Meta aktif yang terpetakan ke brand. Petakan akun di Admin Meta.</p> : <div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}>
