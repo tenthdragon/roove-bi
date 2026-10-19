@@ -4,5 +4,13 @@
   "ignorePatterns": ["mcp-server/**", "supabase/functions/**", "tmp/**", ".next/**"],
   "rules": {
     "react/no-unescaped-entities": "off"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["app/dashboard/admin/page.tsx"],
+      "rules": {
+        "no-undef": "error"
+      }
+    }
+  ]
 }

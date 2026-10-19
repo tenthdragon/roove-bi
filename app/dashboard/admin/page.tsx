@@ -1,7 +1,7 @@
 // @ts-nocheck
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { uploadExcelData, fetchAllUsers, rejectUserAccessRequest, updateUserRole } from '@/lib/actions';
 import {
@@ -19,6 +19,7 @@ import {
   getRolePermissionsMatrix,
 } from '@/lib/admin-actions';
 import { MATRIX_ROLES, PERMISSION_GROUPS } from '@/lib/utils';
+import { toneText } from '@/lib/theme-tones';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { invalidateAll } from '@/lib/dashboard-cache';
 import SheetManager from '@/components/SheetManager';
