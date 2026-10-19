@@ -5,6 +5,7 @@ import { useSupabase } from './supabase-browser';
 import { useWorkspace } from './WorkspaceContext';
 import { usePermissions } from './PermissionsContext';
 import { createMetaOverviewCache } from './meta-overview-cache';
+import { getMetaViewerScope } from './meta-funnel-actions';
 
 export function useMetaReportSession() {
   const supabase = useSupabase();
@@ -17,7 +18,32 @@ export function useMetaReportSession() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => { if (alive) setUserId(session?.user.id || ''); });
     return () => { alive = false; subscription.unsubscribe(); };
   }, [supabase]);
-  return { workspaceId: activeWorkspace.id, key: userId && !switching ? JSON.stringify([userId, activeWorkspace.id, role, [...permissions].sort()]) : null };
+  const identity = userId && !switching ? JSON.stringify([userId, activeWorkspace.id, role, [...permissions].sort()]) : null;
+  const [scope, setScope] = useState<{ identity: string; key: string; empty: boolean } | null>(null);
+  const [scopeError, setScopeError] = useState('');
+  useEffect(() => {
+    if (role !== 'advertiser' || !identity) return;
+    let alive = true; let sequence = 0;
+    const check = async (hide = false) => {
+      const current = ++sequence;
+      if (hide) setScope(null);
+      try {
+        const value = await getMetaViewerScope();
+        if (!alive || current !== sequence) return;
+        if ('error' in value || value.workspaceId !== activeWorkspace.id) throw new Error('Akses brand belum dapat diverifikasi. Muat ulang atau hubungi owner workspace.');
+        setScope({ identity, key: value.accessKey, empty: value.brandIds?.length === 0 }); setScopeError('');
+      } catch (e) { if (alive && current === sequence) { setScope(null); setScopeError(e instanceof Error ? e.message : 'Gagal memverifikasi akses brand.'); } }
+    };
+    void check(true);
+    const focus = () => void check(true);
+    window.addEventListener('focus', focus);
+    const timer = window.setInterval(() => void check(), 30000);
+    return () => { alive = false; window.removeEventListener('focus', focus); window.clearInterval(timer); };
+  }, [identity, role, activeWorkspace.id]);
+  const checked = scope?.identity === identity ? scope : null;
+  return { workspaceId: activeWorkspace.id,
+    key: role === 'advertiser' ? identity && checked && !checked.empty ? JSON.stringify([identity, checked.key]) : null : identity,
+    error: role === 'advertiser' ? checked?.empty ? 'Belum ada brand yang ditugaskan. Hubungi owner workspace untuk mendapatkan alokasi brand.' : scopeError : '' };
 }
 
 /** Shared navigation/pending cache; stale scope results never replace the UI. */

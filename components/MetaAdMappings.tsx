@@ -133,7 +133,7 @@ export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId
         <button className={styles.button} disabled={loading} onClick={() => void load(true)}>Muat ulang</button>
         {canManage && <button className={styles.primary} disabled={busy || !ready} onClick={() => void run(queueMetaAdMappingSync, 'Sync pemetaan masuk antrean. Nama ad dibaca lebih dulu; URL dan creative menyusul dalam batch kecil.')}>Sync pemetaan</button>}
       </>} />
-    {error && <div role="alert" className={styles.error}>{error}</div>}{notice && <div role="status" className={styles.info}>{notice}</div>}
+    {(session.error || error) && <div role="alert" className={styles.error}>{session.error || error}</div>}{notice && <div role="status" className={styles.info}>{notice}</div>}
     {!ready ? <div className={styles.card}>Pemetaan ad belum tersedia di workspace ini. Hubungi admin untuk mengaktifkannya.</div> : <>
       {data && !data.activityReady && <div className={styles.info}>Spend per ad dan cakupan ad tayang belum tersedia: pasang migration 217 agar daftar ini hanya memuat ad dengan impresi pada periode terpilih. Sementara itu seluruh inventori ditampilkan.</div>}
       {pending && <p role="status" className={styles.info}>{data?.pendingJobs} batch sync pemetaan dalam antrean atau sedang berjalan. Daftar diperbarui otomatis.</p>}

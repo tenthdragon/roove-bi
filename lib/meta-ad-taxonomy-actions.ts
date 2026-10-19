@@ -6,13 +6,16 @@ import { newCepKey, validateCepSelection, validateIntention } from './meta-ad-ta
 import { validateRange } from './meta-funnel-domain';
 import { getTodayWIB } from './sync-schedule';
 import { shiftDay } from './meta-funnel-domain';
+import { scopeMetaBrands } from './meta-brand-access';
 type RuleInput = { brandId: number; dimension: 'cep' | 'intention'; raw: string; ceps: string[]; intention: string; revision: number };
 async function result<T>(work: () => Promise<T>) {
   try { return { data: await work() }; }
   catch (error) { console.error('[meta-taxonomy]', error); return { error: 'Perubahan belum tersimpan. Periksa kategori, izin akses, dan versi data; lalu muat ulang.' }; }
 }
 export async function getMetaTaxonomyConfiguration() {
-  return result(async () => { const { workspaceId } = await taxonomyAccess(); return loadTaxonomy(workspaceId); });
+  return result(async () => { const scope = await taxonomyAccess(); const data = await loadTaxonomy(scope.workspaceId);
+    return { brands: scopeMetaBrands(data.brands, scope), catalog: data.catalog.filter(c => scope.brandIds === null || scope.brandIds.includes(c.brand_id)),
+      rules: data.rules.filter(r => scope.brandIds === null || scope.brandIds.includes(r.brand_id)) }; });
 }
 async function ruleScope(input: RuleInput) {
   const { workspaceId, profile } = await taxonomyAccess(true); const config = await loadTaxonomy(workspaceId);

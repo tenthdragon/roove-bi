@@ -49,10 +49,10 @@ export const getCachedMetaBrandDetailReport = unstable_cache(
 // One batched report shares the same database budget as detail/history reads.
 // Database day projections survive Next cache expiry and workspace revisions.
 export const getCachedMetaBrandOverviewReport = unstable_cache(
-  (workspaceId: string, revision: string, from: string, to: string, filters: AdDimensionFilters): Promise<MetaBrandReport> => requests.run(
-    JSON.stringify(['brand-overview', workspaceId, revision, from, to, filters]), async () => {
-      const result = await createServiceSupabase().rpc('get_meta_brand_overview_report', {
-        p_workspace_id: workspaceId, p_from: from, p_to: to, p_filters: filters,
+  (workspaceId: string, revision: string, from: string, to: string, filters: AdDimensionFilters, brandIds: number[] | null = null): Promise<MetaBrandReport> => requests.run(
+    JSON.stringify(['brand-overview', workspaceId, revision, from, to, filters, brandIds]), async () => {
+      const result = await createServiceSupabase().rpc(brandIds === null ? 'get_meta_brand_overview_report' : 'get_meta_brand_overview_report_scoped', {
+        p_workspace_id: workspaceId, p_from: from, p_to: to, p_filters: filters, ...(brandIds === null ? {} : { p_brand_ids: brandIds }),
       });
       if (result.error) {
         console.error('[meta-brand-overview] RPC failed', { code: result.error.code, message: result.error.message });

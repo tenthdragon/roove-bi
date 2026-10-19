@@ -51,7 +51,12 @@ export async function getMetaFunnelCreatives(input: MetaReportInput) {
   return { schemaReady: true as const, creatives: raw.creatives, reportVersion: ctx.reportVersion };
 }
 export async function getMetaFunnelSyncStatus(jobIds?: string[]) {
-  const { workspaceId } = await reportingAccess();
+  const scope = await reportingAccess(); const { workspaceId } = scope;
+  if (scope.brandIds !== null) {
+    const r = await createServiceSupabase().from('meta_ad_report_versions').select('revision').eq('workspace_id', workspaceId).maybeSingle();
+    if (r.error) throw new Error(r.error.message);
+    return { workspaceId, reportVersion: String(r.data?.revision || 0), jobs: [], trackedJobs: jobIds ? [] : null, pending: 0, running: false };
+  }
   const svc = createServiceSupabase();
   const [version, jobs, trackedJobs, active] = await Promise.all([
     svc.from('meta_ad_report_versions').select('revision').eq('workspace_id', workspaceId).maybeSingle(), loadMetaSyncJobTree(svc, workspaceId),
@@ -70,8 +75,20 @@ export async function getMetaReportRevision() {
   if (r.error) throw new Error(r.error.message);
   return { workspaceId, reportVersion: String(r.data?.revision || 0) };
 }
+/** Revalidate assignments before the browser reuses a previous report. */
+export async function getMetaViewerScope() {
+  try {
+    const scope = await reportingAccess();
+    return { workspaceId: scope.workspaceId, accessKey: scope.accessKey, brandIds: scope.brandIds };
+  } catch {
+    return { error: 'Akses brand belum dapat diverifikasi. Muat ulang atau hubungi owner workspace.' };
+  }
+}
 export async function getMetaFunnelNotifications() {
-  const { workspaceId, profile } = await reportingAccess();
+  const scope = await reportingAccess(); const { workspaceId, profile } = scope;
+  // Historical alerts are workspace/template aggregates without immutable brand
+  // provenance. Never expose those precomputed totals to restricted viewers.
+  if (scope.brandIds !== null) return { schemaReady: true as const, alerts: [] };
   const svc = createServiceSupabase();
   const [alerts, reads] = await Promise.all([
     svc.from('meta_funnel_alerts').select('id,funnel_id,payload,created_at,period_end,meta_ad_funnels!inner(archived,config)').eq('workspace_id', workspaceId)
@@ -84,7 +101,8 @@ export async function getMetaFunnelNotifications() {
   return { schemaReady: true as const, alerts: (alerts.data || []).map(alert => ({ ...alert, read: readIds.has(alert.id) })) };
 }
 export async function getMetaFunnelNotificationCount() {
-  const { workspaceId, profile } = await reportingAccess();
+  const scope = await reportingAccess(); const { workspaceId, profile } = scope;
+  if (scope.brandIds !== null) return 0;
   const svc = createServiceSupabase();
   const alerts = await svc.from('meta_funnel_alerts').select('id,meta_ad_funnels!inner(archived,config)').eq('workspace_id', workspaceId)
     .eq('meta_ad_funnels.archived', false).eq('meta_ad_funnels.config->>group_by', 'landing_page').order('period_end', { ascending: false }).order('created_at', { ascending: false }).limit(100);
@@ -134,7 +152,8 @@ export async function archiveMetaFunnel(id: string) {
   if (rules.error && !['42P01', 'PGRST205'].includes(rules.error.code)) throw new Error(rules.error.message);
 }
 export async function markMetaFunnelAlertRead(id: string) {
-  const { workspaceId, profile } = await reportingAccess();
+  const scope = await reportingAccess(); const { workspaceId, profile } = scope;
+  if (scope.brandIds !== null) throw new Error('Notifikasi tidak tersedia dalam akses Anda.');
   const svc = createServiceSupabase();
   const alert = await svc.from('meta_funnel_alerts').select('id').eq('workspace_id', workspaceId).eq('id', uuid(id)).maybeSingle();
   if (alert.error || !alert.data) throw new Error('Notifikasi tidak ditemukan.');

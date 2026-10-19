@@ -13,4 +13,7 @@ const fixture=readFileSync(new URL('workspace-access-requests-db.sql',import.met
 docker('createdb',[database]);
 try{
  process.stdout.write(docker('psql',['-d',database,'-X','-Atq','-v','ON_ERROR_STOP=1'],fixture.replace('-- MIGRATION',()=>migration)));
+ const brandMigration=readFileSync(new URL('../supabase/migrations/224_advertiser_brand_access.sql',import.meta.url),'utf8');
+ const brands=readFileSync(new URL('advertiser-brand-access-db.sql',import.meta.url),'utf8');
+ process.stdout.write(docker('psql',['-d',database,'-X','-Atq','-v','ON_ERROR_STOP=1'],brands.replace('-- BRAND_MIGRATION',()=>brandMigration)));
 }finally{docker('dropdb',['--if-exists',database]);}

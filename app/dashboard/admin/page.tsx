@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { uploadExcelData, fetchAllUsers, rejectUserAccessRequest, updateUserRole } from '@/lib/actions';
+import AdvertiserBrandAssignments from '@/components/AdvertiserBrandAssignments';
 import {
   deleteMarketplaceFeeEstimateRate,
   deleteMonthlyOverhead,
@@ -1519,6 +1520,7 @@ export default function AdminPage() {
                       workspaceName={activeWorkspace.name}
                     />
                   )}
+                  {u.role === 'advertiser' && <AdvertiserBrandAssignments key={`${activeWorkspace.id}:${u.id}`} userId={u.id} workspaceId={activeWorkspace.id} />}
                 </div>
               );
             })}

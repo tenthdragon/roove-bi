@@ -92,7 +92,7 @@ async function loadMetaBrandOverview(input: BrandInput & { workspaceId?: string 
   if (input.workspaceId && input.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
   const [rules, report] = await Promise.all([
     loadTemplateRules(createServiceSupabase(), ctx.workspaceId),
-    getCachedMetaBrandOverviewReport(ctx.workspaceId, ctx.reportVersion, ctx.reportRange.from, ctx.reportRange.to, ctx.filters),
+    getCachedMetaBrandOverviewReport(ctx.workspaceId, ctx.reportVersion, ctx.reportRange.from, ctx.reportRange.to, ctx.filters, ctx.brandIds),
   ]);
   const choices = metaBrandOptions(ctx.accounts, ctx.brands, []).choices;
   const brands: {
@@ -134,7 +134,7 @@ async function loadMetaBrandOverview(input: BrandInput & { workspaceId?: string 
   const allRaw = { ...emptyMetaBrandReport(), facets: report.facets, facetTotals: report.facetTotals, cepLabels: report.cepLabels,
     currencies: [...new Set(report.reports.filter(r => r.channel === 'non_cpas').flatMap(r => r.report.currencies))].sort() };
   return { schemaReady: true as const, workspaceId: ctx.workspaceId, reportRange: ctx.reportRange, prevFrom: shiftDay(from, -daysBetween(from, to)), prevTo: shiftDay(from, -1),
-    reportVersion: ctx.reportVersion, accounts: ctx.accounts, jobs: ctx.jobs, brands, totals, rulesReady: rules.ready,
+    reportVersion: ctx.reportVersion, accessKey: ctx.accessKey, brandIds: ctx.brandIds, accounts: ctx.accounts, jobs: ctx.jobs, brands, totals, rulesReady: rules.ready,
     templates: ctx.funnels.map(f => ({ id: f.id, name: f.name, kind: templateKind(f) })),
     dimensionOptions: metaReportOptions(allRaw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true,
     dataNotes: brands.reduce((s, b) => s + b.dataNotes, 0), currency: brands[0]?.currency || allRaw.currencies[0] || 'IDR' };
@@ -181,6 +181,7 @@ async function loadMetaTemplateSettings() {
   const today = getTodayWIB();
   const ctx = await reportContext({ from: shiftDay(today, -30), to: shiftDay(today, -1) });
   if (!ctx.schemaReady) return ctx;
+  if (ctx.brandIds !== null) throw new Error('Pengaturan template hanya tersedia untuk pengelola workspace.');
   const svc = createServiceSupabase();
   const [rules, raw] = await Promise.all([loadTemplateRules(svc, ctx.workspaceId), fetchWorld(ctx, 'website', undefined)]);
   const accountBrand = new Map(ctx.accounts.map(a => [a.account_name, ctx.brands.find(b => b.id === a.default_brand_id)?.name || 'Brand belum dipetakan']));
@@ -209,7 +210,10 @@ export async function getMetaTemplateSettings(): Promise<MetaTemplateResult<Awai
 /** Refresh configuration after edits without rereading the performance report. */
 export async function getMetaTemplateConfiguration(): Promise<MetaTemplateResult<MetaTemplateConfiguration & { rulesReady: boolean }>> {
   try {
-    const { workspaceId } = await reportingAccess();
+    // Preserve existing read access for other roles; advertisers cannot read global rules.
+    const scope = await reportingAccess();
+    if (scope.brandIds !== null) throw new Error('Pengaturan template hanya tersedia untuk pengelola workspace.');
+    const { workspaceId } = scope;
     const svc = createServiceSupabase();
     const [funnels, rules] = await Promise.all([loadFunnels(svc, workspaceId), loadTemplateRules(svc, workspaceId)]);
     return { rulesReady: rules.ready,
