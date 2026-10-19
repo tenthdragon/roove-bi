@@ -17,7 +17,7 @@ const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gag
 const CTR: FunnelMetric = { id: 'ctr', label: 'CTR', numerator: 'outbound_clicks', denominator: 'impressions', format: 'percent', direction: 'higher', monitor: false, min_denominator: 0 };
 const SPEND: FunnelMetric = { id: 'spend', label: 'Spend', numerator: 'spend', denominator: null, format: 'money', direction: 'lower', monitor: false, min_denominator: 0 };
 
-/** Side panel for one landing page or CPAS ad group: stages, 14-day trend, and the ads behind it. */
+/** Centered detail dialog for one landing page or CPAS ad group: stages, 14-day trend, and the ads behind it. */
 export default function MetaGroupDrawer({ group, section, world, input, currency, onClose }: {
   group: TemplateGroup; section: TemplateSection; world: MetaBrandWorld;
   input: { from: string; to: string; brandId: string; filters: AdDimensionFilters }; currency: string; onClose: () => void;
@@ -53,7 +53,7 @@ export default function MetaGroupDrawer({ group, section, world, input, currency
   const mainGood = main && mainChange !== null ? (main.direction === 'higher' ? mainChange >= 0 : mainChange <= 0) : null;
   return <>
     <div className={styles.drawerBackdrop} onClick={onClose} aria-hidden="true" />
-    <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label={`Detail ${group.name}`}>
+    <aside className={`${styles.drawer} ${styles.detailModal}`} role="dialog" aria-modal="true" aria-label={`Detail ${group.name}`}>
       <div className={styles.drawerHead}>
         <div><div className={styles.muted}>{world === 'website' ? `${group.destination ? 'WhatsApp' : 'Landing page'} · ${section.name}` : 'Ad · CPAS Shopee'}</div><h2>{group.name}</h2><div className={styles.muted}>{group.ad_ids.length} ad · {group.accounts.join(', ')}</div></div>
         <button type="button" className={styles.drawerClose} aria-label="Tutup detail" onClick={onClose}><X size={16} aria-hidden="true" /></button>

@@ -15,7 +15,7 @@ import styles from '@/app/dashboard/meta-funnels/page.module.css';
 type Detail = Extract<Awaited<ReturnType<typeof getMetaCepDetail>>, { schemaReady: true }>;
 const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
 
-/** Side panel for one CEP: its 90-day trend, the destinations carrying it, and its top ads. */
+/** Centered detail dialog for one CEP: its 90-day trend, the destinations carrying it, and its top ads. */
 export default function MetaCepDrawer({ cep, label, world, input, metrics, resultMetric, currency, onClose }: {
   cep: string; label: string; world: MetaBrandWorld; input: { from: string; to: string; brandId: string; filters: AdDimensionFilters };
   metrics: FunnelMetric[]; resultMetric: FunnelMetric; currency: string; onClose: () => void;
@@ -58,7 +58,7 @@ export default function MetaCepDrawer({ cep, label, world, input, metrics, resul
   };
   return <>
     <div className={styles.drawerBackdrop} onClick={onClose} aria-hidden="true" />
-    <aside className={styles.drawer} role="dialog" aria-modal="true" aria-label={`Detail CEP ${label}`}>
+    <aside className={`${styles.drawer} ${styles.detailModal}`} role="dialog" aria-modal="true" aria-label={`Detail CEP ${label}`}>
       <div className={styles.drawerHead}>
         <div><div className={styles.muted}>CEP · {WORLD_LABELS[world]}</div><h2>{label}</h2><div className={styles.muted}>{detail ? `${detail.matchingAds} ad pada periode ini` : loading ? 'Memuat…' : 'Data belum tersedia'}</div></div>
         <button type="button" className={styles.drawerClose} aria-label="Tutup detail" onClick={onClose}><X size={16} aria-hidden="true" /></button>
