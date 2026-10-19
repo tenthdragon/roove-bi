@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { limitByIp, rejectMissingDashboardSession, rejectUntrustedOrigin } from '@/lib/request-hardening';
 import { buildPublicSiteUrl } from '@/lib/site-config';
 import { requireDashboardRoles } from '@/lib/dashboard-access';
+import { createServerSupabase } from '@/lib/supabase-server';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -107,12 +108,15 @@ export async function POST(req: NextRequest) {
       .eq('email', normalizedEmail)
       .maybeSingle();
     if (existing) {
-      const { count } = await svc
-        .from('workspace_memberships')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', existing.id)
-        .eq('status', 'active');
-      await addMembership(existing.id, (count || 0) === 0);
+      // Explicit invitations can reopen a previously rejected request. Update
+      // the compatibility pending profile in the same locked transaction.
+      const { error } = await createServerSupabase().rpc('manage_workspace_user_access', {
+        p_workspace_id: targetWorkspaceId,
+        p_user_id: existing.id,
+        p_action: 'invite',
+        p_role: normalizedRole,
+      });
+      if (error) throw error;
       return NextResponse.json({
         success: true,
         partial: false,

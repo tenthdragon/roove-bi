@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { uploadExcelData, fetchAllUsers, updateUserRole } from '@/lib/actions';
+import { uploadExcelData, fetchAllUsers, rejectUserAccessRequest, updateUserRole } from '@/lib/actions';
 import {
   deleteMarketplaceFeeEstimateRate,
   deleteMonthlyOverhead,
@@ -102,6 +102,8 @@ export default function AdminPage() {
 
   // User management states
   const [users, setUsers] = useState([]);
+  const [userBusy, setUserBusy] = useState(null);
+  const [userMessage, setUserMessage] = useState(null);
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('admin');
   const [inviting, setInviting] = useState(false);
@@ -362,12 +364,35 @@ export default function AdminPage() {
   }, []);
 
   const handleRoleChange = async (userId, newRole) => {
+    if (userBusy) return;
+    setUserBusy(userId);
+    setUserMessage(null);
     try {
       const tabs = newRole === 'brand_manager' ? ['marketing'] : newRole === 'sales_manager' ? ['channels'] : [];
-      await updateUserRole(userId, newRole, tabs, []);
+      const result = await updateUserRole(userId, newRole, tabs, []);
+      setUserMessage({ type: result.approved ? 'warning' : 'success', text: result.approved
+        ? 'Akses user berhasil disetujui. Email pemberitahuan persetujuan belum tersedia; beri tahu user untuk login.'
+        : 'Role user berhasil diperbarui.' });
       await refreshUsers();
     } catch (err) {
-      alert('Error: ' + err.message);
+      setUserMessage({ type: 'error', text: err.message || 'Gagal mengubah akses user.' });
+    } finally {
+      setUserBusy(null);
+    }
+  };
+
+  const handleRejectRequest = async (user) => {
+    if (userBusy || !confirm(`Tolak permintaan akses ${user.email} di ${activeWorkspace.name}? Permintaan akan dihapus dari daftar pending workspace ini.`)) return;
+    setUserBusy(user.id);
+    setUserMessage(null);
+    try {
+      await rejectUserAccessRequest(user.id);
+      setUserMessage({ type: 'success', text: `Permintaan akses ${user.email} telah ditolak dan dihapus dari daftar pending.` });
+      await refreshUsers();
+    } catch (err) {
+      setUserMessage({ type: 'error', text: err.message || 'Gagal menolak permintaan akses.' });
+    } finally {
+      setUserBusy(null);
     }
   };
 
@@ -1409,6 +1434,11 @@ export default function AdminPage() {
           </div>
 
           {/* User List */}
+          {userMessage && <div role={userMessage.type === 'error' ? 'alert' : 'status'} style={{ padding: 12, borderRadius: 8, fontSize: 13,
+            background: userMessage.type === 'error' ? 'var(--badge-red-bg)' : userMessage.type === 'warning' ? 'var(--badge-yellow-bg)' : 'var(--badge-green-bg)',
+            color: userMessage.type === 'error' ? 'var(--badge-red-text)' : userMessage.type === 'warning' ? 'var(--badge-yellow-text)' : 'var(--badge-green-text)' }}>
+            {userMessage.text}
+          </div>}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             {users.map((u) => {
               const rl = roleLabel(u.role);
@@ -1421,6 +1451,9 @@ export default function AdminPage() {
                 }}>
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 13 }}>{u.email}</div>
+                    {u.access_request_scope === 'unassigned' && <div style={{ fontSize: 11, color: 'var(--dim)', marginTop: 4 }}>
+                      Pendaftaran baru. Persetujuan akan memberi akses ke {activeWorkspace.name}.
+                    </div>}
                     <span style={{ padding: '2px 7px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: rl.bg, color: toneText(rl.color) }}>
                       {rl.text}
                     </span>
@@ -1432,16 +1465,21 @@ export default function AdminPage() {
                           {MATRIX_ROLES.map(mr => {
                             const rl = roleLabel(mr.id);
                             return (
-                              <button key={mr.id} onClick={() => handleRoleChange(u.id, mr.id)}
+                              <button key={mr.id} onClick={() => handleRoleChange(u.id, mr.id)} disabled={Boolean(userBusy)}
                                 style={{ padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer', background: rl.bg, color: toneText(rl.color), fontSize: 12, fontWeight: 600 }}>
                                 ✓ {mr.label}
                               </button>
                             );
                           })}
+                          <button onClick={() => handleRejectRequest(u)} disabled={Boolean(userBusy)}
+                            style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid var(--red)', cursor: userBusy ? 'wait' : 'pointer', background: 'var(--badge-red-bg)', color: 'var(--badge-red-text)', fontSize: 12, fontWeight: 600 }}>
+                            {userBusy === u.id ? 'Memproses…' : 'Tolak permintaan'}
+                          </button>
                         </>
                       ) : (
                         <select
                           value={u.role}
+                          disabled={Boolean(userBusy)}
                           onChange={(e) => handleRoleChange(u.id, e.target.value)}
                           style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: 12 }}
                         >
