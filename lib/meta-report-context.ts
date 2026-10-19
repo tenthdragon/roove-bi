@@ -13,7 +13,8 @@ import { META_SYNC_JOB_FIELDS } from './meta-funnel-sync-status';
 
 export function uuid(id: string) { if (!/^[0-9a-f-]{36}$/i.test(id)) throw new Error('ID tidak valid.'); return id; }
 export async function reportingAccess() {
-  const ctx = await requireDashboardTabAccess('marketing', 'Marketing Channel');
+  const ctx = await requireDashboardTabAccess('meta-funnels', 'Meta Ads Funnel');
+  if (!isWorkspaceModuleEnabled(ctx.workspace, 'marketing')) throw new Error('Marketing Channel tidak diaktifkan untuk workspace ini.');
   if (!isWorkspaceModuleEnabled(ctx.workspace, 'meta-funnels')) throw new Error('Meta Ad Funnels tidak diaktifkan untuk workspace ini.');
   return ctx;
 }

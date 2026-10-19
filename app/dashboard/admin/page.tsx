@@ -441,6 +441,7 @@ export default function AdminPage() {
       case 'workspace_owner':    return { text: 'Owner Workspace',   bg: 'var(--accent-subtle)',    color: 'var(--tone-indigo)' };
       case 'admin':              return { text: 'Admin',             bg: 'var(--badge-green-bg)',   color: 'var(--green)' };
       case 'marketing_api_reviewer': return { text: 'Marketing API Reviewer', bg: 'var(--accent-subtle)', color: 'var(--tone-orange)' };
+      case 'advertiser': return { text: 'Advertiser', bg: 'var(--accent-subtle)', color: 'var(--tone-orange)' };
       case 'direktur_ops':       return { text: 'Direktur Ops',      bg: 'var(--badge-green-bg)',   color: 'var(--tone-emerald)' };
       case 'staf_ops':           return { text: 'Staf Ops',          bg: 'var(--accent-subtle)',    color: 'var(--tone-sky)' };
       case 'direktur_finance':   return { text: 'Direktur Finance',  bg: 'var(--accent-subtle)',    color: 'var(--tone-blue)' };
@@ -1387,6 +1388,7 @@ export default function AdminPage() {
               { r: 'owner',             desc: 'akses penuh' },
               { r: 'admin',             desc: 'lihat semua, atur via matrix' },
               { r: 'marketing_api_reviewer', desc: 'khusus Admin > Marketing APIs' },
+              { r: 'advertiser',        desc: 'khusus Meta Ads Funnel' },
               { r: 'direktur_ops',      desc: 'operasional + notif gudang' },
               { r: 'staf_ops',          desc: 'akses via matrix' },
               { r: 'direktur_finance',  desc: 'finance + laporan' },

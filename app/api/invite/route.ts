@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
       'workspace_owner',
       'admin',
       'marketing_api_reviewer',
+      'advertiser',
       'direktur_ops', 'staf_ops',
       'direktur_finance', 'staf_finance',
       'brand_manager', 'sales_manager',

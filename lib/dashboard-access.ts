@@ -1,4 +1,5 @@
 import { createServerSupabase } from './supabase-server';
+import { dashboardTabPermissionKeys } from './dashboard-permissions';
 import { getWorkspaceBootstrapForVerifiedProfile } from './workspace-access';
 import {
   isWorkspaceModuleEnabled,
@@ -105,7 +106,7 @@ export async function requireDashboardTabAccess(tabId: string, label?: string): 
   await verifyPermissionKeys(
     ctx.workspaceId,
     ctx.profile.role,
-    [`tab:${tabId}`],
+    dashboardTabPermissionKeys(tabId),
     `Gagal memverifikasi akses ${tabLabel}.`,
     `Akun ini tidak memiliki akses ke ${tabLabel}.`
   );
@@ -126,7 +127,7 @@ export async function requireAnyDashboardTabAccess(tabIds: string[], label: stri
   await verifyPermissionKeys(
     ctx.workspaceId,
     ctx.profile.role,
-    allowedTabIds.map((tabId) => `tab:${tabId}`),
+    allowedTabIds.flatMap(dashboardTabPermissionKeys),
     `Gagal memverifikasi akses ${label}.`,
     `Akun ini tidak memiliki akses ke ${label}.`
   );
