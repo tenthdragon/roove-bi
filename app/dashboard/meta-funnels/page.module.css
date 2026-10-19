@@ -244,6 +244,29 @@
 .unassignedRow span { overflow-wrap: anywhere; }
 .drawerBackdrop { position: fixed; inset: 0; z-index: 40; background: rgb(0 0 0 / 28%); }
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(100%, 460px); background: var(--card); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgb(0 0 0 / 12%); padding: 18px 20px; display: grid; align-content: start; gap: 14px; overflow-y: auto; }
+/* Detail views share a centered, wider surface while data notes keep their side panel. */
+.detailModal {
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  width: min(760px, calc(100% - 32px));
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  grid-template-columns: minmax(0, 1fr);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 28%);
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+}
+@media (max-width: 480px) {
+  .detailModal { width: calc(100% - 16px); max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px); padding: 16px 12px; }
+  .detailModal .adRow { flex-wrap: wrap; }
+  .detailModal .adResult { flex: 1 0 100%; white-space: normal; }
+}
 .drawerHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .drawerHead h2 { margin: 0; font-size: 15px; overflow-wrap: anywhere; }
 .drawerHead .muted { font-size: 11px; }
