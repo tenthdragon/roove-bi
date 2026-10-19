@@ -55,10 +55,11 @@ test('empty scope never becomes the SQL all-accounts wildcard and forged brand I
   scopes.assertMetaBrand(scope, '1'); scopes.assertMetaBrand(scope, '2');
 });
 test('actual report context restricts history/creative config, accounts, brands, templates and jobs before reads', async () => {
+  let currentScope = scope;
   const svc = database({ meta_ad_accounts: accounts, brands, meta_ad_report_versions: [{ workspace_id: 'w', revision: 7 }], meta_ad_classifications: [{ workspace_id: 'w', ad_channel: 'non_cpas' }] });
   const api = module('meta-report-context', {
     './dashboard-access': { requireDashboardTabAccess: async () => ctx },
-    './meta-brand-access': { ...scopes, loadMetaBrandScope: async () => scope },
+    './meta-brand-access': { ...scopes, loadMetaBrandScope: async () => currentScope },
     './service-supabase': { createServiceSupabase: () => svc },
     './meta-funnel-store': { loadFunnels: async () => [
       { ...defaultFunnel(), id: '11111111-1111-4111-8111-111111111111', account_ids: ['act_3'], group_by: 'landing_page' },
@@ -73,6 +74,10 @@ test('actual report context restricts history/creative config, accounts, brands,
   assert.equal(r.funnels.length, 1); assert.deepEqual(r.funnels[0].account_ids, ['act_1', 'act_2']);
   await assert.rejects(api.reportContext({ ...input, brandId: '3' }), /tidak memiliki akses/);
   await assert.rejects(api.reportContext({ ...input, funnelId: '11111111-1111-4111-8111-111111111111' }), /Template tidak tersedia/);
+  currentScope = { brandIds: [], accountIds: [], accessKey: 'empty' };
+  const empty = await api.reportContext(input);
+  assert.deepEqual(empty.funnels, [], 'Unassigned users must not receive shared template metadata');
+  assert.deepEqual(empty.config.account_ids, [scopes.NO_META_ACCOUNT]);
 });
 test('warm shared inventory is scoped before worklist rows, totals, facets, catalogs and sync state escape', async () => {
   const mappings = accounts.map((a, i) => ({ ...a, ad_id: String(i + 1), ad_name: `Ad brand ${i + 1}`, brand_id: i + 1,

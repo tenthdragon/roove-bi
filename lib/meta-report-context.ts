@@ -55,7 +55,7 @@ export async function reportContext(input: MetaReportInput, includeJobs = false)
   for (const result of [version, accountsResult, brandsResult, jobsResult, channelSchema]) if (result.error) throw new Error(result.error.message);
   const accounts = scopeMetaAccounts(accountsResult.data || [], access), brands = scopeMetaBrands(brandsResult.data || [], access);
   const visibleFunnels = access.brandIds === null ? funnels : funnels
-    .filter(f => !f.account_ids.length || f.account_ids.some(id => access.accountIds!.includes(id)))
+    .filter(f => access.accountIds!.length > 0 && (!f.account_ids.length || f.account_ids.some(id => access.accountIds!.includes(id))))
     .map(f => ({ ...f, account_ids: scopeMetaAccountIds(f.account_ids, access) }));
   if (brandId && !metaBrandOptions(accounts, brands, []).choices.some(b => b.value === brandId)) throw new Error('Brand tidak tersedia pada akun Meta workspace ini.');
   // A template is applied only when explicitly selected: its stages and metrics
