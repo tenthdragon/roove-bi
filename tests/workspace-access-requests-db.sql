@@ -36,17 +36,19 @@ INSERT INTO public.workspaces(id) VALUES
  ('00000000-0000-4000-8000-000000000101'),('00000000-0000-4000-8000-000000000102');
 INSERT INTO public.profiles(id,role,email)
  SELECT ('00000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,role::public.user_role,'user-'||n||'@roove.test'
- FROM (VALUES(1,'owner'),(2,'admin'),(3,'advertiser'),(4,'pending'),(5,'pending'),(6,'advertiser'),(7,'advertiser'),(8,'pending'),(9,'pending')) p(n,role);
+ FROM (VALUES(1,'owner'),(2,'admin'),(3,'advertiser'),(4,'pending'),(5,'pending'),(6,'advertiser'),(7,'advertiser'),(8,'pending'),(9,'pending'),(10,'pending')) p(n,role);
 INSERT INTO public.workspace_memberships(workspace_id,user_id,role,status)
  SELECT ('00000000-0000-4000-8000-'||lpad(w::text,12,'0'))::uuid,
  ('00000000-0000-4000-8000-'||lpad(u::text,12,'0'))::uuid,role,'active'
- FROM (VALUES(101,2,'workspace_owner'),(102,3,'advertiser'),(101,4,'pending'),(101,6,'pending'),(102,6,'advertiser'),(101,7,'advertiser'),(101,9,'pending')) p(w,u,role);
+ FROM (VALUES(101,2,'workspace_owner'),(102,3,'advertiser'),(101,4,'pending'),(101,6,'pending'),(102,6,'advertiser'),(101,7,'advertiser'),(101,9,'pending'),(101,10,'advertiser')) p(w,u,role);
 
 -- MIGRATION
 
 SET ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub','00000000-0000-4000-8000-000000000002',false);
 DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM public.list_workspace_users('00000000-0000-4000-8000-000000000101') u WHERE u->>'id'='00000000-0000-4000-8000-000000000010' AND u->>'role'='pending') THEN
+  RAISE EXCEPTION 'An older partial approval hides the global pending gate'; END IF;
  IF EXISTS(SELECT 1 FROM public.list_workspace_users('00000000-0000-4000-8000-000000000101') u WHERE u->>'access_request_scope'='unassigned') THEN
   RAISE EXCEPTION 'Workspace owner saw unassigned global signup'; END IF;
 END $$;
@@ -56,6 +58,7 @@ SELECT public.expect_access_error($q$SELECT public.manage_workspace_user_access(
 SELECT public.expect_access_error($q$SELECT public.manage_workspace_user_access('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000007','reject')$q$,'Hanya permintaan pending');
 SELECT public.expect_access_error($q$SELECT public.manage_workspace_user_access('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000004','set_role','made_up_role')$q$,'Role tidak valid');
 SELECT public.manage_workspace_user_access('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000004','set_role','advertiser');
+SELECT public.manage_workspace_user_access('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000010','set_role','advertiser');
 SELECT public.manage_workspace_user_access('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000009','set_role','workspace_owner');
 SELECT public.manage_workspace_user_access('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000006','reject');
 SELECT public.manage_workspace_user_access('00000000-0000-4000-8000-000000000101','00000000-0000-4000-8000-000000000006','reject');
@@ -93,7 +96,8 @@ DO $$ BEGIN
  IF (SELECT role::text FROM public.profiles WHERE id='00000000-0000-4000-8000-000000000009')<>'admin' THEN RAISE EXCEPTION 'Workspace owner gained platform ownership'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.workspace_memberships WHERE user_id='00000000-0000-4000-8000-000000000005' AND role='advertiser' AND status='active' AND is_default) THEN RAISE EXCEPTION 'Orphan signup not assigned'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.workspace_memberships WHERE user_id='00000000-0000-4000-8000-000000000006' AND workspace_id='00000000-0000-4000-8000-000000000102' AND role='advertiser' AND status='active') THEN RAISE EXCEPTION 'Rejection modified another workspace'; END IF;
- IF (SELECT count(*) FROM public.profiles)<>9 THEN RAISE EXCEPTION 'Rejection deleted a global identity'; END IF;
+ IF (SELECT count(*) FROM public.profiles)<>10 THEN RAISE EXCEPTION 'Rejection deleted a global identity'; END IF;
+ IF (SELECT role::text FROM public.profiles WHERE id='00000000-0000-4000-8000-000000000010')<>'advertiser' THEN RAISE EXCEPTION 'Older partial approval cannot be repaired'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.workspace_memberships WHERE user_id='00000000-0000-4000-8000-000000000006' AND workspace_id='00000000-0000-4000-8000-000000000101' AND role='admin' AND status='active') THEN RAISE EXCEPTION 'Explicit reinvitation did not reopen request'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.workspace_memberships WHERE user_id='00000000-0000-4000-8000-000000000008' AND status='suspended' AND NOT is_default) THEN RAISE EXCEPTION 'Unassigned rejection not archived'; END IF;
  IF has_function_privilege('anon','public.manage_workspace_user_access(uuid,uuid,text,text)','EXECUTE') OR has_function_privilege('anon','public.list_workspace_users(uuid)','EXECUTE') THEN RAISE EXCEPTION 'Anonymous access granted'; END IF;

@@ -12,7 +12,7 @@ BEGIN
  END IF;
  RETURN QUERY
  SELECT to_jsonb(p)||jsonb_build_object(
-   'role',CASE WHEN wm.role='workspace_owner' THEN 'owner' ELSE COALESCE(wm.role,p.role::text) END,
+   'role',CASE WHEN p.role::text='pending' THEN 'pending' WHEN wm.role='workspace_owner' THEN 'owner' ELSE COALESCE(wm.role,p.role::text) END,
    'access_request_scope',CASE WHEN wm.id IS NULL THEN 'unassigned' ELSE 'workspace' END)
  FROM public.profiles p
  LEFT JOIN public.workspace_memberships wm ON wm.user_id=p.id AND wm.workspace_id=p_workspace_id
@@ -68,14 +68,14 @@ BEGIN
  IF member.id IS NOT NULL AND member.status NOT IN ('active','invited') AND p_action<>'invite' THEN
   RAISE EXCEPTION 'Status membership tidak valid.';
  END IF;
- was_pending:=unassigned OR COALESCE(member.role='pending',false);
+ was_pending:=target.role::text='pending' OR unassigned OR COALESCE(member.role='pending',false);
  IF p_action='reject' THEN
   IF NOT was_pending THEN RAISE EXCEPTION 'Hanya permintaan pending yang dapat ditolak.'; END IF;
   IF unassigned THEN
    INSERT INTO public.workspace_memberships(workspace_id,user_id,role,status,is_default)
    VALUES(p_workspace_id,p_user_id,'pending','suspended',false);
   ELSE
-   UPDATE public.workspace_memberships SET status='suspended',is_default=false,updated_at=now() WHERE id=member.id;
+   UPDATE public.workspace_memberships SET role='pending',status='suspended',is_default=false,updated_at=now() WHERE id=member.id;
   END IF;
   RETURN jsonb_build_object('success',true,'rejected',true);
  END IF;
