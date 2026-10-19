@@ -2,6 +2,8 @@ import { unstable_cache } from 'next/cache';
 import { createServiceSupabase } from './service-supabase';
 import { createMetaReportRequests, MetaReportUnavailableError } from './meta-report-requests';
 import type { RawMetaReport, ReportQuery } from './meta-ad-report';
+import type { MetaBrandReport } from './meta-brand-report';
+import type { AdDimensionFilters } from './meta-ad-dimensions';
 
 // Next may load this module from different route bundles; share the database
 // budget across them. Results live only in Next's revision-keyed cache.
@@ -26,5 +28,23 @@ export const getCachedMetaAdReport = unstable_cache(
       return result.data as RawMetaReport;
   }),
   ['meta-ad-report-v5-brand-taxonomy'],
+  { revalidate: 300 },
+);
+
+// One batched report shares the same database budget as detail/history reads.
+// Database day projections survive Next cache expiry and workspace revisions.
+export const getCachedMetaBrandOverviewReport = unstable_cache(
+  (workspaceId: string, revision: string, from: string, to: string, filters: AdDimensionFilters): Promise<MetaBrandReport> => requests.run(
+    JSON.stringify(['brand-overview', workspaceId, revision, from, to, filters]), async () => {
+      const result = await createServiceSupabase().rpc('get_meta_brand_overview_report', {
+        p_workspace_id: workspaceId, p_from: from, p_to: to, p_filters: filters,
+      });
+      if (result.error) {
+        console.error('[meta-brand-overview] RPC failed', { code: result.error.code, message: result.error.message });
+        throw new MetaReportUnavailableError(result.error.code === '57014');
+      }
+      return result.data as MetaBrandReport;
+    }),
+  ['meta-brand-overview-v1-incremental'],
   { revalidate: 300 },
 );

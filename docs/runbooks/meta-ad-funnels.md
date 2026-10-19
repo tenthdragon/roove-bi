@@ -197,6 +197,65 @@ and scheduled Meta sync enabled; no additional scheduler is required.
 
 ## Report loading and cache
 
+### Incremental brand overview (migration 222)
+
+Ringkasan brand uses one `get_meta_brand_overview_report` RPC for all brands,
+both worlds, CEP spend and dimension choices. Detail/history RPCs are unchanged.
+The new RPC preserves active-ad scope, current brand taxonomy (including
+overlapping CEP memberships), historical objectives, CTWA identity, distinct-ad
+counts and unavailable metrics. Ratios still come from event sums. Global
+dimension choices retain the existing Website channel scope.
+
+`meta_brand_report_days` stores service-only enriched daily ad projections.
+`meta_brand_report_epochs` certifies each account/day against metric, account
+metadata and workspace-brand revisions. Metric inserts/updates/deletes advance
+only affected day revisions, including the old scope when a row moves. Creative,
+mapping, verified URL, destination metadata or account writes advance that
+account's metadata revision; brand writes advance the workspace revision. Source
+writes and revisions commit together. Inventory timestamps, creative copy and
+no-op updates do not invalidate projections; taxonomy-only edits resolve live.
+Failed writes invalidate nothing. A
+delayed older refresh cannot overwrite a newer projection certificate.
+
+Only stale/missing projected dates in the requested and comparison periods are
+rebuilt. Deleted dates become empty projections. Taxonomy resolves once per ad
+delivering in the selected range, so fallback naming still uses that range's
+latest fact; taxonomy, coverage and template assignments remain live rather than
+being frozen into projections. Cache rows never replace source facts. Future
+changes to projection semantics must invalidate these derived rows explicitly.
+
+The existing five-minute server cache and shared RPC concurrency limit wrap the
+batch. The page also has a bounded five-minute memory cache keyed by authenticated
+user, permissions, workspace, dates and filters, with pending-request deduplication.
+Status checks wait for an initial revision, bypass the navigation cache when it
+changes, and leave unrelated cached date/filter selections to be checked on their
+next visit. Manual reload bypasses the navigation cache. Meta's initial default
+range does not wait for the unrelated sales-data extent.
+
+Apply only reviewed migration `222_meta_brand_overview_incremental.sql` before
+activating this app version, after verifying the active-ad/taxonomy prerequisites
+from 217–219 are already present. No source-data backfill is required. First use
+builds the derived dates; subsequent reads reuse them. App rollback can retain
+these additive tables/triggers. Do not reset the local snapshot to test this.
+
+Validation (the database runner installs 222 and fixtures in one rollback-only
+transaction on the fixed local database):
+
+```sh
+npm run test:meta-overview
+npm run test:meta-overview-db
+npm run test:meta-overview-db -- --benchmark
+npm run test:meta-funnels
+npm run typecheck:app
+npm run lint
+npm run build
+```
+
+On the reduced local sample (2,206 Meta fact rows, five active-account brands),
+the existing 21 calls took 2,449 ms of **serial database time**; the batch took
+215 ms cold and 113 ms with its daily projections populated. These are local
+query measurements, not production page-load times or a concurrent-load test.
+
 Migration 203 provides a service-role-only aggregate RPC. Performa reads only
 the selected dates plus an equally long comparison period. Brand, account,
 name, CEP, intention and objective filters, distinct-ad facet counts and event

@@ -6,6 +6,10 @@ import { useRouter } from 'next/navigation';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
+import { useSupabase } from '@/lib/supabase-browser';
+import { createMetaOverviewCache } from '@/lib/meta-overview-cache';
+import { defaultMetaRange } from '@/lib/meta-report-status';
+import { getTodayWIB } from '@/lib/sync-schedule';
 import { getMetaFunnelSyncStatus, queueMetaFunnelSync } from '@/lib/meta-funnel-actions';
 import { getMetaBrandOverview } from '@/lib/meta-brand-actions';
 import { shouldPollMetaSync, restoreMetaSyncRequest, visibleMetaSyncProgress, metaMetricCompletedAt, type MetaSyncRequest } from '@/lib/meta-funnel-sync-status';
@@ -20,6 +24,7 @@ import styles from './page.module.css';
 
 type Data = Extract<Awaited<ReturnType<typeof getMetaBrandOverview>>, { schemaReady: true }>;
 type SyncStatusData = Awaited<ReturnType<typeof getMetaFunnelSyncStatus>>;
+const overviewCache = createMetaOverviewCache<Data>();
 const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
 const healthLabel = { good: 'Sehat', warn: 'Perlu perhatian', bad: 'Bermasalah' } as const;
 const severityClass = { bad: styles.bad, warn: styles.warn, good: styles.good, info: styles.neutral } as const;
@@ -33,12 +38,18 @@ function Delta({ value, direction = 'higher', neutral = false }: { value: number
 export default function MetaBrandOverviewPage() {
   const router = useRouter();
   const { dateRange } = useDateRange();
-  const { activeWorkspace } = useWorkspace();
-  const { can } = usePermissions();
+  // Meta's default is known without waiting for the sales-data date extent.
+  const reportRange = dateRange.from && dateRange.to ? dateRange : defaultMetaRange(getTodayWIB());
+  const { activeWorkspace, switching } = useWorkspace();
+  const { can, role, permissions } = usePermissions();
+  const supabase = useSupabase();
+  const [userId, setUserId] = useState('');
   const canManage = can('admin:meta');
-  const [data, setData] = useState<Data | null>(null);
+  const [resultState, setResultState] = useState<{ key: string; data: Data } | null>(null);
   const [schemaReady, setSchemaReady] = useState(true);
-  const [filters, setFilters] = useState<AdDimensionFilters>({});
+  const [filterState, setFilterState] = useState<{ workspaceId: string; value: AdDimensionFilters }>({ workspaceId: activeWorkspace.id, value: {} });
+  const filters = useMemo(() => filterState.workspaceId === activeWorkspace.id ? filterState.value : {}, [filterState, activeWorkspace.id]);
+  const setFilters = (value: AdDimensionFilters) => setFilterState({ workspaceId: activeWorkspace.id, value });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -50,6 +61,15 @@ export default function MetaBrandOverviewPage() {
   const [syncRefresh, setSyncRefresh] = useState(0);
   const request = useRef(0);
   const reportVersion = useRef('');
+  const pending = useRef<{ key: string; promise: Promise<void> } | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void supabase.auth.getSession().then(({ data: { session } }) => { if (alive) setUserId(session?.user.id || ''); });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (alive) setUserId(session?.user.id || '');
+    });
+    return () => { alive = false; subscription.unsubscribe(); };
+  }, [supabase]);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const view = params.get('view');
@@ -60,30 +80,49 @@ export default function MetaBrandOverviewPage() {
     let saved: MetaSyncRequest | null = null;
     try { saved = restoreMetaSyncRequest(localStorage.getItem(`meta-funnel-sync:${activeWorkspace.id}`)); } catch { /* Storage may be unavailable. */ }
     setSyncRequest({ workspaceId: activeWorkspace.id, request: saved });
-    setSyncStatus(null); setSyncStatusError(''); setFilters({});
+    setSyncStatus(null); setSyncStatusError('');
   }, [activeWorkspace.id]);
-  const input = useMemo(() => ({ from: dateRange.from, to: dateRange.to, filters }), [dateRange.from, dateRange.to, filters]);
-  const load = useCallback(async () => {
-    if (!input.from || !input.to) return;
+  const input = useMemo(() => ({ from: reportRange.from, to: reportRange.to, filters }), [reportRange.from, reportRange.to, filters]);
+  const accessKey = JSON.stringify([role, [...permissions].sort()]);
+  const cacheKey = JSON.stringify([userId, activeWorkspace.id, accessKey, input]);
+  const data = resultState?.key === cacheKey ? resultState.data : overviewCache.get(cacheKey) || null;
+  const load = useCallback((force = false): Promise<void> => {
+    if (!userId || switching || !input.from || !input.to) return Promise.resolve();
+    if (pending.current?.key === cacheKey) return pending.current.promise;
+    const cached = force ? undefined : overviewCache.get(cacheKey);
+    if (cached) {
+      setResultState({ key: cacheKey, data: cached }); reportVersion.current = cached.reportVersion;
+      setLoading(false); setError(''); return Promise.resolve();
+    }
     const current = ++request.current;
+    reportVersion.current = '';
     setLoading(true); setError('');
-    try {
-      const result = await getMetaBrandOverview(input);
+    const promise = (async () => { try {
+      const result = await overviewCache.request(cacheKey, () => getMetaBrandOverview({ ...input, workspaceId: activeWorkspace.id }));
       if (current !== request.current) return;
       if ('reportError' in result) { setError(result.reportError); return; }
       setSchemaReady(result.schemaReady);
-      if (result.schemaReady) { setData(result); reportVersion.current = result.reportVersion; }
+      if (result.schemaReady && result.workspaceId === activeWorkspace.id) {
+        overviewCache.set(cacheKey, result); setResultState({ key: cacheKey, data: result }); reportVersion.current = result.reportVersion;
+      }
     } catch (e) { if (current === request.current) setError(message(e)); }
-    finally { if (current === request.current) setLoading(false); }
-  }, [input]);
-  useEffect(() => { void load(); }, [load]);
-  useEffect(() => { const guard = request; return () => { guard.current++; }; }, []);
+    finally {
+      if (current === request.current) { setLoading(false); pending.current = null; }
+    } })();
+    pending.current = { key: cacheKey, promise };
+    return promise;
+  }, [input, userId, activeWorkspace.id, switching, cacheKey]);
+  useEffect(() => {
+    const guard = request;
+    void load();
+    return () => { guard.current++; pending.current = null; reportVersion.current = ''; };
+  }, [load]);
   const trackedSync = syncRequest?.workspaceId === activeWorkspace.id ? syncRequest.request : null;
   const currentSyncStatus = syncStatus?.workspaceId === activeWorkspace.id ? syncStatus : null;
   const syncProgress = visibleMetaSyncProgress(trackedSync, currentSyncStatus?.trackedJobs || null, currentSyncStatus?.jobs || []);
   const hasPendingJobs = currentSyncStatus ? shouldPollMetaSync(currentSyncStatus) : data?.jobs.some(j => ['queued', 'running'].includes(j.status));
   useEffect(() => {
-    if (!schemaReady || syncRequest?.workspaceId !== activeWorkspace.id) return;
+    if (!userId || switching || !schemaReady || syncRequest?.workspaceId !== activeWorkspace.id) return;
     let alive = true, polling = false;
     let timer: ReturnType<typeof setTimeout>;
     async function poll() {
@@ -91,6 +130,9 @@ export default function MetaBrandOverviewPage() {
       polling = true;
       let again = true;
       try {
+        // Establish the report revision before polling can request a refresh.
+        await load();
+        if (!alive) return;
         const status = await getMetaFunnelSyncStatus(syncRequest?.request?.jobIds);
         if (!alive || status.workspaceId !== activeWorkspace.id) return;
         setSyncStatus(status); setSyncStatusError('');
@@ -100,13 +142,15 @@ export default function MetaBrandOverviewPage() {
           try { localStorage.removeItem(`meta-funnel-sync:${activeWorkspace.id}`); } catch { /* Display still uses the latest server status. */ }
           setSyncRequest({ workspaceId: activeWorkspace.id, request: null });
         }
-        if (status.reportVersion !== reportVersion.current) await load();
+        if (reportVersion.current && status.reportVersion !== reportVersion.current) {
+          overviewCache.delete(cacheKey); await load(true);
+        }
       } catch (e) { if (alive) setSyncStatusError(message(e)); }
       finally { polling = false; if (alive && again) timer = setTimeout(() => void poll(), 5000); }
     }
     void poll();
     return () => { alive = false; clearTimeout(timer); };
-  }, [syncRequest, activeWorkspace.id, schemaReady, syncRefresh, load]);
+  }, [syncRequest, activeWorkspace.id, schemaReady, syncRefresh, load, userId, switching, cacheKey]);
   async function sync() {
     setBusy(true); setSyncStarting(true); setError(''); setNotice('');
     try {
@@ -124,7 +168,7 @@ export default function MetaBrandOverviewPage() {
   const currency = data?.currency || 'IDR';
   return <div className={styles.page} aria-busy={loading}>
     <MetaAdsNav title="Ringkasan brand" subtitle={subtitle} actions={<>
-      <button className={styles.button} onClick={() => { void load(); setSyncRefresh(v => v + 1); }} disabled={loading}>Muat ulang</button>
+      <button className={styles.button} onClick={() => { void load(true); setSyncRefresh(v => v + 1); }} disabled={loading}>Muat ulang</button>
       {canManage && <button className={styles.primary} disabled={busy || hasPendingJobs || !schemaReady} onClick={() => void sync()}>{syncStarting ? 'Menyiapkan sync…' : hasPendingJobs ? 'Sync berlangsung…' : 'Sync'}</button>}
     </>} />
     {error && <div role="alert" className={styles.error}>{error}</div>}
