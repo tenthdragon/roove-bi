@@ -23,3 +23,21 @@ test('failed or missing-schema loads remain retryable and are never retained as 
   assert.deepEqual(await cache.inventory('w', '1', async () => ({ ready: false })), { ready: false });
   assert.deepEqual(await cache.inventory('w', '1', async () => ({ ready: true })), { ready: true });
 });
+test('cold activity overlaps inventory while each source remains bounded and deduplicated', async () => {
+  const cache = createMetaWorklistCache<{ ready: boolean }, { ready: boolean }>();
+  const starts: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const load = (name: string) => async () => { starts.push(name); await gate; return { ready: true }; };
+  const first = cache.inventory('w', '1', load('inventory'));
+  const duplicate = cache.inventory('w', '1', load('duplicate'));
+  const queued = cache.inventory('other', '1', load('next inventory'));
+  const activity = cache.activity('w', '1', 'from', 'to', load('activity'));
+  const nextActivity = cache.activity('w', '1', 'other', 'to', load('next activity'));
+  await Promise.resolve();
+  assert.deepEqual(starts, ['inventory', 'activity']);
+  release();
+  const results = await Promise.all([first, duplicate, queued, activity, nextActivity]);
+  assert.equal(results[0], results[1]);
+  assert.deepEqual(starts, ['inventory', 'activity', 'next inventory', 'next activity']);
+});

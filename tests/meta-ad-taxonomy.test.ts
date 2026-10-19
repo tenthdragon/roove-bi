@@ -6,6 +6,8 @@ import { CEP_KEYS } from '../lib/meta-ad-naming';
 import { metaReportCepShares } from '../lib/meta-ad-report';
 import { defaultFunnel, emptyTotals } from '../lib/meta-funnel-domain';
 import { buildCepView } from '../lib/meta-cep-view';
+import { classifyWorklistInventory } from '../lib/meta-worklist-inventory';
+import type { AdMapping } from '../lib/meta-ad-mapping';
 const catalog: CepCategory[] = Object.entries(CEP_KEYS).map(([key, label]) => ({ brand_id: 1, key, label, description: '', revision: 1 }));
 const rules: TaxonomyRule[] = [{ brand_id: 1, dimension: 'cep', raw_key: 'sport', cep_keys: ['joint', 'bone'], intention_key: null, revision: 1 }, { brand_id: 1, dimension: 'intention', raw_key: 'educ', cep_keys: [], intention_key: 'cons', revision: 1 }];
 test('Roove naming aliases resolve only through its own official catalog', () => {
@@ -72,4 +74,23 @@ test('an additional category named Skin does not remap the legacy Skin cohort tw
   assert.equal(key, 'b1.cep-skin');
   const expanded = [...catalog, { brand_id: 1, key, label: 'Skin', description: '', revision: 1 }];
   assert.deepEqual(resolveTaxonomy(1, parseAdMapping('[skin][disc] Existing'), {}, expanded).cep_keys, ['skin']);
+});
+test('inventory classification keeps database evidence and only includes supplied active accounts', () => {
+  const row: AdMapping = { account_id: 'active', ad_id: 'same-ad', ad_name: '[sport][educ]', creative_id: 'c', effective_status: 'PAUSED',
+    landing_page_urls: ['https://example.com'], auto_mapping: parseAdMapping('[sport][educ]'), overrides: {}, source: 'inventory',
+    first_seen_at: '2026-01-01', last_seen_at: '2026-10-01', revision: 3, ad_channel: 'cpas', ad_channel_reason: null,
+    campaign_id: 'campaign', campaign_name: 'Campaign', campaign_objective: 'OUTCOME_SALES' };
+  const result = classifyWorklistInventory([row, { ...row, account_id: 'inactive' }, { ...row, account_id: 'unassigned' }, { ...row, account_id: 'other-brand' }],
+    [{ account_id: 'active', default_brand_id: 1 }, { account_id: 'unassigned', default_brand_id: null }, { account_id: 'other-brand', default_brand_id: 2 }], catalog, rules);
+  assert.deepEqual(result[0], { ...row, brand_id: 1, cep_keys: ['bone', 'joint'], intention_key: 'cons', cep_source: 'rule', intention_source: 'rule' });
+  assert.equal(result.length, 3);
+  assert.deepEqual(result.slice(1).map(r => [r.brand_id, r.cep_keys, r.intention_key]), [[null, [], null], [2, [], null]]);
+  assert.equal(row.brand_id, undefined);
+});
+test('stored taxonomy matches SQL legacy keys, explicit null decisions and whitespace normalization', () => {
+  const expanded = [...catalog, { ...catalog[0], key: 'b1.skin', is_active: false }];
+  assert.deepEqual(resolveTaxonomy(1, parseAdMapping('[skin][disc]'), {}, expanded).cep_keys, ['b1.skin', 'skin']);
+  assert.equal(resolveTaxonomy(1, parseAdMapping('[skin][educ]'), { intention: null } as any, expanded, rules).intention_source, 'manual');
+  assert.equal(resolveTaxonomy(1, parseAdMapping('[skin][disc]'), { intention: '\tconversion\t' }, expanded).intention_key, null);
+  assert.equal(resolveTaxonomy(1, parseAdMapping('[skin][disc]'), { intention: ' Conversion ' }, expanded).intention_key, 'conv');
 });
