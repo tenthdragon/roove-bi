@@ -5,18 +5,28 @@ export type CepCategory = { brand_id: number; key: string; label: string; descri
 export type TaxonomyRule = { brand_id: number; dimension: 'cep' | 'intention'; raw_key: string; cep_keys: string[]; intention_key: string | null; revision: number };
 export type MappingOverrides = { cep?: string; ceps?: string[]; intention?: string };
 export type Classification = { cep_keys: string[]; intention_key: string | null; cep_source: string; intention_source: string };
+// Match meta_taxonomy_key (migration 218), including its space-only btrim.
+// Do not re-normalize stored evidence with the naming parser's NFC/trim rules.
+function taxonomyKey(dimension: 'cep' | 'intention', value: string) {
+  const key = value.replace(/^ +| +$/g, '').replace(/[\t\n\v\f\r \u1680\u2000-\u2006\u2008-\u200a\u2028\u2029\u205f\u3000]+/g, ' ').toLowerCase();
+  const aliases: Record<string, string> = dimension === 'cep'
+    ? { kulit: 'skin', sendi: 'joint', tulang: 'bone', rambut: 'hair', kuku: 'nail' }
+    : { discovery: 'disc', consideration: 'cons', conversion: 'conv' };
+  return Object.hasOwn(aliases, key) ? aliases[key] : key;
+}
 export function resolveTaxonomy(brandId: number | null, auto: AdNameMapping, overrides: MappingOverrides, catalog: CepCategory[], rules: TaxonomyRule[] = []): Classification {
   const own = catalog.filter(c => c.brand_id === brandId);
-  const raw = (d: string) => auto.tags.find(t => t.dimension === d)?.key || '';
+  const raw = (d: string) => auto.tags?.find(t => t.dimension === d)?.key || '';
   const resolve = (d: 'cep' | 'intention') => {
-    const manual = d === 'cep' ? overrides.ceps !== undefined || overrides.cep !== undefined : overrides.intention !== undefined;
+    const manual = d === 'cep' ? Object.hasOwn(overrides, 'ceps') || Object.hasOwn(overrides, 'cep') : Object.hasOwn(overrides, 'intention');
     const token = d === 'cep' ? overrides.cep ?? raw(d) : overrides.intention ?? raw(d);
-    const key = mappingUnit(d, token).key;
+    const key = taxonomyKey(d, token);
     const rule = !manual ? rules.find(r => r.brand_id === brandId && r.dimension === d && r.raw_key === key) : undefined;
     const source = manual ? 'manual' : rule ? 'rule' : 'naming';
     if (d === 'cep') {
-      const candidates = overrides.ceps ?? (rule ? rule.cep_keys : [key]);
-      const keys = candidates.map(k => own.find(c => c.key === k || c.key === `b${brandId}.${k}`)?.key).filter((k): k is string => !!k);
+      const candidates = Array.isArray(overrides.ceps) ? overrides.ceps : (rule ? rule.cep_keys : [key]);
+      const allowed = new Set(candidates.flatMap(k => [k, `b${brandId}.${k}`]));
+      const keys = own.filter(c => allowed.has(c.key)).map(c => c.key);
       return { keys: [...new Set(keys)].sort(), source };
     }
     const intention = rule?.intention_key ?? key;

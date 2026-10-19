@@ -891,13 +891,23 @@ forced refresh after a mutation waits for an older read and then rereads.
 Responses from a previous scope cannot replace the current page. Trends load
 after the main content, with charts and drawers split out of the initial bundle.
 
-Pemetaan Ads reads classifications once instead of twice, deriving dimension
-choices from the same inventory. A bounded process-local cache retains inventory
+Pemetaan Ads reads channel evidence once from `meta_ad_mapping_channels`, loads
+the workspace catalog/rules once and resolves taxonomy in the application. This
+avoids the per-row SQL taxonomy lookup repeated by offset pages of
+`meta_ad_classifications`. It derives dimension choices from that same inventory.
+The application resolver follows migration 218's aliases, manual precedence,
+multi-CEP memberships (including archived and legacy/prefixed identities), source
+labels and stored-token normalization. Keep `test:meta-taxonomy-db` passing against
+the SQL resolver when either implementation changes.
+A bounded process-local cache retains inventory
 independent of paging, search, dates and filters; activity is cached separately
 by date range. Both use workspace/revision keys and five-minute expiry. A
 process-local cache avoids Next's 2 MiB serialized-entry limit on large
 inventories. It is not shared between server processes. Failed/incomplete reads
 are not cached. Every server action checks access before reading these caches.
+Inventory and activity misses overlap, with one loader per source per process;
+identical requests still share one pending result. This cold-load optimization
+requires no migration beyond the existing 218–223 schema.
 Sync polling reads only job/status/revision data and reloads the worklist when
 its revision changes. Mutation actions remain live and force a client refresh.
 
@@ -915,6 +925,7 @@ Validation:
 ```sh
 npm run test:meta-funnels
 npm run test:meta-detail-mapping-db
+npm run test:meta-taxonomy-db
 npm run test:meta-detail-mapping-db -- --benchmark
 npm run typecheck:app
 npm run lint
@@ -935,6 +946,19 @@ measurements, not production page-load times or a concurrent-load test. The
 production build's Detail Brand first-load JavaScript is 177 kB (previously
 277 kB); the deferred chart/drawer code downloads when used.
 
+On 19 October 2026, two read-only comparisons from the production host against
+release `c8dfb7a6008e0600503bc5c5839ed97ef79342fc` measured cold inventory loading
+at 7,731 / 7,260 ms before and 1,569 / 1,498 ms with the application resolver.
+Inventory plus activity changed from 9,187 / 7,354 ms to 1,569 / 1,498 ms.
+All 4,765 active-account inventory rows, activity, and 66 worklist results
+(paging, search, inactive ads, issues, channels, accounts and taxonomy filters)
+matched exactly at a stable report revision. These are application loader
+measurements with empty process caches, not full browser navigation times or
+database cold-cache/concurrent-load guarantees. The candidate ran only as a
+standalone read-only diagnostic; deployment remains a separate release action.
+The rollback-only local taxonomy test additionally compared 5,405 classifications
+against SQL, including explicit nulls, aliases, archived keys and brand isolation.
+
 ### Report database load
 
 The application permits at most two report RPC cache misses at once per process,
@@ -942,7 +966,7 @@ including requests from different brands/routes. Identical workspace, revision
 and query scopes share an in-flight request; different scopes never share a result.
 The five-minute cache and database revision invalidation still apply. Batched
 overview/detail RPCs use the same limit. Mapping inventory/activity cache misses
-have a separate sequential loader.
+have independent sequential loaders, allowing those two sources to overlap.
 Expected database failures return a safe retry message in overview/detail.
 
 For release verification, test authenticated overview and both brand worlds with
