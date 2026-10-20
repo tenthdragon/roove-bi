@@ -74,3 +74,8 @@ supabase/.branches/
 !docs/runbooks/local-development.md
 !docs/runbooks/feature-branches.md
 !deploy/staging/README.md
+
+# Python maintenance test artifacts
+__pycache__/
+*.py[cod]
+!docs/runbooks/production-build-cache-cleanup.md

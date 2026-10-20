@@ -1,0 +1,26 @@
+[Unit]
+Description=Remove stale Roove BI production webpack caches
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/
+ExecStart=/usr/bin/python3 /usr/local/lib/roove-bi-maintenance/cleanup_build_cache.py --apply
+TimeoutStartSec=10min
+UMask=0077
+Nice=19
+IOSchedulingClass=idle
+MemoryMax=128M
+TasksMax=16
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/www/releases/roove-bi /run/lock
+ReadOnlyPaths=/var/www/releases/roove-bi/current /var/www/releases/roove-bi/previous
+RestrictAddressFamilies=AF_UNIX

@@ -40,6 +40,14 @@ concurrent schema work needs separately provisioned database projects/ports.
 
 ## Release
 
+All production builds, cutovers and rollbacks must hold
+`/run/lock/roove-bi-release-maintenance.lock` exclusively for the entire operation.
+`deploy/digitalocean/deploy.sh` acquires it automatically. For other release
+helpers use `flock --exclusive /run/lock/roove-bi-release-maintenance.lock <command>`.
+The hourly [build-cache cleanup](production-build-cache-cleanup.md) skips a run
+when this lock is held; do not bypass it when reusing an old release for a build
+or changing release links.
+
 1. Review the feature diff against current `main`, including dependencies and
    migrations. Run relevant tests, typecheck, lint and production build.
 2. Merge only the approved feature into `main`; check CI for that commit.
