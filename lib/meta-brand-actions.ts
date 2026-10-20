@@ -26,8 +26,7 @@ import { getTodayWIB } from './sync-schedule';
 import { metaTemplateError, metaTemplateFailure, type MetaTemplateConfiguration, type MetaTemplateResult } from './meta-template-settings';
 
 const CPP: FunnelMetric = { id: 'cpp', label: 'CPP', numerator: 'spend', denominator: 'purchases', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
-const CPL: FunnelMetric = { id: 'cpl', label: 'CPL', numerator: 'spend', denominator: 'leads', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
-const CPC_CONVERSATION: FunnelMetric = { ...CPL, id: 'cost_per_conversation', label: 'Biaya / conversation', denominator: 'conversations' };
+const CPIC: FunnelMetric = { id: 'cpic', label: 'CPIC', numerator: 'spend', denominator: 'checkout', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
 const ROAS: FunnelMetric = { id: 'roas', label: 'ROAS', numerator: 'purchase_value', denominator: 'spend', format: 'multiple', direction: 'higher', monitor: true, min_denominator: 1 };
 const CTR: FunnelMetric = responseMetrics('website')[1];
 export type BrandInput = { from: string; to: string; filters?: MetaReportInput['filters'] };
@@ -53,9 +52,6 @@ function fetchWorld(ctx: Context, world: MetaBrandWorld, brandId: string | undef
   const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: groupBy || (world === 'website' ? 'landing_page' : 'ad') }, config, view);
   return getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query);
 }
-/** The lead cost metric follows whichever lead-type event the brand actually records. */
-function leadCostMetric(totals: Totals): FunnelMetric { return totals.leads > 0 || totals.conversations === 0 ? CPL : CPC_CONVERSATION; }
-
 function websiteWorld(ctx: Context, raw: RawMetaReport, brandAccounts: string[], rules: Awaited<ReturnType<typeof loadTemplateRules>>['rows'], brandId: string) {
   const reportingError = raw.currencies.length > 1 ? 'Brand mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama.' : null;
   const summary = reportingError ? emptyTotals() : raw.summary, previous = reportingError ? emptyTotals() : raw.previous;
@@ -65,11 +61,9 @@ function websiteWorld(ctx: Context, raw: RawMetaReport, brandAccounts: string[],
   const highlights = brandHighlights({ world: 'website', sections, summary, previous, currency: raw.currencies[0] || 'IDR', unassigned, coverageGaps, missingUrls: raw.destinations.missing_ads })
     .map(h => ({ ...h, world: 'website' as const }));
   const transaction = sumTotals(sections.filter(s => s.kind === 'transaction').map(s => s.summary)), transactionPrev = sumTotals(sections.filter(s => s.kind === 'transaction').map(s => s.previous));
-  const lead = sumTotals(sections.filter(s => s.kind === 'lead').map(s => s.summary)), leadPrev = sumTotals(sections.filter(s => s.kind === 'lead').map(s => s.previous));
   return { reportingError, summary, previous, sections, unassigned, coverageGaps, highlights,
     cpp: sections.some(s => s.kind === 'transaction') ? compare(transaction, transactionPrev, CPP) : null,
-    cpl: sections.some(s => s.kind === 'lead') ? compare(lead, leadPrev, leadCostMetric(lead)) : null,
-    cplLabel: leadCostMetric(lead).label, matchingAds: raw.matchingAds, currency: raw.currencies[0] || 'IDR' };
+    cpic: compare(summary, previous, CPIC), matchingAds: raw.matchingAds, currency: raw.currencies[0] || 'IDR' };
 }
 function cpasWorld(ctx: Context, raw: RawMetaReport, brandAccounts: string[]) {
   const reportingError = raw.currencies.length > 1 ? 'Brand mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama.' : null;
@@ -101,7 +95,7 @@ async function loadMetaBrandOverview(input: BrandInput & { workspaceId?: string 
   const brands: {
     id: string; name: string; currency: string; adCount: number; health: ReturnType<typeof brandHealth>; reportingError: string | null;
     spend: { total: number; website: number; cpas: number; change: number | null }; ctr: MetricComparison;
-    website: { cpp: MetricComparison | null; cpl: MetricComparison | null; cplLabel: string; templates: number; unassigned: number };
+    website: { cpp: MetricComparison | null; cpic: MetricComparison; templates: number; unassigned: number };
     cpas: { cpp: MetricComparison; roas: MetricComparison; ads: number } | null;
     highlights: (Highlight & { world: MetaBrandWorld })[]; dataNotes: number; summary: Totals; previous: Totals;
     cepShares: { cep: string; label: string; share: number }[];
@@ -125,7 +119,7 @@ async function loadMetaBrandOverview(input: BrandInput & { workspaceId?: string 
       reportingError: web.reportingError || cpas.reportingError,
       spend: { total: summary.spend, website: web.summary.spend, cpas: cpas.summary.spend, change: relativeChange(summary.spend, previous.spend) },
       ctr: compare(summary, previous, CTR),
-      website: { cpp: web.cpp, cpl: web.cpl, cplLabel: web.cplLabel, templates: web.sections.filter(s => s.groups.length).length, unassigned: web.unassigned.filter(u => u.reason === 'no_rule').length },
+      website: { cpp: web.cpp, cpic: web.cpic, templates: web.sections.filter(s => s.groups.length).length, unassigned: web.unassigned.filter(u => u.reason === 'no_rule').length },
       cpas: cpas.matchingAds ? { cpp: cpas.cpp, roas: cpas.roas, ads: cpas.matchingAds } : null,
       highlights: highlights.slice(0, 3), dataNotes });
   }
