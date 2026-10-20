@@ -77,7 +77,7 @@ test('table headers, data and totals share the selected order, with Tujuan pinne
   let root: any;
   await act(async () => { root = create(<Results section={sections[0]} world="website" currency="IDR" preferencesReady
     preference={{ order: ['funnel', 'metric:cpm', 'metric:spent', 'metric:outbound_ctr'], hidden: ['metric:spent', 'metric:outbound_ctr'] }} onOpenGroup={() => {}} />); });
-  assert.deepEqual(root.root.findByType('thead').findAllByType('th').map((n: any) => n.children[0]), ['Tujuan', 'Funnel', 'CPM']);
+  assert.deepEqual(root.root.findByType('thead').findAllByType('th').map((n: any) => n.findByType('button').children[0]), ['Tujuan', 'Funnel', 'CPM']);
   assert.equal(root.root.findByType('tbody').findAllByType('td').length, 3);
   assert.equal(root.root.findByType('tfoot').findAllByType('td').length, 2);
   const value = root.root.findByType('tbody').findAllByType('td')[2].findAllByType('span')[0].children[0];
