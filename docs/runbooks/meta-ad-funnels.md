@@ -457,6 +457,16 @@ the job summary. Without migration 217 every ad is treated as recent.
 **Sync pemetaan** can request another refresh sooner. This is polling, not an
 instant webhook. Ads omitted by Meta are retained rather than marked deleted.
 
+After a manual mapping sync, the page tracks every returned job ID and its
+creative/catalog descendants through the existing job-tree RPC. It polls every
+15 seconds until all batches finish, then shows **Sync selesai**. Failed,
+partial, canceled, and warning-bearing batches show **Sync selesai dengan
+kendala** with their account/stage details; an unreadable status stays retryable
+and never reports success. This tracking is scoped to the current viewer session
+and workspace while the page is open. The recent ten-job preview is not used to
+determine the result of the manual request. Global job details remain hidden from
+brand-scoped advertisers. This UI change requires no new migration.
+
 - `meta_ad_mappings`: current raw name, creative identity, status, URLs, parsed
   data, parser version and separate manual overrides.
 - `meta_ad_mapping_observations`: distinct observed naming/creative/URL versions.

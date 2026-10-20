@@ -6,6 +6,9 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { X } from 'lucide-react';
 import { getMetaAdWorklist, getMetaAdMappingStatus, queueMetaAdMappingSync, saveMetaAdMappingOverrides, saveMetaAdMappingOverridesBulk } from '@/lib/meta-ad-mapping-actions';
 import { verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
+import { mappingSyncFeedback } from '@/lib/meta-ad-mapping-sync-status';
+import { shouldPollMetaSync } from '@/lib/meta-funnel-sync-status';
+import type { MetaSyncJob } from '@/lib/meta-funnel-sync-status';
 import { mappingDimensionLabel } from '@/lib/meta-ad-mapping';
 import { WORKLIST_ISSUE_LABELS, WORKLIST_ISSUES, type WorklistIssue, type WorklistRow } from '@/lib/meta-ad-worklist';
 import { objectiveLabel, type AdDimensionFilters } from '@/lib/meta-ad-dimensions';
@@ -45,6 +48,10 @@ export default function MetaAdMappings({ workspaceId, canManage, canSync = false
   const [ready, setReady] = useState(true);
   const [busy, setBusy] = useState(false); const [notice, setNotice] = useState('');
   const [pollRefresh, setPollRefresh] = useState(0);
+  const [syncRequest, setSyncRequest] = useState<{ scope: string; jobIds: string[] } | null>(null);
+  const request = syncRequest?.scope === session.key ? syncRequest : null;
+  const [syncResult, setSyncResult] = useState<{ request: typeof syncRequest; jobs: MetaSyncJob[] | null; pending: number } | null>(null);
+  const syncFeedback = request ? mappingSyncFeedback(request.jobIds, syncResult?.request === request ? syncResult.jobs : null, syncResult?.request === request ? syncResult.pending : 0) : null;
   const [selected, setSelected] = useState<Set<string>>(new Set()); const [detail, setDetail] = useState<WorklistRow | null>(null);
   const [bulkCeps, setBulkCeps] = useState<string[] | null | undefined>(undefined);
   const [bulkIntention, setBulkIntention] = useState('');
@@ -82,18 +89,23 @@ export default function MetaAdMappings({ workspaceId, canManage, canSync = false
       let again = false;
       try {
         const report = await load();
-        if (!alive || !report) return;
-        const status = await getMetaAdMappingStatus();
+        if (!alive) return;
+        const status = await getMetaAdMappingStatus(request?.jobIds);
         if (!alive || status.workspaceId !== workspaceId) return;
         setData(current => current ? { ...current, state: status.state, jobs: status.jobs, pendingJobs: status.pendingJobs } : current);
-        again = status.pendingJobs > 0;
-        if (status.reportVersion !== report.reportVersion) await load(true);
+        if (request) setSyncResult({ request, jobs: status.trackedJobs, pending: status.pendingJobs });
+        again = shouldPollMetaSync({ pending: status.pendingJobs, jobs: [], trackedJobs: status.trackedJobs })
+          || status.jobs.some(j => ['queued', 'running'].includes(j.status))
+          || !!(request && mappingSyncFeedback(request.jobIds, status.trackedJobs, status.pendingJobs).active);
+        if (!report || status.reportVersion !== report.reportVersion) await load(true);
+        // Publish fresh queue state after a worklist refresh, which may have read an earlier snapshot.
+        if (alive) setData(current => current ? { ...current, state: status.state, jobs: status.jobs, pendingJobs: status.pendingJobs } : current);
       } catch (e) { if (alive) { setError(message(e)); again = true; } }
       finally { if (alive && again) timer = setTimeout(() => void poll(), 15000); }
     }
     void poll();
     return () => { alive = false; clearTimeout(timer); };
-  }, [cacheKey, load, setData, setError, workspaceId, pollRefresh]);
+  }, [cacheKey, load, setData, setError, workspaceId, pollRefresh, request]);
 
   async function run(work: () => Promise<unknown>, done?: string) {
     setBusy(true); setError(''); setNotice('');
@@ -132,12 +144,19 @@ export default function MetaAdMappings({ workspaceId, canManage, canSync = false
     <MetaAdsNav title="Pemetaan Ads" subtitle={data ? `${sub} · inventori ${lastSync ? stamp(lastSync) : 'belum disinkronkan'}` : 'Ad yang tayang pada periode terpilih, diurutkan dari spend terbesar.'}
       actions={<><Link className={styles.button} href="/dashboard/meta-funnels/categories">Kategori & aturan</Link>
         <button className={styles.button} disabled={loading} onClick={() => void load(true)}>Muat ulang</button>
-        {canSync && <button className={styles.primary} disabled={busy || !ready} onClick={() => void run(queueMetaAdMappingSync, 'Sync pemetaan masuk antrean. Nama ad dibaca lebih dulu; URL dan creative menyusul dalam batch kecil.')}>Sync pemetaan</button>}
+        {canSync && <button className={styles.primary} disabled={busy || !ready || !session.key || pending || !!syncFeedback?.active} onClick={() => void run(async () => {
+          const result = await queueMetaAdMappingSync();
+          setSyncRequest({ scope: session.key!, jobIds: result.jobs });
+        })}>Sync pemetaan</button>}
       </>} />
     {(session.error || error) && <div role="alert" className={styles.error}>{session.error || error}</div>}{notice && <div role="status" className={styles.info}>{notice}</div>}
     {!ready ? <div className={styles.card}>Pemetaan ad belum tersedia di workspace ini. Hubungi admin untuk mengaktifkannya.</div> : <>
       {data && !data.activityReady && <div className={styles.info}>Spend per ad dan cakupan ad tayang belum tersedia: pasang migration 217 agar daftar ini hanya memuat ad dengan impresi pada periode terpilih. Sementara itu seluruh inventori ditampilkan.</div>}
-      {pending && <p role="status" className={styles.info}>{data?.pendingJobs} batch sync pemetaan dalam antrean atau sedang berjalan. Daftar diperbarui otomatis.</p>}
+      {syncFeedback && <div role={syncFeedback.issue ? 'alert' : 'status'} className={syncFeedback.issue ? styles.error : styles.info}>
+        {syncFeedback.text}
+        {syncFeedback.details.length > 0 && <ul>{syncFeedback.details.map((detail, i) => <li key={i}>{detail}</li>)}</ul>}
+      </div>}
+      {!syncFeedback && pending && <p role="status" className={styles.info}>{data?.pendingJobs} batch sync pemetaan dalam antrean atau sedang berjalan. Daftar diperbarui otomatis.</p>}
       {data && <div className={styles.tiles}>
         {data.tiles.map(tile => <button key={tile.issue} type="button" className={`${styles.tile} ${issue === tile.issue ? styles.tileActive : ''}`} aria-pressed={issue === tile.issue} onClick={() => setParam('issue', issue === tile.issue ? null : tile.issue)}>
           <span className={styles.muted}>{tile.label}</span>

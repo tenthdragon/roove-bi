@@ -90,6 +90,10 @@ test('warm shared inventory is scoped before worklist rows, totals, facets, cata
     './service-supabase': { createServiceSupabase: () => svc },
     './meta-worklist-data': { getMetaWorklistInventory: async () => inventory, getMetaWorklistActivity: async () => ({ ready: true, rows: accounts.map((a, i) => ({ ...a, ad_id: String(i + 1), spend: 100, impressions: 5, last_active: null })) }) },
   });
+  const status = await api.getMetaAdMappingStatus(['00000000-0000-4000-8000-000000000001']);
+  assert.equal(status.trackedJobs, null, 'Advertisers must not read global sync trees even with a supplied job ID');
+  assert.deepEqual(status.jobs, []); assert.equal(status.pendingJobs, 0);
+  assert.deepEqual(status.state.map((r: any) => r.account_id), ['act_1', 'act_2']);
   const input = { from: '2026-10-01', to: '2026-10-10' };
   const r = await api.getMetaAdWorklist(input);
   assert.equal(r.totalAds, 2); assert.equal(r.scopeSpend, 200); assert.equal(r.activeAds, 2);
