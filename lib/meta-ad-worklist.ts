@@ -30,7 +30,7 @@ export type WorklistQuery = {
 };
 export type WorklistInput = WorklistQuery & {
   mappings: AdMapping[]; activity: AdActivity[]; verified: VerifiedDestination[]; destinations?: DestinationHint[];
-  accounts: { account_id: string; account_name: string }[]; units?: MappingUnit[]; catalog?: CepCategory[];
+  accounts: { account_id: string; account_name: string }[]; units?: MappingUnit[]; catalog?: CepCategory[]; intentions?: CepCategory[];
 };
 export type WorklistTile = { issue: WorklistIssue; label: string; ads: number; spend: number };
 export type UnitUsage = { dimension: string; unit_key: string; label: string; ads: number; spend: number };
@@ -44,7 +44,7 @@ function label(ad: AdMapping, dimension: 'cep' | 'intention'): WorklistLabel {
 }
 
 /** Rows ranked by spend; issues are what the brand report cannot read for the ad. */
-export function buildWorklistRows(input: Pick<WorklistInput, 'mappings' | 'activity' | 'verified' | 'destinations' | 'accounts' | 'catalog'>): WorklistRow[] {
+export function buildWorklistRows(input: Pick<WorklistInput, 'mappings' | 'activity' | 'verified' | 'destinations' | 'accounts' | 'catalog' | 'intentions'>): WorklistRow[] {
   const activity = new Map(input.activity.map(a => [`${a.account_id}:${a.ad_id}`, a]));
   const verified = new Map(input.verified.map(v => [`${v.account_id}:${v.ad_id}`, v]));
   const hints = new Map((input.destinations || []).map(d => [`${d.account_id}:${d.ad_id}`, d]));
@@ -61,7 +61,8 @@ export function buildWorklistRows(input: Pick<WorklistInput, 'mappings' | 'activ
     if (!urls.length && channel === 'cpas') urlSource = 'shopee';
     const ceps = (ad.cep_keys ?? (label(ad, 'cep').key ? [label(ad, 'cep').key!] : [])).map(key => ({ key, label: input.catalog?.find(c => c.brand_id === ad.brand_id && c.key === key)?.label || mappingUnit('cep', key).label.replace(/^Kesehatan /u, ''), manual: ad.cep_source === 'manual' || ad.overrides.ceps !== undefined || ad.overrides.cep !== undefined, recognized: true }));
     const cep = ceps.length ? { ...ceps[0], label: ceps.map(c => c.label).join(' · ') } : label({ ...ad, cep_keys: [] }, 'cep');
-    const intention = label(ad, 'intention');
+    const found = input.intentions?.find(c => c.brand_id === ad.brand_id && c.key === ad.intention_key);
+    const intention = found ? { key: found.key, label: found.label, manual: ad.overrides.intention !== undefined, recognized: true } : label(ad, 'intention');
     const issues: WorklistIssue[] = [];
     if (!cep.key) issues.push('cep');
     if (!intention.key) issues.push('intention');

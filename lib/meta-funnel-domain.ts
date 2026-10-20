@@ -27,7 +27,7 @@ export type FunnelConfig = {
   group_by?: AdGrouping; cep_keys?: CepKey[]; funnel_keys?: NamingFunnelKey[];
   naming_status?: 'all' | 'tagged' | 'untagged';
 };
-export type SavedFunnel = FunnelConfig & { id: string; updated_at: string };
+export type SavedFunnel = FunnelConfig & { brand_id?: number | null; id: string; updated_at: string };
 export type AdFact = {
   account_id: string; account_name: string; ad_id: string; ad_name: string;
   metric_date: string; currency: string; metrics: Totals; creative_id?: string | null;

@@ -14,7 +14,7 @@ function taxonomyKey(dimension: 'cep' | 'intention', value: string) {
     : { discovery: 'disc', consideration: 'cons', conversion: 'conv' };
   return Object.hasOwn(aliases, key) ? aliases[key] : key;
 }
-export function resolveTaxonomy(brandId: number | null, auto: AdNameMapping, overrides: MappingOverrides, catalog: CepCategory[], rules: TaxonomyRule[] = []): Classification {
+export function resolveTaxonomy(brandId: number | null, auto: AdNameMapping, overrides: MappingOverrides, catalog: CepCategory[], rules: TaxonomyRule[] = [], intentions: CepCategory[] = []): Classification {
   const own = catalog.filter(c => c.brand_id === brandId);
   const raw = (d: string) => auto.tags?.find(t => t.dimension === d)?.key || '';
   const resolve = (d: 'cep' | 'intention') => {
@@ -30,14 +30,16 @@ export function resolveTaxonomy(brandId: number | null, auto: AdNameMapping, ove
       return { keys: [...new Set(keys)].sort(), source };
     }
     const intention = rule?.intention_key ?? key;
-    return { intention: Object.hasOwn(INTENTIONS, intention) ? intention : null, source };
+    const found = intentions.find(c => c.brand_id === brandId && (c.key === intention || c.key === `b${brandId}.${intention}`));
+    return { intention: found?.key || (Object.hasOwn(INTENTIONS, intention) ? intention : null), source };
   };
   const cep = resolve('cep'), intention = resolve('intention');
   return { cep_keys: cep.keys || [], intention_key: intention.intention || null, cep_source: cep.source, intention_source: intention.source };
 }
-export function validateIntention(value: string): string {
+export function validateIntention(value: string, brandId?: number, catalog?: CepCategory[], retained?: string | null): string {
   const key = mappingUnit('intention', value).key;
-  if (!Object.hasOwn(INTENTIONS, key)) throw new Error('Intention harus Discovery, Consideration, atau Conversion.');
+  const valid = catalog ? catalog.some(c => c.brand_id === brandId && c.key === key && (c.is_active !== false || retained === key)) : Object.hasOwn(INTENTIONS, key);
+  if (!valid) throw new Error('Pilih intention aktif milik brand iklan.');
   return key;
 }
 export function validateCepSelection(values: unknown, brandId: number, catalog: CepCategory[], retained: string[] = []): string[] {

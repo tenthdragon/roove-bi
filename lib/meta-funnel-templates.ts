@@ -10,7 +10,7 @@ export const WORLD_CHANNEL = { website: 'non_cpas', cpas: 'cpas' } as const;
 export const WORLD_LABELS: Record<MetaBrandWorld, string> = { website: 'Website & WhatsApp', cpas: 'CPAS Shopee' };
 export const TEMPLATE_MATCH_KINDS = ['exact', 'prefix', 'domain', 'ctwa'] as const;
 export type TemplateMatchKind = typeof TEMPLATE_MATCH_KINDS[number];
-export type TemplateRule = { id: string; funnel_id: string; match_kind: TemplateMatchKind; pattern: string };
+export type TemplateRule = { brand_id?: number | null; id: string; funnel_id: string; match_kind: TemplateMatchKind; pattern: string };
 export type TemplateKind = 'transaction' | 'lead' | 'other';
 export const TEMPLATE_KIND_LABELS: Record<TemplateKind, string> = { transaction: 'Transaksi', lead: 'Lead', other: 'Lainnya' };
 
@@ -55,6 +55,8 @@ export function validateTemplateRule(input: { match_kind?: unknown; pattern?: un
 
 /** Exact beats prefix beats domain; within a kind, the longest pattern wins. */
 export function matchTemplateRule(url: string, rules: TemplateRule[]): TemplateRule | null {
+  const own = rules.filter(r => r.brand_id != null), shared = rules.filter(r => r.brand_id == null);
+  if (own.length && shared.length) return matchTemplateRule(url, own) || matchTemplateRule(url, shared);
   const canonical = canonicalLandingPage(url);
   if (!canonical) return null;
   const host = hostname(canonical);

@@ -13,7 +13,7 @@ function mock(currencies = ['IDR']) {
     const q: any = { select: () => q, eq: (...args: any[]) => { scopes.push([table, ...args]); return q; }, order: () => q, maybeSingle: () => q,
       then: (resolve: any) => Promise.resolve({ data: data[table], error: null }).then(resolve) }; return q;
   }, rpc: async (name: string, args: any) => { assert.equal(name, 'get_meta_ad_report'); rpcArgs = args; return { data: { currencies, summary: { spend: 100 }, previous: { spend: 80 }, groups: [{ key: 'a' }, { key: 'b' }], history: [], creatives: [], coverage: [] }, error: null }; } };
-  return { db: db as any, scopes, args: () => rpcArgs };
+  return { db: db as any, scopes, data, args: () => rpcArgs };
 }
 test('matches completed-day range and rejects invalid or overlong dates', () => {
   assert.deepEqual(reportRange('2026-10-16', '2026-10-16', '2026-10-16'), { from: '2026-10-15', to: '2026-10-15' });
@@ -46,4 +46,19 @@ test('does not invent coverage gaps for history responses that omit coverage row
   const m = mock();
   const r = await readFunnelReport(m.db, workspace, { from: '2026-10-15', to: '2026-10-15', view: 'daily' }, '2026-10-16');
   assert.equal(r.coverage_gaps, null);
+});
+
+test('brand-owned all-account funnels stay within their brand through MCP', async () => {
+  const m=mock();
+  m.data.meta_ad_funnels[0].brand_id=1;
+  m.data.meta_ad_funnels[0].config.account_ids=[];
+  m.data.meta_ad_accounts.push({account_id:'act_2',default_brand_id:2});
+  m.data.brands.push({id:2,name:'Other'});
+  await readFunnelReport(m.db,workspace,{from:'2026-10-15',to:'2026-10-15'});
+  assert.deepEqual(m.args().p_config.account_ids,['act_1']);
+  assert.equal(m.args().p_brand,'1');
+  await assert.rejects(readFunnelReport(m.db,workspace,{from:'2026-10-15',to:'2026-10-15',brand_id:'2'}),/another brand/);
+  m.data.meta_ad_accounts=m.data.meta_ad_accounts.filter((a:any)=>a.default_brand_id!==1);
+  await readFunnelReport(m.db,workspace,{from:'2026-10-15',to:'2026-10-15'});
+  assert.deepEqual(m.args().p_config.account_ids,['__no_authorized_meta_account__']);
 });

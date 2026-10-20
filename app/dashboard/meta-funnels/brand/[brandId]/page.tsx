@@ -73,7 +73,9 @@ export default function MetaBrandDetailPage() {
   }
   const reportRange = dateRange.from && dateRange.to ? dateRange : defaultMetaRange(getTodayWIB());
   const { can, role } = usePermissions();
-  const canManage = role !== 'advertiser' && can('admin:meta');
+  const canManage = can('meta:funnels');
+  const canMap = can('meta:mapping');
+  const canSync = role !== 'advertiser' && can('admin:meta');
   const brandId = params.brandId;
   const world: MetaBrandWorld = search.get('world') === 'cpas' ? 'cpas' : 'website';
   const view: 'destinations' | 'cep' = search.get('view') === 'cep' ? 'cep' : 'destinations';
@@ -253,7 +255,7 @@ export default function MetaBrandDetailPage() {
             <div className={styles.sectionTitle}><strong className={styles.warn}>Belum ditetapkan</strong><span>{data.unassigned.length} tujuan · {formatCompactMoney(data.unassigned.reduce((s, u) => s + u.current.spend, 0), currency)} · belum masuk template mana pun</span></div>
             {data.unassigned.slice(0, 8).map(u => <div key={u.key} className={styles.unassignedRow}>
               <span>{u.name} · {formatCompactMoney(u.current.spend, currency)} · <span className={styles.muted}>{u.reason === 'no_url' ? 'URL belum terbaca' : u.reason === 'multi_url' ? 'beberapa URL dalam satu creative' : u.suggestion.reason}</span></span>
-              {u.reason === 'no_rule' && canManage && u.suggestion.funnelId && <MetaTemplateSuggestionButton className={styles.button} rulesReady={data.rulesReady} busy={busy} onApply={() => void applySuggestion(u, u.suggestion.funnelId!)} />}
+              {u.reason === 'no_rule' && canManage && u.suggestion.funnelId && data.templates.some(t => t.id === u.suggestion.funnelId && (role !== 'advertiser' || t.brand_id != null)) && <MetaTemplateSuggestionButton className={styles.button} rulesReady={data.rulesReady} busy={busy} onApply={() => void applySuggestion(u, u.suggestion.funnelId!)} />}
             </div>)}
             <Link href="/dashboard/meta-funnels/templates">Atur template dan tujuan →</Link>
           </div>}
@@ -278,11 +280,11 @@ export default function MetaBrandDetailPage() {
         {!noteCount && <p className={styles.muted}>Tidak ada catatan. Data periode dan pembanding lengkap, semua URL terbaca.</p>}
         {data.coverageGaps.length > 0 && <div className={styles.card}><b className={styles.warn}>Data parsial</b>
           <dl style={{ margin: '8px 0 0', display: 'grid', gap: 6 }}>{data.coverageGaps.map(g => <div key={g.account_id}><dt style={{ fontWeight: 600 }}>{data.accounts.find(a => a.account_id === g.account_id)?.account_name || g.account_id}</dt><dd style={{ margin: 0 }} className={styles.muted}>{[g.currentMissing > 0 && `periode ${g.currentMissing} hari`, g.baselineMissing > 0 && `pembanding ${g.baselineMissing} hari`].filter(Boolean).join(' · ')} · {g.firstMissing} – {g.lastMissing}</dd></div>)}</dl>
-          {canManage && <button type="button" className={styles.button} style={{ marginTop: 8 }} disabled={busy} onClick={() => void sync()}>Sync</button>}</div>}
+          {canSync && <button type="button" className={styles.button} style={{ marginTop: 8 }} disabled={busy} onClick={() => void sync()}>Sync</button>}</div>}
         {(data.destinations.missing_ads > 0 || data.destinations.multi_ads > 0) && <div className={styles.card}><b className={styles.warn}>URL landing page</b>
           <p className={styles.muted}>{data.destinations.missing_ads} ad dengan URL belum terbaca · {data.destinations.multi_ads} ad dengan beberapa URL. Metrik tetap dihitung sekali; ad ini belum masuk template mana pun.</p>
           {data.destinations.missing.map(ad => <div className={styles.namingIssue} key={`${ad.account_id}:${ad.ad_id}`}><b>{ad.ad_name}</b><small>{ad.account_name} · ad {ad.ad_id}</small>
-            {canManage && <button className={styles.button} onClick={() => setDestinationEditor({ accountId: ad.account_id, adId: ad.ad_id, name: ad.ad_name, url: '' })}>Tetapkan URL</button>}</div>)}
+            {canMap && <button className={styles.button} onClick={() => setDestinationEditor({ accountId: ad.account_id, adId: ad.ad_id, name: ad.ad_name, url: '' })}>Tetapkan URL</button>}</div>)}
           {destinationEditor && <form className={styles.editor} style={{ marginTop: 10 }} onSubmit={e => { e.preventDefault(); void verifyDestination(); }}>
             <p><b>{destinationEditor.name}</b><br /><span className={styles.muted}>Gunakan Website URL yang sudah diperiksa di Ads Manager. URL ini berlaku selama creative yang sama digunakan.</span></p>
             <label>Website URL<input required type="url" maxLength={4096} value={destinationEditor.url} onChange={e => setDestinationEditor({ ...destinationEditor, url: e.target.value })} /></label>

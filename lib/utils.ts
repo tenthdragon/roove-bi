@@ -85,6 +85,14 @@ export const PERMISSION_GROUPS = [
     ],
   },
   {
+    label: 'Meta Ads — Pengelolaan',
+    keys: [
+      { key: 'meta:mapping', label: 'Kelola mapping Ads' },
+      { key: 'meta:taxonomy', label: 'Kelola CEP & intention' },
+      { key: 'meta:funnels', label: 'Kelola funnel' },
+    ],
+  },
+  {
     label: 'Admin - Sub-tab',
     keys: [
       { key: 'admin:daily',      label: 'Daily Data' },

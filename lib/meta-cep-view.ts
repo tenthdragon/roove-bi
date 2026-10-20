@@ -54,12 +54,12 @@ function cepLabel(cep: string) {
   return cep === UNKNOWN_KEY ? 'Belum terpetakan' : dimensionLabel('cep', cep);
 }
 
-export function buildCepView(groups: ReportGroup[], world: 'website' | 'cpas', summary: Totals, previous: Totals, classification?: { cepLabels?: Record<string, string>; intentionTotals?: { intention: string; current: Totals }[]; multiCepAds?: number }): CepView {
+export function buildCepView(groups: ReportGroup[], world: 'website' | 'cpas', summary: Totals, previous: Totals, classification?: { intentionLabels?: Record<string, string>; cepLabels?: Record<string, string>; intentionTotals?: { intention: string; current: Totals }[]; multiCepAds?: number }): CepView {
   const cells: CepCell[] = [];
   for (const g of groups) {
     const parsed = parseCepKey(g.key);
     if (!parsed) continue;
-    cells.push({ key: g.key, cep: parsed.cep, intention: INTENTION_ORDER.includes(parsed.intention as typeof INTENTION_ORDER[number]) ? parsed.intention : UNKNOWN_KEY, current: g.current, previous: g.previous, ads: g.ad_ids.length });
+    cells.push({ key: g.key, cep: parsed.cep, intention: INTENTION_ORDER.includes(parsed.intention as typeof INTENTION_ORDER[number]) || classification?.intentionLabels?.[parsed.intention] ? parsed.intention : UNKNOWN_KEY, current: g.current, previous: g.previous, ads: g.ad_ids.length });
   }
   const totalSpend = summary.spend;
   const resultMetric = cepResultMetric(world, summary);
@@ -70,7 +70,7 @@ export function buildCepView(groups: ReportGroup[], world: 'website' | 'cpas', s
   });
   const columns: CepColumn[] = intentions.map(intention => {
     const current = classification?.intentionTotals?.find(c => c.intention === intention)?.current || sumTotalsOf(cells.filter(c => c.intention === intention).map(c => c.current));
-    return { intention, label: intentionLabel(intention), unknown: intention === UNKNOWN_KEY, current, spendShare: totalSpend > 0 ? current.spend / totalSpend : 0 };
+    return { intention, label: classification?.intentionLabels?.[intention] || intentionLabel(intention), unknown: intention === UNKNOWN_KEY, current, spendShare: totalSpend > 0 ? current.spend / totalSpend : 0 };
   });
   const rows: CepRow[] = [...new Set([...Object.keys(classification?.cepLabels || {}), ...cells.map(c => c.cep)])].map(cep => {
     const own = cells.filter(c => c.cep === cep);

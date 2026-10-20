@@ -1,12 +1,14 @@
 'use client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getMetaTaxonomyConfiguration, previewMetaTaxonomyRule, saveMetaCepCategory, saveMetaTaxonomyRule, setMetaCepCategoryActive } from '@/lib/meta-ad-taxonomy-actions';
-import { INTENTIONS, type CepCategory } from '@/lib/meta-ad-taxonomy';
+import { type CepCategory } from '@/lib/meta-ad-taxonomy';
 import { mappingUnit } from '@/lib/meta-ad-mapping';
 import { useWorkspace } from '@/lib/WorkspaceContext';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { formatCompactMoney } from '@/lib/meta-format';
+import MetaIntentionCatalog from '@/components/MetaIntentionCatalog';
+import { useMetaReportSession } from '@/lib/useMetaCachedLoad';
 import MetaAdsNav from '@/components/MetaAdsNav';
 import styles from '../page.module.css';
 
@@ -16,9 +18,14 @@ type CategoryDraft = Pick<CepCategory, 'key' | 'label' | 'description' | 'revisi
 const emptyCategory = (): CategoryDraft => ({ key: '', label: '', description: '', revision: 0 });
 
 export default function CategoriesPage() {
+  const session = useMetaReportSession();
+  if (!session.key) return <div className={styles.page} role={session.error ? 'alert' : 'status'}>{session.error || 'Memverifikasi akses brand…'}</div>;
+  return <CategoriesPageEditor key={session.key} />;
+}
+function CategoriesPageEditor() {
   const { activeWorkspace } = useWorkspace();
-  const { can, role } = usePermissions();
-  return <ClassificationEditor key={activeWorkspace.id} canManage={role !== 'advertiser' && can('admin:meta')} />;
+  const { can } = usePermissions();
+  return <ClassificationEditor key={activeWorkspace.id} canManage={can('meta:taxonomy')} />;
 }
 function ClassificationEditor({ canManage }: { canManage: boolean }) {
   const { dateRange } = useDateRange();
@@ -49,6 +56,7 @@ function ClassificationEditor({ canManage }: { canManage: boolean }) {
   const brand = config?.brands.find(b => b.id === brandId);
   const catalog = config?.catalog.filter(c => c.brand_id === brandId) || [];
   const active = catalog.filter(c => c.is_active !== false), inactive = catalog.filter(c => c.is_active === false);
+  const intentions = config?.intentions.filter(c => c.brand_id === brandId) || [];
   const rules = config?.rules.filter(r => r.brand_id === brandId) || [];
   const rule = rules.find(r => r.dimension === dimension && r.raw_key === mappingUnit(dimension, raw).key);
   const ruleChoices = catalog.filter(c => c.is_active !== false || rule?.cep_keys.includes(c.key));
@@ -109,10 +117,10 @@ function ClassificationEditor({ canManage }: { canManage: boolean }) {
         <p className={styles.muted}>CEP nonaktif tetap tersedia pada laporan historis. Kategori diarsipkan melalui status nonaktif agar riwayatnya tidak terhapus.</p>
       </section>
 
-      <section className={styles.card}><h2>Intention resmi</h2><div className={styles.intentionChips}>{Object.values(INTENTIONS).map(label => <span key={label}>{label}</span>)}</div><p className={styles.muted}>Tiga intention ini berlaku untuk semua brand. Belum terpetakan adalah status pemeriksaan.</p></section>
+      <MetaIntentionCatalog key={brandId} brandId={brandId} catalog={intentions} canManage={canManage} onSaved={load} />
       <section className={styles.card}><h2>Aturan pemetaan</h2><p>Hubungkan istilah pada nama iklan ke kategori resmi. Aturan berlaku untuk iklan lama maupun baru; koreksi manual tetap dipertahankan.</p>
         {!rules.length && <p className={styles.muted}>Belum ada aturan tambahan untuk brand ini.</p>}
-        {rules.map(r => <div className={styles.unitRow} key={`${r.dimension}:${r.raw_key}`}><span><b>{r.raw_key}</b> → {r.dimension === 'cep' ? r.cep_keys.map(cepLabel).join(' · ') : INTENTIONS[r.intention_key as keyof typeof INTENTIONS]}</span>{canManage && <button className={styles.button} disabled={busy} onClick={() => { setDimension(r.dimension); setRaw(r.raw_key); setCeps(r.cep_keys); setIntention(r.intention_key || 'disc'); setPreview(null); }}>Edit aturan</button>}</div>)}
+        {rules.map(r => <div className={styles.unitRow} key={`${r.dimension}:${r.raw_key}`}><span><b>{r.raw_key}</b> → {r.dimension === 'cep' ? r.cep_keys.map(cepLabel).join(' · ') : intentions.find(c => c.key === r.intention_key)?.label || r.intention_key}</span>{canManage && <button className={styles.button} disabled={busy} onClick={() => { setDimension(r.dimension); setRaw(r.raw_key); setCeps(r.cep_keys); setIntention(r.intention_key || 'disc'); setPreview(null); }}>Edit aturan</button>}</div>)}
         {canManage && <form className={styles.taxonomyForm} onSubmit={e => {
           e.preventDefault(); void (async () => {
             setBusy(true); setError('');
@@ -123,7 +131,7 @@ function ClassificationEditor({ canManage }: { canManage: boolean }) {
         }}>
           <label>Dimensi<select value={dimension} onChange={e => { setDimension(e.target.value as 'cep' | 'intention'); setCeps([]); }}><option value="cep">CEP</option><option value="intention">Intention</option></select></label>
           <label>Istilah yang terbaca dari nama iklan<input required maxLength={500} value={raw} onChange={e => { setRaw(e.target.value); setCeps([]); }} placeholder={dimension === 'cep' ? 'Contoh: sport' : 'Contoh: edukasi'} /></label>
-          {dimension === 'cep' ? <fieldset><legend>Petakan ke CEP</legend>{ruleChoices.map(c => <label key={c.key}><input type="checkbox" checked={ceps.includes(c.key)} disabled={c.is_active === false && !ceps.includes(c.key)} onChange={e => setCeps(e.target.checked ? [...ceps, c.key] : ceps.filter(k => k !== c.key))} />{cepLabel(c.key)}</label>)}</fieldset> : <label>Intention<select value={intention} onChange={e => setIntention(e.target.value)}>{Object.entries(INTENTIONS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}</select></label>}
+          {dimension === 'cep' ? <fieldset><legend>Petakan ke CEP</legend>{ruleChoices.map(c => <label key={c.key}><input type="checkbox" checked={ceps.includes(c.key)} disabled={c.is_active === false && !ceps.includes(c.key)} onChange={e => setCeps(e.target.checked ? [...ceps, c.key] : ceps.filter(k => k !== c.key))} />{cepLabel(c.key)}</label>)}</fieldset> : <label>Intention<select value={intention} onChange={e => setIntention(e.target.value)}>{intentions.filter(c => c.is_active !== false || c.key === rule?.intention_key).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</select></label>}
           <button className={styles.button} disabled={busy || !raw.trim() || (dimension === 'cep' && !ceps.length)}>Pratinjau pemetaan</button>
           {validPreview && <div className={styles.info}><b>{validPreview.eligible} iklan akan memakai aturan ini</b><p>{validPreview.manualPreserved} koreksi manual dipertahankan dari {validPreview.matched} iklan dengan istilah yang sama.</p><p>Spend periode terpilih: {Object.entries(validPreview.spendByCurrency).map(([currency, spend]) => formatCompactMoney(spend, currency)).join(' · ') || 'Tidak ada spend tercatat.'}</p>
             {validPreview.samples.map(a => <p key={`${a.account_id}:${a.ad_id}`}>{a.ad_name}</p>)}<p>Pengelompokan laporan historis ikut berubah; angka performa asli tetap. Perubahan dicatat untuk audit.</p>

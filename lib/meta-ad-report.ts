@@ -14,7 +14,7 @@ export type ReportQuery = {
   view: 'overview' | 'daily' | 'trends' | 'creatives'; period: 'week' | 'month'; groupKey: string | null;
 };
 export type ReportBucket = { date: string; totals: Totals; complete: boolean; partial: boolean };
-export type RawMetaReport = {
+export type RawMetaReport = { intentionLabels?: Record<string, string>;
   cepLabels?: Record<string, string>; intentionTotals?: { intention: string; current: Totals }[]; multiCepAds?: number;
   currencies: string[]; summary: Totals; previous: Totals;
   groups: (Omit<GroupComparison, 'metrics' | 'creatives' | 'categories' | 'classified' | 'destination'> & { destination?: CtwaDestination | null; currencies?: string[] })[];
@@ -41,7 +41,7 @@ export function metaReportGroups(raw: RawMetaReport, config: FunnelConfig): Grou
 }
 export function metaReportOptions(raw: RawMetaReport, accounts: MetaAccountBrand[], brands: MetaBrand[]) {
   const choices = (dimension: keyof AdDimensionFilters) => raw.facets.filter(f => f.dimension === dimension).map(f => ({ value: f.value, count: f.count,
-    label: dimension === 'objective' ? objectiveLabel(f.value) : dimension === 'cep' ? raw.cepLabels?.[f.value] || dimensionLabel(dimension, f.value) : dimensionLabel(dimension, f.value) }))
+    label: dimension === 'objective' ? objectiveLabel(f.value) : dimension === 'cep' ? raw.cepLabels?.[f.value] || dimensionLabel(dimension, f.value) : raw.intentionLabels?.[f.value] || dimensionLabel(dimension, f.value) }))
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'id'));
   const brandOptions = metaBrandOptions(accounts, brands, []);
   brandOptions.choices = brandOptions.choices.map(b => ({ ...b, count: raw.brandCounts[b.value] || 0 })).sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'id'));

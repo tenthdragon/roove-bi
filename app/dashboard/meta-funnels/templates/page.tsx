@@ -11,6 +11,7 @@ import { applyMetaTemplateRules, metaTemplateError, META_TEMPLATE_SCHEMA_MESSAGE
 import MetaTemplateSuggestionButton from '@/components/MetaTemplateSuggestionButton';
 import { templateDestinationRule } from '@/lib/meta-ctwa-destinations';
 import { formatCompactMoney, formatDate } from '@/lib/meta-format';
+import { useMetaReportSession } from '@/lib/useMetaCachedLoad';
 import MetaAdsNav from '@/components/MetaAdsNav';
 import MetaFunnelEditor from '@/components/MetaFunnelEditor';
 import styles from '../page.module.css';
@@ -20,9 +21,15 @@ const message = (e: unknown) => metaTemplateError(e, 'Permintaan belum berhasil.
 const kindLabels: Record<TemplateMatchKind, string> = { exact: 'URL persis', prefix: 'Awalan URL', domain: 'Domain', ctwa: 'Tujuan WhatsApp' };
 
 export default function MetaTemplatesPage() {
+  const session = useMetaReportSession();
+  if (!session.key) return <div className={styles.page} role={session.error ? 'alert' : 'status'}>{session.error || 'Memverifikasi akses brand…'}</div>;
+  return <MetaTemplatesPageEditor key={session.key} />;
+}
+function MetaTemplatesPageEditor() {
   const { activeWorkspace } = useWorkspace();
   const { can, role } = usePermissions();
-  const canManage = role !== 'advertiser' && can('admin:meta');
+  const canManage = can('meta:funnels');
+  const [brandId, setBrandId] = useState<number | null | undefined>(undefined);
   const [data, setData] = useState<Data | null>(null);
   const [schemaReady, setSchemaReady] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -39,14 +46,14 @@ export default function MetaTemplatesPage() {
     const current = ++request.current;
     setLoading(true); setError('');
     try {
-      const result = await getMetaTemplateSettings();
+      const result = await getMetaTemplateSettings(brandId);
       if (current !== request.current) return;
       if ('error' in result) { setError(result.error); return; }
       setSchemaReady(result.schemaReady);
       if (result.schemaReady) { setData(result); setSelectedId(id => result.templates.some(t => t.id === id) ? id : result.templates[0]?.id || ''); }
     } catch (e) { if (current === request.current) setError(message(e)); }
     finally { if (current === request.current) setLoading(false); }
-  }, []);
+  }, [brandId]);
   useEffect(() => {
     const guard = request;
     mutation.current = false; setBusy(false); setPendingUrls([]); setNotice(''); setData(null); setEditor(null);
@@ -62,7 +69,7 @@ export default function MetaTemplatesPage() {
       await work(() => current === request.current);
       if (current !== request.current) return;
       if (done) setNotice(done);
-      const config = await getMetaTemplateConfiguration();
+      const config = await getMetaTemplateConfiguration(data?.brandId);
       if (current !== request.current) return;
       if ('error' in config) { setNotice(`${done || 'Perubahan tersimpan.'} ${config.error}`); return; }
       setData(previous => previous ? applyMetaTemplateRules({ ...previous, rulesReady: config.rulesReady }, config.rules, config.templates) : previous);
@@ -78,8 +85,8 @@ export default function MetaTemplatesPage() {
     try {
       const rule = 'save' in change ? validateTemplateRule(change.save) : null;
       const optimisticRules = 'save' in change && rule
-        ? [...before.rules.filter(r => !(r.id === change.save.id || (r.match_kind === rule.match_kind && r.pattern === rule.pattern))),
-          { ...rule, id: change.save.id || 'pending-rule', funnel_id: change.save.funnelId }]
+        ? [...before.rules.filter(r => !(r.id === change.save.id || (r.match_kind === rule.match_kind && r.pattern === rule.pattern && r.brand_id === before.templates.find(t => t.id === change.save.funnelId)?.brand_id))),
+          { ...rule, brand_id: before.templates.find(t => t.id === change.save.funnelId)?.brand_id, id: change.save.id || 'pending-rule', funnel_id: change.save.funnelId }]
         : before.rules.filter(r => !('remove' in change) || r.id !== change.remove);
       const optimistic = applyMetaTemplateRules(before, optimisticRules);
       mutation.current = true; setBusy(true); setError(''); setNotice('');
@@ -93,7 +100,7 @@ export default function MetaTemplatesPage() {
       }
       const rules = 'deletedId' in result
         ? before.rules.filter(r => r.id !== result.deletedId)
-        : [...before.rules.filter(r => !(r.id === result.id || (r.match_kind === result.match_kind && r.pattern === result.pattern))), result];
+        : [...before.rules.filter(r => !(r.id === result.id || (r.match_kind === result.match_kind && r.pattern === result.pattern && r.brand_id === result.brand_id))), result];
       setData(applyMetaTemplateRules(before, rules)); setNotice(done);
       return true;
     } catch (e) {
@@ -103,9 +110,10 @@ export default function MetaTemplatesPage() {
       if (current === request.current) { mutation.current = false; setBusy(false); setPendingUrls([]); }
     }
   }
+  const editable = (row: { brand_id?: number | null }) => canManage && (row.brand_id ?? null) === (data?.brandId ?? null);
   const selected = data?.templates.find(t => t.id === selectedId) || null;
   function assign(lp: Data['landingPages'][number], funnelId: string) {
-    const existing = lp.rule;
+    const existing = data?.rules.find(r => r.id === lp.rule?.id && editable(r));
     const target = templateDestinationRule(lp);
     if (!funnelId) {
       if (existing?.match_kind === target.match_kind) return changeRule({ remove: existing.id }, 'Aturan tujuan dihapus.');
@@ -131,9 +139,9 @@ export default function MetaTemplatesPage() {
           <td style={{ minWidth: 200 }}>{lp.suggestion.reason}</td>
           <td><select aria-label={`Template untuk ${lp.label}`} disabled={!canManage || busy || !data?.rulesReady} value={lp.templateId || ''} onChange={e => void assign(lp, e.target.value)}>
             <option value="">{lp.suggestion.funnelId ? `Saran: ${data?.templates.find(t => t.id === lp.suggestion.funnelId)?.name}` : 'Tanpa template'}</option>
-            {data?.templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            {data?.templates.filter(t => editable(t) || t.id === lp.templateId).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
           </select></td>
-          <td><span role={pending ? 'status' : undefined} className={`${styles.statusTag} ${pending ? styles.statusWarn : status.cls}`}>{pending ? 'Menyimpan…' : status.label}</span>{canManage && !lp.templateId && lp.suggestion.funnelId && <small><MetaTemplateSuggestionButton className={styles.nameButton} rulesReady={!!data?.rulesReady} busy={busy} onApply={() => void assign(lp, lp.suggestion.funnelId!)}>Konfirmasi saran</MetaTemplateSuggestionButton></small>}</td>
+          <td><span role={pending ? 'status' : undefined} className={`${styles.statusTag} ${pending ? styles.statusWarn : status.cls}`}>{pending ? 'Menyimpan…' : status.label}</span>{canManage && !lp.templateId && lp.suggestion.funnelId && data?.templates.some(t => t.id === lp.suggestion.funnelId && editable(t)) && <small><MetaTemplateSuggestionButton className={styles.nameButton} rulesReady={!!data?.rulesReady} busy={busy} onApply={() => void assign(lp, lp.suggestion.funnelId!)}>Konfirmasi saran</MetaTemplateSuggestionButton></small>}</td>
         </tr>;
       })}</tbody>
     </table>{!rows.length && <p className={styles.muted} style={{ padding: 16 }}>Belum ada tujuan pada 30 hari terakhir.</p>}</div></div>;
@@ -141,9 +149,13 @@ export default function MetaTemplatesPage() {
   return <div className={styles.page} aria-busy={loading}>
     <MetaAdsNav title="Template funnel" subtitle="Template menentukan tahapan dan kolom hasil untuk tujuan Website dan WhatsApp. Setiap tujuan memakai satu template; nomor WhatsApp dipisahkan per brand. CPAS tidak memakai template karena tahapannya tetap: outbound → Shopee → purchase."
       actions={canManage && schemaReady ? <>
-        <button className={styles.button} disabled={busy || loading || !data} onClick={() => void run(() => createMetaTemplatePreset('transaction'), 'Template Transaksi dibuat.')}>+ Template Transaksi</button>
-        <button className={styles.button} disabled={busy || loading || !data} onClick={() => void run(() => createMetaTemplatePreset('lead'), 'Template Lead dibuat.')}>+ Template Lead</button>
+        <button className={styles.button} disabled={busy || loading || !data} onClick={() => void run(() => createMetaTemplatePreset('transaction', data?.brandId), 'Template Transaksi dibuat.')}>+ Template Transaksi</button>
+        <button className={styles.button} disabled={busy || loading || !data} onClick={() => void run(() => createMetaTemplatePreset('lead', data?.brandId), 'Template Lead dibuat.')}>+ Template Lead</button>
       </> : undefined} />
+    {data && <label className={styles.card}>Brand<select aria-label="Brand template" disabled={busy || loading} value={data.brandId ?? ''} onChange={e => { setEditor(null); setRuleForm(f => ({ ...f, funnelId: '' })); setBrandId(e.target.value ? Number(e.target.value) : null); }}>
+      {role !== 'advertiser' && <option value="">Template bersama workspace</option>}
+      {data.brands.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+    </select><small>Perubahan template dan aturan khusus brand tidak memengaruhi brand lain. Template bersama dapat disalin.</small></label>}
     {error && <div role="alert" className={styles.error}>{error} <button type="button" className={styles.button} disabled={busy || loading} onClick={() => void load()}>Muat ulang</button></div>}
     {notice && <div role="status" className={styles.info}>{notice}</div>}
     {!schemaReady ? <div className={styles.card}>Pengelompokan iklan belum tersedia. Hubungi admin untuk mengaktifkannya.</div> : <>
@@ -153,7 +165,7 @@ export default function MetaTemplatesPage() {
         <section aria-label="Daftar template" className={styles.templateList}>
           {!data.templates.length && <div className={styles.card}>Belum ada template. Mulai dari template Transaksi atau Lead di atas, lalu sesuaikan tahapannya.</div>}
           {data.templates.map(t => <button key={t.id} type="button" className={`${styles.templateItem} ${t.id === selectedId ? styles.templateItemActive : ''}`} aria-pressed={t.id === selectedId} onClick={() => { setSelectedId(t.id); setEditor(null); }}>
-            <strong>{t.name}</strong>
+            <strong>{t.name}</strong><small>{t.brand_id == null ? 'Template bersama · salin untuk perubahan khusus brand' : data.brands.find(b => b.id === t.brand_id)?.name}</small>
             <span>{TEMPLATE_KIND_LABELS[t.kind]} · {t.rules} aturan tujuan · hasil utama {t.mainMetric?.label || '—'}</span>
             <div className={styles.stageChips}>{t.stages.filter(s => s !== 'spend').map(s => <span key={s} className={styles.stageChip}>{MEASURES[s]}</span>)}</div>
           </button>)}
@@ -161,12 +173,13 @@ export default function MetaTemplatesPage() {
         </section>
         <section aria-label="Editor template" style={{ display: 'grid', gap: 12, minWidth: 0 }}>
           {editor ? <MetaFunnelEditor value={editor.config} onChange={config => setEditor({ ...editor, config })} accounts={data.accounts} busy={busy}
-            onSave={() => void run(async isCurrent => { const result = await saveMetaFunnel(editor); if (isCurrent()) { setEditor(null); setSelectedId(result.id); if (result.warning) setNotice(result.warning); } }, 'Template tersimpan.')}
+            onSave={() => void run(async isCurrent => { const result = await saveMetaFunnel({ ...editor, brandId: data.brandId }); if (isCurrent()) { setEditor(null); setSelectedId(result.id); if (result.warning) setNotice(result.warning); } }, 'Template tersimpan.')}
             onClose={() => setEditor(null)}
             onArchive={editor.id ? () => { if (window.confirm('Arsipkan template ini? Aturan URL-nya ikut dihapus.')) void run(async isCurrent => { await archiveMetaFunnel(editor.id!); if (isCurrent()) setEditor(null); }, 'Template diarsipkan.'); } : undefined} />
           : selected ? <div className={styles.card} style={{ display: 'grid', gap: 10 }}>
             <div className={styles.sectionHeader}><div><h2 style={{ margin: 0 }}>{selected.name}</h2><p className={styles.muted}>{selected.description || 'Tanpa deskripsi'}</p></div>
-              {canManage && <button className={styles.primary} onClick={() => setEditor({ id: selected.id, version: selected.version, config: selected })}>Ubah template</button>}</div>
+              <div className={styles.actions}>{editable(selected) && <button className={styles.primary} onClick={() => setEditor({ id: selected.id, version: selected.version, config: selected })}>Ubah template</button>}
+              {canManage && data.brandId != null && <button className={styles.button} onClick={() => setEditor({ config: { ...selected, name: `${selected.name} (salinan)`, account_ids: [] } })}>Salin untuk brand ini</button>}</div></div>
             <div><b style={{ fontSize: 12 }}>Urutan tahapan</b><div className={styles.stageChips} style={{ marginTop: 6 }}>{selected.stages.map(s => <span key={s} className={styles.stageChip} style={{ fontSize: 12, padding: '6px 10px' }}>{MEASURES[s]}</span>)}</div></div>
             <div className={styles.tableWrap}><table><thead><tr><th>Kolom hasil</th><th>Pembilang</th><th>Penyebut</th><th>Arah baik</th><th>Monitor</th></tr></thead>
               <tbody>{selected.metrics.map(m => <tr key={m.id}><td style={{ fontWeight: m.id === selected.mainMetric?.id ? 650 : 500 }}>{m.label}{m.id === selected.mainMetric?.id && <small>Hasil utama</small>}</td><td>{MEASURES[m.numerator]}</td><td>{m.denominator ? MEASURES[m.denominator] : '—'}</td><td>{m.direction === 'higher' ? 'Lebih tinggi' : 'Lebih rendah'}</td><td>{m.monitor ? 'Ya' : 'Tidak'}</td></tr>)}</tbody></table></div>
@@ -184,13 +197,13 @@ export default function MetaTemplatesPage() {
         {canManage && data.rulesReady && data.templates.length > 0 && <form className={`${styles.card} ${styles.inlineForm}`} onSubmit={e => { e.preventDefault(); void changeRule({ save: ruleForm }, 'Aturan tersimpan.').then(saved => { if (saved) setRuleForm(f => ({ ...f, pattern: '' })); }); }}>
           <label>Jenis<select value={ruleForm.match_kind} onChange={e => setRuleForm({ ...ruleForm, match_kind: e.target.value as TemplateMatchKind })}>{(['exact', 'prefix', 'domain'] as const).map(k => <option key={k} value={k}>{kindLabels[k]}</option>)}</select></label>
           <label style={{ flex: 1 }}>Pola<input required maxLength={4096} placeholder={ruleForm.match_kind === 'domain' ? 'purvu.id' : 'https://purvu.id/konsultasi'} value={ruleForm.pattern} onChange={e => setRuleForm({ ...ruleForm, pattern: e.target.value })} /></label>
-          <label>Template<select required value={ruleForm.funnelId} onChange={e => setRuleForm({ ...ruleForm, funnelId: e.target.value })}><option value="">Pilih template…</option>{data.templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
+          <label>Template<select required value={ruleForm.funnelId} onChange={e => setRuleForm({ ...ruleForm, funnelId: e.target.value })}><option value="">Pilih template…</option>{data.templates.filter(editable).map(t => <option key={t.id} value={t.id}>{t.name}</option>)}</select></label>
           <button type="submit" className={styles.primary} disabled={busy || !ruleForm.funnelId}>+ Aturan URL</button>
         </form>}
         <div className={styles.sectionCard}><div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}><table className={styles.rulesTable}>
           <thead><tr><th>Jenis</th><th>Pola</th><th>Template</th><th /></tr></thead>
           <tbody>{data.rules.map(r => <tr key={r.id}><td>{kindLabels[r.match_kind]}</td><td style={{ overflowWrap: 'anywhere' }}>{r.match_kind === 'ctwa' ? data.landingPages.find(lp => lp.destination?.key === r.pattern)?.label || `WhatsApp · brand ${r.pattern.split(':')[1]} · ${r.pattern.includes(':phone:') ? r.pattern.split(':phone:')[1] : 'Nomor belum tersedia'}` : r.pattern}</td><td>{r.templateName}</td>
-            <td style={{ textAlign: 'right' }}>{canManage && <button type="button" className={styles.button} disabled={busy} onClick={() => void changeRule({ remove: r.id }, 'Aturan dihapus.')}>Hapus</button>}</td></tr>)}</tbody>
+            <td style={{ textAlign: 'right' }}>{editable(r) && <button type="button" className={styles.button} disabled={busy} onClick={() => void changeRule({ remove: r.id }, 'Aturan dihapus.')}>Hapus</button>}</td></tr>)}</tbody>
         </table>{!data.rules.length && <p className={styles.muted} style={{ padding: 16 }}>Belum ada aturan. Tetapkan template dari tabel pencocokan atau tambahkan aturan domain agar seluruh website langsung terpetakan.</p>}</div></div>
       </section>}
     </>}

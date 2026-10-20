@@ -1,7 +1,7 @@
 'use server';
 
-import { requireDashboardPermissionAccess } from './dashboard-access';
-import { reportingAccess } from './meta-report-context';
+import { mutateMeta } from './meta-edit-mutations';
+import { reportingAccess, editAccess, manageAccess } from './meta-report-context';
 import { scopeMetaAccounts, scopeMetaBrands, type MetaBrandScope } from './meta-brand-access';
 import { createServiceSupabase } from './service-supabase';
 import { loadTaxonomy } from './meta-taxonomy-store';
@@ -19,13 +19,7 @@ import { metaReportResponse } from './meta-report-requests';
 import { applyMappingUnitBatch, buildWorklist, WORKLIST_ISSUES, type WorklistIssue } from './meta-ad-worklist';
 
 async function access(manage = false) {
-  const ctx = await reportingAccess();
-  if (manage) {
-    if (ctx.brandIds !== null) throw new Error('Pengaturan Meta hanya dapat diubah oleh pengelola workspace.');
-    const admin = await requireDashboardPermissionAccess('admin:meta', 'Kelola pemetaan Meta');
-    if (admin.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
-  }
-  return ctx;
+  return manage ? editAccess('meta:mapping') : reportingAccess();
 }
 async function mappingStatus(workspaceId: string, scope: MetaBrandScope) {
   if (scope.brandIds !== null) {
@@ -81,6 +75,7 @@ async function loadMetaAdWorklist(input: MetaWorklistInput) {
   const accounts = scopeMetaAccounts(inventory.accounts, scopeAccess);
   const mappings = scopeMetaAccounts(inventory.mappings, scopeAccess);
   const taxonomy = { ...inventory.taxonomy, brands: scopeMetaBrands(inventory.taxonomy.brands, scopeAccess),
+    intentions: (inventory.taxonomy.intentions || []).filter(c => scopeAccess.brandIds === null || scopeAccess.brandIds.includes(c.brand_id)),
     catalog: inventory.taxonomy.catalog.filter(c => scopeAccess.brandIds === null || scopeAccess.brandIds.includes(c.brand_id)) };
   // Global vocabulary timestamps/counts must not reveal another brand's ads.
   const visibleUnits = scopeAccess.brandIds === null ? (units.data || []) as MappingUnit[] : [];
@@ -90,38 +85,40 @@ async function loadMetaAdWorklist(input: MetaWorklistInput) {
   // view again used to resolve taxonomy and paginate the inventory twice.
   const dimensions: AdDimensions[] = mappings.map(m => ({ account_id: m.account_id, ad_id: m.ad_id, brand_id: m.brand_id, cep_keys: m.cep_keys,
     cep_key: m.cep_keys?.[0] || null, intention_key: m.intention_key || null, campaign_id: m.campaign_id || null, campaign_name: m.campaign_name || null, campaign_objective: m.campaign_objective || null }));
-  const list = buildWorklist({ mappings, activity: scopeMetaAccounts(activity.rows, scopeAccess), verified: scopeMetaAccounts(inventory.verified, scopeAccess), destinations: scopeMetaAccounts(inventory.destinations, scopeAccess), catalog: taxonomy.catalog, accounts, units: visibleUnits,
+  const list = buildWorklist({ mappings, activity: scopeMetaAccounts(activity.rows, scopeAccess), verified: scopeMetaAccounts(inventory.verified, scopeAccess), destinations: scopeMetaAccounts(inventory.destinations, scopeAccess), catalog: taxonomy.catalog, intentions: taxonomy.intentions, accounts, units: visibleUnits,
     includeInactive: !activity.ready || !!input.includeInactive, issue, search: input.search?.slice(0, 200), accountId: input.accountId || null, channel, filters, page: input.page, pageSize: 50 });
   const scope = new Set(input.accountId ? [input.accountId] : ids);
   const delivered = new Set(activity.rows.filter(a => a.impressions > 0).map(a => `${a.account_id}:${a.ad_id}`));
   const candidates = new Set(mappings.filter(m => scope.has(m.account_id) && (!channel || m.ad_channel === channel) && (input.includeInactive || delivered.has(`${m.account_id}:${m.ad_id}`))).map(m => `${m.account_id}:${m.ad_id}`));
-  return { ready: true as const, workspaceId, reportVersion, ...list, catalog: taxonomy.catalog, brands: taxonomy.brands, range, activityReady: activity.ready, issue, channel, filters,
-    dimensionsReady: mappings.every(m => 'campaign_id' in m), dimensionOptions: dimensionOptions(dimensions.filter(m => scope.has(m.account_id)), dimensions.filter(m => candidates.has(`${m.account_id}:${m.ad_id}`)), filters, taxonomy.catalog.filter(c => accounts.some(a => scope.has(a.account_id) && a.default_brand_id === c.brand_id))),
+  return { ready: true as const, workspaceId, reportVersion, ...list, catalog: taxonomy.catalog, intentions: taxonomy.intentions, brands: taxonomy.brands, range, activityReady: activity.ready, issue, channel, filters,
+    dimensionsReady: mappings.every(m => 'campaign_id' in m), dimensionOptions: dimensionOptions(dimensions.filter(m => scope.has(m.account_id)), dimensions.filter(m => candidates.has(`${m.account_id}:${m.ad_id}`)), filters, taxonomy.catalog.filter(c => accounts.some(a => scope.has(a.account_id) && a.default_brand_id === c.brand_id)), taxonomy.intentions.filter(c => accounts.some(a => scope.has(a.account_id) && a.default_brand_id === c.brand_id))),
     newUnits: visibleUnits, accounts, ...status, totalAds: mappings.length };
 }
 export async function queueMetaAdMappingSync() {
-  const { workspaceId, profile } = await access(true);
+  const { workspaceId, profile } = await manageAccess();
   const accounts = await createServiceSupabase().from('meta_ad_accounts').select('account_id').eq('workspace_id', workspaceId).eq('is_active', true);
   if (accounts.error) throw new Error(accounts.error.message);
   if (!accounts.data?.length) throw new Error('Belum ada akun Meta aktif.');
   return { jobs: await enqueueMetaAdMapping(workspaceId, accounts.data.map(a => a.account_id), profile.id) };
 }
 export async function confirmMetaAdMappingUnit(input: { dimension: string; key: string }) {
-  const { workspaceId, profile } = await access(true);
+  const { workspaceId, profile, brandIds } = await access(true);
+  if (brandIds !== null) throw new Error('Istilah bersama hanya dapat dikelola untuk seluruh workspace.');
   const result = await createServiceSupabase().from('meta_ad_mapping_units').update({ review_status: 'confirmed', reviewed_by: profile.id, reviewed_at: new Date().toISOString() })
     .eq('workspace_id', workspaceId).eq('dimension', input.dimension).eq('unit_key', input.key).select('unit_key').maybeSingle();
   if (result.error || !result.data) throw new Error('Unit pemetaan tidak ditemukan.');
 }
 type OverridePatch = { ceps?: string[] | null; cep?: string; intention?: string | null };
-async function overrideScope(workspaceId: string) {
+async function overrideScope(workspaceId: string, access: MetaBrandScope) {
   const [taxonomy, accounts] = await Promise.all([loadTaxonomy(workspaceId, false), createServiceSupabase().from('meta_ad_accounts').select('account_id,default_brand_id').eq('workspace_id', workspaceId).eq('is_active', true)]);
-  if (accounts.error) throw new Error('Akun belum berhasil dimuat.');return { taxonomy, accounts: accounts.data || [] };
+  if (accounts.error) throw new Error('Akun belum berhasil dimuat.');return { taxonomy, accounts: scopeMetaAccounts(accounts.data || [], access) };
 }
-async function writeOverride(workspaceId: string, userId: string, target: { accountId: string; adId: string; revision: number }, patch: OverridePatch, scope: Awaited<ReturnType<typeof overrideScope>>, snapshot?: { overrides: MappingOverrides; revision: number; cep_keys: string[] }) {
+async function writeOverride(workspaceId: string, userId: string, target: { accountId: string; adId: string; revision: number }, patch: OverridePatch, scope: Awaited<ReturnType<typeof overrideScope>>, snapshot?: { overrides: MappingOverrides; revision: number; cep_keys: string[]; intention_key?: string | null }) {
   if (!/^act_\d+$/.test(target.accountId) || !/^\d+$/.test(target.adId) || !Number.isInteger(target.revision)) throw new Error('Identitas ad tidak valid.');
   const svc = createServiceSupabase();
-  const current = snapshot ? { data: snapshot, error: null } : await svc.from('meta_ad_classifications').select('overrides,revision,cep_keys').eq('workspace_id', workspaceId).eq('account_id', target.accountId).eq('ad_id', target.adId).single();
   const account = scope.accounts.find(a => a.account_id === target.accountId);
+  if (!account) throw new Error('Ad tidak tersedia dalam akses brand Anda.');
+  const current = snapshot ? { data: snapshot, error: null } : await svc.from('meta_ad_classifications').select('overrides,revision,cep_keys,intention_key').eq('workspace_id', workspaceId).eq('account_id', target.accountId).eq('ad_id', target.adId).single();
   if (current.error || !current.data || !account || current.data.revision !== target.revision) throw new Error('Ad berubah atau tidak tersedia. Muat ulang.');
   const overrides: MappingOverrides = { ...(current.data.overrides || {}) };
   if (patch.ceps !== undefined || patch.cep !== undefined) {
@@ -129,23 +126,23 @@ async function writeOverride(workspaceId: string, userId: string, target: { acco
     const values = patch.ceps !== undefined ? patch.ceps : patch.cep ? [mappingUnit('cep', patch.cep).key] : null;
     if (values !== null) overrides.ceps = validateCepSelection(values, account.default_brand_id, scope.taxonomy.catalog, current.data.cep_keys);
   }
-  if (patch.intention !== undefined) { delete overrides.intention; if (patch.intention) overrides.intention = validateIntention(patch.intention); }
-  const r = await svc.rpc('set_meta_ad_mapping_overrides', { p_workspace_id: workspaceId, p_account_id: target.accountId, p_ad_id: target.adId, p_overrides: overrides, p_user_id: userId, p_revision: target.revision });
-  if (r.error) throw new Error('Pemetaan belum tersimpan. Pilih kategori resmi dan muat ulang jika ad berubah.');
+  if (patch.intention !== undefined) { delete overrides.intention; if (patch.intention) overrides.intention = validateIntention(patch.intention, account.default_brand_id, scope.taxonomy.intentions, current.data.intention_key ?? current.data.overrides?.intention); }
+  await mutateMeta({ workspaceId, profile: { id: userId } }, 'mapping', { accountId: target.accountId, adId: target.adId, overrides, revision: target.revision });
 }
 export async function saveMetaAdMappingOverrides(input: { accountId: string; adId: string; revision: number } & OverridePatch) {
-  try { const { workspaceId, profile } = await access(true);await writeOverride(workspaceId, profile.id, input, input, await overrideScope(workspaceId));return { saved: true as const }; }
+  try { const ctx = await access(true);await writeOverride(ctx.workspaceId, ctx.profile.id, input, input, await overrideScope(ctx.workspaceId, ctx));return { saved: true as const }; }
   catch (error) { console.error('[meta-ad-mapping] Save failed', error);return { error: 'Pemetaan belum tersimpan. Periksa pilihan kategori dan muat ulang jika data atau izin berubah.' }; }
 }
 export async function saveMetaAdMappingOverridesBulk(input: { ads: { accountId: string; adId: string }[] } & OverridePatch) {
-  const { workspaceId, profile } = await access(true);
+  const ctx = await access(true); const { workspaceId, profile } = ctx;
   if (!Array.isArray(input.ads) || !input.ads.length || input.ads.length > 300) throw new Error('Pilih 1 sampai 300 ad.');
   if (input.ceps === undefined && input.cep === undefined && input.intention === undefined) throw new Error('Pilih dimensi yang diubah.');
-  const scope = await overrideScope(workspaceId);
+  const scope = await overrideScope(workspaceId, ctx);
+  if (input.ads.some(a => !scope.accounts.some(account => account.account_id === a.accountId))) throw new Error('Pilihan memuat iklan di luar akses brand Anda.');
   const failed: { adId: string; error: string }[] = [];let saved = 0;
   for (const target of input.ads) {
     try {
-      const current = await createServiceSupabase().from('meta_ad_classifications').select('overrides,revision,cep_keys').eq('workspace_id', workspaceId).eq('account_id', target.accountId).eq('ad_id', target.adId).single();
+      const current = await createServiceSupabase().from('meta_ad_classifications').select('overrides,revision,cep_keys,intention_key').eq('workspace_id', workspaceId).eq('account_id', target.accountId).eq('ad_id', target.adId).single();
       if (current.error) throw new Error('Ad tidak ditemukan.');
       await writeOverride(workspaceId, profile.id, { ...target, revision: current.data.revision }, input, scope, current.data);saved++;
     } catch (error) { failed.push({ adId: target.adId, error: error instanceof Error ? error.message : 'Gagal menyimpan.' }); }
@@ -154,7 +151,8 @@ export async function saveMetaAdMappingOverridesBulk(input: { ads: { accountId: 
 }
 /** Maps every ad that still relies on a new bracket term to a chosen key, then marks the term reviewed. */
 export async function applyMetaAdMappingUnit(input: { dimension: string; unitKey: string; targetKey: string }) {
-  const { workspaceId } = await access(true);
+  const { workspaceId, brandIds } = await access(true);
+  if (brandIds !== null) throw new Error('Gunakan aturan pemetaan khusus brand.');
   if (input.dimension !== 'cep' && input.dimension !== 'intention') throw new Error('Dimensi tidak valid.');
   if (typeof input.unitKey !== 'string' || !input.unitKey || typeof input.targetKey !== 'string' || !input.targetKey.trim()) throw new Error('Istilah atau tujuan pemetaan kosong.');
   const dimension = input.dimension;

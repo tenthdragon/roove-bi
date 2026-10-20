@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:advertiser": "node --import tsx --test tests/advertiser-access.test.ts tests/advertiser-brand-access.test.ts",
+    "test:advertiser": "node --import tsx --test tests/advertiser-access.test.ts tests/advertiser-brand-access.test.ts tests/meta-brand-edit.test.ts",
     "test:advertiser-db": "node tests/advertiser-role-database.mjs",
     "test:advertiser-brand-report-db": "node tests/advertiser-brand-report-database.mjs",
     "test:access-requests-db": "node tests/workspace-access-requests-database.mjs",
@@ -50,7 +50,8 @@
     "db:local:migration": "node scripts/local-supabase.mjs migration",
     "test:local-supabase": "node --test tests/local-supabase.test.mjs",
     "test:meta-taxonomy-db": "node tests/meta-ad-taxonomy-database.mjs",
-    "test:meta-columns-db": "node tests/meta-column-preferences-database.mjs"
+    "test:meta-columns-db": "node tests/meta-column-preferences-database.mjs",
+    "test:meta-brand-edit-db": "node tests/meta-brand-edit-database.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",

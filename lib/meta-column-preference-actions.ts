@@ -42,10 +42,11 @@ async function templateAccess(input: Viewer & { funnelId: string }) {
   const ctx = await viewerAccess(input);
   uuid(input.funnelId);
   const svc = createServiceSupabase();
-  const template = await svc.from('meta_ad_funnels').select('config').eq('id', input.funnelId)
+  const template = await svc.from('meta_ad_funnels').select('config,brand_id').eq('id', input.funnelId)
     .eq('workspace_id', ctx.workspaceId).eq('archived', false).maybeSingle();
   if (template.error) throw new Error('Template gagal diperiksa. Silakan coba lagi.');
   if (!template.data) throw new Error('Template tidak tersedia. Muat ulang halaman.');
+  if (template.data.brand_id != null && ctx.brandIds !== null && !ctx.brandIds.includes(template.data.brand_id)) throw new Error('Template tidak tersedia dalam akses Anda.');
   const config = validateFunnel(template.data.config);
   if (config.group_by !== 'landing_page' || ctx.accountIds !== null && (!ctx.accountIds.length
     || config.account_ids.length > 0 && !config.account_ids.some(id => ctx.accountIds!.includes(id)))) {

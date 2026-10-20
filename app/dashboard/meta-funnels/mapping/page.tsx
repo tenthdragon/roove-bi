@@ -10,6 +10,6 @@ export default function MetaAdMappingPage() {
   const { activeWorkspace } = useWorkspace();
   const { can, role } = usePermissions();
   return <div className={styles.page}>
-    <Suspense fallback={null}><MetaAdMappings key={activeWorkspace.id} workspaceId={activeWorkspace.id} canManage={role !== 'advertiser' && can('admin:meta')} /></Suspense>
+    <Suspense fallback={null}><MetaAdMappings key={activeWorkspace.id} workspaceId={activeWorkspace.id} canManage={can('meta:mapping')} canSync={role !== 'advertiser' && can('admin:meta')} /></Suspense>
   </div>;
 }

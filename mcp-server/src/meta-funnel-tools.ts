@@ -30,7 +30,7 @@ function checked<T>(result: { data: T; error: { message: string } | null }): T {
 const content = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] });
 export async function funnelContext(db: SupabaseClient, workspaceId: string) {
   const [funnels, accounts, brands, revision] = await Promise.all([
-    db.from('meta_ad_funnels').select('id,config,version,updated_at').eq('workspace_id', workspaceId).eq('archived', false).order('created_at'),
+    db.from('meta_ad_funnels').select('id,brand_id,config,version,updated_at').eq('workspace_id', workspaceId).eq('archived', false).order('created_at'),
     db.from('meta_ad_accounts').select('account_id,account_name,default_brand_id').eq('workspace_id', workspaceId).eq('is_active', true).order('account_name'),
     db.from('brands').select('id,name').eq('workspace_id', workspaceId).order('name'),
     db.from('meta_ad_report_versions').select('revision,updated_at').eq('workspace_id', workspaceId).maybeSingle(),
@@ -49,7 +49,13 @@ export async function readFunnelReport(db: SupabaseClient, workspaceId: string, 
     return brand === input.brand_id;
   })) throw new Error('Brand not available on active Meta accounts in this workspace.');
   // Match dashboard defaults and use its reporting RPC for all aggregation.
-  const config = selected?.config || { account_ids: [], name_filter: '', match: 'contains' };
+  const config = { ...(selected?.config || { account_ids: [], name_filter: '', match: 'contains' }) };
+  if (selected?.brand_id != null) {
+    if (input.brand_id && input.brand_id !== String(selected.brand_id)) throw new Error('Funnel belongs to another brand.');
+    input.brand_id = String(selected.brand_id);
+    const ids = ctx.accounts.filter(a => a.default_brand_id === selected.brand_id && (!config.account_ids?.length || config.account_ids.includes(a.account_id))).map(a => a.account_id);
+    config.account_ids = ids.length ? ids : ['__no_authorized_meta_account__'];
+  }
   const filters = { ...input.filters };
   const aliases: Record<string, Record<string, string>> = { cep: { kulit: 'skin', sendi: 'joint', tulang: 'bone', rambut: 'hair', kuku: 'nail' }, intention: { discovery: 'disc', consideration: 'cons', conversion: 'conv' } };
   for (const key of ['cep', 'intention'] as const) {

@@ -129,7 +129,7 @@ test('overview RPC and pending cache keys include exact authorized brands, inclu
   const api = module('meta-ad-report-data', {
     'next/cache': { unstable_cache: (fn: unknown) => fn },
     './meta-report-requests': { createMetaReportRequests: () => ({ run: async (key: string, fn: () => unknown) => { keys.push(key); return fn(); } }) },
-    './service-supabase': { createServiceSupabase: () => ({ rpc: async (...args: any[]) => { calls.push(args); return { data: {}, error: null }; } }) },
+    './service-supabase': { createServiceSupabase: () => ({ ...database({ meta_ad_intention_catalog: [] }), rpc: async (...args: any[]) => { calls.push(args); return { data: {}, error: null }; } }) },
   });
   try {
     for (const ids of [null, [1], [2], []]) await api.getCachedMetaBrandOverviewReport('w', '1', '2026-01-01', '2026-01-02', {}, ids);
