@@ -24,8 +24,11 @@ modules (`marketing` and `meta-funnels`) must remain enabled for Meta Ads.
 
 - **Ringkasan brand** (`/dashboard/meta-funnels`): one row per brand with
   spend split by world (Website = Non-CPAS ads, CPAS = Shopee ads), the shared
-  ad-response CTR, the Website CPP/CPL, the CPAS CPP/ROAS, a health dot and the
-  top automatic highlights. Sync status and the manual **Sync** button live here.
+  ad-response CTR, the Website CPP/CPIC, the CPAS CPP/ROAS, a health dot and the
+  top automatic highlights. Website CPIC is total Non-CPAS spend divided by
+  total initiate checkout, including destinations without a template. It uses
+  the selected date range and filters, with a comparison to the previous period;
+  zero checkouts display “—”. Sync status and the manual **Sync** button live here.
 - **Detail brand** (`/dashboard/meta-funnels/brand/<brandId>?world=website|cpas`):
   a Website / CPAS segmented control, ranked **Sorotan** (highlights), the
   shared **Respon iklan** layer (CPM, CTR outbound, hook rate, LPV ratio or

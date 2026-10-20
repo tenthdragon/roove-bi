@@ -186,7 +186,7 @@ export default function MetaBrandOverviewPage() {
           <table className={styles.brandTable}>
             <thead><tr>
               <th scope="col">Brand</th><th scope="col" className={styles.num}>Spend</th><th scope="col" className={styles.num} title="Lapisan bersama: respon terhadap iklan">CTR outbound</th>
-              <th scope="col" className={`${styles.num} ${styles.worldCol}`}>Website · CPP</th><th scope="col" className={styles.num}>Website · CPL</th>
+              <th scope="col" className={`${styles.num} ${styles.worldCol}`}>Website · CPP</th><th scope="col" className={styles.num} title="Cost per initiate checkout = spend Website ÷ initiate checkout">Website · CPIC</th>
               <th scope="col" className={`${styles.num} ${styles.worldCol}`}>CPAS · CPP</th><th scope="col" className={styles.num}>CPAS · ROAS</th>
               <th scope="col" className={styles.worldCol}>Sorotan</th>
             </tr></thead>
@@ -197,7 +197,7 @@ export default function MetaBrandOverviewPage() {
               <td className={styles.num}><strong>{formatCompactMoney(b.spend.total, b.currency)}</strong><small>Web {formatCompactMoney(b.spend.website, b.currency)} · CPAS {formatCompactMoney(b.spend.cpas, b.currency)}</small></td>
               <td className={styles.num}><strong>{formatMetric(b.ctr.current, 'percent', b.currency)}</strong><small><Delta value={b.ctr.change} /></small></td>
               <td className={`${styles.num} ${styles.worldCol}`}>{b.website.cpp ? <><strong>{formatMetric(b.website.cpp.current, 'money', b.currency)}</strong><small><Delta value={b.website.cpp.change} direction="lower" /></small></> : <><span className={styles.neutral}>—</span><small>tidak ada template Transaksi</small></>}</td>
-              <td className={styles.num}>{b.website.cpl ? <><strong>{formatMetric(b.website.cpl.current, 'money', b.currency)}</strong><small><Delta value={b.website.cpl.change} direction="lower" />{b.website.cplLabel !== 'CPL' ? ` · ${b.website.cplLabel}` : ''}</small></> : <><span className={styles.neutral}>—</span><small>tidak ada template Lead</small></>}</td>
+              <td className={styles.num}>{b.website.cpic.current !== null ? <><strong>{formatMetric(b.website.cpic.current, 'money', b.currency)}</strong><small><Delta value={b.website.cpic.change} direction="lower" /></small></> : <><span className={styles.neutral}>—</span><small>{b.reportingError ? 'data belum dapat dibandingkan' : 'belum ada initiate checkout'}</small></>}</td>
               <td className={`${styles.num} ${styles.worldCol}`}>{b.cpas ? <><strong>{formatMetric(b.cpas.cpp.current, 'money', b.currency)}</strong><small><Delta value={b.cpas.cpp.change} direction="lower" /></small></> : <><span className={styles.neutral}>—</span><small>tidak beriklan CPAS</small></>}</td>
               <td className={styles.num}>{b.cpas ? <><strong>{formatMetric(b.cpas.roas.current, 'multiple', b.currency)}</strong><small><Delta value={b.cpas.roas.change} /></small></> : <span className={styles.neutral}>—</span>}</td>
               <td className={styles.worldCol} style={{ minWidth: 300 }}>{b.highlights.length ? b.highlights.map((h, i) => <div key={i} className={styles.highlightInline}><b className={severityClass[h.severity]}>{h.title}</b> · {WORLD_LABELS[h.world]} · {h.text}</div>)
