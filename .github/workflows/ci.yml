@@ -55,8 +55,9 @@ jobs:
       - name: Start disposable access request database
         run: |
           docker run -d --name roove-access-requests-test -e POSTGRES_USER=supabase_admin -e POSTGRES_DB=postgres -e POSTGRES_HOST_AUTH_METHOD=trust postgres:17
+          # The init server accepts Unix sockets before restarting; TCP is ready only on the final server.
           for attempt in $(seq 1 30); do
-            if docker exec roove-access-requests-test pg_isready -U supabase_admin -d postgres; then exit 0; fi
+            if docker exec roove-access-requests-test pg_isready -h 127.0.0.1 -U supabase_admin -d postgres; then exit 0; fi
             sleep 1
           done
           exit 1
