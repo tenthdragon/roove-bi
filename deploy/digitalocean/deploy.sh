@@ -4,6 +4,9 @@ set -Eeuo pipefail
 [ "$(id -u)" -eq 0 ] || { echo 'Run as root'; exit 1; }
 commit=${1:?Pass the release commit SHA}
 [[ "$commit" =~ ^[0-9a-f]{7,40}$ ]] || { echo 'Invalid commit'; exit 1; }
+# Serialize the entire build/cutover/rollback with cache maintenance.
+exec 9>/run/lock/roove-bi-release-maintenance.lock
+flock --exclusive 9
 base=/var/www/releases/roove-bi
 old=$(readlink -f "$base/current")
 release="$base/${commit:0:8}-$(date +%Y%m%d-%H%M%S)"

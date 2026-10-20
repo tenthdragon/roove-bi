@@ -24,6 +24,9 @@ jobs:
       - name: Install app dependencies
         run: npm ci
 
+      - name: Check production cache cleanup safety
+        run: python3 -m unittest discover -s tests -p 'test_build_cache_cleanup.py' -v
+
       - name: Check isolated local development helpers
         run: npm run test:local-supabase
 

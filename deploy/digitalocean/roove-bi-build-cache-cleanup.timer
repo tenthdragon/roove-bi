@@ -1,0 +1,12 @@
+[Unit]
+Description=Check stale Roove BI build caches hourly
+
+[Timer]
+OnCalendar=*-*-* *:15:00 Asia/Jakarta
+RandomizedDelaySec=5min
+AccuracySec=1min
+Persistent=true
+Unit=roove-bi-build-cache-cleanup.service
+
+[Install]
+WantedBy=timers.target
