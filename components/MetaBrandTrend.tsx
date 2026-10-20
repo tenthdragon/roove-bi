@@ -11,7 +11,7 @@ export default function MetaBrandTrend({ points, metric, currency, complete }: {
     <ResponsiveContainer width="100%" height={240}>
       <LineChart data={points}><CartesianGrid stroke="var(--border)" strokeDasharray="3 3" /><XAxis dataKey="date" tick={{ fill: 'var(--dim)', fontSize: 11 }} />
         <YAxis tick={{ fill: 'var(--dim)', fontSize: 11 }} tickFormatter={(v: number) => metric.format === 'percent' ? `${(v * 100).toFixed(1)}%` : formatCompactMoney(v, currency).replace('Rp ', '')} width={70} />
-        <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }} formatter={(value: number) => [formatMetric(value, metric.format, currency), metric.label]} />
+        <Tooltip contentStyle={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--text)' }} formatter={(value: number) => [formatMetric(value, metric, currency), metric.label]} />
         <Line type="monotone" dataKey="value" stroke="var(--accent)" strokeWidth={2} dot={false} connectNulls={false} />
       </LineChart>
     </ResponsiveContainer>

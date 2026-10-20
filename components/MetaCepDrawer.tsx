@@ -53,8 +53,8 @@ export default function MetaCepDrawer({ cep, label, world, input, metrics, resul
   const Row = ({ name, sub, current, previous, funnel }: { name: string; sub: string; current: Totals; previous: Totals; funnel?: boolean }) => {
     const a = metricValue(current, resultMetric), b = metricValue(previous, resultMetric), d = relativeChange(a, b);
     return <div className={styles.adRow}><div><b title={name}>{name}</b><small>{sub} · {formatCompactMoney(current.spend, currency)}</small>
-      {funnel && <small>{progress.map(m => `${m.label} ${formatMetric(metricValue(current, m), m.format, currency)}`).join(' · ')}</small>}</div>
-      <div className={styles.adResult}>{resultMetric.label} {formatMetric(a, resultMetric.format, currency)}<br /><small className={d === null ? styles.neutral : (resultMetric.direction === 'higher' ? d >= 0 : d <= 0) ? styles.good : styles.bad}>{formatChange(d)}</small></div></div>;
+      {funnel && <small>{progress.map(m => `${m.label} ${formatMetric(metricValue(current, m), m, currency)}`).join(' · ')}</small>}</div>
+      <div className={styles.adResult}>{resultMetric.label} {formatMetric(a, resultMetric, currency)}<br /><small className={d === null ? styles.neutral : (resultMetric.direction === 'higher' ? d >= 0 : d <= 0) ? styles.good : styles.bad}>{formatChange(d)}</small></div></div>;
   };
   return <>
     <div className={styles.drawerBackdrop} onClick={onClose} aria-hidden="true" />
@@ -66,7 +66,7 @@ export default function MetaCepDrawer({ cep, label, world, input, metrics, resul
       {error && <p role="alert" className={styles.error}>{error}</p>}
       <div className={styles.miniGrid}>
         <div className={styles.mini}><span className={styles.muted}>Spend</span><strong>{detail ? formatCompactMoney(detail.summary.spend, currency) : '—'}</strong></div>
-        <div className={styles.mini}><span className={styles.muted}>{resultMetric.label}</span><strong className={good === null ? '' : good ? styles.good : styles.bad}>{formatMetric(now, resultMetric.format, currency)}</strong></div>
+        <div className={styles.mini}><span className={styles.muted}>{resultMetric.label}</span><strong className={good === null ? '' : good ? styles.good : styles.bad}>{formatMetric(now, resultMetric, currency)}</strong></div>
         <div className={styles.mini}><span className={styles.muted}>vs periode lalu</span><strong className={good === null ? '' : good ? styles.good : styles.bad}>{formatChange(change)}</strong></div>
       </div>
       <div>

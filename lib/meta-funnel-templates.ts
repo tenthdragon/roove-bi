@@ -165,7 +165,7 @@ export function responseMetrics(world: 'website' | 'cpas'): FunnelMetric[] {
     { id: 'outbound_ctr', label: 'CTR outbound', numerator: 'outbound_clicks', denominator: 'impressions', format: 'percent', direction: 'higher', monitor: true, min_denominator: 1000 },
     { id: 'hook_rate', label: 'Hook rate', numerator: 'video_3s', denominator: 'impressions', format: 'percent', direction: 'higher', monitor: true, min_denominator: 1000 },
     world === 'website'
-      ? { id: 'lpv_rate', label: 'LPV ratio', numerator: 'lpv', denominator: 'outbound_clicks', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 }
+      ? { id: 'roas', label: 'ROAS', numerator: 'purchase_value', denominator: 'spend', format: 'multiple', direction: 'higher', monitor: true, min_denominator: 1 }
       : { id: 'purchase_per_click', label: 'Purchase per klik', numerator: 'purchases', denominator: 'outbound_clicks', format: 'percent', direction: 'higher', monitor: true, min_denominator: 30 },
   ];
 }

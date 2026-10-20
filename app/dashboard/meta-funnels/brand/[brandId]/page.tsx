@@ -210,7 +210,7 @@ export default function MetaBrandDetailPage() {
           <div className={styles.sectionTitle}><h2>Respon iklan</h2><span>Lapisan bersama · dinilai sama di Website dan CPAS · sparkline mingguan 90 hari</span></div>
           <div className={styles.responseGrid}>{data.responseMetrics.map(m => { const c = data.response.find(r => r.id === m.id)!; return <div key={m.id} className={styles.kpi}>
             <span className={styles.muted} style={{ display: 'flex', justifyContent: 'space-between' }}><span>{m.label}</span><Delta value={c.change} direction={m.direction} /></span>
-            <span className={styles.kpiValue}>{formatMetric(c.current, m.format, currency)}</span>
+            <span className={styles.kpiValue}>{formatMetric(c.current, m, currency)}</span>
             <MetaSparkline values={series(m)} />
             <span className={styles.muted}>{m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}${m.multiplier ? ` × ${m.multiplier}` : ''}` : MEASURES[m.numerator]}</span>
           </div>; })}</div>
@@ -227,17 +227,17 @@ export default function MetaBrandDetailPage() {
           {view === 'destinations' && data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <div key={section.key} className={styles.sectionCard}>
             <div className={styles.sectionHead}>
               <div><span className={`${styles.templateTag} ${world === 'cpas' ? styles.templateTagCpas : ''}`}>{world === 'cpas' ? 'CPAS' : 'TEMPLATE'}</span><strong>{section.name}</strong><span>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')} · {section.groups.length} {world === 'website' ? 'tujuan' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span></div>
-              <span>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric.format, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
+              <span>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
             </div>
             {!section.groups.length ? <p className={styles.muted} style={{ padding: '12px 16px' }}>Belum ada ad {WORLD_LABELS[world]} pada periode dan filter ini.</p> : <div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}>
               <table className={styles.resultTable}>
                 <thead><tr><th scope="col">{world === 'website' ? 'Tujuan' : 'Ad'}</th>{section.config.metrics.map(m => <th key={m.id} scope="col" title={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}` : MEASURES[m.numerator]}>{m.label}</th>)}<th scope="col">Funnel</th></tr></thead>
                 <tbody>{section.groups.map(g => <tr key={g.key}>
                   <td><button type="button" className={styles.nameButton} onClick={() => setDrawer({ group: g, section })}>{g.name}</button><small>{g.ad_ids.length} ad · {g.accounts.join(', ')}</small></td>
-                  {section.config.metrics.map(m => { const c = g.metrics.find(v => v.id === m.id)!; const main = section.mainMetric?.id === m.id; return <td key={m.id}><span style={main ? { fontWeight: 650 } : undefined}>{formatMetric(c.current, m.format, currency)}</span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}
+                  {section.config.metrics.map(m => { const c = g.metrics.find(v => v.id === m.id)!; const main = section.mainMetric?.id === m.id; return <td key={m.id}><span style={main ? { fontWeight: 650 } : undefined}>{formatMetric(c.current, m, currency)}</span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}
                   <td><StageChips group={g} stages={section.config.stages} currency={currency} /></td>
                 </tr>)}</tbody>
-                <tfoot><tr><th scope="row">Total {section.name}</th>{section.config.metrics.map(m => { const c = section.metrics.find(v => v.id === m.id)!; return <td key={m.id}>{formatMetric(c.current, m.format, currency)}<small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}<td /></tr></tfoot>
+                <tfoot><tr><th scope="row">Total {section.name}</th>{section.config.metrics.map(m => { const c = section.metrics.find(v => v.id === m.id)!; return <td key={m.id}>{formatMetric(c.current, m, currency)}<small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}<td /></tr></tfoot>
               </table>
             </div>}
           </div>)}

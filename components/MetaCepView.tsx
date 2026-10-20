@@ -57,8 +57,8 @@ export default function MetaCepView({ view, currency, onOpenCep }: { view: CepVi
               const value = metricValue(cell.current, response), cost = metricValue(cell.current, result);
               const heat = row.unknown ? null : cepHeat(value, columnMedian(response, col.intention), response.direction);
               return <td key={col.intention}><div className={styles.cepCell} style={heatStyle(heat)}>
-                <strong>{formatMetric(value, response.format, currency)}</strong>
-                <small>{result.label} {formatMetric(cost, result.format, currency)}</small>
+                <strong>{formatMetric(value, response, currency)}</strong>
+                <small>{result.label} {formatMetric(cost, result, currency)}</small>
                 <small>{formatCompactMoney(cell.current.spend, currency)} · {cell.ads} ad</small>
               </div></td>;
             })}
@@ -68,7 +68,7 @@ export default function MetaCepView({ view, currency, onOpenCep }: { view: CepVi
     </div>
     <div className={styles.sectionCard}>
       <div className={styles.sectionHead}><div><span className={styles.templateTag}>PER CEP</span><strong>Respon iklan per CEP, dengan {result.label} sebagai ujungnya</strong><span>Rasio progres funnel ada di tampilan Tujuan · diurutkan menurut spend</span></div>
-        <span>Median CEP · {view.resultMetric.label} {formatMetric(view.medians[view.resultMetric.id] ?? null, view.resultMetric.format, currency)}</span></div>
+        <span>Median CEP · {view.resultMetric.label} {formatMetric(view.medians[view.resultMetric.id] ?? null, view.resultMetric, currency)}</span></div>
       <div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}>
         <table className={styles.cepTable}>
           <thead><tr><th scope="col">CEP</th><th scope="col">Spend</th>{view.metrics.map(m => <th key={m.id} scope="col" title={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}` : MEASURES[m.numerator]}>{m.label}</th>)}<th scope="col">Hasil</th></tr></thead>
@@ -78,7 +78,7 @@ export default function MetaCepView({ view, currency, onOpenCep }: { view: CepVi
               {row.unknown && <small><Link href="/dashboard/meta-funnels/mapping">Lengkapi tag CEP di Pemetaan Ads</Link></small>}</td>
             <td><strong>{formatCompactMoney(row.current.spend, currency)}</strong><small>{Math.round(row.spendShare * 100)}% · <Delta value={relativeChange(row.current.spend, row.previous.spend)} direction="higher" /></small></td>
             {view.metrics.map(m => { const now = metricValue(row.current, m), before = metricValue(row.previous, m); const heat = row.unknown ? null : cepHeat(now, view.medians[m.id], m.direction);
-              return <td key={m.id}><div className={styles.cepCell} style={heatStyle(heat)}><strong>{formatMetric(now, m.format, currency)}</strong><small><Delta value={relativeChange(now, before)} direction={m.direction} /></small></div></td>; })}
+              return <td key={m.id}><div className={styles.cepCell} style={heatStyle(heat)}><strong>{formatMetric(now, m, currency)}</strong><small><Delta value={relativeChange(now, before)} direction={m.direction} /></small></div></td>; })}
             <td><strong>{formatCount(row.current[view.resultMetric.denominator!] ?? 0)}</strong><small>{MEASURES[view.resultMetric.denominator!]}</small></td>
           </tr>)}</tbody>
         </table>
