@@ -79,3 +79,55 @@ test('sort stays attached to metric after column reorder, resets when hidden, an
   assert.equal(root.root.findByProps({ 'aria-sort': 'descending' }).findByType('button').children[0], 'Funnel');
   await act(async () => root.unmount());
 });
+
+test('saved sort restores after async loading and reopening, including Funnel stage and direction', async () => {
+  let root: any;
+  const render = (ready: boolean, sort: import('../lib/meta-table-sorting').MetaTableSort | null) => <Results
+    section={section} world="website" currency="IDR" preferencesReady={ready} savedSort={sort}
+    onSaveSort={async () => {}} onOpenGroup={() => {}} />;
+  await act(async () => { root = create(render(false, null)); });
+  assert.equal(root.root.findByType('thead').findAllByType('button').every((b: any) => b.props.disabled), true);
+  const saved = { key: 'metric:roas', direction: 'ascending' } as const;
+  await act(async () => root.update(render(true, saved)));
+  assert.equal(root.root.findByType('tbody').findAllByType('button')[0].children[0], 'Zero');
+  await act(async () => root.unmount());
+  await act(async () => { root = create(render(true, saved)); });
+  assert.equal(root.root.findByProps({ 'aria-sort': 'ascending' }).findByType('button').children[0], 'ROAS');
+  await act(async () => root.update(render(true, { key: 'funnel', stage: 'purchases', direction: 'descending' })));
+  assert.equal(root.root.findByType('select').props.value, 'purchases');
+  assert.equal(root.root.findByType('tbody').findAllByType('button')[0].children[0], 'Ad 2');
+  await act(async () => root.update(render(true, { key: 'name', direction: 'descending' })));
+  assert.equal(root.root.findByType('tbody').findAllByType('button')[0].children[0], 'Zero');
+  await act(async () => root.unmount());
+});
+
+test('sort saves are guarded while pending; failed save keeps previous order and can be retried/reset', async () => {
+  let root: any, release: () => void = () => {}, calls = 0, fail = true;
+  let saved: import('../lib/meta-table-sorting').MetaTableSort | null = { key: 'name', direction: 'ascending' };
+  const render = () => <Results section={section} world="website" currency="IDR" preferencesReady savedSort={saved}
+    onSave={async () => {}} onSaveSort={async next => {
+      calls++; await new Promise<void>(resolve => { release = resolve; });
+      if (fail) throw new Error('Penyimpanan gagal. Coba lagi.');
+      saved = next; root.update(render());
+    }} onOpenGroup={() => {}} />;
+  await act(async () => { root = create(render()); });
+  const header = () => root.root.findByType('thead').findAllByType('button')[1];
+  const click = header().props.onClick;
+  await act(async () => { click(); click(); });
+  assert.equal(calls, 1, 'same-tick double clicks cannot race saves');
+  assert.equal(header().props.disabled, true);
+  assert.equal(root.root.findAllByType('button').find((b: any) => b.children.includes('Atur kolom')).props.disabled, true);
+  await act(async () => release());
+  assert.match(root.root.findByProps({ role: 'alert' }).children.join(''), /gagal/);
+  assert.equal(root.root.findByProps({ 'aria-sort': 'ascending' }).findByType('button').children[0], 'Tujuan');
+  assert.equal(header().props.disabled, false);
+  fail = false;
+  await act(async () => header().props.onClick());
+  await act(async () => release());
+  assert.equal(root.root.findByProps({ 'aria-sort': 'descending' }).findByType('button').children[0], 'ROAS');
+  await act(async () => root.root.findAllByType('button').find((b: any) => b.children.includes('Urutan awal')).props.onClick());
+  await act(async () => release());
+  assert.equal(saved, null);
+  assert.equal(root.root.findByType('tbody').findAllByType('button')[0].children[0], 'Ad 10');
+  await act(async () => root.unmount());
+});

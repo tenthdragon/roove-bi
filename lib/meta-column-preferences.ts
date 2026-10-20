@@ -1,6 +1,8 @@
+import type { MetaTableSort } from './meta-table-sorting';
 import type { FunnelMetric } from './meta-funnel-domain';
 
 export type MetaColumnPreference = { order: string[]; hidden: string[] };
+export type MetaTablePreference = MetaColumnPreference & { sort: MetaTableSort | null };
 export type MetaResultColumn = { key: string; label: string; metric: FunnelMetric | null };
 export const FUNNEL_COLUMN = 'funnel';
 
