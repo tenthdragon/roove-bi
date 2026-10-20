@@ -992,16 +992,16 @@ keyed by authenticated user and template. A template reused across brands shares
 that user's preference; other users keep their own choices. Server actions check
 the session, workspace and template access, including advertiser account scope.
 Direct anon/authenticated table access is revoked; only the server service role
-can read/write rows. Reset deletes only the current user's preference for that
-template. Removed metrics are ignored and newly added metrics appear at the end.
-Deleting a template or user cascades its preferences. If migration 225 is absent,
+can read/write rows. Reset restores only the current user's column defaults for
+that template, preserving its saved row sort. Removed metrics are ignored and newly added metrics appear at the end.
+Deleting a template or user cascades its preferences. If migration 225 or 226 is absent,
 reports retain their default columns and show a settings-unavailable notice.
 Apply this migration deliberately as part of an authorized release, before the
 application deployment; it does not modify report data or template definitions.
 
 Validation: `npm run test:meta-funnels`, `npm run test:meta-columns-db`,
 `npm run typecheck:app`, `npm run lint`, and `npm run build`.
-The database test uses only the fixed local container, installs migration 225
+The database test uses only the fixed local container, installs migrations 225/226
 and fixtures in a rollback-only transaction, and checks per-user/template keys,
 scoped reset, grants/RLS, constraints and cascade deletion. It preserves the
 existing local schema and data. UI tests cover ordering/visibility alignment,
@@ -1017,9 +1017,30 @@ with natural numeric comparison. The composite Funnel column includes a stage
 selector: its first stage sorts by count, later stages by the displayed ratio
 to the preceding stage. This also works in CPAS result tables.
 
-Sorting is local to each displayed table and follows the selected metric when
-columns are moved. Hiding/removing the active column resets sorting; **Urutan
-awal** restores the report's original order. Totals, formulas and drill-down
-contents remain unchanged. Sort state is not part of the saved column preference
-and does not require a database migration. Validation is included in
-`npm run test:meta-funnels`.
+Sorting follows the selected metric when columns are moved. Hiding the active
+column clears its sort; a removed metric/stage is ignored. **Urutan awal** restores
+the report's original order without changing visible columns or their sequence.
+Totals, formulas and drill-down contents remain unchanged.
+
+Migration **226_meta_funnel_sort_preferences.sql** adds a nullable sort to the
+existing private per-user/per-template preferences. It stores the column key,
+direction, and (for Funnel) stage. Returning to the page or signing in again loads
+that preference; brands using the same template share it for that user. CPAS has
+no template ID and keeps local sorting only.
+
+The service-only `save_meta_funnel_table_preference` RPC atomically patches either
+columns or sorting, so independent writes/resets cannot overwrite the other part.
+Empty column order means template defaults. Hiding the active sort column clears
+sorting in the same write; a concurrent sort save cannot select a hidden column.
+Server actions verify the session/workspace/template and validate keys against the
+current template. The RPC is security-invoker and is not executable by browser
+roles. Apply migration 226 before deploying this code; no report data or template
+configuration changes. Existing 225 preferences are preserved with no saved sort.
+An app rollback can leave 226 in place (the older app will not preserve sorting).
+
+Sort controls wait for preferences to load and are disabled during a save. A
+successful save updates the sort and confirms it on screen. A failed save keeps
+the previous order and shows an error; clicking the desired heading retries it.
+Validation includes 272 Meta tests, rollback-only database coverage of both patch
+types and resets, viewer/template isolation, RPC grants, constraints, asynchronous
+restore, reopening, Funnel stage, pending-save guards and failed-save recovery.

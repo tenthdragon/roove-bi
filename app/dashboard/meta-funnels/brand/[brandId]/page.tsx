@@ -20,8 +20,9 @@ import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
 import { formatChange, formatCompactMoney, formatDate, formatMetric } from '@/lib/meta-format';
 import MetaAdsNav from '@/components/MetaAdsNav';
 import MetaTemplateResults from '@/components/MetaTemplateResults';
-import { getMetaColumnPreferences, saveMetaColumnPreference, type MetaColumnPreferences } from '@/lib/meta-column-preference-actions';
-import type { MetaColumnPreference } from '@/lib/meta-column-preferences';
+import { getMetaColumnPreferences, saveMetaColumnPreference, saveMetaTableSort, type MetaColumnPreferences } from '@/lib/meta-column-preference-actions';
+import type { MetaTableSort } from '@/lib/meta-table-sorting';
+import type { MetaColumnPreference, MetaTablePreference } from '@/lib/meta-column-preferences';
 import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
 import MetaSparkline from '@/components/MetaSparkline';
 const MetaGroupDrawer = dynamic(() => import('@/components/MetaGroupDrawer'), { ssr: false });
@@ -54,9 +55,16 @@ export default function MetaBrandDetailPage() {
   const { dateRange } = useDateRange();
   const session = useMetaReportSession();
   const fetchColumnPreferences = useCallback(() => getMetaColumnPreferences({ workspaceId: session.workspaceId, userId: session.userId }), [session.workspaceId, session.userId]);
-  const { data: columnPreferences, setData: setColumnPreferences, error: columnError, load: reloadColumns } = useMetaCachedLoad(session.key, columnPreferencesCache, fetchColumnPreferences);
+  const { data: columnPreferences, setData: setColumnPreferences, error: columnError, loading: columnLoading, load: reloadColumns } = useMetaCachedLoad(session.key, columnPreferencesCache, fetchColumnPreferences);
   async function saveColumns(funnelId: string, preference: MetaColumnPreference | null) {
     const saved = await saveMetaColumnPreference({ workspaceId: session.workspaceId, userId: session.userId, funnelId, preference });
+    updatePreference(funnelId, saved);
+  }
+  async function saveSort(funnelId: string, sort: MetaTableSort | null) {
+    const saved = await saveMetaTableSort({ workspaceId: session.workspaceId, userId: session.userId, funnelId, sort });
+    updatePreference(funnelId, saved);
+  }
+  function updatePreference(funnelId: string, saved: MetaTablePreference | null) {
     setColumnPreferences(current => {
       const preferences = { ...current?.preferences };
       if (saved) preferences[funnelId] = saved; else delete preferences[funnelId];
@@ -232,11 +240,13 @@ export default function MetaBrandDetailPage() {
           {view === 'cep' && <MetaCepView view={data.cep} currency={currency} onOpenCep={setCepDrawer} />}
           {view === 'destinations' && world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
           {view === 'destinations' && world === 'website' && (columnError || columnPreferences?.ready === false) && <div className={styles.info} role="status">
-            {columnError || 'Pengaturan kolom belum tersedia. Tampilan default digunakan.'} <button type="button" className={styles.button} onClick={() => void reloadColumns(true)}>Coba lagi</button>
+            {columnError || 'Pengaturan tabel belum tersedia. Tampilan default digunakan.'} <button type="button" className={styles.button} onClick={() => void reloadColumns(true)}>Coba lagi</button>
           </div>}
           {view === 'destinations' && data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <MetaTemplateResults
             key={JSON.stringify([session.key, section.key])} section={section} world={world} currency={currency}
-            preferencesReady={!!columnPreferences?.ready && !columnError} preference={section.funnelId ? columnPreferences?.preferences[section.funnelId] : null}
+            preferencesReady={!!columnPreferences?.ready && !columnError && !columnLoading} preference={section.funnelId ? columnPreferences?.preferences[section.funnelId] : null}
+            savedSort={section.funnelId ? columnPreferences?.preferences[section.funnelId]?.sort ?? null : null}
+            onSaveSort={section.funnelId ? value => saveSort(section.funnelId!, value) : undefined}
             onSave={section.funnelId ? value => saveColumns(section.funnelId!, value) : undefined}
             onOpenGroup={group => setDrawer({ group, section })} />)}
           {view === 'destinations' && world === 'website' && data.unassigned.length > 0 && <div className={styles.unassigned}>

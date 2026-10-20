@@ -23,22 +23,35 @@ function StageChips({ group, stages, currency }: { group: TemplateGroup; stages:
   })}</div>;
 }
 
-export default function MetaTemplateResults({ section, world, currency, preference, preferencesReady, onSave, onOpenGroup }: {
+export default function MetaTemplateResults({ section, world, currency, preference, preferencesReady, onSave, savedSort, onSaveSort, onOpenGroup }: {
   section: TemplateSection; world: MetaBrandWorld; currency: string; preference?: MetaColumnPreference | null;
   preferencesReady: boolean; onSave?: (value: MetaColumnPreference | null) => Promise<void>;
+  savedSort?: MetaTableSort | null; onSaveSort?: (value: MetaTableSort | null) => Promise<void>;
   onOpenGroup: (group: TemplateGroup) => void;
 }) {
   const [editing, setEditing] = useState(false), [notice, setNotice] = useState('');
-  const [sort, setSort] = useState<MetaTableSort | null>(null);
+  const [localSort, setSort] = useState<MetaTableSort | null>(null);
+  const [savingSort, setSavingSort] = useState(false), [sortError, setSortError] = useState('');
+  const saveLock = useRef(false);
+  const sort = onSaveSort ? savedSort ?? null : localSort;
+  const sortDisabled = editing || savingSort || !!onSaveSort && !preferencesReady;
+  async function changeSort(next: MetaTableSort | null) {
+    if (saveLock.current || sortDisabled) return;
+    if (!onSaveSort) { setSort(next); return; }
+    saveLock.current = true; setSavingSort(true); setSortError(''); setNotice('');
+    try { await onSaveSort(next); setNotice('Pengurutan disimpan.'); }
+    catch (error) { setSortError(error instanceof Error ? error.message : 'Pengurutan gagal disimpan. Silakan coba lagi.'); }
+    finally { saveLock.current = false; setSavingSort(false); }
+  }
   const [funnelStage, setFunnelStage] = useState<Measure | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const columns = metaResultColumns(section.config.metrics), visible = visibleMetaColumns(columns, preference);
   const steps: Measure[] = section.config.stages.filter(s => s !== 'spend');
-  const selectedStage = funnelStage && steps.includes(funnelStage) ? funnelStage : steps[0];
+  const selectedStage = sort?.key === 'funnel' && steps.includes(sort.stage) ? sort.stage : funnelStage && steps.includes(funnelStage) ? funnelStage : steps[0];
   const sortAvailable = !sort || sort.key === 'name' || visible.some(c => c.key === sort.key)
     && (sort.key !== 'funnel' || steps.includes(sort.stage));
   const activeSort = sortAvailable ? sort : null;
-  useEffect(() => { if (!sortAvailable) setSort(null); }, [sortAvailable]);
+  useEffect(() => { if (!sortAvailable && !onSaveSort) setSort(null); }, [sortAvailable, onSaveSort]);
   const groups = useMemo(() => sortMetaGroups(section.groups, activeSort, section.config.stages), [section.groups, section.config.stages, activeSort]);
   function sortButton(key: MetaTableSort['key'], label: string) {
     const current = activeSort?.key === key ? activeSort.direction : null;
@@ -46,8 +59,8 @@ export default function MetaTemplateResults({ section, world, currency, preferen
     const directionLabel = key === 'name' ? next === 'ascending' ? 'A–Z' : 'Z–A' : next === 'ascending' ? 'rendah ke tinggi' : 'tinggi ke rendah';
     const Icon = current === 'ascending' ? ArrowUp : current === 'descending' ? ArrowDown : ArrowUpDown;
     const description = `Urutkan ${label}${key === 'funnel' ? ` berdasarkan ${MEASURES[selectedStage]}` : ''}: ${directionLabel}`;
-    return <button type="button" className={styles.resultSortButton} aria-label={description} title={description}
-      onClick={() => setSort(key === 'funnel' ? { key, stage: selectedStage, direction: next } : { key, direction: next })}>
+    return <button type="button" className={styles.resultSortButton} disabled={sortDisabled} aria-label={description} title={description}
+      onClick={() => void changeSort(key === 'funnel' ? { key, stage: selectedStage, direction: next } : { key, direction: next })}>
       {label}<Icon size={14} aria-hidden="true" /></button>;
   }
   const close = () => { setEditing(false); trigger.current?.focus(); };
@@ -55,10 +68,12 @@ export default function MetaTemplateResults({ section, world, currency, preferen
     <div className={styles.sectionHead}>
       <div><span className={`${styles.templateTag} ${world === 'cpas' ? styles.templateTagCpas : ''}`}>{world === 'cpas' ? 'CPAS' : 'TEMPLATE'}</span><strong>{section.name}</strong><span>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')} · {section.groups.length} {world === 'website' ? 'tujuan' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span></div>
       <div><span>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
-        {activeSort && <button type="button" className={styles.button} onClick={() => setSort(null)}>Urutan awal</button>}
-        {onSave && <button ref={trigger} type="button" className={`${styles.button} ${styles.columnSettingsButton}`} disabled={!preferencesReady} aria-haspopup="dialog" onClick={() => { setNotice(''); setEditing(true); }}><SlidersHorizontal size={14} />Atur kolom</button>}
+        {activeSort && <button type="button" className={styles.button} disabled={sortDisabled} onClick={() => void changeSort(null)}>Urutan awal</button>}
+        {onSave && <button ref={trigger} type="button" className={`${styles.button} ${styles.columnSettingsButton}`} disabled={!preferencesReady || savingSort} aria-haspopup="dialog" onClick={() => { setNotice(''); setEditing(true); }}><SlidersHorizontal size={14} />Atur kolom</button>}
       </div>
     </div>
+    {savingSort && <p role="status" className={styles.muted}>Menyimpan pengurutan…</p>}
+    {sortError && <p role="alert" className={styles.error}>{sortError}</p>}
     {notice && <p role="status" className={styles.columnSaved}>{notice}</p>}
     {editing && onSave && <MetaColumnEditor key={JSON.stringify(columns.map(c => c.key))} name={section.name} columns={columns} preference={preference} onClose={close}
       onSave={async value => { await onSave(value); setNotice('Pengaturan kolom disimpan.'); }} />}
@@ -68,8 +83,8 @@ export default function MetaTemplateResults({ section, world, currency, preferen
           aria-sort={activeSort?.key === column.key ? activeSort.direction : undefined}
           title={column.metric ? column.metric.denominator ? `${MEASURES[column.metric.numerator]} ÷ ${MEASURES[column.metric.denominator]}` : MEASURES[column.metric.numerator] : undefined}>
           {sortButton(column.key as MetaTableSort['key'], column.label)}
-          {!column.metric && <select className={styles.funnelSortStage} aria-label="Tahap Funnel untuk pengurutan" value={selectedStage}
-            onChange={e => { const stage = e.target.value as Measure; setFunnelStage(stage); setSort({ key: 'funnel', stage, direction: activeSort?.key === 'funnel' ? activeSort.direction : 'descending' }); }}>
+          {!column.metric && <select className={styles.funnelSortStage} aria-label="Tahap Funnel untuk pengurutan" value={selectedStage} disabled={sortDisabled}
+            onChange={e => { const stage = e.target.value as Measure; setFunnelStage(stage); void changeSort({ key: 'funnel', stage, direction: activeSort?.key === 'funnel' ? activeSort.direction : 'descending' }); }}>
             {steps.map((stage, index) => <option key={stage} value={stage}>{MEASURES[stage]}{index ? ' (rasio)' : ''}</option>)}
           </select>}
         </th>)}</tr></thead>
