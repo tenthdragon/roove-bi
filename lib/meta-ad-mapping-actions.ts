@@ -1,5 +1,6 @@
 'use server';
 
+import { loadMetaAdMappingSyncJobs } from './meta-ad-mapping-sync-status';
 import { mutateMeta } from './meta-edit-mutations';
 import { reportingAccess, editAccess, manageAccess } from './meta-report-context';
 import { scopeMetaAccounts, scopeMetaBrands, type MetaBrandScope } from './meta-brand-access';
@@ -44,10 +45,13 @@ async function mappingRevision(workspaceId: string) {
   return String(result.data?.revision || 0);
 }
 /** Poll status/revision without rereading or rebuilding the entire worklist. */
-export async function getMetaAdMappingStatus() {
+export async function getMetaAdMappingStatus(jobIds?: unknown) {
   const scope = await access(); const { workspaceId } = scope;
-  const [reportVersion, status] = await Promise.all([mappingRevision(workspaceId), mappingStatus(workspaceId, scope)]);
-  return { workspaceId, reportVersion, ...status };
+  const [reportVersion, status, trackedJobs] = await Promise.all([
+    mappingRevision(workspaceId), mappingStatus(workspaceId, scope),
+    jobIds !== undefined && scope.brandIds === null ? loadMetaAdMappingSyncJobs(createServiceSupabase(), workspaceId, jobIds) : Promise.resolve(null),
+  ]);
+  return { workspaceId, reportVersion, ...status, trackedJobs };
 }
 export type MetaWorklistInput = { from: string; to: string; workspaceId?: string; page?: number; search?: string; accountId?: string; filters?: AdDimensionFilters; channel?: unknown; issue?: unknown; includeInactive?: boolean };
 export async function getMetaAdWorklist(input: MetaWorklistInput = { from: '', to: '' }) {
