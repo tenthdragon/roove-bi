@@ -1,11 +1,12 @@
 'use client';
 
-import { useRef, useState } from 'react';
-import { SlidersHorizontal } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
 import { MEASURES, type Measure } from '@/lib/meta-funnel-domain';
 import { TEMPLATE_KIND_LABELS, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
 import { formatChange, formatCompactMoney, formatCount, formatMetric } from '@/lib/meta-format';
 import { metaResultColumns, visibleMetaColumns, type MetaColumnPreference } from '@/lib/meta-column-preferences';
+import { metaStageValue, sortMetaGroups, type MetaTableSort } from '@/lib/meta-table-sorting';
 import MetaColumnEditor from '@/components/MetaColumnEditor';
 import styles from '@/app/dashboard/meta-funnels/page.module.css';
 
@@ -17,8 +18,8 @@ function Delta({ value, direction = 'higher', neutral = false }: { value: number
 function StageChips({ group, stages, currency }: { group: TemplateGroup; stages: Measure[]; currency: string }) {
   const steps = stages.filter(s => s !== 'spend');
   return <div className={styles.stageChips}>{steps.map((stage, i) => {
-    const value = group.current[stage], prev = i ? group.current[steps[i - 1]] : 0;
-    return <span key={stage} className={styles.stageChip} title={`${MEASURES[stage]}${i ? ` ÷ ${MEASURES[steps[i - 1]]}` : ''}`}>{MEASURES[stage].replace('Landing page views', 'LPV').replace('Initiate checkout', 'IC').replace('Add to cart', 'ATC').replace('Outbound clicks', 'Outbound').replace('Messaging conversations', 'Conv')} {i === 0 ? formatCount(value) : formatMetric(value != null && prev != null && prev > 0 ? value / prev : null, 'percent', currency)}</span>;
+    const value = metaStageValue(group, stages, stage);
+    return <span key={stage} className={styles.stageChip} title={`${MEASURES[stage]}${i ? ` ÷ ${MEASURES[steps[i - 1]]}` : ''}`}>{MEASURES[stage].replace('Landing page views', 'LPV').replace('Initiate checkout', 'IC').replace('Add to cart', 'ATC').replace('Outbound clicks', 'Outbound').replace('Messaging conversations', 'Conv')} {i === 0 ? formatCount(value) : formatMetric(value, 'percent', currency)}</span>;
   })}</div>;
 }
 
@@ -28,13 +29,33 @@ export default function MetaTemplateResults({ section, world, currency, preferen
   onOpenGroup: (group: TemplateGroup) => void;
 }) {
   const [editing, setEditing] = useState(false), [notice, setNotice] = useState('');
+  const [sort, setSort] = useState<MetaTableSort | null>(null);
+  const [funnelStage, setFunnelStage] = useState<Measure | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const columns = metaResultColumns(section.config.metrics), visible = visibleMetaColumns(columns, preference);
+  const steps: Measure[] = section.config.stages.filter(s => s !== 'spend');
+  const selectedStage = funnelStage && steps.includes(funnelStage) ? funnelStage : steps[0];
+  const sortAvailable = !sort || sort.key === 'name' || visible.some(c => c.key === sort.key)
+    && (sort.key !== 'funnel' || steps.includes(sort.stage));
+  const activeSort = sortAvailable ? sort : null;
+  useEffect(() => { if (!sortAvailable) setSort(null); }, [sortAvailable]);
+  const groups = useMemo(() => sortMetaGroups(section.groups, activeSort, section.config.stages), [section.groups, section.config.stages, activeSort]);
+  function sortButton(key: MetaTableSort['key'], label: string) {
+    const current = activeSort?.key === key ? activeSort.direction : null;
+    const next = current === 'ascending' ? 'descending' : current === 'descending' ? 'ascending' : key === 'name' ? 'ascending' : 'descending';
+    const directionLabel = key === 'name' ? next === 'ascending' ? 'A–Z' : 'Z–A' : next === 'ascending' ? 'rendah ke tinggi' : 'tinggi ke rendah';
+    const Icon = current === 'ascending' ? ArrowUp : current === 'descending' ? ArrowDown : ArrowUpDown;
+    const description = `Urutkan ${label}${key === 'funnel' ? ` berdasarkan ${MEASURES[selectedStage]}` : ''}: ${directionLabel}`;
+    return <button type="button" className={styles.resultSortButton} aria-label={description} title={description}
+      onClick={() => setSort(key === 'funnel' ? { key, stage: selectedStage, direction: next } : { key, direction: next })}>
+      {label}<Icon size={14} aria-hidden="true" /></button>;
+  }
   const close = () => { setEditing(false); trigger.current?.focus(); };
   return <div className={styles.sectionCard}>
     <div className={styles.sectionHead}>
       <div><span className={`${styles.templateTag} ${world === 'cpas' ? styles.templateTagCpas : ''}`}>{world === 'cpas' ? 'CPAS' : 'TEMPLATE'}</span><strong>{section.name}</strong><span>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')} · {section.groups.length} {world === 'website' ? 'tujuan' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span></div>
       <div><span>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
+        {activeSort && <button type="button" className={styles.button} onClick={() => setSort(null)}>Urutan awal</button>}
         {onSave && <button ref={trigger} type="button" className={`${styles.button} ${styles.columnSettingsButton}`} disabled={!preferencesReady} aria-haspopup="dialog" onClick={() => { setNotice(''); setEditing(true); }}><SlidersHorizontal size={14} />Atur kolom</button>}
       </div>
     </div>
@@ -43,9 +64,16 @@ export default function MetaTemplateResults({ section, world, currency, preferen
       onSave={async value => { await onSave(value); setNotice('Pengaturan kolom disimpan.'); }} />}
     {!section.groups.length ? <p className={styles.muted} style={{ padding: '12px 16px' }}>Belum ada ad {WORLD_LABELS[world]} pada periode dan filter ini.</p> : <div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}>
       <table className={styles.resultTable} aria-label={`Hasil ${section.name}`} style={{ minWidth: Math.max(380, 220 + visible.length * 110) }}>
-        <thead><tr><th scope="col">{world === 'website' ? 'Tujuan' : 'Ad'}</th>{visible.map(column => <th key={column.key} scope="col" className={!column.metric ? styles.funnelCell : undefined}
-          title={column.metric ? column.metric.denominator ? `${MEASURES[column.metric.numerator]} ÷ ${MEASURES[column.metric.denominator]}` : MEASURES[column.metric.numerator] : undefined}>{column.label}</th>)}</tr></thead>
-        <tbody>{section.groups.map(g => <tr key={g.key}>
+        <thead><tr><th scope="col" aria-sort={activeSort?.key === 'name' ? activeSort.direction : undefined}>{sortButton('name', world === 'website' ? 'Tujuan' : 'Ad')}</th>{visible.map(column => <th key={column.key} scope="col" className={!column.metric ? styles.funnelCell : undefined}
+          aria-sort={activeSort?.key === column.key ? activeSort.direction : undefined}
+          title={column.metric ? column.metric.denominator ? `${MEASURES[column.metric.numerator]} ÷ ${MEASURES[column.metric.denominator]}` : MEASURES[column.metric.numerator] : undefined}>
+          {sortButton(column.key as MetaTableSort['key'], column.label)}
+          {!column.metric && <select className={styles.funnelSortStage} aria-label="Tahap Funnel untuk pengurutan" value={selectedStage}
+            onChange={e => { const stage = e.target.value as Measure; setFunnelStage(stage); setSort({ key: 'funnel', stage, direction: activeSort?.key === 'funnel' ? activeSort.direction : 'descending' }); }}>
+            {steps.map((stage, index) => <option key={stage} value={stage}>{MEASURES[stage]}{index ? ' (rasio)' : ''}</option>)}
+          </select>}
+        </th>)}</tr></thead>
+        <tbody>{groups.map(g => <tr key={g.key}>
           <td><button type="button" className={styles.nameButton} onClick={() => onOpenGroup(g)}>{g.name}</button><small>{g.ad_ids.length} ad · {g.accounts.join(', ')}</small></td>
           {visible.map(column => {
             const m = column.metric;

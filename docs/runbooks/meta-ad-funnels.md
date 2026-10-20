@@ -1006,3 +1006,20 @@ and fixtures in a rollback-only transaction, and checks per-user/template keys,
 scoped reset, grants/RLS, constraints and cascade deletion. It preserves the
 existing local schema and data. UI tests cover ordering/visibility alignment,
 reset/cancel, failed saves, minimum visible columns and template reconciliation.
+
+
+### Result row sorting
+
+Click a result column heading to toggle descending/ascending order. Numeric
+metrics use their unrounded current value; missing/non-finite values remain last
+in both directions, and ties preserve report order. Tujuan/Ad toggles A–Z/Z–A
+with natural numeric comparison. The composite Funnel column includes a stage
+selector: its first stage sorts by count, later stages by the displayed ratio
+to the preceding stage. This also works in CPAS result tables.
+
+Sorting is local to each displayed table and follows the selected metric when
+columns are moved. Hiding/removing the active column resets sorting; **Urutan
+awal** restores the report's original order. Totals, formulas and drill-down
+contents remain unchanged. Sort state is not part of the saved column preference
+and does not require a database migration. Validation is included in
+`npm run test:meta-funnels`.
