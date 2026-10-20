@@ -235,7 +235,7 @@
 .resultTable { min-width: 900px; }
 .page .resultTable th, .page .resultTable td { padding: 11px 10px; text-align: right; }
 .page .resultTable th:first-child, .page .resultTable td:first-child { text-align: left; min-width: 220px; max-width: 360px; white-space: normal; overflow-wrap: anywhere; }
-.page .resultTable th:last-child, .page .resultTable td:last-child { text-align: left; }
+.page .resultTable .funnelCell { text-align: left; min-width: 200px; }
 .page .resultTable td small { white-space: normal; }
 .stageChips { display: flex; flex-wrap: wrap; gap: 3px; }
 .stageChip { display: inline-flex; align-items: center; font-size: 10px; color: var(--text-secondary); background: var(--bg-deep); border-radius: 4px; padding: 2px 6px; white-space: nowrap; }
@@ -386,3 +386,29 @@
 .taxonomyForm fieldset { display: flex; flex-wrap: wrap; gap: 8px 20px; min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
 .taxonomyForm fieldset label, .cepPicker fieldset label { flex-direction: row; align-items: center; justify-content: flex-start; }
 .taxonomyForm input[type='checkbox'], .cepPicker input[type='checkbox'] { width: 16px; height: 16px; flex-shrink: 0; }
+
+
+/* Personal column settings */
+.columnDialog { width: min(480px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); margin: auto; padding: 20px; overflow: hidden; color: var(--text); background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 20px 70px rgb(0 0 0 / 35%); }
+.columnDialog[open] { display: flex; flex-direction: column; }
+.columnDialog > :not(.columnList) { flex-shrink: 0; }
+.columnSettingsButton { display: inline-flex; align-items: center; gap: 6px; }
+.columnDialog::backdrop { background: rgb(0 0 0 / 55%); }
+.columnDialogHead { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.columnDialogHead h2 { margin: 0; font-size: 18px; }
+.columnDialogHead p { margin: 4px 0 12px; color: var(--dim); font-size: 13px; }
+.columnPinned { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; padding: 12px; background: var(--bg-deep); border-radius: 8px; font-size: 12px; }
+.columnPinned span { color: var(--dim); }
+.columnList { display: grid; overflow-y: auto; min-height: 0; gap: 6px; margin: 12px 0; padding: 0; list-style: none; }
+.columnList li { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; }
+.columnList .columnDropTarget { border-color: var(--accent); background: var(--accent-subtle); }
+.columnGrip { display: flex; padding: 6px 0; color: var(--dim); border: 0; background: none; cursor: grab; }
+.columnGrip:active { cursor: grabbing; }
+.page .columnCheck { display: flex; flex-direction: row; align-items: center; gap: 10px; flex: 1; color: var(--text); cursor: pointer; }
+.page .columnCheck input { width: 16px; height: 16px; margin: 0; flex-shrink: 0; accent-color: var(--accent); }
+.columnMoves { display: flex; gap: 4px; }
+.columnMoves button { padding: 7px; }
+.columnDialogFoot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 10px; margin-top: 18px; }
+.columnHint { margin: 14px 0 0; font-size: 11px; color: var(--dim); line-height: 1.5; }
+.columnSaved { margin: 0; padding: 8px 16px; color: var(--green); font-size: 12px; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }

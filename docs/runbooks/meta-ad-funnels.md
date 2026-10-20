@@ -975,3 +975,34 @@ passed isolated RPC checks but exceeded the database's eight-second limit when
 the page launched its reports together. No database timeout increase or additional
 migration was required for that earlier application concurrency fix. The current
 batched reporting implementation requires migrations 222 and 223.
+
+
+### Personal result columns
+
+The brand detail Website & WhatsApp tables expose **Atur kolom** on each template.
+Users can show/hide existing template metrics and the Funnel summary, reorder
+with drag handles or up/down buttons, and reset to template defaults. Tujuan
+stays first. At least one other column must remain visible. Apply persists the
+choice; Cancel and Escape discard the draft. Header, body and total rows use the
+same column sequence. Monitoring, metric formulas and drawer contents are unchanged.
+CPAS uses a fixed report without a template, so it does not expose this setting.
+
+Migration **225_meta_funnel_column_preferences.sql** adds private preferences
+keyed by authenticated user and template. A template reused across brands shares
+that user's preference; other users keep their own choices. Server actions check
+the session, workspace and template access, including advertiser account scope.
+Direct anon/authenticated table access is revoked; only the server service role
+can read/write rows. Reset deletes only the current user's preference for that
+template. Removed metrics are ignored and newly added metrics appear at the end.
+Deleting a template or user cascades its preferences. If migration 225 is absent,
+reports retain their default columns and show a settings-unavailable notice.
+Apply this migration deliberately as part of an authorized release, before the
+application deployment; it does not modify report data or template definitions.
+
+Validation: `npm run test:meta-funnels`, `npm run test:meta-columns-db`,
+`npm run typecheck:app`, `npm run lint`, and `npm run build`.
+The database test uses only the fixed local container, installs migration 225
+and fixtures in a rollback-only transaction, and checks per-user/template keys,
+scoped reset, grants/RLS, constraints and cascade deletion. It preserves the
+existing local schema and data. UI tests cover ordering/visibility alignment,
+reset/cancel, failed saves, minimum visible columns and template reconciliation.

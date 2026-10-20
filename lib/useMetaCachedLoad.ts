@@ -41,7 +41,7 @@ export function useMetaReportSession() {
     return () => { alive = false; window.removeEventListener('focus', focus); window.clearInterval(timer); };
   }, [identity, role, activeWorkspace.id]);
   const checked = scope?.identity === identity ? scope : null;
-  return { workspaceId: activeWorkspace.id,
+  return { userId, workspaceId: activeWorkspace.id,
     key: role === 'advertiser' ? identity && checked && !checked.empty ? JSON.stringify([identity, checked.key]) : null : identity,
     error: role === 'advertiser' ? checked?.empty ? 'Belum ada brand yang ditugaskan. Hubungi owner workspace untuk mendapatkan alokasi brand.' : scopeError : '' };
 }

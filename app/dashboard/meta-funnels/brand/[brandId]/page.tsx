@@ -13,12 +13,15 @@ import { defaultMetaRange } from '@/lib/meta-report-status';
 import { getTodayWIB } from '@/lib/sync-schedule';
 import { getMetaFunnelHistory, getMetaReportRevision, queueMetaFunnelSync, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
 import { getMetaBrandDetail, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
-import { MEASURES, metricValue, type FunnelMetric, type Measure, type Totals } from '@/lib/meta-funnel-domain';
+import { MEASURES, metricValue, type FunnelMetric, type Totals } from '@/lib/meta-funnel-domain';
 import { templateDestinationRule } from '@/lib/meta-ctwa-destinations';
-import { TEMPLATE_KIND_LABELS, WORLD_CHANNEL, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
+import { WORLD_CHANNEL, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
 import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
-import { formatChange, formatCompactMoney, formatCount, formatDate, formatMetric } from '@/lib/meta-format';
+import { formatChange, formatCompactMoney, formatDate, formatMetric } from '@/lib/meta-format';
 import MetaAdsNav from '@/components/MetaAdsNav';
+import MetaTemplateResults from '@/components/MetaTemplateResults';
+import { getMetaColumnPreferences, saveMetaColumnPreference, type MetaColumnPreferences } from '@/lib/meta-column-preference-actions';
+import type { MetaColumnPreference } from '@/lib/meta-column-preferences';
 import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
 import MetaSparkline from '@/components/MetaSparkline';
 const MetaGroupDrawer = dynamic(() => import('@/components/MetaGroupDrawer'), { ssr: false });
@@ -32,6 +35,7 @@ import styles from '../../page.module.css';
 type Data = Extract<Awaited<ReturnType<typeof getMetaBrandDetail>>, { schemaReady: true }>;
 type HistoryPoint = { date: string; totals: Totals; complete: boolean; partial: boolean };
 const detailCache = createMetaOverviewCache<Data>();
+const columnPreferencesCache = createMetaOverviewCache<MetaColumnPreferences>();
 const historyCache = createMetaOverviewCache<{ points: HistoryPoint[]; complete: boolean }>();
 const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
 const severityClass = { bad: styles.bad, warn: styles.warn, good: styles.good, info: styles.neutral } as const;
@@ -41,13 +45,6 @@ function Delta({ value, direction = 'higher', neutral = false }: { value: number
   const good = direction === 'higher' ? value >= 0 : value <= 0;
   return <span className={neutral ? styles.neutral : good ? styles.good : styles.bad}>{formatChange(value)}</span>;
 }
-function StageChips({ group, stages, currency }: { group: TemplateGroup; stages: Measure[]; currency: string }) {
-  const steps = stages.filter(s => s !== 'spend');
-  return <div className={styles.stageChips}>{steps.map((stage, i) => {
-    const value = group.current[stage], prev = i ? group.current[steps[i - 1]] : 0;
-    return <span key={stage} className={styles.stageChip} title={`${MEASURES[stage]}${i ? ` ÷ ${MEASURES[steps[i - 1]]}` : ''}`}>{MEASURES[stage].replace('Landing page views', 'LPV').replace('Initiate checkout', 'IC').replace('Add to cart', 'ATC').replace('Outbound clicks', 'Outbound').replace('Messaging conversations', 'Conv')} {i === 0 ? formatCount(value) : formatMetric(value != null && prev != null && prev > 0 ? value / prev : null, 'percent', currency)}</span>;
-  })}</div>;
-}
 
 export default function MetaBrandDetailPage() {
   const params = useParams<{ brandId: string }>();
@@ -56,6 +53,16 @@ export default function MetaBrandDetailPage() {
   const pathname = usePathname();
   const { dateRange } = useDateRange();
   const session = useMetaReportSession();
+  const fetchColumnPreferences = useCallback(() => getMetaColumnPreferences({ workspaceId: session.workspaceId, userId: session.userId }), [session.workspaceId, session.userId]);
+  const { data: columnPreferences, setData: setColumnPreferences, error: columnError, load: reloadColumns } = useMetaCachedLoad(session.key, columnPreferencesCache, fetchColumnPreferences);
+  async function saveColumns(funnelId: string, preference: MetaColumnPreference | null) {
+    const saved = await saveMetaColumnPreference({ workspaceId: session.workspaceId, userId: session.userId, funnelId, preference });
+    setColumnPreferences(current => {
+      const preferences = { ...current?.preferences };
+      if (saved) preferences[funnelId] = saved; else delete preferences[funnelId];
+      return { ready: true, preferences };
+    });
+  }
   const reportRange = dateRange.from && dateRange.to ? dateRange : defaultMetaRange(getTodayWIB());
   const { can, role } = usePermissions();
   const canManage = role !== 'advertiser' && can('admin:meta');
@@ -224,23 +231,14 @@ export default function MetaBrandDetailPage() {
             </div></div></div>
           {view === 'cep' && <MetaCepView view={data.cep} currency={currency} onOpenCep={setCepDrawer} />}
           {view === 'destinations' && world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
-          {view === 'destinations' && data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <div key={section.key} className={styles.sectionCard}>
-            <div className={styles.sectionHead}>
-              <div><span className={`${styles.templateTag} ${world === 'cpas' ? styles.templateTagCpas : ''}`}>{world === 'cpas' ? 'CPAS' : 'TEMPLATE'}</span><strong>{section.name}</strong><span>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')} · {section.groups.length} {world === 'website' ? 'tujuan' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span></div>
-              <span>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
-            </div>
-            {!section.groups.length ? <p className={styles.muted} style={{ padding: '12px 16px' }}>Belum ada ad {WORLD_LABELS[world]} pada periode dan filter ini.</p> : <div className={styles.tableWrap} style={{ border: 0, borderRadius: 0 }}>
-              <table className={styles.resultTable}>
-                <thead><tr><th scope="col">{world === 'website' ? 'Tujuan' : 'Ad'}</th>{section.config.metrics.map(m => <th key={m.id} scope="col" title={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}` : MEASURES[m.numerator]}>{m.label}</th>)}<th scope="col">Funnel</th></tr></thead>
-                <tbody>{section.groups.map(g => <tr key={g.key}>
-                  <td><button type="button" className={styles.nameButton} onClick={() => setDrawer({ group: g, section })}>{g.name}</button><small>{g.ad_ids.length} ad · {g.accounts.join(', ')}</small></td>
-                  {section.config.metrics.map(m => { const c = g.metrics.find(v => v.id === m.id)!; const main = section.mainMetric?.id === m.id; return <td key={m.id}><span style={main ? { fontWeight: 650 } : undefined}>{formatMetric(c.current, m, currency)}</span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}
-                  <td><StageChips group={g} stages={section.config.stages} currency={currency} /></td>
-                </tr>)}</tbody>
-                <tfoot><tr><th scope="row">Total {section.name}</th>{section.config.metrics.map(m => { const c = section.metrics.find(v => v.id === m.id)!; return <td key={m.id}>{formatMetric(c.current, m, currency)}<small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>; })}<td /></tr></tfoot>
-              </table>
-            </div>}
-          </div>)}
+          {view === 'destinations' && world === 'website' && (columnError || columnPreferences?.ready === false) && <div className={styles.info} role="status">
+            {columnError || 'Pengaturan kolom belum tersedia. Tampilan default digunakan.'} <button type="button" className={styles.button} onClick={() => void reloadColumns(true)}>Coba lagi</button>
+          </div>}
+          {view === 'destinations' && data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <MetaTemplateResults
+            key={JSON.stringify([session.key, section.key])} section={section} world={world} currency={currency}
+            preferencesReady={!!columnPreferences?.ready && !columnError} preference={section.funnelId ? columnPreferences?.preferences[section.funnelId] : null}
+            onSave={section.funnelId ? value => saveColumns(section.funnelId!, value) : undefined}
+            onOpenGroup={group => setDrawer({ group, section })} />)}
           {view === 'destinations' && world === 'website' && data.unassigned.length > 0 && <div className={styles.unassigned}>
             <div className={styles.sectionTitle}><strong className={styles.warn}>Belum ditetapkan</strong><span>{data.unassigned.length} tujuan · {formatCompactMoney(data.unassigned.reduce((s, u) => s + u.current.spend, 0), currency)} · belum masuk template mana pun</span></div>
             {data.unassigned.slice(0, 8).map(u => <div key={u.key} className={styles.unassignedRow}>
