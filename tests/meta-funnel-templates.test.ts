@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultFunnel, emptyTotals, metricValue, type SavedFunnel } from '../lib/meta-funnel-domain';
 import { assignTemplateSections, cpasSection, defaultLeadFunnel, matchTemplateRule, median, responseMetrics, suggestTemplate, templateKind, templateMainMetric, validateTemplateRule, type ReportGroup, type TemplateRule } from '../lib/meta-funnel-templates';
+import { formatMetric } from '../lib/meta-format';
 import { brandHealth, brandHighlights } from '../lib/meta-ad-highlights';
 import { applyMetaTemplateRules, metaTemplateError, type MetaTemplateConfiguration } from '../lib/meta-template-settings';
 import { evaluateWorkspaceAlerts } from '../lib/meta-funnel-store';
@@ -124,7 +125,7 @@ test('CPAS section judges Shopee purchases per ad and the shared response layer 
   const section = cpasSection([group('ad A', { spend: 1000, impressions: 20000, outbound_clicks: 300, purchases: 10, purchase_value: 3600 })], { ...emptyTotals(), spend: 1000, purchases: 10, purchase_value: 3600 }, emptyTotals());
   assert.equal(section.groups[0].metrics.find(m => m.id === 'cpp')?.current, 100);
   assert.equal(section.metrics.find(m => m.id === 'roas')?.current, 3.6);
-  assert.deepEqual(responseMetrics('website').map(m => m.id), ['cpm', 'outbound_ctr', 'hook_rate', 'lpv_rate']);
+  assert.deepEqual(responseMetrics('website').map(m => m.id), ['cpm', 'outbound_ctr', 'hook_rate', 'roas']);
   assert.deepEqual(responseMetrics('cpas').map(m => m.id), ['cpm', 'outbound_ctr', 'hook_rate', 'purchase_per_click']);
   assert.equal(median([3, 1, 2]), 2); assert.equal(median([4, 1, 2, 3]), 2.5); assert.equal(median([]), null);
 });
@@ -152,4 +153,21 @@ test('highlights find the leaking stage, cost outliers, hidden winners, weak res
   const weak = brandHighlights({ world: 'cpas', sections: [], currency: 'IDR', summary: { ...emptyTotals(), spend: 100, impressions: 10000, outbound_clicks: 80 }, previous: { ...emptyTotals(), spend: 100, impressions: 10000, outbound_clicks: 120 } });
   assert.equal(weak[0].kind, 'weak_response'); assert.match(weak[0].text, /CTR outbound turun -33%/);
   assert.equal(metricValue(summary, sections[0].mainMetric!), 6300 / 52);
+});
+
+test('ROAS KPI and custom columns show one decimal without rounding the underlying totals', () => {
+  const roas = responseMetrics('website').find(m => m.id === 'roas')!;
+  assert.equal(metricValue({ ...emptyTotals(), purchase_value: 2350, spend: 1000 }, roas), 2.35);
+  assert.equal(metricValue({ ...emptyTotals(), purchase_value: 2350, spend: 0 }, roas), null);
+  for (const format of ['number', 'money', 'multiple'] as const) {
+    const custom = { ...roas, id: 'custom_metric', label: 'Return', format };
+    assert.equal(formatMetric(2.35, custom, 'IDR'), '2,4×');
+    assert.equal(formatMetric(2, custom, 'IDR'), '2,0×');
+    assert.equal(formatMetric(0.76, custom, 'IDR'), '0,8×');
+    assert.equal(formatMetric(0, custom, 'IDR'), '0,0×');
+    assert.equal(formatMetric(null, custom, 'IDR'), '—');
+  }
+  assert.equal(formatMetric(281, 'number', 'IDR'), '281');
+  assert.equal(formatMetric(0.7595, 'percent', 'IDR'), '75.95%');
+  assert.equal(formatMetric(2, 'multiple', 'IDR'), '2,0×');
 });

@@ -58,7 +58,7 @@ test('the CEP lens lists response metrics plus the result cost, never a funnel r
   const cpp = cepResultMetric('website', totals({ purchases: 10, leads: 2 })), cpl = cepResultMetric('website', totals({ purchases: 1, leads: 20 }));
   assert.equal(cpp.id, 'cpp'); assert.equal(cpl.id, 'cpl'); assert.equal(cepResultMetric('cpas', totals({ leads: 99 })).id, 'cpp');
   const view = buildCepView(groups, 'website', summary, summary);
-  assert.deepEqual(view.metrics.map(m => m.id), ['cpm', 'outbound_ctr', 'hook_rate', 'lpv_rate', 'cpp']);
+  assert.deepEqual(view.metrics.map(m => m.id), ['cpm', 'outbound_ctr', 'hook_rate', 'roas', 'cpp']);
   assert.equal(view.funnelMetric.id, 'purchase_per_lpv'); assert.ok('purchase_per_lpv' in view.medians);
   assert.equal(cepFunnelMetric('website', cpl).id, 'lead_per_lpv'); assert.equal(cepFunnelMetric('cpas', cpp).id, 'purchase_per_click');
   assert.deepEqual(cepProgressMetrics('website', cpp).map(m => m.id), ['atc_rate', 'purchase_per_lpv']);

@@ -1,10 +1,13 @@
 // Display formatting shared by the Meta Ads pages. Pure and locale-fixed (id-ID).
 import type { FunnelMetric } from './meta-funnel-domain';
 
-export function formatMetric(value: number | null | undefined, kind: FunnelMetric['format'], currency: string) {
+export function formatMetric(value: number | null | undefined, metric: FunnelMetric['format'] | Pick<FunnelMetric, 'format' | 'numerator' | 'denominator' | 'multiplier'>, currency: string) {
   if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  // Recognize saved custom ROAS columns even when they retain the old column's format.
+  const isRoas = typeof metric !== 'string' && metric.numerator === 'purchase_value' && metric.denominator === 'spend' && (metric.multiplier ?? 1) === 1;
+  const kind = isRoas ? 'multiple' : typeof metric === 'string' ? metric : metric.format;
   if (kind === 'percent') return `${(value * 100).toFixed(2)}%`;
-  if (kind === 'multiple') return `${value.toFixed(2)}×`;
+  if (kind === 'multiple') return `${new Intl.NumberFormat('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 1 }).format(value)}×`;
   return new Intl.NumberFormat('id-ID', kind === 'money' ? { style: 'currency', currency, maximumFractionDigits: 0 } : { maximumFractionDigits: 1 }).format(value);
 }
 /** Rp 142,5 jt style amounts for dense tables; other currencies use compact Intl notation. */

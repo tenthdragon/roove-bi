@@ -60,7 +60,7 @@ export default function MetaGroupDrawer({ group, section, world, input, currency
       </div>
       <div className={styles.miniGrid}>
         <div className={styles.mini}><span className={styles.muted}>Spend</span><strong>{formatMetric(group.current.spend, 'money', currency)}</strong></div>
-        <div className={styles.mini}><span className={styles.muted}>{main?.label || 'Hasil utama'}</span><strong className={mainGood === null ? '' : mainGood ? styles.good : styles.bad}>{main ? formatMetric(mainNow, main.format, currency) : '—'}</strong></div>
+        <div className={styles.mini}><span className={styles.muted}>{main?.label || 'Hasil utama'}</span><strong className={mainGood === null ? '' : mainGood ? styles.good : styles.bad}>{main ? formatMetric(mainNow, main, currency) : '—'}</strong></div>
         <div className={styles.mini}><span className={styles.muted}>vs periode lalu</span><strong className={mainGood === null ? '' : mainGood ? styles.good : styles.bad}>{formatChange(mainChange)}</strong></div>
       </div>
       {group.landing_page_urls.length > 0 && <div className={styles.muted}>{group.landing_page_urls.map(url => <div key={url}><a href={url} target="_blank" rel="noopener noreferrer">{url}</a></div>)}</div>}
@@ -85,8 +85,8 @@ export default function MetaGroupDrawer({ group, section, world, input, currency
           const value = main ? metricValue(ad.current, main) : null;
           return <div key={ad.key} className={styles.adRow}>
             {creative ? <MetaAdCreative creative={creative} /> : <div className={styles.adThumb}>Ad</div>}
-            <div><b title={ad.name}>{ad.name}</b><small>{ad.account} · {formatMetric(ad.current.spend, SPEND.format, currency)} · CTR {formatMetric(metricValue(ad.current, CTR), 'percent', currency)}</small></div>
-            <div className={styles.adResult}>{main ? `${main.label} ${formatMetric(value, main.format, currency)}` : formatCount(ad.current.purchases)}</div>
+            <div><b title={ad.name}>{ad.name}</b><small>{ad.account} · {formatMetric(ad.current.spend, SPEND, currency)} · CTR {formatMetric(metricValue(ad.current, CTR), 'percent', currency)}</small></div>
+            <div className={styles.adResult}>{main ? `${main.label} ${formatMetric(value, main, currency)}` : formatCount(ad.current.purchases)}</div>
           </div>;
         })}</div>
       </div>
