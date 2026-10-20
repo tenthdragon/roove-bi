@@ -5,6 +5,15 @@ import type { RawMetaReport, ReportQuery } from './meta-ad-report';
 import type { MetaBrandReport } from './meta-brand-report';
 import type { AdDimensionFilters } from './meta-ad-dimensions';
 
+async function intentionLabels(workspaceId: string, brand?: string | null) {
+  let query = createServiceSupabase().from('meta_ad_intention_catalog').select('key,label').eq('workspace_id', workspaceId);
+  if (brand && /^\d+$/.test(brand)) query = query.eq('brand_id', Number(brand));
+  const { data, error } = await query;
+  if (error) throw new MetaReportUnavailableError(false);
+  // Shared canonical names stay stable on multi-brand reports.
+  return Object.fromEntries((data || []).filter(c => brand || !['disc','cons','conv'].includes(c.key)).map(c => [c.key,c.label]));
+}
+
 // Next may load this module from different route bundles; share the database
 // budget across them. Results live only in Next's revision-keyed cache.
 const processState = globalThis as typeof globalThis & { metaReportRequests?: ReturnType<typeof createMetaReportRequests> };
@@ -25,7 +34,7 @@ export const getCachedMetaAdReport = unstable_cache(
         console.error('[meta-ad-report] RPC failed', { code: result.error.code, message: result.error.message });
         throw new MetaReportUnavailableError(result.error.code === '57014');
       }
-      return result.data as RawMetaReport;
+      return { ...result.data, intentionLabels: await intentionLabels(workspaceId, query.brand) } as RawMetaReport;
   }),
   ['meta-ad-report-v6-incremental'],
   { revalidate: 300 },
@@ -41,7 +50,8 @@ export const getCachedMetaBrandDetailReport = unstable_cache(
         console.error('[meta-brand-detail] RPC failed', { code: result.error.code, message: result.error.message });
         throw new MetaReportUnavailableError(result.error.code === '57014');
       }
-      return result.data;
+      const labels = await intentionLabels(workspaceId, brand);
+      return Object.fromEntries(Object.entries(result.data).map(([key,value]) => [key,{ ...(value as object), intentionLabels: labels }])) as { website: RawMetaReport; cpas: RawMetaReport; cep: RawMetaReport };
     }),
   ['meta-brand-detail-v1-incremental'], { revalidate: 300 },
 );
@@ -58,7 +68,7 @@ export const getCachedMetaBrandOverviewReport = unstable_cache(
         console.error('[meta-brand-overview] RPC failed', { code: result.error.code, message: result.error.message });
         throw new MetaReportUnavailableError(result.error.code === '57014');
       }
-      return result.data as MetaBrandReport;
+      return { ...result.data, intentionLabels: await intentionLabels(workspaceId) } as MetaBrandReport;
     }),
   ['meta-brand-overview-v1-incremental'],
   { revalidate: 300 },

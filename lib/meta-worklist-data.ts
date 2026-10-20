@@ -30,7 +30,7 @@ async function loadInventory(workspaceId: string) {
   const ids = new Set((accounts.data || []).map(a => a.account_id));
   const destinations: DestinationHint[] = hints.filter(h => ids.has(h.account_id)).map(h => ({ account_id: h.account_id, ad_id: h.ad_id, creative_id: h.creative_id,
     classification: h.classification, metadata: { destination_type: h.destination_type, urls: Array.isArray(h.urls) ? h.urls : [] } }));
-  const classified = classifyWorklistInventory(mappings, accounts.data || [], taxonomy.catalog, taxonomy.rules);
+  const classified = classifyWorklistInventory(mappings, accounts.data || [], taxonomy.catalog, taxonomy.rules, taxonomy.intentions);
   return { ready: true as const, mappings: classified, verified: verified.rows, destinations, taxonomy, accounts: accounts.data || [] };
 }
 type Inventory = Awaited<ReturnType<typeof loadInventory>>;

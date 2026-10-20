@@ -1,12 +1,14 @@
 'use server';
 
+import { mutateMeta } from './meta-edit-mutations';
+import { assertMetaBrand } from './meta-brand-access';
 import { createServiceSupabase } from './service-supabase';
 import { daysBetween, hasCoverage, shiftDay, emptyTotals, validateFunnel, type FunnelConfig } from './meta-funnel-domain';
 import { enqueueIncrementalMetaSync } from './meta-sync-queue';
 import { metaAdChannelCounts } from './meta-ad-channels';
 import { canonicalLandingPage } from './meta-ad-destinations';
 import { metaCoverageGaps } from './meta-report-status';
-import { currencyError, manageAccess, reportContext, reportJobs, reportingAccess, uuid } from './meta-report-context';
+import { currencyError, editAccess, manageAccess, reportContext, reportJobs, reportingAccess, uuid } from './meta-report-context';
 
 import { metaReportBrandSections, metaReportQuery, metaReportGroups, metaReportOptions, metaReportHistory, type MetaReportInput } from './meta-ad-report';
 import { getCachedMetaAdReport } from './meta-ad-report-data';
@@ -116,40 +118,18 @@ export async function getMetaFunnelNotificationCount() {
   const readIds = new Set((reads.data || []).map(r => r.alert_id));
   return alerts.data.filter(a => !readIds.has(a.id)).length;
 }
-export async function saveMetaFunnel(input: { id?: string; version?: number; config: FunnelConfig }) {
-  const { workspaceId, profile } = await manageAccess();
+export async function saveMetaFunnel(input: { id?: string; version?: number; brandId?: number | null; config: FunnelConfig }) {
+  const ctx = await editAccess('meta:funnels');
   const config = validateFunnel(input.config);
-  const svc = createServiceSupabase();
-  const accountResult = await svc.from('meta_ad_accounts').select('account_id').eq('workspace_id', workspaceId).eq('is_active', true);
-  if (accountResult.error) throw new Error(accountResult.error.message);
-  const accounts = accountResult.data || [];
-  if (config.account_ids.some(a => !accounts.some(r => r.account_id === a))) throw new Error('Akun funnel tidak tersedia di workspace ini.');
-  let savedId: string;
-  if (input.id) {
-    uuid(input.id);
-    if (!Number.isInteger(input.version) || !input.version || input.version < 1) throw new Error('Versi funnel tidak valid.');
-    const result = await svc.from('meta_ad_funnels').update({ config, version: input.version + 1, updated_at: new Date().toISOString() })
-      .eq('id', input.id).eq('workspace_id', workspaceId).eq('archived', false).eq('version', input.version).select('id').maybeSingle();
-    if (result.error) throw new Error(result.error.message);
-    if (!result.data) throw new Error('Funnel sudah diubah. Muat ulang sebelum menyimpan.');
-    savedId = result.data.id;
-  } else {
-    const result = await svc.from('meta_ad_funnels').insert({ workspace_id: workspaceId, created_by: profile.id, config }).select('id').single();
-    if (result.error) throw new Error(result.error.message);
-    savedId = result.data.id;
-  }
-  // The sync worker evaluates alerts with the saved template. Saving a template
-  // must not read and aggregate the entire metrics history in the request.
-  return { id: savedId, warning: null as string | null };
+  if (input.id) uuid(input.id);
+  else if (input.brandId != null) assertMetaBrand(ctx, String(input.brandId));
+  if (!input.id && ctx.brandIds !== null && !input.brandId) throw new Error('Pilih brand untuk funnel baru.');
+  const saved = await mutateMeta(ctx, 'funnel', { ...input, config });
+  return { id: saved.id as string, warning: null as string | null };
 }
 export async function archiveMetaFunnel(id: string) {
-  const { workspaceId } = await manageAccess();
-  const svc = createServiceSupabase();
-  const result = await svc.from('meta_ad_funnels').update({ archived: true, updated_at: new Date().toISOString() }).eq('workspace_id', workspaceId).eq('id', uuid(id));
-  if (result.error) throw new Error(result.error.message);
-  // Landing pages of an archived template return to "belum ditetapkan".
-  const rules = await svc.from('meta_landing_page_templates').delete().eq('workspace_id', workspaceId).eq('funnel_id', id);
-  if (rules.error && !['42P01', 'PGRST205'].includes(rules.error.code)) throw new Error(rules.error.message);
+  const ctx = await editAccess('meta:funnels');
+  await mutateMeta(ctx, 'archive_funnel', { id: uuid(id) });
 }
 export async function markMetaFunnelAlertRead(id: string) {
   const scope = await reportingAccess(); const { workspaceId, profile } = scope;
@@ -161,17 +141,16 @@ export async function markMetaFunnelAlertRead(id: string) {
   if (result.error) throw new Error(result.error.message);
 }
 export async function verifyMetaAdDestination(input: { accountId: string; adId: string; url: string }) {
-  const { workspaceId, profile } = await manageAccess();
+  const ctx = await editAccess('meta:mapping'); const { workspaceId } = ctx;
   const url = canonicalLandingPage(input.url);
   if (!/^act_\d+$/.test(input.accountId) || !/^\d+$/.test(input.adId) || !url) throw new Error('Akun, ad ID, atau URL tidak valid.');
+  if (ctx.accountIds !== null && !ctx.accountIds.includes(input.accountId)) throw new Error('Akun Meta tidak tersedia dalam akses brand Anda.');
   const svc = createServiceSupabase();
   const account = await svc.from('meta_ad_accounts').select('account_id').eq('workspace_id', workspaceId).eq('account_id', input.accountId).eq('is_active', true).maybeSingle();
   if (account.error || !account.data) throw new Error('Akun Meta tidak tersedia di workspace ini.');
   const creative = await svc.from('meta_ad_creatives').select('creative_id').eq('workspace_id', workspaceId).eq('account_id', input.accountId).eq('ad_id', input.adId).maybeSingle();
   if (creative.error || !creative.data?.creative_id) throw new Error('Creative ad belum tersedia. Sync metadata sebelum menetapkan URL.');
-  const result = await svc.from('meta_ad_verified_destinations').upsert({ workspace_id: workspaceId, account_id: input.accountId, ad_id: input.adId,
-    creative_id: creative.data.creative_id, landing_page_url: url, verified_by: profile.id, updated_at: new Date().toISOString() }, { onConflict: 'workspace_id,account_id,ad_id' });
-  if (result.error) throw new Error(result.error.message);
+  await mutateMeta(ctx, 'destination', { ...input, url, creativeId: creative.data.creative_id });
   return { url };
 }
 export async function queueMetaFunnelSync() {

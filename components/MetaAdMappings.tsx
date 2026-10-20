@@ -7,7 +7,7 @@ import { X } from 'lucide-react';
 import { getMetaAdWorklist, getMetaAdMappingStatus, queueMetaAdMappingSync, saveMetaAdMappingOverrides, saveMetaAdMappingOverridesBulk } from '@/lib/meta-ad-mapping-actions';
 import { verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
 import { mappingDimensionLabel } from '@/lib/meta-ad-mapping';
-import { labelOptions, WORKLIST_ISSUE_LABELS, WORKLIST_ISSUES, type WorklistIssue, type WorklistRow } from '@/lib/meta-ad-worklist';
+import { WORKLIST_ISSUE_LABELS, WORKLIST_ISSUES, type WorklistIssue, type WorklistRow } from '@/lib/meta-ad-worklist';
 import { objectiveLabel, type AdDimensionFilters } from '@/lib/meta-ad-dimensions';
 import { metaAdChannelLabel, META_AD_CHANNELS, type MetaAdChannel } from '@/lib/meta-ad-channels';
 import { formatCompactMoney, formatDate } from '@/lib/meta-format';
@@ -32,7 +32,7 @@ function parseIssue(value: string | null): WorklistIssue | null { return value &
 function parseChannel(value: string | null): MetaAdChannel | null { return value && (META_AD_CHANNELS as readonly string[]).includes(value) ? value as MetaAdChannel : null; }
 
 /** Pemetaan Ads as a worklist: what the brand report cannot read yet, ranked by spend in the selected range. */
-export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId: string; canManage: boolean }) {
+export default function MetaAdMappings({ workspaceId, canManage, canSync = false }: { workspaceId: string; canManage: boolean; canSync?: boolean }) {
   const router = useRouter(); const pathname = usePathname(); const searchParams = useSearchParams();
   const { dateRange } = useDateRange();
   const session = useMetaReportSession();
@@ -101,7 +101,7 @@ export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId
     try { await work(); if (done) setNotice(done); } catch (e) { failure = message(e); }
     finally { await load(true); setPollRefresh(v => v + 1); if (failure) setError(failure); setBusy(false); }
   }
-  const intentionOptions = useMemo(() => labelOptions('intention'), []);
+  const intentionOptions = (brandId: number | null, retained?: string | null) => (data?.intentions || []).filter(c => c.brand_id === brandId && (c.is_active !== false || c.key === retained)).map(c => ({ value: c.key, label: c.label }));
   const picker = (row: WorklistRow, dimension: 'cep' | 'intention') => {
     const own = data?.catalog.filter(c => c.brand_id === row.brandId) || [];
     if (!canManage) return <span>{row[dimension].label}</span>;
@@ -109,7 +109,7 @@ export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId
     if (dimension === 'cep') return <MetaCepPicker key={`${row.ad_id}:${row.revision}`} id={row.ad_id} values={row.ceps.map(c => c.key!)} manual={row.cep.manual} catalog={own} disabled={busy} onSave={ceps => save({ ceps })} />;
     return <><select aria-label={`Intention ad ${row.ad_id}`} disabled={busy} value={row.intention.manual ? row.intention.key || '' : ''} onChange={e => save({ intention: e.target.value || null })}>
       <option value="">Aturan · {row.intention.manual ? 'gunakan aturan' : row.intention.label}</option>
-      {intentionOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      {intentionOptions(row.brandId, row.intention.key).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>{row.intention.manual && <small className={styles.manualMark}>Koreksi manual</small>}</>;
   };
   const destination = (row: WorklistRow) => {
@@ -122,6 +122,7 @@ export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(data!.rows.map(rowKey)));
   const selectedRows = data ? data.rows.filter(r => selected.has(rowKey(r))) : [];
   const selectedBrand = selectedRows.length && selectedRows.every(r => r.brandId === selectedRows[0].brandId) ? selectedRows[0].brandId : null;
+  useEffect(() => { setBulkCeps(undefined); setBulkIntention(''); }, [selectedBrand]);
   const bulkOptions = data?.catalog.filter(c => c.brand_id === selectedBrand && c.is_active !== false) || [];
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
   const sub = data ? `${data.scopeAds.toLocaleString('id-ID')} ad tayang · spend ${formatCompactMoney(data.scopeSpend, 'IDR')} · ${formatDate(data.range.from)} – ${formatDate(data.range.to)}${data.inactiveAds ? ` · ${data.inactiveAds.toLocaleString('id-ID')} ad tanpa impresi disembunyikan` : ''}` : undefined;
@@ -131,7 +132,7 @@ export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId
     <MetaAdsNav title="Pemetaan Ads" subtitle={data ? `${sub} · inventori ${lastSync ? stamp(lastSync) : 'belum disinkronkan'}` : 'Ad yang tayang pada periode terpilih, diurutkan dari spend terbesar.'}
       actions={<><Link className={styles.button} href="/dashboard/meta-funnels/categories">Kategori & aturan</Link>
         <button className={styles.button} disabled={loading} onClick={() => void load(true)}>Muat ulang</button>
-        {canManage && <button className={styles.primary} disabled={busy || !ready} onClick={() => void run(queueMetaAdMappingSync, 'Sync pemetaan masuk antrean. Nama ad dibaca lebih dulu; URL dan creative menyusul dalam batch kecil.')}>Sync pemetaan</button>}
+        {canSync && <button className={styles.primary} disabled={busy || !ready} onClick={() => void run(queueMetaAdMappingSync, 'Sync pemetaan masuk antrean. Nama ad dibaca lebih dulu; URL dan creative menyusul dalam batch kecil.')}>Sync pemetaan</button>}
       </>} />
     {(session.error || error) && <div role="alert" className={styles.error}>{session.error || error}</div>}{notice && <div role="status" className={styles.info}>{notice}</div>}
     {!ready ? <div className={styles.card}>Pemetaan ad belum tersedia di workspace ini. Hubungi admin untuk mengaktifkannya.</div> : <>
@@ -177,7 +178,7 @@ export default function MetaAdMappings({ workspaceId, canManage }: { workspaceId
           <label><input type="checkbox" checked={bulkCeps !== undefined} onChange={e => setBulkCeps(e.target.checked ? [] : undefined)} />Ubah CEP</label>
           {bulkCeps !== undefined && <><select multiple aria-label="CEP untuk ad terpilih" disabled={!selectedBrand || busy || bulkCeps === null} value={bulkCeps || []} onChange={e => setBulkCeps(Array.from(e.target.selectedOptions, o => o.value))}>{bulkOptions.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}</select>
             {!selectedBrand && <small>Pilih ad dari satu brand untuk mengubah CEP.</small>}<label><input type="checkbox" checked={bulkCeps === null} onChange={e => setBulkCeps(e.target.checked ? null : [])} />Gunakan aturan CEP</label></>}
-          <select aria-label="Intention untuk ad terpilih" value={bulkIntention} onChange={e => setBulkIntention(e.target.value)}><option value="">Intention: biarkan</option><option value="__auto__">Intention: gunakan aturan</option>{intentionOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
+          <select aria-label="Intention untuk ad terpilih" value={bulkIntention} onChange={e => setBulkIntention(e.target.value)}><option value="">Intention: biarkan</option><option value="__auto__">Intention: gunakan aturan</option>{intentionOptions(selectedRows.length && selectedRows.every(r => r.brandId === selectedRows[0].brandId) ? selectedRows[0].brandId : null).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
           <button className={styles.primary} disabled={busy || (bulkCeps === undefined && !bulkIntention) || (bulkCeps !== undefined && !selectedBrand)} onClick={() => void run(async () => {
             const result = await saveMetaAdMappingOverridesBulk({ ads: selectedRows.map(r => ({ accountId: r.account_id, adId: r.ad_id })), ceps: bulkCeps, intention: bulkIntention ? (bulkIntention === '__auto__' ? null : bulkIntention) : undefined });
             setSelected(new Set());setBulkCeps(undefined);setBulkIntention('');

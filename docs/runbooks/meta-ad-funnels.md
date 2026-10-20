@@ -1044,3 +1044,56 @@ the previous order and shows an error; clicking the desired heading retries it.
 Validation includes 272 Meta tests, rollback-only database coverage of both patch
 types and resets, viewer/template isolation, RPC grants, constraints, asynchronous
 restore, reopening, Funnel stage, pending-save guards and failed-save recovery.
+
+## Brand-scoped business editing (migrations 227–228)
+
+The `meta:mapping`, `meta:taxonomy`, and `meta:funnels` permissions independently
+control ad corrections/verified destinations, CEP and intention catalogs/rules,
+and funnel templates/destination rules. They do not imply `admin:meta`.
+Integration configuration, credentials, connected accounts and sync requests
+remain behind `admin:meta`; advertisers cannot invoke the sync entry points.
+The permission matrix exposes the three keys under **Meta Ads — Pengelolaan**.
+Migration 227 preserves existing editors by copying their current `admin:meta`
+grants once and gives Advertiser the three business keys. Future permission
+changes are independent. Meta page access is still required.
+
+Advertiser scope comes from the active workspace membership and its assigned
+brands. Canonical `meta_ad_accounts.default_brand_id` determines an ad's brand;
+no mutation accepts a caller-supplied brand for an existing ad, funnel or rule.
+The private `mutate_meta_brand_configuration` RPC derives existing-row scope and
+rechecks current membership, permission and brand assignment in the write
+transaction. Profile/membership/grant locks serialize writes with revocation.
+The authenticated actor is supplied by the server session, never by client input.
+Browser/anonymous roles have no direct table or mutation-RPC privileges.
+
+Funnel and destination-rule `brand_id=NULL` denotes a legacy shared template.
+Advertisers may inspect relevant shared templates and copy their configuration
+into one assigned brand, but cannot edit/archive shared templates or delete their
+rules. Brand scope is immutable; copy rather than move a template. Editors assigned
+to the same brand may edit each other's brand templates. Brand-scoped rules take
+precedence over matching shared fallbacks, and are filtered before matching URLs;
+the same URL can therefore use different funnels in different brands. A shared
+rule not matched by the advertiser's scoped landing pages is not exposed in the
+editor. Alert evaluation and MCP reporting also enforce the template's brand.
+
+Intention catalogs are now owned by each brand. Existing brands are seeded with
+Discovery/Consideration/Conversion; new brands receive the same defaults.
+Additional stable keys use `b<brand-id>.<slug>`. Labels/definitions are editable;
+identity cannot change. Deactivation hides a choice from new assignments but
+preserves existing mappings, rules and historical reporting. Rule-based and manual
+custom intentions appear in worklists, filters and the CEP × intention matrix.
+Category/rule revision checks reject stale edits; funnel version checks do likewise.
+
+Validation: `npm run test:advertiser`, `npm run test:meta-funnels`, and
+`npm run test:meta-brand-edit-db`. The last command uses only the verified local
+sample container, installs missing prerequisites inside a single transaction,
+checks denied/allowed operations, and rolls back schema and fixtures. Do not run
+it against production. No sample data is part of either migration.
+
+Release only after review: apply 227 followed by 228 before activating this code.
+227 changes the URL-rule uniqueness key to include brand; older application code
+uses the previous conflict target and cannot edit URL assignments after this
+migration. Consequently an application-only rollback to pre-227 is not a complete
+editor rollback. Prefer a forward fix; a schema rollback needs a separately
+reviewed preservation/mapping plan for newly created brand templates, rules and
+intentions. Never drop these new records merely to restore the old constraint.

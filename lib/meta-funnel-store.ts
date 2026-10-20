@@ -1,3 +1,4 @@
+import { brandTemplateRules } from './meta-template-scope';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AdFact, AdCreative, Coverage, SavedFunnel, VerifiedDestination } from './meta-funnel-domain';
 import { evaluateDeclines, hasCoverage, shiftDay, validateFunnel, withLandingPages } from './meta-funnel-domain';
@@ -14,7 +15,7 @@ export async function readAll<T>(svc: SupabaseClient, table: string, fields: str
     if (to) query = query.lte('metric_date', to);
     // Stable order for PostgREST pagination, including multiple ads on the same date.
     query = ['meta_ad_creatives', 'meta_ad_verified_destinations', 'meta_ad_mappings', 'meta_ad_mapping_channels', 'meta_ad_destination_metadata', 'meta_ad_classifications'].includes(table) ? query.order('account_id').order('ad_id')
-      : table === 'meta_ad_cep_catalog' ? query.order('brand_id').order('key')
+      : ['meta_ad_cep_catalog', 'meta_ad_intention_catalog'].includes(table) ? query.order('brand_id').order('key')
       : table === 'meta_ad_taxonomy_rules' ? query.order('brand_id').order('dimension').order('raw_key')
       : query.order('metric_date').order('account_id');
     if (table === 'meta_ad_daily_metrics') query = query.order('ad_id');
@@ -38,12 +39,12 @@ export async function loadVerifiedDestinations(svc: SupabaseClient, workspaceId:
   return { ready: true, rows: await readAll<VerifiedDestination>(svc, 'meta_ad_verified_destinations', 'account_id,ad_id,creative_id,landing_page_url', workspaceId) };
 }
 export async function loadFunnels(svc: SupabaseClient, workspaceId: string): Promise<(SavedFunnel & { version: number })[]> {
-  const { data, error } = await svc.from('meta_ad_funnels').select('id,config,version,updated_at').eq('workspace_id', workspaceId).eq('archived', false).order('created_at');
+  const { data, error } = await svc.from('meta_ad_funnels').select('id,brand_id,config,version,updated_at').eq('workspace_id', workspaceId).eq('archived', false).order('created_at');
   if (error) throw new Error(`Funnel belum tersedia: ${error.message}`);
-  return (data || []).map(r => ({ ...validateFunnel(r.config), id: r.id, version: r.version, updated_at: r.updated_at }));
+  return (data || []).map(r => ({ ...validateFunnel(r.config), id: r.id, brand_id: r.brand_id, version: r.version, updated_at: r.updated_at }));
 }
 export async function loadTemplateRules(svc: SupabaseClient, workspaceId: string): Promise<{ ready: boolean; rows: TemplateRule[] }> {
-  const { data, error } = await svc.from('meta_landing_page_templates').select('id,funnel_id,match_kind,pattern').eq('workspace_id', workspaceId).order('created_at');
+  const { data, error } = await svc.from('meta_landing_page_templates').select('id,brand_id,funnel_id,match_kind,pattern').eq('workspace_id', workspaceId).order('created_at');
   if (error && ['42P01', 'PGRST205'].includes(error.code)) return { ready: false, rows: [] };
   if (error) throw new Error(`Aturan template belum tersedia: ${error.message}`);
   return { ready: true, rows: (data || []).filter(r => TEMPLATE_MATCH_KINDS.includes(r.match_kind)) as TemplateRule[] };
@@ -58,8 +59,11 @@ export async function evaluateWorkspaceAlerts(svc: SupabaseClient, workspaceId: 
     && (!refreshed || shiftDay(today, -f.lag_days) <= refreshed.to));
   if (!enabled.length) return 0;
   const earliest = enabled.map(f => shiftDay(today, -f.lag_days - f.window_days * 2 + 1)).sort()[0];
+  const accountScope = await svc.from('meta_ad_accounts').select('account_id,default_brand_id').eq('workspace_id', workspaceId).eq('is_active', true);
+  if (accountScope.error) throw new Error(accountScope.error.message);
+  const funnelAccounts = (f: SavedFunnel) => accountIds.filter(id => (!f.account_ids.length || f.account_ids.includes(id)) && (f.brand_id == null || accountScope.data.some(a => a.account_id === id && a.default_brand_id === f.brand_id)));
   const coverage = await readAll<Coverage>(svc, 'meta_ad_sync_coverage', 'account_id,metric_date', workspaceId, earliest, today);
-  const eligible = enabled.filter(f => hasCoverage(coverage, accountIds.filter(a => !f.account_ids.length || f.account_ids.includes(a)),
+  const eligible = enabled.filter(f => hasCoverage(coverage, funnelAccounts(f),
     shiftDay(today, -f.lag_days - f.window_days * 2 + 1), shiftDay(today, -f.lag_days)));
   if (!eligible.length) return 0;
   const [facts, creatives, verified, rules, contacts, accounts] = await Promise.all([
@@ -91,13 +95,13 @@ export async function evaluateWorkspaceAlerts(svc: SupabaseClient, workspaceId: 
     // A template with URL rules monitors only its own landing pages. Templates
     // without rules keep the earlier behavior and monitor every landing page.
     const ownRules = rules.rows.some(r => r.funnel_id === funnel.id);
-    const scoped = enriched.filter(r => accountIds.includes(r.account_id) && (!funnel.account_ids.length || funnel.account_ids.includes(r.account_id))
+    const scoped = enriched.filter(r => (funnel.brand_id == null || brandByAccount.get(r.account_id) === String(funnel.brand_id)) && accountIds.includes(r.account_id) && (!funnel.account_ids.length || funnel.account_ids.includes(r.account_id))
       && (!ownRules || ((r.destination || r.landing_page_urls?.length === 1) && matchDestinationTemplate({
         destination: r.destination, landing_page_urls: r.landing_page_urls,
-      }, rules.rows)?.funnel_id === funnel.id)));
+      }, brandTemplateRules(rules.rows, brandByAccount.get(r.account_id)))?.funnel_id === funnel.id)));
     // Never combine monetary performance from different account currencies.
     if (new Set(scoped.map(r => r.currency)).size > 1) continue;
-    const declines = evaluateDeclines(scoped, coverage, funnel, accountIds, end, creatives);
+    const declines = evaluateDeclines(scoped, coverage, funnel, funnelAccounts(funnel), end, creatives);
     for (const payload of declines) {
       const { error } = await svc.from('meta_funnel_alerts').upsert({
         workspace_id: workspaceId, funnel_id: funnel.id, rule_version: funnel.version,

@@ -1,3 +1,4 @@
+import { visibleMetaTemplates } from './meta-template-scope';
 import { requireDashboardPermissionAccess, requireDashboardTabAccess } from './dashboard-access';
 import { createServiceSupabase } from './service-supabase';
 import { defaultFunnel, metaPerformanceMetrics, validateRange, type FunnelConfig } from './meta-funnel-domain';
@@ -24,6 +25,13 @@ export async function manageAccess() {
   if (ctx.brandIds !== null) throw new Error('Pengaturan Meta hanya dapat diubah oleh pengelola workspace.');
   const manage = await requireDashboardPermissionAccess('admin:meta', 'Kelola funnel Meta');
   if (manage.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
+  return ctx;
+}
+/** Business editing permissions deliberately do not grant integration access. */
+export async function editAccess(permission: 'meta:mapping' | 'meta:taxonomy' | 'meta:funnels') {
+  const ctx = await reportingAccess();
+  const allowed = await requireDashboardPermissionAccess(permission, 'Kelola Meta Ads');
+  if (allowed.workspaceId !== ctx.workspaceId || allowed.profile.id !== ctx.profile.id) throw new Error('Workspace berubah. Muat ulang halaman.');
   return ctx;
 }
 export const currencyError = 'Funnel mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama pada konfigurasi.';
@@ -54,9 +62,9 @@ export async function reportContext(input: MetaReportInput, includeJobs = false)
   if ([version, channelSchema].some(r => r.error && ['42P01', 'PGRST205'].includes(r.error.code))) return { schemaReady: false as const };
   for (const result of [version, accountsResult, brandsResult, jobsResult, channelSchema]) if (result.error) throw new Error(result.error.message);
   const accounts = scopeMetaAccounts(accountsResult.data || [], access), brands = scopeMetaBrands(brandsResult.data || [], access);
-  const visibleFunnels = access.brandIds === null ? funnels : funnels
-    .filter(f => access.accountIds!.length > 0 && (!f.account_ids.length || f.account_ids.some(id => access.accountIds!.includes(id))))
-    .map(f => ({ ...f, account_ids: scopeMetaAccountIds(f.account_ids, access) }));
+  const visibleFunnels = visibleMetaTemplates(funnels, access, brandId)
+    .map(f => ({ ...f, account_ids: f.brand_id == null ? scopeMetaAccountIds(f.account_ids, access) :
+      f.account_ids }));
   if (brandId && !metaBrandOptions(accounts, brands, []).choices.some(b => b.value === brandId)) throw new Error('Brand tidak tersedia pada akun Meta workspace ini.');
   // A template is applied only when explicitly selected: its stages and metrics
   // then drive the report. Without one, the report covers every active account
@@ -65,6 +73,10 @@ export async function reportContext(input: MetaReportInput, includeJobs = false)
   if (input.funnelId && !selected) throw new Error('Template tidak tersedia dalam akses Anda.');
   const config: FunnelConfig = { ...(selected || { ...defaultFunnel(), metrics: metaPerformanceMetrics() }), group_by: input.groupBy === 'ad' ? 'ad_id' : input.groupBy === 'cep_intention' ? 'cep_intention' : 'landing_page' };
   config.account_ids = scopeMetaAccountIds(config.account_ids, access);
+  if (selected?.brand_id != null) {
+    const ids = accounts.filter(a => a.default_brand_id === selected.brand_id && (!selected.account_ids.length || selected.account_ids.includes(a.account_id))).map(a => a.account_id);
+    config.account_ids = ids.length ? ids : ['__no_authorized_meta_account__'];
+  }
   const configuredAccounts = accounts.filter(a => !config.account_ids.length || config.account_ids.includes(a.account_id));
   return { schemaReady: true as const, workspaceId, reportVersion: String(version.data?.revision || 0), reportRange, filters, brandId, channel,
     brandIds: access.brandIds, accessKey: access.accessKey, funnels: visibleFunnels, selectedId: selected?.id || null, config, accounts, configuredAccounts, brands,

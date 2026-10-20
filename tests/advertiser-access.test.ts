@@ -100,6 +100,7 @@ test('Meta Ads server entry point respects disabled modules and retains legacy m
     const report = loadServerModule('meta-report-context', {
       './dashboard-access': guards,
       './workspaces': { isWorkspaceModuleEnabled },
+      './meta-template-scope': {},
       './meta-brand-access': { loadMetaBrandScope: async () => ({ brandIds: [1], accountIds: ['act_1'], accessKey: '1' }) },
       ...Object.fromEntries(['./service-supabase', './meta-funnel-domain', './meta-funnel-store', './sync-schedule', './meta-ad-channels', './meta-ad-dimensions', './meta-ad-brands', './meta-report-status', './meta-funnel-sync-status'].map(name => [name, {}])),
     });

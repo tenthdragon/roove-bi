@@ -2,10 +2,13 @@
 
 // Brand-first Meta Ads reporting: one summary per brand, one detail per brand
 // and world (website or CPAS), and template rule management.
+import { mutateMeta } from './meta-edit-mutations';
+import { brandTemplateRules } from './meta-template-scope';
+import { assertMetaBrand } from './meta-brand-access';
 import { createServiceSupabase } from './service-supabase';
 import { metaReportResponse } from './meta-report-requests';
 import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, sumMetricTotals, type FunnelMetric, type Totals } from './meta-funnel-domain';
-import { loadFunnels, loadTemplateRules } from './meta-funnel-store';
+import { loadTemplateRules } from './meta-funnel-store';
 import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaReport, type ReportGroupBy } from './meta-ad-report';
 import { getCachedMetaAdReport, getCachedMetaBrandOverviewReport, getCachedMetaBrandDetailReport } from './meta-ad-report-data';
 import { emptyMetaBrandReport } from './meta-brand-report';
@@ -16,11 +19,11 @@ import { assignTemplateSections, compareMetrics, cpasSection, defaultLeadFunnel,
 import { ctwaLabel } from './meta-ctwa-destinations';
 import { brandHealth, brandHighlights, type Highlight } from './meta-ad-highlights';
 import { buildCepView, cepHighlights } from './meta-cep-view';
-import { manageAccess, reportContext, reportingAccess, uuid } from './meta-report-context';
+import { editAccess, reportContext, reportingAccess, uuid } from './meta-report-context';
 import { defaultFunnel } from './meta-funnel-domain';
 import { saveMetaFunnel } from './meta-funnel-actions';
 import { getTodayWIB } from './sync-schedule';
-import { assertMetaTemplateMutation, metaTemplateError, metaTemplateFailure, type MetaTemplateConfiguration, type MetaTemplateResult } from './meta-template-settings';
+import { metaTemplateError, metaTemplateFailure, type MetaTemplateConfiguration, type MetaTemplateResult } from './meta-template-settings';
 
 const CPP: FunnelMetric = { id: 'cpp', label: 'CPP', numerator: 'spend', denominator: 'purchases', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
 const CPL: FunnelMetric = { id: 'cpl', label: 'CPL', numerator: 'spend', denominator: 'leads', format: 'money', direction: 'lower', monitor: true, min_denominator: 1 };
@@ -53,11 +56,11 @@ function fetchWorld(ctx: Context, world: MetaBrandWorld, brandId: string | undef
 /** The lead cost metric follows whichever lead-type event the brand actually records. */
 function leadCostMetric(totals: Totals): FunnelMetric { return totals.leads > 0 || totals.conversations === 0 ? CPL : CPC_CONVERSATION; }
 
-function websiteWorld(ctx: Context, raw: RawMetaReport, brandAccounts: string[], rules: Awaited<ReturnType<typeof loadTemplateRules>>['rows']) {
+function websiteWorld(ctx: Context, raw: RawMetaReport, brandAccounts: string[], rules: Awaited<ReturnType<typeof loadTemplateRules>>['rows'], brandId: string) {
   const reportingError = raw.currencies.length > 1 ? 'Brand mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama.' : null;
   const summary = reportingError ? emptyTotals() : raw.summary, previous = reportingError ? emptyTotals() : raw.previous;
   const groups = reportingError ? [] : normalizeGroups(raw, ctx.brands);
-  const { sections, unassigned } = assignTemplateSections(groups, ctx.funnels, rules);
+  const { sections, unassigned } = assignTemplateSections(groups, ctx.funnels.filter(f => f.brand_id == null || String(f.brand_id) === brandId), brandTemplateRules(rules, brandId));
   const coverageGaps = metaCoverageGaps(raw.coverage, brandAccounts, ctx.reportRange);
   const highlights = brandHighlights({ world: 'website', sections, summary, previous, currency: raw.currencies[0] || 'IDR', unassigned, coverageGaps, missingUrls: raw.destinations.missing_ads })
     .map(h => ({ ...h, world: 'website' as const }));
@@ -114,7 +117,7 @@ async function loadMetaBrandOverview(input: BrandInput & { workspaceId?: string 
       label: c.cep === '__unknown__' ? 'Belum terpetakan' : report.cepLabels[c.cep] || dimensionLabel('cep', c.cep),
       share: cepTotal > 0 ? c.spend / cepTotal : 0,
     })).sort((a, b) => Number(a.cep === '__unknown__') - Number(b.cep === '__unknown__') || b.share - a.share);
-    const web = websiteWorld(ctx, rawWeb, brandAccounts, rules.rows), cpas = cpasWorld(ctx, rawCpas, brandAccounts);
+    const web = websiteWorld(ctx, rawWeb, brandAccounts, rules.rows, brand.value), cpas = cpasWorld(ctx, rawCpas, brandAccounts);
     const summary = sumTotals([web.summary, cpas.summary]), previous = sumTotals([web.previous, cpas.previous]);
     const highlights = mergeHighlights(web.highlights, cpas.matchingAds ? cpas.highlights : []);
     const dataNotes = highlights.filter(h => h.kind === 'data').length;
@@ -131,11 +134,11 @@ async function loadMetaBrandOverview(input: BrandInput & { workspaceId?: string 
   const summary = sumTotals(brands.map(b => b.summary)), previous = sumTotals(brands.map(b => b.previous));
   const totals = { spend: summary.spend, website: brands.reduce((s, b) => s + b.spend.website, 0), cpas: brands.reduce((s, b) => s + b.spend.cpas, 0),
     spendChange: relativeChange(summary.spend, previous.spend), ctr: compare(summary, previous, CTR) };
-  const allRaw = { ...emptyMetaBrandReport(), facets: report.facets, facetTotals: report.facetTotals, cepLabels: report.cepLabels,
+  const allRaw = { ...emptyMetaBrandReport(), facets: report.facets, facetTotals: report.facetTotals, cepLabels: report.cepLabels, intentionLabels: report.intentionLabels,
     currencies: [...new Set(report.reports.filter(r => r.channel === 'non_cpas').flatMap(r => r.report.currencies))].sort() };
   return { schemaReady: true as const, workspaceId: ctx.workspaceId, reportRange: ctx.reportRange, prevFrom: shiftDay(from, -daysBetween(from, to)), prevTo: shiftDay(from, -1),
     reportVersion: ctx.reportVersion, accessKey: ctx.accessKey, brandIds: ctx.brandIds, accounts: ctx.accounts, jobs: ctx.jobs, brands, totals, rulesReady: rules.ready,
-    templates: ctx.funnels.map(f => ({ id: f.id, name: f.name, kind: templateKind(f) })),
+    templates: ctx.funnels.map(f => ({ id: f.id, brand_id: f.brand_id, name: f.name, kind: templateKind(f) })),
     dimensionOptions: metaReportOptions(allRaw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true,
     dataNotes: brands.reduce((s, b) => s + b.dataNotes, 0), currency: brands[0]?.currency || allRaw.currencies[0] || 'IDR' };
 }
@@ -156,7 +159,7 @@ async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world:
   ]);
   const brandAccounts = metaBrandAccountIds(ctx.accounts, ctx.brands, brandId);
   const { website: rawWeb, cpas: rawCpas, cep: rawCep } = raw;
-  const web = websiteWorld(ctx, rawWeb, brandAccounts, rules.rows), cpas = cpasWorld(ctx, rawCpas, brandAccounts);
+  const web = websiteWorld(ctx, rawWeb, brandAccounts, rules.rows, brandId), cpas = cpasWorld(ctx, rawCpas, brandAccounts);
   const active = world === 'website' ? web : cpas;
   const activeRaw = world === 'website' ? rawWeb : rawCpas;
   // The CEP lens reads the same scoped ads as the destination view, cut by CEP × intention.
@@ -174,16 +177,25 @@ async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world:
     sections: world === 'website' ? web.sections : [cpas.section], unassigned: world === 'website' ? web.unassigned : [],
     highlights: highlights.slice(0, 6), cep, coverageGaps: active.coverageGaps, destinations: activeRaw.destinations, objectiveUnknownAds: activeRaw.objectiveUnknownAds,
     dimensionOptions: metaReportOptions(activeRaw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true, rulesReady: rules.ready, verifiedDestinationsReady: true,
-    templates: ctx.funnels.map(f => ({ id: f.id, name: f.name, kind: templateKind(f) })) };
+    templates: ctx.funnels.map(f => ({ id: f.id, brand_id: f.brand_id, name: f.name, kind: templateKind(f) })) };
 }
 
-async function loadMetaTemplateSettings() {
+async function loadMetaTemplateSettings(requestedBrandId?: number | null) {
   const today = getTodayWIB();
+  const scope = await reportingAccess();
+  const brandId = requestedBrandId === undefined && scope.brandIds !== null ? scope.brandIds[0] ?? null : requestedBrandId ?? null;
+  if (scope.brandIds !== null && brandId === null) throw new Error('Pilih brand yang ditugaskan.');
+  if (brandId !== null) assertMetaBrand(scope, String(brandId));
+  // A brand can prepare its templates before its first Meta account is connected.
   const ctx = await reportContext({ from: shiftDay(today, -30), to: shiftDay(today, -1) });
   if (!ctx.schemaReady) return ctx;
-  if (ctx.brandIds !== null) throw new Error('Pengaturan template hanya tersedia untuk pengelola workspace.');
+  if (ctx.workspaceId !== scope.workspaceId || brandId !== null && !ctx.brands.some(b => b.id === brandId)) throw new Error('Brand tidak tersedia dalam akses Anda.');
   const svc = createServiceSupabase();
-  const [rules, raw] = await Promise.all([loadTemplateRules(svc, ctx.workspaceId), fetchWorld(ctx, 'website', undefined)]);
+  const [loadedRules, raw] = await Promise.all([loadTemplateRules(svc, ctx.workspaceId), fetchWorld(ctx, 'website', brandId === null ? undefined : String(brandId))]);
+  const scopedRules = brandTemplateRules(loadedRules.rows, brandId);
+  const matchedShared = new Set(normalizeGroups(raw, ctx.brands).map(g => matchDestinationTemplate(g, scopedRules)?.id));
+  const rules = { ...loadedRules, rows: scopedRules.filter(r => ctx.brandIds === null || r.brand_id != null || matchedShared.has(r.id)) };
+  ctx.funnels = ctx.funnels.filter(f => f.brand_id == null || f.brand_id === brandId);
   const accountBrand = new Map(ctx.accounts.map(a => [a.account_name, ctx.brands.find(b => b.id === a.default_brand_id)?.name || 'Brand belum dipetakan']));
   const templates = ctx.funnels.map(f => ({ ...f, kind: templateKind(f), mainMetric: templateMainMetric(f), rules: rules.rows.filter(r => r.funnel_id === f.id).length }));
   const normalized = normalizeGroups(raw, ctx.brands);
@@ -197,28 +209,22 @@ async function loadMetaTemplateSettings() {
       rule: rule ? { id: rule.id, match_kind: rule.match_kind, pattern: rule.pattern } : null, templateId: template?.id || null, templateName: template?.name || null,
       suggestion: suggestTemplate(g.current, ctx.funnels) };
   }).sort((a, b) => Number(!!a.templateId) - Number(!!b.templateId) || b.spend - a.spend);
-  return { schemaReady: true as const, rulesReady: rules.ready, range: ctx.reportRange, currency: raw.currencies[0] || 'IDR', templates, accounts: ctx.accounts,
+  return { schemaReady: true as const, brandId, brands: ctx.brands, rulesReady: rules.ready, range: ctx.reportRange, currency: raw.currencies[0] || 'IDR', templates, accounts: ctx.accounts.filter(a => brandId === null || a.default_brand_id === brandId),
     rules: rules.rows.map(r => ({ ...r, templateName: ctx.funnels.find(f => f.id === r.funnel_id)?.name || 'Template diarsipkan' })), landingPages, reportVersion: ctx.reportVersion };
 }
-export async function getMetaTemplateSettings(): Promise<MetaTemplateResult<Awaited<ReturnType<typeof loadMetaTemplateSettings>>>> {
-  try { return await loadMetaTemplateSettings(); }
+export async function getMetaTemplateSettings(brandId?: number | null): Promise<MetaTemplateResult<Awaited<ReturnType<typeof loadMetaTemplateSettings>>>> {
+  try { return await loadMetaTemplateSettings(brandId); }
   catch (error) {
     console.error('[meta-template-settings] Load failed', error);
     return { error: metaTemplateError(error, 'Data template belum berhasil dimuat. Silakan coba muat ulang.') };
   }
 }
-/** Refresh configuration after edits without rereading the performance report. */
-export async function getMetaTemplateConfiguration(): Promise<MetaTemplateResult<MetaTemplateConfiguration & { rulesReady: boolean }>> {
+/** Refresh configuration with the same brand scope and cached destination report. */
+export async function getMetaTemplateConfiguration(brandId?: number | null): Promise<MetaTemplateResult<MetaTemplateConfiguration & { rulesReady: boolean }>> {
   try {
-    // Preserve existing read access for other roles; advertisers cannot read global rules.
-    const scope = await reportingAccess();
-    if (scope.brandIds !== null) throw new Error('Pengaturan template hanya tersedia untuk pengelola workspace.');
-    const { workspaceId } = scope;
-    const svc = createServiceSupabase();
-    const [funnels, rules] = await Promise.all([loadFunnels(svc, workspaceId), loadTemplateRules(svc, workspaceId)]);
-    return { rulesReady: rules.ready,
-      templates: funnels.filter(f => f.group_by === 'landing_page').map(f => ({ ...f, kind: templateKind(f), mainMetric: templateMainMetric(f), rules: rules.rows.filter(r => r.funnel_id === f.id).length })),
-      rules: rules.rows.map(r => ({ ...r, templateName: funnels.find(f => f.id === r.funnel_id)?.name || 'Template diarsipkan' })) };
+    const settings = await loadMetaTemplateSettings(brandId);
+    if (!settings.schemaReady) throw new Error('Konfigurasi belum tersedia.');
+    return { templates: settings.templates, rules: settings.rules, rulesReady: settings.rulesReady };
   } catch (error) {
     console.error('[meta-template-settings] Configuration load failed', error);
     return { error: metaTemplateError(error, 'Konfigurasi template belum berhasil dimuat. Silakan muat ulang halaman.') };
@@ -226,27 +232,10 @@ export async function getMetaTemplateConfiguration(): Promise<MetaTemplateResult
 }
 export async function saveMetaTemplateRule(input: { id?: string; funnelId: string; match_kind: string; pattern: string }): Promise<MetaTemplateResult<TemplateRule>> {
   try {
-    const { workspaceId, profile } = await manageAccess();
+    const ctx = await editAccess('meta:funnels');
     const rule = validateTemplateRule(input);
-    const svc = createServiceSupabase();
-    if (rule.match_kind === 'ctwa') {
-      const brandId = rule.pattern.split(':')[1];
-      if (brandId !== '__unmapped__') {
-        const brand = await svc.from('brands').select('id').eq('workspace_id', workspaceId).eq('id', brandId).maybeSingle();
-        if (brand.error) throw new Error(brand.error.message);
-        if (!brand.data) throw new Error('Tujuan WhatsApp tidak valid. Brand tidak ditemukan.');
-      }
-    }
-    const funnel = await svc.from('meta_ad_funnels').select('id').eq('workspace_id', workspaceId).eq('id', uuid(input.funnelId)).eq('archived', false).maybeSingle();
-    if (funnel.error) throw new Error(funnel.error.message);
-    if (!funnel.data) throw new Error('Template tidak ditemukan.');
-    const row = { workspace_id: workspaceId, funnel_id: input.funnelId, ...rule, updated_at: new Date().toISOString() };
-    const result = input.id
-      ? await svc.from('meta_landing_page_templates').update(row).eq('workspace_id', workspaceId).eq('id', uuid(input.id)).select('id').maybeSingle()
-      : await svc.from('meta_landing_page_templates').upsert({ ...row, created_by: profile.id }, { onConflict: 'workspace_id,match_kind,pattern' }).select('id').maybeSingle();
-    assertMetaTemplateMutation(result.error);
-    if (!result.data) throw new Error('Aturan tidak ditemukan.');
-    return { id: result.data.id as string, funnel_id: input.funnelId, ...rule };
+    uuid(input.funnelId); if (input.id) uuid(input.id);
+    return await mutateMeta(ctx, 'template_rule', { ...input, ...rule }) as TemplateRule;
   } catch (error) {
     console.error('[meta-template-settings] Rule save failed', error);
     return metaTemplateFailure(error, 'Penetapan template belum dapat dikonfirmasi. Muat ulang halaman sebelum mencoba lagi.');
@@ -254,9 +243,8 @@ export async function saveMetaTemplateRule(input: { id?: string; funnelId: strin
 }
 export async function deleteMetaTemplateRule(id: string): Promise<MetaTemplateResult<{ deletedId: string }>> {
   try {
-    const { workspaceId } = await manageAccess();
-    const result = await createServiceSupabase().from('meta_landing_page_templates').delete().eq('workspace_id', workspaceId).eq('id', uuid(id));
-    assertMetaTemplateMutation(result.error);
+    const ctx = await editAccess('meta:funnels');
+    await mutateMeta(ctx, 'delete_template_rule', { id: uuid(id) });
     return { deletedId: id };
   } catch (error) {
     console.error('[meta-template-settings] Rule delete failed', error);
@@ -264,10 +252,10 @@ export async function deleteMetaTemplateRule(id: string): Promise<MetaTemplateRe
   }
 }
 /** Creates a standard template so a workspace can start without designing one. */
-export async function createMetaTemplatePreset(kind: 'transaction' | 'lead') {
+export async function createMetaTemplatePreset(kind: 'transaction' | 'lead', brandId?: number | null) {
   if (kind !== 'transaction' && kind !== 'lead') throw new Error('Jenis template tidak valid.');
   const config = kind === 'transaction' ? { ...defaultFunnel(), name: 'Transaksi website', description: 'Outbound click → landing page → add to cart → initiate checkout → purchase' } : defaultLeadFunnel();
-  return saveMetaFunnel({ config });
+  return saveMetaFunnel({ config, brandId });
 }
 
 /** Per-ad rows behind one landing page or CPAS group, for the detail drawer. */

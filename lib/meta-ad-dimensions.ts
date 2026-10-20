@@ -35,7 +35,7 @@ export function withAdDimensions(facts: AdFact[], mappings: AdDimensions[]) {
     return { ...row,
       cep_keys: ceps,
       cep_key: ceps[0] || null,
-      intention_key: (() => { const key = mapping ? mapping.intention_key : parsed.tags.find(t => t.dimension === 'intention')?.key; return key && Object.hasOwn(FUNNEL_KEYS, key) ? key : null; })(),
+      intention_key: (() => { const key = mapping ? mapping.intention_key : parsed.tags.find(t => t.dimension === 'intention')?.key; return mapping ? key || null : key && Object.hasOwn(FUNNEL_KEYS, key) ? key : null; })(),
       // Use a report-observed objective first. A metadata fallback must match the
       // fact's actual campaign ID, not just the ad's current name or creative.
       campaign_objective: row.campaign_objective || (row.campaign_id && mapping?.campaign_id === row.campaign_id ? mapping.campaign_objective : null)
@@ -48,13 +48,13 @@ export function matchesAdDimensions(row: Pick<AdDimensions, 'cep_key' | 'intenti
     && (!filters.intention || (row.intention_key || '__unknown__') === filters.intention)
     && (!filters.objective || (row.campaign_objective || '__unknown__') === filters.objective);
 }
-export function dimensionOptions(mappings: AdDimensions[], rows: AdDimensions[] = [], filters: AdDimensionFilters = {}, catalog?: CepCategory[]) {
+export function dimensionOptions(mappings: AdDimensions[], rows: AdDimensions[] = [], filters: AdDimensionFilters = {}, catalog?: CepCategory[], intentions?: CepCategory[]) {
   const valueFor = (row: Pick<AdDimensions, 'cep_key'|'intention_key'|'campaign_objective'>, dimension: keyof AdDimensionFilters) =>
     (dimension === 'objective' ? row.campaign_objective : dimension === 'cep' ? row.cep_key : row.intention_key) || '__unknown__';
   const options = (dimension: keyof AdDimensionFilters) => {
     const otherFilters = { ...filters };
     delete otherFilters[dimension];
-    const allowed = dimension === 'intention' ? Object.keys(FUNNEL_KEYS) : dimension === 'cep' ? (catalog ? catalog.map(c => c.key) : Object.keys(CEP_KEYS)) : mappings.map(m => valueFor(m, dimension));
+    const allowed = dimension === 'intention' ? (intentions ? intentions.map(c => c.key) : Object.keys(FUNNEL_KEYS)) : dimension === 'cep' ? (catalog ? catalog.map(c => c.key) : Object.keys(CEP_KEYS)) : mappings.map(m => valueFor(m, dimension));
     const values = new Set(dimension === 'objective' ? allowed : [...allowed, '__unknown__']);
     const adsByValue = new Map<string, Set<string>>();
     const allAds = new Set<string>();
@@ -72,10 +72,10 @@ export function dimensionOptions(mappings: AdDimensions[], rows: AdDimensions[] 
       }
       allAds.add(ad);
     }
-    const choices = [...values].map(value => ({ value, label: dimension === 'objective' ? objectiveLabel(value) : dimension === 'cep' ? catalog?.find(c => c.key === value)?.label || dimensionLabel(dimension, value) : dimensionLabel(dimension, value), count: adsByValue.get(value)?.size || 0 }))
+    const choices = [...values].map(value => ({ value, label: dimension === 'objective' ? objectiveLabel(value) : dimension === 'cep' ? catalog?.find(c => c.key === value)?.label || dimensionLabel(dimension, value) : intentions?.find(c => c.key === value)?.label || dimensionLabel(dimension, value), count: adsByValue.get(value)?.size || 0 }))
       .sort((a,b) => b.count - a.count || a.label.localeCompare(b.label, 'id'));
     return { choices, total: allAds.size };
   };
-  const ceps = options('cep'), intentions = options('intention'), objectives = options('objective');
-  return { ceps: ceps.choices, cepTotal: ceps.total, intentions: intentions.choices, intentionTotal: intentions.total, objectives: objectives.choices, objectiveTotal: objectives.total };
+  const ceps = options('cep'), intentionChoices = options('intention'), objectives = options('objective');
+  return { ceps: ceps.choices, cepTotal: ceps.total, intentions: intentionChoices.choices, intentionTotal: intentionChoices.total, objectives: objectives.choices, objectiveTotal: objectives.total };
 }

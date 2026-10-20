@@ -2,7 +2,7 @@ import { emptyTotals } from './meta-funnel-domain';
 import type { RawMetaReport } from './meta-ad-report';
 
 /** Only fields used by the brand summary cross the database boundary. */
-export type MetaBrandReport = {
+export type MetaBrandReport = { intentionLabels?: Record<string, string>;
   reports: { brand: string; channel: 'non_cpas' | 'cpas'; report: RawMetaReport }[];
   cepSpend: { brand: string; cep: string; spend: number }[];
   facets: RawMetaReport['facets'];

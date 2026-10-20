@@ -31,7 +31,7 @@ export default function MetaAdsNav({ title, subtitle, actions }: { title?: strin
   }, [activeWorkspace.id]);
   return <div className={styles.subnavArea}>
     <nav aria-label="Menu Meta Ads" className={styles.subnav}>
-      {items.filter(item => role !== 'advertiser' || !['Notifikasi', 'Template funnel'].includes(item.label)).map(item => { const active = item.match(pathname); return <Link key={item.href} href={item.href} className={active ? styles.subnavActive : ''} aria-current={active ? 'page' : undefined}>
+      {items.filter(item => role !== 'advertiser' || item.label !== 'Notifikasi').map(item => { const active = item.match(pathname); return <Link key={item.href} href={item.href} className={active ? styles.subnavActive : ''} aria-current={active ? 'page' : undefined}>
         {item.label}{item.label === 'Notifikasi' && unread > 0 && <span className={styles.subnavBadge} aria-label={`${unread} belum dibaca`}>{unread > 99 ? '99+' : unread}</span>}
       </Link>; })}
     </nav>
