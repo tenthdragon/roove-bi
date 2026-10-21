@@ -80,7 +80,8 @@ test('table headers, data and totals share the selected order, with Tujuan pinne
   assert.deepEqual(root.root.findByType('thead').findAllByType('th').map((n: any) => n.findByType('button').children[0]), ['Tujuan', 'Funnel', 'CPM']);
   assert.equal(root.root.findByType('tbody').findAllByType('td').length, 3);
   assert.equal(root.root.findByType('tfoot').findAllByType('td').length, 2);
-  const value = root.root.findByType('tbody').findAllByType('td')[2].findAllByType('span')[0].children[0];
+  const text = (node: any): string => typeof node === 'string' ? node : node.children.map(text).join('');
+  const value = text(root.root.findByType('tbody').findAllByType('td')[2].findAllByType('span')[0]);
   assert.equal(value, root.root.findByType('tfoot').findAllByType('td')[1].children[0]);
   assert.equal(sections[0].summary.spend, 1234); assert.equal(sections[0].config.metrics.length, 3);
   await act(async () => root.unmount());

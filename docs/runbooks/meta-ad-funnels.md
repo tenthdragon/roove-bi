@@ -30,7 +30,7 @@ modules (`marketing` and `meta-funnels`) must remain enabled for Meta Ads.
   the selected date range and filters, with a comparison to the previous period;
   zero checkouts display “—”. Sync status and the manual **Sync** button live here.
 - **Detail brand** (`/dashboard/meta-funnels/brand/<brandId>?world=website|cpas`):
-  a Website / CPAS segmented control, ranked **Sorotan** (highlights), the
+  a Website / CPAS segmented control, inline **Sorotan** (highlights), the
   shared **Respon iklan** layer (CPM, CTR outbound, hook rate, LPV ratio or
   purchase per click), then **Hasil**. On Website, results are grouped per
   funnel template with that template's own columns; landing pages without a
@@ -106,6 +106,25 @@ one URL rule only monitors landing pages matched to it; a template without
 rules keeps monitoring every landing page in its account scope.
 
 ## Highlights
+
+Brand detail shows insights beside the affected KPI, destination metric/funnel
+step, or per-CEP metric. Hover or keyboard focus opens an explanation; click/tap
+pins it. Escape, close, or clicking outside dismisses it. Panels include raw
+current/reference values, date ranges for period comparisons, and the existing
+explanation and detail action. Period comparisons use arrows; median/brand
+comparisons use a warning or opportunity star, never a temporal arrow.
+
+Anchors match numerator, denominator and multiplier rather than editable metric
+IDs. Destination name badges retain all row insights even when the affected
+column is hidden or absent from the template. CEP insights apply to whole CEP
+rows, not individual intention cells. Detail reports return every finding;
+overview ranking/health and the existing rule thresholds remain unchanged.
+
+Non-metric findings are previewed under **Catatan data** beside Filter. Its count
+is the number of issue categories (including unmapped CEP), matching the detail
+panel. Unassigned destinations also show a template warning by name. No standalone
+stable card is displayed. Actions continue using the existing permission checks.
+No database migration or new persistence is required.
 
 `lib/meta-ad-highlights.ts` ranks five pure rules by severity, then spend:
 stage leak (a consecutive-stage ratio down ≥ 15% with ≥ 30 events in both
