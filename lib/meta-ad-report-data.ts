@@ -2,6 +2,7 @@ import { unstable_cache } from 'next/cache';
 import { createServiceSupabase } from './service-supabase';
 import { createMetaReportRequests, MetaReportUnavailableError } from './meta-report-requests';
 import type { RawMetaReport, ReportQuery } from './meta-ad-report';
+import { buildFormatCepMatrix } from './meta-format-cep-matrix';
 import type { MetaBrandReport } from './meta-brand-report';
 import type { AdDimensionFilters } from './meta-ad-dimensions';
 
@@ -19,25 +20,43 @@ async function intentionLabels(workspaceId: string, brand?: string | null) {
 const processState = globalThis as typeof globalThis & { metaReportRequests?: ReturnType<typeof createMetaReportRequests> };
 const requests = processState.metaReportRequests ??= createMetaReportRequests(2);
 
+async function readMetaAdReport(workspaceId: string, query: ReportQuery): Promise<RawMetaReport> {
+  const result = await createServiceSupabase().rpc('get_meta_ad_report_incremental', {
+    p_workspace_id: workspaceId, p_from: query.from, p_to: query.to, p_config: query.config,
+    p_filters: { ...query.filters, ...(query.channel ? { channel: query.channel } : {}) }, p_brand: query.brand, p_group_by: query.groupBy,
+    p_view: query.view, p_period: query.period, p_group_key: query.groupKey,
+  });
+  if (result.error) {
+    console.error('[meta-ad-report] RPC failed', { code: result.error.code, message: result.error.message });
+    throw new MetaReportUnavailableError(result.error.code === '57014');
+  }
+  return result.data as RawMetaReport;
+}
+
 // Auth is checked by the Server Action before every call, including cache hits.
 // The database revision changes atomically with successful sync/metadata writes.
 // This also invalidates results when a CLI worker writes outside Next.js.
 export const getCachedMetaAdReport = unstable_cache(
   (workspaceId: string, revision: string, query: ReportQuery): Promise<RawMetaReport> => requests.run(
     JSON.stringify([workspaceId, revision, query]), async () => {
-      const result = await createServiceSupabase().rpc('get_meta_ad_report_incremental', {
-        p_workspace_id: workspaceId, p_from: query.from, p_to: query.to, p_config: query.config,
-        p_filters: { ...query.filters, ...(query.channel ? { channel: query.channel } : {}) }, p_brand: query.brand, p_group_by: query.groupBy,
-        p_view: query.view, p_period: query.period, p_group_key: query.groupKey,
-      });
-      if (result.error) {
-        console.error('[meta-ad-report] RPC failed', { code: result.error.code, message: result.error.message });
-        throw new MetaReportUnavailableError(result.error.code === '57014');
-      }
-      return { ...result.data, intentionLabels: await intentionLabels(workspaceId, query.brand) } as RawMetaReport;
+      const data = await readMetaAdReport(workspaceId, query);
+      return { ...data, intentionLabels: await intentionLabels(workspaceId, query.brand) };
   }),
   ['meta-ad-report-v9-optimization'],
   { revalidate: 300 },
+);
+
+// Cache the compact matrix, not thousands of full per-ad rows (Next cache entries are bounded).
+export const getCachedMetaFormatCepMatrix = unstable_cache(
+  (workspaceId: string, revision: string, query: ReportQuery) => requests.run(
+    JSON.stringify(['format-cep-matrix', workspaceId, revision, query]), async () => {
+      const raw = await readMetaAdReport(workspaceId, query);
+      const reportingError = raw.currencies.length > 1 ? 'Brand mencakup beberapa mata uang. Pilih akun dengan mata uang yang sama.' : null;
+      try {
+        return { matrix: buildFormatCepMatrix(reportingError ? { groups: [], cepLabels: {} } : raw), currency: raw.currencies[0] || 'IDR', reportingError };
+      } catch { throw new MetaReportUnavailableError(false); }
+    }),
+  ['meta-format-cep-matrix-v1'], { revalidate: 300 },
 );
 
 export const getCachedMetaBrandDetailReport = unstable_cache(
