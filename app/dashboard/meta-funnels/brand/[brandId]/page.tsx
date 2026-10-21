@@ -10,7 +10,7 @@ import { usePermissions } from '@/lib/PermissionsContext';
 import { useMetaCachedLoad, useMetaReportSession } from '@/lib/useMetaCachedLoad';
 import { useMetaBreakdownPreference } from '@/lib/useMetaBreakdownPreference';
 import { createMetaOverviewCache } from '@/lib/meta-overview-cache';
-import { defaultMetaRange } from '@/lib/meta-report-status';
+import { defaultMetaRange, metaDailyTrendRange } from '@/lib/meta-report-status';
 import { getTodayWIB } from '@/lib/sync-schedule';
 import { getMetaFunnelHistory, getMetaReportRevision, queueMetaFunnelSync, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
 import { getMetaBrandDetail, getMetaFormatCepMatrix, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
@@ -125,7 +125,8 @@ export default function MetaBrandDetailPage() {
     return () => { alive = false; };
   }, [cacheKey, data?.reportVersion, session.workspaceId, load, setError]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { setDrawer(null); setCepDrawer(null); setNotesOpen(false); setDestinationEditor(null); }, [world, brandId, cacheKey]);
-  const historyKey = JSON.stringify([cacheKey, data?.reportVersion, 'daily']);
+  const trendRange = useMemo(() => metaDailyTrendRange(data?.reportRange.to || reportRange.to), [data?.reportRange.to, reportRange.to]);
+  const historyKey = JSON.stringify([session.key, brandId, world, filters, trendRange, data?.reportVersion, 'daily-30']);
   useEffect(() => {
     if (!data || !cacheKey) return;
     let alive = true; setHistoryError('');
@@ -133,7 +134,7 @@ export default function MetaBrandDetailPage() {
     if (cached) { setHistory({ key: historyKey, ...cached }); return; }
     const read = () => {
       void historyCache.request(historyKey, async () => {
-        const result = await getMetaFunnelHistory({ from: input.from, to: input.to, workspaceId: session.workspaceId, brandId, filters, channel: WORLD_CHANNEL[world], groupBy: world === 'website' ? 'landing_page' : 'ad', view: 'daily' });
+        const result = await getMetaFunnelHistory({ from: trendRange.from, to: trendRange.to, workspaceId: session.workspaceId, brandId, filters, channel: WORLD_CHANNEL[world], groupBy: world === 'website' ? 'landing_page' : 'ad', view: 'daily' });
         if (!result.schemaReady) throw new Error('Histori laporan belum tersedia.');
         if (result.reportingError) throw new Error(result.reportingError);
         return { points: result.history, complete: result.history.length > 0 && result.history.every(point => point.complete) };
@@ -145,7 +146,7 @@ export default function MetaBrandDetailPage() {
     const idle = 'requestIdleCallback' in window;
     const timer = idle ? window.requestIdleCallback(read, { timeout: 1500 }) : window.setTimeout(read, 0);
     return () => { alive = false; if (idle) window.cancelIdleCallback(timer); else clearTimeout(timer); };
-  }, [input, brandId, filters, world, historyKey, cacheKey, session.workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [trendRange, brandId, filters, world, historyKey, cacheKey, session.workspaceId]); // eslint-disable-line react-hooks/exhaustive-deps
   const points = history?.key === historyKey ? history.points : [];
   const trendMetrics = useMemo<FunnelMetric[]>(() => {
     if (!data) return [];
@@ -227,7 +228,7 @@ export default function MetaBrandDetailPage() {
         <p className={styles.period}>Periode {formatDate(data.reportRange.from)} – {formatDate(data.reportRange.to)} <span>vs {formatDate(data.prevFrom)} – {formatDate(data.prevTo)} · {currency}</span></p>
         {data.reportingError && <div role="alert" className={styles.error}>{data.reportingError}</div>}
         <section aria-label="Respon iklan" style={{ display: 'grid', gap: 10 }}>
-          <div className={styles.sectionTitle}><h2>Respon iklan</h2><span>Lapisan bersama · dinilai sama di Website dan CPAS · sparkline harian sesuai periode</span></div>
+          <div className={styles.sectionTitle}><h2>Respon iklan</h2><span>Lapisan bersama · dinilai sama di Website dan CPAS · sparkline harian 30 hari</span></div>
           <div className={styles.responseGrid}>{data.responseMetrics.map(m => { const c = data.response.find(r => r.id === m.id)!; return <div key={m.id} className={styles.kpi}>
             <span className={styles.muted} style={{ display: 'flex', justifyContent: 'space-between' }}><span>{m.label}</span><Delta value={c.change} direction={m.direction} /></span>
             <span className={styles.kpiValue}><MetaHighlightValue highlights={brandMetricHighlights(data.highlights, m)} currency={currency} period={highlightPeriod}>{formatMetric(c.current, m, currency)}</MetaHighlightValue></span>
@@ -273,7 +274,7 @@ export default function MetaBrandDetailPage() {
           {view === 'destinations' && world === 'cpas' && <p className={styles.muted}>Metrik CPAS memakai atribusi Meta per adset. Purchase shared items 1 hari dan 7 hari belum dipisahkan; ROAS dibaca sebagai indikasi arah.</p>}
         </section>
         <section aria-label="Tren" style={{ display: 'grid', gap: 10 }}>
-          <div className={styles.sectionTitle}><h2>Tren harian</h2><div className={styles.actions}><span className={styles.muted}>{formatDate(data.reportRange.from)} – {formatDate(data.reportRange.to)} · {WORLD_LABELS[world]}</span>
+          <div className={styles.sectionTitle}><h2>Tren harian · 30 hari</h2><div className={styles.actions}><span className={styles.muted}>{formatDate(trendRange.from)} – {formatDate(trendRange.to)} · {WORLD_LABELS[world]}</span>
             <select aria-label="Metrik tren" value={trendMetric?.id || ''} onChange={e => setTrendMetricId(e.target.value)}>{trendMetrics.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}</select></div></div>
           {historyError && <p role="alert" className={styles.error}>{historyError}</p>}
           {trendMetric && (history?.key === historyKey ? <MetaBrandTrend metric={trendMetric} currency={currency} complete={history.complete}

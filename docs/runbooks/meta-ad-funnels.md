@@ -922,9 +922,12 @@ refresh changed data on revisit. Repeated pending requests share a result; a
 forced refresh after a mutation waits for an older read and then rereads.
 Responses from a previous scope cannot replace the current page. Trends load
 after the main content, with charts and drawers split out of the initial bundle.
-The brand chart and response-card sparklines use daily buckets within the global
-selected date range, including both endpoints. They reuse the existing daily
-history read; its preceding comparison day is omitted from the displayed series.
+The brand chart and response-card sparklines use the 30 calendar dates ending
+at the normalized report cutoff (the report’s final date, capped before today
+in WIB). Both endpoints are included: cutoff 21 October means 22 September–21
+October. Changing the selected start date does not shorten this series. They
+reuse the existing daily history read; its preceding comparison day is omitted
+from the displayed series.
 Missing coverage stays a gap, and the completeness note concerns only the days
 shown. The separate CEP drawer retains its 90-day weekly history.
 

@@ -5,6 +5,10 @@ export function defaultMetaRange(today: string) {
   const to = shiftDay(today, -1);
   return { from: `${to.slice(0, 7)}-01`, to };
 }
+/** Thirty calendar dates, including the report's final cutoff date. */
+export function metaDailyTrendRange(cutoff: string) {
+  return { from: shiftDay(cutoff, -29), to: cutoff };
+}
 export function completedMetaRange(range: { from: string; to: string }, today: string) {
   if (!range.from || !range.to) return range;
   const to = range.to < today ? range.to : shiftDay(today, -1);
