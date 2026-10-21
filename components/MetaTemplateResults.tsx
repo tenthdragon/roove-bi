@@ -101,7 +101,7 @@ export default function MetaTemplateResults({ section, world, currency, preferen
           })}
         </tr>
         {world === 'website' && creativeFormatGroups(g, section.config.metrics).map(child => <tr key={child.key} className={styles.formatSubrow}>
-          <th scope="row"><span className={styles.formatLabel}>{child.name}</span><small>{child.ad_ids.length} ads</small></th>
+          <th scope="row"><span className={styles.formatLabel}>{child.name}</span><small>{child.ad_ids.length} ads</small>{!!child.latest_metadata_ad_ids?.length && <small title="ID creative pada data historis belum tersedia. Tipe memakai creative terbaru yang cocok dengan inventori iklan.">{child.latest_metadata_ad_ids.length} memakai tipe terbaru</small>}</th>
           {visible.map(column => {
             const m = column.metric;
             if (!m) return <td key={column.key} className={styles.funnelCell}><StageChips group={child} stages={section.config.stages} currency={currency} highlights={[]} onDetail={() => {}} /></td>;

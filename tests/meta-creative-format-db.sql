@@ -36,3 +36,19 @@ DO $$ DECLARE w uuid:='00000000-0000-4000-8000-000000000001'; report jsonb; pare
  OR has_table_privilege('authenticated','public.meta_ad_creatives','SELECT') THEN RAISE EXCEPTION 'Browser permissions expanded'; END IF;
 END $$;
 SELECT 'PASS: format totals, comparisons, distinct counts, URL/CTWA, stale creative, cache invalidation, filters and workspace boundaries';
+DO $$ DECLARE w uuid:='00000000-0000-4000-8000-000000000001'; config jsonb; report jsonb; child jsonb; a text; BEGIN
+ SELECT jsonb_build_object('account_ids',jsonb_agg(account_id)) INTO config FROM ctwa_scope;
+ SELECT account_id INTO a FROM ctwa_scope WHERE n=1;
+ UPDATE meta_ad_daily_metrics SET creative_id=NULL WHERE workspace_id=w AND account_id=a AND ad_id='99999997309';
+ report:=get_meta_ad_report_incremental(w,'1996-01-02','1996-01-02',config);
+ SELECT c INTO STRICT child FROM jsonb_array_elements(report->'groups') g CROSS JOIN jsonb_array_elements(g->'format_breakdown') c WHERE c->'ad_ids' ? '99999997309';
+ IF child->>'format'<>'image' OR child->'latest_metadata_ad_ids'<>'["99999997309"]' THEN RAISE EXCEPTION 'Missing historical ID did not use labeled current metadata: %',child; END IF;
+ UPDATE meta_ad_mappings SET creative_id='999999973777' WHERE workspace_id=w AND account_id=a AND ad_id='99999997309';
+ report:=get_meta_ad_report_incremental(w,'1996-01-02','1996-01-02',config);
+ SELECT c INTO STRICT child FROM jsonb_array_elements(report->'groups') g CROSS JOIN jsonb_array_elements(g->'format_breakdown') c WHERE c->'ad_ids' ? '99999997309';
+ IF child->>'format'<>'unknown' OR child->'latest_metadata_ad_ids'<>'[]' THEN RAISE EXCEPTION 'Stale inventory metadata used'; END IF;
+ -- Restore fixtures for the parity suite that follows.
+ UPDATE meta_ad_mappings m SET creative_id=f.creative_id FROM ctwa_fixture f WHERE m.workspace_id=w AND m.account_id=a AND m.ad_id=f.ad_id AND f.n=9;
+ UPDATE meta_ad_daily_metrics d SET creative_id=f.creative_id FROM ctwa_fixture f WHERE d.workspace_id=w AND d.account_id=a AND d.ad_id=f.ad_id AND f.n=9;
+END $$;
+SELECT 'PASS: missing historical identity uses inventory-matched latest metadata with explicit provenance; conflicts remain unknown';

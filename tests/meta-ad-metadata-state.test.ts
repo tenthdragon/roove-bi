@@ -30,5 +30,12 @@ test('missing, older, wrong-identity and incomplete caches cannot certify unchan
 test('unclassified legacy creatives refresh once; inspected unknown formats are cacheable', () => {
   const source = metaMetadataSource(ad), state = { ad_id: '10', ...source, observed_at: '2026-10-17T10:01:00Z' };
   assert.equal(metadataRefreshDecision(source, state, { ...creative, creative_format: null }, destination), 'refresh');
-  assert.equal(metadataRefreshDecision(source, state, { ...creative, creative_format: 'unknown' }, destination), 'cached');
+  assert.equal(metadataRefreshDecision(source, state, { ...creative, creative_format: 'unknown' }, destination, Date.parse(creative.updated_at) + 60_000), 'cached');
+});
+
+test('unknown formats retry after one day while known unchanged formats remain cached', () => {
+  const source = metaMetadataSource(ad), state = { ad_id: '10', ...source, observed_at: creative.updated_at };
+  const now = Date.parse(creative.updated_at) + 86_400_000;
+  assert.equal(metadataRefreshDecision(source, state, { ...creative, creative_format: 'unknown' }, destination, now), 'refresh');
+  assert.equal(metadataRefreshDecision(source, state, creative, destination, now), 'cached');
 });

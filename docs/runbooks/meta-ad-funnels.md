@@ -1154,3 +1154,19 @@ Format changes invalidate the report revision without rebuilding day projections
 Checks: `npm run test:meta-funnels`, `npm run test:meta-detail-mapping-db`
 (verified local database; all fixtures and schema changes roll back),
 `npm run typecheck:app`, `npm run lint`, `npm run build`.
+
+## Creative format resolution (migration 231)
+
+When the latest selected historical fact has no creative ID, format grouping may
+use the current creative only if it matches the same workspace/account/ad's
+inventory mapping. The child row discloses how many ads use latest metadata.
+A non-null historical creative ID that differs still fails closed. No historical
+facts or performance totals are rewritten. Apply 231 after 230.
+
+Metadata reads now include explicit PHOTO/VIDEO object types. Unknown creatives
+follow their effective Instagram media, then source Instagram media, using the
+provider's IMAGE/VIDEO/CAROUSEL_ALBUM media_type. Requests are deduplicated in at
+most two additional batches of 50; inaccessible media does not turn into an image
+by default. Unknown results become eligible for retry after 24 hours within the
+normal active/recent-delivery policy. Already known unchanged metadata stays
+cached. A scoped creative job can refresh unresolved ads immediately after release.

@@ -11,6 +11,7 @@ let migration = '';
 if (query("SELECT to_regclass('public.meta_brand_report_days') IS NOT NULL;").trim() !== 't') migration += read('../supabase/migrations/222_meta_brand_overview_incremental.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 migration += read('../supabase/migrations/223_meta_detail_incremental_reports.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 migration += read('../supabase/migrations/230_meta_creative_format_breakdown.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
+migration += read('../supabase/migrations/231_meta_creative_format_resolution.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 if (process.argv.includes('--benchmark')) {
   console.log(query('BEGIN;\n' + migration + '\n' + read('meta-detail-mapping-benchmark.sql') + '\nROLLBACK;').trim());
   assert.equal(snapshot(), before); process.exit(0);

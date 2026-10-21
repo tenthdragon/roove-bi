@@ -15,8 +15,9 @@ export type TemplateRule = { brand_id?: number | null; id: string; funnel_id: st
 export type TemplateKind = 'transaction' | 'lead' | 'other';
 export const TEMPLATE_KIND_LABELS: Record<TemplateKind, string> = { transaction: 'Transaksi', lead: 'Lead', other: 'Lainnya' };
 
-export type FormatBreakdown = { format: CreativeFormat; ad_ids: string[]; current: Totals; previous: Totals };
+export type FormatBreakdown = { latest_metadata_ad_ids?: string[]; format: CreativeFormat; ad_ids: string[]; current: Totals; previous: Totals };
 export type ReportGroup = {
+  latest_metadata_ad_ids?: string[];
   format_breakdown?: FormatBreakdown[];
   key: string; name: string; current: Totals; previous: Totals; ad_ids: string[];
   accounts: string[]; ad_names: string[]; landing_page_urls: string[]; verified_ad_ids: string[];
