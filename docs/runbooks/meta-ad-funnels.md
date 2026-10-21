@@ -1129,3 +1129,28 @@ migration. Consequently an application-only rollback to pre-227 is not a complet
 editor rollback. Prefer a forward fix; a schema rollback needs a separately
 reviewed preservation/mapping plan for newly created brand templates, rules and
 intentions. Never drop these new records merely to restore the old constraint.
+
+## Destination creative-format breakdown (migration 230)
+
+Website/WhatsApp destination rows include Image, Video, Carousel, Campuran /
+flexible, and Belum diketahui subrows when present. Subrows follow the parent's
+sorting and configured columns. Ratios and prior-period deltas use summed events;
+section totals continue to count each fact once.
+
+Formats come from Meta creative metadata, never ad names, thumbnails, or video
+view counts. Carousel cards stay one carousel ad. Missing or mismatched creative
+identities remain unknown. The latest observed creative in the selected range
+classifies each ad for both current and comparison periods; this is not an
+asset-level delivery report for dynamic ads.
+
+Apply migration 230 before activating the updated metadata worker. It adds
+`meta_ad_creatives.creative_format` and updates the incremental report function,
+without bulk backfill or expanded database grants. Existing creatives remain
+unknown until the next normal inventory/metadata pass. Recently delivering or
+active ads refresh through the existing bounded queue. Inspected `unknown`
+results are cached, and long-paused ads retain the existing deferral policy.
+Format changes invalidate the report revision without rebuilding day projections.
+
+Checks: `npm run test:meta-funnels`, `npm run test:meta-detail-mapping-db`
+(verified local database; all fixtures and schema changes roll back),
+`npm run typecheck:app`, `npm run lint`, `npm run build`.
