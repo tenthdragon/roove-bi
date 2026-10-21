@@ -36,6 +36,11 @@ DO $$ DECLARE w uuid:='00000000-0000-4000-8000-000000000001'; a text; a2 text; c
  IF EXISTS(SELECT 1 FROM jsonb_array_elements(report->'groups') g WHERE jsonb_array_length(g->'optimization_breakdown')>0) THEN RAISE EXCEPTION 'Unused per-ad optimization was aggregated'; END IF;
  report:=get_meta_ad_report_incremental(w,'1996-01-02','1996-01-02',config||'{"include_optimization":true}','{}',NULL,'ad');
  IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(report->'groups') g WHERE g->'ad_ids' ? '99999997302' AND jsonb_array_length(g->'optimization_breakdown')=1) THEN RAISE EXCEPTION 'Per-ad detail missing'; END IF;
+ FOR parent IN SELECT value FROM jsonb_array_elements(report->'groups') LOOP
+  IF jsonb_array_length(parent->'optimization_breakdown')<>1 THEN RAISE EXCEPTION 'Per-ad optimization must have one child'; END IF;
+  child:=parent#>'{optimization_breakdown,0}';
+  IF child->'current' IS DISTINCT FROM parent->'current' OR child->'previous' IS DISTINCT FROM parent->'previous' OR child->'ad_ids' IS DISTINCT FROM parent->'ad_ids' THEN RAISE EXCEPTION 'Per-ad optimization totals/cohort differ'; END IF;
+ END LOOP;
  report:=get_meta_ad_report_incremental('00000000-0000-4000-8000-000000000002','1996-01-02','1996-01-02',config);
  IF jsonb_array_length(report->'groups')<>0 THEN RAISE EXCEPTION 'Workspace leak'; END IF;
  BEGIN PERFORM save_meta_adset_optimizations(w,'act_nonexistent','[]','1996-01-06');RAISE EXCEPTION 'accepted foreign account';EXCEPTION WHEN OTHERS THEN IF SQLERRM='accepted foreign account' THEN RAISE;END IF;END;
