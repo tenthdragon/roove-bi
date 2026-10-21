@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { defaultMetaRange, completedMetaRange, metaReportPresets, metaCoverageGaps } from '../lib/meta-report-status';
+import { defaultMetaRange, metaDailyTrendRange, completedMetaRange, metaReportPresets, metaCoverageGaps } from '../lib/meta-report-status';
 import { daysBetween, shiftDay, type Coverage } from '../lib/meta-funnel-domain';
 import { getTodayWIB } from '../lib/sync-schedule';
 import { getPresetRanges } from '../lib/utils';
@@ -59,4 +59,17 @@ test('successfully synchronized zero-delivery dates are complete, and an empty a
 test('the Meta default follows completed days independently of other dashboard data dates', () => {
   assert.deepEqual(defaultMetaRange(today), { from: '2026-10-01', to: '2026-10-13' });
   assert.deepEqual(defaultMetaRange('2026-11-01'), { from: '2026-10-01', to: '2026-10-31' });
+});
+
+
+test('daily brand trends contain exactly 30 dates ending at the report cutoff', () => {
+  assert.deepEqual(metaDailyTrendRange('2026-10-21'), { from: '2026-09-22', to: '2026-10-21' });
+  for (const [cutoff, from] of [['2027-01-01', '2026-12-03'], ['2028-03-01', '2028-02-01'], ['2026-03-01', '2026-01-31']]) {
+    const range = metaDailyTrendRange(cutoff);
+    assert.equal(range.from, from); assert.equal(range.to, cutoff); assert.equal(daysBetween(range.from, range.to), 30);
+  }
+  // On 22 October WIB the normalized report cutoff is 21 October, never the live day.
+  const today = getTodayWIB(new Date('2026-10-21T17:01:00Z'));
+  const cutoff = completedMetaRange({ from: '2026-10-01', to: today }, today).to;
+  assert.deepEqual(metaDailyTrendRange(cutoff), { from: '2026-09-22', to: '2026-10-21' });
 });

@@ -61,7 +61,7 @@ rows only carry zero-delivery coverage and ads that only exist in the mapping
 inventory no longer appear in brand totals, facet counts, CEP rows or the
 "Belum ditetapkan" blocks. Spend without impressions on the same day (rare
 Meta corrections) still counts as long as the ad delivered somewhere in the
-range. The comparison period and 90-day history retain the same ad cohort that
+range. The comparison period and history retain the same ad cohort that
 delivered inside the selected range.
 
 Migration 217 also adds `get_meta_ad_activity(workspace, from, to, account)`
@@ -922,6 +922,14 @@ refresh changed data on revisit. Repeated pending requests share a result; a
 forced refresh after a mutation waits for an older read and then rereads.
 Responses from a previous scope cannot replace the current page. Trends load
 after the main content, with charts and drawers split out of the initial bundle.
+The brand chart and response-card sparklines use the 30 calendar dates ending
+at the normalized report cutoff (the report’s final date, capped before today
+in WIB). Both endpoints are included: cutoff 21 October means 22 September–21
+October. Changing the selected start date does not shorten this series. They
+reuse the existing daily history read; its preceding comparison day is omitted
+from the displayed series.
+Missing coverage stays a gap, and the completeness note concerns only the days
+shown. The separate CEP drawer retains its 90-day weekly history.
 
 Pemetaan Ads reads channel evidence once from `meta_ad_mapping_channels`, loads
 the workspace catalog/rules once and resolves taxonomy in the application. This
