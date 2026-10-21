@@ -445,5 +445,6 @@
 .formatLabel { font-weight: 600; }
 .formatSubrow th small { display: block; color: var(--text-muted); font-weight: 400; margin-top: 4px; }
 
-.breakdownSelect { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap; }
-.breakdownSelect select { font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: inherit; }
+.tableViewControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.page .breakdownSelect { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; white-space: nowrap; }
+.page .breakdownSelect select { padding: 9px 8px; border-radius: 8px; color: var(--text); font: inherit; font-weight: 600; }
