@@ -13,7 +13,7 @@ import { createMetaOverviewCache } from '@/lib/meta-overview-cache';
 import { defaultMetaRange } from '@/lib/meta-report-status';
 import { getTodayWIB } from '@/lib/sync-schedule';
 import { getMetaFunnelHistory, getMetaReportRevision, queueMetaFunnelSync, verifyMetaAdDestination } from '@/lib/meta-funnel-actions';
-import { getMetaBrandDetail, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
+import { getMetaBrandDetail, getMetaFormatCepMatrix, saveMetaTemplateRule } from '@/lib/meta-brand-actions';
 import { MEASURES, metricValue, type FunnelMetric, type Totals } from '@/lib/meta-funnel-domain';
 import { templateDestinationRule } from '@/lib/meta-ctwa-destinations';
 import { WORLD_CHANNEL, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
@@ -32,6 +32,7 @@ const MetaGroupDrawer = dynamic(() => import('@/components/MetaGroupDrawer'), { 
 import MetaTemplateSuggestionButton from '@/components/MetaTemplateSuggestionButton';
 import { META_TEMPLATE_SCHEMA_MESSAGE } from '@/lib/meta-template-settings';
 import MetaCepView from '@/components/MetaCepView';
+import MetaFormatCepMatrix from '@/components/MetaFormatCepMatrix';
 const MetaCepDrawer = dynamic(() => import('@/components/MetaCepDrawer'), { ssr: false });
 const MetaBrandTrend = dynamic(() => import('@/components/MetaBrandTrend'), { ssr: false });
 import styles from '../../page.module.css';
@@ -39,6 +40,8 @@ import styles from '../../page.module.css';
 type Data = Extract<Awaited<ReturnType<typeof getMetaBrandDetail>>, { schemaReady: true }>;
 type HistoryPoint = { date: string; totals: Totals; complete: boolean; partial: boolean };
 const detailCache = createMetaOverviewCache<Data>();
+type MatrixData = Extract<Awaited<ReturnType<typeof getMetaFormatCepMatrix>>, { schemaReady: true }>;
+const matrixCache = createMetaOverviewCache<MatrixData>();
 const columnPreferencesCache = createMetaOverviewCache<MetaColumnPreferences>();
 const historyCache = createMetaOverviewCache<{ points: HistoryPoint[]; complete: boolean }>();
 const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
@@ -81,7 +84,7 @@ export default function MetaBrandDetailPage() {
   const canSync = role !== 'advertiser' && can('admin:meta');
   const brandId = params.brandId;
   const world: MetaBrandWorld = search.get('world') === 'cpas' ? 'cpas' : 'website';
-  const view: 'destinations' | 'cep' = search.get('view') === 'cep' ? 'cep' : 'destinations';
+  const view = search.get('view') === 'matrix' ? 'matrix' : search.get('view') === 'cep' ? 'cep' : 'destinations';
   const [filters, setFilters] = useState<AdDimensionFilters>({});
   const [schemaReady, setSchemaReady] = useState(true);
   const [notice, setNotice] = useState('');
@@ -102,6 +105,17 @@ export default function MetaBrandDetailPage() {
     return result.schemaReady && result.workspaceId === session.workspaceId ? result : null;
   }, [input, world, session.workspaceId]);
   const { data, setData, loading, error, setError, load } = useMetaCachedLoad(cacheKey, detailCache, fetchDetail);
+  const matrixKey = view === 'matrix' && cacheKey && data && !data.reportingError ? JSON.stringify([cacheKey, data.reportVersion, 'matrix']) : null;
+  const fetchMatrix = useCallback(async () => {
+    const result = await getMetaFormatCepMatrix({ ...input, world, workspaceId: session.workspaceId });
+    if ('reportError' in result) throw new Error(result.reportError);
+    if (!result.schemaReady) throw new Error('Matrix belum tersedia. Silakan muat ulang.');
+    return result.workspaceId === session.workspaceId ? result : null;
+  }, [input, world, session.workspaceId]);
+  const matrix = useMetaCachedLoad(matrixKey, matrixCache, fetchMatrix);
+  useEffect(() => {
+    if (matrix.data && data && matrix.data.reportVersion !== data.reportVersion) void load(true);
+  }, [matrix.data, data, load]);
   useEffect(() => {
     if (!data || !cacheKey) return;
     let alive = true;
@@ -144,9 +158,9 @@ export default function MetaBrandDetailPage() {
     const query = new URLSearchParams(search.toString()); query.set('world', next);
     router.replace(`${pathname}?${query.toString()}`, { scroll: false });
   }
-  function setView(next: 'destinations' | 'cep') {
+  function setView(next: 'destinations' | 'cep' | 'matrix') {
     const query = new URLSearchParams(search.toString());
-    if (next === 'cep') query.set('view', 'cep'); else query.delete('view');
+    if (next === 'destinations') query.delete('view'); else query.set('view', next);
     router.replace(`${pathname}?${query.toString()}`, { scroll: false });
   }
   async function applySuggestion(group: Data['unassigned'][number], funnelId: string) {
@@ -222,11 +236,18 @@ export default function MetaBrandDetailPage() {
         </section>
         <section aria-label={`Hasil ${WORLD_LABELS[world]}`} style={{ display: 'grid', gap: 12 }}>
           <div className={styles.sectionTitle}><h2>Hasil · {WORLD_LABELS[world]}</h2><div className={styles.actions}>
-            <span className={styles.muted}>{view === 'cep' ? 'Per CEP · nuansa antar pintu masuk pada ad yang sama' : world === 'website' ? 'Per template · Website per URL, WhatsApp per brand dan nomor' : 'Per ad · purchase Shopee dengan atribusi Meta'}</span>
+            <span className={styles.muted}>{view === 'matrix' ? 'CEP × format iklan · per optimasi' : view === 'cep' ? 'Per CEP · nuansa antar pintu masuk pada ad yang sama' : world === 'website' ? 'Per template · Website per URL, WhatsApp per brand dan nomor' : 'Per ad · purchase Shopee dengan atribusi Meta'}</span>
             <div className={styles.viewSwitch} role="group" aria-label="Tampilan hasil">
               <button type="button" className={view === 'destinations' ? styles.viewActive : ''} aria-pressed={view === 'destinations'} onClick={() => setView('destinations')}>{world === 'website' ? 'Tujuan' : 'Ad'}</button>
               <button type="button" className={view === 'cep' ? styles.viewActive : ''} aria-pressed={view === 'cep'} onClick={() => setView('cep')}>CEP</button>
+              <button type="button" className={view === 'matrix' ? styles.viewActive : ''} aria-pressed={view === 'matrix'} onClick={() => setView('matrix')}>Matrix</button>
             </div></div></div>
+          {view === 'matrix' && !data.reportingError && <>
+            {matrix.error && <div role="alert" className={styles.error}>{matrix.error} <button type="button" className={styles.button} onClick={() => void matrix.load(true)}>Coba lagi</button></div>}
+            {(matrix.loading && !matrix.data || matrix.data && matrix.data.reportVersion !== data.reportVersion) && !matrix.error && <p role="status" className={styles.muted}>Memuat Matrix…</p>}
+            {matrix.data?.reportingError && <div role="alert" className={styles.error}>{matrix.data.reportingError}</div>}
+            {matrix.data && matrix.data.reportVersion === data.reportVersion && !matrix.data.reportingError && <MetaFormatCepMatrix key={JSON.stringify([session.key, brandId, world])} matrix={matrix.data.matrix} currency={matrix.data.currency} />}
+          </>}
           {view === 'destinations' && world === 'website' && breakdown.error && <p role="status" className={styles.muted}>{breakdown.error}</p>}
           {view === 'cep' && <MetaCepView view={data.cep} currency={currency} onOpenCep={setCepDrawer} highlights={data.highlights} period={highlightPeriod} />}
           {view === 'destinations' && world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}

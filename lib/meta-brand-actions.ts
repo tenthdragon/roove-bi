@@ -11,7 +11,7 @@ import { metaReportResponse } from './meta-report-requests';
 import { daysBetween, emptyTotals, metricValue, relativeChange, shiftDay, sumMetricTotals, type FunnelMetric, type Totals } from './meta-funnel-domain';
 import { loadTemplateRules } from './meta-funnel-store';
 import { metaReportQuery, metaReportOptions, type MetaReportInput, type RawMetaReport, type ReportGroupBy } from './meta-ad-report';
-import { getCachedMetaAdReport, getCachedMetaBrandOverviewReport, getCachedMetaBrandDetailReport } from './meta-ad-report-data';
+import { getCachedMetaAdReport, getCachedMetaBrandOverviewReport, getCachedMetaBrandDetailReport, getCachedMetaFormatCepMatrix } from './meta-ad-report-data';
 import { emptyMetaBrandReport } from './meta-brand-report';
 import { dimensionLabel } from './meta-ad-dimensions';
 import { metaBrandAccountIds, metaBrandOptions, validateMetaBrandFilter } from './meta-ad-brands';
@@ -172,6 +172,22 @@ async function loadMetaBrandDetail(input: BrandInput & { brandId: string; world:
     highlights, cep, coverageGaps: active.coverageGaps, destinations: activeRaw.destinations, objectiveUnknownAds: activeRaw.objectiveUnknownAds,
     dimensionOptions: metaReportOptions(activeRaw, ctx.accounts, ctx.brands).dimensionOptions, dimensionsReady: true, rulesReady: rules.ready, verifiedDestinationsReady: true,
     templates: ctx.funnels.map(f => ({ id: f.id, brand_id: f.brand_id, name: f.name, kind: templateKind(f) })) };
+}
+
+/** Loaded only when the Matrix tab opens; reuse the report's scoped per-ad totals. */
+export async function getMetaFormatCepMatrix(input: BrandInput & { brandId: string; world: MetaBrandWorld; workspaceId?: string }) {
+  return metaReportResponse(async () => {
+    const world = validateWorld(input.world), brandId = validateMetaBrandFilter(input.brandId);
+    if (!brandId) throw new Error('Pilih brand terlebih dahulu.');
+    const ctx = await reportContext({ from: input.from, to: input.to, filters: input.filters, brandId });
+    if (!ctx.schemaReady) return ctx;
+    if (input.workspaceId && input.workspaceId !== ctx.workspaceId) throw new Error('Workspace berubah. Muat ulang halaman.');
+    const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: 'ad' },
+      { ...ctx.config, account_ids: ctx.scopedAccountIds.length ? ctx.scopedAccountIds : ['__no_authorized_meta_account__'] });
+    query.config.include_optimization = true; query.config.include_matrix = true;
+    const report = await getCachedMetaFormatCepMatrix(ctx.workspaceId, ctx.reportVersion, query);
+    return { schemaReady: true as const, workspaceId: ctx.workspaceId, reportVersion: ctx.reportVersion, reportRange: ctx.reportRange, world, ...report };
+  });
 }
 
 async function loadMetaTemplateSettings(requestedBrandId?: number | null) {

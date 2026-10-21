@@ -1173,8 +1173,8 @@ cached. A scoped creative job can refresh unresolved ads immediately after relea
 
 ## Optimization breakdown (migration 232)
 
-One page-level Rincian selector switches Website/WhatsApp destination subrows
-between Format iklan and Optimasi. Parent sorting, configured metric columns,
+The Format iklan / Optimasi dropdown beside Atur kolom switches Website/WhatsApp
+destination subrows. Its value is shared by the destination tables. Parent sorting, configured metric columns,
 summary totals and period comparisons stay shared. Browser preferences are scoped
 by workspace and viewer; unavailable storage leaves the selector usable and shows
 a save error. CPAS and the CEP view retain their existing layouts. Ad details
@@ -1209,3 +1209,42 @@ Validation: Meta unit/UI suite, test:meta-detail-mapping-db (rollback only), app
 typecheck, lint and production build. The SQL suite reconciles all child totals,
 compares 288 existing report scopes and checks identity, staleness, revisions,
 per-ad detail and service-only access.
+
+
+## Format × CEP Matrix (migration 234)
+
+Brand detail adds a third Matrix lens beside Tujuan/Ad and CEP. A selector shows
+one actual campaign-objective/optimization/event/custom-conversion universe at a
+time. Rows are official CEP memberships and columns are Image, Video and Carousel;
+mixed and unknown format columns appear when present. Missing CEP/optimization
+metadata remains explicit, and conflicting historical creative identities remain
+unknown. Latest-inventory format fallback retains its provenance in cell tooltips.
+Optimization describes the latest synced configuration, not historical attribution.
+
+Each cell shows Spent, CPM (spend / impressions × 1000), ATC rate (ATC / LPV),
+IC rate (checkout / ATC), Purchase rate (purchase / checkout), and CPP
+(spend / purchase). Sum event totals before calculating ratios. Zero denominators
+show a dash. No new scoring or heat formula is introduced. Each ad/account counts
+once in the optimization universe's header; multi-CEP ads count fully in each CEP
+row, so row spend can overlap. A selected CEP filter keeps only that membership.
+
+getMetaFormatCepMatrix checks the same workspace/brand permissions before every
+cache read, including hits, and uses the selected brand's account IDs plus the
+current world, dates, filters and report revision. Mixed currencies suppress the
+matrix. The server caches aggregated cells rather than the full per-ad payload,
+including for brands with thousands of delivering ads. The client requests Matrix only when its tab opens, using a separate
+session/filter/world/revision cache. A newer Matrix revision refreshes the parent
+report before being shown. The existing Tujuan/CEP loads do not request this data.
+
+Migration 234 replaces only get_meta_ad_report_incremental. The internal
+include_matrix flag adds per-ad official CEPs, current creative format and
+provenance. The existing include_optimization flag returns the target. Both use
+per-ad totals already calculated by the report: format totals are not reaggregated
+per ad. Unflagged report JSON and cohorts stay identical. Service-only grants,
+provider requests and stored performance facts are unchanged. Apply only 234 after
+233 before activating the app; no backfill or provider sync is required. Preserve
+the previous report definition/grants for function rollback.
+
+Validation: Meta unit/UI and action-boundary tests; rollback database suite for
+report parity, metadata identity, filters, channels, account/workspace boundaries
+and grants; app typecheck, lint, build; browser preview and local performance check.

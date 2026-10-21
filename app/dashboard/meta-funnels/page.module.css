@@ -447,3 +447,32 @@
 
 .tableViewControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .page .breakdownSelect { padding: 9px 8px; border-radius: 8px; font-weight: 600; }
+
+/* Six funnel measures for a CEP/format cohort inside one optimization universe. */
+.formatCepMatrix { width: 100%; min-width: 880px; border-collapse: separate; border-spacing: 0; font-size: 12px; }
+.formatCepMatrix th, .formatCepMatrix td { padding: 14px 16px; border-bottom: 1px solid var(--border); vertical-align: top; text-align: left; }
+.formatCepMatrix thead th { background: var(--bg-deep); color: var(--dim); font-weight: 600; }
+.formatCepMatrix th:first-child { position: sticky; left: 0; z-index: 1; width: 190px; min-width: 160px; background: var(--card); box-shadow: 1px 0 var(--border); }
+.formatCepMatrix thead th:first-child { z-index: 2; background: var(--bg-deep); }
+.formatCepMatrix tbody th { padding-top: 22px; }
+.formatCepMatrix tbody th strong { font-size: 13px; }
+.formatCepMatrix tbody th small { display: block; margin-top: 6px; color: var(--dim); font-weight: 400; }
+.formatCepMatrix td { min-width: 230px; }
+.formatCepMatrix tr:last-child th, .formatCepMatrix tr:last-child td { border-bottom: 0; }
+.matrixCell { display: grid; gap: 10px; min-width: 190px; }
+.matrixAdCount { color: var(--dim); font-size: 11px; }
+.matrixMetrics { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px 20px; margin: 0; }
+.matrixMetrics dt { color: var(--dim); font-size: 11px; margin-bottom: 4px; }
+.matrixMetrics dd { margin: 0; font-size: 13px; font-variant-numeric: tabular-nums; }
+.matrixResultMetric dd { font-weight: 700; }
+@media (max-width: 600px) {
+  .formatCepMatrix { min-width: 750px; }
+  .formatCepMatrix th, .formatCepMatrix td { padding: 12px; }
+  .formatCepMatrix th:first-child { width: 120px; min-width: 120px; }
+  .formatCepMatrix td { min-width: 210px; }
+  .matrixCell { min-width: 186px; }
+  .matrixMetrics { grid-template-columns: 1fr; gap: 8px; }
+  .matrixMetrics > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .matrixMetrics dt { margin-bottom: 0; font-size: 10px; white-space: nowrap; }
+  .matrixMetrics dd { font-size: 12px; }
+}
