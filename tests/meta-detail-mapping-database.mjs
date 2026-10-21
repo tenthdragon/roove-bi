@@ -10,6 +10,7 @@ const before = snapshot();
 let migration = '';
 if (query("SELECT to_regclass('public.meta_brand_report_days') IS NOT NULL;").trim() !== 't') migration += read('../supabase/migrations/222_meta_brand_overview_incremental.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 migration += read('../supabase/migrations/223_meta_detail_incremental_reports.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
+migration += read('../supabase/migrations/230_meta_creative_format_breakdown.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 if (process.argv.includes('--benchmark')) {
   console.log(query('BEGIN;\n' + migration + '\n' + read('meta-detail-mapping-benchmark.sql') + '\nROLLBACK;').trim());
   assert.equal(snapshot(), before); process.exit(0);
@@ -23,6 +24,6 @@ UPDATE meta_ad_daily_metrics SET currency='USD' WHERE ad_id='99999997309';
 INSERT INTO meta_ad_daily_metrics(workspace_id,account_id,account_name,ad_id,ad_name,metric_date,currency,metrics,raw_insights,landing_page_urls)
 SELECT workspace_id,account_id,'Paused','999999973999','Paused','1996-01-01','IDR','{"spend":9000,"impressions":10000}','{}','[]' FROM ctwa_scope WHERE n=1;
 `;
-console.log(query('BEGIN;\n' + migration + '\n' + fixtures + '\n' + read('meta-detail-mapping-db.sql') + '\n' + read('meta-brand-overview-db.sql') + '\nROLLBACK;').trim());
+console.log(query('BEGIN;\n' + migration + '\n' + fixtures + '\n' + read('meta-creative-format-db.sql') + '\n' + read('meta-detail-mapping-db.sql') + '\n' + read('meta-brand-overview-db.sql') + '\nROLLBACK;').trim());
 assert.equal(snapshot(), before, 'Fixtures or schema escaped rollback');
 console.log('PASS: all report/cache/schema changes rolled back');

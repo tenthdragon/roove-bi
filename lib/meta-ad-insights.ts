@@ -1,3 +1,4 @@
+import { classifyCreativeFormat } from './meta-creative-format';
 import { emptyTotals, type Totals } from './meta-funnel-domain';
 import { selectPurchaseMetric, type MetaActionMetric } from './meta-marketing';
 import { creativeLandingPages } from './meta-ad-destinations';
@@ -101,7 +102,7 @@ export function normalizeAdInsight(raw: RawAdInsight): Totals {
 }
 
 export async function fetchCreativeBatch(ids: string[], token: string) {
-  const batch = ids.map(id => ({ method: 'GET', relative_url: `${id}?fields=id,name,creative{id,name,thumbnail_url,video_id,call_to_action,object_story_spec,asset_feed_spec,link_url,object_url}` }));
+  const batch = ids.map(id => ({ method: 'GET', relative_url: `${id}?fields=id,name,creative{id,name,thumbnail_url,video_id,image_hash,image_url,call_to_action,object_story_spec,asset_feed_spec,link_url,object_url}` }));
   const response = await fetch(BASE, { method: 'POST', headers: { Authorization: `Bearer ${token}` },
     body: new URLSearchParams({ batch: JSON.stringify(batch) }), signal: AbortSignal.timeout(60000) });
   const data = await response.json();
@@ -116,7 +117,8 @@ export async function fetchCreativeBatch(ids: string[], token: string) {
 export function normalizeCreativeMetadata(adId: string, name: string, creative: Record<string, any>) {
   const story = creative.object_story_spec || {};
   return { ad_id: adId, creative_id: creative.id || null, name,
-    thumbnail_url: creative.thumbnail_url || null, video_id: creative.video_id || null,
+    thumbnail_url: creative.thumbnail_url || null, video_id: creative.video_id || story.video_data?.video_id || null,
+    creative_format: classifyCreativeFormat(creative),
     landing_page_urls: creativeLandingPages(creative),
     body: story.video_data?.message || story.link_data?.message || story.photo_data?.message || null };
 }

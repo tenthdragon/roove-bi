@@ -87,7 +87,7 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
       if (dimensionSchema.error && !['42703','PGRST204'].includes(dimensionSchema.error.code)) throw new Error(dimensionSchema.error.message);
       for (let offset = 0; offset < inventory.length; offset += 50) {
         const ads = inventory.slice(offset, offset + 50);
-        const cache = await svc.from('meta_ad_creatives').select('ad_id,creative_id,landing_page_urls,updated_at')
+        const cache = await svc.from('meta_ad_creatives').select('ad_id,creative_id,landing_page_urls,updated_at,creative_format')
           .eq('workspace_id', workspaceId).eq('account_id', account.account_id).in('ad_id', ads.map(a => a.id));
         if (cache.error) throw new Error(cache.error.message);
         const cached = new Map((cache.data || []).map(c => [c.ad_id, c]));

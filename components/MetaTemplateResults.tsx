@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
 import { MEASURES, type Measure } from '@/lib/meta-funnel-domain';
-import { TEMPLATE_KIND_LABELS, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
+import { creativeFormatGroups, TEMPLATE_KIND_LABELS, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
 import { formatChange, formatCompactMoney, formatCount, formatMetric } from '@/lib/meta-format';
 import { metaResultColumns, visibleMetaColumns, type MetaColumnPreference } from '@/lib/meta-column-preferences';
 import { metaStageValue, sortMetaGroups, type MetaTableSort } from '@/lib/meta-table-sorting';
@@ -91,7 +91,7 @@ export default function MetaTemplateResults({ section, world, currency, preferen
             {steps.map((stage, index) => <option key={stage} value={stage}>{MEASURES[stage]}{index ? ' (rasio)' : ''}</option>)}
           </select>}
         </th>)}</tr></thead>
-        <tbody>{groups.map(g => { const insights = destinationHighlights(highlights, section.key, g.key); return <tr key={g.key}>
+        <tbody>{groups.map(g => { const insights = destinationHighlights(highlights, section.key, g.key); return <Fragment key={g.key}><tr>
           <td><button type="button" className={styles.nameButton} onClick={() => onOpenGroup(g)}>{g.name}</button><small>{g.ad_ids.length} ad · {g.accounts.join(', ')}</small>{insights.length > 0 && <span className={styles.rowInsights}><MetaHighlightValue highlights={insights} currency={currency} period={period} onDetail={() => onOpenGroup(g)} label={`Sorotan ${g.name}`} /></span>}</td>
           {visible.map(column => {
             const m = column.metric;
@@ -99,7 +99,17 @@ export default function MetaTemplateResults({ section, world, currency, preferen
             const c = g.metrics.find(v => v.id === m.id)!;
             return <td key={column.key}><span style={section.mainMetric?.id === m.id ? { fontWeight: 650 } : undefined}><MetaHighlightValue highlights={highlightsForMetric(insights, m)} currency={currency} period={period} onDetail={() => onOpenGroup(g)}>{formatMetric(c.current, m, currency)}</MetaHighlightValue></span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>;
           })}
-        </tr>; })}</tbody>
+        </tr>
+        {world === 'website' && creativeFormatGroups(g, section.config.metrics).map(child => <tr key={child.key} className={styles.formatSubrow}>
+          <th scope="row"><span className={styles.formatLabel}>{child.name}</span><small>{child.ad_ids.length} ads</small></th>
+          {visible.map(column => {
+            const m = column.metric;
+            if (!m) return <td key={column.key} className={styles.funnelCell}><StageChips group={child} stages={section.config.stages} currency={currency} highlights={[]} onDetail={() => {}} /></td>;
+            const c = child.metrics.find(v => v.id === m.id)!;
+            return <td key={column.key}><span>{formatMetric(c.current, m, currency)}</span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>;
+          })}
+        </tr>)}
+        </Fragment>; })}</tbody>
         <tfoot><tr><th scope="row">Total {section.name}</th>{visible.map(column => {
           const m = column.metric;
           if (!m) return <td key={column.key} className={styles.funnelCell} />;

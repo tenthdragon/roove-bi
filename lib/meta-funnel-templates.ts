@@ -1,6 +1,7 @@
 // Funnel templates: a saved funnel configuration describes the stages and result
 // columns of one kind of landing page. URL rules assign landing pages to a
 // template; observed events only suggest one, never assign it.
+import { CREATIVE_FORMAT_LABELS, CREATIVE_FORMAT_ORDER, type CreativeFormat } from './meta-creative-format';
 import { canonicalLandingPage } from './meta-ad-destinations';
 import { emptyTotals, metricValue, relativeChange, sumMetricTotals, type FunnelConfig, type FunnelMetric, type SavedFunnel, type Totals } from './meta-funnel-domain';
 import { CTWA_KEY_PATTERN, type CtwaDestination } from './meta-ctwa-destinations';
@@ -14,12 +15,22 @@ export type TemplateRule = { brand_id?: number | null; id: string; funnel_id: st
 export type TemplateKind = 'transaction' | 'lead' | 'other';
 export const TEMPLATE_KIND_LABELS: Record<TemplateKind, string> = { transaction: 'Transaksi', lead: 'Lead', other: 'Lainnya' };
 
+export type FormatBreakdown = { format: CreativeFormat; ad_ids: string[]; current: Totals; previous: Totals };
 export type ReportGroup = {
+  format_breakdown?: FormatBreakdown[];
   key: string; name: string; current: Totals; previous: Totals; ad_ids: string[];
   accounts: string[]; ad_names: string[]; landing_page_urls: string[]; verified_ad_ids: string[];
   destination?: CtwaDestination | null;
   currencies?: string[];
 };
+/** Children inherit the configured columns; ratios are calculated from summed events. */
+export function creativeFormatGroups(group: TemplateGroup, metrics: FunnelMetric[]): TemplateGroup[] {
+  return [...(group.format_breakdown || [])].sort((a, b) => CREATIVE_FORMAT_ORDER.indexOf(a.format) - CREATIVE_FORMAT_ORDER.indexOf(b.format)).map(child => ({
+    ...group, ...child, format_breakdown: undefined, key: `${group.key}:format:${child.format}`,
+    name: CREATIVE_FORMAT_LABELS[child.format] || CREATIVE_FORMAT_LABELS.unknown,
+    metrics: compare(child.current, child.previous, metrics),
+  }));
+}
 export type MetricComparison = { id: string; current: number | null; previous: number | null; change: number | null };
 export type TemplateGroup = ReportGroup & { metrics: MetricComparison[] };
 export type TemplateSection = {
