@@ -134,12 +134,12 @@ export function cepHighlights(view: CepView, currency: string): Highlight[] {
     const cost = metricValue(r.current, result);
     if (cost !== null && resultMedian && (r.current[result.denominator!] ?? 0) >= result.min_denominator && r.spendShare >= 0.15 && cost >= resultMedian * 1.5) {
       const diagnosis = cepCostDiagnosis(view, r);
-      out.push({ kind: 'cep', severity: 'bad', title: 'CEP mahal', groupKey: r.cep, weight: r.current.spend,
+      out.push({ metric: result, comparison: { basis: 'cep_median', current: cost, reference: resultMedian }, kind: 'cep', severity: 'bad', title: 'CEP mahal', groupKey: r.cep, weight: r.current.spend,
         text: `${r.label} menyerap ${Math.round(r.spendShare * 100)}% spend dengan ${result.label} ${money(cost, currency)}, ${(cost / resultMedian).toFixed(2)}× median CEP, ${diagnosis.text}` });
     }
     const response = metricValue(r.current, ctr);
     if (response !== null && ctrMedian && r.current.impressions >= 1000 && response >= ctrMedian * 1.25 && r.spendShare <= shareMedian && (cost === null || !resultMedian || cost <= resultMedian)) {
-      out.push({ kind: 'cep', severity: 'good', title: 'CEP berpotensi', groupKey: r.cep, weight: r.current.spend,
+      out.push({ metric: ctr, comparison: { basis: 'cep_median', current: response, reference: ctrMedian }, kind: 'cep', severity: 'good', title: 'CEP berpotensi', groupKey: r.cep, weight: r.current.spend,
         text: `${r.label} punya CTR outbound ${percent(response)}, ${Math.round((response / ctrMedian - 1) * 100)}% di atas median CEP, tapi porsi spend baru ${Math.round(r.spendShare * 100)}%. Kandidat uji penambahan budget.` });
     }
   }
@@ -147,11 +147,11 @@ export function cepHighlights(view: CepView, currency: string): Highlight[] {
     const now = metricValue(r.current, ctr), before = metricValue(r.previous, ctr);
     const change = relativeChange(now, before);
     if (change !== null && change <= -20 && r.current.impressions >= 1000 && r.previous.impressions >= 1000 && r.spendShare >= 0.1) {
-      out.push({ kind: 'cep', severity: 'warn', title: 'Respon CEP melemah', groupKey: r.cep, weight: r.current.spend,
+      out.push({ metric: ctr, comparison: { basis: 'period', current: now!, reference: before! }, kind: 'cep', severity: 'warn', title: 'Respon CEP melemah', groupKey: r.cep, weight: r.current.spend,
         text: `CTR outbound ${r.label} turun ${change.toFixed(0)}% dibanding periode lalu (${percent(before!)} → ${percent(now!)}). Periksa creative CEP ini sebelum mengubah budget.` });
     }
   }
-  if (view.unknownShare >= 0.2) out.push({ kind: 'data', severity: 'warn', title: 'CEP belum terpetakan', weight: 0,
+  if (view.unknownShare >= 0.2) out.push({ kind: 'data', severity: 'warn', title: 'CEP belum terpetakan', note: 'unmapped_cep', weight: 0,
     text: `${Math.round(view.unknownShare * 100)}% spend berasal dari ad tanpa tag CEP. Perbandingan antar CEP belum lengkap; lengkapi di Pemetaan Ads.` });
   return out;
 }

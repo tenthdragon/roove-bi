@@ -7,6 +7,9 @@ import { TEMPLATE_KIND_LABELS, WORLD_LABELS, type MetaBrandWorld, type TemplateG
 import { formatChange, formatCompactMoney, formatCount, formatMetric } from '@/lib/meta-format';
 import { metaResultColumns, visibleMetaColumns, type MetaColumnPreference } from '@/lib/meta-column-preferences';
 import { metaStageValue, sortMetaGroups, type MetaTableSort } from '@/lib/meta-table-sorting';
+import type { Highlight } from '@/lib/meta-ad-highlights';
+import { destinationHighlights, highlightsForMetric, type HighlightPeriod } from '@/lib/meta-inline-highlights';
+import { MetaHighlightValue } from '@/components/MetaInsightPopover';
 import MetaColumnEditor from '@/components/MetaColumnEditor';
 import styles from '@/app/dashboard/meta-funnels/page.module.css';
 
@@ -15,19 +18,19 @@ function Delta({ value, direction = 'higher', neutral = false }: { value: number
   const good = direction === 'higher' ? value >= 0 : value <= 0;
   return <span className={neutral ? styles.neutral : good ? styles.good : styles.bad}>{formatChange(value)}</span>;
 }
-function StageChips({ group, stages, currency }: { group: TemplateGroup; stages: Measure[]; currency: string }) {
+function StageChips({ group, stages, currency, highlights, period, onDetail }: { group: TemplateGroup; stages: Measure[]; currency: string; highlights: Highlight[]; period?: HighlightPeriod; onDetail: () => void }) {
   const steps = stages.filter(s => s !== 'spend');
   return <div className={styles.stageChips}>{steps.map((stage, i) => {
     const value = metaStageValue(group, stages, stage);
-    return <span key={stage} className={styles.stageChip} title={`${MEASURES[stage]}${i ? ` ÷ ${MEASURES[steps[i - 1]]}` : ''}`}>{MEASURES[stage].replace('Landing page views', 'LPV').replace('Initiate checkout', 'IC').replace('Add to cart', 'ATC').replace('Outbound clicks', 'Outbound').replace('Messaging conversations', 'Conv')} {i === 0 ? formatCount(value) : formatMetric(value, 'percent', currency)}</span>;
+    return <span key={stage} className={styles.stageChip} title={`${MEASURES[stage]}${i ? ` ÷ ${MEASURES[steps[i - 1]]}` : ''}`}>{MEASURES[stage].replace('Landing page views', 'LPV').replace('Initiate checkout', 'IC').replace('Add to cart', 'ATC').replace('Outbound clicks', 'Outbound').replace('Messaging conversations', 'Conv')} <MetaHighlightValue highlights={i === 0 ? [] : highlightsForMetric(highlights, { id: stage, label: '', numerator: stage, denominator: steps[i - 1], format: 'percent', direction: 'higher', monitor: true, min_denominator: 0 })} currency={currency} period={period} onDetail={onDetail}>{i === 0 ? formatCount(value) : formatMetric(value, 'percent', currency)}</MetaHighlightValue></span>;
   })}</div>;
 }
 
-export default function MetaTemplateResults({ section, world, currency, preference, preferencesReady, onSave, savedSort, onSaveSort, onOpenGroup }: {
+export default function MetaTemplateResults({ section, world, currency, preference, preferencesReady, onSave, savedSort, onSaveSort, onOpenGroup, highlights = [], period }: {
   section: TemplateSection; world: MetaBrandWorld; currency: string; preference?: MetaColumnPreference | null;
   preferencesReady: boolean; onSave?: (value: MetaColumnPreference | null) => Promise<void>;
   savedSort?: MetaTableSort | null; onSaveSort?: (value: MetaTableSort | null) => Promise<void>;
-  onOpenGroup: (group: TemplateGroup) => void;
+  onOpenGroup: (group: TemplateGroup) => void; highlights?: Highlight[]; period?: HighlightPeriod;
 }) {
   const [editing, setEditing] = useState(false), [notice, setNotice] = useState('');
   const [localSort, setSort] = useState<MetaTableSort | null>(null);
@@ -88,15 +91,15 @@ export default function MetaTemplateResults({ section, world, currency, preferen
             {steps.map((stage, index) => <option key={stage} value={stage}>{MEASURES[stage]}{index ? ' (rasio)' : ''}</option>)}
           </select>}
         </th>)}</tr></thead>
-        <tbody>{groups.map(g => <tr key={g.key}>
-          <td><button type="button" className={styles.nameButton} onClick={() => onOpenGroup(g)}>{g.name}</button><small>{g.ad_ids.length} ad · {g.accounts.join(', ')}</small></td>
+        <tbody>{groups.map(g => { const insights = destinationHighlights(highlights, section.key, g.key); return <tr key={g.key}>
+          <td><button type="button" className={styles.nameButton} onClick={() => onOpenGroup(g)}>{g.name}</button><small>{g.ad_ids.length} ad · {g.accounts.join(', ')}</small>{insights.length > 0 && <span className={styles.rowInsights}><MetaHighlightValue highlights={insights} currency={currency} period={period} onDetail={() => onOpenGroup(g)} label={`Sorotan ${g.name}`} /></span>}</td>
           {visible.map(column => {
             const m = column.metric;
-            if (!m) return <td key={column.key} className={styles.funnelCell}><StageChips group={g} stages={section.config.stages} currency={currency} /></td>;
+            if (!m) return <td key={column.key} className={styles.funnelCell}><StageChips group={g} stages={section.config.stages} currency={currency} highlights={insights} period={period} onDetail={() => onOpenGroup(g)} /></td>;
             const c = g.metrics.find(v => v.id === m.id)!;
-            return <td key={column.key}><span style={section.mainMetric?.id === m.id ? { fontWeight: 650 } : undefined}>{formatMetric(c.current, m, currency)}</span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>;
+            return <td key={column.key}><span style={section.mainMetric?.id === m.id ? { fontWeight: 650 } : undefined}><MetaHighlightValue highlights={highlightsForMetric(insights, m)} currency={currency} period={period} onDetail={() => onOpenGroup(g)}>{formatMetric(c.current, m, currency)}</MetaHighlightValue></span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>;
           })}
-        </tr>)}</tbody>
+        </tr>; })}</tbody>
         <tfoot><tr><th scope="row">Total {section.name}</th>{visible.map(column => {
           const m = column.metric;
           if (!m) return <td key={column.key} className={styles.funnelCell} />;

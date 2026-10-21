@@ -24,6 +24,8 @@ import { getMetaColumnPreferences, saveMetaColumnPreference, saveMetaTableSort, 
 import type { MetaTableSort } from '@/lib/meta-table-sorting';
 import type { MetaColumnPreference, MetaTablePreference } from '@/lib/meta-column-preferences';
 import MetaAdDimensionFilters from '@/components/MetaAdDimensionFilters';
+import { brandMetricHighlights, metaDataNotes } from '@/lib/meta-inline-highlights';
+import { MetaDataNotesTrigger, MetaHighlightValue } from '@/components/MetaInsightPopover';
 import MetaSparkline from '@/components/MetaSparkline';
 const MetaGroupDrawer = dynamic(() => import('@/components/MetaGroupDrawer'), { ssr: false });
 import MetaTemplateSuggestionButton from '@/components/MetaTemplateSuggestionButton';
@@ -39,7 +41,6 @@ const detailCache = createMetaOverviewCache<Data>();
 const columnPreferencesCache = createMetaOverviewCache<MetaColumnPreferences>();
 const historyCache = createMetaOverviewCache<{ points: HistoryPoint[]; complete: boolean }>();
 const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gagal.';
-const severityClass = { bad: styles.bad, warn: styles.warn, good: styles.good, info: styles.neutral } as const;
 
 function Delta({ value, direction = 'higher', neutral = false }: { value: number | null; direction?: 'higher' | 'lower'; neutral?: boolean }) {
   if (value === null) return <span className={styles.neutral}>—</span>;
@@ -174,17 +175,10 @@ export default function MetaBrandDetailPage() {
   }
   const currency = data?.currency || 'IDR';
   const unassignedRules = data?.unassigned.filter(u => u.reason === 'no_rule') || [];
-  const noteCount = data ? data.coverageGaps.length + (data.destinations.missing_ads ? 1 : 0) + (data.destinations.multi_ads ? 1 : 0) + (data.objectiveUnknownAds ? 1 : 0) + (unassignedRules.length ? 1 : 0) : 0;
+  const dataNotes = data ? metaDataNotes(data) : [];
+  const noteCount = dataNotes.length;
+  const highlightPeriod = data ? { ...data.reportRange, prevFrom: data.prevFrom, prevTo: data.prevTo } : undefined;
   const hasFilters = !!(filters.cep || filters.intention || filters.objective);
-  const openHighlight = (h: Data['highlights'][number]) => {
-    if (h.kind === 'cep' && h.groupKey) { setCepDrawer(h.groupKey); return; }
-    if (h.groupKey && data) {
-      const section = data.sections.find(s => s.key === h.sectionKey) || data.sections[0];
-      const group = section?.groups.find(g => g.key === h.groupKey);
-      if (section && group) { setDrawer({ group, section }); return; }
-    }
-    if (h.kind === 'data') setNotesOpen(true);
-  };
   return <div className={styles.page} aria-busy={loading}>
     <MetaAdsNav />
     <div className={styles.toolbar}>
@@ -204,7 +198,7 @@ export default function MetaBrandDetailPage() {
         <details className={styles.filterDetails}><summary>Filter{hasFilters ? ' · aktif' : ''}</summary>
           <div className={styles.filterPanel}>{data && <MetaAdDimensionFilters value={filters} options={data.dimensionOptions} ready={data.dimensionsReady} onChange={setFilters} onReset={() => setFilters({})} />}</div>
         </details>
-        <button type="button" className={`${styles.button} ${noteCount ? styles.notesButton : ''}`} onClick={() => setNotesOpen(true)} disabled={!data}>{noteCount ? `${noteCount} catatan data` : 'Catatan data'}</button>
+        <MetaDataNotesTrigger notes={dataNotes} onOpen={() => setNotesOpen(true)} disabled={!data} />
       </div>
     </div>
     {(session.error || error) && <div role="alert" className={styles.error}>{session.error || error}</div>}
@@ -215,19 +209,11 @@ export default function MetaBrandDetailPage() {
         {world === 'website' && !data.rulesReady && error !== META_TEMPLATE_SCHEMA_MESSAGE && <div role="alert" className={styles.error}>{META_TEMPLATE_SCHEMA_MESSAGE}</div>}
         <p className={styles.period}>Periode {formatDate(data.reportRange.from)} – {formatDate(data.reportRange.to)} <span>vs {formatDate(data.prevFrom)} – {formatDate(data.prevTo)} · {currency}</span></p>
         {data.reportingError && <div role="alert" className={styles.error}>{data.reportingError}</div>}
-        <section aria-label="Sorotan" style={{ display: 'grid', gap: 10 }}>
-          <div className={styles.sectionTitle}><h2>Sorotan</h2><span>Insight otomatis · diurutkan menurut tingkat masalah dan spend yang terdampak</span></div>
-          <div className={styles.highlights}>{data.highlights.map((h, i) => <div key={i} className={styles.highlight}>
-            <span className={`${styles.highlightKind} ${severityClass[h.severity]}`}><i aria-hidden="true" />{h.title}</span>
-            <span>{h.text}</span>
-            {(h.groupKey || h.kind === 'data') && <button type="button" className={styles.nameButton} onClick={() => openHighlight(h)}>{h.groupKey ? 'Lihat detail →' : 'Lihat catatan data →'}</button>}
-          </div>)}</div>
-        </section>
         <section aria-label="Respon iklan" style={{ display: 'grid', gap: 10 }}>
           <div className={styles.sectionTitle}><h2>Respon iklan</h2><span>Lapisan bersama · dinilai sama di Website dan CPAS · sparkline mingguan 90 hari</span></div>
           <div className={styles.responseGrid}>{data.responseMetrics.map(m => { const c = data.response.find(r => r.id === m.id)!; return <div key={m.id} className={styles.kpi}>
             <span className={styles.muted} style={{ display: 'flex', justifyContent: 'space-between' }}><span>{m.label}</span><Delta value={c.change} direction={m.direction} /></span>
-            <span className={styles.kpiValue}>{formatMetric(c.current, m, currency)}</span>
+            <span className={styles.kpiValue}><MetaHighlightValue highlights={brandMetricHighlights(data.highlights, m)} currency={currency} period={highlightPeriod}>{formatMetric(c.current, m, currency)}</MetaHighlightValue></span>
             <MetaSparkline values={series(m)} />
             <span className={styles.muted}>{m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}${m.multiplier ? ` × ${m.multiplier}` : ''}` : MEASURES[m.numerator]}</span>
           </div>; })}</div>
@@ -239,13 +225,13 @@ export default function MetaBrandDetailPage() {
               <button type="button" className={view === 'destinations' ? styles.viewActive : ''} aria-pressed={view === 'destinations'} onClick={() => setView('destinations')}>{world === 'website' ? 'Tujuan' : 'Ad'}</button>
               <button type="button" className={view === 'cep' ? styles.viewActive : ''} aria-pressed={view === 'cep'} onClick={() => setView('cep')}>CEP</button>
             </div></div></div>
-          {view === 'cep' && <MetaCepView view={data.cep} currency={currency} onOpenCep={setCepDrawer} />}
+          {view === 'cep' && <MetaCepView view={data.cep} currency={currency} onOpenCep={setCepDrawer} highlights={data.highlights} period={highlightPeriod} />}
           {view === 'destinations' && world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
           {view === 'destinations' && world === 'website' && (columnError || columnPreferences?.ready === false) && <div className={styles.info} role="status">
             {columnError || 'Pengaturan tabel belum tersedia. Tampilan default digunakan.'} <button type="button" className={styles.button} onClick={() => void reloadColumns(true)}>Coba lagi</button>
           </div>}
           {view === 'destinations' && data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <MetaTemplateResults
-            key={JSON.stringify([session.key, section.key])} section={section} world={world} currency={currency}
+            key={JSON.stringify([session.key, section.key])} section={section} world={world} currency={currency} highlights={data.highlights} period={highlightPeriod}
             preferencesReady={!!columnPreferences?.ready && !columnError && !columnLoading} preference={section.funnelId ? columnPreferences?.preferences[section.funnelId] : null}
             savedSort={section.funnelId ? columnPreferences?.preferences[section.funnelId]?.sort ?? null : null}
             onSaveSort={section.funnelId ? value => saveSort(section.funnelId!, value) : undefined}
@@ -254,7 +240,7 @@ export default function MetaBrandDetailPage() {
           {view === 'destinations' && world === 'website' && data.unassigned.length > 0 && <div className={styles.unassigned}>
             <div className={styles.sectionTitle}><strong className={styles.warn}>Belum ditetapkan</strong><span>{data.unassigned.length} tujuan · {formatCompactMoney(data.unassigned.reduce((s, u) => s + u.current.spend, 0), currency)} · belum masuk template mana pun</span></div>
             {data.unassigned.slice(0, 8).map(u => <div key={u.key} className={styles.unassignedRow}>
-              <span>{u.name} · {formatCompactMoney(u.current.spend, currency)} · <span className={styles.muted}>{u.reason === 'no_url' ? 'URL belum terbaca' : u.reason === 'multi_url' ? 'beberapa URL dalam satu creative' : u.suggestion.reason}</span></span>
+              <span>{u.name} {u.reason === 'no_rule' && <MetaHighlightValue currency={currency} highlights={[{ kind: 'data', severity: 'warn', title: 'Template belum ditetapkan', text: u.suggestion.reason, weight: 0 }]} onDetail={() => setNotesOpen(true)}><span>Belum ada template</span></MetaHighlightValue>} · {formatCompactMoney(u.current.spend, currency)} · <span className={styles.muted}>{u.reason === 'no_url' ? 'URL belum terbaca' : u.reason === 'multi_url' ? 'beberapa URL dalam satu creative' : u.suggestion.reason}</span></span>
               {u.reason === 'no_rule' && canManage && u.suggestion.funnelId && data.templates.some(t => t.id === u.suggestion.funnelId && (role !== 'advertiser' || t.brand_id != null)) && <MetaTemplateSuggestionButton className={styles.button} rulesReady={data.rulesReady} busy={busy} onApply={() => void applySuggestion(u, u.suggestion.funnelId!)} />}
             </div>)}
             <Link href="/dashboard/meta-funnels/templates">Atur template dan tujuan →</Link>
@@ -291,6 +277,8 @@ export default function MetaBrandDetailPage() {
             <div className={styles.actions}><button type="submit" className={styles.primary} disabled={busy}>Simpan URL terverifikasi</button><button type="button" className={styles.button} disabled={busy} onClick={() => setDestinationEditor(null)}>Batal</button></div>
           </form>}</div>}
         {data.objectiveUnknownAds > 0 && <div className={styles.card}><b className={styles.warn}>Objective belum terbaca</b><p className={styles.muted}>{data.objectiveUnknownAds} ad. Gunakan Sync pemetaan di <Link href="/dashboard/meta-funnels/mapping">Pemetaan Ads</Link> untuk melengkapinya.</p></div>}
+        {dataNotes.filter(n => n.note === 'unmapped_cep').map(n => <div key={n.note} className={styles.card}><b className={styles.warn}>{n.title}</b><p className={styles.muted}>{n.text}</p>
+          {canMap && <Link href="/dashboard/meta-funnels/mapping">Buka Pemetaan Ads →</Link>}</div>)}
         {unassignedRules.length > 0 && <div className={styles.card}><b className={styles.warn}>Template belum ditetapkan</b><p className={styles.muted}>{unassignedRules.length} tujuan. Atur di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</p></div>}
       </aside>
     </>}

@@ -5,6 +5,9 @@ import Link from 'next/link';
 import { MEASURES, metricValue, relativeChange, type FunnelMetric } from '@/lib/meta-funnel-domain';
 import { cepHeat, type CepView } from '@/lib/meta-cep-view';
 import { formatChange, formatCompactMoney, formatCount, formatMetric } from '@/lib/meta-format';
+import type { Highlight } from '@/lib/meta-ad-highlights';
+import { cepRowHighlights, highlightsForMetric, type HighlightPeriod } from '@/lib/meta-inline-highlights';
+import { MetaHighlightValue } from '@/components/MetaInsightPopover';
 import styles from '@/app/dashboard/meta-funnels/page.module.css';
 
 export const CEP_COLORS = ['var(--accent)', 'var(--green)', 'var(--yellow)', '#8b5cf6', '#0ea5e9', '#ec4899', '#f97316'];
@@ -23,7 +26,7 @@ function Delta({ value, direction }: { value: number | null; direction: FunnelMe
 }
 
 /** CEP × intention matrix plus one row per CEP; the matrix compares against the CEP median, never the brand total. */
-export default function MetaCepView({ view, currency, onOpenCep }: { view: CepView; currency: string; onOpenCep: (cep: string) => void }) {
+export default function MetaCepView({ view, currency, onOpenCep, highlights = [], period }: { view: CepView; currency: string; onOpenCep: (cep: string) => void; highlights?: Highlight[]; period?: HighlightPeriod }) {
   const [metricId, setMetricId] = useState('outbound_ctr');
   const response = view.responseMetrics.find(m => m.id === metricId) || view.responseMetrics[1] || view.responseMetrics[0];
   const result = view.resultMetric;
@@ -74,11 +77,12 @@ export default function MetaCepView({ view, currency, onOpenCep }: { view: CepVi
           <thead><tr><th scope="col">CEP</th><th scope="col">Spend</th>{view.metrics.map(m => <th key={m.id} scope="col" title={m.denominator ? `${MEASURES[m.numerator]} ÷ ${MEASURES[m.denominator]}` : MEASURES[m.numerator]}>{m.label}</th>)}<th scope="col">Hasil</th></tr></thead>
           <tbody>{view.rows.map((row, i) => <tr key={row.cep}>
             <td>{row.unknown ? <span className={styles.cepUnknown}>{row.label}</span> : <button type="button" className={styles.cepName} onClick={() => onOpenCep(row.cep)}>{row.label}</button>}
+              <span className={styles.rowInsights}><MetaHighlightValue highlights={cepRowHighlights(highlights, row.cep)} currency={currency} period={period} onDetail={() => onOpenCep(row.cep)} label={`Sorotan ${row.label}`} /></span>
               <div className={styles.shareBar} aria-hidden="true"><i style={{ width: `${row.spendShare * 100}%`, background: cepColor(i, row.unknown) }} /></div>
               {row.unknown && <small><Link href="/dashboard/meta-funnels/mapping">Lengkapi tag CEP di Pemetaan Ads</Link></small>}</td>
             <td><strong>{formatCompactMoney(row.current.spend, currency)}</strong><small>{Math.round(row.spendShare * 100)}% · <Delta value={relativeChange(row.current.spend, row.previous.spend)} direction="higher" /></small></td>
             {view.metrics.map(m => { const now = metricValue(row.current, m), before = metricValue(row.previous, m); const heat = row.unknown ? null : cepHeat(now, view.medians[m.id], m.direction);
-              return <td key={m.id}><div className={styles.cepCell} style={heatStyle(heat)}><strong>{formatMetric(now, m, currency)}</strong><small><Delta value={relativeChange(now, before)} direction={m.direction} /></small></div></td>; })}
+              return <td key={m.id}><div className={styles.cepCell} style={heatStyle(heat)}><strong><MetaHighlightValue highlights={highlightsForMetric(cepRowHighlights(highlights, row.cep), m)} currency={currency} period={period} onDetail={() => onOpenCep(row.cep)}>{formatMetric(now, m, currency)}</MetaHighlightValue></strong><small><Delta value={relativeChange(now, before)} direction={m.direction} /></small></div></td>; })}
             <td><strong>{formatCount(row.current[view.resultMetric.denominator!] ?? 0)}</strong><small>{MEASURES[view.resultMetric.denominator!]}</small></td>
           </tr>)}</tbody>
         </table>
