@@ -122,3 +122,23 @@ ad-detail and mapping jobs even without saved funnels. Existing deployment
 rollback restores previous timers and removes newly introduced timer files.
 
 The production systemd worker uses `--max-jobs=100 --max-runtime-seconds=240` to keep draining available jobs without a pause after every five batches. It remains sequential and finishes its current job before honoring the time budget. The one-minute timer prevents overlapping instances of the same unit.
+
+## Queue fairness
+
+Apply migration `229_sync_queue_fairness.sql` to enable oldest-first selection
+for jobs that have been eligible (`available_at`) for at least two minutes.
+Newer eligible jobs retain their existing numeric priority. This prevents
+Scalev continuation batches from indefinitely overtaking Meta creative metadata,
+and also lets older Scalev jobs progress when new Meta jobs arrive. Two minutes
+is the threshold for changing queue order, not a guaranteed completion time;
+older eligible jobs and the active provider request still need to finish.
+Delayed retries age only after their `available_at`, and active jobs are never
+interrupted. Atomic claims retain `FOR UPDATE SKIP LOCKED` for concurrent workers.
+The migration changes only the claim function and preserves its grants.
+
+The Meta status distinguishes queued metadata/catalog batches (clock icon) from
+running batches (spinner), including a partially completed stage awaiting its
+remaining batches. The existing poller continues following queued work.
+
+Run `npm run test:sync-queue-db` against a disposable database after verifying
+the local stack. The test never alters the local snapshot or production data.

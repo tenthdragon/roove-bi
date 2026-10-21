@@ -66,6 +66,8 @@ jobs:
           exit 1
       - name: Check approval, rejection and tenant isolation
         run: node tests/workspace-access-requests-database.mjs --ci
+      - name: Check sync queue fairness and concurrent claims
+        run: node tests/sync-queue-database.mjs --ci
       - name: Remove disposable database container
         if: always()
         run: docker rm -f roove-access-requests-test

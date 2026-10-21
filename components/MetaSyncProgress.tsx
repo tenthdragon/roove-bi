@@ -39,15 +39,15 @@ export default function MetaSyncProgress({ progress, preparing, checking, status
       {error && <button type="button" className={styles.syncRetry} onClick={onRefresh} title={error}>Status belum diperbarui · Coba lagi</button>}
     </div>
     {!!metadata.total && <div className={`${styles.syncStatus} ${metadataIssues ? styles.syncWarning : !metadata.active ? styles.syncSuccess : ''}`} role="status" aria-live="polite">
-      {metadata.active ? <LoaderCircle size={15} aria-hidden="true" className={styles.syncSpinner} /> : metadataIssues ? <AlertCircle size={15} aria-hidden="true" /> : <CheckCircle2 size={15} aria-hidden="true" />}
-      <span>{metadata.active ? stages.discovering ? 'Metadata · mendeteksi perubahan…' : 'Memperbarui metadata iklan…' : metadataIssues ? 'Metadata iklan dengan kendala' : 'Metadata iklan diperbarui'}</span>
+      {metadata.running ? <LoaderCircle size={15} aria-hidden="true" className={styles.syncSpinner} /> : metadata.queued ? <Clock3 size={15} aria-hidden="true" /> : metadataIssues ? <AlertCircle size={15} aria-hidden="true" /> : <CheckCircle2 size={15} aria-hidden="true" />}
+      <span>{metadata.running ? metadata.jobs.some(job => job.mode === 'ad_mapping' && job.status === 'running') ? 'Metadata · mendeteksi perubahan…' : 'Memperbarui metadata iklan…' : metadata.queued ? 'Metadata iklan menunggu antrean' : metadataIssues ? 'Metadata iklan dengan kendala' : 'Metadata iklan diperbarui'}</span>
       <span className={styles.muted}>{metadata.completed}/{metadata.total} batch metadata</span>
       {!stages.discovering && <progress aria-label="Progres metadata" max={metadata.total} value={metadata.completed} />}
       {!!metadataIssues && <span>{metadataIssues} batch perlu diperiksa</span>}
     </div>}
     {!!catalog.total && <div className={`${styles.syncStatus} ${catalogIssues ? styles.syncWarning : !catalog.active ? styles.syncSuccess : ''}`} role="status" aria-live="polite">
-      {catalog.active ? <LoaderCircle size={15} aria-hidden="true" className={styles.syncSpinner} /> : catalogIssues ? <AlertCircle size={15} aria-hidden="true" /> : <CheckCircle2 size={15} aria-hidden="true" />}
-      <span>{catalog.active ? 'Memeriksa katalog…' : catalogIssues ? `Katalog: ${catalogIssues} perlu diperiksa` : 'Katalog terverifikasi'}</span>
+      {catalog.running ? <LoaderCircle size={15} aria-hidden="true" className={styles.syncSpinner} /> : catalog.queued ? <Clock3 size={15} aria-hidden="true" /> : catalogIssues ? <AlertCircle size={15} aria-hidden="true" /> : <CheckCircle2 size={15} aria-hidden="true" />}
+      <span>{catalog.running ? 'Memeriksa katalog…' : catalog.queued ? 'Katalog menunggu antrean' : catalogIssues ? `Katalog: ${catalogIssues} perlu diperiksa` : 'Katalog terverifikasi'}</span>
       {catalog.active && <span className={styles.muted}>{catalog.completed}/{catalog.total} batch katalog</span>}
     </div>}
     {!!jobs.length && <details className={styles.syncDetails}><summary>Detail</summary>
