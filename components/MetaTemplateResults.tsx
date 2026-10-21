@@ -3,7 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, SlidersHorizontal } from 'lucide-react';
 import { MEASURES, type Measure } from '@/lib/meta-funnel-domain';
-import { creativeFormatGroups, TEMPLATE_KIND_LABELS, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
+import { creativeFormatGroups, optimizationGroups, TEMPLATE_KIND_LABELS, WORLD_LABELS, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
 import { formatChange, formatCompactMoney, formatCount, formatMetric } from '@/lib/meta-format';
 import { metaResultColumns, visibleMetaColumns, type MetaColumnPreference } from '@/lib/meta-column-preferences';
 import { metaStageValue, sortMetaGroups, type MetaTableSort } from '@/lib/meta-table-sorting';
@@ -26,7 +26,8 @@ function StageChips({ group, stages, currency, highlights, period, onDetail }: {
   })}</div>;
 }
 
-export default function MetaTemplateResults({ section, world, currency, preference, preferencesReady, onSave, savedSort, onSaveSort, onOpenGroup, highlights = [], period }: {
+export default function MetaTemplateResults({ section, world, currency, preference, preferencesReady, onSave, savedSort, onSaveSort, onOpenGroup, highlights = [], period, breakdown = 'format' }: {
+  breakdown?: 'format' | 'optimization';
   section: TemplateSection; world: MetaBrandWorld; currency: string; preference?: MetaColumnPreference | null;
   preferencesReady: boolean; onSave?: (value: MetaColumnPreference | null) => Promise<void>;
   savedSort?: MetaTableSort | null; onSaveSort?: (value: MetaTableSort | null) => Promise<void>;
@@ -100,7 +101,7 @@ export default function MetaTemplateResults({ section, world, currency, preferen
             return <td key={column.key}><span style={section.mainMetric?.id === m.id ? { fontWeight: 650 } : undefined}><MetaHighlightValue highlights={highlightsForMetric(insights, m)} currency={currency} period={period} onDetail={() => onOpenGroup(g)}>{formatMetric(c.current, m, currency)}</MetaHighlightValue></span><small><Delta value={c.change} direction={m.direction} neutral={!m.monitor} /></small></td>;
           })}
         </tr>
-        {world === 'website' && creativeFormatGroups(g, section.config.metrics).map(child => <tr key={child.key} className={styles.formatSubrow}>
+        {world === 'website' && (breakdown === 'optimization' ? optimizationGroups(g, section.config.metrics) : creativeFormatGroups(g, section.config.metrics)).map(child => <tr key={child.key} className={styles.formatSubrow}>
           <th scope="row"><span className={styles.formatLabel}>{child.name}</span><small>{child.ad_ids.length} ads</small>{!!child.latest_metadata_ad_ids?.length && <small title="ID creative pada data historis belum tersedia. Tipe memakai creative terbaru yang cocok dengan inventori iklan.">{child.latest_metadata_ad_ids.length} memakai tipe terbaru</small>}</th>
           {visible.map(column => {
             const m = column.metric;

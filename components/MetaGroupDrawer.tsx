@@ -85,7 +85,7 @@ export default function MetaGroupDrawer({ group, section, world, input, currency
           const value = main ? metricValue(ad.current, main) : null;
           return <div key={ad.key} className={styles.adRow}>
             {creative ? <MetaAdCreative creative={creative} /> : <div className={styles.adThumb}>Ad</div>}
-            <div><b title={ad.name}>{ad.name}</b><small>{ad.account} · {formatMetric(ad.current.spend, SPEND, currency)} · CTR {formatMetric(metricValue(ad.current, CTR), 'percent', currency)}</small></div>
+            <div><b title={ad.name}>{ad.name}</b><small>{ad.account} · {formatMetric(ad.current.spend, SPEND, currency)} · CTR {formatMetric(metricValue(ad.current, CTR), 'percent', currency)}</small>{ad.optimization && <small title={ad.optimization.detail}>{ad.optimization.label}</small>}</div>
             <div className={styles.adResult}>{main ? `${main.label} ${formatMetric(value, main, currency)}` : formatCount(ad.current.purchases)}</div>
           </div>;
         })}</div>

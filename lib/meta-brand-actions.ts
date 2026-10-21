@@ -1,4 +1,5 @@
 'use server';
+import { optimizationLabel, optimizationDescription } from './meta-ad-optimization';
 
 // Brand-first Meta Ads reporting: one summary per brand, one detail per brand
 // and world (website or CPAS), and template rule management.
@@ -265,7 +266,8 @@ export async function getMetaGroupAds(input: BrandInput & { brandId: string; wor
   const wanted = new Set(input.adIds);
   return { schemaReady: true as const, currency: raw.currencies[0] || 'IDR',
     ads: normalizeGroups(raw).filter(g => g.ad_ids.some(id => wanted.has(id))).sort((a, b) => b.current.spend - a.current.spend)
-      .map(g => ({ key: g.key, ad_id: g.ad_ids[0], name: g.name, account: g.accounts[0] || '', current: g.current, previous: g.previous })) };
+      .map(g => ({ key: g.key, ad_id: g.ad_ids[0], name: g.name, account: g.accounts[0] || '', current: g.current, previous: g.previous,
+        optimization: g.optimization_breakdown?.[0] ? { label: optimizationLabel(g.optimization_breakdown[0]), detail: optimizationDescription(g.optimization_breakdown[0]) } : null })) };
 }
 
 /** Behind one CEP: the destinations and ads carrying it, for the CEP drawer. */
