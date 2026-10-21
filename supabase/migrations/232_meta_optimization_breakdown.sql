@@ -125,7 +125,7 @@ BEGIN
   SELECT x.account_id,x.ad_id,
    coalesce(observed.campaign_objective,CASE WHEN m.campaign_id=observed.campaign_id THEN m.campaign_objective END,o.campaign_objective) AS objective,
    o.optimization_goal,o.conversion_event,o.custom_conversion_id
-  FROM active_ads x
+  FROM (SELECT DISTINCT account_id,ad_id FROM scoped) x
   LEFT JOIN LATERAL (
    SELECT d.raw_insights->>'adset_id' AS adset_id,d.campaign_id,d.campaign_objective
    FROM meta_ad_daily_metrics d WHERE d.workspace_id=p_workspace_id AND d.account_id=x.account_id AND d.ad_id=x.ad_id
@@ -134,7 +134,7 @@ BEGIN
   LEFT JOIN meta_ad_mappings m ON m.workspace_id=p_workspace_id AND m.account_id=x.account_id AND m.ad_id=x.ad_id
   LEFT JOIN meta_adset_optimizations o ON o.workspace_id=p_workspace_id AND o.account_id=x.account_id
    AND o.adset_id=observed.adset_id AND o.campaign_id=observed.campaign_id
-  WHERE p_view='overview' AND p_group_by IN('landing_page','ad')
+  WHERE p_view='overview' AND (p_group_by='landing_page' OR (p_group_by='ad' AND p_config->>'include_optimization'='true'))
  ), group_rows AS (
   -- Cohort rows may overlap. Summary, facets, history and intention totals below
   -- continue to read unique daily facts from scoped/enriched.

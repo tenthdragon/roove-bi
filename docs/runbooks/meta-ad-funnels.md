@@ -1179,6 +1179,8 @@ summary totals and period comparisons stay shared. Browser preferences are scope
 by workspace and viewer; unavailable storage leaves the selector usable and shows
 a save error. CPAS and the CEP view retain their existing layouts. Ad details
 include the current campaign/optimization/event label without adding table columns.
+Per-ad optimization aggregation is requested only when the detail panel opens;
+the CPAS summary does not compute unused optimization breakdowns.
 
 The existing inventory request adds adset.optimization_goal; promoted_object
 already contains custom_event_type/custom_conversion_id. Inventory deduplicates

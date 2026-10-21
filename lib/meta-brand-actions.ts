@@ -262,6 +262,7 @@ export async function getMetaGroupAds(input: BrandInput & { brandId: string; wor
   if (!ctx.schemaReady) return ctx;
   const config = ctx.scopedAccountIds.length ? { ...ctx.config, account_ids: ctx.scopedAccountIds } : ctx.config;
   const query = metaReportQuery({ ...ctx.input, brandId, channel: WORLD_CHANNEL[world], groupBy: 'ad' }, config);
+  query.config.include_optimization = true;
   const raw = await getCachedMetaAdReport(ctx.workspaceId, ctx.reportVersion, query);
   const wanted = new Set(input.adIds);
   return { schemaReady: true as const, currency: raw.currencies[0] || 'IDR',

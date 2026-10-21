@@ -33,6 +33,8 @@ DO $$ DECLARE w uuid:='00000000-0000-4000-8000-000000000001'; a text; a2 text; c
  PERFORM save_meta_adset_optimizations(w,a,'[{"adset_id":"700","campaign_id":"900","campaign_objective":"OUTCOME_TRAFFIC","optimization_goal":"LANDING_PAGE_VIEWS","source_updated_at":"1996-01-05T00:00:00Z"}]','1996-01-06');
  IF (SELECT revision FROM meta_ad_report_versions WHERE workspace_id=w)<=rev THEN RAISE EXCEPTION 'Optimization update did not invalidate cache'; END IF;
  report:=get_meta_ad_report_incremental(w,'1996-01-02','1996-01-02',config,'{}',NULL,'ad');
+ IF EXISTS(SELECT 1 FROM jsonb_array_elements(report->'groups') g WHERE jsonb_array_length(g->'optimization_breakdown')>0) THEN RAISE EXCEPTION 'Unused per-ad optimization was aggregated'; END IF;
+ report:=get_meta_ad_report_incremental(w,'1996-01-02','1996-01-02',config||'{"include_optimization":true}','{}',NULL,'ad');
  IF NOT EXISTS(SELECT 1 FROM jsonb_array_elements(report->'groups') g WHERE g->'ad_ids' ? '99999997302' AND jsonb_array_length(g->'optimization_breakdown')=1) THEN RAISE EXCEPTION 'Per-ad detail missing'; END IF;
  report:=get_meta_ad_report_incremental('00000000-0000-4000-8000-000000000002','1996-01-02','1996-01-02',config);
  IF jsonb_array_length(report->'groups')<>0 THEN RAISE EXCEPTION 'Workspace leak'; END IF;
