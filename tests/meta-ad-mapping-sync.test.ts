@@ -132,7 +132,7 @@ function versionedHarness(certified: boolean) {
     const q = original(table);
     if (table === 'meta_ad_metadata_sync_state') q.then = (resolve: any) => resolve({ error: null, data: certified ? [{ ad_id: '10', ...metaMetadataSource(versionedAd), observed_at: '2026-10-16T00:00:00Z' }] : [] });
     if (table === 'meta_ad_destination_metadata') q.then = (resolve: any) => resolve({ error: null, data: [{ ad_id: '10', creative_id: '20', adset_id: '30', observed_at: '2026-10-16T00:00:00Z', metadata: { contact_identity_checked: true, product_set_ids: ['500'] } }] });
-    if (table === 'meta_ad_creatives') q.then = (resolve: any) => resolve({ error: null, data: [{ ad_id: '10', creative_id: '20', creative_format: 'video', updated_at: '2026-10-16T00:00:00Z', landing_page_urls: ['https://roove.co.id/cached'] }] });
+    if (table === 'meta_ad_creatives') q.then = (resolve: any) => resolve({ error: null, data: [{ ad_id: '10', creative_id: '20', creative_format: 'video', partnership_metadata: { version: 1, status: 'non_partnership' }, updated_at: '2026-10-16T00:00:00Z', landing_page_urls: ['https://roove.co.id/cached'] }] });
     return q;
   };
   h.deps.fetchAdInventory = async () => [versionedAd];

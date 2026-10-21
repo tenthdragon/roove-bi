@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { metaMetadataSource, metadataRefreshDecision } from '../lib/meta-ad-metadata-state';
 const ad = { id: '10', updated_time: '2026-10-16T00:00:00Z', creative: { id: '20' }, adset_id: '30',
   adset: { id: '30', updated_time: '2026-10-16T00:00:00Z', destination_type: 'WHATSAPP', promoted_object: { page_id: '1', whatsapp_phone_number: '+628123456789' } } };
-const creative = { creative_format: 'video', ad_id: '10', creative_id: '20', updated_at: '2026-10-17T10:00:00Z' };
+const creative = { partnership_metadata: { version: 1, status: 'non_partnership' }, creative_format: 'video', ad_id: '10', creative_id: '20', updated_at: '2026-10-17T10:00:00Z' };
 const destination = { ad_id: '10', creative_id: '20', adset_id: '30', observed_at: '2026-10-17T10:00:00Z', metadata: { contact_identity: { version: 1 } } };
 test('metadata fingerprint detects creative, ad-set destination, phone and provider timestamp changes', () => {
   const base = metaMetadataSource(ad);
@@ -38,4 +38,12 @@ test('unknown formats retry after one day while known unchanged formats remain c
   const now = Date.parse(creative.updated_at) + 86_400_000;
   assert.equal(metadataRefreshDecision(source, state, { ...creative, creative_format: 'unknown' }, destination, now), 'refresh');
   assert.equal(metadataRefreshDecision(source, state, creative, destination, now), 'cached');
+});
+
+test('legacy partnership cache refreshes once; failed inspections retry after one day', () => {
+  const source = metaMetadataSource(ad), state = { ad_id: '10', ...source, observed_at: creative.updated_at };
+  assert.equal(metadataRefreshDecision(source, state, { ...creative, partnership_metadata: null }, destination), 'refresh');
+  const pending = { ...creative, partnership_metadata: { version: 1, status: 'unknown' } };
+  assert.equal(metadataRefreshDecision(source, state, pending, destination, Date.parse(creative.updated_at) + 60_000), 'cached');
+  assert.equal(metadataRefreshDecision(source, state, pending, destination, Date.parse(creative.updated_at) + 86_400_000), 'refresh');
 });

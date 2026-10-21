@@ -58,6 +58,8 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
             const result = await svc.rpc('upsert_meta_ad_mappings', { p_workspace_id: workspaceId, p_account_id: account.account_id, p_rows: rows, p_source: 'inventory', p_observed_at: observedAt });
             if (result.error) throw new Error(result.error.message); count += Number(result.data || 0);
           }
+          const unknownPartnership = successes.filter(m => m.partnership_metadata?.status === 'unknown').length;
+          if (unknownPartnership) warnings.push(`${account.account_name}: status partnership ${unknownPartnership} ad belum dapat dipastikan.`);
           if (successes.length !== ids.length) warnings.push(`${account.account_name}: ${ids.length - successes.length} creative belum terbaca; pemetaan nama tetap disimpan.`);
           try {
             const destinations = await dependencies.refreshMetaAdDestinations?.(svc, workspaceId, account.account_id, ids, token, undefined, options.parentJobId);
@@ -88,7 +90,7 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
       if (dimensionSchema.error && !['42703','PGRST204'].includes(dimensionSchema.error.code)) throw new Error(dimensionSchema.error.message);
       for (let offset = 0; offset < inventory.length; offset += 50) {
         const ads = inventory.slice(offset, offset + 50);
-        const cache = await svc.from('meta_ad_creatives').select('ad_id,creative_id,landing_page_urls,updated_at,creative_format')
+        const cache = await svc.from('meta_ad_creatives').select('ad_id,creative_id,landing_page_urls,updated_at,creative_format,partnership_metadata')
           .eq('workspace_id', workspaceId).eq('account_id', account.account_id).in('ad_id', ads.map(a => a.id));
         if (cache.error) throw new Error(cache.error.message);
         const cached = new Map((cache.data || []).map(c => [c.ad_id, c]));
