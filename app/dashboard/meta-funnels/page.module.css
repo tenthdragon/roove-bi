@@ -446,5 +446,4 @@
 .formatSubrow th small { display: block; color: var(--text-muted); font-weight: 400; margin-top: 4px; }
 
 .tableViewControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.page .breakdownSelect { display: inline-flex; flex-direction: row; align-items: center; gap: 8px; white-space: nowrap; }
-.page .breakdownSelect select { padding: 9px 8px; border-radius: 8px; color: var(--text); font: inherit; font-weight: 600; }
+.page .breakdownSelect { padding: 9px 8px; border-radius: 8px; font-weight: 600; }

@@ -75,13 +75,11 @@ export default function MetaTemplateResults({ section, world, currency, preferen
         {activeSort && <button type="button" className={styles.button} disabled={sortDisabled} onClick={() => void changeSort(null)}>Urutan awal</button>}
         <div className={styles.tableViewControls}>
           {onSave && <button ref={trigger} type="button" className={`${styles.button} ${styles.columnSettingsButton}`} disabled={!preferencesReady || savingSort} aria-haspopup="dialog" onClick={() => { setNotice(''); setEditing(true); }}><SlidersHorizontal size={14} />Atur kolom</button>}
-          {world === 'website' && onBreakdownChange && <label className={styles.breakdownSelect}>Rincian
-            <select aria-label={`Rincian tabel ${section.name}`} disabled={!breakdownReady} value={breakdown}
-              title={breakdown === 'optimization' ? 'Konfigurasi optimasi terbaru yang tersinkron.' : undefined}
-              onChange={e => onBreakdownChange(e.target.value === 'optimization' ? 'optimization' : 'format')}>
-              <option value="format">Format iklan</option><option value="optimization">Optimasi</option>
-            </select>
-          </label>}
+          {world === 'website' && onBreakdownChange && <select className={styles.breakdownSelect} aria-label={`Rincian tabel ${section.name}`} disabled={!breakdownReady} value={breakdown}
+            title={breakdown === 'optimization' ? 'Konfigurasi optimasi terbaru yang tersinkron.' : undefined}
+            onChange={e => onBreakdownChange(e.target.value === 'optimization' ? 'optimization' : 'format')}>
+            <option value="format">Format iklan</option><option value="optimization">Optimasi</option>
+          </select>}
         </div>
       </div>
     </div>
