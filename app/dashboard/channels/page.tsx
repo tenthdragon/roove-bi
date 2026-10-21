@@ -89,6 +89,7 @@ export default function ChannelsPage() {
   const [selectedProduct, setSelectedProduct] = useState('all');
   const [scalevExpanded, setScalevExpanded] = useState(false);
   const [dailySalesOpen, setDailySalesOpen] = useState(false);
+  const [showOlderSalesDays, setShowOlderSalesDays] = useState(false);
   const [hiddenChannels, setHiddenChannels] = useState<Set<string>>(new Set());
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
   const [prevAdsData, setPrevAdsData] = useState<any[]>([]);
@@ -510,7 +511,7 @@ export default function ChannelsPage() {
     });
 
     const rows = Object.entries(byDate)
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => b.localeCompare(a))
       .map(([date, data]) => {
         const totalOrders = Object.values(data.channels).reduce((sum, v) => sum + v.orders, 0);
         const totalRevenue = Object.values(data.channels).reduce((sum, v) => sum + v.revenue, 0);
@@ -870,7 +871,7 @@ export default function ChannelsPage() {
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map(row => {
+              {visibleRows.slice(0, showOlderSalesDays ? undefined : 2).map(row => {
                 const rowTotalOrders = visibleChannels.reduce((sum, ch) => sum + (row.channels[ch]?.orders || 0), 0);
                 const rowTotalRevenue = visibleChannels.reduce((sum, ch) => sum + (row.channels[ch]?.revenue || 0), 0);
                 return (
@@ -897,6 +898,19 @@ export default function ChannelsPage() {
                 </tr>
                 );
               })}
+              {visibleRows.length > 2 && (
+                <tr>
+                  <td colSpan={visibleChannels.length + 2} style={{ padding: '8px 10px', textAlign: 'center', borderBottom: '1px solid var(--border)' }}>
+                    <button
+                      type="button"
+                      onClick={() => setShowOlderSalesDays(value => !value)}
+                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 10, color: 'var(--dim)' }}
+                    >
+                      {showOlderSalesDays ? 'Sembunyikan tanggal sebelumnya' : `Tampilkan ${visibleRows.length - 2} tanggal sebelumnya`}
+                    </button>
+                  </td>
+                </tr>
+              )}
               {/* Grand Total row */}
               <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg)' }}>
                 <td style={{ padding: '8px 10px', fontWeight: 700, fontSize: 11, position: 'sticky', left: 0, background: 'var(--bg)', zIndex: 1 }}>TOTAL</td>
