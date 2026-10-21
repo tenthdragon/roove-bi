@@ -26,8 +26,8 @@ function StageChips({ group, stages, currency, highlights, period, onDetail }: {
   })}</div>;
 }
 
-export default function MetaTemplateResults({ section, world, currency, preference, preferencesReady, onSave, savedSort, onSaveSort, onOpenGroup, highlights = [], period, breakdown = 'format' }: {
-  breakdown?: 'format' | 'optimization';
+export default function MetaTemplateResults({ section, world, currency, preference, preferencesReady, onSave, savedSort, onSaveSort, onOpenGroup, highlights = [], period, breakdown = 'format', breakdownReady = true, onBreakdownChange }: {
+  breakdown?: 'format' | 'optimization'; breakdownReady?: boolean; onBreakdownChange?: (value: 'format' | 'optimization') => void;
   section: TemplateSection; world: MetaBrandWorld; currency: string; preference?: MetaColumnPreference | null;
   preferencesReady: boolean; onSave?: (value: MetaColumnPreference | null) => Promise<void>;
   savedSort?: MetaTableSort | null; onSaveSort?: (value: MetaTableSort | null) => Promise<void>;
@@ -73,7 +73,14 @@ export default function MetaTemplateResults({ section, world, currency, preferen
       <div><span className={`${styles.templateTag} ${world === 'cpas' ? styles.templateTagCpas : ''}`}>{world === 'cpas' ? 'CPAS' : 'TEMPLATE'}</span><strong>{section.name}</strong><span>{section.config.stages.filter(s => s !== 'spend').map(s => MEASURES[s]).join(' → ')} · {section.groups.length} {world === 'website' ? 'tujuan' : 'ad'} · {formatCompactMoney(section.summary.spend, currency)}</span></div>
       <div><span>{section.mainMetric && section.mainMedian !== null ? `Median ${section.mainMetric.label} ${formatMetric(section.mainMedian, section.mainMetric, currency)}` : TEMPLATE_KIND_LABELS[section.kind]}</span>
         {activeSort && <button type="button" className={styles.button} disabled={sortDisabled} onClick={() => void changeSort(null)}>Urutan awal</button>}
-        {onSave && <button ref={trigger} type="button" className={`${styles.button} ${styles.columnSettingsButton}`} disabled={!preferencesReady || savingSort} aria-haspopup="dialog" onClick={() => { setNotice(''); setEditing(true); }}><SlidersHorizontal size={14} />Atur kolom</button>}
+        <div className={styles.tableViewControls}>
+          {onSave && <button ref={trigger} type="button" className={`${styles.button} ${styles.columnSettingsButton}`} disabled={!preferencesReady || savingSort} aria-haspopup="dialog" onClick={() => { setNotice(''); setEditing(true); }}><SlidersHorizontal size={14} />Atur kolom</button>}
+          {world === 'website' && onBreakdownChange && <select className={styles.breakdownSelect} aria-label={`Rincian tabel ${section.name}`} disabled={!breakdownReady} value={breakdown}
+            title={breakdown === 'optimization' ? 'Konfigurasi optimasi terbaru yang tersinkron.' : undefined}
+            onChange={e => onBreakdownChange(e.target.value === 'optimization' ? 'optimization' : 'format')}>
+            <option value="format">Format iklan</option><option value="optimization">Optimasi</option>
+          </select>}
+        </div>
       </div>
     </div>
     {savingSort && <p role="status" className={styles.muted}>Menyimpan pengurutan…</p>}
