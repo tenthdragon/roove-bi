@@ -88,7 +88,6 @@ export default function ChannelsPage() {
   const [error, setError] = useState('');
   const [selectedProduct, setSelectedProduct] = useState('all');
   const [scalevExpanded, setScalevExpanded] = useState(false);
-  const [dailySalesOpen, setDailySalesOpen] = useState(false);
   const [showOlderSalesDays, setShowOlderSalesDays] = useState(false);
   const [hiddenChannels, setHiddenChannels] = useState<Set<string>>(new Set());
   const [prevChannelData, setPrevChannelData] = useState<any[]>([]);
@@ -817,17 +816,13 @@ export default function ChannelsPage() {
         />
       </div>
 
-      {/* Combined Daily Sales & Shipments Table (Collapsible) */}
+      {/* Combined Daily Sales & Shipments Table */}
       <div style={{ background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 16 }}>
-        <div
-          onClick={() => setDailySalesOpen(!dailySalesOpen)}
-          style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', userSelect: 'none' }}
-        >
-          <span style={{ fontSize: 13, color: 'var(--dim)', transition: 'transform 0.2s', transform: dailySalesOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}>&#9654;</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 15, fontWeight: 700 }}>Active Daily Sales &amp; Shipments</span>
           <span style={{ fontSize: 12, color: 'var(--dim)' }}>({dailyCombined.rows.length} days · month-over-month)</span>
         </div>
-        {dailySalesOpen && dailyCombined.rows.length > 0 ? (<>
+        {dailyCombined.rows.length > 0 ? (<>
           {/* Hide/unhide channel toggles */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', margin: '12px 0' }}>
             {dailyCombined.channelNames.map(ch => {
@@ -903,10 +898,11 @@ export default function ChannelsPage() {
                   <td colSpan={visibleChannels.length + 2} style={{ padding: '8px 10px', textAlign: 'center', borderBottom: '1px solid var(--border)' }}>
                     <button
                       type="button"
+                      aria-expanded={showOlderSalesDays}
                       onClick={() => setShowOlderSalesDays(value => !value)}
                       style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '5px 10px', cursor: 'pointer', fontSize: 10, color: 'var(--dim)' }}
                     >
-                      {showOlderSalesDays ? 'Sembunyikan tanggal sebelumnya' : `Tampilkan ${visibleRows.length - 2} tanggal sebelumnya`}
+                      {showOlderSalesDays ? 'Tampilkan 2 tanggal terbaru' : `Tampilkan semua ${visibleRows.length} tanggal`}
                     </button>
                   </td>
                 </tr>
@@ -957,9 +953,9 @@ export default function ChannelsPage() {
           </div>
             );
           })()}
-        </>) : dailySalesOpen ? (
+        </>) : (
           <div style={{ textAlign: 'center', padding: 24, color: 'var(--dim)', fontSize: 12 }}>Tidak ada data harian untuk periode ini.</div>
-        ) : null}
+        )}
       </div>
 
       {/* Channel Breakdown Table */}
