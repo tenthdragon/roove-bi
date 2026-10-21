@@ -444,3 +444,6 @@
 .page .resultTable .formatSubrow th:first-child { padding-left: 28px; font-weight: 400; }
 .formatLabel { font-weight: 600; }
 .formatSubrow th small { display: block; color: var(--text-muted); font-weight: 400; margin-top: 4px; }
+
+.breakdownSelect { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; white-space: nowrap; }
+.breakdownSelect select { font: inherit; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); color: inherit; }

@@ -202,3 +202,14 @@ test('deferred ads preserve their certification and still enqueue cached product
   assert.deepEqual(calls[0].slice(1, 4), [options.workspaceId, options.accountId, ['500']]);
   assert.equal((Date.parse(reads[0].p_to) - Date.parse(reads[0].p_from)) / 86400000, 29, 'the inclusive lookback is exactly 30 days');
 });
+
+test('inventory persists optimization for long-paused ads without queuing rich creative reads', async () => {
+ const h = harness(undefined, []);
+ h.deps.fetchAdInventory = async () => [{ id: '10', name: 'Purchase in name is not evidence', effective_status: 'PAUSED', creative: { id: '20' },
+  campaign: { id: '40', objective: 'OUTCOME_SALES' }, adset: { id: '30', optimization_goal: 'OFFSITE_CONVERSIONS', promoted_object: { custom_event_type: 'INITIATED_CHECKOUT' } } }];
+ const result = await runMetaAdMappingSync(options, h.deps);
+ assert.equal(result.status, 'success');assert.deepEqual(h.queued, []);
+ const write = h.writes.find(w => w.table === 'save_meta_adset_optimizations')!;
+ assert.equal(write.data.p_workspace_id, options.workspaceId);assert.equal(write.data.p_account_id, 'act_1');
+ assert.equal(write.data.p_rows[0].conversion_event, 'INITIATED_CHECKOUT');assert.equal(write.data.p_rows[0].adset_id, '30');
+});

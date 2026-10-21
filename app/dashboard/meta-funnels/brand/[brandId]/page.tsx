@@ -8,6 +8,7 @@ import { X } from 'lucide-react';
 import { useDateRange } from '@/lib/DateRangeContext';
 import { usePermissions } from '@/lib/PermissionsContext';
 import { useMetaCachedLoad, useMetaReportSession } from '@/lib/useMetaCachedLoad';
+import { useMetaBreakdownPreference } from '@/lib/useMetaBreakdownPreference';
 import { createMetaOverviewCache } from '@/lib/meta-overview-cache';
 import { defaultMetaRange } from '@/lib/meta-report-status';
 import { getTodayWIB } from '@/lib/sync-schedule';
@@ -55,6 +56,7 @@ export default function MetaBrandDetailPage() {
   const pathname = usePathname();
   const { dateRange } = useDateRange();
   const session = useMetaReportSession();
+  const breakdown = useMetaBreakdownPreference(session.workspaceId, session.userId);
   const fetchColumnPreferences = useCallback(() => getMetaColumnPreferences({ workspaceId: session.workspaceId, userId: session.userId }), [session.workspaceId, session.userId]);
   const { data: columnPreferences, setData: setColumnPreferences, error: columnError, loading: columnLoading, load: reloadColumns } = useMetaCachedLoad(session.key, columnPreferencesCache, fetchColumnPreferences);
   async function saveColumns(funnelId: string, preference: MetaColumnPreference | null) {
@@ -221,17 +223,24 @@ export default function MetaBrandDetailPage() {
         <section aria-label={`Hasil ${WORLD_LABELS[world]}`} style={{ display: 'grid', gap: 12 }}>
           <div className={styles.sectionTitle}><h2>Hasil · {WORLD_LABELS[world]}</h2><div className={styles.actions}>
             <span className={styles.muted}>{view === 'cep' ? 'Per CEP · nuansa antar pintu masuk pada ad yang sama' : world === 'website' ? 'Per template · Website per URL, WhatsApp per brand dan nomor' : 'Per ad · purchase Shopee dengan atribusi Meta'}</span>
+            {view === 'destinations' && world === 'website' && <label className={styles.breakdownSelect}>Rincian
+              <select aria-label="Rincian tabel" disabled={!breakdown.ready} value={breakdown.value} onChange={e => breakdown.select(e.target.value === 'optimization' ? 'optimization' : 'format')}>
+                <option value="format">Format iklan</option><option value="optimization">Optimasi</option>
+              </select>
+            </label>}
             <div className={styles.viewSwitch} role="group" aria-label="Tampilan hasil">
               <button type="button" className={view === 'destinations' ? styles.viewActive : ''} aria-pressed={view === 'destinations'} onClick={() => setView('destinations')}>{world === 'website' ? 'Tujuan' : 'Ad'}</button>
               <button type="button" className={view === 'cep' ? styles.viewActive : ''} aria-pressed={view === 'cep'} onClick={() => setView('cep')}>CEP</button>
             </div></div></div>
+          {view === 'destinations' && world === 'website' && breakdown.error && <p role="status" className={styles.muted}>{breakdown.error}</p>}
+          {view === 'destinations' && world === 'website' && breakdown.value === 'optimization' && <p className={styles.muted}>Konfigurasi optimasi terbaru yang tersinkron · metrik mengikuti periode laporan.</p>}
           {view === 'cep' && <MetaCepView view={data.cep} currency={currency} onOpenCep={setCepDrawer} highlights={data.highlights} period={highlightPeriod} />}
           {view === 'destinations' && world === 'website' && !data.sections.some(s => s.groups.length) && <div className={styles.card}>{data.sections.length ? 'Belum ada landing page yang terpetakan ke template pada periode ini.' : 'Belum ada template funnel.'} Tetapkan template di <Link href="/dashboard/meta-funnels/templates">Template funnel</Link>.</div>}
           {view === 'destinations' && world === 'website' && (columnError || columnPreferences?.ready === false) && <div className={styles.info} role="status">
             {columnError || 'Pengaturan tabel belum tersedia. Tampilan default digunakan.'} <button type="button" className={styles.button} onClick={() => void reloadColumns(true)}>Coba lagi</button>
           </div>}
           {view === 'destinations' && data.sections.filter(s => s.groups.length || world === 'cpas').map(section => <MetaTemplateResults
-            key={JSON.stringify([session.key, section.key])} section={section} world={world} currency={currency} highlights={data.highlights} period={highlightPeriod}
+            key={JSON.stringify([session.key, section.key])} breakdown={breakdown.value} section={section} world={world} currency={currency} highlights={data.highlights} period={highlightPeriod}
             preferencesReady={!!columnPreferences?.ready && !columnError && !columnLoading} preference={section.funnelId ? columnPreferences?.preferences[section.funnelId] : null}
             savedSort={section.funnelId ? columnPreferences?.preferences[section.funnelId]?.sort ?? null : null}
             onSaveSort={section.funnelId ? value => saveSort(section.funnelId!, value) : undefined}

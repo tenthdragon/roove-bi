@@ -9,7 +9,7 @@ import { parseCepKey } from './meta-cep-key';
 export type MetaReportInput = { from: string; to: string; channel?: MetaAdChannel; funnelId?: string; brandId?: string; groupKey?: string; filters?: AdDimensionFilters; groupBy?: ReportGroupBy };
 export type ReportGroupBy = 'ad' | 'landing_page' | 'cep_intention';
 export type ReportQuery = {
-  from: string; to: string; config: Pick<FunnelConfig, 'account_ids' | 'name_filter' | 'match'>;
+  from: string; to: string; config: Pick<FunnelConfig, 'account_ids' | 'name_filter' | 'match'> & { include_optimization?: boolean };
   filters: AdDimensionFilters; channel: MetaAdChannel | null; brand: string | null; groupBy: ReportGroupBy;
   view: 'overview' | 'daily' | 'trends' | 'creatives'; period: 'week' | 'month'; groupKey: string | null;
 };
@@ -17,7 +17,7 @@ export type ReportBucket = { date: string; totals: Totals; complete: boolean; pa
 export type RawMetaReport = { intentionLabels?: Record<string, string>;
   cepLabels?: Record<string, string>; intentionTotals?: { intention: string; current: Totals }[]; multiCepAds?: number;
   currencies: string[]; summary: Totals; previous: Totals;
-  groups: (Omit<GroupComparison, 'metrics' | 'creatives' | 'categories' | 'classified' | 'destination'> & { destination?: CtwaDestination | null; currencies?: string[]; format_breakdown?: import('./meta-funnel-templates').FormatBreakdown[] })[];
+  groups: (Omit<GroupComparison, 'metrics' | 'creatives' | 'categories' | 'classified' | 'destination'> & { destination?: CtwaDestination | null; currencies?: string[]; optimization_breakdown?: import('./meta-funnel-templates').OptimizationBreakdown[]; format_breakdown?: import('./meta-funnel-templates').FormatBreakdown[] })[];
   coverage: Coverage[]; facets: { dimension: keyof AdDimensionFilters; value: string; count: number }[];
   facetTotals: Partial<Record<keyof AdDimensionFilters, number>>; brandCounts: Record<string, number>;
   channelCounts?: Partial<Record<MetaAdChannel, number>>; matchingAds: number; objectiveUnknownAds: number;

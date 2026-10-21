@@ -9,11 +9,11 @@ export type RawAdInsight = {
   ad_id: string; ad_name: string; date_start: string; date_stop: string;
   [key: string]: unknown;
 };
-export type MetaInventoryAd = { id: string; name: string; effective_status?: string; creative?: { id: string; [key: string]: any }; campaign_id?: string; campaign?: { id: string; name?: string; objective?: string }; adset_id?: string; adset?: { id: string; updated_time?: string; destination_type?: string; promoted_object?: Record<string, unknown> }; updated_time?: string };
+export type MetaInventoryAd = { id: string; name: string; effective_status?: string; creative?: { id: string; [key: string]: any }; campaign_id?: string; campaign?: { id: string; name?: string; objective?: string }; adset_id?: string; adset?: { id: string; updated_time?: string; optimization_goal?: string; destination_type?: string; promoted_object?: Record<string, unknown> }; updated_time?: string };
 
 export async function fetchAdInventory(accountId: string, token: string): Promise<MetaInventoryAd[]> {
   let page = await metaGraph(`${accountId}/ads`, token, {
-    fields: 'id,name,effective_status,creative{id},campaign_id,campaign{id,name,objective},adset_id,updated_time,adset{id,updated_time,destination_type,promoted_object}', limit: '500',
+    fields: 'id,name,effective_status,creative{id},campaign_id,campaign{id,name,objective},adset_id,updated_time,adset{id,updated_time,optimization_goal,destination_type,promoted_object}', limit: '500',
   });
   const ads = new Map<string, MetaInventoryAd>(); const seen = new Set<string>();
   while (true) {

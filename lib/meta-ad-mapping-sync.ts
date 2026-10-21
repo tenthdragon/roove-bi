@@ -9,6 +9,7 @@ import { enqueueMetaAdMappingCreatives } from './meta-ad-mapping-queue';
 import { enqueueNewMetaProductSets } from './meta-product-set-queue';
 import { refreshMetaAdDestinations } from './meta-ad-destination-metadata';
 import { shiftDay } from './meta-funnel-domain';
+import { optimizationInventoryRows } from './meta-ad-optimization';
 import { getTodayWIB } from './sync-schedule';
 
 const RECENT_DELIVERY_DAYS = 30;
@@ -133,6 +134,12 @@ export async function runMetaAdMappingSync(options: { workspaceId: string; accou
             p_rows: ads.filter(ad=>ad.campaign?.id || ad.campaign_id).map(ad => ({ ad_id: ad.id, campaign_id: ad.campaign?.id || ad.campaign_id || null, campaign_name: ad.campaign?.name || null, campaign_objective: ad.campaign?.objective || null })), p_observed_at: observedAt });
           if (campaigns.error) throw new Error(campaigns.error.message);
         }
+      }
+      const optimizationRows = optimizationInventoryRows(inventory);
+      for (let offset = 0; offset < optimizationRows.length; offset += 500) {
+        const saved = await svc.rpc('save_meta_adset_optimizations', { p_workspace_id: workspaceId, p_account_id: account.account_id,
+          p_rows: optimizationRows.slice(offset, offset + 500), p_observed_at: observedAt });
+        if (saved.error) throw new Error(saved.error.message);
       }
       // Read rich destinations separately: expanding every creative on /ads can
       // hit Meta's response-size limit; one huge worker job can also time out.

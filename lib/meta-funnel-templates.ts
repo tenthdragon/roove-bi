@@ -2,6 +2,7 @@
 // columns of one kind of landing page. URL rules assign landing pages to a
 // template; observed events only suggest one, never assign it.
 import { CREATIVE_FORMAT_LABELS, CREATIVE_FORMAT_ORDER, type CreativeFormat } from './meta-creative-format';
+import { optimizationLabel, type MetaOptimization } from './meta-ad-optimization';
 import { canonicalLandingPage } from './meta-ad-destinations';
 import { emptyTotals, metricValue, relativeChange, sumMetricTotals, type FunnelConfig, type FunnelMetric, type SavedFunnel, type Totals } from './meta-funnel-domain';
 import { CTWA_KEY_PATTERN, type CtwaDestination } from './meta-ctwa-destinations';
@@ -16,7 +17,9 @@ export type TemplateKind = 'transaction' | 'lead' | 'other';
 export const TEMPLATE_KIND_LABELS: Record<TemplateKind, string> = { transaction: 'Transaksi', lead: 'Lead', other: 'Lainnya' };
 
 export type FormatBreakdown = { latest_metadata_ad_ids?: string[]; format: CreativeFormat; ad_ids: string[]; current: Totals; previous: Totals };
+export type OptimizationBreakdown = MetaOptimization & { ad_ids: string[]; current: Totals; previous: Totals };
 export type ReportGroup = {
+  optimization_breakdown?: OptimizationBreakdown[];
   latest_metadata_ad_ids?: string[];
   format_breakdown?: FormatBreakdown[];
   key: string; name: string; current: Totals; previous: Totals; ad_ids: string[];
@@ -30,6 +33,14 @@ export function creativeFormatGroups(group: TemplateGroup, metrics: FunnelMetric
     ...group, ...child, format_breakdown: undefined, key: `${group.key}:format:${child.format}`,
     name: CREATIVE_FORMAT_LABELS[child.format] || CREATIVE_FORMAT_LABELS.unknown,
     metrics: compare(child.current, child.previous, metrics),
+  }));
+}
+/** Optimization rows use the same metric definitions and parent sorting as format rows. */
+export function optimizationGroups(group: TemplateGroup, metrics: FunnelMetric[]): TemplateGroup[] {
+  return [...(group.optimization_breakdown || [])].sort((a, b) => optimizationLabel(a).localeCompare(optimizationLabel(b), 'id')).map(child => ({
+    ...group, ...child, format_breakdown: undefined, optimization_breakdown: undefined, latest_metadata_ad_ids: undefined,
+    key: `${group.key}:optimization:${JSON.stringify([child.objective,child.optimization_goal,child.conversion_event,child.custom_conversion_id])}`,
+    name: optimizationLabel(child), metrics: compare(child.current, child.previous, metrics),
   }));
 }
 export type MetricComparison = { id: string; current: number | null; previous: number | null; change: number | null };

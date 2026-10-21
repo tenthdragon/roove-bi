@@ -1170,3 +1170,42 @@ most two additional batches of 50; inaccessible media does not turn into an imag
 by default. Unknown results become eligible for retry after 24 hours within the
 normal active/recent-delivery policy. Already known unchanged metadata stays
 cached. A scoped creative job can refresh unresolved ads immediately after release.
+
+## Optimization breakdown (migration 232)
+
+One page-level Rincian selector switches Website/WhatsApp destination subrows
+between Format iklan and Optimasi. Parent sorting, configured metric columns,
+summary totals and period comparisons stay shared. Browser preferences are scoped
+by workspace and viewer; unavailable storage leaves the selector usable and shows
+a save error. CPAS and the CEP view retain their existing layouts. Ad details
+include the current campaign/optimization/event label without adding table columns.
+Per-ad optimization aggregation is requested only when the detail panel opens;
+the CPAS summary does not compute unused optimization breakdowns.
+
+The existing inventory request adds adset.optimization_goal; promoted_object
+already contains custom_event_type/custom_conversion_id. Inventory deduplicates
+adsets and writes scoped configuration in batches of 500 through the service-only
+save_meta_adset_optimizations RPC. Rich creative queues are not expanded, and page
+reads never invoke Meta. A normal inventory pass populates the new table, including
+long-paused ads returned by the provider. Apply 232 before activating workers.
+
+The report matches the selected range's latest stored adset and campaign identity
+to the current configuration in the same workspace/account. It explicitly labels
+this as latest synced optimization, not historical optimization attribution. A
+changed/missing identity remains unclassified rather than borrowing another
+adset/campaign's configuration. Both current and comparison metrics use the same
+ad cohort; ratios derive from summed events. Offsite conversions without an event
+are never assumed to mean Purchase. Custom conversions, value optimization,
+Traffic goals, Awareness goals and unrecognized provider values remain distinct.
+
+Configuration writes reject stale provider versions and older observations and
+invalidate the workspace report revision without rebuilding daily projections.
+No browser grants, credentials, budgets or historical performance facts change.
+The migration adds an empty configuration table/RPC and replaces the report
+function; keep the previous function definition for rollback and retain collected
+configuration if an app rollback is needed.
+
+Validation: Meta unit/UI suite, test:meta-detail-mapping-db (rollback only), app
+typecheck, lint and production build. The SQL suite reconciles all child totals,
+compares 288 existing report scopes and checks identity, staleness, revisions,
+per-ad detail and service-only access.
