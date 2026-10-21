@@ -13,7 +13,9 @@ migration += read('../supabase/migrations/223_meta_detail_incremental_reports.sq
 migration += read('../supabase/migrations/230_meta_creative_format_breakdown.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 migration += read('../supabase/migrations/231_meta_creative_format_resolution.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 migration += read('../supabase/migrations/232_meta_optimization_breakdown.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
+const fastAdMigration = read('../supabase/migrations/233_meta_optimization_ad_totals.sql').replace(/^\s*(BEGIN|COMMIT);\s*$/gm, '');
 if (process.argv.includes('--benchmark')) {
+  migration += fastAdMigration;
   console.log(query('BEGIN;\n' + migration + '\n' + read('meta-detail-mapping-benchmark.sql') + '\nROLLBACK;').trim());
   assert.equal(snapshot(), before); process.exit(0);
 }
@@ -26,6 +28,6 @@ UPDATE meta_ad_daily_metrics SET currency='USD' WHERE ad_id='99999997309';
 INSERT INTO meta_ad_daily_metrics(workspace_id,account_id,account_name,ad_id,ad_name,metric_date,currency,metrics,raw_insights,landing_page_urls)
 SELECT workspace_id,account_id,'Paused','999999973999','Paused','1996-01-01','IDR','{"spend":9000,"impressions":10000}','{}','[]' FROM ctwa_scope WHERE n=1;
 `;
-console.log(query('BEGIN;\n' + migration + '\n' + fixtures + '\n' + read('meta-creative-format-db.sql') + '\n' + read('meta-optimization-db.sql') + '\n' + read('meta-detail-mapping-db.sql') + '\n' + read('meta-brand-overview-db.sql') + '\nROLLBACK;').trim());
+console.log(query('BEGIN;\n' + migration + '\n' + fixtures + '\n' + read('meta-optimization-ad-parity-before.sql') + '\n' + 'RESET ROLE;\n' + fastAdMigration + '\nSET LOCAL ROLE service_role;\n' + read('meta-optimization-ad-parity-after.sql') + '\n' + read('meta-creative-format-db.sql') + '\n' + read('meta-optimization-db.sql') + '\n' + read('meta-detail-mapping-db.sql') + '\n' + read('meta-brand-overview-db.sql') + '\nROLLBACK;').trim());
 assert.equal(snapshot(), before, 'Fixtures or schema escaped rollback');
 console.log('PASS: all report/cache/schema changes rolled back');
