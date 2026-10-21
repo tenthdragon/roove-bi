@@ -36,7 +36,7 @@ export const getCachedMetaAdReport = unstable_cache(
       }
       return { ...result.data, intentionLabels: await intentionLabels(workspaceId, query.brand) } as RawMetaReport;
   }),
-  ['meta-ad-report-v7-formats'],
+  ['meta-ad-report-v8-format-resolution'],
   { revalidate: 300 },
 );
 
@@ -53,7 +53,7 @@ export const getCachedMetaBrandDetailReport = unstable_cache(
       const labels = await intentionLabels(workspaceId, brand);
       return Object.fromEntries(Object.entries(result.data).map(([key,value]) => [key,{ ...(value as object), intentionLabels: labels }])) as { website: RawMetaReport; cpas: RawMetaReport; cep: RawMetaReport };
     }),
-  ['meta-brand-detail-v2-formats'], { revalidate: 300 },
+  ['meta-brand-detail-v3-format-resolution'], { revalidate: 300 },
 );
 
 // One batched report shares the same database budget as detail/history reads.

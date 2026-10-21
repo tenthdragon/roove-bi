@@ -1,4 +1,4 @@
-import { classifyCreativeFormat } from './meta-creative-format';
+import { classifyCreativeFormat, classifyCreativeMedia } from './meta-creative-format';
 import { emptyTotals, type Totals } from './meta-funnel-domain';
 import { selectPurchaseMetric, type MetaActionMetric } from './meta-marketing';
 import { creativeLandingPages } from './meta-ad-destinations';
@@ -102,16 +102,41 @@ export function normalizeAdInsight(raw: RawAdInsight): Totals {
 }
 
 export async function fetchCreativeBatch(ids: string[], token: string) {
-  const batch = ids.map(id => ({ method: 'GET', relative_url: `${id}?fields=id,name,creative{id,name,thumbnail_url,video_id,image_hash,image_url,call_to_action,object_story_spec,asset_feed_spec,link_url,object_url}` }));
-  const response = await fetch(BASE, { method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    body: new URLSearchParams({ batch: JSON.stringify(batch) }), signal: AbortSignal.timeout(60000) });
-  const data = await response.json();
-  if (!response.ok || !Array.isArray(data)) throw new Error('Gagal mengambil metadata creative Meta.');
-  return data.map((item: { code: number; body: string }, i: number) => {
-    const body = JSON.parse(item.body || '{}');
-    if (item.code !== 200 || body.error) return { ad_id: ids[i], error: true as const };
-    return normalizeCreativeMetadata(ids[i], body.name || '', body.creative || {});
-  });
+  // Two bounded media passes at most; never download media or infer from a name.
+  if (!ids.length || ids.length > 50 || ids.some(id => !/^\d+$/.test(id))) throw new Error('Invalid creative batch');
+  const fields = 'id,name,thumbnail_url,video_id,image_hash,image_url,object_type,call_to_action,object_story_spec,asset_feed_spec,link_url,object_url,effective_instagram_media_id,source_instagram_media_id';
+  async function readBatch(paths: string[]) {
+    const response = await fetch(BASE, { method: 'POST', headers: { Authorization: `Bearer ${token}` },
+      body: new URLSearchParams({ batch: JSON.stringify(paths.map(relative_url => ({ method: 'GET', relative_url }))) }), signal: AbortSignal.timeout(60000) });
+    const data = await response.json();
+    if (!response.ok || !Array.isArray(data) || data.length !== paths.length) throw new Error('Gagal mengambil metadata creative Meta.');
+    return data.map((item: { code: number; body: string }) => {
+      try { const body = JSON.parse(item.body || '{}'); return item.code === 200 && !body.error ? body : null; }
+      catch { return null; }
+    });
+  }
+  const bodies = await readBatch(ids.map(id => `${id}?fields=id,name,creative{${fields}}`));
+  const rows = bodies.map((body, i) => body ? normalizeCreativeMetadata(ids[i], body.name || '', body.creative || {}) : { ad_id: ids[i], error: true as const });
+  const resolved = new Map<string, ReturnType<typeof classifyCreativeMedia>>();
+  for (const field of ['effective_instagram_media_id', 'source_instagram_media_id']) {
+    const pending = rows.flatMap((row, i) => {
+      const mediaId = bodies[i]?.creative?.[field];
+      return !('error' in row) && row.creative_format === 'unknown' && typeof mediaId === 'string' && /^\d+$/.test(mediaId) ? [{ i, mediaId }] : [];
+    });
+    const mediaIds = [...new Set(pending.map(p => p.mediaId))].filter(id => !resolved.has(id));
+    try {
+      if (mediaIds.length) {
+        const media = await readBatch(mediaIds.map(id => `${id}?fields=id,media_type`));
+        mediaIds.forEach((id, i) => resolved.set(id, media[i]?.id === id ? classifyCreativeMedia(media[i]) : 'unknown'));
+      }
+    } catch { mediaIds.forEach(id => resolved.set(id, 'unknown')); }
+    // Preserve a successful creative even if its linked media is unavailable.
+    for (const { i, mediaId } of pending) {
+      const row = rows[i], format = resolved.get(mediaId);
+      if (!('error' in row) && format && format !== 'unknown') row.creative_format = format;
+    }
+  }
+  return rows;
 }
 
 export function normalizeCreativeMetadata(adId: string, name: string, creative: Record<string, any>) {

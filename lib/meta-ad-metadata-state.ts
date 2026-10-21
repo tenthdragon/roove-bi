@@ -20,10 +20,11 @@ export function metaMetadataSource(ad: Record<string, any>): MetadataSource {
     source_fingerprint: createHash('sha256').update(JSON.stringify(stable(identity))).digest('hex') };
 }
 export function metadataRefreshDecision(source: MetadataSource, state: MetadataState | undefined,
-  creative: MetadataCreativeCache | undefined, destination: MetadataDestinationCache | undefined): 'refresh' | 'cached' | 'adopt' {
+  creative: MetadataCreativeCache | undefined, destination: MetadataDestinationCache | undefined, now = Date.now()): 'refresh' | 'cached' | 'adopt' {
   if (!source.creative_id || !source.adset_id || !source.source_updated_at || !source.adset_updated_at
     || !creative || !creative.creative_format || creative.creative_id !== source.creative_id || !destination || destination.creative_id !== source.creative_id
     || destination.adset_id !== source.adset_id || !(destination.metadata?.contact_identity?.version === 1 || destination.metadata?.contact_identity_checked)) return 'refresh';
+  if (creative.creative_format === 'unknown' && (!Number.isFinite(Date.parse(creative.updated_at || '')) || now - Date.parse(creative.updated_at || '') >= 24 * 60 * 60 * 1000)) return 'refresh';
   if (state) return state.source_fingerprint === source.source_fingerprint ? 'cached' : 'refresh';
   // Adopt successful pre-migration observations without another provider read.
   // Missing/older timestamps cannot certify a cache hit.

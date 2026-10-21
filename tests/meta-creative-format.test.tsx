@@ -15,6 +15,9 @@ const Results = require('../components/MetaTemplateResults').default;
 test('classifies provider assets, including carousel video cards, without name/thumbnail guesses', () => {
   for (const [creative, expected] of [
     [{ image_hash: 'hash' }, 'image'],
+    [{ object_type: 'PHOTO' }, 'image'],
+    [{ object_type: 'VIDEO' }, 'video'],
+    [{ object_type: 'SHARE' }, 'unknown'],
     [{ object_story_spec: { link_data: { image_hash: 'hash' } } }, 'image'],
     [{ object_story_spec: { photo_data: { url: 'image' } } }, 'image'],
     [{ video_id: 'video', thumbnail_url: 'cover', image_url: 'cover' }, 'video'],
@@ -74,5 +77,13 @@ test('destination children use the same visible columns and stay under their URL
  const updated=tbody().findAllByType('tr');
  assert.equal(updated[0].findAllByType('td').length, 3);
  assert.equal(updated[0].findAllByType('td').length, updated[1].findAllByType('td').length+1);
+ await act(async () => root.unmount());
+});
+
+test('latest creative fallback is disclosed under the matching format row', async () => {
+ const groups = section.groups.map(g => ({ ...g, format_breakdown: g.format_breakdown?.map(c => ({ ...c, latest_metadata_ad_ids: c.format === 'image' ? ['i1'] : [] })) }));
+ let root: any;
+ await act(async () => { root = create(<Results section={{ ...section, groups }} world="website" currency="IDR" preferencesReady onOpenGroup={() => {}} />); });
+ assert.ok(root.root.findAllByType('small').some((node: any) => node.children.join('') === '1 memakai tipe terbaru'));
  await act(async () => root.unmount());
 });
