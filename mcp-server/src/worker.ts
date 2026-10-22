@@ -1,19 +1,28 @@
-// Cloudflare Worker entry: serves the Roove BI MCP server over Streamable HTTP.
-// Same read-only tools as the local stdio entry (see server.ts).
+// Cloudflare Worker entry: serves the Roove BI MCP server over Streamable HTTP,
+// scoped to marketing data (Meta Ads + marketing spend).
 //
 // Endpoint:  POST /mcp   (requires  Authorization: Bearer <MCP_AUTH_TOKEN>)
 // Health:    GET  /health
 //
-// One deployment serves exactly one workspace (MCP_WORKSPACE_ID), mirroring the
-// "one instance per workspace" rule of the stdio server.
+// Database access goes through the read-only role `mcp_marketing_reader` and the
+// `mcp_marketing` schema (supabase/migrations/237_mcp_marketing_reader.sql):
+//  * SUPABASE_ANON_KEY identifies the project to the API gateway (public key).
+//  * SUPABASE_MCP_JWT is a long-lived token signed with the project's JWT secret,
+//    carrying { role: "mcp_marketing_reader", workspace_id: <uuid> }. It can only
+//    read the views and the report wrapper in mcp_marketing, for that workspace.
+// The service role key is never present in this Worker.
+//
+// One deployment serves exactly one workspace (MCP_WORKSPACE_ID must match the
+// workspace_id claim inside SUPABASE_MCP_JWT).
 
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createClient } from "@supabase/supabase-js";
-import { createRooveServer, WORKSPACE_ID_PATTERN } from "./server.js";
+import { createRooveServer, MARKETING_TOOLS, WORKSPACE_ID_PATTERN } from "./server.js";
 
 export interface Env {
   SUPABASE_URL: string;
-  SUPABASE_SERVICE_ROLE_KEY: string; // secret
+  SUPABASE_ANON_KEY: string;
+  SUPABASE_MCP_JWT: string; // secret
   MCP_WORKSPACE_ID: string;
   MCP_AUTH_TOKEN: string; // secret: shared with trusted callers only
 }
@@ -37,14 +46,36 @@ function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+// Reads the (unverified) payload of a JWT so the Worker can refuse a token whose
+// role or workspace does not match its configuration. Supabase verifies the signature.
+function jwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  try {
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
 function configError(env: Env): string | null {
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) return "Supabase credentials are not configured";
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return "SUPABASE_URL and SUPABASE_ANON_KEY are not configured";
   if (!env.MCP_WORKSPACE_ID || !WORKSPACE_ID_PATTERN.test(env.MCP_WORKSPACE_ID.trim())) {
     return "MCP_WORKSPACE_ID must be a valid workspace UUID";
   }
   if (!env.MCP_AUTH_TOKEN || env.MCP_AUTH_TOKEN.length < 32) {
     return "MCP_AUTH_TOKEN must be set (at least 32 characters)";
   }
+  if (!env.SUPABASE_MCP_JWT) return "SUPABASE_MCP_JWT is not configured";
+  const claims = jwtPayload(env.SUPABASE_MCP_JWT);
+  if (!claims) return "SUPABASE_MCP_JWT is not a JWT";
+  if (claims.role !== "mcp_marketing_reader") return "SUPABASE_MCP_JWT must carry role mcp_marketing_reader";
+  if (claims.workspace_id !== env.MCP_WORKSPACE_ID.trim()) {
+    return "SUPABASE_MCP_JWT workspace_id does not match MCP_WORKSPACE_ID";
+  }
+  if (typeof claims.exp === "number" && claims.exp * 1000 < Date.now()) return "SUPABASE_MCP_JWT has expired";
   return null;
 }
 
@@ -54,7 +85,7 @@ export default {
 
     if (url.pathname === "/health") {
       const problem = configError(env);
-      return json(problem ? 500 : 200, { ok: !problem, error: problem ?? undefined });
+      return json(problem ? 500 : 200, { ok: !problem, scope: "marketing", error: problem ?? undefined });
     }
 
     if (url.pathname !== "/mcp") return json(404, { error: "Not found" });
@@ -70,11 +101,14 @@ export default {
 
     // Stateless mode: a fresh server and transport per request. The tools hold no
     // session state, so nothing is lost between calls.
-    const svc = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+    const db = createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
+      db: { schema: "mcp_marketing" },
+      global: { headers: { Authorization: `Bearer ${env.SUPABASE_MCP_JWT}` } },
     });
-    const server = createRooveServer(svc, env.MCP_WORKSPACE_ID.trim(), {
+    const server = createRooveServer(db, env.MCP_WORKSPACE_ID.trim(), {
       includePii: false,
+      onlyTools: MARKETING_TOOLS,
     });
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

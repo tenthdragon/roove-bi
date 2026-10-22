@@ -1,4 +1,4 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { registerMetaFunnelTools } from "./meta-funnel-tools.js";
@@ -22,10 +22,24 @@ export type RooveServerOptions = {
    * true for the local stdio server (owner use); false for the remote Worker.
    */
   includePii?: boolean;
+  /**
+   * Keep only these tools; every other tool is removed after registration.
+   * Used by scoped deployments (e.g. the marketing Worker).
+   */
+  onlyTools?: readonly string[];
 };
 
+/** Tools a marketing-scoped deployment may expose (Meta Ads + marketing spend). */
+export const MARKETING_TOOLS = [
+  "roove_mcp_guide",
+  "meta_ad_funnel_catalog",
+  "meta_ad_funnel_report",
+  "marketing_spend_summary",
+  "meta_ads_spend_by_account",
+] as const;
+
 export function createRooveServer(
-  svc: SupabaseClient,
+  svc: SupabaseClient<any, any, any>,
   workspaceId: string,
   options: RooveServerOptions = {},
 ): McpServer {
@@ -38,7 +52,7 @@ export function createRooveServer(
     version: "1.0.0",
   });
 
-  registerMetaFunnelTools(server, svc, workspaceId);
+  const handles: Record<string, RegisteredTool> = registerMetaFunnelTools(server, svc, workspaceId);
 
   type SafeDataset = {
     table: string;
@@ -216,7 +230,7 @@ export function createRooveServer(
   //  LLM WORKFLOW / GENERAL BUSINESS TOOLS
   // ────────────────────────────────────────────────────────────────
 
-  server.tool(
+  handles["roove_mcp_guide"] = server.tool(
     "roove_mcp_guide",
     "Explain the workspace-scoped BI MCP capabilities, safe datasets, and suggested workflows for Claude/Codex conversations.",
     {},
@@ -266,7 +280,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["roove_dataset_catalog"] = server.tool(
     "roove_dataset_catalog",
     "List safe read-only datasets available for flexible business analysis, including allowed columns and default selects.",
     {},
@@ -284,7 +298,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["roove_read_dataset"] = server.tool(
     "roove_read_dataset",
     "Read rows from a safe allowlisted dataset with simple filters. Use for ad-hoc drilldowns during LLM discussions. Read-only.",
     {
@@ -350,7 +364,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["business_snapshot"] = server.tool(
     "business_snapshot",
     "Get a compact executive snapshot for a date range: sales, gross profit, marketing spend, channel/brand mix, customer split, and latest finance rows.",
     {
@@ -490,7 +504,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["marketing_spend_summary"] = server.tool(
     "marketing_spend_summary",
     "Get marketing spend totals for a date range, grouped by source, store, and data_source. Use this for total marketing cost and marketing channel cost breakdown.",
     {
@@ -561,7 +575,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["meta_ads_spend_by_account"] = server.tool(
     "meta_ads_spend_by_account",
     "Get Meta Ads spend breakdown by ad account for a date range. Includes spend, impressions, CPM, mapped store, and configured account metadata when available.",
     {
@@ -673,7 +687,7 @@ export function createRooveServer(
   //  PPIC TOOLS
   // ────────────────────────────────────────────────────────────────
 
-  server.tool(
+  handles["ppic_stock_balance"] = server.tool(
     "ppic_stock_balance",
     "Get current stock balance for all warehouse products (qty on hand, product info, HPP, price list)",
     {},
@@ -702,7 +716,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["ppic_ito"] = server.tool(
     "ppic_ito",
     "Get Inventory Turn Over data — monthly IN/OUT movements per product. Source: 'warehouse' (ledger) or 'scalev' (ScaleV orders proxy). Returns monthly movements + current stock + ITO ratio.",
     {
@@ -776,7 +790,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["ppic_rop"] = server.tool(
     "ppic_rop",
     "Get Reorder Point analysis — avg daily demand, lead time, safety stock, ROP threshold, and current status per product",
     {
@@ -832,7 +846,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["ppic_demand_plans"] = server.tool(
     "ppic_demand_plans",
     "Get demand planning data for a given month — auto demand (weighted avg), manual override, effective demand, and weekly breakdown",
     {
@@ -870,7 +884,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["ppic_purchase_orders"] = server.tool(
     "ppic_purchase_orders",
     "Get purchase orders with items and vendor info. Filter by status or date range.",
     {
@@ -901,7 +915,7 @@ export function createRooveServer(
   //  CUSTOMER ANALYSIS TOOLS
   // ────────────────────────────────────────────────────────────────
 
-  server.tool(
+  handles["customer_overview"] = server.tool(
     "customer_overview",
     "Get customer KPIs — total/new/repeat customers, revenue split, AOV, order counts. Requires date range.",
     {
@@ -980,7 +994,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["customer_cohort"] = server.tool(
     "customer_cohort",
     "Get monthly cohort retention data — how many customers from each acquisition month are still active in subsequent months. Optionally filter by channel.",
     {
@@ -1005,7 +1019,7 @@ export function createRooveServer(
     }
   );
 
-  const customerListTool = server.tool(
+  handles["customer_list"] = server.tool(
     "customer_list",
     "Get individual customer data — phone, name, channel, total orders, revenue, AOV, first/last order date, repeat status. Supports pagination and date filtering.",
     {
@@ -1029,7 +1043,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["customer_ltv"] = server.tool(
     "customer_ltv",
     "Get Customer Lifetime Value by acquisition channel — avg first purchase, repeat value, LTV 90d, repeat rate. Optionally filter by brand.",
     {
@@ -1073,7 +1087,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["customer_cac"] = server.tool(
     "customer_cac",
     "Get Customer Acquisition Cost by channel — total ad spend, new customers, CAC. Optionally with monthly trend.",
     {
@@ -1110,7 +1124,7 @@ export function createRooveServer(
     }
   );
 
-  server.tool(
+  handles["customer_brand_analysis"] = server.tool(
     "customer_brand_analysis",
     "Get multi-brand customer analysis — cross-brand overlap, brand journeys, bundled orders, and multi-brand stats",
     {},
@@ -1150,7 +1164,7 @@ export function createRooveServer(
   //  GENERAL / SEARCH
   // ────────────────────────────────────────────────────────────────
 
-  server.tool(
+  handles["search_products"] = server.tool(
     "search_products",
     "Search warehouse products by name or SKU",
     {
@@ -1170,7 +1184,13 @@ export function createRooveServer(
     }
   );
 
-  if (!options.includePii) customerListTool.remove();
+  if (!options.includePii) handles["customer_list"].remove();
+  if (options.onlyTools) {
+    const keep = new Set<string>(options.onlyTools);
+    for (const [name, tool] of Object.entries(handles)) {
+      if (!keep.has(name)) tool.remove();
+    }
+  }
 
   return server;
 }

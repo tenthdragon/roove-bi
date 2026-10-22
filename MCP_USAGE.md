@@ -112,35 +112,62 @@ Tool general hanya membaca dataset allowlist dan tidak menyediakan operasi
 tulis. Semua query dan RPC dikunci ke `MCP_WORKSPACE_ID`. Dataset customer yang
 dibuka bersifat agregat, bukan data individual/PII.
 
-## Cloudflare Worker (mode HTTP)
+## Cloudflare Worker (mode HTTP, cakupan marketing)
 
-Tool yang sama juga bisa dijalankan sebagai Cloudflare Worker, supaya bisa dipanggil
-dari luar laptop (misalnya agent Basecamp). Definisi tool ada di
+Tool yang sama bisa dijalankan sebagai Cloudflare Worker, supaya bisa dipanggil dari
+luar laptop (misalnya agent Basecamp). Definisi tool ada di
 `mcp-server/src/server.ts` dan dipakai bersama oleh mode stdio (`index.ts`) dan
 Worker (`worker.ts`).
 
-Perbedaan dengan mode lokal:
+Worker ini **tidak memakai service role key**. Ia masuk ke database sebagai role
+read-only `mcp_marketing_reader` (migrasi `237_mcp_marketing_reader.sql`), yang
+hanya bisa membaca skema `mcp_marketing`: lima view Meta Ads/marketing spend dan
+satu pembungkus `get_meta_ad_report`, semuanya terkunci ke `workspace_id` yang ada
+di dalam token. Tidak ada akses ke tabel finance, gudang, PPIC, atau data pelanggan.
 
-- Endpoint `POST /mcp` wajib memakai header `Authorization: Bearer <MCP_AUTH_TOKEN>`.
-- `customer_list` (data per pelanggan: nama, nomor telepon) **tidak** didaftarkan
-  di Worker. Tool ini tetap tersedia di mode stdio lokal.
-- Satu deployment = satu workspace (`MCP_WORKSPACE_ID` di `wrangler.jsonc`).
+Tool yang tersedia di Worker: `roove_mcp_guide`, `meta_ad_funnel_catalog`,
+`meta_ad_funnel_report`, `marketing_spend_summary`, `meta_ads_spend_by_account`.
+Tool lain hanya ada di mode stdio lokal.
 
-Setup pertama kali (dari folder repo):
+Endpoint `POST /mcp` wajib memakai header `Authorization: Bearer <MCP_AUTH_TOKEN>`.
+Satu deployment = satu workspace.
 
-```bash
-npm --prefix mcp-server install
-cd mcp-server
-npx wrangler login                         # login ke akun Cloudflare
-# isi SUPABASE_URL dan MCP_WORKSPACE_ID di wrangler.jsonc
-npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
-openssl rand -hex 32                       # buat token, simpan di password manager
-npx wrangler secret put MCP_AUTH_TOKEN     # tempel token dari langkah sebelumnya
-npm run deploy
-```
+### Setup pertama kali
+
+1. Terapkan migrasi 237 ke database (lewat alur rilis migrasi yang biasa).
+   Uji dulu di stack lokal: `npm run test:mcp-reader-db`.
+2. Dashboard Supabase → Settings → API → **Exposed schemas**: tambahkan
+   `mcp_marketing`. Tanpa ini PostgREST menolak skema tersebut.
+3. Buat token database untuk Worker. Ambil **JWT Secret** (Settings → API → JWT
+   Settings; secret HS256 legacy harus masih aktif), lalu dari folder repo:
+
+   ```bash
+   SUPABASE_JWT_SECRET='...' node mcp-server/scripts/mint-mcp-jwt.mjs \
+     --workspace <MCP_WORKSPACE_ID> --days 365
+   ```
+
+   Secret hanya dibaca dari environment dan tidak disimpan di mana pun. Token
+   yang tercetak berisi `role: mcp_marketing_reader` dan `workspace_id`.
+4. Simpan semua binding Worker sebagai secret. Tiga nilai pertama tidak sensitif,
+   tetapi tetap disimpan sebagai secret agar deployment berikutnya tidak bisa
+   menimpa konfigurasi produksi dengan placeholder dari source code:
+
+   ```bash
+   npm --prefix mcp-server install
+   cd mcp-server
+   npx wrangler login
+   npx wrangler secret put SUPABASE_URL
+   npx wrangler secret put SUPABASE_ANON_KEY    # anon/publishable key
+   npx wrangler secret put MCP_WORKSPACE_ID
+   npx wrangler secret put SUPABASE_MCP_JWT     # tempel token dari langkah 3
+   openssl rand -hex 32                         # token untuk pemanggil, simpan di password manager
+   npx wrangler secret put MCP_AUTH_TOKEN
+   npm run deploy
+   ```
 
 Cek: `curl https://roove-bi-mcp.<subdomain>.workers.dev/health` harus mengembalikan
-`{"ok":true}`.
+`{"ok":true,"scope":"marketing"}`. `/health` juga menolak JWT yang role atau
+workspace-nya tidak cocok dengan konfigurasi, atau yang sudah kedaluwarsa.
 
 Untuk menguji dari Claude Desktop, gunakan `mcp-remote` dengan header token:
 
@@ -160,5 +187,20 @@ Untuk menguji dari Claude Desktop, gunakan `mcp-remote` dengan header token:
 }
 ```
 
-Catatan keamanan: Worker masih memakai service role key. Langkah berikutnya adalah
-mengganti dengan role database read-only khusus MCP.
+### Mencabut atau memperluas akses
+
+- Mencabut token: `DROP ROLE` tidak perlu; cukup `REVOKE mcp_marketing_reader FROM
+  authenticator` (PostgREST tidak bisa lagi memakai role itu), lalu terbitkan token
+  baru setelah dipulihkan. Mengganti JWT secret juga membatalkan semua token.
+- Agent lain dengan cakupan berbeda (misalnya finance) dibuat sebagai role, skema,
+  dan Worker **terpisah**, bukan dengan menambah izin ke `mcp_marketing_reader`.
+
+### Catatan keamanan yang masih terbuka
+
+Secara default PostgreSQL memberi hak EXECUTE pada semua fungsi di skema `public`
+kepada PUBLIC. Role reader tidak punya hak SELECT pada tabel `public`, sehingga
+fungsi biasa akan gagal, tetapi fungsi `SECURITY DEFINER` yang tidak memeriksa
+`auth.uid()` secara teori masih bisa dipanggil jika token bocor dan pemanggil
+memakai `Content-Profile: public`. Penutupan menyeluruh (`REVOKE EXECUTE ON ALL
+FUNCTIONS IN SCHEMA public FROM PUBLIC` plus default privileges) memengaruhi seluruh
+API, jadi dikerjakan sebagai perubahan terpisah yang diuji di stack lokal.

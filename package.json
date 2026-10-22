@@ -52,7 +52,8 @@
     "test:local-supabase": "node --test tests/local-supabase.test.mjs",
     "test:meta-taxonomy-db": "node tests/meta-ad-taxonomy-database.mjs",
     "test:meta-columns-db": "node tests/meta-column-preferences-database.mjs",
-    "test:meta-brand-edit-db": "node tests/meta-brand-edit-database.mjs"
+    "test:meta-brand-edit-db": "node tests/meta-brand-edit-database.mjs",
+    "test:mcp-reader-db": "node tests/mcp-marketing-reader-database.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
