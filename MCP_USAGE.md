@@ -148,13 +148,17 @@ Satu deployment = satu workspace.
 
    Secret hanya dibaca dari environment dan tidak disimpan di mana pun. Token
    yang tercetak berisi `role: mcp_marketing_reader` dan `workspace_id`.
-4. Deploy:
+4. Simpan semua binding Worker sebagai secret. Tiga nilai pertama tidak sensitif,
+   tetapi tetap disimpan sebagai secret agar deployment berikutnya tidak bisa
+   menimpa konfigurasi produksi dengan placeholder dari source code:
 
    ```bash
    npm --prefix mcp-server install
    cd mcp-server
    npx wrangler login
-   # isi SUPABASE_URL, SUPABASE_ANON_KEY (anon/publishable key), MCP_WORKSPACE_ID di wrangler.jsonc
+   npx wrangler secret put SUPABASE_URL
+   npx wrangler secret put SUPABASE_ANON_KEY    # anon/publishable key
+   npx wrangler secret put MCP_WORKSPACE_ID
    npx wrangler secret put SUPABASE_MCP_JWT     # tempel token dari langkah 3
    openssl rand -hex 32                         # token untuk pemanggil, simpan di password manager
    npx wrangler secret put MCP_AUTH_TOKEN

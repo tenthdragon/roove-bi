@@ -15,8 +15,13 @@ const fixture = readFileSync(new URL('./mcp-marketing-reader-db.sql', import.met
 
 docker('createdb', [database]);
 try {
-  process.stdout.write(docker('psql', ['-d', database, '-X', '-Atq', '-v', 'ON_ERROR_STOP=1'],
-    fixture.replace('-- MIGRATION (applied twice by the runner)', `${migration}\n${migration}`)));
+  // Use a replacement function: a replacement string interprets `$$` as `$`,
+  // which corrupts every PostgreSQL dollar-quoted block in the migration.
+  const sql = fixture.replace(
+    '-- MIGRATION (applied twice by the runner)',
+    () => `${migration}\n${migration}`,
+  );
+  process.stdout.write(docker('psql', ['-d', database, '-X', '-Atq', '-v', 'ON_ERROR_STOP=1'], sql));
 } finally {
   docker('dropdb', ['--if-exists', database]);
 }
