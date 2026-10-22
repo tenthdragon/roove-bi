@@ -46,9 +46,21 @@ test('switching breakdown replaces subrows without changing parent, totals or vi
  await act(async()=>{root=create(<Results {...props}/>);});
  const text=()=>JSON.stringify(root.toJSON());assert.match(text(),/Image/);assert.doesNotMatch(text(),/Sales · Purchase/);
  const parentColumns=root.root.findByType('tbody').findAllByType('tr')[0].findAllByType('td').length;
+ const nodeText=(n:any):string=>typeof n==='string'?n:n.children.map(nodeText).join('');
+ const parentBefore=JSON.stringify(root.root.findByType('tbody').findAllByType('tr')[0].findAllByType('td').map(nodeText));
+ const totalsBefore=JSON.stringify(root.root.findByType('tfoot').findAllByType('td').map(nodeText));
  await act(async()=>root.update(<Results {...props} breakdown="optimization"/>));
  assert.match(text(),/Sales · Purchase/);assert.match(text(),/Sales · Initiate Checkout/);assert.doesNotMatch(text(),/"Image"/);
  assert.equal(root.root.findByType('tbody').findAllByType('tr').length,3);assert.equal(root.root.findByType('tbody').findAllByType('tr')[0].findAllByType('td').length,parentColumns);
+ await act(async()=>root.update(<Results {...props} breakdown="none" onBreakdownChange={()=>{}}/>));
+ assert.equal(root.root.findByType('tbody').findAllByType('tr').length,1);
+ assert.equal(JSON.stringify(root.root.findByType('tbody').findAllByType('tr')[0].findAllByType('td').map(nodeText)),parentBefore);
+ assert.equal(JSON.stringify(root.root.findByType('tfoot').findAllByType('td').map(nodeText)),totalsBefore);
+ const dropdown=root.root.findByProps({'aria-label':'Breakdown tabel Test'});
+ assert.equal(dropdown.props.value,'none');
+ assert.equal(dropdown.findAllByType('option').find((o:any)=>o.props.value==='none').children.join(''),'Breakdown: No breakdown');
+ await act(async()=>root.update(<Results {...props} breakdown="format"/>));
+ assert.equal(root.root.findByType('tbody').findAllByType('tr').length,2);
  await act(async()=>root.unmount());
 });
 test('breakdown preference restores, isolates sessions, and handles blocked storage',async()=>{
@@ -60,6 +72,8 @@ test('breakdown preference restores, isolates sessions, and handles blocked stor
   await act(async()=>{root=create(<Probe/>);});assert.equal(state!.value,'format');
   await act(async()=>state!.select('optimization'));assert.equal(state!.value,'optimization');
   await act(async()=>root.unmount());await act(async()=>{root=create(<Probe/>);});assert.equal(state!.value,'optimization');
+  await act(async()=>state!.select('none'));assert.equal(state!.value,'none');
+  await act(async()=>root.unmount());await act(async()=>{root=create(<Probe/>);});assert.equal(state!.value,'none');
   await act(async()=>root.update(<Probe user="other"/>));assert.equal(state!.value,'format');
   await act(async()=>root.update(<Probe workspace="other"/>));assert.equal(state!.value,'format');
   globalThis.window.localStorage.setItem=()=>{throw Error('blocked');};

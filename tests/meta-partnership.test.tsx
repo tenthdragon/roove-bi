@@ -63,8 +63,8 @@ test('existing dropdown switches to partnership, replaces children and keeps con
   const section = { key: 's', funnelId: 's', name: 'Test', kind: 'transaction', config, groups: [group], summary: group.current, previous: group.previous, metrics: group.metrics, mainMetric: null, mainMedian: null };
   const props = { section, world: 'website', currency: 'IDR', preferencesReady: true, onOpenGroup: () => {}, onSave: async () => {}, onBreakdownChange: (v: string) => { selected=v; } };
   await act(async () => { root = create(<Results {...props}/>); });
-  const dropdown = root.root.findByProps({ 'aria-label': 'Rincian tabel Test' });
-  assert.ok(dropdown.parent.findAllByType('button').some((b:any) => b.children.includes('Atur kolom')));
+  const dropdown = root.root.findByProps({ 'aria-label': 'Breakdown tabel Test' });
+  assert.ok(root.root.findByProps({ 'aria-label': 'Tampilan tabel Test' }).findAllByType('button').some((b:any) => b.children.includes('Atur kolom')));
   assert.ok(dropdown.findAllByType('option').some((o:any) => o.props.value==='partnership'));
   await act(async () => dropdown.props.onChange({ target: { value: 'partnership' } })); assert.equal(selected, 'partnership');
   const parentBefore = root.root.findByType('tbody').findAllByType('tr')[0].findAllByType('td').length;
@@ -74,6 +74,7 @@ test('existing dropdown switches to partnership, replaces children and keeps con
   assert.equal(rows[0].findAllByType('td').length, parentBefore);
   assert.ok(rows.slice(1).every((r:any) => r.findAllByType('td').length === rows[0].findAllByType('td').length-1));
   const text = JSON.stringify(root.toJSON()); assert.match(text,/Non-partnership/); assert.match(text,/Belum diketahui/); assert.doesNotMatch(text,/"Image"/);
+  await act(async () => dropdown.props.onChange({ target: { value: 'none' } })); assert.equal(selected, 'none');
   await act(async () => root.unmount());
 });
 test('partnership preference survives remount and remains scoped to user/workspace', async () => {

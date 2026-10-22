@@ -446,15 +446,22 @@
 .formatSubrow th small { display: block; color: var(--text-muted); font-weight: 400; margin-top: 4px; }
 
 .tableViewControls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.page .breakdownSelect { min-height: 36px; max-width: 100%; padding: 9px 8px; border-radius: 8px; font-size: 12px; font-weight: 600; }
+.breakdownControl { position: relative; display: inline-flex; max-width: 100%; }
+.breakdownControl > svg { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); color: var(--dim); pointer-events: none; }
+.page .breakdownSelect, .tableViewControls .columnSettingsButton { box-sizing: border-box; height: 36px; min-height: 36px; margin: 0; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); font-family: inherit; font-size: 12px; font-weight: 600; line-height: 18px; }
+.page .breakdownSelect { appearance: none; -webkit-appearance: none; max-width: 100%; padding-right: 34px; cursor: pointer; }
+.page .breakdownSelect:disabled { opacity: .5; cursor: default; }
+.breakdownSelect:disabled + svg { opacity: .5; }
+.page .breakdownSelect:hover:not(:disabled), .tableViewControls .columnSettingsButton:hover:not(:disabled) { border-color: var(--accent); }
+.tableViewControls .columnSettingsButton { justify-content: center; white-space: nowrap; }
+.tableViewControls .columnSettingsButton > svg, .sortReset > svg { flex-shrink: 0; }
 .templateHeader { display: grid; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
 .templateSummary, .tableToolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; }
 .templateIdentity { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .templateIdentity strong { font-size: 14px; overflow-wrap: anywhere; }
 .funnelInfo { display: inline-flex; align-items: center; justify-content: center; padding: 5px; border: 0; background: transparent; color: var(--dim); cursor: pointer; }
 .tableToolbar .tableViewControls { margin-left: auto; }
-.tableViewControls .columnSettingsButton { min-height: 36px; }
-.sortReset { display: inline-flex; align-items: center; gap: 6px; padding: 7px 0; border: 0; background: transparent; color: var(--dim); font-size: 12px; cursor: pointer; }
+.sortReset { display: inline-flex; align-items: center; min-height: 36px; gap: 6px; padding: 7px 0; border: 0; background: transparent; color: var(--dim); font-size: 12px; cursor: pointer; }
 .sortReset:hover, .funnelInfo:hover { color: var(--accent); }
 @media (max-width: 600px) { .tableToolbar .tableViewControls { width: 100%; margin-left: 0; } }
 
