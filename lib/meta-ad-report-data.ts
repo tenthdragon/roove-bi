@@ -4,7 +4,7 @@ import { createMetaReportRequests, MetaReportUnavailableError } from './meta-rep
 import type { RawMetaReport, ReportQuery } from './meta-ad-report';
 import { buildFormatCepMatrix } from './meta-format-cep-matrix';
 import type { MetaBrandReport } from './meta-brand-report';
-import type { AdDimensionFilters } from './meta-ad-dimensions';
+import type { MetaAnalysisFilters } from './meta-analysis-filters';
 
 async function intentionLabels(workspaceId: string, brand?: string | null) {
   let query = createServiceSupabase().from('meta_ad_intention_catalog').select('key,label').eq('workspace_id', workspaceId);
@@ -42,7 +42,7 @@ export const getCachedMetaAdReport = unstable_cache(
       const data = await readMetaAdReport(workspaceId, query);
       return { ...data, intentionLabels: await intentionLabels(workspaceId, query.brand) };
   }),
-  ['meta-ad-report-v10-partnership'],
+  ['meta-ad-report-v11-analysis-filters'],
   { revalidate: 300 },
 );
 
@@ -56,11 +56,11 @@ export const getCachedMetaFormatCepMatrix = unstable_cache(
         return { matrix: buildFormatCepMatrix(reportingError ? { groups: [], cepLabels: {} } : raw), currency: raw.currencies[0] || 'IDR', reportingError };
       } catch { throw new MetaReportUnavailableError(false); }
     }),
-  ['meta-format-cep-matrix-v1'], { revalidate: 300 },
+  ['meta-format-cep-matrix-v2-analysis-filters'], { revalidate: 300 },
 );
 
 export const getCachedMetaBrandDetailReport = unstable_cache(
-  (workspaceId: string, revision: string, from: string, to: string, brand: string, channel: string, filters: AdDimensionFilters): Promise<{ website: RawMetaReport; cpas: RawMetaReport; cep: RawMetaReport }> => requests.run(
+  (workspaceId: string, revision: string, from: string, to: string, brand: string, channel: string, filters: MetaAnalysisFilters): Promise<{ website: RawMetaReport; cpas: RawMetaReport; cep: RawMetaReport }> => requests.run(
     JSON.stringify(['brand-detail', workspaceId, revision, from, to, brand, channel, filters]), async () => {
       const result = await createServiceSupabase().rpc('get_meta_brand_detail_report', {
         p_workspace_id: workspaceId, p_from: from, p_to: to, p_brand: brand, p_channel: channel, p_filters: filters,
@@ -72,13 +72,13 @@ export const getCachedMetaBrandDetailReport = unstable_cache(
       const labels = await intentionLabels(workspaceId, brand);
       return Object.fromEntries(Object.entries(result.data).map(([key,value]) => [key,{ ...(value as object), intentionLabels: labels }])) as { website: RawMetaReport; cpas: RawMetaReport; cep: RawMetaReport };
     }),
-  ['meta-brand-detail-v5-partnership'], { revalidate: 300 },
+  ['meta-brand-detail-v6-analysis-filters'], { revalidate: 300 },
 );
 
 // One batched report shares the same database budget as detail/history reads.
 // Database day projections survive Next cache expiry and workspace revisions.
 export const getCachedMetaBrandOverviewReport = unstable_cache(
-  (workspaceId: string, revision: string, from: string, to: string, filters: AdDimensionFilters, brandIds: number[] | null = null): Promise<MetaBrandReport> => requests.run(
+  (workspaceId: string, revision: string, from: string, to: string, filters: MetaAnalysisFilters, brandIds: number[] | null = null): Promise<MetaBrandReport> => requests.run(
     JSON.stringify(['brand-overview', workspaceId, revision, from, to, filters, brandIds]), async () => {
       const result = await createServiceSupabase().rpc(brandIds === null ? 'get_meta_brand_overview_report' : 'get_meta_brand_overview_report_scoped', {
         p_workspace_id: workspaceId, p_from: from, p_to: to, p_filters: filters, ...(brandIds === null ? {} : { p_brand_ids: brandIds }),

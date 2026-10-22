@@ -6,7 +6,7 @@ import { getMetaFunnelHistory } from '@/lib/meta-funnel-actions';
 import { getMetaCepDetail } from '@/lib/meta-brand-actions';
 import { metricValue, relativeChange, type FunnelMetric, type Totals } from '@/lib/meta-funnel-domain';
 import { WORLD_CHANNEL, WORLD_LABELS, type MetaBrandWorld } from '@/lib/meta-funnel-templates';
-import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
+import type { MetaAnalysisFilters } from '@/lib/meta-analysis-filters';
 import { formatChange, formatCompactMoney, formatMetric } from '@/lib/meta-format';
 import { cepProgressMetrics } from '@/lib/meta-cep-view';
 import MetaSparkline from './MetaSparkline';
@@ -17,7 +17,7 @@ const message = (e: unknown) => e instanceof Error ? e.message : 'Permintaan gag
 
 /** Centered detail dialog for one CEP: its 90-day trend, the destinations carrying it, and its top ads. */
 export default function MetaCepDrawer({ cep, label, world, input, metrics, resultMetric, currency, onClose }: {
-  cep: string; label: string; world: MetaBrandWorld; input: { from: string; to: string; brandId: string; filters: AdDimensionFilters };
+  cep: string; label: string; world: MetaBrandWorld; input: { from: string; to: string; brandId: string; filters: MetaAnalysisFilters };
   metrics: FunnelMetric[]; resultMetric: FunnelMetric; currency: string; onClose: () => void;
 }) {
   const [detail, setDetail] = useState<Detail | null>(null);

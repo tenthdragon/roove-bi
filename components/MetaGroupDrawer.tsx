@@ -6,7 +6,7 @@ import { getMetaFunnelCreatives, getMetaFunnelHistory } from '@/lib/meta-funnel-
 import { getMetaGroupAds } from '@/lib/meta-brand-actions';
 import { MEASURES, metricValue, relativeChange, shiftDay, type AdCreative, type FunnelMetric, type Measure } from '@/lib/meta-funnel-domain';
 import { WORLD_CHANNEL, type MetaBrandWorld, type TemplateGroup, type TemplateSection } from '@/lib/meta-funnel-templates';
-import type { AdDimensionFilters } from '@/lib/meta-ad-dimensions';
+import type { MetaAnalysisFilters } from '@/lib/meta-analysis-filters';
 import { formatChange, formatCount, formatMetric } from '@/lib/meta-format';
 import MetaSparkline from './MetaSparkline';
 import MetaAdCreative from './MetaAdCreative';
@@ -20,7 +20,7 @@ const SPEND: FunnelMetric = { id: 'spend', label: 'Spend', numerator: 'spend', d
 /** Centered detail dialog for one landing page or CPAS ad group: stages, 14-day trend, and the ads behind it. */
 export default function MetaGroupDrawer({ group, section, world, input, currency, onClose }: {
   group: TemplateGroup; section: TemplateSection; world: MetaBrandWorld;
-  input: { from: string; to: string; brandId: string; filters: AdDimensionFilters }; currency: string; onClose: () => void;
+  input: { from: string; to: string; brandId: string; filters: MetaAnalysisFilters }; currency: string; onClose: () => void;
 }) {
   const [ads, setAds] = useState<Ads>([]); const [creatives, setCreatives] = useState<AdCreative[]>([]);
   const [history, setHistory] = useState<{ date: string; value: number | null }[]>([]);

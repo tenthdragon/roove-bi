@@ -476,3 +476,18 @@
   .matrixMetrics dt { margin-bottom: 0; font-size: 10px; white-space: nowrap; }
   .matrixMetrics dd { font-size: 12px; }
 }
+
+.analysisFilterGrid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; }
+.analysisFilterGrid label { min-width: 0; display: grid; gap: 6px; font-size: 12px; font-weight: 600; }
+.analysisFilterGrid select { width: 100%; min-width: 0; padding: 9px 8px; font-size: 12px; }
+.analysisFilterGrid > span { grid-column: 1 / -1; }
+.activeFilterChips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.filterChip { display: inline-flex; align-items: center; gap: 8px; max-width: 360px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--text); background: var(--card); font-size: 12px; cursor: pointer; }
+.filterChip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.filterChip svg { flex-shrink: 0; }
+.filterReset { background: transparent; border: 0; color: var(--text-secondary); font-size: 12px; padding: 6px 8px; cursor: pointer; }
+@media (max-width: 600px) { .analysisFilterGrid { grid-template-columns: repeat(2,minmax(0,1fr)); } .filterChip { max-width: 100%; } }
+
+.analysisToolbar { position: relative; }
+.analysisToolbar .filterDetails { position: static; }
+.analysisToolbar .filterPanel { min-width: 0; width: min(620px,100%); }

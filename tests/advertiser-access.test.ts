@@ -102,7 +102,7 @@ test('Meta Ads server entry point respects disabled modules and retains legacy m
       './workspaces': { isWorkspaceModuleEnabled },
       './meta-template-scope': {},
       './meta-brand-access': { loadMetaBrandScope: async () => ({ brandIds: [1], accountIds: ['act_1'], accessKey: '1' }) },
-      ...Object.fromEntries(['./service-supabase', './meta-funnel-domain', './meta-funnel-store', './sync-schedule', './meta-ad-channels', './meta-ad-dimensions', './meta-ad-brands', './meta-report-status', './meta-funnel-sync-status'].map(name => [name, {}])),
+      ...Object.fromEntries(['./service-supabase', './meta-funnel-domain', './meta-funnel-store', './sync-schedule', './meta-ad-channels', './meta-analysis-filters', './meta-ad-brands', './meta-report-status', './meta-funnel-sync-status'].map(name => [name, {}])),
     });
     if (disabled.length) {
       await assert.rejects(report.reportingAccess(), /tidak diaktifkan/);
