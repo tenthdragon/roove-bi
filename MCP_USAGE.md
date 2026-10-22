@@ -111,3 +111,54 @@ Contoh pertanyaan:
 Tool general hanya membaca dataset allowlist dan tidak menyediakan operasi
 tulis. Semua query dan RPC dikunci ke `MCP_WORKSPACE_ID`. Dataset customer yang
 dibuka bersifat agregat, bukan data individual/PII.
+
+## Cloudflare Worker (mode HTTP)
+
+Tool yang sama juga bisa dijalankan sebagai Cloudflare Worker, supaya bisa dipanggil
+dari luar laptop (misalnya agent Basecamp). Definisi tool ada di
+`mcp-server/src/server.ts` dan dipakai bersama oleh mode stdio (`index.ts`) dan
+Worker (`worker.ts`).
+
+Perbedaan dengan mode lokal:
+
+- Endpoint `POST /mcp` wajib memakai header `Authorization: Bearer <MCP_AUTH_TOKEN>`.
+- `customer_list` (data per pelanggan: nama, nomor telepon) **tidak** didaftarkan
+  di Worker. Tool ini tetap tersedia di mode stdio lokal.
+- Satu deployment = satu workspace (`MCP_WORKSPACE_ID` di `wrangler.jsonc`).
+
+Setup pertama kali (dari folder repo):
+
+```bash
+npm --prefix mcp-server install
+cd mcp-server
+npx wrangler login                         # login ke akun Cloudflare
+# isi SUPABASE_URL dan MCP_WORKSPACE_ID di wrangler.jsonc
+npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+openssl rand -hex 32                       # buat token, simpan di password manager
+npx wrangler secret put MCP_AUTH_TOKEN     # tempel token dari langkah sebelumnya
+npm run deploy
+```
+
+Cek: `curl https://roove-bi-mcp.<subdomain>.workers.dev/health` harus mengembalikan
+`{"ok":true}`.
+
+Untuk menguji dari Claude Desktop, gunakan `mcp-remote` dengan header token:
+
+```json
+{
+  "mcpServers": {
+    "roove-bi-remote": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-remote",
+        "https://roove-bi-mcp.<subdomain>.workers.dev/mcp",
+        "--header", "Authorization: Bearer ${MCP_AUTH_TOKEN}"
+      ],
+      "env": { "MCP_AUTH_TOKEN": "<token>" }
+    }
+  }
+}
+```
+
+Catatan keamanan: Worker masih memakai service role key. Langkah berikutnya adalah
+mengganti dengan role database read-only khusus MCP.

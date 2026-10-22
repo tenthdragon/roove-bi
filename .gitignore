@@ -79,3 +79,7 @@ supabase/.branches/
 __pycache__/
 *.py[cod]
 !docs/runbooks/production-build-cache-cleanup.md
+
+# Cloudflare Worker (mcp-server)
+.dev.vars
+.wrangler/
