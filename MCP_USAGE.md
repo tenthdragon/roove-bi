@@ -58,9 +58,9 @@ node /Users/armyalghifari/Documents/Github/roove-bi/mcp-server/dist/index.js
 - `business_snapshot`: ringkasan eksekutif berdasarkan rentang tanggal.
 - `roove_dataset_catalog`: daftar dataset aman dan kolom yang boleh dibaca.
 - `roove_read_dataset`: drilldown read-only dengan filter sederhana.
-- `marketing_spend_summary`: total marketing spend dan breakdown per source/store/data source.
+- `marketing_spend_summary`: total marketing spend dengan filter kanonis `brand_id` / `business_code`; breakdown kanal, brand, business, label historis, dan data source.
 - `meta_ads_spend_by_account`: breakdown Meta Ads spend per ad account.
-- `meta_ad_funnel_catalog`: konfigurasi funnel tersimpan, definisi metrik, akun Meta aktif, brand, dan revisi data. Gunakan untuk menemukan `funnel_id` dan `brand_id`.
+- `meta_ad_funnel_catalog`: katalog workspace, business, brand, toko operasional, relasi owner/seller/operator dan alias; juga funnel/akun/revisi. `dimensions_only:true` menghindari payload konfigurasi funnel saat hanya butuh identitas.
 - `meta_ad_funnel_report`: report granular dari RPC `get_meta_ad_report`, sama dengan dashboard Meta Ad Funnel. Mendukung `group_by=ad|landing_page`, filter `cep`, `intention`, `objective`, serta `view=overview|daily|trends|creatives`.
 
 ### Meta Ad Funnel
@@ -121,7 +121,8 @@ Worker (`worker.ts`).
 
 Worker ini **tidak memakai service role key**. Ia masuk ke database sebagai role
 read-only `mcp_marketing_reader` (migrasi `237_mcp_marketing_reader.sql`), yang
-hanya bisa membaca skema `mcp_marketing`: lima view Meta Ads/marketing spend dan
+hanya bisa membaca skema `mcp_marketing`: view Meta Ads/marketing spend, metadata
+dimensi non-secret (migrasi `238_mcp_marketing_dimensions.sql`), dan
 satu pembungkus `get_meta_ad_report`, semuanya terkunci ke `workspace_id` yang ada
 di dalam token. Tidak ada akses ke tabel finance, gudang, PPIC, atau data pelanggan.
 
@@ -129,12 +130,15 @@ Tool yang tersedia di Worker: `roove_mcp_guide`, `meta_ad_funnel_catalog`,
 `meta_ad_funnel_report`, `marketing_spend_summary`, `meta_ads_spend_by_account`.
 Tool lain hanya ada di mode stdio lokal.
 
+Kontrak dimensi v2, perubahan kompatibilitas, status atribusi, dan urutan rilis:
+[MCP dimension scopes](docs/runbooks/mcp-dimension-scopes.md).
+
 Endpoint `POST /mcp` wajib memakai header `Authorization: Bearer <MCP_AUTH_TOKEN>`.
 Satu deployment = satu workspace.
 
 ### Setup pertama kali
 
-1. Terapkan migrasi 237 ke database (lewat alur rilis migrasi yang biasa).
+1. Terapkan migrasi 237 lalu 238 ke database (hanya yang belum terpasang, lewat alur rilis migrasi yang biasa).
    Uji dulu di stack lokal: `npm run test:mcp-reader-db`.
 2. Dashboard Supabase → Settings → API → **Exposed schemas**: tambahkan
    `mcp_marketing`. Tanpa ini PostgREST menolak skema tersebut.

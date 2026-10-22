@@ -68,6 +68,8 @@ jobs:
         run: node tests/workspace-access-requests-database.mjs --ci
       - name: Check sync queue fairness and concurrent claims
         run: node tests/sync-queue-database.mjs --ci
+      - name: Check MCP marketing dimensions and tenant isolation
+        run: node tests/mcp-marketing-reader-database.mjs --ci
       - name: Remove disposable database container
         if: always()
         run: docker rm -f roove-access-requests-test
@@ -90,3 +92,9 @@ jobs:
       - name: Build MCP server
         working-directory: mcp-server
         run: npm run build
+
+      - name: Install test runner
+        run: npm ci --ignore-scripts
+
+      - name: Check dimension scopes and funnel reports
+        run: npm run test:mcp-dimensions
