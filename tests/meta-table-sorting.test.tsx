@@ -57,7 +57,7 @@ test('header clicks toggle direction, preserve totals/drawer group, and reset re
   assert.equal(rows()[0], 'Ad 2');
   await act(async () => header('Tujuan').props.onClick());
   assert.equal(rows()[0], 'Zero');
-  await act(async () => root.root.findAllByType('button').find((n: any) => n.children.includes('Urutan awal')).props.onClick());
+  await act(async () => root.root.findAllByType('button').find((n: any) => n.children.includes('Reset urutan')).props.onClick());
   assert.deepEqual(rows(), names(groups));
   assert.equal(root.root.findAllByType('th').filter((n: any) => n.props['aria-sort']).length, 0);
   await act(async () => root.unmount());
@@ -125,7 +125,7 @@ test('sort saves are guarded while pending; failed save keeps previous order and
   await act(async () => header().props.onClick());
   await act(async () => release());
   assert.equal(root.root.findByProps({ 'aria-sort': 'descending' }).findByType('button').children[0], 'ROAS');
-  await act(async () => root.root.findAllByType('button').find((b: any) => b.children.includes('Urutan awal')).props.onClick());
+  await act(async () => root.root.findAllByType('button').find((b: any) => b.children.includes('Reset urutan')).props.onClick());
   await act(async () => release());
   assert.equal(saved, null);
   assert.equal(root.root.findByType('tbody').findAllByType('button')[0].children[0], 'Ad 10');

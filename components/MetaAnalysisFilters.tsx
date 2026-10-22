@@ -35,9 +35,9 @@ export default function MetaAnalysisFilters({ value, dimensions, analysis, ready
       return <label key={key}>{labels[key]}<select aria-label={`Filter ${labels[key]}`} value={value[key] || ''} disabled={!available}
         title={advanced ? 'Metadata terbaru untuk iklan pada periode ini. Jumlah ad memperhitungkan filter lainnya.' : 'Jumlah ad pada periode ini dengan filter lainnya.'}
         onChange={e => { const next = { ...value }; if (e.target.value) Object.assign(next, { [key]: e.target.value }); else delete next[key]; onChange(next); }}>
-        <option value="">Semua{available ? ` (${total || 0})` : ''}</option>
-        {value[key] && !choices?.some(c => c.value === value[key]) && <option value={value[key]}>{label(key, value[key]!, dimensions)}{available ? ' (0)' : ''}</option>}
-        {(choices || []).map(c => <option key={c.value} value={c.value}>{c.label}{available ? ` (${c.count})` : ''}</option>)}
+        <option value="">Semua{available && value[key] ? ` (${total || 0})` : ''}</option>
+        {value[key] && !choices?.some(c => c.value === value[key]) && <option value={value[key]}>{label(key, value[key]!, dimensions)}</option>}
+        {(choices || []).map(c => <option key={c.value} value={c.value}>{c.label}{available && value[key] !== c.value ? ` (${c.count})` : ''}</option>)}
       </select></label>;
     })}
     {loading && <span role="status" className={styles.muted}>Memuat pilihan filter…</span>}
