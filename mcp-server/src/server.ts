@@ -2,6 +2,7 @@ import { McpServer, RegisteredTool } from "@modelcontextprotocol/sdk/server/mcp.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { registerMetaFunnelTools } from "./meta-funnel-tools.js";
+import { registerMarketingSpendTools } from "./marketing-spend-tools.js";
 
 export const WORKSPACE_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -114,7 +115,7 @@ export function createRooveServer(
     daily_ads_spend: {
       table: "daily_ads_spend",
       description:
-        "Daily marketing spend rows by source, store/brand mapping key, ad account, and data source. Safe read-only marketing drilldown.",
+        "Daily marketing spend rows. brand_id is canonical frozen attribution; store is a legacy label, NOT an operational store ID. business_code can be missing. Safe read-only marketing drilldown.",
       defaultSelect:
         "date, source, store, ad_account, spent, data_source, impressions, cpm",
       columns: [
@@ -129,6 +130,7 @@ export function createRooveServer(
         "objective",
         "advertiser",
         "business_code",
+        "brand_id",
       ],
       defaultOrder: "date",
     },
@@ -235,7 +237,16 @@ export function createRooveServer(
     "Explain the workspace-scoped BI MCP capabilities, safe datasets, and suggested workflows for Claude/Codex conversations.",
     {},
     async () => {
+      if (options.onlyTools) return { content: [{ type: 'text' as const, text: JSON.stringify({
+        workspace_id: workspaceId,
+        tools: options.onlyTools,
+        scope: 'Read-only marketing, restricted to the token workspace. No finance, inventory or customer data.',
+        first_step: 'meta_ad_funnel_catalog with dimensions_only=true for workspace, business, brand and operational store identities. Do not treat these as interchangeable.',
+        attribution: 'Spend uses frozen brand_id and recorded business_code, not owner/seller roles or legacy store labels. Operational store spend is unsupported. Missing attribution is unknown, not zero.',
+      }) }] };
       const guide = {
+        workspace_id: workspaceId,
+        dimensions: 'Use meta_ad_funnel_catalog with dimensions_only=true for workspace, businesses, brands, operational stores, roles and aliases. These are distinct entities, not interchangeable labels. Spend uses frozen brand_id and recorded business_code; operational store attribution is unavailable.',
         business_context:
           "This MCP instance is bound to one workspace and covers marketplace/ScaleV sales, ads, customer cohorts, finance, warehouse, PPIC, and cashflow without reading another tenant.",
         recommended_first_steps: [
@@ -504,188 +515,7 @@ export function createRooveServer(
     }
   );
 
-  handles["marketing_spend_summary"] = server.tool(
-    "marketing_spend_summary",
-    "Get marketing spend totals for a date range, grouped by source, store, and data_source. Use this for total marketing cost and marketing channel cost breakdown.",
-    {
-      from: z.string().describe("Start date YYYY-MM-DD"),
-      to: z.string().describe("End date YYYY-MM-DD"),
-      source: z.string().optional().describe("Optional source filter, e.g. Facebook Ads, TikTok Ads, Shopee"),
-      store: z.string().optional().describe("Optional store/brand mapping key filter"),
-    },
-    async ({ from, to, source, store }) => {
-      let q = svc
-        .from("daily_ads_spend")
-        .select("date, source, store, ad_account, spent, data_source, impressions, cpm")
-        .eq("workspace_id", workspaceId)
-        .gte("date", from)
-        .lte("date", to)
-        .limit(20000);
-
-      if (source) q = q.ilike("source", `%${source}%`);
-      if (store) q = q.ilike("store", `%${store}%`);
-
-      const rows = unwrap(await q) as any[];
-
-      function groupedBy(key: "source" | "store" | "data_source") {
-        const buckets = new Map<string, any>();
-        for (const row of rows) {
-          const group = row[key] || "Unknown";
-          const bucket = buckets.get(group) ?? {
-            [key]: group,
-            spent: 0,
-            impressions: 0,
-            rows: 0,
-          };
-          bucket.spent += Math.abs(Number(row.spent ?? 0));
-          bucket.impressions += Number(row.impressions ?? 0);
-          bucket.rows += 1;
-          buckets.set(group, bucket);
-        }
-
-        return Array.from(buckets.values())
-          .map((bucket) => ({
-            ...bucket,
-            avg_cpm: bucket.impressions > 0 ? round((bucket.spent / bucket.impressions) * 1000) : null,
-          }))
-          .sort((a, b) => b.spent - a.spent);
-      }
-
-      const totalSpent = rows.reduce(
-        (total, row) => total + Math.abs(Number(row.spent ?? 0)),
-        0
-      );
-      const totalImpressions = sumNumber(rows, "impressions");
-
-      const result = {
-        period: { from, to },
-        filters: { source: source ?? null, store: store ?? null },
-        totals: {
-          spent: round(totalSpent),
-          impressions: totalImpressions,
-          avg_cpm: totalImpressions > 0 ? round((totalSpent / totalImpressions) * 1000) : null,
-          rows: rows.length,
-        },
-        by_source: groupedBy("source"),
-        by_store: groupedBy("store"),
-        by_data_source: groupedBy("data_source"),
-      };
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-    }
-  );
-
-  handles["meta_ads_spend_by_account"] = server.tool(
-    "meta_ads_spend_by_account",
-    "Get Meta Ads spend breakdown by ad account for a date range. Includes spend, impressions, CPM, mapped store, and configured account metadata when available.",
-    {
-      from: z.string().describe("Start date YYYY-MM-DD"),
-      to: z.string().describe("End date YYYY-MM-DD"),
-      include_daily: z.boolean().default(false).describe("Include daily rows per ad account"),
-    },
-    async ({ from, to, include_daily }) => {
-      const [spendRes, accountRes] = await Promise.all([
-        svc
-          .from("daily_ads_spend")
-          .select("date, source, store, ad_account, spent, data_source, impressions, cpm")
-          .eq("workspace_id", workspaceId)
-          .gte("date", from)
-          .lte("date", to)
-          .eq("data_source", "meta_api")
-          .limit(20000),
-        svc
-          .from("meta_ad_accounts")
-          .select("account_id, account_name, store, default_source, default_advertiser, is_active")
-          .eq("workspace_id", workspaceId),
-      ]);
-
-      const spendRows = unwrap(spendRes) as any[];
-      const accounts = (accountRes.data ?? []) as any[];
-      const accountMap = new Map(accounts.map((account) => [account.account_name, account]));
-      const byAccount = new Map<string, any>();
-
-      for (const row of spendRows) {
-        const accountName = row.ad_account || "Unknown";
-        const account = accountMap.get(accountName);
-        const bucket = byAccount.get(accountName) ?? {
-          ad_account: accountName,
-          account_id: account?.account_id ?? null,
-          configured_store: account?.store ?? null,
-          observed_stores: new Set<string>(),
-          default_source: account?.default_source ?? null,
-          is_active: account?.is_active ?? null,
-          spent: 0,
-          impressions: 0,
-          rows: 0,
-          daily: new Map<string, any>(),
-        };
-
-        if (row.store) bucket.observed_stores.add(row.store);
-        bucket.spent += Math.abs(Number(row.spent ?? 0));
-        bucket.impressions += Number(row.impressions ?? 0);
-        bucket.rows += 1;
-
-        if (include_daily) {
-          const day = row.date;
-          const daily = bucket.daily.get(day) ?? {
-            date: day,
-            spent: 0,
-            impressions: 0,
-          };
-          daily.spent += Math.abs(Number(row.spent ?? 0));
-          daily.impressions += Number(row.impressions ?? 0);
-          bucket.daily.set(day, daily);
-        }
-
-        byAccount.set(accountName, bucket);
-      }
-
-      const accountsBreakdown = Array.from(byAccount.values())
-        .map((bucket) => ({
-          ad_account: bucket.ad_account,
-          account_id: bucket.account_id,
-          configured_store: bucket.configured_store,
-          observed_stores: Array.from(bucket.observed_stores),
-          default_source: bucket.default_source,
-          is_active: bucket.is_active,
-          spent: round(bucket.spent),
-          impressions: bucket.impressions,
-          avg_cpm: bucket.impressions > 0 ? round((bucket.spent / bucket.impressions) * 1000) : null,
-          rows: bucket.rows,
-          daily: include_daily
-            ? Array.from(bucket.daily.values()).sort((a: any, b: any) =>
-                a.date.localeCompare(b.date)
-              )
-            : undefined,
-        }))
-        .sort((a, b) => b.spent - a.spent);
-
-      const totalSpent = accountsBreakdown.reduce((total, row) => total + row.spent, 0);
-      const totalImpressions = accountsBreakdown.reduce(
-        (total, row) => total + Number(row.impressions ?? 0),
-        0
-      );
-
-      const result = {
-        period: { from, to },
-        totals: {
-          spent: round(totalSpent),
-          impressions: totalImpressions,
-          avg_cpm: totalImpressions > 0 ? round((totalSpent / totalImpressions) * 1000) : null,
-          accounts: accountsBreakdown.length,
-        },
-        accounts: accountsBreakdown,
-        note:
-          "Rows are filtered to daily_ads_spend.data_source = meta_api, which is the app's Meta Marketing API ingestion path.",
-      };
-
-      return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
-    }
-  );
-
-  // ────────────────────────────────────────────────────────────────
-  //  PPIC TOOLS
-  // ────────────────────────────────────────────────────────────────
+  Object.assign(handles, registerMarketingSpendTools(server, svc, workspaceId));
 
   handles["ppic_stock_balance"] = server.tool(
     "ppic_stock_balance",

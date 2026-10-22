@@ -1,11 +1,13 @@
 import type { McpServer, RegisteredTool } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
+import { assertWorkspace, readDimensionCatalog, scopeShape } from './marketing-dimensions.js';
 
 const date = z.string().refine(value => /^\d{4}-\d{2}-\d{2}$/.test(value)
   && Number.isFinite(Date.parse(value)) && new Date(value).toISOString().slice(0, 10) === value, 'Use a valid YYYY-MM-DD date');
 export const reportSchema = z.object({
   from: date, to: date,
+  ...scopeShape,
   funnel_id: z.string().uuid().optional(),
   brand_id: z.string().regex(/^(?:[1-9]\d*|__unmapped__)$/).optional(),
   group_by: z.enum(['ad', 'landing_page']).default('landing_page'),
@@ -15,7 +17,7 @@ export const reportSchema = z.object({
   filters: z.object({ cep: z.string().max(500).optional(), intention: z.string().max(500).optional(), objective: z.string().max(500).optional() }).default({}),
   offset: z.number().int().min(0).default(0),
   limit: z.number().int().min(1).max(200).default(50),
-});
+}).strict();
 const shift = (day: string, amount: number) => new Date(Date.parse(`${day}T00:00:00Z`) + amount * 86400000).toISOString().slice(0, 10);
 export function reportRange(from: string, to: string, today: string) {
   date.parse(from); date.parse(to);
@@ -39,6 +41,10 @@ export async function funnelContext(db: SupabaseClient<any, any, any>, workspace
 }
 export async function readFunnelReport(db: SupabaseClient<any, any, any>, workspaceId: string, args: z.input<typeof reportSchema>, today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())) {
   const input = reportSchema.parse(args);
+  assertWorkspace(workspaceId, input.workspace_id);
+  if (input.business_code !== undefined || input.store_id !== undefined || input.store !== undefined) {
+    throw new Error('Funnel reports do not support business or operational store attribution. Do not substitute a brand report.');
+  }
   const range = reportRange(input.from, input.to, today);
   const ctx = await funnelContext(db, workspaceId);
   const funnels = ctx.funnels.filter(f => f.config?.group_by === 'landing_page');
@@ -89,7 +95,8 @@ export async function readFunnelReport(db: SupabaseClient<any, any, any>, worksp
     result[key] = result[key].slice(input.offset, input.offset + input.limit);
   }
   return { workspace_id: workspaceId, requested_range: { from: input.from, to: input.to }, reporting_range: range,
-    funnel_id: selected?.id || null, funnel_config: selected?.config || null, filters, report_revision: ctx.revision,
+    funnel_id: selected?.id || null, funnel_config: selected?.config || null, brand_id: input.brand_id || null,
+    attribution_basis: 'current meta_ad_accounts.default_brand_id; not frozen spend.brand_id or operational store', filters, report_revision: ctx.revision,
     currency: raw.currencies[0] || null, coverage_gaps, pagination,
     notes: ['Read-only cached Meta data; no sync is triggered.', 'Range ends before today in Asia/Jakarta, matching the dashboard.',
       'Totals are summed events, not averaged ratios. Previous is the preceding equal-length period in overview.',
@@ -98,7 +105,12 @@ export async function readFunnelReport(db: SupabaseClient<any, any, any>, worksp
 }
 export function registerMetaFunnelTools(server: McpServer, db: SupabaseClient<any, any, any>, workspaceId: string): Record<string, RegisteredTool> {
   const handles: Record<string, RegisteredTool> = {};
-  handles.meta_ad_funnel_catalog = server.tool('meta_ad_funnel_catalog', 'List saved Meta Ad Funnels, configured metrics, active ad accounts, brands, and report revision in this workspace. Read this before selecting funnel_id or brand_id. Read-only.', {}, async () => content(await funnelContext(db, workspaceId)));
+  handles.meta_ad_funnel_catalog = server.tool('meta_ad_funnel_catalog', 'Canonical workspace dimension catalog: businesses, brands, operational stores, owner/seller/operator roles and provider-scoped aliases. Resolve entity type and ID here before spend queries; duplicate names require clarification. Also lists Meta funnels/accounts unless dimensions_only=true. Read-only.',
+    { dimensions_only: z.boolean().default(false).describe('True for a smaller entity catalog without funnel configs; use for spend questions.') },
+    async ({ dimensions_only }) => {
+      const dimensions = await readDimensionCatalog(db, workspaceId);
+      return content(dimensions_only ? dimensions : { ...(await funnelContext(db, workspaceId)), ...dimensions });
+    });
   handles.meta_ad_funnel_report = server.tool('meta_ad_funnel_report', 'Read the same Meta Ad Funnel report RPC used by the dashboard: per-ad or landing-page performance, prior-period totals, CEP/intention/objective filters, daily history, trends, or creatives. Dates are WIB, max 93 days, capped at yesterday. Default funnel is the first saved landing-page funnel, as in the dashboard. Paginate groups/history/creatives with offset/limit; totals remain for the full selection. Read-only.', reportSchema.shape, async input => content(await readFunnelReport(db, workspaceId, input)));
   return handles;
 }
