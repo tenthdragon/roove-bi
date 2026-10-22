@@ -1,0 +1,18 @@
+{
+  // Cloudflare Worker for the Roove BI MCP server (HTTP mode).
+  // Deploy:  npm --prefix mcp-server run deploy
+  // Secrets (set once, never committed):
+  //   npx wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+  //   npx wrangler secret put MCP_AUTH_TOKEN
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "roove-bi-mcp",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": {
+    // Public values. Fill these in before the first deploy.
+    "SUPABASE_URL": "https://YOUR-PROJECT.supabase.co",
+    "MCP_WORKSPACE_ID": "00000000-0000-4000-8000-000000000001"
+  }
+}
